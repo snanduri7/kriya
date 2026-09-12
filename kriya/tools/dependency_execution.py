@@ -29,6 +29,7 @@ Two phases, always:
 """
 from __future__ import annotations
 
+import logging
 import re
 import shlex
 from dataclasses import dataclass
@@ -136,7 +137,76 @@ def _classify_pip_offline_failure(result: ProcessResult) -> Optional[OfflineFail
     return classify_pip_offline_failure_text(result.stdout + result.stderr)
 
 
-def _acquisition_profile(workspace_path: str, cache_path: str, env_allowlist: List[str]) -> ContainmentProfile:
+# SEC-007 (2026-09-12): acquisition's own resource authority, separate
+# from whatever cpu_seconds/memory_mb a caller applies to TARGET/execution
+# profiles (kriya.config.config.AutonomyConfig's own
+# acquisition_cpu_seconds/acquisition_memory_mb carry the same defaults
+# for validate.py's own, separately-built acquisition profiles - kept as
+# plain module constants here since this module has no AutonomyConfig
+# reference of its own). Confirmed live, 2026-09-11/12: a target-code
+# memory cap tightened to bound hostile application execution (128MB)
+# OOM-killed Maven's acquisition-phase JVM resolving a legitimately large
+# transitive plugin tree when the SAME cap was reused for acquisition -
+# these constants exist so that never happens for THIS module's own
+# acquisition functions either.
+_ACQUISITION_CPU_SECONDS = 300
+_ACQUISITION_MEMORY_MB = 2048
+
+# POSIX convention: a process killed by signal N reports exit status 128+N
+# to its parent (128=no signal info available, 129..159 covers every real
+# signal number) - the ONLY platform evidence available from a plain
+# returncode alone, without inspecting /proc or a platform-specific wait()
+# status decomposition this module doesn't otherwise need. Never asserted
+# as certain (a genuine `exit(137)` call is indistinguishable from
+# SIGKILL(9) this way) - reported as "likely", per OBS-005's own scope
+# ("distinguishable where platform evidence permits").
+_POSIX_SIGNAL_EXIT_CODE_RANGE = range(129, 160)
+
+_logger = logging.getLogger(__name__)
+
+
+def log_acquisition_outcome(
+    purpose: str, goal_desc: str, *, returncode: Optional[int], timed_out: bool,
+) -> None:
+    """OBS-005 (2026-09-12): always records a deterministic, diagnosable
+    acquisition outcome - exit code, timeout, a best-effort resource-
+    termination signal, and the acquisition's own purpose/goal - so a real
+    infra-level acquisition failure (an OOM-killed build-tool JVM, the
+    SEC-007 incident this exists because of) leaves evidence of its own,
+    not just whatever a SEPARATE authoritative offline attempt later
+    reports. Takes plain `returncode`/`timed_out` values rather than a
+    whole result object on purpose - shared by this module's own
+    acquisition functions (which have a real `ProcessResult`) AND
+    kriya/tools/validate.py's `_run_maven_cmd`/`_ensure_project_venv`
+    (which build their own dict-shaped results) without either side
+    needing to match the other's result TYPE, just its two relevant
+    field values. Deliberately metadata-only: never logs stdout/stderr
+    (verbose, not secret-shaped, but this function's job is a diagnosable
+    OUTCOME SUMMARY, not a second copy of the full transcript) and never
+    touches environment variables at all - there is nothing to redact
+    because nothing here ever reads the environment."""
+    timed_out = bool(timed_out)
+    if returncode == 0 and not timed_out:
+        _logger.info(f"Acquisition ({purpose}, goal={goal_desc!r}): succeeded (exit 0).")
+        return
+    if timed_out:
+        _logger.warning(f"Acquisition ({purpose}, goal={goal_desc!r}): timed out.")
+        return
+    likely_signal = isinstance(returncode, int) and returncode in _POSIX_SIGNAL_EXIT_CODE_RANGE
+    if likely_signal:
+        _logger.warning(
+            f"Acquisition ({purpose}, goal={goal_desc!r}): exited {returncode} - in the POSIX "
+            f"128+signal range, likely terminated by a signal (e.g. OOM/SIGKILL), not an "
+            f"ordinary tool-reported failure."
+        )
+        return
+    _logger.warning(f"Acquisition ({purpose}, goal={goal_desc!r}): exited {returncode}.")
+
+
+def _acquisition_profile(
+    workspace_path: str, cache_path: str, env_allowlist: List[str],
+    cpu_seconds: Optional[int] = _ACQUISITION_CPU_SECONDS, memory_mb: Optional[int] = _ACQUISITION_MEMORY_MB,
+) -> ContainmentProfile:
     return ContainmentProfile(
         trust_class=TrustClass.UNTRUSTED_EXECUTION,
         workspace_path=workspace_path,
@@ -144,6 +214,8 @@ def _acquisition_profile(workspace_path: str, cache_path: str, env_allowlist: Li
         dependency_cache_writable=True,
         network=NetworkAuthority.UNRESTRICTED,
         env_allowlist=env_allowlist,
+        cpu_seconds=cpu_seconds,
+        memory_mb=memory_mb,
     )
 
 
@@ -188,11 +260,13 @@ def maven_acquire_dependencies(
     `OfflineFailureKind.MISSING_DEPENDENCY` evidence to surface, not
     something this phase can guarantee away."""
     profile = _acquisition_profile(workspace_path, cache_path, env_allowlist or [])
-    return controller.run(
+    result = controller.run(
         ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", "dependency:go-offline"],
         cwd=workspace_path, timeout=timeout,
         containment_profile=profile, containment_backend=containment_backend,
     )
+    log_acquisition_outcome("maven", "mvn dependency:go-offline", returncode=result.returncode, timed_out=result.timeout)
+    return result
 
 
 def maven_execute_offline(
@@ -235,13 +309,16 @@ def python_acquire_dependencies(
         cwd=workspace_path, timeout=timeout,
         containment_profile=profile, containment_backend=containment_backend,
     )
+    log_acquisition_outcome("python", "pip download --only-binary=:all:", returncode=wheels_only.returncode, timed_out=wheels_only.timeout)
     if wheels_only.returncode == 0:
         return wheels_only
-    return controller.run(
+    fallback = controller.run(
         ["python3", "-m", "pip", "download", "--dest", PIP_CACHE_MOUNT, "-r", requirements_path],
         cwd=workspace_path, timeout=timeout,
         containment_profile=profile, containment_backend=containment_backend,
     )
+    log_acquisition_outcome("python", "pip download (fallback, sdist allowed)", returncode=fallback.returncode, timed_out=fallback.timeout)
+    return fallback
 
 
 _PYDEPS_TARGET_DIR = ".kriya_pydeps"

@@ -257,3 +257,95 @@ def test_contained_maven_test_lifecycle_plugins_available_offline_after_acquisit
     # A real JUnit 5 test actually ran offline (not just "build succeeded
     # with zero tests collected") - Surefire's own summary line proves it.
     assert "Tests run: 1" in result["output"] or "1 test" in result["output"].lower(), result["output"]
+
+
+# --- SEC-007: acquisition/target resource-authority separation, real Docker ---
+
+_POM_WITH_UNSTABLE_SUREFIRE = """<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.kriya.test</groupId>
+  <artifactId>sec007-resource-authority-fixture</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.10.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.0.0-M9</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>
+"""
+
+
+def test_sec007_maven_acquisition_survives_a_deliberately_tight_target_memory_cap(tmp_path):
+    """The exact real-world SEC-007 incident, reproduced and proven fixed:
+    `maven-surefire-plugin:3.0.0-M9` (an old milestone version with an
+    unusually large legacy transitive tree - ~200 real artifacts,
+    including org.apache.maven.surefire:surefire-junit-platform's own
+    provider chain) genuinely OOM-kills a Maven acquisition JVM confined
+    to a deliberately tight, hostile-code-shaped memory cap (returncode
+    137, confirmed via direct isolated reproduction during the SEC-001
+    live-validation session). With the separate, more generous
+    acquisition_memory_mb (the packaged default, 2048MB) now applied to
+    the acquisition step specifically, the SAME scenario must succeed -
+    proving the target cap no longer starves legitimate build tooling.
+
+    Target cap is 256MB, not the originally-observed 128MB (2026-09-12,
+    user-confirmed choice): a SEPARATE isolated probe (128/192/256/384/
+    512MB) found 128MB OOM-kills the JVM/Surefire/JUnit framework itself
+    before ANY test code executes, hostile or legitimate - a JVM/Maven
+    baseline-overhead floor unrelated to SEC-007 or hostile-code
+    behavior. 256MB is still 8x tighter than the 2048MB acquisition
+    default (and 16x tighter than the 4096MB packaged default) - a
+    genuinely constrained target cap, just above the point where the
+    framework itself can actually run."""
+    src_dir = tmp_path / "src" / "test" / "java" / "com" / "kriya" / "test"
+    src_dir.mkdir(parents=True)
+    (tmp_path / "pom.xml").write_text(_POM_WITH_UNSTABLE_SUREFIRE)
+    (src_dir / "ProbeTest.java").write_text(
+        "package com.kriya.test;\n"
+        "import org.junit.jupiter.api.Test;\n"
+        "import static org.junit.jupiter.api.Assertions.assertTrue;\n"
+        "public class ProbeTest {\n"
+        "    @Test public void ok() { assertTrue(true); }\n"
+        "}\n"
+    )
+
+    validator = PolymorphicValidator(
+        str(tmp_path),
+        autonomy_cfg=AutonomyConfig(
+            contained_execution_required=True, containment_backend="oci",
+            sandbox_cpu_seconds=120, sandbox_memory_mb=256,  # deliberately tight, above the JVM's own floor
+        ),
+    )
+    assert validator.stack == "java"
+
+    result = validator.run_tests()
+    assert result["success"] is True, result["output"]
+    assert "Tests run: 1" in result["output"], result["output"]
+
+    # The target (offline, authoritative) profile must still carry the
+    # LOW, deliberately-tight target cap - acquisition succeeding must
+    # never have raised or otherwise altered what target execution itself
+    # is bounded by.
+    target_profile, _ = validator.build_containment_profile_and_backend(acquisition=False)
+    assert target_profile.memory_mb == 256
+    acquisition_profile, _ = validator.build_containment_profile_and_backend(acquisition=True)
+    assert acquisition_profile.memory_mb == 2048
+    assert acquisition_profile.memory_mb != target_profile.memory_mb

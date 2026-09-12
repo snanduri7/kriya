@@ -110,6 +110,23 @@ class AutonomyConfig(BaseModel):
     ])
     sandbox_cpu_seconds: int = Field(default=240)
     sandbox_memory_mb: int = Field(default=4096)
+    # SEC-007 (2026-09-12): dependency/build-tool ACQUISITION resource
+    # authority, deliberately separate from sandbox_cpu_seconds/
+    # sandbox_memory_mb above - those two bound TARGET/generated code
+    # execution and are meant to be tightened aggressively for a
+    # suspected-hostile application; acquisition (Maven/pip resolving a
+    # real, possibly large dependency/plugin tree with real network
+    # access) is trusted-purpose tooling with different, usually larger,
+    # resource needs. Confirmed live, 2026-09-11/12: a fixture's own
+    # sandbox_memory_mb=128 (chosen to make an application's OWN
+    # resource-abuse probe meaningful) OOM-killed Maven's acquisition-
+    # phase JVM (real returncode 137) resolving a legitimately large
+    # transitive plugin tree - lowering the target cap to test hostile
+    # code should never also break legitimate build tooling. Defaults
+    # generous enough for ordinary Maven/pip dependency resolution
+    # without being unbounded.
+    acquisition_cpu_seconds: int = Field(default=300)
+    acquisition_memory_mb: int = Field(default=2048)
     # SEC-001 foundation (2026-09-11): which ContainmentBackend
     # (kriya/tools/containment.py) ProcessController composes for a
     # profile that requires one. "none" (NullContainmentBackend) is the

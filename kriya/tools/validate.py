@@ -27,6 +27,7 @@ from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT
 from kriya.tools.dependency_execution import (
     OfflineFailureKind,
     classify_maven_offline_failure_text,
+    log_acquisition_outcome,
     maven_missing_artifact_signature,
 )
 
@@ -359,9 +360,18 @@ class PolymorphicValidator:
         # network stays irrelevant there), and under containment this is
         # the one call in this method that genuinely needs to reach a
         # package registry; still fully filesystem/process-contained.
+        # acquisition=True (SEC-007, 2026-09-12): pip resolving/building a
+        # real dependency tree gets the separate, more generous acquisition
+        # resource authority - never the (possibly deliberately very
+        # tight) target-code cap this same run may be using to bound a
+        # suspected-hostile application.
         install_res = self._run_cmd_with_timeout(
             [venv_python, "-m", "pip", "install", "-q", *install_args, "pytest"],
-            cwd=self.workspace_path, timeout=300, network=NetworkAuthority.UNRESTRICTED,
+            cwd=self.workspace_path, timeout=300, network=NetworkAuthority.UNRESTRICTED, acquisition=True,
+        )
+        log_acquisition_outcome(
+            "python", f"pip install {' '.join(install_args)}",
+            returncode=install_res["returncode"], timed_out=install_res.get("timeout", False),
         )
         if install_res["returncode"] != 0:
             return None, (
@@ -615,6 +625,7 @@ class PolymorphicValidator:
     def build_containment_profile_and_backend(
         self, *, network: NetworkAuthority = NetworkAuthority.DENIED,
         dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
+        acquisition: bool = False,
     ) -> Tuple[Optional[ContainmentProfile], Optional[ContainmentBackend]]:
         """SEC-001-P6 (2026-09-11): the real-containment counterpart to
         `build_subprocess_env_and_preexec`, gated by
@@ -660,16 +671,39 @@ class PolymorphicValidator:
         dependency-ACQUISITION step, not execution of already-resolved
         code, matching kriya/tools/dependency_execution.py's own
         acquisition/execution split - still fully filesystem/process-
-        contained throughout, only network differs)."""
+        contained throughout, only network differs).
+
+        `acquisition` (SEC-007, 2026-09-12): explicit resource-authority
+        selector - True routes cpu_seconds/memory_mb from
+        `autonomy_cfg.acquisition_cpu_seconds`/`acquisition_memory_mb`
+        instead of `sandbox_cpu_seconds`/`sandbox_memory_mb`. Deliberately
+        a caller-supplied flag, never inferred from `network`/goals/command
+        text (Invariant: do not infer acquisition trust merely from
+        command text) - every call site that constructs an acquisition
+        request already knows it's doing so structurally (it's calling a
+        dedicated acquisition helper, not guessing from what the command
+        looks like). Filesystem/environment/network containment and the
+        containment MECHANISM itself are completely unchanged either way -
+        only which resource-limit numbers land on the same
+        `ContainmentProfile.cpu_seconds`/`memory_mb` fields that already
+        existed; no parallel containment/execution code path is
+        introduced (Invariant: do not duplicate containment execution
+        code)."""
         if not self.autonomy_cfg.contained_execution_required:
             return None, None
+        if acquisition:
+            cpu_seconds = self.autonomy_cfg.acquisition_cpu_seconds
+            memory_mb = self.autonomy_cfg.acquisition_memory_mb
+        else:
+            cpu_seconds = self.autonomy_cfg.sandbox_cpu_seconds
+            memory_mb = self.autonomy_cfg.sandbox_memory_mb
         profile = ContainmentProfile(
             trust_class=TrustClass.UNTRUSTED_EXECUTION,
             workspace_path=self.workspace_path,
             network=network,
             env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
-            cpu_seconds=self.autonomy_cfg.sandbox_cpu_seconds,
-            memory_mb=self.autonomy_cfg.sandbox_memory_mb,
+            cpu_seconds=cpu_seconds,
+            memory_mb=memory_mb,
             dependency_cache_paths=[dependency_cache_path] if dependency_cache_path else [],
             dependency_cache_writable=dependency_cache_writable,
         )
@@ -680,11 +714,12 @@ class PolymorphicValidator:
         self, cmd: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
         network: NetworkAuthority = NetworkAuthority.DENIED,
         dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
+        acquisition: bool = False,
     ) -> Dict[str, Any]:
         self._audit_run_command(cmd, cwd)
         profile, backend = self.build_containment_profile_and_backend(
             network=network, dependency_cache_path=dependency_cache_path,
-            dependency_cache_writable=dependency_cache_writable,
+            dependency_cache_writable=dependency_cache_writable, acquisition=acquisition,
         )
         if profile is not None:
             return ProcessController().run(
@@ -762,19 +797,26 @@ class PolymorphicValidator:
                 dependency_cache_path=cache_dir, dependency_cache_writable=True,
             )
 
+        goal_desc = f"mvn {' '.join(goals)}"
+
         def _acquire_for_this_goal() -> None:
             # PREPARATION/ACQUISITION ONLY - network=UNRESTRICTED, same
             # goals as the authoritative offline run, result discarded.
             # Never contributes Quality Gate PASS evidence: the caller
-            # never sees this call's own return value.
+            # never sees this call's own return value (OBS-005: its
+            # OUTCOME - exit code/timeout/likely-resource-termination - is
+            # still always recorded via _log_acquisition_outcome, just
+            # never its content).
             try:
-                self._run_cmd_with_timeout(
+                result = self._run_cmd_with_timeout(
                     ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}"] + goals,
-                    cwd=cwd, timeout=timeout, network=NetworkAuthority.UNRESTRICTED,
+                    cwd=cwd, timeout=timeout, network=NetworkAuthority.UNRESTRICTED, acquisition=True,
                     dependency_cache_path=cache_dir, dependency_cache_writable=True,
                 )
             except Exception as e:
-                logger.warning(f"Maven acquisition for goals {goals!r} failed: {e}")
+                logger.warning(f"Maven acquisition (goal={goal_desc!r}) failed to invoke: {e}")
+                return
+            log_acquisition_outcome("maven", goal_desc, returncode=result["returncode"], timed_out=result.get("timeout", False))
 
         first = _offline_attempt()
         if first["returncode"] == 0:
@@ -791,7 +833,9 @@ class PolymorphicValidator:
         _acquire_for_this_goal()
         second = _offline_attempt()
         if second["returncode"] == 0:
+            logger.info(f"Acquisition (maven, goal={goal_desc!r}): authoritative offline retry followed and succeeded.")
             return second
+        logger.info(f"Acquisition (maven, goal={goal_desc!r}): authoritative offline retry followed but still failed.")
         second_output = second.get("stdout", "") + second.get("stderr", "")
         if classify_maven_offline_failure_text(second_output) != OfflineFailureKind.MISSING_DEPENDENCY:
             return second
