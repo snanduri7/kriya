@@ -1678,9 +1678,6 @@ def build_grounded_java_launch_command(
 
 
 _PYTHON_INTERPRETER_BASENAME_RE = re.compile(r"^python[23]?(?:\.\d+)?$")
-_PYTHON_MAIN_GUARD_RE = re.compile(
-    r'^if\s+__name__\s*==\s*(?:"__main__"|\'__main__\')\s*:', re.MULTILINE
-)
 
 
 def _is_python_interpreter_token(token: str) -> bool:
@@ -1696,14 +1693,55 @@ def _is_python_interpreter_token(token: str) -> bool:
     return bool(_PYTHON_INTERPRETER_BASENAME_RE.match(basename)) or token == sys.executable
 
 
-def python_file_has_main_guard(content: str) -> bool:
-    """Deterministically detects a Python file's runnable entrypoint shape -
-    a real top-level `if __name__ == "__main__":` guard - mirroring
-    DependencyGraph.find_java_main_class()'s own real-main()-method
-    detection for Java. Column-0 anchored (MULTILINE `^`): an indented
-    occurrence lives inside a function/class body, not at module top level,
-    and is not evidence this file is meant to be run directly."""
-    return bool(_PYTHON_MAIN_GUARD_RE.search(content))
+def python_file_is_runnable_script(content: str) -> bool:
+    """Deterministically detects whether a Python file has REAL, observable
+    behavior when executed directly via `python <path>` - the Python sibling
+    of DependencyGraph.find_java_main_class()'s own real-main()-method
+    detection for Java, but grounded in Python's own semantics rather than a
+    literal transliteration of Java's: unlike Java, Python has no required
+    entrypoint construct at all - ANY top-level statement runs when the file
+    is executed directly, with or without an `if __name__ == "__main__":`
+    guard (that guard only matters for distinguishing "also importable as a
+    library" from "runs unconditionally," never for "is runnable" itself).
+
+    An EARLIER version of this function required the literal guard text -
+    wrong, found live by this repository's own independent pytest run
+    (2026-09-14): 20 real test failures, every one against a fixture whose
+    generated app.py was a single bare `print(...)` statement with no guard
+    at all - an extremely common, completely legitimate Python script shape
+    that the guard-only check incorrectly classified as "no entrypoint,"
+    silently forcing should_run=False and skipping runtime verification
+    entirely for a goal that explicitly needed it run.
+
+    Parses the file's AST and returns True iff `tree.body` (top-level
+    statements only, never nested inside a function/class) contains any
+    statement that is NOT a definition/import/module-docstring/simple
+    constant-assignment - i.e. any statement that would actually DO
+    something observable when the module runs (a bare expression/call
+    like `print(...)`, an `if`/`for`/`while`/`with`/`try`, or the
+    `__main__` guard itself, which is just a specific `if` statement and
+    needs no separate detection path). A file containing ONLY def/class/
+    import statements (plus an optional leading docstring and simple
+    dunder/constant assignments) is genuinely a pure library - running it
+    directly produces no observable behavior at all, which IS "no runnable
+    entrypoint," not merely "no guard." Any parse failure degrades to
+    False - never guess a broken/unparseable file is runnable."""
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError):
+        return False
+    for index, node in enumerate(tree.body):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)):
+            continue
+        if (
+            index == 0 and isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+        ):
+            continue  # module docstring
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue  # a plain constant/variable definition - still library-shaped, no side effect
+        return True
+    return False
 
 
 def python_target_path_is_test_shaped(rel_path: str) -> bool:

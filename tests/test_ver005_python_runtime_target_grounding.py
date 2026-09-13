@@ -27,7 +27,7 @@ from kriya.workflow.attempt import (
 from kriya.workflow.file_resolution import (
     ground_python_runtime_target,
     python_command_targets_test_path,
-    python_file_has_main_guard,
+    python_file_is_runnable_script,
     python_target_path_is_test_shaped,
 )
 
@@ -435,14 +435,30 @@ def test_managed_service_legitimate_target_still_accepted(tmp_path):
 # Pure-function unit coverage for the building blocks.
 # ---------------------------------------------------------------------------
 
-def test_python_file_has_main_guard():
-    assert python_file_has_main_guard('if __name__ == "__main__":\n    main()\n') is True
-    assert python_file_has_main_guard("if __name__ == '__main__':\n    main()\n") is True
-    assert python_file_has_main_guard("def main():\n    pass\n") is False
-    # Indented (nested) occurrence is not a top-level entrypoint guard.
-    assert python_file_has_main_guard(
+def test_python_file_is_runnable_script():
+    assert python_file_is_runnable_script('if __name__ == "__main__":\n    main()\n') is True
+    assert python_file_is_runnable_script("if __name__ == '__main__':\n    main()\n") is True
+    assert python_file_is_runnable_script("def main():\n    pass\n") is False
+    # Indented (nested) occurrence is not top-level - the outer file body is
+    # just a single FunctionDef, no observable behavior at import/run time.
+    assert python_file_is_runnable_script(
         "def f():\n    if __name__ == \"__main__\":\n        pass\n"
     ) is False
+    # A bare top-level statement with NO guard at all is still genuinely
+    # runnable - Python has no required entrypoint construct, unlike Java.
+    # Found live, 2026-09-14: this exact shape (a single print(...) call, no
+    # guard) is what every one of 20 real independent-pytest failures used.
+    assert python_file_is_runnable_script("print('hi')\n") is True
+    assert python_file_is_runnable_script(
+        "\"\"\"Docstring.\"\"\"\nimport sys\nprint(sys.argv)\n"
+    ) is True
+    # A pure library file - only defs/imports/docstring/constants - has no
+    # observable behavior when run directly.
+    assert python_file_is_runnable_script(
+        "\"\"\"Docstring.\"\"\"\nimport sys\n\nVERSION = '1.0'\n\ndef f():\n    pass\n"
+    ) is False
+    # Malformed content never guessed as runnable.
+    assert python_file_is_runnable_script("def f(:\n") is False
 
 
 def test_python_target_path_is_test_shaped():

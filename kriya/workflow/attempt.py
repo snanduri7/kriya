@@ -55,7 +55,7 @@ from kriya.workflow.dependency_invalidation import (
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _build_test_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, classify_environment_failure, extract_missing_project_local_python_module, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
 from kriya.workflow.contract_authority import derive_direct_contract_authorizations
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, build_grounded_java_launch_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, ground_python_runtime_target, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, python_command_targets_test_path, python_file_has_main_guard, python_target_path_is_test_shaped, strip_package_declaration_matching_source_root
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, build_grounded_java_launch_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, ground_python_runtime_target, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, python_command_targets_test_path, python_file_is_runnable_script, python_target_path_is_test_shaped, strip_package_declaration_matching_source_root
 from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
@@ -2043,9 +2043,11 @@ def _build_python_runtime_grounding(root: str) -> Tuple[FrozenSet[str], FrozenSe
     own call sites already apply.
 
     entrypoint_files is every real, non-test, non-__init__.py `.py` file
-    under root with a genuine top-level `if __name__ == "__main__":` guard
-    - the Python sibling of _build_java_main_class_map's real-main()-method
-    detection."""
+    under root with REAL, observable top-level behavior when run directly -
+    the Python sibling of _build_java_main_class_map's real-main()-method
+    detection, but grounded in Python's own semantics (see python_file_
+    is_runnable_script()'s own docstring for why a required `__main__`
+    guard is the wrong transliteration of Java's requirement)."""
     all_py, package_dirs = _collect_python_runtime_grounding_facts(root)
     entrypoints: List[str] = []
     for rel in sorted(all_py):
@@ -2058,7 +2060,7 @@ def _build_python_runtime_grounding(root: str) -> Tuple[FrozenSet[str], FrozenSe
         except Exception as e:
             logger.debug(f"Python entrypoint detection: couldn't read {rel}, skipping it: {e}")
             continue
-        if python_file_has_main_guard(content):
+        if python_file_is_runnable_script(content):
             entrypoints.append(rel)
     return all_py, package_dirs, entrypoints
 

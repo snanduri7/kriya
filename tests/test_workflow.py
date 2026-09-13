@@ -4241,6 +4241,22 @@ async def test_run_attempt_allowlist_subtask_still_executes_declared_runtime_ver
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = {"manage.py"}
+    # Real content for the already-established manage.py (VER-005's own
+    # deterministic runtime-target grounding reads real repository content
+    # from disk, worktree-first - an earlier-completed subtask's own file
+    # genuinely exists on disk by the time a later subtask runs; this test
+    # must reflect that, not merely a name in state.all_files_written with
+    # no backing content).
+    (tmp_path / "manage.py").write_text(
+        "#!/usr/bin/env python\n"
+        "import os\nimport sys\n\n\n"
+        "def main():\n"
+        "    os.environ.setdefault(\"DJANGO_SETTINGS_MODULE\", \"customers.settings\")\n"
+        "    from django.core.management import execute_from_command_line\n"
+        "    execute_from_command_line(sys.argv)\n\n\n"
+        "if __name__ == \"__main__\":\n"
+        "    main()\n"
+    )
 
     views_py = "customers/views.py"
     developer = AsyncMock()

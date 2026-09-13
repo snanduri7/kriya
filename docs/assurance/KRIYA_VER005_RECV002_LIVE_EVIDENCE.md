@@ -697,6 +697,77 @@ from this pass's own live-run protocol are satisfied simultaneously
 carried a genuinely correct candidate to terminal success). No second live
 run needed or attempted.
 
+### VER-005 correction (2026-09-14, same day)
+
+Found via the user's own independent `.venv/bin/pytest` run against the
+commit that included Run 4 and the closure claim above — **not** caught by
+this pass's own manual/standalone self-testing. 20 real test failures, all
+in `tests/test_workflow.py`, all sharing one root cause.
+
+**Root cause of the regression**: `python_file_has_main_guard()` (the
+function backing `entrypoint_files` in `_build_python_runtime_grounding()`)
+required a literal `if __name__ == "__main__":` guard to classify a Python
+file as a real application entrypoint — a too-literal transliteration of
+Java's own `find_java_main_class()` requirement (which genuinely does
+require a `public static void main` method — Java has no other way to be
+an entrypoint). Python has no equivalent required construct: **any**
+top-level statement produces observable behavior when a file is executed
+directly via `python <path>`, with or without a guard — the guard only
+matters for distinguishing "this file is also meant to be imported as a
+library," never for "is this file runnable at all." Every one of the 20
+failing tests used a generated `app.py` whose entire content was a single
+bare `print(...)` statement with no guard — an extremely common,
+completely legitimate script shape — which the guard-only check
+misclassified as "no runnable entrypoint," silently forcing
+`should_run=False` and skipping runtime verification for goals that
+explicitly needed it run and graded.
+
+**Fix**: `python_file_has_main_guard()` renamed and rewritten as
+`python_file_is_runnable_script()` (`kriya/workflow/file_resolution.py`),
+now AST-based rather than regex-based: parses the file and inspects only
+`tree.body` (true top-level statements, never nested inside a function/
+class) — a file is runnable if that body contains anything beyond a
+`def`/`class`/`import`/module-docstring/simple-constant-assignment (an
+`Expr` call like `print(...)`, an `if`/`for`/`while`/`with`/`try`, or the
+`__main__` guard itself — now just one specific case of "any other
+top-level statement," not a special-cased regex). A pure library file
+(only definitions/imports/docstring/constants at module level) is still
+correctly classified as having no observable entrypoint — the distinction
+this whole mechanism exists to make is preserved exactly; only the
+over-strict guard-literal requirement was wrong.
+
+One of the 20 failures needed a second, narrower fix beyond the rename:
+`test_run_attempt_allowlist_subtask_still_executes_declared_runtime_
+verification` (`tests/test_workflow.py`) marked `manage.py` as an
+already-established file (`state.all_files_written = {"manage.py"}`)
+without ever writing its content to disk. VER-005's own grounding
+correctly reads real repository content from disk (worktree-first, per its
+own design — see "New production code" above) — a name-only "established"
+file with no backing content is indistinguishable from a genuinely
+nonexistent one, and treating it as grounded anyway would have meant
+trusting an unbacked claim, exactly what this whole mechanism exists to
+stop doing. The test now writes realistic Django `manage.py` content
+(matching what a real, earlier-completed subtask would actually have left
+on disk) rather than the production code being weakened to tolerate a
+content-less "established" file.
+
+**Re-verification after the fix** (standalone harness, never
+`.venv/bin/pytest` per this repository's standing quota-discipline
+convention): all 23 tests in `tests/test_ver005_python_runtime_target_
+grounding.py`; all 33 tests in `tests/test_workflow.py` that construct a
+python-shaped `run_commands` (a superset of the original 20 failures, swept
+broadly rather than spot-checked); all 68 tests in
+`tests/test_milestones.py`; all 19 tests in `tests/test_ver006_distrust_
+containment.py`; the 5 pure `ground_java_entrypoint_*` unit tests plus both
+existing Java end-to-end regression tests through the two modified
+`attempt.py` call sites; the original reproducer,
+`tests/test_polymorphic_validation.py::test_run_app_sequence_multi_
+package_test_file_target_hits_module_not_found` — **150 tests total, 0
+failures.** Disposition unchanged by this correction: still **CLOSED**, the
+underlying architecture (deterministic target validation → deterministic
+invocation policy) was correct throughout; only the Python-specific
+"what counts as runnable" predicate needed correcting.
+
 ### VER-005 disposition update
 
 **CLOSED (2026-09-14).** All Task-level acceptance criteria met: runtime

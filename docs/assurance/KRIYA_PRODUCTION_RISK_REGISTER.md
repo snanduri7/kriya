@@ -658,6 +658,46 @@ Per the task's own DEFECT RULE, the closure claim is stopped and disposition mov
 
 **VER-005 implementation (2026-09-14), CLOSED.** Full detail in `docs/assurance/KRIYA_VER005_RECV002_LIVE_EVIDENCE.md`'s own "VER-005 implementation" section. Root cause traced precisely to two combined factors (never merely `PYTHONPATH`): (A) `RunVerifierAgent.judge()` selecting an invalid target (a test file, for a goal with no grounded application entrypoint) and (D) Kriya's execution layer invoking even a genuinely valid, package-nested target via bare `python <path>`, which cannot resolve a sibling top-level package import — working directory (C) was ruled out by direct code read (`run_app_sequence()`/`run_app()` already hardcode `cwd=workspace_path` unconditionally) and the deterministic required/optional heuristic (E) was ruled out (`goal_requires_runtime_behavior()` was already `False` for both failing goals). Fix: a new deterministic invocation-policy layer, `ground_python_runtime_target()` (`kriya/workflow/file_resolution.py`) — the Python sibling of the pre-existing, unmodified `ground_java_entrypoint_in_no_build_file_projects()`, same architectural boundary (`LLM verification intent -> deterministic target validation -> deterministic invocation policy -> controlled execution -> deterministic evidence -> terminal decision`), same `None`-sentinel-means-"force should_run=False" contract, same "goal_explicit is authoritative, never guess when ambiguous" posture. Validates a proposed target against real, repository-wide filesystem facts (never scoped to this run's own writes — a brownfield repository's entrypoint/package structure routinely predates the current attempt) resolved fresh every attempt; converts a bare-script invocation to `-m dotted.module` form exactly when the target is nested inside a real Python package (the condition under which `-m` puts the workspace root, not the script's own directory, on `sys.path[0]` — the actual mechanism fix, requiring zero environment-variable changes); substitutes the one unambiguous real entrypoint when the proposed target is invalid, or forces `should_run=False` when none exists or more than one does. Bypass sweep found and closed a THIRD, previously undiscovered unvalidated-target path beyond the two `kriya/workflow/attempt.py` call sites this row's own campaign had already traced: `kriya/workflow/milestones.py`'s own independent `judge()` call (captured for later cross-milestone replay) — fixed, Python-only, narrower than the two `attempt.py` sites (disclosed, not silently expanded to Java parity there, since no live evidence of the Java-equivalent gap exists at that call site). `MANAGED_SERVICE`'s own `service_command` target gets test-shape rejection only (fails closed, no substitution attempted — no safe deterministic "run this other service instead" exists, honestly disclosed as narrower than the `FINITE_COMMAND` treatment). Full production-path inventory: `UNVALIDATED_LLM_RUNTIME_TARGET_EXECUTION_PATHS = 0`, `BARE_TEST_AS_APPLICATION_PATHS = 0` (two paths grounded directly, two inherit grounding by construction — confirmed via direct code trace, not assumed — one path found to have zero production call sites at all). No Java code touched; existing Java entrypoint-grounding tests and both existing Java end-to-end regression tests through the two modified `attempt.py` call sites re-run manually, unaffected. `VER-006`'s own 19-test distrust-containment suite re-run manually, unaffected — false-positive protection (a bad candidate still fails after correction) independently confirmed via a new test plus reliance on VER-006's own unmodified suite. No security control touched (SEC-001/003/005 untouched; the new repository-walk reuses the existing symlink-safe `is_within_scope()` containment idiom, never a new one). One live revalidation (of 2 permitted) against the real production model (`qwen3-coder:30b`, fresh copy of the E4 fixture, `kriya analyze .` run first, goal text byte-identical to the original campaign's Run 3, target choice not steered): the judge *still* naturally proposed an invalid target (confirmed by the grounding log line firing), the new deterministic layer forced `should_run=False`, and the genuinely correct candidate (real `compile` + real `pytest` 7/7 on the targeted test, 11/11 on full regression, `is_premium_eligible`'s own test included) reached terminal `quality_gates_passed: true` — independently re-confirmed outside Kriya via `git diff --stat`/`git status` and direct Python execution of every case the goal required, plus MUST_PRESERVE. Decisive on the first attempt; no second live run needed. **Disposition: CLOSED.** Closure statement: runtime-verification targets proposed by an LLM are not directly executable authority — Kriya deterministically validates runtime applicability, target role, and language/project invocation semantics before execution; invalid/test-shaped targets can no longer create spurious candidate failure or bypass deterministic verification.
 
+**VER-005 correction (2026-09-14, same day, found via the user's own
+independent pytest run after the closure paragraph above — not caught by
+this pass's own deterministic self-testing).** One real regression in the
+initial implementation, fixed before push, now permanently
+regression-tested. `python_file_has_main_guard()` (renamed
+`python_file_is_runnable_script()`) required a literal `if __name__ ==
+"__main__":` guard to classify a Python file as a real application
+entrypoint — a too-literal transliteration of Java's own
+`find_java_main_class()` requirement. Unlike Java, Python has no required
+entrypoint construct at all: ANY top-level statement produces observable
+behavior when the file runs directly, guard or not. 20 real test failures,
+every one against a fixture whose generated `app.py` was a single bare
+`print(...)` statement with no guard — an extremely common, completely
+legitimate script shape that the guard-only check misclassified as "no
+entrypoint," silently forcing `should_run=False` and skipping runtime
+verification the goal explicitly needed. Fixed: the detector is now
+AST-based (`python_file_is_runnable_script()`) — a file is runnable if
+`tree.body` (top-level statements only) contains anything beyond a
+definition/import/docstring/simple-constant-assignment; a pure library
+file (only `def`/`class`/`import` at module level) still correctly has no
+observable entrypoint, exactly as intended. One of the 20 failures
+(`test_run_attempt_allowlist_subtask_still_executes_declared_runtime_
+verification`) needed a second, narrower fix: the test's own fixture
+marked `manage.py` as an already-established file
+(`state.all_files_written`) without ever writing its content to disk —
+VER-005's own grounding correctly reads real repository content from disk,
+so a name-only "established" file with no backing content is
+indistinguishable from a nonexistent one; the test now writes realistic
+Django `manage.py` content (matching what a real earlier-completed subtask
+would have left on disk) rather than the production code being weakened to
+tolerate a content-less "established" file. Independently pytest-confirmed
+by the user before this correction (the exact 20-failure list, reconciled
+test by test); re-verified via the standalone harness after the fix (all
+23 new VER-005 tests + all 33 tests across `tests/test_workflow.py`
+referencing a python-shaped `run_commands` + all 68
+`tests/test_milestones.py` tests + all 19
+`tests/test_ver006_distrust_containment.py` tests + the 7 Java
+entrypoint-grounding tests — 150 tests total, 0 failures). Disposition
+unchanged: **CLOSED**.
+
 **VER-006 — Runtime-verification LLM fallback can upgrade deterministically distrusted evidence into terminal success**
 Language Scope: LANGUAGE_NEUTRAL (the verification-marker contract, `pass_verdict_is_grounded()`, and `RunVerifierAgent.grade()` all operate on captured stdout/stderr text and written-file content generically, not on any language-specific structure) · Deployment Relevance: REQUIRED · Effective Evidence Level: **E4 at discovery** — a real, live, independently-confirmed production instance, not hypothetical: run `bpwsqscrg` (`/tmp/pol001_live_run2.log`) produced exit code 0, stdout `[VERIFICATION] PASS`, the deterministic contract-grounding check (`pass_verdict_is_grounded()`) correctly found the marker ungrounded (no `[VERIFICATION] FAIL` string anywhere in the written files), the result collapsed into the same `None` a genuine no-evidence case would produce, `RunVerifierAgent.grade()` was never told the marker was already distrusted, cited it as "strong, primary evidence" per its own then-unqualified system prompt, and returned `passed: true` — Quality Gates reported `PASSED` for a `main.py` independently confirmed broken (28 bytes, `print("[VERIFICATION] PASS")`, no argv dispatch, no CLI logic at all). Investigation: this session's dedicated root-cause task, full failure-chain trace with exact file:line references. Disposition: **CLOSED (2026-09-13, see the reconciliation paragraph after the P1 update below)**.
 
