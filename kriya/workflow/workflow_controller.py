@@ -116,6 +116,7 @@ from kriya.workflow.checkpoint import (
     compute_base_commit,
     compute_registry_hash,
     compute_tree_hash,
+    compute_workspace_content_hash,
     new_run_id,
     validate_resume_against_reality,
     list_checkpoints,
@@ -3894,9 +3895,16 @@ class WorkflowController:
     def _attach_refactor_baseline(self, control_state: ControlState, workspace_path: str) -> ControlState:
         base_commit = compute_base_commit(workspace_path)
         tree_hash = compute_tree_hash(workspace_path)
-        if base_commit is None and tree_hash is None:
+        # STATE-001 (2026-09-14): the real working-tree-content-sensitive
+        # identity, computed alongside tree_hash's own narrower committed-
+        # tree meaning - see ControlState.workspace_content_hash's own
+        # field docstring.
+        workspace_content_hash = compute_workspace_content_hash(workspace_path)
+        if base_commit is None and tree_hash is None and workspace_content_hash is None:
             return control_state
-        return control_state.with_updates(base_commit=base_commit, tree_hash=tree_hash)
+        return control_state.with_updates(
+            base_commit=base_commit, tree_hash=tree_hash, workspace_content_hash=workspace_content_hash,
+        )
 
     async def _run_structured_shadow(
         self, goal: str, workspace_path: str, route: Any, run_id: str,
@@ -4741,6 +4749,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     checkpoint_data={
                         "base_commit": prior_control_state.base_commit,
                         "tree_hash": prior_control_state.tree_hash,
+                        # STATE-001 (2026-09-14): required for a real
+                        # content-drift signal - tree_hash alone cannot see
+                        # any of THIS run's own uncommitted subtask writes,
+                        # since subtask writes are plain file writes, never
+                        # a git commit between subtasks.
+                        "workspace_content_hash": prior_control_state.workspace_content_hash,
                     },
                     workspace_path=workspace_path,
                 )
@@ -4810,6 +4824,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         control_state = control_state.with_updates(
             current_plan_hash=current_plan_hash, subtask_states=dict(resumed_subtask_states),
             base_commit=compute_base_commit(workspace_path), tree_hash=compute_tree_hash(workspace_path),
+            workspace_content_hash=compute_workspace_content_hash(workspace_path),
         )
 
         order = topological_subtask_order(plan)

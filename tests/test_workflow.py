@@ -132,6 +132,7 @@ from kriya.workflow.workflow_controller import (
 from kriya.workflow.checkpoint import (
     checkpoint_path,
     compute_config_fingerprint,
+    compute_workspace_content_hash,
     compute_workspace_fingerprint,
     find_latest_checkpoint,
     load_checkpoint,
@@ -1230,6 +1231,16 @@ def _seed_checkpoint(tmp_path, cfg, goal, run_id, stage, **extra):
     save_checkpoint(str(tmp_path), run_id, {
         "stage": stage,
         "workspace_fingerprint": compute_workspace_fingerprint(str(tmp_path)),
+        # STATE-001 (2026-09-14): required alongside workspace_fingerprint -
+        # its own absence is treated as a legacy/pre-fix checkpoint and
+        # fails closed (see run_generation_workflow's own resume-check
+        # block). A caller that specifically wants to exercise the
+        # legacy-checkpoint-rejected case passes workspace_content_hash=None
+        # explicitly via **extra (dict literal order means an explicit
+        # **extra value here would collide - see
+        # test_workflow_refuses_resume_on_legacy_checkpoint below instead,
+        # which pops this key after seeding).
+        "workspace_content_hash": compute_workspace_content_hash(str(tmp_path)),
         "config_fingerprint": compute_config_fingerprint(cfg.model_dump()),
         "goal_fingerprint": hashlib.sha256(f"{goal}\x00".encode("utf-8")).hexdigest(),
         **extra,

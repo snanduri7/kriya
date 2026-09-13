@@ -25,6 +25,7 @@ from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.checkpoint import (
     compute_config_fingerprint,
+    compute_workspace_content_hash,
     compute_workspace_fingerprint,
     delete_checkpoint,
     find_latest_checkpoint,
@@ -1042,6 +1043,35 @@ class WorkflowEngine:
                         drift_reasons.append("workspace is not a git repository, so drift can't be verified")
                     elif candidate.get("workspace_fingerprint") != current_ws_fp:
                         drift_reasons.append("workspace has changed (git HEAD/dirty-state differs)")
+                    # STATE-001 (2026-09-14): workspace_fingerprint above is
+                    # HEAD+dirty-BOOLEAN - it cannot distinguish two
+                    # different dirty working-tree contents at the same HEAD
+                    # (reproduced and permanently characterized by
+                    # test_checkpoint_workspace_fingerprint_cannot_
+                    # distinguish_two_different_dirty_states). This is the
+                    # REAL, content-sensitive check - required unconditionally
+                    # whenever workspace_fingerprint itself is present at all
+                    # (i.e. this is a real, non-legacy checkpoint); its own
+                    # absence means the checkpoint predates this fix and is
+                    # never silently treated as equivalent to a real match
+                    # (Task 10's own explicit instruction).
+                    if candidate.get("workspace_fingerprint") is not None:
+                        current_content_hash = compute_workspace_content_hash(workspace_path)
+                        stored_content_hash = candidate.get("workspace_content_hash")
+                        if stored_content_hash is None:
+                            drift_reasons.append(
+                                "checkpoint predates the working-tree-content identity check "
+                                "(legacy checkpoint) and is not safely resumable"
+                            )
+                        elif current_content_hash is None:
+                            drift_reasons.append(
+                                "workspace content identity could not be computed - failing closed"
+                            )
+                        elif current_content_hash != stored_content_hash:
+                            drift_reasons.append(
+                                "workspace content has changed (tracked/untracked content differs "
+                                "from the checkpoint)"
+                            )
                     if candidate.get("config_fingerprint") != current_cfg_fp:
                         drift_reasons.append("config has changed")
                     if candidate.get("goal_fingerprint") != current_goal_fp:
@@ -1675,7 +1705,18 @@ class WorkflowEngine:
 
         # Fingerprints for any checkpoint saved during this run - computed once,
         # goal/workspace/config are all fixed for the remainder of the call.
+        # Safe to compute once (not per-checkpoint-save): every checkpoint
+        # this method saves happens BEFORE the real workspace is ever
+        # touched by this run (candidate writes stay confined to
+        # worktree_path until the final, post-checkpoint apply step) -
+        # traced explicitly for this fix (STATE-001) rather than assumed.
         checkpoint_ws_fp = compute_workspace_fingerprint(workspace_path)
+        # STATE-001 (2026-09-14): the real, working-tree-content-sensitive
+        # identity - see compute_workspace_content_hash()'s own docstring
+        # (kriya/workflow/checkpoint.py) for the full mechanism and why
+        # checkpoint_ws_fp above cannot distinguish two different dirty
+        # contents at the same HEAD.
+        checkpoint_content_hash = compute_workspace_content_hash(workspace_path)
         checkpoint_cfg_fp = compute_config_fingerprint(self.kernel.config.model_dump())
         checkpoint_goal_fp = hashlib.sha256(f"{goal}\x00{state.error_context or ''}".encode("utf-8")).hexdigest()
 
@@ -1683,6 +1724,7 @@ class WorkflowEngine:
             save_checkpoint(workspace_path, run_id, {
                 "stage": stage,
                 "workspace_fingerprint": checkpoint_ws_fp,
+                "workspace_content_hash": checkpoint_content_hash,
                 "config_fingerprint": checkpoint_cfg_fp,
                 "goal_fingerprint": checkpoint_goal_fp,
                 "milestone_group_id": milestone_group_id,
