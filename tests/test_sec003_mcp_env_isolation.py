@@ -30,10 +30,36 @@ from kriya.mcp.mcp import (
     MCPManager,
     build_mcp_subprocess_env,
 )
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KRIYA_BIN = os.path.join(REPO_ROOT, ".venv", "bin", "kriya")
 ENV_REPORT_SERVER = os.path.join(REPO_ROOT, "tests", "env_report_mcp_server.py")
+
+# Literal schema of env_report_mcp_server.py's one tool ("report_env"),
+# duplicated here (rather than probed live) so the expected TOOL-002 P1
+# identity is visible inline next to the tests that pre-approve it.
+_REPORT_ENV_SCHEMA = {
+    "type": "object",
+    "properties": {"names": {"type": "string", "description": "comma-separated variable names to check"}},
+    "required": ["names"],
+}
+_REPORT_ENV_DIGEST = compute_mcp_schema_digest(_REPORT_ENV_SCHEMA)
+
+
+def _pre_approved_policy(*server_identities):
+    """TOOL-002 P1: SEC-003's own MCPManager-based tests exercise real MCP
+    tool invocation only as a vehicle to prove environment isolation - they
+    are not testing invocation authority at all. TOOL-002 P1 introduced a
+    default-deny gate in front of every MCP tools/call, so these tests must
+    now supply the specific identities they call, exactly as production's
+    own future operator-facing approval mechanism (TOOL-002 P2) will."""
+    identities = frozenset(
+        MCPToolIdentity(server_identity=s, tool_name="report_env", schema_digest=_REPORT_ENV_DIGEST)
+        for s in server_identities
+    )
+    return ExecutionPolicy(approved_mcp_tool_identities=identities)
 
 # Synthetic-only - never real credentials, per this risk's own requirement.
 SYNTHETIC_SENTINELS = {
@@ -242,7 +268,7 @@ async def test_required_launch_environment_remains_functional():
 @pytest.mark.asyncio
 async def test_cross_server_isolation_no_leak_between_servers():
     kernel = Kernel()
-    manager = MCPManager(kernel)
+    manager = MCPManager(kernel, execution_policy=_pre_approved_policy("server_a", "server_b"))
     mcp_config = {
         "server_a": {"command": sys.executable, "args": [ENV_REPORT_SERVER], "env": {"SERVER_A_ONLY": "a-value"}},
         "server_b": {"command": sys.executable, "args": [ENV_REPORT_SERVER], "env": {"SERVER_B_ONLY": "b-value"}},
@@ -316,14 +342,35 @@ def _run_cli(args, cwd, extra_env=None, timeout=20):
 
 
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
-def test_cli_ambient_sentinel_absent_then_explicit_sentinel_present_end_to_end(tmp_path):
-    """The single most decisive piece of SEC-003 evidence: the real,
-    unmodified `kriya` CLI, a real disposable MCP subprocess, and the
-    parent process actually carrying the sentinel in its own environment
-    (via extra_env) - proving the full production path (config ->
-    SEC-009 authority -> MCPManager -> MCPClient -> subprocess) never lets
-    an ambient value through, and lets an explicitly-authorized one
-    through with the exact configured value."""
+def test_cli_mcp_tool_call_denied_by_tool002_p1_no_sentinel_leak_either_way(tmp_path):
+    """TOOL-002 P1 (2026-09-13) evidence-level change to SEC-003, recorded
+    here rather than silently: before TOOL-002 P1, this test was SEC-003's
+    single most decisive piece of evidence - a real, unmodified `kriya`
+    CLI invocation proving the ambient-absent/explicit-present env
+    differential through the full production path. TOOL-002 P1 put a
+    default-deny invocation-authority gate immediately in front of every
+    MCP tools/call, and gave that gate no config/flag/env-driven
+    approval path yet (deliberately deferred to TOOL-002 P2, which will
+    add an operator-facing approval mechanism a real CLI invocation can
+    drive) - so the real, unmodified CLI can no longer reach the MCP
+    subprocess at all for either phase of the original differential.
+
+    SEC-003's actual guarantee (build_mcp_subprocess_env() never leaks an
+    ambient host variable into a real MCP child, and does pass through an
+    explicitly-authorized one) is NOT weakened - it remains fully covered
+    by this file's own direct-MCPClient tests
+    (test_ambient_variable_is_not_present_in_real_child_env and
+    test_ambient_variable_is_absent_then_present_via_explicit_env, both
+    unmodified, both still exercising real subprocesses with no policy
+    gate in the way). What is genuinely lost is this one E4-tier piece of
+    evidence: a real-CLI-driven demonstration of that same differential.
+    This test is repurposed to prove the new, honest end-to-end fact
+    instead - the real CLI denies the call outright, and the ambient
+    sentinel value never appears in its output regardless of which
+    config phase is active, which is itself still meaningful (if
+    weaker) SEC-003-adjacent evidence: an ambient secret cannot reach
+    output via this path either way, now because the call never happens
+    at all."""
     home = tmp_path / "_authority_home"
     ws = tmp_path / "cli_mcp_repo"
     ws.mkdir()
@@ -339,8 +386,9 @@ def test_cli_ambient_sentinel_absent_then_explicit_sentinel_present_end_to_end(t
         ["tools", "execute", "envprobe_report_env", '{"names":"KRIYA_SEC003_SENTINEL"}', "-y"],
         cwd=str(ws), extra_env=ambient_env,
     )
-    assert code == 0, err
-    assert '"KRIYA_SEC003_SENTINEL": null' in out, out
+    assert "MCP_TOOL_REQUIRES_APPROVAL" in out, out
+    assert "host-secret-must-not-leak" not in out
+    assert "host-secret-must-not-leak" not in err
 
     _write_yaml(ws / "kriya.yaml", {
         "mcp": {"envprobe": {
@@ -355,5 +403,6 @@ def test_cli_ambient_sentinel_absent_then_explicit_sentinel_present_end_to_end(t
         ["tools", "execute", "envprobe_report_env", '{"names":"KRIYA_SEC003_SENTINEL"}', "-y"],
         cwd=str(ws), extra_env=ambient_env,
     )
-    assert code2 == 0, err2
-    assert '"KRIYA_SEC003_SENTINEL": "explicitly-authorized-value"' in out2, out2
+    assert "MCP_TOOL_REQUIRES_APPROVAL" in out2, out2
+    assert "host-secret-must-not-leak" not in out2
+    assert "host-secret-must-not-leak" not in err2

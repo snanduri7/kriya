@@ -429,24 +429,19 @@ async def test_subtask_shaped_route_is_gated():
 
 def test_no_production_direct_call_tool_bypass():
     """Structural, AST-based proof (immune to docstring/comment false
-    positives, unlike a plain string search): kriya/mcp/mcp.py contains
-    exactly one production CALL EXPRESSION invoking `.call_tool(...)` as
-    an attribute call - inside MCPTool._run(), the same method this
-    file's own tests gate. A future second call site added to mcp.py
-    without going through MCPTool would silently bypass this package's
+    positives, unlike a plain string search), scanning the ENTIRE kriya/
+    package (not just kriya/mcp/mcp.py) - a bypass added anywhere else in
+    the codebase would be just as real a TOOL-002 gate bypass as one added
+    to mcp.py itself. Exactly one production CALL EXPRESSION invoking
+    `.call_tool(...)` as an attribute call may exist anywhere in the
+    package: inside MCPTool._run() in kriya/mcp/mcp.py, the same method
+    this file's own tests gate. A future second call site added anywhere,
+    without going through MCPTool, would silently bypass this package's
     entire gate - this test fails loudly if that ever happens."""
     import ast
-    import kriya.mcp.mcp as mcp_module
+    import os
 
-    tree = ast.parse(inspect.getsource(mcp_module))
-    run_method_node = None
-    for node in ast.walk(tree):
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_run":
-            # Disambiguate MCPTool._run from any other `_run` (there isn't
-            # one today, but this walk is class-agnostic by design).
-            run_method_node = node
-            break
-    assert run_method_node is not None, "MCPTool._run not found"
+    import kriya
 
     def _call_tool_invocations(subtree):
         return [
@@ -454,12 +449,49 @@ def test_no_production_direct_call_tool_bypass():
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "call_tool"
         ]
 
-    all_invocations = _call_tool_invocations(tree)
-    invocations_inside_run = _call_tool_invocations(run_method_node)
-    assert len(invocations_inside_run) == 1, f"expected exactly 1 call_tool(...) invocation inside _run, found {len(invocations_inside_run)}"
-    assert len(all_invocations) == len(invocations_inside_run), (
-        f"found {len(all_invocations) - len(invocations_inside_run)} .call_tool(...) invocation(s) "
-        "elsewhere in kriya/mcp/mcp.py, outside MCPTool._run() - a production bypass of the TOOL-002 gate"
+    package_root = os.path.dirname(kriya.__file__)
+    mcp_module_path = os.path.join(package_root, "mcp", "mcp.py")
+
+    invocations_inside_run = []
+    invocations_outside_run = []
+
+    for dirpath, _dirnames, filenames in os.walk(package_root):
+        for filename in filenames:
+            if not filename.endswith(".py"):
+                continue
+            filepath = os.path.join(dirpath, filename)
+            with open(filepath, "r", encoding="utf-8") as f:
+                source = f.read()
+            tree = ast.parse(source, filename=filepath)
+
+            run_method_node = None
+            if filepath == mcp_module_path:
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.AsyncFunctionDef) and node.name == "_run":
+                        # Disambiguate MCPTool._run from any other `_run`
+                        # (there isn't one today, but this walk is
+                        # class-agnostic by design).
+                        run_method_node = node
+                        break
+                assert run_method_node is not None, "MCPTool._run not found in kriya/mcp/mcp.py"
+
+            file_invocations = _call_tool_invocations(tree)
+            if not file_invocations:
+                continue
+            if run_method_node is not None:
+                run_invocations = _call_tool_invocations(run_method_node)
+                invocations_inside_run.extend(run_invocations)
+                outside_count = len(file_invocations) - len(run_invocations)
+                invocations_outside_run.extend([filepath] * outside_count)
+            else:
+                invocations_outside_run.extend([filepath] * len(file_invocations))
+
+    assert len(invocations_inside_run) == 1, (
+        f"expected exactly 1 call_tool(...) invocation inside MCPTool._run, found {len(invocations_inside_run)}"
+    )
+    assert invocations_outside_run == [], (
+        f"found .call_tool(...) invocation(s) outside MCPTool._run() in: {invocations_outside_run} "
+        "- a production bypass of the TOOL-002 gate"
     )
 
 

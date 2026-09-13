@@ -26,6 +26,8 @@ from kriya.config.config import AppConfig, MCPLifecycleConfig, load_config
 from kriya.config.authority import ConfigAuthorityError
 from kriya.core.kernel import Kernel
 from kriya.mcp.mcp import MCPClient, MCPManager
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
 from kriya.mcp.lifecycle import (
     MCPLifecycleError,
     MCPRequestTimeoutError,
@@ -511,8 +513,20 @@ async def test_sec003_explicit_env_still_present_through_sec004_spawn_path():
 
 @pytest.mark.asyncio
 async def test_sec003_cross_server_isolation_still_intact():
+    """TOOL-002 P1 (2026-09-13): this test's own tool.execute() calls are
+    not testing invocation authority - they're SEC-003's evidence vehicle
+    for environment isolation - so they must supply the specific identities
+    they call, exactly as production's own future operator-facing approval
+    mechanism (TOOL-002 P2) will."""
     kernel = Kernel(config=AppConfig(mcp_lifecycle=FAST))
-    manager = MCPManager(kernel)
+    report_env_schema = {"type": "object", "properties": {
+        "names": {"type": "string", "description": "comma-separated names"}}, "required": ["names"]}
+    digest = compute_mcp_schema_digest(report_env_schema)
+    approved = frozenset({
+        MCPToolIdentity(server_identity="server_a", tool_name="report_env", schema_digest=digest),
+        MCPToolIdentity(server_identity="server_b", tool_name="report_env", schema_digest=digest),
+    })
+    manager = MCPManager(kernel, execution_policy=ExecutionPolicy(approved_mcp_tool_identities=approved))
     await manager.start_all({
         "server_a": {"command": sys.executable, "args": [FIXTURE], "env": {"ADVERSARIAL_MODE": "normal", "SERVER_A_ONLY": "a"}},
         "server_b": {"command": sys.executable, "args": [FIXTURE], "env": {"ADVERSARIAL_MODE": "normal", "SERVER_B_ONLY": "b"}},
