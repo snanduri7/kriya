@@ -61,9 +61,16 @@ engine.
 
 import os
 import re
-from typing import FrozenSet, Optional, Sequence, Tuple
+from typing import Callable, FrozenSet, Optional, Sequence, Tuple
 
-from kriya.policy.model import ActionRequest, ActionType, MCPToolIdentity, PolicyDecision, PolicyResult
+from kriya.policy.model import (
+    ActionRequest,
+    ActionType,
+    MCPCapabilityProfileIdentity,
+    MCPToolIdentity,
+    PolicyDecision,
+    PolicyResult,
+)
 from kriya.workflow.triage import ExecutionWeight, RiskClass
 
 # MA4.4 - deliberately small starter allowlist (design doc section 18: "start
@@ -397,6 +404,9 @@ class ExecutionPolicy:
         self,
         sensitive_path_patterns: Optional[Sequence[str]] = None,
         approved_mcp_tool_identities: Optional[FrozenSet[MCPToolIdentity]] = None,
+        mcp_invocation_approval_resolver: Optional[
+            Callable[[MCPToolIdentity, Optional[MCPCapabilityProfileIdentity]], bool]
+        ] = None,
     ) -> None:
         self._sensitive_path_patterns = _compile_path_patterns(
             sensitive_path_patterns if sensitive_path_patterns else _DEFAULT_SENSITIVE_PATH_PATTERN_STRINGS
@@ -418,6 +428,25 @@ class ExecutionPolicy:
         self._approved_mcp_tool_identities: FrozenSet[MCPToolIdentity] = (
             approved_mcp_tool_identities if approved_mcp_tool_identities is not None else frozenset()
         )
+        # TOOL-002 P2 - additive, optional constructor override, alongside
+        # (never replacing) approved_mcp_tool_identities above: that static
+        # frozenset stays exactly as-is, purely for isolated unit-test
+        # identity injection (Task 10 explicitly permits this to remain).
+        # This second, independent hook is where PRODUCTION authorization
+        # now comes from - a callable a real caller (MCPManager, see
+        # kriya/mcp/mcp.py) binds to a durable, on-disk, operator-approved
+        # store (kriya/mcp/invocation_approval.py), consulted fresh on
+        # EVERY call (Task 7's revalidation requirement - this stage never
+        # caches a resolver's answer). None (default, every call site that
+        # doesn't pass one - e.g. every existing unit test) disables this
+        # path entirely and changes NOTHING about pre-existing behavior:
+        # an identity not in the static approved set still falls straight
+        # through to REQUIRE_APPROVAL exactly as before. Any exception the
+        # resolver raises is deliberately NOT caught here - it propagates
+        # out of evaluate() to MCPTool._run()'s own existing fail-closed
+        # try/except (Task 15's "approval-store exception fails closed" -
+        # reusing that boundary rather than adding a second one here).
+        self._mcp_invocation_approval_resolver = mcp_invocation_approval_resolver
 
     def evaluate(self, request: ActionRequest) -> PolicyResult:
         for stage_name in _STAGE_METHOD_NAMES:
@@ -730,7 +759,7 @@ class ExecutionPolicy:
         )
 
     def _check_mcp_invocation(self, request: ActionRequest) -> Optional[PolicyResult]:
-        """TOOL-002 P1 - governs ActionType.MCP_TOOL_CALL only. Unlike every
+        """TOOL-002 P1/P2 - governs ActionType.MCP_TOOL_CALL only. Unlike every
         other stage in this pipeline, the caller (MCPTool._run(),
         kriya/mcp/mcp.py) treats this stage's DENY and REQUIRE_APPROVAL
         outcomes as REAL, mode-independent enforcement - never audit-only,
@@ -754,16 +783,24 @@ class ExecutionPolicy:
         satisfying Invariant 5 (MCP-provided metadata may describe an
         operation, never authorize it) structurally, not by convention.
 
-        TOOL-002 P1 intentionally does NOT infer filesystem/network/process
-        capability from the identity or from anything else - that semantic
-        capability question is TOOL-003's scope. The only decision this
-        stage can make today is IDENTITY-based: is this EXACT
+        TOOL-002 P1/P2 intentionally does NOT infer filesystem/network/
+        process capability from the identity or from anything else - that
+        semantic capability question is TOOL-003's scope (this stage reads
+        `mcp_capability_profile_identity` for one narrow purpose only: as
+        an anti-drift BINDING key inside the durable-approval check below,
+        never as an independent authority source - Invariant 13 stays
+        true). The decision this stage can make is IDENTITY-based, checked
+        against two independent sources in order: (1) is this EXACT
         (server, tool, schema) tuple one Kriya/the operator has explicitly
-        pre-approved (`self._approved_mcp_tool_identities`, empty by
-        default - see __init__)? If yes, ALLOW. If no - which is every
-        real call in a default P1 deployment, since no operator-facing
-        approval/capability mechanism exists yet - REQUIRE_APPROVAL, never
-        a bare ALLOW merely because the identity looks unremarkable or the
+        pre-approved for THIS PROCESS (`self._approved_mcp_tool_identities`,
+        empty by default, test-injection only - see __init__)? (2) failing
+        that, does a durable, operator-granted, on-disk invocation approval
+        (TOOL-002 P2, `self._mcp_invocation_approval_resolver`, None by
+        default) exist whose FULL current binding - workspace, server,
+        tool, schema digest, AND capability-profile digest - still matches
+        exactly? If either yes, ALLOW. If neither - which is every real
+        call with no approval on file - REQUIRE_APPROVAL, never a bare
+        ALLOW merely because the identity looks unremarkable or the
         server's own description sounds harmless (Invariant: never bare-
         ALLOW an unknown/ambiguous MCP invocation)."""
         if request.action_type != ActionType.MCP_TOOL_CALL:
@@ -794,14 +831,40 @@ class ExecutionPolicy:
                 matched_rule="mcp_invocation.identity_approved",
             )
 
+        # TOOL-002 P2 - the durable, operator-facing production approval
+        # path (see __init__'s own docstring for this parameter). Only
+        # reached when the static test-injection set above did not already
+        # match. `capability_identity` is validated to the exact expected
+        # type here (never trusted as arbitrary metadata content) before
+        # being handed to the resolver - this stage still owns validating
+        # the shape of its own ActionRequest, exactly like the identity
+        # check above.
+        if self._mcp_invocation_approval_resolver is not None:
+            capability_identity = request.metadata.get("mcp_capability_profile_identity")
+            if not isinstance(capability_identity, MCPCapabilityProfileIdentity):
+                capability_identity = None
+            if self._mcp_invocation_approval_resolver(identity, capability_identity):
+                return PolicyResult(
+                    decision=PolicyDecision.ALLOW,
+                    reason_code="MCP_TOOL_DURABLE_APPROVAL_VALID",
+                    explanation=(
+                        f"MCP tool identity (server={identity.server_identity!r}, "
+                        f"tool={identity.tool_name!r}) matches a durable, operator-"
+                        "granted invocation approval whose full binding (workspace, "
+                        "server, tool, schema digest, capability-profile digest) is "
+                        "still current."
+                    ),
+                    matched_rule="mcp_invocation.durable_approval_valid",
+                )
+
         return PolicyResult(
             decision=PolicyDecision.REQUIRE_APPROVAL,
             reason_code="MCP_TOOL_REQUIRES_APPROVAL",
             explanation=(
                 f"MCP tool identity (server={identity.server_identity!r}, "
-                f"tool={identity.tool_name!r}) is not on the pre-approved identity set - "
-                "TOOL-002 P1 has no operator-facing approval/capability mechanism yet, so "
-                "this fails closed (no tools/call) rather than defaulting to ALLOW."
+                f"tool={identity.tool_name!r}) is not on the pre-approved identity set "
+                "and has no current, valid durable invocation approval - failing closed "
+                "(no tools/call) rather than defaulting to ALLOW."
             ),
             matched_rule="mcp_invocation.requires_approval",
             requires_approval=True,

@@ -23,12 +23,14 @@ from kriya.mcp.lifecycle import (
     spawn_mcp_process,
     terminate_mcp_process,
 )
+from kriya.mcp.invocation_approval import resolve_mcp_invocation_approval
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import (
     ActionRequest,
     ActionType,
     MCPCapabilityProfileIdentity,
+    MCPContainmentIdentity,
     MCPToolIdentity,
     PolicyDecision,
     PolicyResult,
@@ -247,6 +249,14 @@ class MCPClient:
         not use successful host-side execution as containment evidence"),
         and also False before start() completes."""
         return self._containment_active
+
+    @property
+    def containment_backend_name(self) -> Optional[str]:
+        """TOOL-002 P2 (Task 12) evidence field - the resolved backend's own
+        short name (e.g. "none"/"oci", see kriya.tools.containment.
+        ContainmentBackend.name), or None when no backend was ever
+        resolved for this client (containment_required=False)."""
+        return self._containment_backend.name if self._containment_backend is not None else None
 
     async def start(self) -> None:
         """Spawns the MCP server process and completes the full startup
@@ -766,11 +776,18 @@ class MCPTool(BaseTool):
             action_type=ActionType.MCP_TOOL_CALL,
             metadata={
                 "mcp_tool_identity": self.identity,
-                # TOOL-003 P1: audit context only - _check_mcp_invocation
-                # does not read this key, never widens/narrows the
-                # invocation decision (Task 10/12: capability approval and
-                # invocation approval remain distinct decisions).
+                # TOOL-003 P1: also the TOOL-002 P2 anti-drift binding key
+                # for durable approval (see _check_mcp_invocation's own
+                # updated docstring) - never an independent authority
+                # source on its own (Invariant 13).
                 "mcp_capability_profile_identity": self.capability_profile_identity,
+                # TOOL-002 P2 (Task 12): audit-only containment-state
+                # evidence - _check_mcp_invocation never reads this key.
+                "mcp_containment_identity": MCPContainmentIdentity(
+                    required=self.client.containment_required,
+                    active=self.client.containment_active,
+                    backend=self.client.containment_backend_name,
+                ),
             },
         )
         try:
@@ -877,13 +894,31 @@ class MCPManager:
         self.kernel = kernel
         self.clients: Dict[str, MCPClient] = {}
         self.registered_tools: Dict[str, List[str]] = {}
-        # TOOL-002 P1: one shared ExecutionPolicy for every MCPTool this
-        # manager constructs - bare ExecutionPolicy() (nothing pre-
-        # approved) unless a caller explicitly supplies one, matching
-        # every other real ExecutionPolicy call site's own "no override"
-        # default convention. A real, operator-facing, SEC-009-governed
-        # source for this is TOOL-002 P2 / TOOL-003 scope, not built here.
-        self._execution_policy = execution_policy or ExecutionPolicy()
+        # TOOL-002 P2: one shared ExecutionPolicy for every MCPTool this
+        # manager constructs. `Kernel.__init__` is the ONE production
+        # construction site for MCPManager (a full-repo grep confirms no
+        # other production caller ever constructs one) and never passes an
+        # explicit execution_policy - so this default is what every real
+        # `kernel.start()` (kriya tools list/execute, WorkflowEngine, the
+        # REPL, ...) actually gets. Wiring the durable, on-disk invocation-
+        # approval resolver HERE, at this single narrowest boundary, is
+        # what restores the real CLI capability P1 disclosed as lost
+        # ("no config/flag/env path to populate approved_mcp_tool_
+        # identities") - without touching Kernel, MCPClient, or
+        # ExecutionPolicy's own default-construction behavior at all
+        # (ExecutionPolicy() with no arguments, used throughout this
+        # codebase's other real call sites, is completely unaffected).
+        # `workspace_root` is derived the SAME way `start_all()` already
+        # derives it for capability-profile resolution below
+        # (os.path.realpath(os.getcwd())) - one consistent workspace-
+        # identity source for both the capability profile and the
+        # invocation-approval binding, never two independently-computed
+        # values that could silently drift apart.
+        self._execution_policy = execution_policy or ExecutionPolicy(
+            mcp_invocation_approval_resolver=resolve_mcp_invocation_approval(
+                workspace_root=os.path.realpath(os.getcwd())
+            )
+        )
 
     def _on_client_closed(self, server_name: str, reason: BaseException) -> None:
         """SEC-004: invoked by an MCPClient the instant it transitions to

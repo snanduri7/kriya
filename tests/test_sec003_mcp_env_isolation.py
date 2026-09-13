@@ -372,9 +372,14 @@ def test_cli_mcp_tool_call_denied_by_tool002_p1_no_sentinel_leak_either_way(tmp_
     output via this path either way, now because the call never happens
     at all."""
     home = tmp_path / "_authority_home"
+    mcp_approval_home = tmp_path / "_mcp_approval_home"
     ws = tmp_path / "cli_mcp_repo"
     ws.mkdir()
-    ambient_env = {"KRIYA_AUTHORITY_HOME": str(home), "KRIYA_SEC003_SENTINEL": "host-secret-must-not-leak"}
+    ambient_env = {
+        "KRIYA_AUTHORITY_HOME": str(home),
+        "KRIYA_MCP_APPROVAL_HOME": str(mcp_approval_home),
+        "KRIYA_SEC003_SENTINEL": "host-secret-must-not-leak",
+    }
 
     _write_yaml(ws / "kriya.yaml", {
         "mcp": {"envprobe": {"command": sys.executable, "args": [ENV_REPORT_SERVER]}}

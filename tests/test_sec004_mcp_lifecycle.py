@@ -39,6 +39,15 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KRIYA_BIN = os.path.join(REPO_ROOT, ".venv", "bin", "kriya")
 FIXTURE = os.path.join(REPO_ROOT, "tests", "adversarial_mcp_server.py")
 
+
+@pytest.fixture(autouse=True)
+def isolated_mcp_approval_home(tmp_path, monkeypatch):
+    """TOOL-002 P2: MCPManager(kernel) with no explicit execution_policy now
+    wires a real, on-disk durable-approval resolver - isolate it so this
+    file's tests never read/depend on a real developer's
+    ~/.kriya/mcp_approvals/ store."""
+    monkeypatch.setenv("KRIYA_MCP_APPROVAL_HOME", str(tmp_path / "_mcp_approval_home"))
+
 FAST = MCPLifecycleConfig(
     startup_timeout_seconds=2, request_timeout_seconds=1,
     shutdown_grace_seconds=1, force_kill_reap_seconds=2,

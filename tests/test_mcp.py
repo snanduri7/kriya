@@ -10,6 +10,16 @@ from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
 
 
+@pytest.fixture(autouse=True)
+def isolated_mcp_approval_home(tmp_path, monkeypatch):
+    """TOOL-002 P2: MCPManager(kernel) with no explicit execution_policy now
+    wires a real, on-disk durable-approval resolver (see MCPManager.
+    __init__) - isolate it to a throwaway per-test directory so this file's
+    tests never read/depend on a real developer's ~/.kriya/mcp_approvals/
+    store."""
+    monkeypatch.setenv("KRIYA_MCP_APPROVAL_HOME", str(tmp_path / "_mcp_approval_home"))
+
+
 @pytest.mark.asyncio
 async def test_mcp_client_handshake_and_call():
     # Setup mock server path

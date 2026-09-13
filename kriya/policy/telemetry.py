@@ -37,6 +37,12 @@ Two decisions here are deliberate and load-bearing:
    (also a plain, closed, two-string dataclass) - exposed for audit
    context only, per Task 10's own instruction that TOOL-002 must never
    independently reinterpret the profile it merely carries along.
+   TOOL-002 P2 (2026-09-13) adds a third, equally narrow exception:
+   `metadata["mcp_containment_identity"]` is always exactly an
+   `MCPContainmentIdentity` (a closed, three-field dataclass) - audit
+   context only, describing a containment decision this module never
+   reasons about (that decision is made entirely, independently, at MCP
+   server start time - see kriya/mcp/mcp.py).
 
 2. `scrub_potential_secrets()` is a narrow, high-confidence redaction - the
    same "high-confidence, avoid false-positiving" principle MA4.12's
@@ -56,7 +62,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from kriya.policy.model import ActionRequest, MCPCapabilityProfileIdentity, MCPToolIdentity, PolicyResult
+from kriya.policy.model import (
+    ActionRequest,
+    MCPCapabilityProfileIdentity,
+    MCPContainmentIdentity,
+    MCPToolIdentity,
+    PolicyResult,
+)
 
 _SUMMARY_MAX_CHARS = 300
 _REDACTED = "***REDACTED***"
@@ -125,6 +137,13 @@ class PolicyDecisionRecord:
     # MCPCapabilityProfileIdentity (None otherwise); audit context only,
     # never an input to any policy decision (see module docstring).
     mcp_capability_profile_digest_short: Optional[str] = None
+    # TOOL-002 P2 (Task 12) - populated only when the request carries an
+    # MCPContainmentIdentity (None otherwise); audit context only, same
+    # narrow-named-field exception as the two fields above - never a
+    # blanket metadata dump.
+    mcp_containment_required: Optional[bool] = None
+    mcp_containment_active: Optional[bool] = None
+    mcp_containment_backend: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -143,6 +162,9 @@ class PolicyDecisionRecord:
             "mcp_tool_name_summary": self.mcp_tool_name_summary,
             "mcp_schema_digest_short": self.mcp_schema_digest_short,
             "mcp_capability_profile_digest_short": self.mcp_capability_profile_digest_short,
+            "mcp_containment_required": self.mcp_containment_required,
+            "mcp_containment_active": self.mcp_containment_active,
+            "mcp_containment_backend": self.mcp_containment_backend,
         }
 
     def to_json(self) -> str:
@@ -170,6 +192,13 @@ def build_decision_record(
     if isinstance(capability_identity, MCPCapabilityProfileIdentity):
         mcp_capability_profile_digest_short = capability_identity.profile_digest[:12]
 
+    containment_identity = request.metadata.get("mcp_containment_identity")
+    mcp_containment_required = mcp_containment_active = mcp_containment_backend = None
+    if isinstance(containment_identity, MCPContainmentIdentity):
+        mcp_containment_required = containment_identity.required
+        mcp_containment_active = containment_identity.active
+        mcp_containment_backend = containment_identity.backend
+
     return PolicyDecisionRecord(
         timestamp=datetime.now(timezone.utc).isoformat(),
         action_type=request.action_type.value,
@@ -186,4 +215,7 @@ def build_decision_record(
         mcp_tool_name_summary=mcp_tool_name_summary,
         mcp_schema_digest_short=mcp_schema_digest_short,
         mcp_capability_profile_digest_short=mcp_capability_profile_digest_short,
+        mcp_containment_required=mcp_containment_required,
+        mcp_containment_active=mcp_containment_active,
+        mcp_containment_backend=mcp_containment_backend,
     )

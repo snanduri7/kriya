@@ -134,6 +134,24 @@ class MCPCapabilityProfileIdentity:
     profile_digest: str
 
 
+@dataclass(frozen=True)
+class MCPContainmentIdentity:
+    """TOOL-002 P2 (Task 12) - audit-only containment-state facts carried
+    alongside an MCP_TOOL_CALL decision so telemetry can show whether
+    TOOL-003 containment assurance actually applies to an ALLOWed call.
+    Exactly like MCPCapabilityProfileIdentity above, this is exposed for
+    AUDIT CONTEXT ONLY - `_check_mcp_invocation` never reads or reasons
+    about these values; containment is decided entirely and independently
+    at MCPClient start time (kriya/mcp/mcp.py's TOOL-003 P2 section), long
+    before any invocation-approval decision runs. A valid invocation
+    approval can never widen this, and this can never widen an invocation
+    approval - the two stay structurally separate."""
+
+    required: bool
+    active: bool
+    backend: Optional[str]
+
+
 def compute_mcp_schema_digest(schema: Any) -> str:
     """TOOL-002 P1 - canonicalizes an MCP tool's JSON Schema (inputSchema)
     before hashing, so semantically-identical schemas produce the same

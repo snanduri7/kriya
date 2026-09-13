@@ -678,6 +678,268 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
         click.secho(f"Execution failed: {e}", fg="red")
         sys.exit(1)
 
+@main.group(name="mcp")
+def mcp_group() -> None:
+    """TOOL-002 P2: inspect MCP tool identities and explicitly, durably
+    approve or revoke invocation authority for them. Approval is never
+    granted implicitly during `tools execute` (and `-y` never creates
+    it) - it must be requested here, once, and it persists across
+    processes until revoked or invalidated by drift."""
+    pass
+
+
+def _mcp_workspace_root() -> str:
+    """The one workspace-identity source every TOOL-002 P2 command/resolver
+    in this file derives from - identical to MCPManager.__init__'s own
+    default-resolver construction (kriya/mcp/mcp.py) and to
+    MCPManager.start_all()'s capability-profile resolution, so an approval
+    granted here always binds to the exact workspace the real invocation-
+    time resolver will check against."""
+    return os.path.realpath(os.getcwd())
+
+
+async def _discover_mcp_tools(cfg: AppConfig):
+    """Starts a real Kernel - spawning every configured MCP server exactly
+    like `tools list`/`tools execute` do - and returns (kernel, pairs)
+    where pairs are the LIVE (flattened_name, MCPTool) entries currently
+    held by the kernel's own tool registry. This is the ONLY way any `mcp`
+    subcommand resolves an operator-supplied name to a structured
+    identity: by looking up the SAME registry entry `tools execute` itself
+    would dispatch to, never by parsing/splitting the flattened name
+    string (Invariant 14) - so even under a flattened-name collision
+    between two servers, whichever MCPTool object the registry actually
+    holds under that name is exactly the one approval binds to, matching
+    whichever object real execution would actually invoke."""
+    from kriya.mcp.mcp import MCPTool
+
+    kernel = Kernel(config=cfg)
+    await kernel.start()
+    pairs = []
+    for name in kernel.registry.list_components("tool"):
+        tool = kernel.registry.get("tool", name)
+        if isinstance(tool, MCPTool):
+            pairs.append((name, tool))
+    return kernel, pairs
+
+
+def _print_mcp_identity(flattened_name: str, tool: Any, approved: bool) -> None:
+    """TASK 5 - authority information sufficient for a meaningful approval
+    decision, with the server's own untrusted description clearly
+    separated (labeled) from authority facts rather than presented as one
+    of them."""
+    profile = tool.client.capability_profile
+    click.secho(f"\n  - {flattened_name}", bold=True, fg="cyan")
+    click.echo(f"      server identity:       {tool.identity.server_identity}")
+    click.echo(f"      tool name:             {tool.identity.tool_name}")
+    click.echo(f"      schema digest:         {tool.identity.schema_digest[:16]}...")
+    click.echo(
+        f"      capability profile:    {tool.capability_profile_identity.profile_digest[:16]}... "
+        f"(workspace_read={profile.workspace_read}, workspace_write={profile.workspace_write}, "
+        f"network={profile.network.value})"
+    )
+    click.echo(f"      containment required:  {tool.client.containment_required}")
+    click.echo(
+        f"      containment active:    {tool.client.containment_active} "
+        f"(backend={tool.client.containment_backend_name})"
+    )
+    click.echo(f"      description (untrusted, informational only): {tool.description!r}")
+    status = click.style("APPROVED (current)", fg="green") if approved else click.style("NOT APPROVED", fg="yellow")
+    click.echo(f"      invocation approval:   {status}")
+
+
+@mcp_group.command(name="inspect")
+@click.pass_context
+def mcp_inspect(ctx: click.Context) -> None:
+    """Discover every configured MCP server's tools and show their exact
+    identity, TOOL-003 capability profile, containment state, and current
+    invocation-approval status. Read-only - starts configured MCP servers
+    to discover their real schema/identity but never writes an approval."""
+    cfg: AppConfig = ctx.obj['config']
+    if not cfg.mcp:
+        click.echo("No MCP servers configured.")
+        return
+
+    from kriya.control.workspace_identity import workspace_identity
+    from kriya.mcp.invocation_approval import (
+        default_local_approval_path, is_tool_approved, load_approval_artifact,
+    )
+
+    workspace_root = _mcp_workspace_root()
+
+    async def run() -> None:
+        kernel, pairs = await _discover_mcp_tools(cfg)
+        try:
+            if not pairs:
+                click.echo("No MCP tools discovered.")
+                return
+            path = default_local_approval_path(workspace_root)
+            try:
+                artifact = load_approval_artifact(path)
+            except Exception as e:
+                click.secho(
+                    f"Warning: local invocation-approval store at {path} is present but "
+                    f"invalid ({e}) - treating as no approvals (fail closed).", fg="yellow",
+                )
+                artifact = None
+            click.secho(f"=== MCP tools ({len(pairs)}) ===", bold=True)
+            for flattened_name, tool in pairs:
+                approved = artifact is not None and is_tool_approved(
+                    artifact, workspace_identity(workspace_root),
+                    tool.identity, tool.capability_profile_identity.profile_digest,
+                )
+                _print_mcp_identity(flattened_name, tool, approved)
+        finally:
+            await kernel.stop()
+
+    try:
+        asyncio.run(run())
+    except Exception as e:
+        click.secho(f"Error: {e}", fg="red")
+        sys.exit(1)
+
+
+@mcp_group.command(name="approve")
+@click.argument('tool_name')
+@click.option('--confirm', is_flag=True, default=False,
+              help="Skip the interactive confirmation prompt.")
+@click.pass_context
+def mcp_approve(ctx: click.Context, tool_name: str, confirm: bool) -> None:
+    """Explicitly, durably approve invocation of TOOL_NAME - the exact
+    flattened name shown by `kriya mcp inspect` / `kriya tools list`
+    (e.g. `myserver_mytool`).
+
+    Always re-discovers TOOL_NAME fresh from a real, currently-running MCP
+    connection - never reuses a prior `inspect` call's output - and binds
+    the approval to its EXACT (workspace, server identity, tool name,
+    schema digest, capability-profile digest) at the moment of approval,
+    closing the TOCTOU window by construction."""
+    cfg: AppConfig = ctx.obj['config']
+    if not cfg.mcp:
+        click.secho("No MCP servers configured - nothing to approve.", fg="yellow")
+        return
+
+    from kriya.control.workspace_identity import workspace_identity
+    from kriya.mcp.invocation_approval import (
+        add_approval, default_local_approval_path, empty_artifact, load_approval_artifact,
+        save_approval_artifact,
+    )
+
+    workspace_root = _mcp_workspace_root()
+
+    async def run() -> None:
+        kernel, pairs = await _discover_mcp_tools(cfg)
+        try:
+            match = next((tool for name, tool in pairs if name == tool_name), None)
+            if match is None:
+                click.secho(
+                    f"MCP tool '{tool_name}' was not discovered among currently configured/"
+                    "reachable servers - run 'kriya mcp inspect' to see exact available names.",
+                    fg="red",
+                )
+                sys.exit(1)
+
+            _print_mcp_identity(tool_name, match, approved=False)
+
+            if not confirm:
+                if not sys.stdin.isatty():
+                    click.secho(
+                        "\nError: Non-TTY (piped) input detected. You must pass --confirm to "
+                        "approve non-interactively.", fg="red",
+                    )
+                    sys.exit(1)
+                if not click.confirm(
+                    "\nGrant explicit, durable invocation approval to exactly this tool "
+                    "identity/capability binding shown above?"
+                ):
+                    click.echo("Not approved - no artifact written.")
+                    sys.exit(1)
+
+            path = default_local_approval_path(workspace_root)
+            try:
+                existing = load_approval_artifact(path)
+            except Exception:
+                existing = None
+            base = existing if existing is not None else empty_artifact(workspace_identity(workspace_root))
+            updated = add_approval(base, match.identity, match.capability_profile_identity.profile_digest)
+            save_approval_artifact(path, updated)
+            click.secho(f"\nApproved. Durable invocation approval written to {path}.", fg="green", bold=True)
+        finally:
+            await kernel.stop()
+
+    try:
+        asyncio.run(run())
+    except SystemExit:
+        raise
+    except Exception as e:
+        click.secho(f"Error: {e}", fg="red")
+        sys.exit(1)
+
+
+@mcp_group.command(name="revoke")
+@click.argument('tool_name')
+@click.pass_context
+def mcp_revoke(ctx: click.Context, tool_name: str) -> None:
+    """Immediately revoke any durable invocation approval for TOOL_NAME
+    (matches on exact server identity + tool name, even if its schema or
+    capability profile has since drifted from what was originally
+    approved - an operator must be able to revoke a stale approval too).
+    Idempotent, and takes effect on the very next invocation - no restart
+    of Kriya required."""
+    cfg: AppConfig = ctx.obj['config']
+    if not cfg.mcp:
+        click.secho("No MCP servers configured - nothing to revoke.", fg="yellow")
+        return
+
+    from kriya.mcp.invocation_approval import (
+        default_local_approval_path, load_approval_artifact, remove_approvals_for_identity,
+        save_approval_artifact,
+    )
+
+    workspace_root = _mcp_workspace_root()
+
+    async def run() -> None:
+        kernel, pairs = await _discover_mcp_tools(cfg)
+        try:
+            match = next((tool for name, tool in pairs if name == tool_name), None)
+            if match is None:
+                click.secho(
+                    f"MCP tool '{tool_name}' was not discovered among currently configured/"
+                    "reachable servers - run 'kriya mcp inspect' to see exact available names.",
+                    fg="red",
+                )
+                sys.exit(1)
+
+            path = default_local_approval_path(workspace_root)
+            try:
+                artifact = load_approval_artifact(path)
+            except Exception as e:
+                click.secho(
+                    f"Local invocation-approval store at {path} is present but invalid "
+                    f"({e}) - nothing to revoke.", fg="yellow",
+                )
+                return
+            if artifact is None:
+                click.echo(f"No local invocation-approval store at {path} - nothing to revoke.")
+                return
+
+            updated, removed = remove_approvals_for_identity(artifact, match.identity)
+            save_approval_artifact(path, updated)
+            if removed:
+                click.secho(f"Revoked {removed} approval record(s) for '{tool_name}'.", fg="yellow", bold=True)
+            else:
+                click.echo(f"No existing approval on file for '{tool_name}' - nothing to revoke.")
+        finally:
+            await kernel.stop()
+
+    try:
+        asyncio.run(run())
+    except SystemExit:
+        raise
+    except Exception as e:
+        click.secho(f"Error: {e}", fg="red")
+        sys.exit(1)
+
+
 @main.command()
 @click.argument('path', type=click.Path(exists=True))
 @click.option('--changed', '-d', is_flag=True, default=False, help="Only index files changed in git.")

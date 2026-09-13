@@ -38,6 +38,15 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURE = os.path.join(REPO_ROOT, "tests", "tool002_mcp_fixture.py")
 
 
+@pytest.fixture(autouse=True)
+def isolated_mcp_approval_home(tmp_path, monkeypatch):
+    """TOOL-002 P2: MCPManager(kernel) with no explicit execution_policy now
+    wires a real, on-disk durable-approval resolver - isolate it so this
+    file's own P1 identity-injection tests never read/depend on a real
+    developer's ~/.kriya/mcp_approvals/ store."""
+    monkeypatch.setenv("KRIYA_MCP_APPROVAL_HOME", str(tmp_path / "_mcp_approval_home"))
+
+
 def _client(name="fixture", extra_env=None):
     env = dict(extra_env or {})
     return MCPClient(name=name, command=sys.executable, args=[FIXTURE], env=env)
