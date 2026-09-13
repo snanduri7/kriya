@@ -4189,6 +4189,38 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         fallback, since real side effects may already exist in the
         workspace by that point. Only a genuine bug in this method's own
         code propagates as a real (uncaught) exception."""
+
+        def _persist_control_state(cs: ControlState) -> ControlState:
+            """STATE-001 (2026-09-14): every real save of ControlState
+            WITHIN this method's own per-subtask loop must reflect CURRENT
+            workspace content, never a value computed once, early, before
+            the loop began. Unlike base_commit/tree_hash (safe to compute
+            once - neither is sensitive to an uncommitted write), subtasks
+            in THIS execution mode apply real content changes to
+            workspace_path as plain file writes, incrementally, as each one
+            completes - a workspace_content_hash carried unchanged from the
+            pre-loop computation through every later save would persist
+            STALE pre-run content for every state actually saved after any
+            subtask completed, silently reintroducing the exact drift-
+            blindness this fix exists to close (found live via the real
+            test_workflow_controller_enforce.py resume tests: a genuinely
+            zero-drift resume was incorrectly refused).
+
+            Deliberately a LOCAL closure, not a change to
+            save_control_state() itself (kriya/control/persistence.py) -
+            that function's own contract is "persist exactly what you're
+            given," relied on directly by callers doing a plain save-then-
+            reload round-trip (test_control_plane_end_to_end.py's own
+            control_state.content_hash() == reloaded_state.content_hash()
+            check) elsewhere in this codebase; centralizing the refresh
+            there would silently diverge what gets persisted from what the
+            caller explicitly passed, breaking that real invariant. This
+            closure is the correct, narrow place: the ONE method whose own
+            control flow actually needs per-save freshness."""
+            cs = cs.with_updates(workspace_content_hash=compute_workspace_content_hash(workspace_path))
+            save_control_state(workspace_path, cs)
+            return cs
+
         ledger = DecisionLedger()
 
         kernel = getattr(self.workflow_engine, "kernel", None)
@@ -4847,7 +4879,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 stage_states=approved_stage_states, lifecycle_state="approved",
             ),
         )
-        save_control_state(workspace_path, control_state)
+        control_state = _persist_control_state(control_state)
         # The authoritative plan is one transaction. Individual subtask
         # workflows may apply only into this plan-level sandbox; the user
         # workspace remains unchanged until every subtask and any bounded
@@ -5085,7 +5117,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     stage_states=approved_stage_states, lifecycle_state="in_progress",
                 ),
             )
-            save_control_state(workspace_path, control_state)
+            control_state = _persist_control_state(control_state)
 
             _log_phase_banner(f"SUBTASK '{subtask.id}' ({position}/{total}): {subtask.description[:40]}")
             logger.info(
@@ -5139,7 +5171,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         stage_states=approved_stage_states, lifecycle_state=tool_lifecycle_state,
                     ),
                 )
-                save_control_state(workspace_path, control_state)
+                control_state = _persist_control_state(control_state)
                 if result.status != SubtaskStatus.COMPLETED:
                     logger.warning(
                         f"WorkflowController enforce run {run_id!r}: stopped at subtask {subtask_id!r} "
@@ -5562,7 +5594,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             lifecycle_state="scope_revised",
                         ),
                     )
-                    save_control_state(workspace_path, control_state)
+                    control_state = _persist_control_state(control_state)
                     plan_recovery_events.append({
                         "failed_subtask": subtask.id,
                         "classification": "PLAN_SCOPE_DEFECT",
@@ -5769,7 +5801,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             stage_states=approved_stage_states, lifecycle_state="recovering",
                         ),
                     )
-                    save_control_state(workspace_path, control_state)
+                    control_state = _persist_control_state(control_state)
                     owner_position = order.index(owner_id) + 1
                     # MA8.1 (PRV-06, 2026-08-29): the grounded reason this
                     # owner is being reopened is promoted into a durable
@@ -6004,7 +6036,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                                 stage_states=approved_stage_states, lifecycle_state="in_progress",
                             ),
                         )
-                        save_control_state(workspace_path, control_state)
+                        control_state = _persist_control_state(control_state)
                         owners_repaired = ", ".join(g.owner_subtask_id for g in exec_plan.groups)
                         logger.info(
                             "CONSUMER_RETRY_STARTED subtask=%s plan_id=%s owners=%s",
@@ -6118,7 +6150,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             lifecycle_state="in_progress" if plan_recovery_accepted else "needs_review",
                         ),
                     )
-                    save_control_state(workspace_path, control_state)
+                    control_state = _persist_control_state(control_state)
                     # Matches the original single-owner code's own
                     # distinction exactly: the FINAL reported
                     # subtask_results list is only ever downgraded to
@@ -6255,7 +6287,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     stage_states=approved_stage_states, lifecycle_state=plan_lifecycle_state,
                 ),
             )
-            save_control_state(workspace_path, control_state)
+            control_state = _persist_control_state(control_state)
 
             if not passed:
                 logger.warning(
@@ -6395,7 +6427,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     },
                     subtask_written_files={},
                 )
-                save_control_state(workspace_path, control_state)
+                control_state = _persist_control_state(control_state)
         finally:
             if plan_workspace_path != workspace_path:
                 remove_git_worktree(workspace_path, plan_workspace_path)

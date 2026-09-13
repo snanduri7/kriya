@@ -32,7 +32,6 @@ from kriya.control.contracts import ContractRegistry
 from kriya.control.state import ControlState
 from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
 from kriya.policy.filesystem import AuthorizedFileWriter
-from kriya.workflow.checkpoint import compute_workspace_content_hash
 from kriya.workflow.edit_safety import read_file_revision
 
 logger = logging.getLogger(__name__)
@@ -113,28 +112,17 @@ def _load_json_document(path: str, workspace_path: Optional[str] = None) -> Opti
 
 
 def save_control_state(workspace_path: str, state: ControlState) -> None:
-    # STATE-001 (2026-09-14): refreshed here, unconditionally, at the one
-    # real persistence boundary - never trusted from whatever the caller's
-    # own in-memory value happens to be. Structured/enforce-mode subtasks
-    # write real content to workspace_path INCREMENTALLY as they complete
-    # (unlike the legacy generate/fix path, which stays worktree-confined
-    # until one final apply) - workflow_controller.py computes base_commit/
-    # tree_hash/workspace_content_hash ONCE, early, before its own subtask
-    # loop runs; that is safe for base_commit/tree_hash (neither is
-    # sensitive to an uncommitted write, so a plain file write between
-    # subtasks never changes them), but workspace_content_hash is
-    # SPECIFICALLY sensitive to exactly that content - carrying the early,
-    # pre-loop value unchanged through every later save would persist STALE
-    # pre-run content for every state actually saved after any subtask
-    # completed, silently reintroducing the exact drift-blindness this fix
-    # exists to close, one layer up (found live via the real
-    # test_workflow_controller_enforce.py resume tests, not merely
-    # theorized). Refreshing here, at the one shared save function every
-    # caller already goes through, closes it at its true source instead of
-    # patching each of workflow_controller.py's own many per-subtask save
-    # call sites - the same "inject fresh ground truth at save time"
-    # precedent ownership_metadata already establishes one call below.
-    state = state.with_updates(workspace_content_hash=compute_workspace_content_hash(workspace_path))
+    # Pure save - persists exactly the ControlState it is given, never
+    # silently mutates a field first (a real caller-visible round-trip
+    # invariant several existing tests rely on directly: save(x); reload();
+    # assert reloaded == x). STATE-001's own workspace_content_hash
+    # freshness requirement is the CALLER's responsibility - see
+    # kriya/workflow/workflow_controller.py's own _save_control_state_
+    # with_fresh_content_hash() for the one real caller that actually needs
+    # per-save freshness (structured/enforce-mode's per-subtask loop,
+    # where real content changes between saves within the SAME run) -
+    # deliberately NOT centralized here, where it would silently diverge
+    # what every OTHER caller persists from what it explicitly passed in.
     _save_json_document(workspace_path, control_state_path(workspace_path), state.to_dict())
 
 

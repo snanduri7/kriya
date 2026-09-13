@@ -348,40 +348,106 @@ def test_control_state_default_is_none():
     assert cs.workspace_content_hash is None
 
 
-def test_save_control_state_refreshes_content_hash_at_each_save_not_stale(git_repo):
-    """Regression test for a real bug this closure found via the user's own
-    independent pytest run (test_workflow_controller_enforce.py's resume
-    tests): workflow_controller.py computes base_commit/tree_hash/
+def test_save_control_state_is_pure_never_silently_mutates_a_field(git_repo):
+    """save_control_state() must persist EXACTLY the ControlState it is
+    given - a real, caller-visible round-trip invariant
+    (test_control_plane_end_to_end.py::test_full_two_milestone_control_
+    plane_round_trip relies on this directly: save(x); reload();
+    assert reloaded.content_hash() == x.content_hash()). An earlier version
+    of this STATE-001 fix centralized the workspace_content_hash refresh
+    INSIDE save_control_state() itself - it closed the real bug (see the
+    sibling test below) but broke this exact invariant by silently
+    diverging what got persisted from what the caller passed in, caught by
+    the user's own independent pytest run. The refresh now lives in a
+    narrow, LOCAL closure inside workflow_controller.py's own
+    _run_structured_enforce() (`_persist_control_state`) - the one caller
+    that actually needs per-save freshness - never in the shared,
+    general-purpose primitive every other caller depends on staying pure."""
+    cs = ControlState.new(run_id="r1", milestone_group_id="g1").with_updates(
+        current_milestone_id="M1", milestone_states={"M1": "done"},
+    )
+    save_control_state(git_repo, cs)
+    reloaded = load_control_state(git_repo)
+    assert reloaded.content_hash() == cs.content_hash()
+    assert reloaded.workspace_content_hash is None  # exactly what the caller supplied - untouched
+
+
+def test_persist_control_state_pattern_refreshes_content_hash_at_each_save(git_repo):
+    """Regression test for the real bug this closure found via the user's
+    own independent pytest run (test_workflow_controller_enforce.py's
+    resume tests): workflow_controller.py computes base_commit/tree_hash/
     workspace_content_hash ONCE, early, before its own per-subtask loop -
     safe for base_commit/tree_hash (neither is sensitive to an uncommitted
     write), but WRONG for workspace_content_hash, since structured/
     enforce-mode subtasks write real content to the workspace
-    INCREMENTALLY as they complete. save_control_state() must refresh this
-    field unconditionally at the actual persistence boundary, so a state
-    saved AFTER a subtask's own real write reflects that write, never the
-    pre-loop value."""
+    INCREMENTALLY as they complete. This test proves the CORRECT pattern
+    directly (the exact sequence _persist_control_state's own closure
+    performs at each of its 9 real call sites in _run_structured_enforce -
+    structurally confirmed present by the bypass-sweep test below) - a
+    state saved AFTER a subtask's own real write must reflect that write,
+    never the pre-loop value."""
+    def _persist(cs):
+        cs = cs.with_updates(workspace_content_hash=compute_workspace_content_hash(git_repo))
+        save_control_state(git_repo, cs)
+        return cs
+
     cs = ControlState.new(run_id="r1")
 
-    # T1: save BEFORE any subtask has written anything real (mirrors the
-    # early, pre-loop control_state.with_updates(...) in workflow_controller.py)
-    save_control_state(git_repo, cs.with_updates(subtask_states={}))
+    # T1: persisted BEFORE any subtask has written anything real (mirrors
+    # the early, pre-loop control_state.with_updates(...) in
+    # workflow_controller.py).
+    cs = _persist(cs.with_updates(subtask_states={}))
     before = load_control_state(git_repo).workspace_content_hash
 
     # A subtask completes and writes a REAL file to the workspace.
     with open(os.path.join(git_repo, "new_from_subtask.py"), "w") as f:
         f.write("# written by a completed subtask\n")
 
-    # T2: the SAME control_state object (carrying whatever stale value it
-    # already had in memory) is saved again, as workflow_controller.py's
-    # own per-subtask loop does.
-    save_control_state(git_repo, cs.with_updates(subtask_states={"s1": "completed"}))
+    # T2: the per-subtask loop's own next persist call.
+    cs = _persist(cs.with_updates(subtask_states={"s1": "completed"}))
     after = load_control_state(git_repo).workspace_content_hash
 
-    assert before != after, "save_control_state must not persist a stale pre-write identity"
+    assert before != after, "the persisted identity must not stay stale across a real subtask write"
     assert after == compute_workspace_content_hash(git_repo), (
         "a resume immediately after this save must see a MATCHING identity, "
         "or the legitimate no-drift resume case would be incorrectly rejected"
     )
+
+
+def test_run_structured_enforce_uses_persist_control_state_closure_everywhere():
+    """Bypass sweep for this specific fix: every save_control_state() call
+    site actually reachable from _run_structured_enforce's own per-subtask
+    loop must go through the local _persist_control_state() closure (which
+    refreshes workspace_content_hash), never the raw, pure
+    save_control_state() directly - that would silently reintroduce the
+    staleness bug. execute()/execute_milestones() keep their own small
+    number of raw save_control_state() calls (state saved before any
+    subtask of a NEW call has run, or from an entirely different,
+    non-enforce flow) - deliberately unchanged, not part of this sweep."""
+    path = os.path.join(_REPO_ROOT, "kriya", "workflow", "workflow_controller.py")
+    with open(path, encoding="utf-8") as fh:
+        source = fh.read()
+    tree = ast.parse(source, filename=path)
+    target_fn = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_run_structured_enforce":
+            target_fn = node
+            break
+    assert target_fn is not None
+    raw_save_calls = 0
+    persist_calls = 0
+    for node in ast.walk(target_fn):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id == "save_control_state":
+                raw_save_calls += 1
+            elif node.func.id == "_persist_control_state":
+                persist_calls += 1
+    # Exactly 1: the one call INSIDE _persist_control_state's own
+    # definition (expected, correct - that's the closure's own
+    # implementation). Every other real per-subtask save site must go
+    # through the closure, never call save_control_state() raw.
+    assert raw_save_calls == 1, f"expected exactly 1 raw save_control_state call (inside the closure itself), found {raw_save_calls}"
+    assert persist_calls == 9, persist_calls
 
 
 # ---------------------------------------------------------------------------
