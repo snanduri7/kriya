@@ -1550,3 +1550,62 @@ def test_java_home_override_also_applies_under_sandbox_execution(tmp_path):
         _, kwargs = mock_popen.call_args
         assert kwargs["env"]["JAVA_HOME"] == "/opt/jdk-17"
         assert kwargs["preexec_fn"] is not None  # sandboxing still applied too
+
+
+def test_run_app_sequence_multi_package_test_file_target_hits_module_not_found(tmp_path):
+    """Deterministic reproducer for a real live-evidence incident (VER-005/
+    RECV-002 E4 campaign, 2026-09-13, see docs/assurance/
+    KRIYA_VER005_RECV002_LIVE_EVIDENCE.md, run_id 20260913T230532-ea0f24f7):
+    a correct, real multi-package Python candidate (real sibling top-level
+    packages, no CLI/service entrypoint) failed terminal verification twice
+    live, on two different goals, because RunVerifierAgent's own judgment
+    (contrary to its own system prompt's explicit "do NOT return ... a test
+    command as proof of observable runtime behavior" instruction) selected a
+    test file as the runtime-verification target, and Kriya's execution
+    layer then ran it via a bare `python <relative-path>` subprocess - which
+    only puts the script's OWN containing directory on sys.path[0], never
+    the process cwd/repository root, so any test file importing a sibling
+    top-level package fails with ModuleNotFoundError regardless of whether
+    that package's own content is correct.
+
+    This test exercises the REAL, non-mocked PolymorphicValidator.
+    run_app_sequence() (no model involved - the judge's own selection isn't
+    deterministically reproducible; what's pinned here is that WHEN this
+    exact command shape occurs against a real multi-package layout, it (a)
+    genuinely reproduces the failure and (b) is still correctly classified
+    as a verifier-infrastructure failure, not an application-logic defect -
+    exactly as observed live, so a real correct candidate is never
+    misattributed to the Developer."""
+    (tmp_path / "validation").mkdir()
+    (tmp_path / "validation" / "__init__.py").write_text("")
+    (tmp_path / "validation" / "email_rules.py").write_text(
+        "def is_valid_email(email):\n"
+        "    return bool(email) and '@' in email\n"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "__init__.py").write_text("")
+    (tmp_path / "tests" / "test_email_rules.py").write_text(
+        "from validation.email_rules import is_valid_email\n"
+        "\n"
+        "def test_valid_email():\n"
+        "    assert is_valid_email('user@example.com')\n"
+    )
+
+    validator = PolymorphicValidator(str(tmp_path))
+    result = validator.run_app_sequence(
+        [[sys.executable, "tests/test_email_rules.py"]], timeout=10
+    )
+
+    assert result["success"] is False
+    assert "ModuleNotFoundError" in result["output"]
+    assert "No module named" in result["output"]
+    assert "validation" in result["output"]
+
+    reason = runtime_verification_infrastructure_reason(result)
+    assert reason is not None, (
+        "a sibling-package ModuleNotFoundError from a direct-script-executed "
+        "test file must classify as verifier infrastructure, not application "
+        "logic - misclassifying this would wrongly attribute a real "
+        "verifier-invocation defect to the Developer's own candidate code"
+    )
+    assert runtime_application_step_started(result) is False
