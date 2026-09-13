@@ -24,6 +24,7 @@ import tempfile
 
 import pytest
 
+from kriya.control.persistence import load_control_state, save_control_state
 from kriya.control.state import ControlState
 from kriya.workflow.checkpoint import (
     ResumeStatus,
@@ -191,9 +192,15 @@ def test_scenario_k_checkpoint_self_write_does_not_self_invalidate(git_repo):
 def test_deterministic_ordering_independent_of_creation_order(git_repo):
     """File ordering/filesystem traversal ordering must not affect identity
     (Invariants 5/6) - two workspaces built by adding the same two new
-    files in opposite orders must converge on the identical hash."""
-    with tempfile.TemporaryDirectory() as d2:
-        _init_git_repo_with_a_commit(d2)
+    files in opposite orders must converge on the identical hash. d2 is a
+    real CLONE of git_repo (never an independently re-initialized repo -
+    two separately-committed repos do not reliably share a commit SHA,
+    since a commit object bakes in a real timestamp; unrelated to, and not
+    what, this test means to exercise) so both start from the exact same
+    commit."""
+    with tempfile.TemporaryDirectory() as parent:
+        d2 = os.path.join(parent, "clone")
+        subprocess.run(["git", "clone", "-q", git_repo, d2], capture_output=True, check=True)
         # ensure identical starting point
         assert compute_workspace_content_hash(git_repo) == compute_workspace_content_hash(d2)
 
@@ -241,15 +248,20 @@ def test_untracked_file_collision_two_workspaces_same_head_different_content():
 
 
 def test_same_head_different_repos_identical_content_same_identity():
-    """Sanity converse of the collision test - two INDEPENDENT repos with
-    truly identical committed history and working-tree content get the
-    SAME content identity (Invariant 7: no accidental repo-location
-    sensitivity baked into content identity itself - checkpoint files are
-    already scoped per-workspace by their own on-disk location, so this
-    module doesn't duplicate that binding)."""
-    with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2:
+    """Sanity converse of the collision test - two DIFFERENT on-disk paths
+    holding the genuinely SAME commit (a real clone, so the commit SHA
+    itself matches exactly - independently re-committing identical content
+    in two separate repos does NOT reliably reproduce the same commit SHA,
+    since a commit object bakes in a real timestamp, an unrelated and
+    intentionally-not-tested dimension here) get the SAME content identity
+    (Invariant 7: no accidental repo-location/absolute-path sensitivity
+    baked into content identity itself - checkpoint files are already
+    scoped per-workspace by their own on-disk location, so this module
+    doesn't duplicate that binding)."""
+    with tempfile.TemporaryDirectory() as d1, tempfile.TemporaryDirectory() as d2_parent:
         _init_git_repo_with_a_commit(d1)
-        _init_git_repo_with_a_commit(d2)
+        d2 = os.path.join(d2_parent, "clone")
+        subprocess.run(["git", "clone", "-q", d1, d2], capture_output=True, check=True)
         assert compute_workspace_content_hash(d1) == compute_workspace_content_hash(d2)
 
 
@@ -334,6 +346,42 @@ def test_control_state_round_trips_workspace_content_hash():
 def test_control_state_default_is_none():
     cs = ControlState.new(run_id="r1")
     assert cs.workspace_content_hash is None
+
+
+def test_save_control_state_refreshes_content_hash_at_each_save_not_stale(git_repo):
+    """Regression test for a real bug this closure found via the user's own
+    independent pytest run (test_workflow_controller_enforce.py's resume
+    tests): workflow_controller.py computes base_commit/tree_hash/
+    workspace_content_hash ONCE, early, before its own per-subtask loop -
+    safe for base_commit/tree_hash (neither is sensitive to an uncommitted
+    write), but WRONG for workspace_content_hash, since structured/
+    enforce-mode subtasks write real content to the workspace
+    INCREMENTALLY as they complete. save_control_state() must refresh this
+    field unconditionally at the actual persistence boundary, so a state
+    saved AFTER a subtask's own real write reflects that write, never the
+    pre-loop value."""
+    cs = ControlState.new(run_id="r1")
+
+    # T1: save BEFORE any subtask has written anything real (mirrors the
+    # early, pre-loop control_state.with_updates(...) in workflow_controller.py)
+    save_control_state(git_repo, cs.with_updates(subtask_states={}))
+    before = load_control_state(git_repo).workspace_content_hash
+
+    # A subtask completes and writes a REAL file to the workspace.
+    with open(os.path.join(git_repo, "new_from_subtask.py"), "w") as f:
+        f.write("# written by a completed subtask\n")
+
+    # T2: the SAME control_state object (carrying whatever stale value it
+    # already had in memory) is saved again, as workflow_controller.py's
+    # own per-subtask loop does.
+    save_control_state(git_repo, cs.with_updates(subtask_states={"s1": "completed"}))
+    after = load_control_state(git_repo).workspace_content_hash
+
+    assert before != after, "save_control_state must not persist a stale pre-write identity"
+    assert after == compute_workspace_content_hash(git_repo), (
+        "a resume immediately after this save must see a MATCHING identity, "
+        "or the legitimate no-drift resume case would be incorrectly rejected"
+    )
 
 
 # ---------------------------------------------------------------------------

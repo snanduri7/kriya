@@ -28,6 +28,7 @@ from kriya.workflow import WorkflowEngine
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.checkpoint import (
     compute_config_fingerprint,
+    compute_workspace_content_hash,
     compute_workspace_fingerprint,
     save_checkpoint,
 )
@@ -151,9 +152,15 @@ def _init_git_repo(tmp_path):
 
 
 def _seed_checkpoint(tmp_path, cfg, goal, run_id, stage, **extra):
+    # STATE-001 (2026-09-14): workspace_content_hash is required alongside
+    # workspace_fingerprint - its own absence is treated as a legacy/pre-fix
+    # checkpoint and fails closed (see run_generation_workflow's own
+    # resume-check block). Every test in this file seeding a checkpoint it
+    # expects to RESUME needs this present and accurate.
     save_checkpoint(str(tmp_path), run_id, {
         "stage": stage,
         "workspace_fingerprint": compute_workspace_fingerprint(str(tmp_path)),
+        "workspace_content_hash": compute_workspace_content_hash(str(tmp_path)),
         "config_fingerprint": compute_config_fingerprint(cfg.model_dump()),
         "goal_fingerprint": hashlib.sha256(f"{goal}\x00".encode("utf-8")).hexdigest(),
         **extra,
