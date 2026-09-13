@@ -72,20 +72,42 @@ class MCPProtocolViolationError(MCPLifecycleError):
 
 
 async def spawn_mcp_process(
-    command: str, args: List[str], env: Dict[str, str], *,
+    command: str, args: List[str], env: Optional[Dict[str, str]], *,
     cpu_seconds: Optional[int], memory_mb: Optional[int], max_stdout_line_bytes: int,
+    command_prefix: Optional[List[str]] = None,
 ) -> "asyncio.subprocess.Process":
     """Fail-closed MCP subprocess spawn: process-group isolation
     (`start_new_session=True`, POSIX - the property every descendant the
     server spawns inherits the same group, which `terminate_mcp_process()`
-    below relies on to guarantee no survivors) + CPU/memory rlimits
-    (`posix_resource_limits_preexec_fn`, SEC-001, unchanged) + a hard
-    per-line stdout size ceiling (`limit=`, asyncio's own StreamReader
-    bound - raises `ValueError` deterministically rather than allocating
-    unboundedly, confirmed empirically to recover cleanly for the NEXT
-    read rather than corrupting the stream). `env` must already be the
-    SEC-003-restricted environment (`build_mcp_subprocess_env()`'s result)
-    - this function does not construct or re-validate it.
+    below relies on to guarantee no survivors) + a hard per-line stdout
+    size ceiling (`limit=`, asyncio's own StreamReader bound - raises
+    `ValueError` deterministically rather than allocating unboundedly,
+    confirmed empirically to recover cleanly for the NEXT read rather than
+    corrupting the stream). `env` must already be the SEC-003-restricted
+    environment (`build_mcp_subprocess_env()`'s result) for a HOST-mode
+    spawn - this function does not construct or re-validate it.
+
+    `command_prefix` (TOOL-003 P2, 2026-09-13): when set, this is a
+    CONTAINERIZED spawn - `command_prefix` is a real, already-prepared
+    `docker run -i ...` argv (`kriya/tools/containment_oci.py`'s own
+    `PreparedContainment.command_prefix`, composed via
+    `kriya/mcp/containment_adapter.py`), and `command`/`args` are the
+    real MCP server command appended AFTER it (exactly the same
+    command_prefix + command composition `kriya/tools/process.py`'s
+    `_prepare_env_and_preexec()` already uses for `run()`/`run_async()`/
+    `start_managed()`). Host CPU/memory rlimits
+    (`posix_resource_limits_preexec_fn`) are SKIPPED in this case - they
+    would apply to the lightweight `docker` CLI wrapper process, not the
+    container, which is meaningless; the container's own `--memory`/
+    `--cpus` flags (already baked into `command_prefix` by
+    `OCIContainmentBackend.prepare()`) are the real bound instead. `env`
+    is also NOT the SEC-003-restricted MCP environment in this case - the
+    `docker` CLI itself is TRUSTED_KRIYA_INFRASTRUCTURE and needs its own
+    normal host environment (PATH to find the `docker` binary, etc.); the
+    untrusted MCP server's own environment is baked into `command_prefix`
+    as `-e KEY=VALUE` flags instead (`ContainmentProfile.resolved_env`).
+    `env=None` here means "inherit the current process's environment",
+    exactly right for invoking trusted host tooling.
 
     Raises `kriya.tools.containment.ContainmentSetupError` (or
     `ResourceLimitSetupError`) if the resource-limit preexec_fn fails
@@ -94,9 +116,14 @@ async def spawn_mcp_process(
     own fail-closed requirement is "do not start the MCP server" when
     required controls cannot be established, and the caller (MCPClient)
     must not catch this and retry uncontained."""
-    preexec_fn = posix_resource_limits_preexec_fn(cpu_seconds, memory_mb)
+    if command_prefix:
+        full_argv = list(command_prefix) + [command] + list(args)
+        preexec_fn = None
+    else:
+        full_argv = [command] + list(args)
+        preexec_fn = posix_resource_limits_preexec_fn(cpu_seconds, memory_mb)
     return await spawn_subprocess_exec_fail_closed(
-        command, *args,
+        *full_argv,
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

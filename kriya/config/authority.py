@@ -160,6 +160,11 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # Security boundary
     ("execution_policy", "enabled"),
     ("autonomy", "containment_backend"), ("autonomy", "contained_execution_required"),
+    # TOOL-003 P2 (2026-09-13): the MCP analogue immediately above - a
+    # repository must never be able to disable MCP containment (nor
+    # silently enable it in a way the operator did not choose) without
+    # explicit SEC-009 approval, same as contained_execution_required.
+    ("autonomy", "mcp_contained_execution_required"),
     ("autonomy", "sandbox_execution"),
     # widens what ambient host env a repo's OWN sandboxed build/test command sees
     ("autonomy", "sandbox_env_allowlist"),
@@ -195,6 +200,12 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     ("mcp_lifecycle", "max_stderr_buffer_bytes"),
     ("mcp_lifecycle", "cpu_seconds"),
     ("mcp_lifecycle", "memory_mb"),
+    # TOOL-003 P2 (2026-09-13): the container-cleanup bound is exactly as
+    # security-relevant as every other mcp_lifecycle.* bound above (the
+    # same "no safe direction to weaken toward" reasoning) - a repository
+    # widening it could mask an orphaned-container leak behind a longer
+    # grace window.
+    ("mcp_lifecycle", "container_cleanup_timeout_seconds"),
 })
 
 # NOTE: there is currently no AppConfig field for an "LSP executable path" -

@@ -263,6 +263,18 @@ class MCPLifecycleConfig(BaseModel):
     max_stderr_buffer_bytes: int = Field(default=1_000_000, ge=1024)
     cpu_seconds: Optional[int] = Field(default=3600, ge=1)
     memory_mb: Optional[int] = Field(default=2048, ge=1)
+    # TOOL-003 P2 (2026-09-13): a containerized MCP server's teardown has a
+    # SECOND lifecycle layer beyond the process-group kill terminate_mcp_process()
+    # already bounds - the host `docker rm -f <container>` authoritative
+    # cleanup (PreparedContainment.cleanup's own docstring: a VM-mediated
+    # container runtime like Docker Desktop does not reliably stop on a
+    # host-side process-group SIGKILL alone). Bounds THAT separate call,
+    # invoked via run_in_executor (never blocking the event loop) after
+    # terminate_mcp_process() already ran - additive to, not a replacement
+    # for, shutdown_grace_seconds/force_kill_reap_seconds above. Only
+    # meaningful when mcp_contained_execution_required is True; ignored
+    # entirely for host-side (uncontained) MCP servers.
+    container_cleanup_timeout_seconds: int = Field(default=15, ge=1)
 
 class EmbeddingConfig(BaseModel):
     model: str = Field(default="nomic-embed-text:latest")
@@ -392,6 +404,33 @@ class AutonomyConfig(BaseModel):
     # into the contained path this pass - see validate.py's own comment on
     # build_subprocess_env_and_preexec for the residual limitation.
     contained_execution_required: bool = Field(default=False)
+    # TOOL-003 P2 (2026-09-13): the MCP analogue of contained_execution_required
+    # immediately above, deliberately a SEPARATE flag rather than reusing that
+    # one - contained_execution_required governs target-code compile/test/
+    # managed-service sandboxing (PolymorphicValidator/service_runtime), a
+    # different execution surface with a different risk profile and a
+    # different operator who might reasonably want one contained without the
+    # other. Default False preserves 100% of today's MCP behavior (host-side
+    # execution, unchanged) for every existing deployment and the entire
+    # existing MCP test corpus - this is a decision made explicitly with the
+    # user (2026-09-13), not a default flip: "always require containment for
+    # every MCP server" was considered and rejected as this pass's default
+    # because it would make Docker a hard MCP dependency and require rewriting
+    # ~40 existing tests that spawn real MCP subprocesses via sys.executable
+    # with no Docker involved - a strict superset relationship holds instead
+    # (flipping this to True later is a one-line config change, not a
+    # rearchitecture). Same fail-closed semantics as contained_execution_required:
+    # flipping this to True with containment_backend still "none" (or Docker
+    # simply unavailable) means every MCP server refuses to start - "no raw-host
+    # fallback" is the explicit, non-negotiable requirement (2026-09-13 user
+    # instruction) - never a silent downgrade to host-side execution just
+    # because containment could not be established. When False, MCP still gets
+    # TOOL-002 invocation authorization and a resolved/audited MCPCapabilityProfile
+    # (TOOL-003 P1) - only the OS/container enforcement boundary is absent, and
+    # every real MCP connection's own telemetry records this fact explicitly
+    # (kriya/mcp/mcp.py's own "containment_required"/"containment_active"
+    # fields) - a host-side run must never be misread as containment evidence.
+    mcp_contained_execution_required: bool = Field(default=False)
     # ShellTool previously had no wall-clock timeout at all (SEC-001
     # execution-surface inventory finding, 2026-09-11) - every other real
     # command primitive in this codebase (ProcessController.run(), used by

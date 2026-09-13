@@ -73,10 +73,85 @@ class BackendUnavailableError(ContainmentSetupError):
 
 
 @dataclass(frozen=True)
+class MountSpec:
+    """One explicit host<->container bind mount - TOOL-003 P2's own
+    additive filesystem primitive, distinct from `dependency_cache_paths`
+    (which is a positional list bound to a backend-selected in-container
+    path) and from `workspace_path`/`temp_path` (which are always exactly
+    one mount each). An MCP capability profile's `additional_read_paths`/
+    `additional_write_paths` (kriya/mcp/capability.py) each become one
+    `MountSpec` here - the container_path is Kriya-chosen and
+    deterministic (never derived from anything MCP-server-supplied)."""
+
+    host_path: str
+    container_path: str
+    writable: bool
+
+
+@dataclass(frozen=True)
 class ContainmentProfile:
     """What a subprocess is allowed to do - backend-independent by
     construction (no Docker/sandbox-exec-specific fields). See
-    docs/architecture/SEC001_HOSTILE_CODE_CONTAINMENT_DESIGN.md §3/§6."""
+    docs/architecture/SEC001_HOSTILE_CODE_CONTAINMENT_DESIGN.md §3/§6.
+
+    TOOL-003 P2 (2026-09-13) additive fields - every one of them defaults
+    to exactly today's pre-existing behavior for every current caller
+    (PolymorphicValidator/service_runtime's compile/test/managed-service
+    sandboxing), so this dataclass's extension is a strict superset, not a
+    reinterpretation, of the SEC-001/SEC-006 contract those callers
+    already rely on:
+
+    `mount_workspace`/`workspace_write` (default True/True = today's
+    "always mount workspace_path RW" behavior, unconditionally): an MCP
+    capability profile with neither `workspace_read` nor `workspace_write`
+    granted maps to `mount_workspace=False` (no workspace mount inside the
+    container AT ALL - Task 3's "no workspace access unless granted");
+    `workspace_read=True` alone maps to `mount_workspace=True,
+    workspace_write=False` (a real read-only bind mount, not merely a
+    policy note - Task 3's "workspace RO means writes fail").
+
+    `additional_mounts` (default empty = no change for any existing
+    caller): explicit extra host<->container binds - kriya/mcp/capability.py's
+    already-resolved, already-escape-checked `additional_read_paths`/
+    `additional_write_paths` map directly onto this, one `MountSpec` each.
+
+    `resolved_env` (default None = today's behavior: `env_allowlist` +
+    `build_restricted_env()` decide the container's `-e` flags): when set,
+    used INSTEAD of `env_allowlist` - MCP's own SEC-003
+    `build_mcp_subprocess_env()` output is already the complete, correct,
+    restricted environment for an MCP server; re-deriving it through
+    `env_allowlist`'s differently-purposed baseline (LANG/TMPDIR/PATH, no
+    HOME) would silently discard SEC-003's own env-composition decision
+    (e.g. an MCP server's explicit `mcp.<server>.env` HOME override) or
+    require duplicating it under a second name. Never both set (a
+    programming error, not a silent precedence rule) - see
+    `OCIContainmentBackend.prepare()`'s own guard.
+
+    `persistent_stdio` (default False = today's behavior: no `-i` flag,
+    matching every existing finite/managed-service caller, none of which
+    need the container's stdin attached to the spawned `docker run`
+    process's own stdin): True adds `-i` (interactive, keep stdin open) -
+    NEVER `-t` (a pseudo-TTY's line-discipline/echo would corrupt MCP's
+    newline-delimited JSON-RPC framing) - so a long-lived MCP server's
+    stdin/stdout can be driven directly through the `docker run` CLI
+    process's own stdio, letting `MCPClient`'s existing JSON-RPC reader/
+    writer work completely unchanged (Task 8: "existing MCP JSON-RPC
+    reader/writer continues unchanged as much as possible").
+
+    `run_as_uid`/`run_as_gid` (default None/None = today's behavior: no
+    `--user` flag, root inside the container, unchanged for every existing
+    compile/test/managed-service caller - out of scope for this pass to
+    revisit): an explicit `(uid, gid)` pair adds `--user uid:gid` -
+    TOOL-003 P2's own non-root requirement (Task 7) sets this for every
+    MCP-derived profile, never for the pre-existing callers above.
+
+    `authority_label` (default None = no `--label` on the DENIED/
+    UNRESTRICTED path, unchanged): an opaque string (TOOL-003 P2 sets this
+    to the MCP capability-profile digest) attached as
+    `--label kriya.mcp-capability-digest=<value>` - the audit/cleanup-proof
+    chain Task 12 requires (server identity -> capability digest ->
+    container instance), queryable via `docker ps --filter label=...`
+    without needing to trust the caller's own bookkeeping."""
 
     trust_class: TrustClass
     workspace_path: str
@@ -96,6 +171,14 @@ class ContainmentProfile:
     env_allowlist: List[str] = field(default_factory=list)
     cpu_seconds: Optional[int] = None
     memory_mb: Optional[int] = None
+    mount_workspace: bool = True
+    workspace_write: bool = True
+    additional_mounts: Tuple[MountSpec, ...] = ()
+    resolved_env: Optional[Dict[str, str]] = None
+    persistent_stdio: bool = False
+    run_as_uid: Optional[int] = None
+    run_as_gid: Optional[int] = None
+    authority_label: Optional[str] = None
 
     @property
     def backend_required(self) -> bool:

@@ -8,12 +8,13 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from pydantic import BaseModel, Field, create_model
 
 from kriya.core.kernel import Kernel
-from kriya.tools.containment import ContainmentSetupError
+from kriya.tools.containment import ContainmentSetupError, resolve_containment_backend
 from kriya.mcp.capability import (
     MCPCapabilityProfile,
     compute_mcp_capability_profile_digest,
     resolve_mcp_capability_profile,
 )
+from kriya.mcp.containment_adapter import map_capability_profile_to_containment
 from kriya.mcp.lifecycle import (
     MCPLifecycleError,
     MCPProtocolViolationError,
@@ -167,6 +168,7 @@ class MCPClient:
         self, name: str, command: str, args: List[str], env: Optional[Dict[str, str]] = None,
         lifecycle_config: Optional[Any] = None, on_closed: Optional[Callable[[str, BaseException], None]] = None,
         capability_profile: Optional[MCPCapabilityProfile] = None,
+        containment_required: bool = False, containment_backend: Optional[Any] = None,
     ) -> None:
         self.name = name
         self.command = command
@@ -180,6 +182,19 @@ class MCPClient:
         # this does not (yet) change what start()/spawn_mcp_process() does
         # in any way; see kriya/mcp/capability.py's own security statement.
         self.capability_profile = capability_profile or resolve_mcp_capability_profile({}, workspace_root=os.getcwd())
+        # TOOL-003 P2: whether this server MUST run inside real OCI
+        # containment (autonomy.mcp_contained_execution_required, default
+        # False - see that field's own docstring for the explicit,
+        # deliberate default-flip decision). False (default) preserves
+        # 100% of pre-TOOL-003-P2 behavior: host-side execution, no
+        # containment backend ever consulted. `containment_backend` is the
+        # resolved kriya.tools.containment.ContainmentBackend instance to
+        # use when True - injected by MCPManager.start_all(), never
+        # resolved by this class itself (keeps MCPClient constructible/
+        # testable with no config/autonomy dependency at all when unset).
+        self._containment_required = containment_required
+        self._containment_backend = containment_backend
+        self._containment_cleanup: Optional[Callable[[], None]] = None
         # Local import (not a module-level import) to avoid a config->mcp
         # layer import cycle - kriya/config/config.py never imports from
         # kriya/mcp/, and this keeps that direction unchanged.
@@ -196,6 +211,7 @@ class MCPClient:
         # observability only - never allowed to break shutdown).
         self._on_closed = on_closed
 
+        self._containment_active = False
         self._process: Optional[asyncio.subprocess.Process] = None
         self._read_task: Optional[asyncio.Task] = None
         self._read_stderr_task: Optional[asyncio.Task] = None
@@ -212,6 +228,25 @@ class MCPClient:
         registered `MCPTool` should treat False as "this server's tools
         are no longer live", not attempt the call and hope for the best."""
         return self._state == _ConnState.RUNNING
+
+    @property
+    def containment_required(self) -> bool:
+        """TOOL-003 P2 evidence field (per the 2026-09-13 decision:
+        "every MCP startup/run must record: containment required
+        true/false") - what this deployment DEMANDED, independent of
+        whether it was ever actually achieved (see `containment_active`)."""
+        return self._containment_required
+
+    @property
+    def containment_active(self) -> bool:
+        """True only once a real OCI container was successfully prepared
+        and this client's process IS that container's own attached
+        `docker run -i` process. False whenever `containment_required` is
+        False (host-side execution - TOOL-003 containment assurance must
+        never be claimed for this case, per the 2026-09-13 decision: "Do
+        not use successful host-side execution as containment evidence"),
+        and also False before start() completes."""
+        return self._containment_active
 
     async def start(self) -> None:
         """Spawns the MCP server process and completes the full startup
@@ -248,16 +283,64 @@ class MCPClient:
         # SEC-003: restricted-env construction, never ambient os.environ -
         # see build_mcp_subprocess_env()'s own docstring for the invariant.
         full_env = build_mcp_subprocess_env(self.env)
-        # SEC-004: fail-closed spawn - process-group isolation, CPU/memory
-        # rlimits, and the hard stdout-line ceiling are all established
-        # HERE, before the process can do anything; a resource-limit setup
-        # failure (ContainmentSetupError/ResourceLimitSetupError) propagates
+
+        command_prefix: Optional[List[str]] = None
+        spawn_env: Optional[Dict[str, str]] = full_env
+        if self._containment_required:
+            # TOOL-003 P2: "no raw-host fallback" (2026-09-13 user
+            # instruction, policed as the single hardest requirement in
+            # this package) - every step below either produces a real,
+            # prepared container or raises a ContainmentSetupError (or
+            # subclass) that propagates UNCAUGHT out of this method, out
+            # of start(), and out of MCPManager.start_all(), which is
+            # already SEC-004-atomic (rolls back any earlier server in the
+            # same start_all() call). There is no except-and-continue
+            # anywhere on this path.
+            if self._containment_backend is None:
+                raise ContainmentSetupError(
+                    f"MCP server '{self.name}': autonomy.mcp_contained_execution_required "
+                    "is True but no containment backend was resolved - refusing to start "
+                    "uncontained."
+                )
+            profile_digest = compute_mcp_capability_profile_digest(self.capability_profile)
+            loop = asyncio.get_running_loop()
+            # OCIContainmentBackend.prepare() does real, synchronous
+            # subprocess I/O (docker daemon probe, image ensure) -
+            # off the event loop via run_in_executor, exactly like the
+            # cleanup call in _close() below.
+
+            def _prepare():
+                containment_profile = map_capability_profile_to_containment(
+                    self.capability_profile, workspace_root=os.path.realpath(os.getcwd()),
+                    resolved_env=full_env, profile_digest=profile_digest,
+                    cpu_seconds=self._lifecycle.cpu_seconds, memory_mb=self._lifecycle.memory_mb,
+                )
+                return self._containment_backend.prepare(containment_profile, [self.command] + self.args)
+
+            prepared = await loop.run_in_executor(None, _prepare)
+            command_prefix = prepared.command_prefix
+            self._containment_cleanup = prepared.cleanup
+            # The `docker` CLI itself is TRUSTED_KRIYA_INFRASTRUCTURE - it
+            # needs its own normal host environment (PATH to find the
+            # `docker` binary, etc.), never the SEC-003-restricted MCP
+            # environment, which is instead baked into command_prefix as
+            # `-e KEY=VALUE` flags (ContainmentProfile.resolved_env, set
+            # to `full_env` above). `env=None` means "inherit the current
+            # process's environment" - correct for trusted host tooling.
+            spawn_env = None
+
+        # SEC-004: fail-closed spawn - process-group isolation and the
+        # hard stdout-line ceiling are established HERE, before the
+        # process can do anything; a resource-limit setup failure
+        # (ContainmentSetupError/ResourceLimitSetupError) propagates
         # uncaught - this method never falls back to an uncontrolled spawn.
         self._process = await spawn_mcp_process(
-            self.command, self.args, full_env,
+            self.command, self.args, spawn_env,
             cpu_seconds=self._lifecycle.cpu_seconds, memory_mb=self._lifecycle.memory_mb,
             max_stdout_line_bytes=self._lifecycle.max_stdout_line_bytes,
+            command_prefix=command_prefix,
         )
+        self._containment_active = self._containment_required
         self._state = _ConnState.RUNNING
         self._read_task = asyncio.create_task(self._read_stdout())
         self._read_stderr_task = asyncio.create_task(self._read_stderr())
@@ -298,6 +381,41 @@ class MCPClient:
                     grace_seconds=self._lifecycle.shutdown_grace_seconds,
                     reap_seconds=self._lifecycle.force_kill_reap_seconds,
                 )
+
+            if self._containment_cleanup is not None:
+                # TOOL-003 P2: the SECOND lifecycle layer - the host-side
+                # process-group kill above (terminate_mcp_process(),
+                # targeting the `docker run` CLI process) does NOT
+                # reliably stop/remove a VM-mediated container runtime's
+                # actual container (PreparedContainment.cleanup's own
+                # docstring) - this authoritative `docker rm -f` step
+                # closes that gap. Real, synchronous, potentially-slow
+                # subprocess I/O - off the event loop via run_in_executor
+                # (never blocks other coroutines) and bounded by its own
+                # SEC-009-governed timeout (additive to, not swapped in
+                # for, the grace/reap bounds above). A timeout here is
+                # logged, not raised - the container's own removal was
+                # already requested (docker rm -f is itself the forceful
+                # path); this mirrors terminate_mcp_process()'s own
+                # "reap timeout after the forced kill is still terminal"
+                # precedent exactly.
+                cleanup = self._containment_cleanup
+                self._containment_cleanup = None
+                loop = asyncio.get_running_loop()
+                try:
+                    await asyncio.wait_for(
+                        loop.run_in_executor(None, cleanup),
+                        timeout=self._lifecycle.container_cleanup_timeout_seconds,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "MCP server '%s': container cleanup did not confirm within %.1fs - "
+                        "docker rm -f was already issued (the forceful removal path); "
+                        "treating as terminal regardless of this asyncio call's own outcome.",
+                        self.name, self._lifecycle.container_cleanup_timeout_seconds,
+                    )
+                except Exception as e:
+                    logger.warning(f"MCP server '{self.name}': container cleanup raised: {e}")
 
             for fut in self._pending_requests.values():
                 if not fut.done():
@@ -798,6 +916,7 @@ class MCPManager:
                     cfg_dict = server_cfg
 
                 lifecycle_cfg = getattr(self.kernel.config, "mcp_lifecycle", None) if self.kernel.config else None
+                autonomy_cfg = getattr(self.kernel.config, "autonomy", None) if self.kernel.config else None
 
                 # TOOL-003 P1 (Task 9): resolve this server's capability
                 # profile BEFORE the client (and therefore the process) is
@@ -810,6 +929,23 @@ class MCPManager:
                     cfg_dict.get("capabilities", {}), workspace_root=os.path.realpath(os.getcwd())
                 )
 
+                # TOOL-003 P2: `autonomy.mcp_contained_execution_required`
+                # (default False) - resolved fresh per server from the
+                # real, SEC-009-governed config, mirroring
+                # contained_execution_required's own established pattern.
+                # False preserves 100% of pre-TOOL-003-P2 behavior (no
+                # containment backend ever consulted). True resolves a
+                # real ContainmentBackend and NEVER falls back to host
+                # execution if that resolution or the backend's own
+                # `prepare()` fails - see MCPClient._start_sequence()'s
+                # own "no raw-host fallback" comment for where that
+                # failure actually propagates from.
+                containment_required = bool(getattr(autonomy_cfg, "mcp_contained_execution_required", False))
+                containment_backend = None
+                if containment_required:
+                    backend_name = getattr(autonomy_cfg, "containment_backend", "none")
+                    containment_backend = resolve_containment_backend(backend_name)
+
                 client = MCPClient(
                     name=server_name,
                     command=cfg_dict["command"],
@@ -818,6 +954,8 @@ class MCPManager:
                     lifecycle_config=lifecycle_cfg,
                     on_closed=self._on_client_closed,
                     capability_profile=capability_profile,
+                    containment_required=containment_required,
+                    containment_backend=containment_backend,
                 )
                 await client.start()
                 self.clients[server_name] = client

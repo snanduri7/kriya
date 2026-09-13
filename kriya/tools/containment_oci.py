@@ -632,15 +632,17 @@ class OCIContainmentBackend:
             self._probe_daemon(docker_path)
             return self._prepare_registry_scoped(docker_path, profile, command)
 
-        # UNRESTRICTED/DENIED - unchanged from the original SEC-001-P6 shape.
+        # UNRESTRICTED/DENIED - unchanged from the original SEC-001-P6 shape
+        # for every field an existing (non-MCP) caller ever sets; the new
+        # TOOL-003 P2 fields below are all additive and default to exactly
+        # that original shape (see ContainmentProfile's own docstring).
         self._probe_daemon(docker_path)
 
-        workspace_host = os.path.abspath(profile.workspace_path)
-        if not os.path.isdir(workspace_host):
-            raise BackendUnavailableError(
-                f"ContainmentProfile.workspace_path {workspace_host!r} does not "
-                "exist or is not a directory - refusing to start a container "
-                "with no valid workspace mount."
+        if profile.resolved_env is not None and profile.env_allowlist:
+            raise ValueError(
+                "ContainmentProfile.resolved_env and .env_allowlist are mutually "
+                "exclusive - pass a pre-resolved environment (MCP's own SEC-003 "
+                "build_mcp_subprocess_env() output) OR an allowlist name-list, never both."
             )
 
         container_name = f"kriya-oci-{uuid.uuid4().hex[:12]}"
@@ -654,12 +656,65 @@ class OCIContainmentBackend:
             "--security-opt", "no-new-privileges",
             "--pids-limit", _PIDS_LIMIT,
             "--tmpfs", f"{_CONTAINER_TEMP}:rw,noexec,nosuid,size={_TMPFS_SIZE}",
-            # Filesystem: ONLY these mounts ever exist - no host root, no
-            # home directory, no Kriya source tree. Minimal and explicit
-            # by construction (nothing else is ever added below).
-            "-v", f"{workspace_host}:{_CONTAINER_WORKSPACE}:rw",
-            "-w", _CONTAINER_WORKSPACE,
         ]
+
+        # TOOL-003 P2: `-i` (interactive, stdin kept open) for a persistent
+        # bidirectional-stdio caller (an MCP server) - deliberately never
+        # `-t` (a pseudo-TTY's line discipline/echo would corrupt MCP's
+        # newline-delimited JSON-RPC framing). False (default) for every
+        # existing finite/managed-service caller - identical to before.
+        if profile.persistent_stdio:
+            args.append("-i")
+
+        # TOOL-003 P2: non-root execution (Task 7) - `--user uid:gid` only
+        # when the caller explicitly resolved an identity (every existing
+        # compile/test/managed-service caller leaves this None, unchanged:
+        # root inside the container, exactly as before - revisiting THAT
+        # is out of this pass's scope). Never `--privileged`, never a
+        # Docker socket mount, never broader than `--cap-drop ALL` +
+        # `no-new-privileges` above.
+        if profile.run_as_uid is not None:
+            args += ["--user", f"{profile.run_as_uid}:{profile.run_as_gid}"]
+
+        # TOOL-003 P2: an opaque audit label (Task 12) - None (default) for
+        # every existing caller, unchanged.
+        if profile.authority_label is not None:
+            args += ["--label", f"kriya.mcp-capability-digest={profile.authority_label}"]
+
+        # Filesystem: ONLY these mounts ever exist - no host root, no
+        # home directory, no Kriya source tree. Minimal and explicit by
+        # construction (nothing else is ever added beyond what's built
+        # here). TOOL-003 P2 (Task 3): `mount_workspace=False` means NO
+        # workspace mount at all (an MCP profile granting neither
+        # workspace_read nor workspace_write) - every existing caller
+        # leaves this at its default True, unchanged. `workspace_write`
+        # controls `ro` vs `rw` - every existing caller leaves this at its
+        # default True (rw), unchanged.
+        if profile.mount_workspace:
+            workspace_host = os.path.abspath(profile.workspace_path)
+            if not os.path.isdir(workspace_host):
+                raise BackendUnavailableError(
+                    f"ContainmentProfile.workspace_path {workspace_host!r} does not "
+                    "exist or is not a directory - refusing to start a container "
+                    "with no valid workspace mount."
+                )
+            mode = "rw" if profile.workspace_write else "ro"
+            args += ["-v", f"{workspace_host}:{_CONTAINER_WORKSPACE}:{mode}", "-w", _CONTAINER_WORKSPACE]
+        else:
+            args += ["-w", _CONTAINER_TEMP]
+
+        # TOOL-003 P2 (Task 2/3): explicit extra host<->container binds -
+        # kriya/mcp/capability.py's already-resolved, already-escape-
+        # checked additional_read_paths/additional_write_paths, each one
+        # MountSpec. Empty for every existing (non-MCP) caller, unchanged.
+        for i, mount in enumerate(profile.additional_mounts):
+            mount_host = os.path.abspath(mount.host_path)
+            if not os.path.isdir(mount_host) and not os.path.isfile(mount_host):
+                raise BackendUnavailableError(
+                    f"ContainmentProfile.additional_mounts[{i}] {mount_host!r} does not exist."
+                )
+            mode = "rw" if mount.writable else "ro"
+            args += ["-v", f"{mount_host}:{mount.container_path}:{mode}"]
 
         if profile.temp_path:
             temp_host = os.path.abspath(profile.temp_path)
@@ -712,10 +767,30 @@ class OCIContainmentBackend:
         # container regardless of what a caller's env_allowlist contains
         # (Invariant: host paths/interpreters must not leak accidentally
         # into container execution).
-        for key, value in build_restricted_env(profile.env_allowlist).items():
-            if key in _HOST_ONLY_ENV_VARS:
-                continue
-            args += ["-e", f"{key}={value}"]
+        #
+        # TOOL-003 P2: resolved_env (default None) is an already-complete,
+        # already-restricted environment (MCP's own SEC-003
+        # build_mcp_subprocess_env() output) - baked into `-e` flags
+        # VERBATIM, with `_HOST_ONLY_ENV_VARS` filtering deliberately
+        # SKIPPED for this path. That filter exists to strip HOST
+        # FILESYSTEM PATHS meaningless inside a generic toolchain
+        # container (a macOS JAVA_HOME path, etc.) - a completely
+        # different problem from SEC-003's own env composition, which
+        # already excludes ambient HOME/proxy leakage by construction and
+        # may deliberately INCLUDE an operator's explicit,
+        # SEC-009-approved `mcp.<server>.env.HOME` override. Re-applying
+        # this filter here would silently drop that explicit, approved
+        # value - exactly the "explicit allowed env must appear" property
+        # TOOL-003 P2 must preserve (Task 19), never a second, different,
+        # container-specific env decision layered on top of SEC-003's own.
+        if profile.resolved_env is not None:
+            for key, value in profile.resolved_env.items():
+                args += ["-e", f"{key}={value}"]
+        else:
+            for key, value in build_restricted_env(profile.env_allowlist).items():
+                if key in _HOST_ONLY_ENV_VARS:
+                    continue
+                args += ["-e", f"{key}={value}"]
 
         # RESOURCES: --memory is a real, cgroup-enforced hard limit (accurate
         # mapping of profile.memory_mb). --cpus is a RATE cap (cores), not a
