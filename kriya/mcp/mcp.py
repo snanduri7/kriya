@@ -16,6 +16,10 @@ from kriya.mcp.lifecycle import (
     spawn_mcp_process,
     terminate_mcp_process,
 )
+from kriya.policy.errors import PolicyDeniedError
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.model import ActionRequest, ActionType, MCPToolIdentity, PolicyDecision, PolicyResult, compute_mcp_schema_digest
+from kriya.policy.telemetry import build_decision_record
 from kriya.tools.sandbox import build_restricted_env
 from kriya.tools.tool import BaseTool, ToolExecutionError
 
@@ -503,16 +507,72 @@ class MCPClient:
 # =====================================================================
 
 class MCPTool(BaseTool):
-    """Kriya BaseTool implementation wrapping a dynamically fetched MCP Tool schema."""
+    """Kriya BaseTool implementation wrapping a dynamically fetched MCP Tool
+    schema.
 
-    def __init__(self, mcp_client: MCPClient, tool_meta: Dict[str, Any]) -> None:
+    TOOL-002 P1: this is the single production choke point every MCP
+    `tools/call` passes through (kernel.registry.get("tool", ...) always
+    resolves to an MCPTool instance for an MCP-backed name, and
+    MCPClient.call_tool() has exactly one production caller - this class's
+    own _run(), confirmed by a full-repo grep before this change; every
+    other caller is a test file exercising MCPClient directly, which this
+    package deliberately leaves possible). Both known production routes
+    (kriya tools execute, and any future TOOL-tagged SubtaskExecutor
+    dispatch) reach an MCP tool exclusively via BaseTool.execute() -> this
+    class's _run() -> self.client.call_tool(...), so gating HERE, not at
+    either individual caller, covers both without either needing its own
+    copy of this logic (and without a future third caller needing to
+    remember to add one)."""
+
+    def __init__(
+        self, mcp_client: MCPClient, tool_meta: Dict[str, Any],
+        execution_policy: Optional[ExecutionPolicy] = None,
+    ) -> None:
         self.client = mcp_client
+        # TOOL-002 P1: the EXACT MCP-advertised tool name, captured once at
+        # registration and never reconstructed later (unlike the old
+        # `self._name.replace(f"{self.client.name}_", "", 1)` pattern this
+        # replaces below) - a stored fact, not a string-manipulation guess.
+        self._exact_tool_name = tool_meta["name"]
         self._name = f"{mcp_client.name}_{tool_meta['name']}"
         self._description = tool_meta.get("description", "MCP Dynamic Tool")
 
         # Build arguments schema dynamically using Pydantic create_model
         input_schema = tool_meta.get("inputSchema", {})
         self._schema = self._build_pydantic_schema(input_schema)
+
+        # TOOL-002 P1: the structured, collision-resistant identity this
+        # exact MCPTool instance was constructed with - bound once, at
+        # registration, from the SAME tool_meta snapshot the dispatch
+        # target (self.client / self._exact_tool_name) was also derived
+        # from. Because a policy decision and its own dispatch target are
+        # always read from the SAME already-constructed, immutable object
+        # (never re-looked-up from the registry mid-call, never re-derived
+        # from a flattened display string), there is no window in which
+        # the identity a policy decision evaluates could diverge from the
+        # identity of what actually gets invoked - even if
+        # ComponentRegistry later overwrites this instance's own
+        # FLATTENED display name with a different server's colliding
+        # MCPTool (kriya/core/registry.py's register() logs a warning but
+        # does not refuse), whichever object actually gets resolved and
+        # invoked always uses ITS OWN identity for the policy check, never
+        # the other one's. This is what makes Task 3's "revalidation"
+        # requirement satisfied WITHOUT any ComponentRegistry redesign.
+        self.identity = MCPToolIdentity(
+            server_identity=mcp_client.name,
+            tool_name=self._exact_tool_name,
+            schema_digest=compute_mcp_schema_digest(input_schema),
+        )
+        # Bare ExecutionPolicy() with no override when the caller (today:
+        # only MCPManager.start_all()) doesn't supply one - matches every
+        # other real ExecutionPolicy call site's own established
+        # convention (kriya/policy/execution.py's own comment on this
+        # default). An empty approved_mcp_tool_identities set (this
+        # default's own behavior) means every MCP_TOOL_CALL falls through
+        # to REQUIRE_APPROVAL, which _run() below fails closed on - see
+        # its own docstring for why that is P1's correct, conservative,
+        # intentional default.
+        self._execution_policy = execution_policy or ExecutionPolicy()
 
     @property
     def name(self) -> str:
@@ -527,6 +587,54 @@ class MCPTool(BaseTool):
         return self._schema
 
     async def _run(self, args: BaseModel) -> Any:
+        # TOOL-002 P1 (Invariant 1/2/8/9/10): a deterministic Kriya
+        # authority decision, ALWAYS REAL ENFORCEMENT regardless of
+        # ExecutionPolicyConfig.mode (unlike every audit-only MA4 caller -
+        # every other current ExecutionPolicy consumer only enforces under
+        # mode="enforce" or via enforce_hard_invariants's own fixed 5-code
+        # set; MCP has no such carve-out, matching AuthorizedFileWriter's
+        # own precedent as the SECOND deliberate, explicit exception to
+        # MA4's audit-only mandate) - gates every path to
+        # the real MCP dispatch call below. DENY, REQUIRE_APPROVAL (no
+        # approval mechanism is safely reachable at this call site in P1 -
+        # see TASK 6/Invariant 9), and a THROWING/unavailable policy engine
+        # (Invariant 10) all mean zero tools/call, raised via the same
+        # typed PolicyDeniedError ExecutionPolicy's other real-enforcement
+        # callers (ShellTool, GitTool, AuthorizedFileWriter) already use -
+        # never a fallback to unauthorized execution. Only ALLOW/
+        # ALLOW_SANDBOXED let this method reach the dispatch call below;
+        # MCP has no sandboxing mechanism of its own to route
+        # ALLOW_SANDBOXED through (that is TOOL-003 containment's scope),
+        # so both are treated identically here.
+        #
+        # `self.identity` (bound once, at construction - see __init__'s
+        # own docstring) is the ONLY thing this decision is made against -
+        # never `self._description` (the server's own advertised text),
+        # never `args`/`raw_args` (Invariant: no authority inferred from
+        # argument names or values in P1 - that is TOOL-003 scope too).
+        request = ActionRequest(
+            action_type=ActionType.MCP_TOOL_CALL,
+            metadata={"mcp_tool_identity": self.identity},
+        )
+        try:
+            result = self._execution_policy.evaluate(request)
+        except Exception as e:
+            logger.error(f"TOOL-002 P1: MCP invocation policy evaluation raised for '{self._name}' - failing closed: {e}")
+            result = PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="MCP_POLICY_EVALUATION_FAILED",
+                explanation=f"ExecutionPolicy.evaluate() raised: {e}",
+                matched_rule="mcp_invocation.policy_evaluation_failed",
+            )
+
+        try:
+            logger.debug("TOOL-002 P1 MCP invocation decision: %s", build_decision_record(request, result, enforced=True).to_json())
+        except Exception as e:
+            logger.debug("TOOL-002 P1 telemetry record build failed (ignored, never blocks the real decision): %s", e)
+
+        if result.decision in (PolicyDecision.DENY, PolicyDecision.REQUIRE_APPROVAL):
+            raise PolicyDeniedError(request=request, result=result)
+
         # SEC-004: a server that died after its tools were registered
         # (stale lifecycle state) must fail deterministically here, not
         # attempt a write to a dead process's stdin and hang - MCPManager
@@ -541,11 +649,9 @@ class MCPTool(BaseTool):
             )
         # Extract arguments and request execution over MCP client
         raw_args = args.model_dump()
-        # Clean prefix from tool name to call it on the actual server
-        actual_name = self._name.replace(f"{self.client.name}_", "", 1)
 
         try:
-            response = await self.client.call_tool(actual_name, raw_args)
+            response = await self.client.call_tool(self._exact_tool_name, raw_args)
         except MCPLifecycleError as e:
             # SEC-004 lifecycle failures (request timeout, connection
             # closed mid-call) are distinct from an ordinary tool-level
@@ -610,10 +716,17 @@ class MCPManager:
     every earlier-started server up with no signal to the caller that
     anything was wrong)."""
 
-    def __init__(self, kernel: Kernel) -> None:
+    def __init__(self, kernel: Kernel, execution_policy: Optional[ExecutionPolicy] = None) -> None:
         self.kernel = kernel
         self.clients: Dict[str, MCPClient] = {}
         self.registered_tools: Dict[str, List[str]] = {}
+        # TOOL-002 P1: one shared ExecutionPolicy for every MCPTool this
+        # manager constructs - bare ExecutionPolicy() (nothing pre-
+        # approved) unless a caller explicitly supplies one, matching
+        # every other real ExecutionPolicy call site's own "no override"
+        # default convention. A real, operator-facing, SEC-009-governed
+        # source for this is TOOL-002 P2 / TOOL-003 scope, not built here.
+        self._execution_policy = execution_policy or ExecutionPolicy()
 
     def _on_client_closed(self, server_name: str, reason: BaseException) -> None:
         """SEC-004: invoked by an MCPClient the instant it transitions to
@@ -663,7 +776,7 @@ class MCPManager:
                 tools = await client.list_tools()
                 self.registered_tools[server_name] = []
                 for t in tools:
-                    mcp_tool = MCPTool(client, t)
+                    mcp_tool = MCPTool(client, t, execution_policy=self._execution_policy)
                     # Register under 'tool' category in kernel registry
                     self.kernel.registry.register("tool", mcp_tool.name, mcp_tool)
                     self.registered_tools[server_name].append(mcp_tool.name)

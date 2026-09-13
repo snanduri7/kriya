@@ -61,9 +61,9 @@ engine.
 
 import os
 import re
-from typing import Optional, Sequence, Tuple
+from typing import FrozenSet, Optional, Sequence, Tuple
 
-from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+from kriya.policy.model import ActionRequest, ActionType, MCPToolIdentity, PolicyDecision, PolicyResult
 from kriya.workflow.triage import ExecutionWeight, RiskClass
 
 # MA4.4 - deliberately small starter allowlist (design doc section 18: "start
@@ -180,6 +180,7 @@ _STAGE_METHOD_NAMES: Tuple[str, ...] = (
     "_check_git_destructive",
     "_check_network_egress",
     "_check_package_supply_chain",
+    "_check_mcp_invocation",
     "_check_command_allowlist",
     "_check_approval_rules",
 )
@@ -392,9 +393,30 @@ class ExecutionPolicy:
     unchanged - keeps using the same hardcoded default list stage 2 always
     has."""
 
-    def __init__(self, sensitive_path_patterns: Optional[Sequence[str]] = None) -> None:
+    def __init__(
+        self,
+        sensitive_path_patterns: Optional[Sequence[str]] = None,
+        approved_mcp_tool_identities: Optional[FrozenSet[MCPToolIdentity]] = None,
+    ) -> None:
         self._sensitive_path_patterns = _compile_path_patterns(
             sensitive_path_patterns if sensitive_path_patterns else _DEFAULT_SENSITIVE_PATH_PATTERN_STRINGS
+        )
+        # TOOL-002 P1 - additive, optional constructor override, mirroring
+        # sensitive_path_patterns's own precedent exactly: ExecutionPolicy()
+        # with no arguments (every real call site today) gets an EMPTY set -
+        # nothing is pre-approved, so every MCP_TOOL_CALL falls through to
+        # _check_mcp_invocation's own REQUIRE_APPROVAL default, which
+        # MCPTool's real-enforcement wiring then fails closed on (no
+        # approval mechanism is safely reachable at that call site in P1 -
+        # see kriya/mcp/mcp.py's own MCPTool._run() docstring). A real,
+        # operator-facing, SEC-009-governed capability/approval source is
+        # explicitly TOOL-002 P2 / TOOL-003 scope, not built here - this
+        # parameter exists so the ALLOW path is real, testable code now
+        # rather than invented later, matching MA4's own established
+        # "build the dormant branch now" precedent (execution_policy.py's
+        # own module docstring, `_authorize_action`'s enforce=True branch).
+        self._approved_mcp_tool_identities: FrozenSet[MCPToolIdentity] = (
+            approved_mcp_tool_identities if approved_mcp_tool_identities is not None else frozenset()
         )
 
     def evaluate(self, request: ActionRequest) -> PolicyResult:
@@ -704,6 +726,84 @@ class ExecutionPolicy:
             reason_code="PACKAGE_INSTALL_REQUIRES_APPROVAL",
             explanation=f"Installing '{request.target}' is a supply-chain action and requires approval.",
             matched_rule="package_supply_chain.requires_approval",
+            requires_approval=True,
+        )
+
+    def _check_mcp_invocation(self, request: ActionRequest) -> Optional[PolicyResult]:
+        """TOOL-002 P1 - governs ActionType.MCP_TOOL_CALL only. Unlike every
+        other stage in this pipeline, the caller (MCPTool._run(),
+        kriya/mcp/mcp.py) treats this stage's DENY and REQUIRE_APPROVAL
+        outcomes as REAL, mode-independent enforcement - never audit-only,
+        regardless of ExecutionPolicyConfig.mode - because unlike a Kriya-
+        authored command (mvn compile, a fixed git bootstrap commit), an
+        MCP tool call has no legitimate "this is Kriya's own trusted
+        internal action" carve-out to ever fall back on; every MCP call is
+        entirely LLM/server-directed. This method itself stays a pure,
+        deterministic PolicyResult producer exactly like every other
+        stage - it is MCPTool's own caller-side wiring that makes the
+        outcome real rather than logged-only, the same separation of
+        concerns _check_git_destructive/_check_command_allowlist already
+        keep from their own enforcement callers.
+
+        Identity, never metadata content, decides the outcome:
+        `request.metadata["mcp_tool_identity"]` must be a well-formed
+        `MCPToolIdentity` (server_identity + exact tool_name + a schema
+        digest that already excludes all description text - see
+        MCPToolIdentity's own docstring) - the server's own advertised
+        description/annotations/result text are never read here at all,
+        satisfying Invariant 5 (MCP-provided metadata may describe an
+        operation, never authorize it) structurally, not by convention.
+
+        TOOL-002 P1 intentionally does NOT infer filesystem/network/process
+        capability from the identity or from anything else - that semantic
+        capability question is TOOL-003's scope. The only decision this
+        stage can make today is IDENTITY-based: is this EXACT
+        (server, tool, schema) tuple one Kriya/the operator has explicitly
+        pre-approved (`self._approved_mcp_tool_identities`, empty by
+        default - see __init__)? If yes, ALLOW. If no - which is every
+        real call in a default P1 deployment, since no operator-facing
+        approval/capability mechanism exists yet - REQUIRE_APPROVAL, never
+        a bare ALLOW merely because the identity looks unremarkable or the
+        server's own description sounds harmless (Invariant: never bare-
+        ALLOW an unknown/ambiguous MCP invocation)."""
+        if request.action_type != ActionType.MCP_TOOL_CALL:
+            return None
+
+        identity = request.metadata.get("mcp_tool_identity")
+        if not isinstance(identity, MCPToolIdentity):
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="MCP_IDENTITY_MISSING",
+                explanation=(
+                    "MCP_TOOL_CALL request carries no well-formed MCPToolIdentity in "
+                    "metadata['mcp_tool_identity'] - failing closed rather than guessing "
+                    "which server/tool this call refers to."
+                ),
+                matched_rule="mcp_invocation.identity_missing",
+            )
+
+        if identity in self._approved_mcp_tool_identities:
+            return PolicyResult(
+                decision=PolicyDecision.ALLOW,
+                reason_code="MCP_TOOL_IDENTITY_APPROVED",
+                explanation=(
+                    f"MCP tool identity (server={identity.server_identity!r}, "
+                    f"tool={identity.tool_name!r}) matches an explicitly pre-approved "
+                    "identity, including its schema digest."
+                ),
+                matched_rule="mcp_invocation.identity_approved",
+            )
+
+        return PolicyResult(
+            decision=PolicyDecision.REQUIRE_APPROVAL,
+            reason_code="MCP_TOOL_REQUIRES_APPROVAL",
+            explanation=(
+                f"MCP tool identity (server={identity.server_identity!r}, "
+                f"tool={identity.tool_name!r}) is not on the pre-approved identity set - "
+                "TOOL-002 P1 has no operator-facing approval/capability mechanism yet, so "
+                "this fails closed (no tools/call) rather than defaulting to ALLOW."
+            ),
+            matched_rule="mcp_invocation.requires_approval",
             requires_approval=True,
         )
 

@@ -14,14 +14,24 @@ secrets there - it doesn't enforce it). This module is the enforcement.
 
 Two decisions here are deliberate and load-bearing:
 
-1. `request.metadata` is NEVER included in a PolicyDecisionRecord, at all -
-   not scrubbed, not summarized, simply absent. It's arbitrary caller-
-   supplied data (a version string today, something else tomorrow); trying
-   to pattern-match every possible secret shape that could end up in a free-
-   form dict is a losing game. The record only ever carries the small,
-   closed set of fields ActionRequest itself defines structurally
-   (action_type, target, command, network_target, decision fields) - fields
-   whose SHAPE is known, so they can actually be scrubbed with confidence.
+1. `request.metadata` is NEVER included in a PolicyDecisionRecord AS A
+   BLANKET DUMP - not scrubbed, not summarized, simply absent. It's
+   arbitrary caller-supplied data (a version string today, something else
+   tomorrow); trying to pattern-match every possible secret shape that
+   could end up in a free-form dict is a losing game. The record only ever
+   carries the small, closed set of fields ActionRequest itself defines
+   structurally (action_type, target, command, network_target, decision
+   fields) - fields whose SHAPE is known, so they can actually be scrubbed
+   with confidence.
+
+   TOOL-002 P1's ONE narrow, explicit exception (still consistent with
+   this principle, not a violation of it): `metadata["mcp_tool_identity"]`
+   is not arbitrary caller data, it's always exactly a `MCPToolIdentity` -
+   a plain, closed, three-string dataclass this module already knows the
+   full shape of (kriya/policy/model.py) - so its three fields are
+   extracted and summarized individually, by name, the same way `target`/
+   `command`/`network_target` already are; the metadata MAPPING itself is
+   still never blanket-included.
 
 2. `scrub_potential_secrets()` is a narrow, high-confidence redaction - the
    same "high-confidence, avoid false-positiving" principle MA4.12's
@@ -41,7 +51,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from kriya.policy.model import ActionRequest, PolicyResult
+from kriya.policy.model import ActionRequest, MCPToolIdentity, PolicyResult
 
 _SUMMARY_MAX_CHARS = 300
 _REDACTED = "***REDACTED***"
@@ -99,6 +109,13 @@ class PolicyDecisionRecord:
     target_summary: Optional[str]
     command_summary: Optional[str]
     network_target_summary: Optional[str]
+    # TOOL-002 P1 - populated only for ActionType.MCP_TOOL_CALL (None
+    # otherwise); see the module docstring's point 1 for why extracting
+    # these three named fields from metadata is a narrow, explicit
+    # exception rather than a blanket metadata dump.
+    mcp_server_identity: Optional[str] = None
+    mcp_tool_name_summary: Optional[str] = None
+    mcp_schema_digest_short: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -113,6 +130,9 @@ class PolicyDecisionRecord:
             "target_summary": self.target_summary,
             "command_summary": self.command_summary,
             "network_target_summary": self.network_target_summary,
+            "mcp_server_identity": self.mcp_server_identity,
+            "mcp_tool_name_summary": self.mcp_tool_name_summary,
+            "mcp_schema_digest_short": self.mcp_schema_digest_short,
         }
 
     def to_json(self) -> str:
@@ -127,6 +147,14 @@ def build_decision_record(
     the record; this function's only job is building it safely."""
 
     command_text = " ".join(request.command) if request.command else None
+
+    identity = request.metadata.get("mcp_tool_identity")
+    mcp_server_identity = mcp_tool_name_summary = mcp_schema_digest_short = None
+    if isinstance(identity, MCPToolIdentity):
+        mcp_server_identity = _summarize(identity.server_identity)
+        mcp_tool_name_summary = _summarize(identity.tool_name)
+        mcp_schema_digest_short = identity.schema_digest[:12]
+
     return PolicyDecisionRecord(
         timestamp=datetime.now(timezone.utc).isoformat(),
         action_type=request.action_type.value,
@@ -139,4 +167,7 @@ def build_decision_record(
         target_summary=_summarize(request.target),
         command_summary=_summarize(command_text),
         network_target_summary=_summarize(request.network_target),
+        mcp_server_identity=mcp_server_identity,
+        mcp_tool_name_summary=mcp_tool_name_summary,
+        mcp_schema_digest_short=mcp_schema_digest_short,
     )

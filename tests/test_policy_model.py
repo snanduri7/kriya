@@ -13,11 +13,17 @@ def test_policy_decision_has_exactly_four_distinct_outcomes():
 
 
 def test_action_type_is_a_closed_small_vocabulary():
+    # TOOL-002 P1 (2026-09-13) added "mcp_tool_call" - a new class of
+    # consequential action, given real rule coverage in the same pass
+    # (kriya/policy/execution.py's own _check_mcp_invocation), matching
+    # this vocabulary's own explicit rule for adding one (see ActionType's
+    # docstring: "may never be silently swept into an existing value").
     values = {a.value for a in ActionType}
     assert values == {
         "read_file", "write_file", "run_command",
         "network_access", "llm_network_access",
         "install_package", "git_read", "git_write", "publish_artifact",
+        "mcp_tool_call",
     }
 
 

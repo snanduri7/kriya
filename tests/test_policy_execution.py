@@ -3,12 +3,20 @@ from kriya.policy.model import ActionRequest, ActionType, PolicyDecision
 
 
 def test_stage_order_matches_ma4_design_doc_section_11():
+    # TOOL-002 P1 (2026-09-13) added "_check_mcp_invocation" between
+    # _check_package_supply_chain and _check_command_allowlist - it governs
+    # a disjoint ActionType (MCP_TOOL_CALL) from every neighboring stage, so
+    # its exact position among them has no behavioral effect on any
+    # existing ActionType's own decision; placed there simply to group it
+    # near the other resource/action-category-specific stages rather than
+    # at the very end.
     assert _STAGE_METHOD_NAMES == (
         "_check_platform_invariants",
         "_check_filesystem",
         "_check_git_destructive",
         "_check_network_egress",
         "_check_package_supply_chain",
+        "_check_mcp_invocation",
         "_check_command_allowlist",
         "_check_approval_rules",
     )
