@@ -553,11 +553,13 @@ def test_telemetry_never_carries_raw_metadata_dump():
 
 def test_no_production_module_populates_static_approved_set_nonempty():
     """Strengthens the existing 'approved_mcp_tool_identities is test-only'
-    claim from a convention into a checked property: no file under kriya/
-    (excluding tests/) ever constructs ExecutionPolicy(...
-    approved_mcp_tool_identities=<something non-obviously-empty>) - the
-    only production authority source is the durable resolver wired in
-    MCPManager.__init__."""
+    claim from a convention into a checked property: no production module
+    under kriya/ - i.e. every file EXCEPT kriya/policy/execution.py itself,
+    which only declares/stores the parameter, never populates it with a
+    value - ever passes `approved_mcp_tool_identities=...` as a keyword
+    argument at a call site. The only production authority source is the
+    durable resolver wired in MCPManager.__init__ (mcp_invocation_approval_
+    resolver)."""
     import ast
     import kriya
 
@@ -568,6 +570,8 @@ def test_no_production_module_populates_static_approved_set_nonempty():
             if not filename.endswith(".py"):
                 continue
             filepath = os.path.join(dirpath, filename)
+            if os.path.basename(filepath) == "execution.py":
+                continue
             with open(filepath, "r", encoding="utf-8") as f:
                 source = f.read()
             if "approved_mcp_tool_identities" not in source:
@@ -575,9 +579,5 @@ def test_no_production_module_populates_static_approved_set_nonempty():
             tree = ast.parse(source, filename=filepath)
             for node in ast.walk(tree):
                 if isinstance(node, ast.keyword) and node.arg == "approved_mcp_tool_identities":
-                    # The only production-legal shape is the parameter's
-                    # own declaration/default handling inside
-                    # kriya/policy/execution.py itself.
-                    if os.path.basename(filepath) != "execution.py":
-                        offenders.append(filepath)
+                    offenders.append(filepath)
     assert offenders == [], f"production code populates approved_mcp_tool_identities: {offenders}"

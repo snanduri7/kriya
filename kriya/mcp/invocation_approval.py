@@ -274,16 +274,6 @@ def load_approval_artifact(path: str) -> Optional[MCPInvocationApprovalArtifact]
     return MCPInvocationApprovalArtifact.from_dict(raw)
 
 
-def revoke_all(workspace_root: str) -> bool:
-    """Deletes the entire local approval store for this workspace, if any.
-    Returns True if a file was actually removed."""
-    path = default_local_approval_path(workspace_root)
-    if os.path.isfile(path):
-        os.remove(path)
-        return True
-    return False
-
-
 def _load_fail_closed(path: str) -> Optional[MCPInvocationApprovalArtifact]:
     try:
         return load_approval_artifact(path)

@@ -173,6 +173,51 @@ def test_real_cli_revoke_then_deny_does_not_require_restart(tmp_path):
 
 
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+def test_real_cli_capability_profile_drift_invalidates_approval(tmp_path):
+    """Task 8's mandatory scenario, proven end-to-end through the real CLI
+    (not just at the store/digest level - see test_tool002_p2_invocation_
+    approval.py's test_capability_profile_digest_drift_denies for that
+    lower-level proof): approve a tool under capability profile A, then
+    change the SAME server's mcp.fixture.capabilities so it resolves to a
+    DIFFERENT profile digest B - the old durable approval must no longer
+    validate, denying the very next invocation with zero new tools/call."""
+    ws = tmp_path / "repo"
+    ws.mkdir()
+    call_log = tmp_path / "calls.log"
+    env = {
+        "KRIYA_AUTHORITY_HOME": str(tmp_path / "_authority_home"),
+        "KRIYA_MCP_APPROVAL_HOME": str(tmp_path / "_mcp_approval_home"),
+    }
+    _write_yaml(ws / "kriya.yaml", {"mcp": {"fixture": {
+        "command": sys.executable, "args": [FIXTURE], "env": {"CALL_LOG_FILE": str(call_log)},
+    }}})
+    assert _run_cli(["authority", "approve", "--confirm"], cwd=str(ws), extra_env=env)[0] == 0
+    assert _run_cli(["mcp", "approve", "fixture_echo", "--confirm"], cwd=str(ws), extra_env=env)[0] == 0
+
+    code, out, err = _run_cli(["tools", "execute", "fixture_echo", '{"message":"x"}', "-y"], cwd=str(ws), extra_env=env)
+    assert code == 0, err
+    assert "Echo: x" in out
+    assert _call_log_lines(call_log) == ["echo"]
+
+    # Same server, same tool, same schema - ONLY the capability profile
+    # changes (mcp.* is SEC-009 SECURITY_AUTHORITY, so it must be
+    # re-approved there too before Kriya will even load this config).
+    _write_yaml(ws / "kriya.yaml", {"mcp": {"fixture": {
+        "command": sys.executable, "args": [FIXTURE], "env": {"CALL_LOG_FILE": str(call_log)},
+        "capabilities": {"workspace_read": True},
+    }}})
+    assert _run_cli(["authority", "approve", "--confirm"], cwd=str(ws), extra_env=env)[0] == 0
+
+    code, out, err = _run_cli(["mcp", "inspect"], cwd=str(ws), extra_env=env)
+    assert code == 0, err
+    assert "NOT APPROVED" in out, out
+
+    code, out, err = _run_cli(["tools", "execute", "fixture_echo", '{"message":"x"}', "-y"], cwd=str(ws), extra_env=env)
+    assert "MCP_TOOL_REQUIRES_APPROVAL" in (out + err)
+    assert _call_log_lines(call_log) == ["echo"]  # unchanged - no new call
+
+
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
 def test_real_cli_host_mode_explicitly_labeled_non_contained(tmp_path):
     """Required test 27 / Task 15: with containment disabled (the default),
     `kriya mcp inspect` must explicitly show containment as NOT active -

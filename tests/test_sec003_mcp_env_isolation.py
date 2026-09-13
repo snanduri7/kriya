@@ -342,35 +342,23 @@ def _run_cli(args, cwd, extra_env=None, timeout=20):
 
 
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
-def test_cli_mcp_tool_call_denied_by_tool002_p1_no_sentinel_leak_either_way(tmp_path):
-    """TOOL-002 P1 (2026-09-13) evidence-level change to SEC-003, recorded
-    here rather than silently: before TOOL-002 P1, this test was SEC-003's
-    single most decisive piece of evidence - a real, unmodified `kriya`
-    CLI invocation proving the ambient-absent/explicit-present env
-    differential through the full production path. TOOL-002 P1 put a
-    default-deny invocation-authority gate immediately in front of every
-    MCP tools/call, and gave that gate no config/flag/env-driven
-    approval path yet (deliberately deferred to TOOL-002 P2, which will
-    add an operator-facing approval mechanism a real CLI invocation can
-    drive) - so the real, unmodified CLI can no longer reach the MCP
-    subprocess at all for either phase of the original differential.
+def test_cli_mcp_tool_call_ambient_absent_then_explicit_present_via_durable_approval(tmp_path):
+    """TOOL-002 P2 (2026-09-13) restores this test's original E4-tier
+    evidence: SEC-003's decisive ambient-absent/explicit-present env
+    differential, demonstrated through the real, unmodified `kriya` CLI.
 
-    SEC-003's actual guarantee (build_mcp_subprocess_env() never leaks an
-    ambient host variable into a real MCP child, and does pass through an
-    explicitly-authorized one) is NOT weakened - it remains fully covered
-    by this file's own direct-MCPClient tests
-    (test_ambient_variable_is_not_present_in_real_child_env and
-    test_ambient_variable_is_absent_then_present_via_explicit_env, both
-    unmodified, both still exercising real subprocesses with no policy
-    gate in the way). What is genuinely lost is this one E4-tier piece of
-    evidence: a real-CLI-driven demonstration of that same differential.
-    This test is repurposed to prove the new, honest end-to-end fact
-    instead - the real CLI denies the call outright, and the ambient
-    sentinel value never appears in its output regardless of which
-    config phase is active, which is itself still meaningful (if
-    weaker) SEC-003-adjacent evidence: an ambient secret cannot reach
-    output via this path either way, now because the call never happens
-    at all."""
+    Between TOOL-002 P1 and P2, this test was temporarily repurposed to
+    prove only that the real CLI denied the call outright (P1 had no
+    config/flag/env-driven approval path yet). TOOL-002 P2 adds
+    `kriya mcp approve` - a real, durable, operator-facing invocation
+    approval - so the original differential is restorable through the
+    full production path again: `envprobe_report_env`'s structured
+    identity (server, tool, schema) and its TOOL-003 capability-profile
+    digest are UNCHANGED by adding an explicit `env` entry (env is not a
+    capability-profile input at all - see kriya/mcp/capability.py), so
+    ONE `mcp approve` before phase 1 remains valid through phase 2's
+    config change; only the separate SEC-009 `authority approve` must be
+    re-granted, since `mcp.envprobe.env` is itself SECURITY_AUTHORITY."""
     home = tmp_path / "_authority_home"
     mcp_approval_home = tmp_path / "_mcp_approval_home"
     ws = tmp_path / "cli_mcp_repo"
@@ -386,15 +374,26 @@ def test_cli_mcp_tool_call_denied_by_tool002_p1_no_sentinel_leak_either_way(tmp_
     })
     approve_code, _, approve_err = _run_cli(["authority", "approve", "--confirm"], cwd=str(ws), extra_env=ambient_env)
     assert approve_code == 0, approve_err
+    mcp_approve_code, mcp_approve_out, mcp_approve_err = _run_cli(
+        ["mcp", "approve", "envprobe_report_env", "--confirm"], cwd=str(ws), extra_env=ambient_env,
+    )
+    assert mcp_approve_code == 0, mcp_approve_err
 
+    # Phase 1 - no explicit env configured: the ambient host sentinel must
+    # be ABSENT from the subprocess's own env, even though the real CLI
+    # now successfully reaches and calls the tool.
     code, out, err = _run_cli(
         ["tools", "execute", "envprobe_report_env", '{"names":"KRIYA_SEC003_SENTINEL"}', "-y"],
         cwd=str(ws), extra_env=ambient_env,
     )
-    assert "MCP_TOOL_REQUIRES_APPROVAL" in out, out
+    assert code == 0, err
+    assert '"KRIYA_SEC003_SENTINEL": null' in out, out
     assert "host-secret-must-not-leak" not in out
     assert "host-secret-must-not-leak" not in err
 
+    # Phase 2 - the SAME server/tool now gets an explicit, SEC-009-approved
+    # env value: it must be PRESENT verbatim, and the ambient host secret
+    # must still never appear - the decisive differential.
     _write_yaml(ws / "kriya.yaml", {
         "mcp": {"envprobe": {
             "command": sys.executable, "args": [ENV_REPORT_SERVER],
@@ -408,6 +407,7 @@ def test_cli_mcp_tool_call_denied_by_tool002_p1_no_sentinel_leak_either_way(tmp_
         ["tools", "execute", "envprobe_report_env", '{"names":"KRIYA_SEC003_SENTINEL"}', "-y"],
         cwd=str(ws), extra_env=ambient_env,
     )
-    assert "MCP_TOOL_REQUIRES_APPROVAL" in out2, out2
+    assert code2 == 0, err2
+    assert '"KRIYA_SEC003_SENTINEL": "explicitly-authorized-value"' in out2, out2
     assert "host-secret-must-not-leak" not in out2
     assert "host-secret-must-not-leak" not in err2
