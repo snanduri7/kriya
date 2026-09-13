@@ -31,7 +31,12 @@ Two decisions here are deliberate and load-bearing:
    full shape of (kriya/policy/model.py) - so its three fields are
    extracted and summarized individually, by name, the same way `target`/
    `command`/`network_target` already are; the metadata MAPPING itself is
-   still never blanket-included.
+   still never blanket-included. TOOL-003 P1 (2026-09-13) adds a second,
+   equally narrow exception the same way: `metadata["mcp_capability_
+   profile_identity"]` is always exactly an `MCPCapabilityProfileIdentity`
+   (also a plain, closed, two-string dataclass) - exposed for audit
+   context only, per Task 10's own instruction that TOOL-002 must never
+   independently reinterpret the profile it merely carries along.
 
 2. `scrub_potential_secrets()` is a narrow, high-confidence redaction - the
    same "high-confidence, avoid false-positiving" principle MA4.12's
@@ -51,7 +56,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from kriya.policy.model import ActionRequest, MCPToolIdentity, PolicyResult
+from kriya.policy.model import ActionRequest, MCPCapabilityProfileIdentity, MCPToolIdentity, PolicyResult
 
 _SUMMARY_MAX_CHARS = 300
 _REDACTED = "***REDACTED***"
@@ -116,6 +121,10 @@ class PolicyDecisionRecord:
     mcp_server_identity: Optional[str] = None
     mcp_tool_name_summary: Optional[str] = None
     mcp_schema_digest_short: Optional[str] = None
+    # TOOL-003 P1 - populated only when the request carries an
+    # MCPCapabilityProfileIdentity (None otherwise); audit context only,
+    # never an input to any policy decision (see module docstring).
+    mcp_capability_profile_digest_short: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -133,6 +142,7 @@ class PolicyDecisionRecord:
             "mcp_server_identity": self.mcp_server_identity,
             "mcp_tool_name_summary": self.mcp_tool_name_summary,
             "mcp_schema_digest_short": self.mcp_schema_digest_short,
+            "mcp_capability_profile_digest_short": self.mcp_capability_profile_digest_short,
         }
 
     def to_json(self) -> str:
@@ -155,6 +165,11 @@ def build_decision_record(
         mcp_tool_name_summary = _summarize(identity.tool_name)
         mcp_schema_digest_short = identity.schema_digest[:12]
 
+    capability_identity = request.metadata.get("mcp_capability_profile_identity")
+    mcp_capability_profile_digest_short = None
+    if isinstance(capability_identity, MCPCapabilityProfileIdentity):
+        mcp_capability_profile_digest_short = capability_identity.profile_digest[:12]
+
     return PolicyDecisionRecord(
         timestamp=datetime.now(timezone.utc).isoformat(),
         action_type=request.action_type.value,
@@ -170,4 +185,5 @@ def build_decision_record(
         mcp_server_identity=mcp_server_identity,
         mcp_tool_name_summary=mcp_tool_name_summary,
         mcp_schema_digest_short=mcp_schema_digest_short,
+        mcp_capability_profile_digest_short=mcp_capability_profile_digest_short,
     )

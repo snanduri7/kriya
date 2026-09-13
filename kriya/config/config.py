@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -87,10 +87,107 @@ class LoggingConfig(BaseModel):
     level: str = Field(default="INFO")
     file: Optional[str] = Field(default="./logs/kriya.log")
 
+class MCPCapabilityConfig(BaseModel):
+    """TOOL-003 P1 (2026-09-13): the operator-controlled MAXIMUM
+    filesystem/network authority a given `mcp.<server>` may ever be
+    declared to possess. Defines and governs capability authority only -
+    does NOT yet enforce it at the OS/container boundary (that is TOOL-003
+    P2, real OCI containment). See kriya/mcp/capability.py's module
+    docstring for the full resolved-profile/canonicalization/digest
+    machinery this config resolves into, and CLAUDE.md's "MCP capability
+    authority" section for the overall mechanism.
+
+    SAFE DEFAULT (every field defaults to the most restrictive value -
+    "declares nothing"): with no containment backend wired to this profile
+    yet, no default can make an untrusted MCP process ACTUALLY safer today
+    - the only meaningful thing a default can do is avoid pre-declaring
+    broad authority that a future enforcement pass would then either have
+    to honor (defeating the point of finally landing containment) or
+    silently downgrade (a false sense of security in the interim). So the
+    default declares NOTHING (no filesystem/network authority at all) -
+    every existing `mcp.<server>` block with no `capabilities` section
+    keeps running exactly as it does today (nothing is enforced yet - see
+    the P1 security statement), but the day TOOL-003 P2 wires this profile
+    into real containment, an operator who never explicitly widened a
+    server's declared authority will find it starts genuinely restricted,
+    not grandfathered into broad implicit trust that would then need to be
+    manually locked back down.
+
+    `extra="forbid"` (unlike MCPServerConfig itself): an unrecognized
+    capability field must be a hard pydantic ValidationError, not silently
+    dropped - SEC-009 already denies-without-approval any `mcp.*` field by
+    virtue of the whole `mcp.<server>` block being SECURITY_AUTHORITY
+    (kriya/config/authority.py's `classify_field()`), but a silently-
+    ignored unknown field would still let a future typo'd/renamed field
+    pass validation while doing nothing, which is a worse failure mode
+    than refusing to load the config at all.
+
+    PROCESS is deliberately NOT a configurable field here at all (Task 8):
+    SEC-004's process-group isolation (`start_new_session=True`) is
+    LIFECYCLE ownership only (guaranteed cleanup on shutdown/timeout), not
+    an execution-capability restriction - it does not, and was never
+    claimed to, restrict what a live MCP server's process tree can do
+    while running. Adding a boolean like `allow_process_spawn` here would
+    be a decorative, non-enforceable policy field (nothing currently
+    reads or enforces it) that could mislead a future reader into thinking
+    process capability is already governed - it is not, until real OCI
+    containment (TOOL-003 P2) exists. See
+    kriya/mcp/capability.py::PROCESS_AUTHORITY_STATEMENT for the fixed,
+    honest constant every resolved profile carries instead.
+
+    NETWORK reuses `kriya.tools.containment.NetworkAuthority`'s exact
+    DENIED/UNRESTRICTED semantics by value-string convention (see
+    kriya/mcp/capability.py::MCPNetworkAuthority for why this is a
+    dedicated MCP-local enum rather than an added member of the shared
+    ContainmentProfile-facing enum - reusing that shared enum's own type
+    was evaluated and rejected: kriya/tools/containment_oci.py's
+    `OCIContainmentBackend.prepare()` has no exhaustive-match ValueError
+    guard for `ContainmentProfile.network` - an unrecognized member
+    silently falls through to full UNRESTRICTED networking, so adding a
+    third member to that SHARED, ALREADY-IN-PRODUCTION enum risks a live
+    SEC-006 regression in the completely unrelated target-code sandboxing
+    path if any future code ever constructed a ContainmentProfile with the
+    new member by mistake - not a risk worth taking for a value that MCP
+    capability profiles never feed into ContainmentBackend in this
+    package anyway)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_read: bool = Field(default=False)
+    workspace_write: bool = Field(default=False)
+    temp_read_write: bool = Field(default=False)
+    dependency_cache_read: bool = Field(default=False)
+    # Resolved to absolute, escape-checked real paths by
+    # resolve_config_state() BEFORE SEC-009 authority resolution ever
+    # inspects this config (see that function's own "MCP capability path
+    # resolution" block) - by the time AppConfig validates this model, and
+    # by the time kriya/mcp/capability.py's resolve_mcp_capability_profile()
+    # ever sees these values, they are always already-safe absolute paths,
+    # never raw operator-supplied relative strings. A relative string that
+    # resolves outside the anchor root is rejected at that same resolution
+    # point (ValueError), never silently accepted here downstream.
+    additional_read_paths: List[str] = Field(default_factory=list)
+    additional_write_paths: List[str] = Field(default_factory=list)
+    network: str = Field(default="denied")
+    # Only meaningful (and required non-empty) when network=="explicit_destinations" -
+    # see kriya/mcp/capability.py::resolve_mcp_capability_profile()'s own check.
+    network_hosts: List[str] = Field(default_factory=list)
+
+    @field_validator("network")
+    @classmethod
+    def _network_must_be_recognized(cls, v: str) -> str:
+        if v not in ("denied", "explicit_destinations", "unrestricted"):
+            raise ValueError(
+                f"mcp.<server>.capabilities.network must be one of "
+                f"'denied'/'explicit_destinations'/'unrestricted', got {v!r}"
+            )
+        return v
+
 class MCPServerConfig(BaseModel):
     command: str
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
+    capabilities: MCPCapabilityConfig = Field(default_factory=MCPCapabilityConfig)
 
 class MCPLifecycleConfig(BaseModel):
     """SEC-004 (2026-09-13): bounded MCP subprocess lifecycle/resource
@@ -898,6 +995,79 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                         lf = user_data["logging"]["file"]
                         resolved_lf = lf if os.path.isabs(lf) else os.path.join(config_dir, lf)
                         user_data["logging"]["file"] = os.path.realpath(resolved_lf)
+
+                    # TOOL-003 P1: MCP capability filesystem paths - resolved
+                    # and escape-checked HERE, anchored to config_dir (same
+                    # anchor and same realpath-based idiom as paths.*/
+                    # logging.file above, for the identical reason: the value
+                    # SEC-009 authority resolution digests below and the
+                    # value kriya/mcp/capability.py's resolve_mcp_capability_
+                    # profile() eventually binds to a real MCPClient must be
+                    # the SAME single resolved value, computed ONCE, never
+                    # independently re-resolved later against a possibly-
+                    # different CWD (the exact classify-here/execute-there
+                    # split the logging.file bypass fix exists to prevent -
+                    # see this function's own module-level precedent above).
+                    # A `capabilities` key is unconditionally backfilled to
+                    # `{}` for every configured server (even one that never
+                    # mentions `capabilities` at all) so an omitted key and
+                    # an explicit empty `capabilities: {}` always produce the
+                    # IDENTICAL effective dict from this point forward -
+                    # otherwise the two would digest differently under
+                    # SEC-009 P2 (build_security_field_records() digests this
+                    # exact dict) even though pydantic resolves both to the
+                    # same default MCPCapabilityConfig(), causing a spurious
+                    # "approval invalidated" the moment an operator adds a
+                    # no-op explicit empty block.
+                    if isinstance(user_data.get("mcp"), dict):
+                        for _server_name, _server_cfg in user_data["mcp"].items():
+                            if not isinstance(_server_cfg, dict):
+                                continue
+                            caps = _server_cfg.setdefault("capabilities", {})
+                            if not isinstance(caps, dict):
+                                continue
+                            for _path_field in ("additional_read_paths", "additional_write_paths"):
+                                raw_paths = caps.get(_path_field)
+                                if not isinstance(raw_paths, list):
+                                    continue
+                                resolved_paths = []
+                                for raw in raw_paths:
+                                    if not isinstance(raw, str):
+                                        resolved_paths.append(raw)
+                                        continue
+                                    if os.path.isabs(raw):
+                                        # Absolute -> an explicit host path.
+                                        # Unambiguous by construction - no
+                                        # anchor, no escape check applies (an
+                                        # absolute path was never workspace-
+                                        # relative to begin with).
+                                        resolved_paths.append(os.path.realpath(raw))
+                                        continue
+                                    # Relative -> workspace-relative-only:
+                                    # resolved against config_dir and
+                                    # canonicalized (realpath follows both
+                                    # `..` traversal and any intermediate
+                                    # symlink to its real target) - REJECTED
+                                    # if the real target does not stay inside
+                                    # the real config_dir. A relative-looking
+                                    # path must never be able to smuggle an
+                                    # outside-anchor target past someone
+                                    # reading the config, and must never
+                                    # silently receive host-path authority it
+                                    # did not explicitly ask for by being
+                                    # written as an absolute path.
+                                    real_root = os.path.realpath(config_dir)
+                                    real_target = os.path.realpath(os.path.join(real_root, raw))
+                                    if real_target != real_root and not real_target.startswith(real_root + os.sep):
+                                        raise ValueError(
+                                            f"mcp.{_server_name}.capabilities.{_path_field} entry "
+                                            f"{raw!r} is a relative path that resolves outside "
+                                            f"{real_root!r} - a relative capability path must stay "
+                                            f"within the config's own directory; use an absolute "
+                                            f"path to explicitly authorize a host path outside it."
+                                        )
+                                    resolved_paths.append(real_target)
+                                caps[_path_field] = resolved_paths
 
                     # paths.{skills,memory,logs} classification depends on the
                     # resolved value (in-workspace vs. escaping) - resolve

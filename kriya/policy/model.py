@@ -106,6 +106,34 @@ class MCPToolIdentity:
     schema_digest: str
 
 
+@dataclass(frozen=True)
+class MCPCapabilityProfileIdentity:
+    """TOOL-003 P1 - a lightweight, strings-only identity carrying a
+    resolved MCP server's capability-profile digest into policy/audit
+    context (ActionRequest.metadata, telemetry), WITHOUT this module
+    importing anything from kriya/mcp/ - the actual `MCPCapabilityProfile`
+    dataclass and its digest function live in kriya/mcp/capability.py
+    (a HIGHER layer than kriya/policy/, which mcp/ already depends on -
+    see that module's own docstring); this type only carries the two
+    plain strings a policy/telemetry consumer needs, preserving the
+    existing one-directional kriya.mcp -> kriya.policy dependency exactly
+    like MCPToolIdentity above.
+
+    Deliberately DISTINCT from TOOL-002's own invocation-authority
+    decision: capability-profile identity is exposed here for AUDIT
+    CONTEXT ONLY (Task 10's "extend TOOL-002 policy metadata/telemetry
+    only enough to expose the MCP server's capability-profile identity" -
+    "Do not let TOOL-002 independently reinterpret the profile"). Nothing
+    in kriya/policy/execution.py's `_check_mcp_invocation` stage reads or
+    reasons about this identity's value at all - a capability-profile
+    approval (SEC-009, config-time) is never invocation approval (TOOL-002,
+    per-call), and this type does not blur that line. See CLAUDE.md's
+    TOOL-003 P1 section and kriya/mcp/capability.py's module docstring."""
+
+    server_identity: str
+    profile_digest: str
+
+
 def compute_mcp_schema_digest(schema: Any) -> str:
     """TOOL-002 P1 - canonicalizes an MCP tool's JSON Schema (inputSchema)
     before hashing, so semantically-identical schemas produce the same

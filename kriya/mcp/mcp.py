@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Type
 
@@ -8,6 +9,11 @@ from pydantic import BaseModel, Field, create_model
 
 from kriya.core.kernel import Kernel
 from kriya.tools.containment import ContainmentSetupError
+from kriya.mcp.capability import (
+    MCPCapabilityProfile,
+    compute_mcp_capability_profile_digest,
+    resolve_mcp_capability_profile,
+)
 from kriya.mcp.lifecycle import (
     MCPLifecycleError,
     MCPProtocolViolationError,
@@ -18,7 +24,15 @@ from kriya.mcp.lifecycle import (
 )
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
-from kriya.policy.model import ActionRequest, ActionType, MCPToolIdentity, PolicyDecision, PolicyResult, compute_mcp_schema_digest
+from kriya.policy.model import (
+    ActionRequest,
+    ActionType,
+    MCPCapabilityProfileIdentity,
+    MCPToolIdentity,
+    PolicyDecision,
+    PolicyResult,
+    compute_mcp_schema_digest,
+)
 from kriya.policy.telemetry import build_decision_record
 from kriya.tools.sandbox import build_restricted_env
 from kriya.tools.tool import BaseTool, ToolExecutionError
@@ -152,11 +166,20 @@ class MCPClient:
     def __init__(
         self, name: str, command: str, args: List[str], env: Optional[Dict[str, str]] = None,
         lifecycle_config: Optional[Any] = None, on_closed: Optional[Callable[[str, BaseException], None]] = None,
+        capability_profile: Optional[MCPCapabilityProfile] = None,
     ) -> None:
         self.name = name
         self.command = command
         self.args = args
         self.env = env or {}
+        # TOOL-003 P1: the resolved, operator-authorized maximum capability
+        # this server may ever be declared to possess - bound HERE, before
+        # start() is ever awaited (Task 9), from MCPManager.start_all()'s
+        # own resolution of the server's SEC-009-governed
+        # mcp.<server>.capabilities config. A data/authority BINDING only -
+        # this does not (yet) change what start()/spawn_mcp_process() does
+        # in any way; see kriya/mcp/capability.py's own security statement.
+        self.capability_profile = capability_profile or resolve_mcp_capability_profile({}, workspace_root=os.getcwd())
         # Local import (not a module-level import) to avoid a config->mcp
         # layer import cycle - kriya/config/config.py never imports from
         # kriya/mcp/, and this keeps that direction unchanged.
@@ -563,6 +586,15 @@ class MCPTool(BaseTool):
             tool_name=self._exact_tool_name,
             schema_digest=compute_mcp_schema_digest(input_schema),
         )
+        # TOOL-003 P1: the resolved capability-profile identity of the
+        # SAME MCPClient this tool dispatches through - bound once, here,
+        # from the client's own `capability_profile` (itself bound before
+        # start(), see MCPClient.__init__). Audit/telemetry context only
+        # (Task 10) - never read by _check_mcp_invocation's own decision.
+        self.capability_profile_identity = MCPCapabilityProfileIdentity(
+            server_identity=mcp_client.name,
+            profile_digest=compute_mcp_capability_profile_digest(mcp_client.capability_profile),
+        )
         # Bare ExecutionPolicy() with no override when the caller (today:
         # only MCPManager.start_all()) doesn't supply one - matches every
         # other real ExecutionPolicy call site's own established
@@ -614,7 +646,14 @@ class MCPTool(BaseTool):
         # argument names or values in P1 - that is TOOL-003 scope too).
         request = ActionRequest(
             action_type=ActionType.MCP_TOOL_CALL,
-            metadata={"mcp_tool_identity": self.identity},
+            metadata={
+                "mcp_tool_identity": self.identity,
+                # TOOL-003 P1: audit context only - _check_mcp_invocation
+                # does not read this key, never widens/narrows the
+                # invocation decision (Task 10/12: capability approval and
+                # invocation approval remain distinct decisions).
+                "mcp_capability_profile_identity": self.capability_profile_identity,
+            },
         )
         try:
             result = self._execution_policy.evaluate(request)
@@ -760,6 +799,17 @@ class MCPManager:
 
                 lifecycle_cfg = getattr(self.kernel.config, "mcp_lifecycle", None) if self.kernel.config else None
 
+                # TOOL-003 P1 (Task 9): resolve this server's capability
+                # profile BEFORE the client (and therefore the process) is
+                # ever constructed - `cfg_dict["capabilities"]` was already
+                # path-escape-validated at config-load time
+                # (kriya.config.config.resolve_config_state()); this call
+                # only classifies/canonicalizes, never re-validates safety
+                # (see kriya/mcp/capability.py's own docstring).
+                capability_profile = resolve_mcp_capability_profile(
+                    cfg_dict.get("capabilities", {}), workspace_root=os.path.realpath(os.getcwd())
+                )
+
                 client = MCPClient(
                     name=server_name,
                     command=cfg_dict["command"],
@@ -767,6 +817,7 @@ class MCPManager:
                     env=cfg_dict.get("env", {}),
                     lifecycle_config=lifecycle_cfg,
                     on_closed=self._on_client_closed,
+                    capability_profile=capability_profile,
                 )
                 await client.start()
                 self.clients[server_name] = client
