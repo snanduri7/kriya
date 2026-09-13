@@ -888,20 +888,18 @@ def build_structured_plan_repair_prompt(
                     f"{item['consumer_subtask']}.depends_on\n"
                 )
             targeted_correction += "  Preserve unrelated valid plan edges.\n"
-    if "TOOL_SUBTASK_MISSING_TOOL_NAME" in reason_codes or "TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE" in reason_codes:
-        # Repair Guidance audit (2026-09-07, before P7): TOOL_SUBTASK_
-        # UNSUPPORTED_IN_ENFORCE is the SAME underlying defect (a TOOL-
-        # execution-method subtask exists in enforce mode at all, which is
-        # never supported) reached via a different path than TOOL_SUBTASK_
-        # MISSING_TOOL_NAME (that one specifically has no tool_name; this
-        # one can have one and is still unsupported) - the identical fix
-        # applies either way, so both codes share this one block rather
-        # than duplicating it.
+    if "TOOL_SUBTASK_MISSING_TOOL_NAME" in reason_codes:
+        # TOOL-001 (2026-09-13): TOOL-execution-method subtasks are now
+        # supported in enforce mode (governed execution via the existing
+        # BaseTool.execute() boundary - see _run_structured_enforce's own
+        # per-subtask loop). TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE no longer
+        # exists as a reason code; this guidance now applies only to a
+        # genuinely malformed TOOL subtask missing its required tool_name.
         targeted_correction += (
-            "- A TOOL-execution-method subtask is not supported in enforce mode. If it is a "
-            "non-editing check, REMOVE it from subtasks and move its acceptance_criteria_ids plus "
-            "an equivalent verification entry onto its nearest declared implementation dependency. "
-            "Do not relabel it MODEL.\n"
+            "- A TOOL-execution-method subtask requires tool_name to be set (it names the "
+            "registered tool this subtask actually runs). Set it to the exact registered tool "
+            "name, or if this was meant to be a code-generation step, use execution_method=model "
+            "instead.\n"
         )
     if "MODEL_SUBTASK_MISSING_PLANNED_FILES" in reason_codes:
         targeted_correction += (
@@ -3221,6 +3219,80 @@ def revise_plan_for_runtime_plan_gap(
     return EngineeringPlan.model_validate(revised.model_dump(mode="json"))
 
 
+def exclude_tool_subtasks_from_resume(
+    plan: EngineeringPlan, resumed_subtask_states: Dict[str, str],
+) -> Tuple[Dict[str, str], List[str]]:
+    """TOOL-001 (2026-09-13), Invariant 18 ("resume/checkpoint cannot
+    bypass revalidation"): pure computation, separated out for direct unit
+    testing (mirrors compute_abandoned_plan_files's own "pure/testable,
+    real call site wires it in" split just above).
+
+    A MODEL subtask's "completed" resume record is self-verifying via the
+    caller's own git tree_hash/base_commit match - the written file
+    content IS the artifact, and it's still on disk exactly as recorded.
+    A TOOL subtask's "completed" record has no such self-verifying
+    property: the side effect (an MCP tools/call, a Maven build, ...) left
+    no git-visible trace that check can confirm is still current, and
+    TOOL-002/TOOL-003's own authority state (durable approval, capability
+    profile) can drift independently of the git workspace entirely.
+    Rather than inventing new idempotency/staleness semantics for tool
+    side effects (explicitly out of scope), a TOOL-tagged subtask is never
+    treated as resume-completed - removed from the returned dict
+    unconditionally, so the caller's own per-subtask loop always
+    re-executes it through the full governed path, which always
+    re-consults current TOOL-002/TOOL-003/SEC-005/ExecutionPolicy
+    authority fresh. This is a disclosed behavior CHOICE, not a
+    side-effect-free compromise: a non-idempotent tool re-invoked on
+    resume is a plan-design hazard the existing governance layer surfaces
+    the same way it would on any fresh second run of the same plan,
+    whereas silently skipping TOOL-002 revalidation would be a
+    security-contract violation - the two are not symmetric risks, so
+    this does not split the difference.
+
+    Only ever REMOVES entries (never adds/completes one) - a subtask id
+    from `resumed_subtask_states` that is no longer present in the
+    (possibly freshly re-planned) `plan` is left exactly as the caller
+    passed it; this function has no opinion on plan-drift handling, only
+    on which currently-plan-present, currently-"completed" entries are
+    safe to treat as resume-skippable."""
+    tool_subtask_ids = {
+        st.id for st in plan.subtasks if st.execution_method == ExecutionMethod.TOOL
+    }
+    excluded = sorted(
+        subtask_id for subtask_id, status in resumed_subtask_states.items()
+        if status == "completed" and subtask_id in tool_subtask_ids
+    )
+    if not excluded:
+        return resumed_subtask_states, excluded
+    filtered = {k: v for k, v in resumed_subtask_states.items() if k not in excluded}
+    return filtered, excluded
+
+
+def all_subtasks_completed(
+    current_plan_subtask_ids: Set[str], latest_status_by_subtask: Dict[str, SubtaskStatus],
+) -> bool:
+    """Terminal-correctness gate (TOOL-001, 2026-09-13; Invariant 20: a
+    Subtask's own execution status only ever means "the attempt itself
+    didn't error" - never "the workflow overall may terminate successful"
+    on its own). Pure computation, separated out for direct unit testing:
+    a plain AND-reduction over every CURRENT plan subtask's latest
+    status - a single TOOL subtask reporting COMPLETED (even if its own
+    `tool_output` happens to contain text like "PASS") cannot make this
+    True while any OTHER subtask (MODEL or TOOL) in the same plan is not
+    itself COMPLETED; nothing here ever inspects `tool_output`/`files`
+    content at all, only the structural `SubtaskStatus` each subtask's own
+    real execution produced. Scope recovery can merge/remove a subtask
+    mid-run, leaving a stale COMPLETED entry in the results dict even
+    though it's no longer part of the current plan - measured against the
+    current plan's ids only, never bare dict/set equality, so a
+    successfully executed revised plan is never falsely reported failed
+    solely because it now has fewer stages."""
+    return all(
+        latest_status_by_subtask.get(subtask_id) == SubtaskStatus.COMPLETED
+        for subtask_id in current_plan_subtask_ids
+    )
+
+
 def compute_abandoned_plan_files(
     prior_subtask_states: Dict[str, str],
     prior_subtask_written_files: Dict[str, List[str]],
@@ -4036,12 +4108,18 @@ class WorkflowController:
 
         Known, honest scope boundaries for this first real cut (not silent
         gaps - each is a deliberate, separate decision):
-        - TOOL-tagged subtasks are refused outright (see below) - the same
-          reasoning as _run_structured_shadow's own hard stop:
-          SubtaskExecutor's TOOL dispatch has zero policy gate a raw shell
-          string can't trivially defeat. Enforcing SAFELY requires either a
-          real per-tool policy mapping or accepting a materially weaker
-          guarantee - a separate, later decision, not bundled into this one.
+        - TOOL-1 (2026-09-13): TOOL-tagged subtasks are now executed for
+          real (see the per-subtask loop below) - by the time this landed,
+          "zero policy gate a raw shell string can't trivially defeat" was
+          no longer accurate: TOOL-002/TOOL-003 (MCP invocation/capability
+          authority) and SEC-005 (ShellTool package-manager network
+          authority) had both since closed, and every real TOOL dispatch
+          converges on the exact same governed `BaseTool.execute()`
+          boundary `kriya tools execute` already uses - no new or weaker
+          policy mapping was introduced for this. `_run_structured_shadow`'s
+          own hard stop (above) is unchanged and unrelated - that
+          restriction is specific to shadow's own non-mutating contract,
+          not a security gap this pass closed.
         - Subtask-spanning resume (2026-08-24): when the CALLER passes
           resume=True or resume_id=<id> (the same flags each subtask's own
           run_generation_workflow() call already accepted), this method now
@@ -4090,7 +4168,8 @@ class WorkflowController:
           context-quality gap.
 
 A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
-        failed validation, a TOOL-tagged subtask present) enters a bounded
+        failed validation - a TOOL-tagged subtask present is no longer one
+        of these, see TOOL-001 above) enters a bounded
         local PLAN_REPAIR loop. Two unsuccessful corrections raise
         _UnsafeStructuredPlan and fail closed without a legacy fallback,
         preserving the authoritative write-scope boundary. A
@@ -4290,16 +4369,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     reason_codes.append("STRUCTURED_PLAN_EMPTY")
                 else:
                     plan, _ = canonicalize_planned_file_actions(raw_plan, workspace_path)
-                    tool_subtasks = [
-                        st.id for st in plan.subtasks
-                        if st.execution_method == ExecutionMethod.TOOL
-                    ]
-                    if tool_subtasks:
-                        invalid_subtask_ids.extend(tool_subtasks)
-                        errors.append(
-                            f"TOOL-tagged subtask(s) {tool_subtasks!r} are unsupported in enforce mode"
-                        )
-                        reason_codes.append("TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE")
+                    # TOOL-001 (2026-09-13): TOOL-tagged subtasks are no
+                    # longer refused here - they now execute through the
+                    # governed path in the per-subtask loop below (real
+                    # kernel.registry lookup -> BaseTool.execute() -> the
+                    # SAME ExecutionPolicy/TOOL-002/TOOL-003/SEC-005
+                    # controls direct CLI tool execution already goes
+                    # through). validate_plan() below still requires
+                    # tool_name to resolve to a REGISTERED tool
+                    # (available_tool_names) - an unknown tool_name is
+                    # still rejected here, at plan-validation time, not
+                    # silently deferred to execution.
 
                     validation = await validate_plan(
                         plan, workspace_path=workspace_path,
@@ -4671,7 +4751,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "Starting the plan fresh."
                     )
                 else:
-                    resumed_subtask_states = dict(prior_control_state.subtask_states)
+                    resumed_subtask_states, skipped_tool_subtasks = exclude_tool_subtasks_from_resume(
+                        plan, dict(prior_control_state.subtask_states),
+                    )
+                    if skipped_tool_subtasks:
+                        logger.warning(
+                            f"WorkflowController enforce run {run_id!r}: TOOL-tagged subtask(s) "
+                            f"{skipped_tool_subtasks!r} were recorded completed by an earlier "
+                            "interrupted run, but TOOL subtasks are never resume-skipped "
+                            "(authority must always revalidate - see exclude_tool_subtasks_from_"
+                            "resume's own docstring) - they will re-execute for real."
+                        )
                     logger.info(
                         f"WorkflowController enforce run {run_id!r}: resuming - "
                         f"{sum(1 for v in resumed_subtask_states.values() if v == 'completed')} "
@@ -4988,6 +5078,62 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 position, total, subtask.id, [pf.path for pf in subtask.planned_files],
                 subtask.depends_on, subtask.relevant_global_invariant_ids,
             )
+
+            if subtask.execution_method == ExecutionMethod.TOOL:
+                # TOOL-001 (2026-09-13): governed execution, converging on
+                # the SAME kernel.registry -> BaseTool.execute() boundary
+                # `kriya tools execute` (direct CLI) already uses, via the
+                # existing subtask_executor.execute() - unchanged, and
+                # already the exact function _run_structured_shadow calls
+                # for MODEL subtasks above; TOOL was the one
+                # execution_method it (deliberately) never dispatched for
+                # real. No retry/recovery/obligation-ledger/scope-conflict
+                # machinery applies here - all of that is MODEL-generation-
+                # specific (a Quality-Gates retry loop over LLM output); a
+                # TOOL subtask is one deterministic call through a tool the
+                # tool's OWN implementation is responsible for authorizing/
+                # containing (ExecutionPolicy, TOOL-002/TOOL-003 durable
+                # approval + OCI containment for MCP tools, SEC-005
+                # registry-scoped network authority for ShellTool
+                # package-manager commands - none of it duplicated or
+                # reimplemented here). subtask.tool_arguments passes
+                # straight through as validated kwargs
+                # (BaseTool.execute()'s own arguments_schema validation);
+                # nothing here inspects or trusts subtask.description,
+                # planner rationale, or any other free-form field as an
+                # authority signal.
+                tool_context = project_for_subtask(execution_context, subtask)
+                result = await subtask_executor.execute(
+                    subtask=subtask, plan=plan, context=tool_context, kernel=kernel,
+                )
+                subtask_results.append(result)
+                record_subtask_attempt(ledger, plan, result, attempt=1)
+                control_state = control_state.with_updates(
+                    subtask_states={**control_state.subtask_states, subtask.id: result.status.value},
+                )
+                approved_stage_states[subtask.id] = result.status.value
+                tool_lifecycle_state = (
+                    "in_progress" if result.status == SubtaskStatus.COMPLETED
+                    else "needs_review" if result.status == SubtaskStatus.NEEDS_REVIEW
+                    else "failed"
+                )
+                save_approved_plan(
+                    workspace_path, plan.plan_id,
+                    build_approved_plan_document(
+                        plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                        stage_states=approved_stage_states, lifecycle_state=tool_lifecycle_state,
+                    ),
+                )
+                save_control_state(workspace_path, control_state)
+                if result.status != SubtaskStatus.COMPLETED:
+                    logger.warning(
+                        f"WorkflowController enforce run {run_id!r}: stopped at subtask {subtask_id!r} "
+                        f"({position}/{total}) - TOOL execution did not complete (status="
+                        f"{result.status.value})." + (f" Reason: {result.error}" if result.error else "")
+                    )
+                    break
+                continue
+
             # MA7-C1 (2026-08-25 external review): the validated Subtask is
             # now authoritative - predetermined_plan/predetermined_design/
             # predetermined_architect_files (kriya/workflow/workflow.py)
@@ -6160,16 +6306,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         latest_status_by_subtask = {
             result.subtask_id: result.status for result in subtask_results
         }
-        # Scope recovery can merge/remove a subtask mid-run, leaving its
-        # stale COMPLETED entry in subtask_results even though it's no
-        # longer part of the current plan. Measure completion against the
-        # current plan's ids only - a set-equality check against the
-        # (append-only, never-pruned) subtask_results keys would falsely
-        # report a fully successful revised plan as failed.
-        all_completed = all(
-            latest_status_by_subtask.get(subtask_id) == SubtaskStatus.COMPLETED
-            for subtask_id in current_plan_subtask_ids
-        )
+        all_completed = all_subtasks_completed(current_plan_subtask_ids, latest_status_by_subtask)
         try:
             if all_completed and plan_workspace_path != workspace_path:
                 terminal_writes: List[StagedFileWrite] = []

@@ -7486,13 +7486,16 @@ def _scan_structured_plan_reason_codes():
 # build_structured_plan_repair_prompt - verified BEHAVIORALLY below, not
 # just declared here. Repair Guidance audit (2026-09-07, before P7): the
 # twelve entries below the P1-P6 baseline are this audit's own findings -
-# real gaps proven necessary (TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE now
-# shares TOOL_SUBTASK_MISSING_TOOL_NAME's existing block rather than
-# duplicating it; DUPLICATE_SUBTASK_ID/SUBTASK_DEPENDS_ON_UNKNOWN_ID/
-# SUBTASK_DEPENDENCY_CYCLE are reason codes that did not exist before this
-# audit at all - three structural checks in plan_validation.py had error
-# text but genuinely no reason code, invisible to this entire completeness
-# mechanism until now).
+# real gaps proven necessary (DUPLICATE_SUBTASK_ID/SUBTASK_DEPENDS_ON_
+# UNKNOWN_ID/SUBTASK_DEPENDENCY_CYCLE are reason codes that did not exist
+# before this audit at all - three structural checks in plan_validation.py
+# had error text but genuinely no reason code, invisible to this entire
+# completeness mechanism until now). TOOL-001 (2026-09-13):
+# TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE removed from this set - TOOL-tagged
+# subtasks are no longer unsupported in enforce mode (see
+# workflow_controller.py's own per-subtask loop), so this reason code is
+# no longer ever emitted; TOOL_SUBTASK_MISSING_TOOL_NAME remains (a
+# TOOL-execution-method subtask with no tool_name is still invalid).
 _CODES_WITH_TARGETED_GUIDANCE = {
     "TOOL_SUBTASK_MISSING_TOOL_NAME",
     "MODEL_SUBTASK_MISSING_PLANNED_FILES",
@@ -7510,7 +7513,6 @@ _CODES_WITH_TARGETED_GUIDANCE = {
     "UNKNOWN_GLOBAL_INVARIANT",
     "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP",
     "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED",
-    "TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE",
     "SEMANTIC_DEPENDENCY_EDGE_MISSING",
     "SUBTASK_SEMANTIC_CONTRACT_MISSING",
     "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER",
