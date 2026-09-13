@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import shlex
-from typing import Any, Optional, Type
+from typing import Any, Optional, Tuple, Type
 
 from pydantic import BaseModel, Field
 
@@ -12,7 +12,7 @@ from kriya.config.config import AutonomyConfig, ExecutionPolicyConfig
 from kriya.plugins.plugin import BasePlugin
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
-from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.execution import ExecutionPolicy, classify_shell_acquisition_command
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision
 from kriya.tools.containment import (
     ContainmentProfile,
@@ -248,13 +248,40 @@ class ShellTool(BaseTool):
         # being silently caught by the generic ToolExecutionError wrap -
         # a caller needs to be able to tell "the shell command itself
         # failed" from "Kriya refused to run it uncontained".
+        #
+        # SEC-005 O5 (2026-09-13): network is UNRESTRICTED unconditionally
+        # UNLESS BOTH (a) `contained_execution_required=True` (the same
+        # opt-in gate PolymorphicValidator's own acquisition path already
+        # uses - "preserve current documented behavior when containment is
+        # intentionally disabled", never redesigning that global decision)
+        # AND (b) this exact invocation is recognized as package-manager-
+        # acquisition-shaped (classify_shell_acquisition_command, reusing
+        # SEC-006's own AutonomyConfig.acquisition_registry_hosts for the
+        # two ecosystems it already authorizes - never a new, independently
+        # maintained host list). A near-miss / unrecognized command is
+        # UNCHANGED (still UNRESTRICTED) - this only ever NARROWS authority
+        # for a positively-recognized acquisition shape, never widens
+        # anything relative to today's behavior. An unmapped-but-recognized
+        # package manager (npm/Bundler/RubyGems/Cargo/Gradle - no
+        # registry-host authority declared for these today) fails CLOSED to
+        # DENIED, never UNRESTRICTED.
+        network = NetworkAuthority.UNRESTRICTED
+        network_destinations: Tuple[str, ...] = ()
+        if self.autonomy_cfg.contained_execution_required:
+            acquisition_kind = classify_shell_acquisition_command(parsed_command) if parsed_command else None
+            if acquisition_kind == "registry_scoped":
+                network = NetworkAuthority.DEPENDENCY_REGISTRY_ONLY
+                network_destinations = tuple(sorted(set(self.autonomy_cfg.acquisition_registry_hosts)))
+            elif acquisition_kind == "unmapped":
+                network = NetworkAuthority.DENIED
         profile = None
         backend = None
         if self.autonomy_cfg.sandbox_execution:
             profile = ContainmentProfile(
                 trust_class=TrustClass.UNTRUSTED_EXECUTION,
                 workspace_path=os.getcwd(),
-                network=NetworkAuthority.UNRESTRICTED,  # unchanged from today - no network gate existed here before either
+                network=network,
+                network_destinations=network_destinations,
                 env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
                 cpu_seconds=self.autonomy_cfg.sandbox_cpu_seconds,
                 memory_mb=self.autonomy_cfg.sandbox_memory_mb,

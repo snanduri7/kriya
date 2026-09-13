@@ -61,7 +61,8 @@ engine.
 
 import os
 import re
-from typing import Callable, FrozenSet, Optional, Sequence, Tuple
+import shlex
+from typing import Callable, FrozenSet, List, Optional, Sequence, Tuple
 
 from kriya.policy.model import (
     ActionRequest,
@@ -174,6 +175,145 @@ def extract_install_package_target(command: Tuple[str, ...]) -> Optional[str]:
             return " ".join(command[len(prefix):]) or None
 
     return None
+
+
+# SEC-005 O5 (2026-09-13): ShellTool ("Execute arbitrary shell commands on
+# the local machine") is the one production call site that hardcodes
+# ContainmentProfile.network=UNRESTRICTED unconditionally, independent of
+# any package-manager shape - unlike PolymorphicValidator/dependency_execution.py,
+# which already route real Maven/pip acquisition through SEC-006's
+# registry-scoped network authority. This is deliberately NOT the same
+# recognition used by extract_install_package_target/_check_package_supply_chain
+# above (POL-001's INSTALL_PACKAGE approval-gating decision, which excludes
+# Maven entirely - "dependency resolution happens implicitly during mvn
+# compile/test") - here the question is narrower and different: "does this
+# ShellTool invocation touch a package registry over the network at all",
+# which for Maven is true on nearly every real invocation (compile/test/
+# verify/package/install/deploy all trigger implicit dependency
+# resolution), not just an explicit install verb.
+#
+# "registry_scoped" -> the two ecosystems SEC-006's own
+# AutonomyConfig.acquisition_registry_hosts already authorizes (Maven
+# Central, PyPI) - reuse that SAME host list, never a new one.
+# "unmapped" -> a real, recognized package-manager acquisition shape for
+# an ecosystem Kriya has no registry-host authority for today (npm,
+# Bundler, RubyGems, Cargo, Gradle) - fails closed to DENIED, never
+# UNRESTRICTED (Task 3: "do not silently convert unsupported managers into
+# UNRESTRICTED").
+# None -> not recognized at all (includes every "near miss" - an
+# unrelated command, a package name that merely contains "pip"/"npm", a
+# recognized executable used with an unrecognized verb) - falls through to
+# ShellTool's existing, UNCHANGED UNRESTRICTED default. Deliberately
+# conservative: this function only ever NARROWS authority relative to
+# today's baseline, never widens it, so a false negative (an unrecognized
+# real package-manager invocation) is no worse than today's status quo,
+# while a false positive would incorrectly restrict a legitimate command -
+# every prefix below is a real, well-known package-manager invocation
+# shape, not a guess.
+_UNMAPPED_PACKAGE_MANAGER_PREFIXES: Tuple[Tuple[str, ...], ...] = _INSTALL_COMMAND_PREFIXES + (
+    ("npm", "ci"),
+    ("npm", "i"),
+    ("gradle",),
+    ("gradlew",),
+)
+
+
+def _classify_acquisition_segment(command: Tuple[str, ...]) -> Optional[str]:
+    if not command:
+        return None
+    executable = os.path.basename(command[0])
+    rest = command[1:]
+
+    # mvn/mvnw (the Maven Wrapper - Task 6's own required bypass check):
+    # ANY subcommand, not just "install" - see the module comment above for
+    # why this is intentionally broader than extract_install_package_target's
+    # own Maven exclusion.
+    if executable in ("mvn", "mvnw"):
+        return "registry_scoped"
+    if executable in ("pip", "pip3") and rest[:1] in (("install",), ("download",)):
+        return "registry_scoped"
+    if (
+        executable.startswith("python") and len(rest) >= 3
+        and rest[0] == "-m" and rest[1] in ("pip", "pip3") and rest[2] in ("install", "download")
+    ):
+        return "registry_scoped"
+
+    for prefix in _UNMAPPED_PACKAGE_MANAGER_PREFIXES:
+        if _command_matches_prefix(command, prefix):
+            return "unmapped"
+
+    return None
+
+
+_SHELL_CONTROL_OPERATORS = frozenset({"&&", "||", ";", "|", "&"})
+_RESTRICTIVENESS_RANK = {None: 0, "registry_scoped": 1, "unmapped": 2}
+
+
+def _split_shell_segments(tokens: Tuple[str, ...]) -> Tuple[Tuple[str, ...], ...]:
+    """Splits a flat, already-shlex-tokenized command on well-known shell
+    control-operator tokens (&&, ||, ;, |, &) - a bounded, deterministic
+    step, NOT shell-grammar parsing (no subshell/quoting/substitution
+    handling): Task 6's own "obvious shell wrapping currently accepted by
+    ShellTool" bar, not Task 2/6's explicitly-excluded "ambitious shell
+    parser"/"complete adversarial shell-language interpretation." Exists so
+    a compound command like "pip install x && curl evil" is recognized on
+    its pip segment (and therefore network-narrowed for the WHOLE contained
+    process, since containment applies per-process-tree, not per-segment -
+    narrowing is always safe to apply too broadly, never too narrowly)."""
+    segments: List[Tuple[str, ...]] = []
+    current: List[str] = []
+    for tok in tokens:
+        if tok in _SHELL_CONTROL_OPERATORS:
+            if current:
+                segments.append(tuple(current))
+            current = []
+        else:
+            current.append(tok)
+    if current:
+        segments.append(tuple(current))
+    return tuple(segments)
+
+
+def classify_shell_acquisition_command(command: Tuple[str, ...], _depth: int = 0) -> Optional[str]:
+    """SEC-005 O5: deterministic, shape-based classification of a ShellTool
+    command as package-manager-acquisition-shaped or not - see the module
+    comment above `_UNMAPPED_PACKAGE_MANAGER_PREFIXES` for the full
+    rationale and the "registry_scoped"/"unmapped"/None outcome meanings.
+
+    Splits on shell control operators first (_split_shell_segments) so a
+    compound command is recognized by ANY of its segments, then does ONE
+    bounded level of `sh -c "..."`/`bash -c "..."` unwrapping (reusing the
+    existing `_SHELL_WRAPPER_EXECUTABLES` recognition already used
+    elsewhere in this module) via `_depth` (capped at 3, purely to bound a
+    pathological/self-referential input, not because deeper real nesting is
+    expected) - deliberately NOT a general shell parser: subshells
+    (`( ... )`), command substitution (`` `...` ``/`$(...)`), and an
+    eval/xargs-launched package manager are NOT unwrapped and remain
+    undetectable by this function, disclosed explicitly rather than
+    silently claimed as covered. When nothing in a compound command is
+    recognized, the result is None - identical to today's baseline (an
+    unrecognized command already gets ShellTool's unchanged UNRESTRICTED
+    default), so an undetected compound form is not a regression, only an
+    acknowledged limitation of shape-based recognition on a full shell
+    string."""
+    if not command or _depth > 3:
+        return None
+    best: Optional[str] = None
+    for segment in _split_shell_segments(command):
+        outcome = _classify_acquisition_segment(segment)
+        if outcome is None and segment and os.path.basename(segment[0]) in _SHELL_WRAPPER_EXECUTABLES:
+            if "-c" in segment:
+                c_index = segment.index("-c")
+                if c_index + 1 < len(segment):
+                    try:
+                        nested = tuple(shlex.split(segment[c_index + 1]))
+                    except ValueError:
+                        nested = ()
+                    if nested:
+                        outcome = classify_shell_acquisition_command(nested, _depth=_depth + 1)
+        if outcome is not None and _RESTRICTIVENESS_RANK[outcome] > _RESTRICTIVENESS_RANK[best]:
+            best = outcome
+    return best
 
 # Section 11 of the MA4 design doc: this fixed order is itself a safety
 # property. Placing filesystem/git/network/package restrictions ahead of the
