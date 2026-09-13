@@ -4467,12 +4467,19 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # signature while its body silently changed). Deliberately its own
         # module/function/reason-code space, never merged into
         # find_brownfield_public_api_changes() - see semantic_region_authority.py's
-        # own module docstring. A full no-op (early-out on empty list, inside
-        # find_unauthorized_semantic_changes() itself) for every caller that
-        # hasn't populated ctx.authorized_semantic_regions - which is every
-        # caller today, since A3 promotion doesn't exist yet.
+        # own module docstring. Per-region checking is a no-op for a file
+        # absent from ctx.authorized_semantic_regions - unaffected by A3 or
+        # by CORR-018's general-case closure (2026-09-13), which populates
+        # this list automatically for ordinary generate/fix and structured-
+        # plan calls, but ONLY when autonomy.semantic_region_enforcement_
+        # required is True (see kriya/workflow/semantic_scope_derivation.py).
+        # strict_existing_java_files below is what makes an UNLISTED
+        # existing .java file's own real change a rejection rather than a
+        # silent no-op, and is itself gated by that same flag - default
+        # False preserves every existing caller's behavior exactly.
         semantic_violations = find_unauthorized_semantic_changes(
             baseline_contents, candidate_contents, ctx.authorized_semantic_regions,
+            strict_existing_java_files=ctx.kernel.config.autonomy.semantic_region_enforcement_required,
         )
         if semantic_violations:
             evidence = "; ".join(
@@ -5698,6 +5705,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     compile_error_output=compile_res["output"],
                     active_code_context=active_code_context,
                     max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
+                    authorized_semantic_regions=ctx.authorized_semantic_regions,
+                    strict_existing_java_files=ctx.kernel.config.autonomy.semantic_region_enforcement_required,
+                    baseline_contents=state.all_original_contents,
                 )
                 _record_self_correction_scope_conflict(
                     state, ctx, self_correction_result, "compile",
@@ -6583,6 +6593,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 active_code_context=active_code_context,
                                 max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
                                 failure_type="run_verification",
+                                authorized_semantic_regions=ctx.authorized_semantic_regions,
+                                strict_existing_java_files=ctx.kernel.config.autonomy.semantic_region_enforcement_required,
+                                baseline_contents=state.all_original_contents,
                             )
                             _record_self_correction_scope_conflict(
                                 state, ctx, self_correction_result, "run_verification",

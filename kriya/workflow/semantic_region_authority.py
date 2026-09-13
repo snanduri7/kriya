@@ -23,24 +23,37 @@ CONSTRUCTOR_SIGNATURE region - CORR-016 still independently decides whether
 the signature delta itself is authorized; this module never re-litigates
 that, it only decides whether the region shape is covered.
 
-A3-BOUND ONLY, BY DESIGN: `authorized_regions` must be supplied explicitly by
-the caller (in practice, derived from an approved `ProposedModification`,
-kriya/workflow/review_context.py - not yet wired, a future slice). There is
-no goal-text-derived general authorization here - general CORR-018 (deriving
-authority from an arbitrary hand-typed goal) remains NEEDS_IMPLEMENTATION and
-is explicitly out of scope. An empty/absent `authorized_regions` sequence for
-a given file means this module performs NO checks on that file at all -
-today's unchanged behavior for every existing caller, opted into per-file by
-the caller supplying a region there, never opted OUT of per-file by this
-module itself.
+`authorized_regions` must always be supplied explicitly by the caller -
+never inferred from candidate content, Planner text, or file-write scope
+(Invariant: file authority != semantic authority). Two independent sources
+of `authorized_regions` exist in production: (1) an approved
+`ProposedModification` (A3's own proposal-promotion path,
+kriya/workflow/proposal_binding.py - unchanged by the CORR-018 general-case
+closure below), and (2) `kriya/workflow/semantic_scope_derivation.py`
+(CORR-018 general-case closure, 2026-09-13) - grounding_goal-derived and
+deterministic-repository-relationship-derived regions for ordinary
+generate/fix runs, gated behind `autonomy.semantic_region_enforcement_
+required` (default False - see that module's own docstring for why an
+unconditional default was rejected). An empty/absent `authorized_regions`
+sequence for a given file means this module performs NO PER-REGION checks
+on that file - `find_unauthorized_semantic_changes`'s own
+`strict_existing_java_files` parameter (default False, opt-in, wired only
+when the flag above is True) is the ONLY thing that turns an unlisted
+EXISTING .java file's own change into a rejection instead of a silent
+no-op; every existing caller that does not pass it keeps byte-identical
+behavior.
 
-V1 SCOPE (Java only): top-level class methods/constructors and imports.
-Fields, nested/inner class members, record compact constructors, generated/
-Lombok/annotation-processor source, and arbitrary class-level restructuring
-are explicitly OUT of member-level scope - any material change there is
-caught only as an undifferentiated "residual region changed" and rejected by
-default (no WHOLE_FILE escape hatch in this slice - see RegionType's own
-docstring). This is an honest, stated restriction, not a silent gap.
+V1 SCOPE (Java only): top-level class/interface/record methods,
+constructors, field declarations, record components, and imports.
+Nested/inner class members, record compact constructors, multi-line or
+comma-separated (`int a, b;`) field declarations, generated/Lombok/
+annotation-processor source, and arbitrary class-level restructuring are
+explicitly OUT of scope - any material change there is caught only as an
+undifferentiated "residual region changed" and rejected by default (no
+WHOLE_FILE escape hatch anywhere in this module - see RegionType's own
+docstring). This is an honest, stated restriction, not a silent gap: a
+construct this module cannot recognize can only ever be MORE protected
+(falls to the residual catch-all), never less.
 """
 from __future__ import annotations
 
@@ -50,7 +63,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
 
-from kriya.analyzer.java_members import JavaMember, extract_java_members
+from kriya.analyzer.java_members import (
+    JavaMember,
+    _param_type_only,
+    _split_top_level_commas,
+    extract_java_members,
+)
+from kriya.workflow.edit_safety import _strip_java_comments_and_strings
 
 REASON_REGION_UNAUTHORIZED = "SEMANTIC_REGION_UNAUTHORIZED"
 REASON_MEMBER_DELETED = "SEMANTIC_MEMBER_DELETED"
@@ -59,6 +78,22 @@ REASON_SIGNATURE_UNAUTHORIZED = "SEMANTIC_SIGNATURE_UNAUTHORIZED"
 REASON_RESIDUAL_REGION_CHANGED = "SEMANTIC_RESIDUAL_REGION_CHANGED"
 REASON_IMPORT_UNAUTHORIZED = "SEMANTIC_IMPORT_UNAUTHORIZED"
 REASON_SCAN_AMBIGUOUS = "SEMANTIC_SCAN_AMBIGUOUS"
+# CORR-018 general-case closure (2026-09-13): declaration-shaped peers of
+# the member reason codes above, reused verbatim in spirit (deleted/added/
+# changed-without-authority) for FIELD_DECLARATION/RECORD_COMPONENT - kept
+# as distinct string values (never the SAME code as a method/constructor
+# violation) so a caller's diagnostics can always tell which construct
+# kind was actually rejected, without inventing a second violation shape.
+REASON_DECLARATION_DELETED = "SEMANTIC_DECLARATION_DELETED"
+REASON_DECLARATION_ADDED_UNAUTHORIZED = "SEMANTIC_DECLARATION_ADDED_UNAUTHORIZED"
+REASON_DECLARATION_UNAUTHORIZED = "SEMANTIC_DECLARATION_UNAUTHORIZED"
+# Strict mode only (find_unauthorized_semantic_changes(...,
+# strict_existing_java_files=True)) - an EXISTING .java file whose content
+# actually changed but that has ZERO entries anywhere in authorized_regions
+# at all (today's non-strict behavior treats this as "outside this run's
+# authority scope, not this function's concern" and is silently a no-op for
+# that file - strict mode makes that silence a rejection instead).
+REASON_FILE_HAS_NO_SEMANTIC_AUTHORITY = "SEMANTIC_FILE_HAS_NO_AUTHORITY"
 
 
 class RegionType(str, Enum):
@@ -77,6 +112,18 @@ class RegionType(str, Enum):
     IMPORTS = "IMPORTS"
     TEST_METHOD_ADD = "TEST_METHOD_ADD"
     TEST_FILE_ADD = "TEST_FILE_ADD"
+    # CORR-018 general-case closure (2026-09-13): ordinary class/interface
+    # field declarations (top-level members of the primary type only - see
+    # _extract_field_declarations()'s own docstring for the exact scanned
+    # shape) and Java record components (the record header's own
+    # parenthesized component list - a distinct construct, never modeled
+    # as METHOD_SIGNATURE/CONSTRUCTOR_SIGNATURE/FIELD_DECLARATION even
+    # though a record's accessor methods and canonical constructor are
+    # implicitly derived from its components - this region authorizes ONLY
+    # the component-list text itself, never any accessor/constructor body,
+    # per the closure task's own explicit instruction).
+    FIELD_DECLARATION = "FIELD_DECLARATION"
+    RECORD_COMPONENT = "RECORD_COMPONENT"
 
 
 _BODY_REGIONS = frozenset({RegionType.METHOD_BODY, RegionType.CONSTRUCTOR_BODY})
@@ -84,6 +131,11 @@ _SIGNATURE_REGIONS = frozenset({RegionType.METHOD_SIGNATURE, RegionType.CONSTRUC
 _ADD_REGIONS = frozenset({
     RegionType.METHOD_ADD, RegionType.CONSTRUCTOR_ADD, RegionType.TEST_METHOD_ADD,
 })
+# A field/record-component has no body/signature split - one declaration,
+# one authorization. Kept as its own frozenset (not folded into
+# _SIGNATURE_REGIONS) so a *_SIGNATURE authorization can never accidentally
+# be read as covering a field/record-component change, or vice versa.
+_DECLARATION_REGIONS = frozenset({RegionType.FIELD_DECLARATION, RegionType.RECORD_COMPONENT})
 
 
 @dataclass(frozen=True)
@@ -117,9 +169,25 @@ class MemberSnapshot:
 
 
 @dataclass(frozen=True)
+class DeclarationSnapshot:
+    """A single field declaration or record component - simpler than
+    MemberSnapshot by design: there is no body/signature split (one
+    declaration, one hash), matching this construct's own single-region
+    authorization model (FIELD_DECLARATION/RECORD_COMPONENT)."""
+    stable_key: str
+    kind: str  # "field" | "record_component"
+    name: str
+    declaration_hash: str
+    start_line: int
+    end_line: int
+
+
+@dataclass(frozen=True)
 class FileSnapshot:
     relpath: str
     members: Dict[str, MemberSnapshot] = field(default_factory=dict)
+    fields: Dict[str, DeclarationSnapshot] = field(default_factory=dict)
+    record_components: Dict[str, DeclarationSnapshot] = field(default_factory=dict)
     imports: FrozenSet[str] = frozenset()
     residual_hash: str = ""
     ambiguous: bool = False
@@ -153,6 +221,28 @@ def stable_member_key(
     kind_token = "CONSTRUCTOR" if kind == "constructor" else "METHOD"
     normalized_params = ", ".join(_normalize_type(p) for p in parameter_types)
     return f"{relpath}::{enclosing_type}::{kind_token}::{name}::({normalized_params})"
+
+
+def stable_field_key(relpath: str, enclosing_type: str, field_name: str) -> str:
+    """Field identity: owning type + field name (Java forbids two fields of
+    the same name in the same type, so name alone disambiguates within one
+    type - the ``FIELD`` kind token plus enclosing_type is what keeps
+    ``Customer.region`` distinct from ``OtherCustomer.region``, and a
+    field's own key namespace distinct from a method/constructor sharing
+    the same name, matching stable_member_key()'s own collision-avoidance
+    reasoning)."""
+    return f"{relpath}::{enclosing_type}::FIELD::{field_name}"
+
+
+def stable_record_component_key(relpath: str, record_name: str, component_name: str) -> str:
+    """Component identity: owning record + component name - deliberately
+    its own kind token/namespace (RECORD_COMPONENT), never collapsed into
+    stable_field_key()'s FIELD namespace even for the same textual name,
+    since the two constructs have different authorization semantics
+    (RegionType.RECORD_COMPONENT vs RegionType.FIELD_DECLARATION) and this
+    module's own instruction is explicit: never model a record component as
+    a field declaration."""
+    return f"{relpath}::{record_name}::RECORD_COMPONENT::{component_name}"
 
 
 def _strip_comments_only(code: str) -> str:
@@ -243,17 +333,28 @@ def _references_token(text: str, token: str) -> bool:
     return bool(pattern.search(text))
 
 
-def _residual_text(content: str, members: Sequence[JavaMember]) -> str:
-    """Every line NOT part of an import statement and NOT part of any
-    extracted member's own [start_line, end_line] span - fields, class-level
-    annotations/modifiers, nested types, initializers, anything this
-    module's member scanner doesn't individually understand. Blanked (not
-    deleted) so import/member text remains excluded without shifting what
-    "material" means for the rest of the file."""
+def _residual_text(
+    content: str, members: Sequence[JavaMember],
+    extra_protected_spans: Sequence[Tuple[int, int]] = (),
+) -> str:
+    """Every line NOT part of an import statement, NOT part of any
+    extracted member's own [start_line, end_line] span, and NOT part of any
+    `extra_protected_spans` entry (recognized field declarations / a
+    record's own component-list header, both now explicitly represented -
+    see `_extract_field_declarations`/`_extract_record_components`) -
+    class-level annotations/modifiers, nested types, initializers, and
+    anything else this module's scanners don't individually understand
+    still fall here. Blanked (not deleted) so protected text remains
+    excluded without shifting what "material" means for the rest of the
+    file."""
     lines = content.splitlines()
     protected = [False] * (len(lines) + 1)  # 1-indexed
     for m in members:
         for ln in range(m.start_line, m.end_line + 1):
+            if 0 < ln <= len(lines):
+                protected[ln] = True
+    for start, end in extra_protected_spans:
+        for ln in range(start, end + 1):
             if 0 < ln <= len(lines):
                 protected[ln] = True
     kept = []
@@ -262,6 +363,159 @@ def _residual_text(content: str, members: Sequence[JavaMember]) -> str:
             continue
         kept.append(line)
     return "\n".join(kept)
+
+
+_FIELD_DECL_RE = re.compile(
+    r"^\s*(?:(?:public|private|protected|static|final|transient|volatile)\s+)*"
+    r"(?P<type>[A-Za-z_$][\w$]*(?:\s*<[^<>{}]*>)?(?:\s*\[\s*\])*)\s+"
+    r"(?P<name>[A-Za-z_$][\w$]*)\s*(?:=[^;]*)?;\s*$"
+)
+_LEADING_FIELD_ANNOTATION_RE = re.compile(r"^\s*@[A-Za-z_$][\w$.]*(?:\s*\([^()]*\))?\s*")
+
+
+def _extract_field_declarations(
+    relpath: str, content: str, enclosing_type: str, members: Sequence[JavaMember],
+) -> Dict[str, DeclarationSnapshot]:
+    """Ordinary class/interface field declarations of the PRIMARY top-level
+    type only (mirrors extract_java_members()'s own "one target file, one
+    primary type, depth 1 relative to it" scope). Depth is computed by a
+    plain running brace count over the comment/string-stripped text (safe:
+    a string literal's own '{'/'}' characters are blanked first, exactly
+    the same reuse `_matching_close_brace_line()` in java_members.py relies
+    on) - a line is a field candidate only while depth-before-that-line is
+    exactly 1 (directly inside the primary type's own body, never inside a
+    method/initializer block, which would already be depth >= 2) and it is
+    not already claimed by an extracted member's own line span.
+
+    Explicit V1 scope, honest rather than silently wrong: SINGLE PHYSICAL
+    LINE declarations only - no multi-line generic types, no multi-line
+    lambda initializers, no comma-separated multi-declarators (`int a,
+    b;`). None of these become false NEGATIVES that leak protection: a
+    field shape this function does not recognize simply never enters
+    `fields` and stays covered by the existing residual-region catch-all
+    (REASON_RESIDUAL_REGION_CHANGED) exactly as before this change - this
+    function can only ever narrow what "residual" means, never widen what
+    is silently permitted."""
+    try:
+        stripped = _strip_java_comments_and_strings(content)
+    except Exception:
+        return {}
+    stripped_lines = stripped.splitlines()
+    real_lines = content.splitlines()
+    depths_before: List[int] = []
+    depth = 0
+    for line in stripped_lines:
+        depths_before.append(depth)
+        depth += line.count("{") - line.count("}")
+
+    member_protected = [False] * (len(real_lines) + 1)
+    for m in members:
+        for ln in range(m.start_line, m.end_line + 1):
+            if 0 < ln <= len(real_lines):
+                member_protected[ln] = True
+
+    out: Dict[str, DeclarationSnapshot] = {}
+    for idx, stripped_line in enumerate(stripped_lines):
+        line_no = idx + 1
+        if depths_before[idx] != 1 or member_protected[line_no]:
+            continue
+        candidate = stripped_line
+        prev = None
+        while prev != candidate:
+            prev = candidate
+            candidate = _LEADING_FIELD_ANNOTATION_RE.sub("", candidate)
+        match = _FIELD_DECL_RE.match(candidate)
+        if not match:
+            continue
+        name = match.group("name")
+        key = stable_field_key(relpath, enclosing_type, name)
+        if key in out:
+            # A duplicate field name in the same type is invalid Java and
+            # should not occur for real source - treated defensively as
+            # "not safely identifiable" (removed, not arbitrarily picked)
+            # rather than risking a wrong identity; still protected by the
+            # residual catch-all either way.
+            del out[key]
+            continue
+        raw_text = real_lines[line_no - 1] if 0 < line_no <= len(real_lines) else stripped_line
+        declaration_hash = hashlib.sha256(_normalize_body_text(raw_text).encode("utf-8")).hexdigest()
+        out[key] = DeclarationSnapshot(
+            stable_key=key, kind="field", name=name,
+            declaration_hash=declaration_hash, start_line=line_no, end_line=line_no,
+        )
+    return out
+
+
+_RECORD_HEADER_RE = re.compile(r"\brecord\s+([A-Za-z_$][\w$]*)\s*(?:<[^<>{}]*>)?\s*\(")
+# Fallback enclosing-type name for a file whose primary type has zero
+# extracted methods/constructors (e.g. a plain data class/record with only
+# fields/components) - mirrors java_members.py's own private
+# _TOP_LEVEL_TYPE_RE exactly (kept local rather than importing a
+# leading-underscore symbol from that module for a second purpose).
+_TOP_LEVEL_TYPE_FALLBACK_RE = re.compile(r"\b(?:class|interface|enum|record)\s+([A-Za-z_$][\w$]*)")
+
+
+def _extract_record_components(
+    relpath: str, content: str,
+) -> Tuple[Dict[str, DeclarationSnapshot], Optional[Tuple[int, int]]]:
+    """The PRIMARY top-level record's own component list only (same "one
+    target file, one primary type" bound extract_java_members() already
+    uses) - a SECOND record declared in the same file is not scanned, an
+    honest V1 restriction. Returns (components, header_span) - header_span
+    (1-indexed, inclusive) is the record header's own line range, needed by
+    build_file_snapshot() to exclude it from the residual region; None if
+    no record declaration was found (or it was malformed/unmatched, which
+    fails closed - the header stays in the residual region, unauthorizable,
+    rather than silently guessing a component list)."""
+    try:
+        stripped = _strip_java_comments_and_strings(content)
+    except Exception:
+        return {}, None
+    match = _RECORD_HEADER_RE.search(stripped)
+    if not match:
+        return {}, None
+    record_name = match.group(1)
+    open_paren = match.end() - 1
+    depth = 0
+    close_paren = None
+    for i in range(open_paren, len(stripped)):
+        ch = stripped[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                close_paren = i
+                break
+    if close_paren is None:
+        return {}, None
+
+    component_text = stripped[open_paren + 1: close_paren]
+    start_line = stripped.count("\n", 0, open_paren) + 1
+    end_line = stripped.count("\n", 0, close_paren) + 1
+
+    out: Dict[str, DeclarationSnapshot] = {}
+    for piece in _split_top_level_commas(component_text):
+        piece = piece.strip()
+        if not piece:
+            continue
+        name_match = re.search(r"([A-Za-z_$][\w$]*)\s*$", piece)
+        if not name_match:
+            continue
+        name = name_match.group(1)
+        comp_type = _param_type_only(piece)
+        key = stable_record_component_key(relpath, record_name, name)
+        if key in out:
+            del out[key]
+            continue
+        declaration_hash = hashlib.sha256(
+            _normalize_body_text(f"{comp_type} {name}").encode("utf-8")
+        ).hexdigest()
+        out[key] = DeclarationSnapshot(
+            stable_key=key, kind="record_component", name=name,
+            declaration_hash=declaration_hash, start_line=start_line, end_line=end_line,
+        )
+    return out, (start_line, end_line)
 
 
 def build_file_snapshot(relpath: str, content: str) -> FileSnapshot:
@@ -292,11 +546,28 @@ def build_file_snapshot(relpath: str, content: str) -> FileSnapshot:
             start_line=m.start_line, end_line=m.end_line,
         )
 
+    if members:
+        enclosing_type = members[0].enclosing_type
+    else:
+        type_match = _TOP_LEVEL_TYPE_FALLBACK_RE.search(content)
+        enclosing_type = type_match.group(1) if type_match else ""
+    field_snapshots = _extract_field_declarations(relpath, content, enclosing_type, members)
+    record_component_snapshots, record_header_span = _extract_record_components(relpath, content)
+    if field_snapshots.keys() & record_component_snapshots.keys():
+        return FileSnapshot(
+            relpath=relpath, ambiguous=True,
+            ambiguous_reason="a field and a record component resolved to the same stable key",
+        )
+
+    extra_protected_spans = [(d.start_line, d.end_line) for d in field_snapshots.values()]
+    if record_header_span:
+        extra_protected_spans.append(record_header_span)
     residual_hash = hashlib.sha256(
-        _normalize_body_text(_residual_text(content, members)).encode("utf-8")
+        _normalize_body_text(_residual_text(content, members, extra_protected_spans)).encode("utf-8")
     ).hexdigest()
     return FileSnapshot(
         relpath=relpath, members=member_snapshots,
+        fields=field_snapshots, record_components=record_component_snapshots,
         imports=_extract_imports(content), residual_hash=residual_hash,
     )
 
@@ -312,6 +583,57 @@ def _authorized_body_or_signature(
     body = any(r.member_key == key and r.region_type in _BODY_REGIONS for r in regions)
     sig = any(r.member_key == key and r.region_type in _SIGNATURE_REGIONS for r in regions)
     return body, sig
+
+
+def _compare_declarations(
+    relpath: str,
+    base_decls: Dict[str, DeclarationSnapshot],
+    cand_decls: Dict[str, DeclarationSnapshot],
+    regions: Sequence[AuthorizedSemanticRegion],
+    region_type: RegionType,
+) -> List[SemanticAuthorityViolation]:
+    """Field/record-component comparison - deliberately simpler than the
+    member comparator below: one declaration, one hash, no body/signature
+    split, and NO successor-matching for a rename (Task 3's own explicit
+    instruction: a rename is indistinguishable from, and must be
+    authorized as, an independent delete + add - never a special-cased
+    "same identity, new name" grant, unlike a *_SIGNATURE region's own
+    successor_key mechanism for methods/constructors)."""
+    violations: List[SemanticAuthorityViolation] = []
+    # One grant, per exact key, covers all three operations for that key:
+    # modify, remove, or (for a key absent from the baseline) add - Task 2/3
+    # both explicitly require field/record-component REMOVAL to be an
+    # authorizable operation (unlike the method/constructor comparator
+    # above, where deletion is never authorized via a BODY/SIGNATURE grant
+    # at all, only via an explicit *_SIGNATURE successor_key rename - a
+    # deliberately different, simpler rule for this simpler construct kind,
+    # per this closure task's own explicit instruction that a
+    # field/record-component rename is an independent delete + add, never
+    # a special-cased "same identity" match).
+    authorized_keys = {r.member_key for r in regions if r.region_type == region_type and r.member_key}
+    for base_key, base_decl in base_decls.items():
+        cand_decl = cand_decls.get(base_key)
+        if cand_decl is None:
+            if base_key in authorized_keys:
+                continue  # authorized removal
+            violations.append(SemanticAuthorityViolation(
+                REASON_DECLARATION_DELETED, relpath, base_key,
+                f"{base_decl.kind} present in baseline is missing from candidate",
+            ))
+            continue
+        if base_decl.declaration_hash != cand_decl.declaration_hash and base_key not in authorized_keys:
+            violations.append(SemanticAuthorityViolation(
+                REASON_DECLARATION_UNAUTHORIZED, relpath, base_key,
+                f"{base_decl.kind} declaration changed without an authorized {region_type.value} region",
+            ))
+    for cand_key, cand_decl in cand_decls.items():
+        if cand_key in base_decls or cand_key in authorized_keys:
+            continue
+        violations.append(SemanticAuthorityViolation(
+            REASON_DECLARATION_ADDED_UNAUTHORIZED, relpath, cand_key,
+            f"new {cand_decl.kind} has no authorized {region_type.value} region",
+        ))
+    return violations
 
 
 def _compare_one_file(
@@ -379,14 +701,22 @@ def _compare_one_file(
             "new member has no authorized *_ADD region",
         ))
 
+    violations.extend(_compare_declarations(
+        relpath, base_snap.fields, cand_snap.fields, regions, RegionType.FIELD_DECLARATION,
+    ))
+    violations.extend(_compare_declarations(
+        relpath, base_snap.record_components, cand_snap.record_components, regions, RegionType.RECORD_COMPONENT,
+    ))
+
     violations.extend(_check_imports(relpath, baseline, candidate, base_snap, cand_snap, regions))
 
     if base_snap.residual_hash != cand_snap.residual_hash:
         violations.append(SemanticAuthorityViolation(
             REASON_RESIDUAL_REGION_CHANGED, relpath, None,
-            "content outside every recognized member/import region changed "
-            "(fields, class-level annotations/modifiers, nested types, or other "
-            "unsupported constructs) - not authorizable in this slice",
+            "content outside every recognized member/field/record-component/import "
+            "region changed (class-level annotations/modifiers, nested types, "
+            "multi-line/comma-separated field declarations, or other unsupported "
+            "constructs) - not authorizable in this slice",
         ))
 
     return violations
@@ -397,25 +727,41 @@ def _member_raw_text(content: str, start_line: int, end_line: int) -> str:
     return "\n".join(lines[start_line - 1: end_line]) if start_line >= 1 else ""
 
 
+def _lookup_span(snap: FileSnapshot, key: str) -> Optional[Tuple[int, int]]:
+    """A key may resolve to a member, a field, or a record component -
+    exactly one dict will ever hold it (the three key namespaces never
+    collide by construction, see stable_member_key/stable_field_key/
+    stable_record_component_key's own distinct kind tokens)."""
+    m = snap.members.get(key)
+    if m:
+        return m.start_line, m.end_line
+    d = snap.fields.get(key) or snap.record_components.get(key)
+    if d:
+        return d.start_line, d.end_line
+    return None
+
+
 def _authorized_region_text(content: str, snap: FileSnapshot, keys: "set[str]") -> str:
     parts = []
     for key in keys:
-        m = snap.members.get(key)
-        if m:
-            parts.append(_member_raw_text(content, m.start_line, m.end_line))
+        span = _lookup_span(snap, key)
+        if span:
+            parts.append(_member_raw_text(content, span[0], span[1]))
     return "\n".join(parts)
 
 
 def _non_authorized_baseline_text(baseline: str, base_snap: FileSnapshot, authorized_keys: "set[str]") -> str:
-    """Baseline content with only the AUTHORIZED members' own line ranges
-    blanked out - everything else (unauthorized members, residual region,
-    import lines) remains, so an import's simple name found here proves it
-    has a use the authorized change does NOT make obsolete."""
+    """Baseline content with only the AUTHORIZED members'/fields'/record
+    components' own line ranges blanked out - everything else (unauthorized
+    members, residual region, import lines) remains, so an import's simple
+    name found here proves it has a use the authorized change does NOT
+    make obsolete."""
     lines = baseline.splitlines()
     protected = [False] * (len(lines) + 1)
-    for key, m in base_snap.members.items():
+    all_items = list(base_snap.members.items()) + list(base_snap.fields.items()) + list(base_snap.record_components.items())
+    for key, entry in all_items:
         if key in authorized_keys:
-            for ln in range(m.start_line, m.end_line + 1):
+            for ln in range(entry.start_line, entry.end_line + 1):
                 if 0 < ln <= len(lines):
                     protected[ln] = True
     kept = [line for idx, line in enumerate(lines, 1) if not protected[idx] and not _IMPORT_LINE_RE.match(line)]
@@ -436,10 +782,12 @@ def _check_imports(
 
     cand_authorized_keys = {
         r.member_key for r in regions
-        if r.region_type in (_BODY_REGIONS | _SIGNATURE_REGIONS | _ADD_REGIONS) and r.member_key
+        if r.region_type in (_BODY_REGIONS | _SIGNATURE_REGIONS | _ADD_REGIONS | _DECLARATION_REGIONS)
+        and r.member_key
     }
     base_authorized_keys = {
-        r.member_key for r in regions if r.region_type in (_BODY_REGIONS | _SIGNATURE_REGIONS) and r.member_key
+        r.member_key for r in regions
+        if r.region_type in (_BODY_REGIONS | _SIGNATURE_REGIONS | _DECLARATION_REGIONS) and r.member_key
     }
     authorized_candidate_text = _authorized_region_text(candidate, cand_snap, cand_authorized_keys)
     authorized_baseline_text = _authorized_region_text(baseline, base_snap, base_authorized_keys)
@@ -488,6 +836,7 @@ def find_unauthorized_semantic_changes(
     original_contents: Dict[str, str],
     final_contents: Dict[str, str],
     authorized_regions: Sequence[AuthorizedSemanticRegion],
+    strict_existing_java_files: bool = False,
 ) -> List[SemanticAuthorityViolation]:
     """The orchestration entry point - the CORR-018-P1 peer to
     `find_brownfield_public_api_changes()` (kriya/workflow/file_resolution.py),
@@ -496,13 +845,20 @@ def find_unauthorized_semantic_changes(
     means clean" shape, but a SEPARATE function/module/reason-code space -
     never merged into that one (Part 15/19 of the CORR-018 A3-D2 design).
 
-    Only checks files that appear as a `relpath` in `authorized_regions` -
-    this is the A3-bound slice's own scope boundary: it protects exactly the
-    file(s) an approved proposal named, never every file a candidate
-    happens to touch (that would be general CORR-018, explicitly deferred).
-    An empty `authorized_regions` is a full no-op, by construction."""
-    if not authorized_regions:
-        return []
+    Per-region checking covers only files that appear as a `relpath` in
+    `authorized_regions` - unchanged since A3-P1. `strict_existing_java_files`
+    (new, 2026-09-13, default False - every existing caller keeps
+    byte-identical behavior without passing it) is additive: when True, ANY
+    EXISTING `.java` file present in `final_contents` with real content
+    change but ZERO entries anywhere in `authorized_regions` is rejected
+    outright (REASON_FILE_HAS_NO_SEMANTIC_AUTHORITY) instead of silently
+    skipped - this is what makes "every existing Java file requires
+    semantic-region authority, not merely file-write authority" a real,
+    fail-closed guarantee rather than a per-file opt-in. A brand-new file
+    (absent from `original_contents`) is never flagged by this branch -
+    CORR-018's own required closure target is existing-file mutation; new
+    files remain governed by file-write/change-contract authority and other
+    existing validation (Task 19)."""
     regions_by_relpath: Dict[str, List[AuthorizedSemanticRegion]] = {}
     for r in authorized_regions:
         regions_by_relpath.setdefault(r.relpath, []).append(r)
@@ -525,4 +881,23 @@ def find_unauthorized_semantic_changes(
         if baseline_content == candidate_content:
             continue
         violations.extend(_compare_one_file(relpath, baseline_content, candidate_content, regions))
+
+    if strict_existing_java_files:
+        already_checked = set(regions_by_relpath.keys())
+        for relpath in sorted(final_contents.keys()):
+            if relpath in already_checked or not relpath.endswith(".java"):
+                continue
+            candidate_content = final_contents.get(relpath)
+            baseline_content = original_contents.get(relpath)
+            if baseline_content is None or candidate_content is None:
+                continue  # new file - not this function's concern (Task 19)
+            if baseline_content == candidate_content:
+                continue
+            violations.append(SemanticAuthorityViolation(
+                REASON_FILE_HAS_NO_SEMANTIC_AUTHORITY, relpath, None,
+                f"'{relpath}' is an existing Java file with a real content change but "
+                "zero authorized_regions entries at all - strict_existing_java_files "
+                "requires every existing-Java-file mutation to carry requirement-grounded "
+                "semantic-region authority, never merely file-write authority",
+            ))
     return violations

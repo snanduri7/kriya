@@ -165,6 +165,11 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # silently enable it in a way the operator did not choose) without
     # explicit SEC-009 approval, same as contained_execution_required.
     ("autonomy", "mcp_contained_execution_required"),
+    # CORR-018 (2026-09-13): the semantic-region-authority analogue of the
+    # two containment flags above - a repository must never be able to
+    # silently disable an operator's own strict semantic-mutation
+    # enforcement.
+    ("autonomy", "semantic_region_enforcement_required"),
     ("autonomy", "sandbox_execution"),
     # widens what ambient host env a repo's OWN sandboxed build/test command sees
     ("autonomy", "sandbox_env_allowlist"),

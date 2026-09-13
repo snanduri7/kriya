@@ -106,14 +106,16 @@ def test_contract_evolution_authorization_constructed_only_in_its_own_module():
     assert hits == [], f"unexpected ContractEvolutionAuthorization(...) construction sites: {hits}"
 
 
-def test_derive_direct_contract_authorizations_has_exactly_two_production_call_sites():
-    """Both call sites (attempt.py pre-write, workflow.py terminal recheck)
-    are the only places production code may CONSULT authority - both pass
-    the same-named grounding_goal variable (verified by source inspection in
-    this closure's own investigation trace, not re-parsed here since a
-    textual/AST provenance check would be brittle; this test instead pins
-    the call-site COUNT so a future third call site is a deliberate,
-    reviewed change, not a silent addition)."""
+def test_derive_direct_contract_authorizations_has_exactly_known_production_call_sites():
+    """The consuming call sites are the only places production code may
+    CONSULT authority - this test pins the exact call-site COUNT per file
+    so a future new call site is a deliberate, reviewed change, not a
+    silent addition. `semantic_scope_derivation.py` (CORR-018 general-case
+    closure, 2026-09-13) is legitimate, REVIEWED reuse - it calls this
+    SAME grounding_goal-only derivation twice (once per its own two
+    derivation functions) rather than re-parsing goal text a second time,
+    which is exactly what Invariant 5 requires (one requirement-authority
+    derivation, never a second parallel one)."""
     hits = {}
     for root, _dirs, files in os.walk(_REPO_ROOT):
         if "/.git" in root or "/.venv" in root or "/tests" in root:
@@ -130,6 +132,7 @@ def test_derive_direct_contract_authorizations_has_exactly_two_production_call_s
     assert hits == {
         "kriya/workflow/attempt.py": 1,
         "kriya/workflow/workflow.py": 1,
+        "kriya/workflow/semantic_scope_derivation.py": 4,
     }, f"unexpected/changed call-site set for derive_direct_contract_authorizations: {hits}"
 
 

@@ -10,6 +10,7 @@ stayed green) is now rejected.
 import hashlib
 
 from kriya.workflow.semantic_region_authority import (
+    REASON_DECLARATION_ADDED_UNAUTHORIZED,
     REASON_IMPORT_UNAUTHORIZED,
     REASON_MEMBER_ADDED_UNAUTHORIZED,
     REASON_MEMBER_DELETED,
@@ -317,12 +318,22 @@ def test_removed_import_still_used_elsewhere_rejected():
 # =====================================================================
 
 def test_field_modification_rejected():
+    """CORR-018 general-case closure (2026-09-13): FIELD_DECLARATION is now
+    explicitly represented - a deliberate, expected update to this
+    characterization test, not a silent regression (see the risk
+    register's own "must update it deliberately" convention). An
+    unauthorized new field still gets rejected, just via the new, more
+    precise SEMANTIC_DECLARATION_ADDED_UNAUTHORIZED reason code instead of
+    falling into the undifferentiated residual catch-all - strictly a
+    precision improvement, never a weakening (the field is still, and was
+    always, rejected)."""
     candidate = _with_authorized_delete_body_change(BASELINE).replace(
         "    private final DriverRepository repository;\n",
         "    private final DriverRepository repository;\n    private boolean cacheEnabled = false;\n",
     )
     violations = find_unauthorized_semantic_changes({RELPATH: BASELINE}, {RELPATH: candidate}, [DELETE_BODY_AUTH])
-    assert any(v.reason_code == REASON_RESIDUAL_REGION_CHANGED for v in violations)
+    assert any(v.reason_code == REASON_DECLARATION_ADDED_UNAUTHORIZED for v in violations)
+    assert not any(v.reason_code == REASON_RESIDUAL_REGION_CHANGED for v in violations)
 
 
 def test_class_annotation_modifier_change_rejected():

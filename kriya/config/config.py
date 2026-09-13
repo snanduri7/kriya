@@ -431,6 +431,28 @@ class AutonomyConfig(BaseModel):
     # (kriya/mcp/mcp.py's own "containment_required"/"containment_active"
     # fields) - a host-side run must never be misread as containment evidence.
     mcp_contained_execution_required: bool = Field(default=False)
+    # CORR-018 (2026-09-13): opt-in strict semantic-region enforcement for
+    # ordinary generate/fix Java brownfield mutations - the general-case
+    # analogue of contained_execution_required/mcp_contained_execution_
+    # required immediately above, same shape, same reasoning. Default False
+    # preserves 100% of today's ordinary generate/fix behavior: neither
+    # CORR-016's own grounding_goal-regex derivation nor a deterministic
+    # repository relationship (e.g. interface -> implementer) can name
+    # which member a natural bug-fix-shaped goal ("fix the NPE when X is
+    # null") needs to touch - that is discovered during generation, not
+    # statable up front - so making this unconditional would fail closed
+    # on the overwhelming majority of real brownfield usage (a deliberate,
+    # explicit decision with the user, 2026-09-13; see kriya/workflow/
+    # semantic_scope_derivation.py's own module docstring). When True,
+    # every mutation to an EXISTING Java source file must be covered by
+    # requirement-grounded semantic-region authority (explicit grounding_
+    # goal derivation or deterministic repository-grounded necessity) or
+    # the candidate is rejected before write - never a silent downgrade
+    # to file-level-only protection. Flipping this to True does not touch
+    # A3's own existing authorized_semantic_regions caller (proposal_
+    # promotion.py already supplies its own explicit region list, which
+    # this flag never overrides or narrows).
+    semantic_region_enforcement_required: bool = Field(default=False)
     # ShellTool previously had no wall-clock timeout at all (SEC-001
     # execution-surface inventory finding, 2026-09-11) - every other real
     # command primitive in this codebase (ProcessController.run(), used by

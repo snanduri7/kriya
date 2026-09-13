@@ -93,6 +93,7 @@ from kriya.workflow.attribution import (
 )
 from kriya.workflow.contract_authority import derive_direct_contract_authorizations
 from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
+from kriya.workflow.semantic_scope_derivation import derive_semantic_authority_for_run
 from kriya.workflow.file_resolution import (
     EXPECTED_FILE_EXTENSIONS,
     IncompleteGenerationError,
@@ -907,6 +908,26 @@ class WorkflowEngine:
             raise ValueError(
                 "predetermined_plan/predetermined_design/predetermined_architect_files must be "
                 "supplied together or not at all - got a partial combination."
+            )
+        # CORR-018 general-case closure (2026-09-13): auto-derive
+        # authorized_semantic_regions for ordinary generate/fix and
+        # structured-plan MODEL-subtask calls, ONLY when the caller did not
+        # already supply its own list (`is None` - A3's proposal-promotion
+        # path always passes a real, non-empty list here and is therefore
+        # completely untouched by this branch, preserving Invariant 13
+        # exactly) AND the opt-in flag is set (default False - zero
+        # behavior change for every existing deployment). Deliberately
+        # BEFORE the resume-checkpoint drift check below, so a resumed run
+        # under strict mode always re-derives fresh from the current
+        # grounding_goal/structured_plan/workspace content rather than
+        # trusting anything checkpoint-carried (mirrors TOOL-001's own
+        # "always revalidate fresh on resume" precedent).
+        if (
+            self.kernel.config.autonomy.semantic_region_enforcement_required
+            and authorized_semantic_regions is None
+        ):
+            authorized_semantic_regions = derive_semantic_authority_for_run(
+                grounding_goal, structured_plan, workspace_path,
             )
         # Deliberately BEFORE state is constructed below - state.generation_
         # started_monotonic (kriya/workflow/state.py) defaults to time.monotonic()
@@ -3043,6 +3064,7 @@ class WorkflowEngine:
                 # a caller actually populated authorized_semantic_regions.
                 terminal_semantic_violations = find_unauthorized_semantic_changes(
                     state.all_original_contents, final_candidate_contents, authorized_semantic_regions or [],
+                    strict_existing_java_files=self.kernel.config.autonomy.semantic_region_enforcement_required,
                 )
                 if terminal_semantic_violations:
                     evidence = "; ".join(
