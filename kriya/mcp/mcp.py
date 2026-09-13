@@ -57,8 +57,11 @@ logger = logging.getLogger(__name__)
 # roles are not equivalent (target-code execution is the repository's
 # OWN declared build/test tooling; an MCP server is an arbitrary,
 # SEC-009-approved but otherwise unvetted third-party command). Do not
-# invent a fake/isolated HOME here either - that is SEC-005/containment's
-# concern if a real MCP runtime is ever found to need one. An operator
+# invent a fake/isolated HOME here either - that is the not-yet-registered
+# MCP invocation/execution authority work's concern if a real MCP runtime
+# is ever found to need one (NOT the register's existing SEC-005 row,
+# which is an unrelated package-installation/network-access broker risk).
+# An operator
 # who has a genuine reason to expose HOME to a specific server sets it
 # explicitly via `mcp.<server>.env.HOME`, subject to SEC-009 authority
 # like any other configured value - the ambient-denied/explicit-allowed
@@ -548,7 +551,9 @@ class MCPTool(BaseTool):
             # closed mid-call) are distinct from an ordinary tool-level
             # failure the server itself reports - re-raised as
             # ToolExecutionError so this stays connection-health/lifecycle
-            # only (SEC-005 owns tool-call AUTHORIZATION, not this).
+            # only (the not-yet-registered MCP invocation/execution
+            # authority work owns tool-call AUTHORIZATION, not this - NOT
+            # the register's existing SEC-005 row, an unrelated risk).
             raise ToolExecutionError(f"MCP lifecycle failure calling '{self._name}': {e}") from e
 
         if response.get("isError"):

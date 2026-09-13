@@ -151,10 +151,12 @@ class MCPLifecycleConfig(BaseModel):
     having done a lot of honest work). It still bounds a genuinely
     CPU-spinning/pathological server, which is the property SEC-004
     requires - true CPU RATE limiting (cgroups CPU shares/quota) would
-    need real container/cgroup containment and is explicitly SEC-005's
-    scope, not attempted here (see docs/assurance/
-    KRIYA_PRODUCTION_RISK_REGISTER.md's SEC-004 entry for the full
-    native-vs-OCI decision record)."""
+    need real container/cgroup containment and belongs to the
+    not-yet-registered MCP invocation/execution authority work (NOT the
+    register's existing SEC-005 row, which is an unrelated
+    package-installation/network-access broker risk), not attempted
+    here (see docs/assurance/KRIYA_PRODUCTION_RISK_REGISTER.md's SEC-004
+    entry for the full native-vs-OCI decision record)."""
 
     startup_timeout_seconds: int = Field(default=30, ge=1)
     request_timeout_seconds: int = Field(default=60, ge=1)
