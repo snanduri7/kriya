@@ -352,7 +352,13 @@ attempt a fourth run to manufacture one.
 
 ## Per-risk disposition
 
-**VER-005 — Python end-to-end validation/generation correctness: NEEDS_IMPLEMENTATION.**
+**Superseded for VER-005** — see "VER-005 implementation (2026-09-14)" and
+its own "VER-005 disposition update" below: **CLOSED**, following the fix and
+live revalidation described there. This section is kept as the original,
+dated (2026-09-13) evidence-only record and must not be edited to match the
+later outcome.
+
+**VER-005 — Python end-to-end validation/generation correctness: NEEDS_IMPLEMENTATION (2026-09-13, superseded 2026-09-14).**
 The false-success-resistance and atomicity properties this risk's E4 bar
 cares about most directly are now live-confirmed (finding #1, #2) — do not
 weaken or re-litigate those in a future pass. But a concrete, reproduced,
@@ -373,7 +379,12 @@ Kriya classifies as an ordinary (non-infrastructure) candidate defect.
 
 ## Production/test/doc changes
 
-- Production code: **none**. Per the DEFECT RULE ("do not immediately patch
+**Superseded** — see "VER-005 implementation (2026-09-14)" above for the
+actual production/test/doc changes made in the follow-up implementation
+pass. This section remains the original, dated (2026-09-13) evidence-only
+record.
+
+- Production code: **none** (as of 2026-09-13, this evidence-only pass). Per the DEFECT RULE ("do not immediately patch
   unless [the] change is narrow and architecture-neutral"): a candidate fix
   exists in outline (route test-shaped runtime targets through `pytest`/
   `-m`-qualified invocation, or set the subprocess `PYTHONPATH` to the
@@ -387,6 +398,333 @@ Kriya classifies as an ordinary (non-infrastructure) candidate defect.
   commit — see NEXT_ACTION.
 - Risk register: VER-005 and RECV-002 entries updated to reflect the
   dispositions above; no other risk rows touched.
+
+## VER-005 implementation (2026-09-14) — deterministic Python runtime-target grounding
+
+Closes finding #3 above. Full task: fix and close the spurious-failure defect
+this campaign found, without redesigning verification architecture, without
+weakening VER-006/deterministic gates, and with one live revalidation against
+the real production model.
+
+### Root-cause decomposition (Task 1)
+
+Traced end to end: `RunVerifierAgent.judge()` result → target/command
+selection → runtime-verification interpretation → language/project detection
+→ command construction → cwd selection → environment construction →
+subprocess execution → result classification → quality gate → terminal
+decision.
+
+- **(A) Invalid runtime target chosen by the verifier** — confirmed, the
+  primary cause. A pure-library goal has no runnable entrypoint; the judge
+  selected a test file anyway, contrary to its own system prompt.
+- **(B) Valid target executed using the wrong invocation** — a secondary,
+  independently real mechanism: even a genuinely correct application target
+  living inside a package (not just this test-file case) would misresolve
+  under bare `python <path>` if it imports a sibling top-level package, since
+  bare-script mode only ever puts the *script's own* directory on
+  `sys.path[0]`.
+- **(C) Wrong working directory** — **ruled out**. `PolymorphicValidator.
+  run_app_sequence()`/`run_app()` (`kriya/tools/validate.py`) already
+  hardcode `cwd=self.workspace_path` unconditionally, for every command,
+  independent of target path. Confirmed by direct code read; not itself a
+  contributor to the defect. `-m` module invocation and this already-correct
+  cwd are what interact to fix the ModuleNotFoundError below.
+- **(D) Missing repository-root/module semantics** — confirmed, the second
+  primary cause. Python's own `-m` machinery puts the *current working
+  directory* on `sys.path[0]` instead of the script's own directory; nothing
+  in Kriya ever used `-m` for a package-nested target, so this correct
+  resolution mechanism was simply never engaged.
+- **(E) Runtime verification incorrectly required for a library/non-runnable
+  goal** — **ruled out**. `ctx.runtime_verification_required` (driven by
+  `goal_requires_runtime_behavior()`) was `False` for both failing goals
+  (confirmed by direct evaluation against the exact goal text); the defect is
+  `RunVerifierAgent.judge()`'s own `should_run` verdict, not the deterministic
+  required/optional heuristic.
+- **(F) Multiple factors** — **the defect is A+D combined**: an invalid
+  target (A) executed via an invocation mechanism (bare-script) that cannot
+  resolve repository-root imports (D). Root cause is not merely `PYTHONPATH`
+  — no environment variable was touched or needed; the fix is a target-
+  validity decision (A) plus an invocation-mechanism decision (D), not an
+  environment patch.
+
+### Architectural rule maintained
+
+```
+LLM verification intent -> deterministic target validation -> deterministic invocation policy -> controlled execution -> deterministic evidence -> terminal decision
+```
+
+Mirrors the existing, already-shipped Java precedent exactly:
+`ground_java_entrypoint_in_no_build_file_projects()` (`kriya/workflow/
+file_resolution.py`) already implements this identical boundary for Java —
+"never build a second execution architecture if one already exists" (this
+task's own instruction). The new Python function,
+`ground_python_runtime_target()`, is its sibling: same call sites, same
+`None`-sentinel-means-"force should_run=False" contract, same "goal_explicit
+is authoritative, never touched" rule, same "never guess when ambiguous"
+posture.
+
+**LLM contribution vs. deterministic ownership**, made explicit in code for
+the first time this pass:
+- The LLM (`RunVerifierAgent.judge()`) still proposes *what* to verify and
+  *a* candidate target/command — unchanged.
+- Kriya now deterministically decides, from real repository facts read fresh
+  off disk every attempt (never from `judge()`'s own claims): whether the
+  proposed target is an executable application target, a test artifact, a
+  library file with no entrypoint, a directory, or nonexistent; whether a
+  real, unambiguous substitute exists; and whether the correct invocation is
+  module (`-m`) or bare-script form. `judge()`'s raw output is never executed
+  directly — it passes through this validation/correction layer first, on
+  every attempt, both call sites, no exception.
+
+### New production code (`kriya/workflow/file_resolution.py`)
+
+- `python_file_has_main_guard(content)` — real, top-level `if __name__ ==
+  "__main__":` guard detection (the Python sibling of `DependencyGraph.
+  find_java_main_class()`'s real-`main()`-method detection).
+- `python_target_path_is_test_shaped(rel_path)` — filename-regex
+  (`is_runnable_test_file`) **and** `tests/`/`test/` directory-segment
+  detection (Task 3: "consider the tests/ hierarchy, not only filename
+  regexes").
+- `_extract_python_command_target(cmd)` — structural-only extraction of the
+  argv token (or, for `-m`, the dotted module converted to its file-path
+  shape) a python-interpreter command would execute; unifies bare-script and
+  `-m` invocation shapes so both are validated identically (closes the gap a
+  reviewing pass identified: a model could emit `python -m tests.test_x` as
+  easily as `python tests/test_x.py`, the same violation in different
+  clothing).
+- `python_command_targets_test_path(cmd)` — the narrow, grounding-fact-free
+  predicate the MANAGED_SERVICE path (below) uses.
+- `_grounded_python_invocation(...)` — the actual invocation-POLICY decision:
+  converts a bare-script target to `-m dotted.module` form *only* when every
+  directory from the workspace root down to the file is a real Python
+  package (contains `__init__.py`) — the exact condition under which `-m`
+  puts the workspace root (not the script's directory) on `sys.path[0]`. A
+  workspace-root script or one under a non-package directory is left as
+  bare-script form, unchanged — zero behavior change for the common flat-
+  script case.
+- `ground_python_runtime_target(run_commands, command_source,
+  all_python_files, package_dirs, entrypoint_files)` — the main correction
+  function, called from both `kriya/workflow/attempt.py` call sites (and,
+  narrowly, from `kriya/workflow/milestones.py`'s own third judge() call
+  site — see Bypass sweep below). Returns `run_commands` unchanged when
+  `command_source == "goal_explicit"` or the target is already grounded and
+  correctly invoked; returns a corrected sequence (target substituted, and/or
+  invocation converted to `-m` form) when exactly one real, unambiguous
+  entrypoint exists to substitute; returns `None` — the same "force
+  should_run=False" sentinel Java's own function uses — when the target is
+  invalid and there is not exactly one unambiguous substitute (zero: a
+  genuine library; more than one: genuinely ambiguous, never guessed).
+
+Repository facts (`all_python_files`, `package_dirs`, `entrypoint_files`) are
+resolved **repository-wide from the real filesystem** every attempt
+(`kriya/workflow/attempt.py::_build_python_runtime_grounding()`/
+`_collect_python_runtime_grounding_facts()`), never scoped to this run's own
+`state.all_files_written` the way Java's `java_main_classes` map is — a
+brownfield repository's entrypoint/package structure routinely predates the
+current attempt (a pre-existing `main.py` never touched this run, a
+pre-existing `validation/__init__.py`), so run-local scoping would silently
+reintroduce a false-negative mirror of the same defect (a real, untouched
+entrypoint rejected as "nonexistent"). Symlink-safe by construction:
+`is_within_scope()`/`make_workspace_scope()` (`kriya/policy/filesystem.py` —
+the same idiom `run_app_sequence()`'s own `javac -d` containment check
+already uses) filter the walk itself, and — independently — a judge-proposed
+absolute or `..`-escaping path can never become a member of the resulting
+sets at all (the sets only ever contain paths the walk itself discovered
+inside the root), so an out-of-workspace target is always treated exactly
+like a nonexistent one, never resolved against the real filesystem.
+
+### Call sites patched (Task 19 bypass sweep)
+
+| # | Location | Target source | Fix applied |
+|---|----------|---------------|-------------|
+| 1 | `attempt.py::_execute_runtime_verification_directly` (verification-only subtask path) | `judge()` `finite_command` | `ground_python_runtime_target()`, mirrors the adjacent Java block |
+| 2 | `attempt.py`'s mutating-path inline Quality-Gates block | `judge()` `finite_command` | `ground_python_runtime_target()`, mirrors the adjacent Java block |
+| 3 | `attempt.py`'s self-correction micro-loop re-run (`run_app_sequence` call inside `run_self_correction_loop` resolution) | `resolved_run_commands`, derived from `judgment["run_commands"]` | **Inherits grounding** — `resolved_run_commands = [_resolve_run_command(cmd, ...) for cmd in judgment["run_commands"]]` reads the ALREADY-corrected value from call site #2; confirmed by direct code trace, no separate fix needed |
+| 4 | `attempt.py::_validate_and_convert_managed_service_contract` (`MANAGED_SERVICE` path) | `judgment["managed_service"]["service_command"]` | `python_command_targets_test_path()` — test-shape **rejection only** (fails closed with `MANAGED_SERVICE_CONTRACT_INVALID`); no substitution attempted — there is no safe deterministic "run this other service instead" (unlike `FINITE_COMMAND`, which has one) |
+| 5 | `milestones.py`'s own independent `judge()` call (captured for later replay) | `judge()` `finite_command` | `ground_python_runtime_target()` — Python-only; this path has no live evidence of the Java-equivalent defect and `_build_java_main_class_map`'s signature is `AttemptContext`-coupled, not plumbed through this call site — disclosed, not silently expanded |
+| 6 | `milestones.py::replay_prior_milestone_verifications` (later re-execution of #5's captured command) | Persisted `run_state.verification_commands[id]` | **Inherits grounding** — replays whatever #5 already captured post-correction; confirmed by direct code trace |
+| 7 | `PolymorphicValidator.run_app()` (single-command variant) | — | **Zero production call sites found** (`grep -rn "\.run_app("` across `kriya/` — empty) — not a live bypass |
+| 8 | Java (`mvn`/`javac`/`java`) paths, all call sites | `judge()` | **Pre-existing, unmodified** — `ground_java_entrypoint_in_no_build_file_projects()` already covers this; re-verified unaffected (see Tests below) |
+
+`UNVALIDATED_LLM_RUNTIME_TARGET_EXECUTION_PATHS = 0`,
+`BARE_TEST_AS_APPLICATION_PATHS = 0` — every real production path that can
+reach a subprocess `execve` for an LLM-proposed Python target now passes
+through deterministic validation first (paths 3 and 6 by inheritance, not
+independent re-implementation). The one honest asymmetry: path 4
+(`MANAGED_SERVICE`) rejects a test-shaped target but never substitutes a
+real one (no safe deterministic substitute exists for a long-running
+service) — disclosed here, not claimed as identical treatment to
+`FINITE_COMMAND`.
+
+### Prompt-strengthening explicitly not treated as the fix (Task 6)
+
+`RunVerifierAgent`'s system prompt already told the model not to do this
+("Do NOT return a build-only command such as ... or a test command as proof
+of observable runtime behavior") — confirmed live, twice, that the
+instruction alone did not prevent the defect (Run 2, Run 3). No prompt text
+was changed this pass. Enforcement is entirely post-model, deterministic, and
+proven again in Run 4 below: the live model **still** proposed an invalid
+target naturally (log: `2026-09-13 23:58:56 ... "Deterministic Python
+runtime-target grounding: the run-verification judge's proposed target is
+not a valid application runtime target ..."`), and the deterministic layer
+caught it.
+
+### False-negative / false-positive proof (Task 7)
+
+- **False-negative prevention**: Run 4 below is the live proof — a genuinely
+  correct candidate (real compile + real 7/7 pytest pass) is no longer
+  blocked by a bad verifier-proposed target.
+- **False-positive prevention**: `tests/test_ver005_python_runtime_target_
+  grounding.py::test_bad_candidate_still_rejected_after_grounding` confirms
+  grounding correction never launders a wrong candidate's output into a
+  clean one — correction changes *which command runs and how*, never the
+  pass/fail verdict itself, which stays owned entirely by the unmodified
+  compile/test/grade pipeline. VER-006's own 19-test distrust-containment
+  suite (`tests/test_ver006_distrust_containment.py`) — untouched by this
+  change, re-run manually this pass, 19/19 still pass — remains the
+  authoritative false-positive-protection evidence; this pass's own new test
+  is a narrower, adjacent confirmation, not a replacement for it.
+
+### Tests added
+
+- `tests/test_ver005_python_runtime_target_grounding.py` (23 tests): pure
+  function coverage (`python_file_has_main_guard`, `python_target_path_is_
+  test_shaped`, `python_command_targets_test_path`); the exact E4 shape
+  (library, test-file target → not applicable); a grounded-app fixture
+  (bare-script guess corrected to `-m` form; the corrected form actually
+  executes correctly through real, non-mocked `run_app_sequence()`; a
+  genuinely bad candidate is still rejected); the full Task 11 adversarial
+  set (nonexistent target with 0/1 entrypoints, out-of-workspace paths,
+  symlink-escape containment, directory target, `__init__.py` target,
+  malformed/no-target commands, ambiguous 2-entrypoint case, `goal_explicit`
+  passthrough, `-m` test-module rejection, `-m` stdlib-module passthrough);
+  cwd-independence (Task 12, real subprocess run after `os.chdir()` to a
+  different directory); `MANAGED_SERVICE` test-shape rejection (bare-script
+  and `-m` forms) and legitimate-target passthrough.
+- `tests/test_workflow.py::test_run_attempt_disables_run_verification_end_
+  to_end_for_python_test_shaped_target` (new) — the Python sibling of the
+  existing Java end-to-end regression test, reproducing the exact E4 fixture
+  shape through the REAL, unmocked `run_attempt()` mutating path (call site
+  #2), asserting `run_app_sequence` is never called.
+- `tests/test_milestones.py::test_run_milestones_grounds_python_verification_
+  commands_before_capture_for_replay` (new) — proves call site #5 (the third,
+  previously-undiscovered bypass) through the real `run_milestones()`
+  orchestrator, asserting the bad command is never persisted for replay.
+- `tests/test_polymorphic_validation.py::test_run_app_sequence_multi_
+  package_test_file_target_hits_module_not_found` — **kept unmodified**
+  (Task 18); one docstring line added noting prevention now lives upstream.
+  Manually re-verified still passes (proves the underlying OS-level failure
+  mode and its correct infrastructure classification are unchanged — this
+  test documents the mechanism, not the absence of a bypass).
+- Existing Java tests re-run manually, unaffected: 5 pure
+  `ground_java_entrypoint_*` unit tests, plus both existing end-to-end Java
+  regression tests through the two modified `attempt.py` call sites
+  (`test_run_attempt_deterministically_corrects_java_entrypoint_end_to_end`,
+  `test_verification_only_java_entrypoint_launch_failure_remains_
+  infrastructure`).
+- All 19 `tests/test_ver006_distrust_containment.py` tests re-run manually,
+  unaffected.
+- All 68 tests in `tests/test_milestones.py` re-run manually, unaffected.
+- All 6 existing `MANAGED_SERVICE` contract tests re-run manually, unaffected.
+- **No production code change was validated by self-testing alone** — see
+  Run 4 below for live, real-model confirmation.
+
+### Cosmetic wording fix (Task 17)
+
+`kriya/cli.py`'s two identical hardcoded `"...to check your Java/Maven
+toolchain resolution."` strings (in the `generate`/`fix` CLI's own
+environment-failure reporting — the exact message class Run 2's terminal log
+surfaced on a pure-Python run, finding #5 above) changed to `"...to check
+your language toolchain resolution."` — narrow, wording-only, no decision
+logic touched.
+
+### Run 4 — live revalidation (1 of 2 permitted)
+
+Fresh copy of Fixture 2 (`~/kriya-live-validation/ver005-py-multipkg-live-
+02-run4/`, baseline `da43645`, re-derived from the same `b5c582f` tree via
+`git archive` — no carried-over `.kriya/`, `skills/`, or prior-run logs, per
+this pass's own advisor guidance to eliminate that variable), `kriya.yaml`
+identical (`skills.load_global=false`, `skills.load_cwd=false`,
+`paths.skills="./skills"`). `kriya analyze .` run first (7 files indexed,
+fresh auto-skill generated), matching Run 3's own setup. Goal text **byte-
+identical to Run 3**, copied verbatim from this document. Model unchanged:
+`qwen3-coder:30b`. No steering of `RunVerifierAgent`'s target choice.
+
+- `run_id`: `20260913T235820-4679c5ce` (trace `16edc152`).
+- Started: 2026-09-13T23:58:12Z. Duration: 46.3s (`generation_metrics.
+  total_wall_seconds`). Attempts: 1 (`retry.full_set_attempts: 0`).
+- `files`: `['tests/test_email_rules.py', 'validation/email_rules.py']` —
+  the correct, real paths (grounding present, as expected post-`analyze`).
+- **`RunVerifierAgent.judge()` still naturally proposed an invalid target**
+  (confirmed by the deterministic-grounding log line firing — the raw
+  judgment payload itself remains unpersisted, the same disclosed
+  observability gap noted in finding #6; its invalidity is proven
+  necessarily by the correction firing at all): log, 2026-09-13T23:58:56Z:
+  *"Deterministic Python runtime-target grounding: the run-verification
+  judge's proposed target is not a valid application runtime target
+  (test-shaped, nonexistent, or unguarded), and no unambiguous real
+  entrypoint exists elsewhere in the repository to substitute - overriding
+  should_run to False instead of executing an invalid target."*
+  `should_run` forced to `False` — correct, since this fixture is a genuine
+  library with zero real entrypoints anywhere (confirmed independently
+  below).
+- **Deterministic gate outcomes** (`traces.db`, all `success: true`):
+  `compile`; `targeted_test` — real `pytest`, **7/7 passed** against the real
+  `tests/test_email_rules.py`; `goal_spec_compliance`; `regression_test` —
+  real `pytest`, **11/11 passed** (`tests/test_email_rules.py` +
+  `tests/test_service.py`, confirming `is_premium_eligible`'s own test still
+  passes). **No `run_verification` gate outcome at all** — correctly absent,
+  matching the Java precedent's identical "nothing to run" behavior; runtime
+  verification was never attempted, not attempted-and-passed.
+- **Terminal result**: `quality_gates_passed: true`. Reviewer text confirmed
+  correctness and was included in the approval (`review_included_in_
+  approval: true`).
+- **Independent verification (outside Kriya)**: `git diff --stat` — exactly
+  the 2 expected files changed (`validation/email_rules.py`,
+  `tests/test_email_rules.py`); `customer/service.py` byte-identical to
+  baseline (confirmed via `git status --short` — no `M` for that file).
+  Direct Python import and execution (no pytest available on the ambient
+  system interpreter; a project-local venv resolution isn't necessary for
+  this independent check) re-confirmed, outside Kriya entirely: `is_valid_
+  email('user@example.com')==True`, `is_valid_email('user@localhost')==
+  False`, `is_valid_email('user@example..com')==False`, plus the pre-existing
+  cases (`''`, `None`, baseline valid) all correct; `is_premium_eligible`
+  re-confirmed unchanged (`.com`→`True`, `.org`→`False`) — MUST_PRESERVE held.
+
+**Verdict**: decisive on the first live attempt — both required outcomes
+from this pass's own live-run protocol are satisfied simultaneously
+(`should_run` correctly forced `False`, and compile+pytest evidence alone
+carried a genuinely correct candidate to terminal success). No second live
+run needed or attempted.
+
+### VER-005 disposition update
+
+**CLOSED (2026-09-14).** All Task-level acceptance criteria met: runtime
+applicability is now deterministic (Task 2); LLM-suggested execution targets
+are validated post-model, not trusted (Task 3); test files cannot be blindly
+executed as applications, confirmed for both bare-script and `-m` forms
+(Task 6); Python invocation respects package/module semantics via the new
+`-m` conversion (Task 4); library-only projects no longer receive fabricated
+runtime targets (Tasks 2, 9, live-confirmed Run 4); a runnable Python app
+still receives real runtime verification with the correct grounded invocation
+(Task 10, live-confirmed via the app-fixture end-to-end test); invalid-target
+handling is distinguished from candidate runtime failure in both direction
+(Tasks 14, 15); cwd/environment remain exactly as deterministic and bounded
+as before (Tasks 12, 13 — zero environment changes, cwd was already correct);
+no false-success regression (VER-006 unaffected, re-confirmed); no
+false-negative regression for the E4 fixture (Run 4); Java (VER-006)
+unchanged and re-confirmed; security controls unchanged (SEC-001/003/005 not
+touched; the new grounding walk reuses the existing symlink-safe containment
+idiom); `UNVALIDATED_LLM_RUNTIME_TARGET_EXECUTION_PATHS = 0`,
+`BARE_TEST_AS_APPLICATION_PATHS = 0` (bypass sweep table above); one real
+local-model revalidation confirms the production path (Run 4); `UNOWNED = 0`,
+`UNEXPLAINED = 0`.
+
+**Closure statement**: Runtime-verification targets proposed by an LLM are
+not directly executable authority. Kriya deterministically validates runtime
+applicability, target role, and language/project invocation semantics before
+execution; invalid/test-shaped targets cannot create spurious candidate
+failure or bypass deterministic verification.
 
 ## Reproducibility
 
@@ -403,3 +741,10 @@ Kriya classifies as an ordinary (non-infrastructure) candidate defect.
   fixture directories and their logs live outside `docs/assurance/` and are
   not committed to the Kriya repository itself — this document is the
   summarized, reproducible evidence artifact.
+- Run 4 (2026-09-14, VER-005 implementation live revalidation):
+  `~/kriya-live-validation/ver005-py-multipkg-live-02-run4/` (fresh git repo,
+  baseline `da43645`, re-derived from `b5c582f`'s tree via `git archive`),
+  goal `kriya_run4_goal.txt` (byte-identical to Run 3's), output log
+  `kriya_run4_output.log`, `run_id=20260913T235820-4679c5ce`
+  (trace `16edc152`), full structured trace in that fixture's own
+  `.kriya-logs/traces.db`.

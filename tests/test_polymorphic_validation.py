@@ -1575,7 +1575,20 @@ def test_run_app_sequence_multi_package_test_file_target_hits_module_not_found(t
     genuinely reproduces the failure and (b) is still correctly classified
     as a verifier-infrastructure failure, not an application-logic defect -
     exactly as observed live, so a real correct candidate is never
-    misattributed to the Developer."""
+    misattributed to the Developer.
+
+    VER-005 implementation (2026-09-13): prevention of this exact incident
+    now lives UPSTREAM of run_app_sequence() - see kriya/workflow/
+    file_resolution.py::ground_python_runtime_target() and kriya/workflow/
+    attempt.py's own two call sites, which deterministically reject a
+    test-shaped verifier target before it ever reaches here (proven in
+    tests/test_ver005_python_runtime_target_grounding.py). This test is kept
+    UNCHANGED and still passes - it documents that IF this exact bad command
+    is ever handed to run_app_sequence() directly (e.g. a future bypass of
+    the upstream grounding), the underlying OS-level failure mode and its
+    correct infrastructure classification are still exactly as described
+    above; it is no longer the only thing standing between a bad target and
+    a spurious candidate failure."""
     (tmp_path / "validation").mkdir()
     (tmp_path / "validation" / "__init__.py").write_text("")
     (tmp_path / "validation" / "email_rules.py").write_text(

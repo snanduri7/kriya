@@ -1941,7 +1941,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
                         "Kriya stopped retrying early rather than burning its retry budget "
                         "re-generating code that could never fix this - run `kriya doctor` "
-                        "to check your Java/Maven toolchain resolution.",
+                        "to check your language toolchain resolution.",
                         fg="yellow", bold=True
                     )
                 # PRV-17 (2026-09-08, P7 efficiency finding): a candidate-

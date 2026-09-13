@@ -11962,6 +11962,71 @@ async def test_run_attempt_disables_run_verification_end_to_end_when_no_real_ent
     mock_run_app_sequence.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_run_attempt_disables_run_verification_end_to_end_for_python_test_shaped_target(tmp_path):
+    """VER-005 implementation (2026-09-13) - the Python sibling of the Java
+    test just above, confirming the SAME None-override fires end-to-end
+    through run_attempt() itself for the real E4 live defect (docs/
+    assurance/KRIYA_VER005_RECV002_LIVE_EVIDENCE.md): a pure-library,
+    multi-package Python goal where RunVerifierAgent.judge() selected a
+    test file (tests/test_email_rules.py) as the finite_command runtime
+    target, contrary to its own system prompt. Without the fix, Kriya
+    executed this as a bare `python tests/test_email_rules.py` subprocess,
+    which fails with ModuleNotFoundError against the sibling `validation`
+    package regardless of candidate correctness - a real, correct candidate
+    ending in quality_gates_passed=False. With the fix, ground_python_
+    runtime_target() finds zero real entrypoints anywhere in this
+    workspace (a genuine library) and forces should_run to False BEFORE
+    run_app_sequence is ever reached."""
+    (tmp_path / "validation").mkdir()
+    (tmp_path / "validation" / "__init__.py").write_text("")
+    (tmp_path / "validation" / "email_rules.py").write_text(
+        "def is_valid_email(email):\n"
+        "    return bool(email) and '@' in email\n"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "__init__.py").write_text("")
+    (tmp_path / "tests" / "test_email_rules.py").write_text(
+        "from validation.email_rules import is_valid_email\n"
+        "\n"
+        "def test_valid_email():\n"
+        "    assert is_valid_email('user@example.com')\n"
+    )
+    state = GenerationState()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[
+        {"filepath": "validation/email_rules.py", "content": "def is_valid_email(email):\n    return bool(email) and '@' in email\n"},
+    ])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [[sys.executable, "tests/test_email_rules.py"]],
+        "command_source": "inferred",
+        "success_criteria": "is_valid_email correctly validates addresses",
+    })
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        developer=developer,
+        run_verifier=run_verifier,
+        architect_files=["validation/email_rules.py"],
+        expected_files_upfront=["validation/email_rules.py"],
+        architect_basename_to_path={"email_rules.py": "validation/email_rules.py"},
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+    ) as mock_run_app_sequence:
+        await run_attempt(state, ctx)
+
+    mock_run_app_sequence.assert_not_called()
+
+
 def test_strip_package_declaration_matching_source_root_removes_the_bogus_package():
     """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol
     milestone 3/4): `package src.main.java;` is the Maven source-root path,

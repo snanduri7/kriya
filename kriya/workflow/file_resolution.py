@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
 from kriya.workflow.failure import Failure
 
 logger = logging.getLogger(__name__)
@@ -1675,6 +1675,294 @@ def build_grounded_java_launch_command(
         "java", "-cp", classes_dir,
         *(jvm_module_flags or []), entrypoint_class, *argv,
     ]
+
+
+_PYTHON_INTERPRETER_BASENAME_RE = re.compile(r"^python[23]?(?:\.\d+)?$")
+_PYTHON_MAIN_GUARD_RE = re.compile(
+    r'^if\s+__name__\s*==\s*(?:"__main__"|\'__main__\')\s*:', re.MULTILINE
+)
+
+
+def _is_python_interpreter_token(token: str) -> bool:
+    """True for a bare 'python'/'python3'/'python3.11' token OR Kriya's own
+    sys.executable - the same interpreter-token shapes _substitute_python_
+    interpreter() (kriya/tools/validate.py) already recognizes, matched by
+    BASENAME rather than an exact-string set so a venv-qualified interpreter
+    (.venv/bin/python, /usr/bin/python3) is recognized too - an exact-match
+    set would silently skip grounding for any interpreter spelled slightly
+    differently than the three literal strings, leaving the bare-script bug
+    fully reachable through them."""
+    basename = os.path.basename(token)
+    return bool(_PYTHON_INTERPRETER_BASENAME_RE.match(basename)) or token == sys.executable
+
+
+def python_file_has_main_guard(content: str) -> bool:
+    """Deterministically detects a Python file's runnable entrypoint shape -
+    a real top-level `if __name__ == "__main__":` guard - mirroring
+    DependencyGraph.find_java_main_class()'s own real-main()-method
+    detection for Java. Column-0 anchored (MULTILINE `^`): an indented
+    occurrence lives inside a function/class body, not at module top level,
+    and is not evidence this file is meant to be run directly."""
+    return bool(_PYTHON_MAIN_GUARD_RE.search(content))
+
+
+def python_target_path_is_test_shaped(rel_path: str) -> bool:
+    """VER-005 implementation (2026-09-13): beyond is_runnable_test_file()'s
+    own filename-convention regex, a file living anywhere under a real
+    tests/test directory segment is verifier-test-shaped even when its own
+    basename doesn't match the naming convention (e.g. tests/fixtures.py,
+    tests/helpers.py) - Task 3's "consider the tests/ hierarchy, not only
+    filename regexes." Neither signal alone is a complete test-artifact
+    detector; this function is the single, reused place both signals are
+    combined, so every caller that needs to know "is this a test artifact,
+    never a runtime application target" asks the same question the same
+    way."""
+    norm = (rel_path or "").replace("\\", "/").lstrip("./")
+    if is_runnable_test_file(norm):
+        return True
+    parent_dirs = norm.split("/")[:-1]
+    return any(part.lower() in ("test", "tests") for part in parent_dirs)
+
+
+def _python_dotted_module_to_path(module: str) -> str:
+    return module.replace(".", "/") + ".py"
+
+
+def _extract_python_command_target(cmd: List[str]) -> Optional[Tuple[int, str, bool]]:
+    """Structural-only: locates the argv token (or, for a `-m` invocation,
+    the dotted module name converted to its file-path shape) that WOULD be
+    the target of a python-interpreter command - independent of whether it
+    corresponds to a real repository file. Returns
+    (index_of_that_token, workspace-relative-path-shaped string, is_module_
+    form) or None when cmd isn't a python-interpreter invocation at all, or
+    names nothing file-shaped (`python -c "..."` inline code, or a bare
+    `python`/`python -m` with no argument).
+
+    Deliberately handles the bare-script (`["python", "tests/test_x.py"]`)
+    and module (`["python", "-m", "tests.test_x"]`) shapes identically -
+    RunVerifierAgent.judge()'s own system prompt never asks it to use `-m`
+    today, but nothing prevents a future/creative model response from doing
+    so, and a test MODULE run this way is exactly the same invariant
+    violation as a test FILE run as a bare script. Whether the resolved
+    path/module actually exists as a real repository file is a SEPARATE
+    question this function does not answer (see ground_python_runtime_
+    target()'s own grounding check below) - `python -m http.server` or
+    `python -m some_installed_package` name a real, legitimate stdlib/
+    third-party module that is never a repository file at all, and this
+    function alone cannot and must not distinguish that case from a
+    genuine (broken) repository-module reference; callers needing that
+    distinction check the returned path against real repository facts."""
+    if not cmd or not _is_python_interpreter_token(cmd[0]):
+        return None
+    i = 1
+    while i < len(cmd):
+        tok = cmd[i]
+        if tok == "-m":
+            if i + 1 >= len(cmd) or not cmd[i + 1]:
+                return None
+            return i + 1, _python_dotted_module_to_path(cmd[i + 1]), True
+        if tok == "-c":
+            return None
+        if tok.startswith("-"):
+            i += 1
+            continue
+        return i, tok.replace("\\", "/").lstrip("./"), False
+    return None
+
+
+def python_command_targets_test_path(cmd: List[str]) -> bool:
+    """True when a python-interpreter command's own target (bare-script or
+    `-m` form, existing or not) is test-shaped - used to reject a test
+    artifact from ever being launched as a MANAGED_SERVICE (a long-running
+    application/daemon), where no deterministic substitute target exists to
+    fall back to (unlike the FINITE_COMMAND path's own ground_python_
+    runtime_target(), a service has no safe "run this other real file
+    instead" substitution - the only safe action is refusing to start it at
+    all, at the same pre-process-launch admission-check boundary
+    _validate_and_convert_managed_service_contract already enforces every
+    other managed_service field at, kriya/workflow/attempt.py)."""
+    extraction = _extract_python_command_target(cmd)
+    if extraction is None:
+        return False
+    return python_target_path_is_test_shaped(extraction[1])
+
+
+def _grounded_python_invocation(
+    rel_path: str,
+    package_dirs: FrozenSet[str],
+    leading_args: List[str],
+    trailing_args: List[str],
+    interpreter: str,
+) -> List[str]:
+    """Deterministic Python invocation-POLICY decision (Task 4): a grounded
+    target is run as a MODULE (`python -m pkg.sub.mod`) rather than a bare
+    script (`python pkg/sub/mod.py`) whenever every directory from the
+    workspace root down to (but not including) the target file is a real
+    Python package (contains __init__.py) - exactly the condition under
+    which Python's own `-m` machinery puts the CURRENT WORKING DIRECTORY on
+    sys.path[0] instead of the script's own containing directory, which is
+    the root-cause mechanism the VER-005 E4 campaign traced
+    (docs/assurance/KRIYA_VER005_RECV002_LIVE_EVIDENCE.md): a bare `python
+    <path>` invocation only ever puts the SCRIPT's own directory on
+    sys.path[0], never the repository root, so a script that imports a
+    sibling top-level package fails with ModuleNotFoundError regardless of
+    candidate correctness. cwd is already always the workspace root
+    (PolymorphicValidator.run_app_sequence/run_app both hardcode
+    cwd=self.workspace_path) - this function relies on that existing,
+    unchanged invariant rather than introducing a second one.
+
+    A workspace-root script (no directory component) or a script under a
+    directory with no __init__.py anywhere in its chain is NOT converted -
+    bare `python <path>` from the workspace root is already correct for
+    that shape and must not change (zero behavior change for the common
+    flat-script/single-package case)."""
+    if "/" in rel_path:
+        dirs = rel_path.rsplit("/", 1)[0].split("/")
+        module_name = rel_path.rsplit("/", 1)[1]
+        if module_name.endswith(".py"):
+            module_name = module_name[:-3]
+        if module_name and all(
+            "/".join(dirs[:i]) in package_dirs for i in range(1, len(dirs) + 1)
+        ):
+            module = ".".join(dirs + [module_name])
+            return [interpreter] + leading_args + ["-m", module] + trailing_args
+    return [interpreter] + leading_args + [rel_path] + trailing_args
+
+
+def ground_python_runtime_target(
+    run_commands: Optional[List[List[str]]],
+    command_source: str,
+    all_python_files: FrozenSet[str],
+    package_dirs: FrozenSet[str],
+    entrypoint_files: List[str],
+) -> Optional[List[List[str]]]:
+    """VER-005 implementation (2026-09-13) - the Python sibling of
+    ground_java_entrypoint_in_no_build_file_projects() above: deterministically
+    validates and, where possible, corrects RunVerifierAgent.judge()'s own
+    Python run-command guess against REAL repository evidence, instead of
+    trusting it. Built for the exact E4 live defect this risk's own campaign
+    reproduced twice (docs/assurance/KRIYA_VER005_RECV002_LIVE_EVIDENCE.md):
+    judge() selected a test file (tests/test_email_rules.py) as a
+    finite_command runtime-verification target for a pure-library goal with
+    no runnable entrypoint at all - contrary to its own system prompt's
+    explicit instruction - and Kriya executed it as a bare `python
+    <test-file-path>` application command, which fails with
+    ModuleNotFoundError against a sibling top-level package regardless of
+    whether the candidate itself is correct. The prompt already told the
+    model not to do this; that did not prevent the defect (Task 6) - this
+    is the deterministic, POST-model-output enforcement layer the
+    architectural rule requires (LLM verification intent -> deterministic
+    target validation -> deterministic invocation policy -> controlled
+    execution), applied the same way Java's own entrypoint grounding already
+    is: a free-form LLM guess is never directly executed unchecked.
+
+    all_python_files/package_dirs/entrypoint_files are REAL, REPOSITORY-WIDE
+    facts the caller resolves fresh from disk every attempt (kriya/workflow/
+    attempt.py's _build_python_runtime_grounding) - deliberately NOT scoped
+    to this run's own state.all_files_written the way Java's java_main_
+    classes map is, because Python entrypoint/package structure routinely
+    PREDATES the current run entirely in a brownfield repository (a
+    pre-existing top-level main.py never touched this attempt, a
+    pre-existing validation/__init__.py from before Kriya ever ran) - VER-005
+    is scoped to exactly this brownfield case, so scoping repository facts
+    to run-local writes would silently reintroduce a false-negative version
+    of the same defect (a genuinely valid, real, untouched entrypoint
+    rejected as "nonexistent" because it wasn't written this attempt).
+
+    Returns run_commands UNCHANGED for every case this correctly leaves
+    alone:
+    - command_source == "goal_explicit" - a goal-stated command is
+      authoritative and must never be silently replaced (same rule Java's
+      own grounding function applies).
+    - A command whose target already resolves to a REAL, non-test,
+      main()-guarded repository file - Kriya still applies the deterministic
+      module-vs-script invocation-POLICY correction to it (Task 4), which is
+      itself a no-op unless the bare-script form actually needs converting
+      to `-m` form for correct sys.path resolution.
+    - A command with no python-interpreter target at all (a Maven/`java`
+      command, `python -c "..."` inline code, an already-`-m`-invoked
+      stdlib/third-party module that doesn't correspond to any repository
+      file - e.g. `python -m http.server` - out of scope: there is no
+      repository file to validate, and rejecting a legitimate stdlib/
+      third-party module invocation would be a false-positive regression).
+
+    Returns a CORRECTED run_commands (never the original object) when a
+    command's target is test-shaped, nonexistent, a directory, `__init__.py`,
+    or a real non-test file with no main() guard, AND exactly ONE real
+    grounded entrypoint exists elsewhere in the repository to substitute -
+    "target rejected and a grounded runtime target used" (matches this
+    task's own Task 8 acceptance shape).
+
+    Returns None - a distinct signal from "unchanged", meaning the caller
+    should force should_run to False (runtime verification genuinely not
+    applicable) rather than execute anything - when a command's target is
+    invalid AND there is not exactly one unambiguous real entrypoint to
+    substitute (zero: a genuine library/no-runnable-target repository,
+    exactly this campaign's own reproduced case; more than one: genuinely
+    ambiguous which application should run, and Kriya never guesses which).
+    Mirrors Java's own zero-match `None` sentinel exactly - one consistent
+    meaning across both languages."""
+    if not run_commands or command_source == "goal_explicit":
+        return run_commands
+
+    changed = False
+    corrected: List[List[str]] = []
+    for cmd in run_commands:
+        extraction = _extract_python_command_target(cmd)
+        if extraction is None:
+            corrected.append(cmd)
+            continue
+        target_idx, rel_path, is_module = extraction
+        is_test_shaped = python_target_path_is_test_shaped(rel_path)
+        exists_in_repo = rel_path in all_python_files
+        if is_module and not exists_in_repo and not is_test_shaped:
+            # `-m` naming something that isn't a repository file at all AND
+            # isn't test-shaped either (e.g. `python -m http.server`, a real
+            # stdlib module) - nothing here to validate or correct against
+            # repository facts; leave it alone (see docstring's own "out of
+            # scope" case). A genuinely hallucinated repo-relative `-m`
+            # reference (neither a real file nor test-shaped) is likewise
+            # left alone here - indistinguishable from a legitimate stdlib/
+            # third-party module without a package registry this function
+            # doesn't have - and still fails safely via the EXISTING
+            # ModuleNotFoundError infrastructure-failure classification
+            # (kriya/workflow/acceptance.py) if actually executed, unchanged
+            # from today's behavior.
+            corrected.append(cmd)
+            continue
+        grounded = (
+            not is_test_shaped
+            and exists_in_repo
+            and os.path.basename(rel_path) != "__init__.py"
+            and rel_path in entrypoint_files
+        )
+        if grounded:
+            if is_module:
+                # Already correctly using -m form and resolves to a real,
+                # non-test, main()-guarded file - nothing to correct.
+                corrected.append(cmd)
+                continue
+            leading = list(cmd[1:target_idx])
+            trailing = list(cmd[target_idx + 1:])
+            new_cmd = _grounded_python_invocation(rel_path, package_dirs, leading, trailing, cmd[0])
+            if new_cmd != cmd:
+                changed = True
+            corrected.append(new_cmd)
+            continue
+        # Invalid/rejectable target (test-shaped, nonexistent, a directory,
+        # __init__.py, or a real file with no main() guard) - never executed
+        # as-is regardless of which of those it is.
+        changed = True
+        if len(entrypoint_files) == 1:
+            trailing = list(cmd[target_idx + 1:])
+            corrected.append(
+                _grounded_python_invocation(entrypoint_files[0], package_dirs, [], trailing, cmd[0])
+            )
+        else:
+            return None
+    if not changed:
+        return run_commands
+    return corrected
 
 
 def _resolve_run_command(command: List[str], workspace_path: Optional[str] = None) -> List[str]:

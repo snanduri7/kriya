@@ -28,7 +28,7 @@ from kriya.agents.contracts import (
 )
 from kriya.core.kernel import Kernel
 from kriya.policy.errors import PolicyDeniedError
-from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode, normalize_workspace_relpath
+from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode, is_within_scope, make_workspace_scope, normalize_workspace_relpath
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.tools.process import ProcessController
 from kriya.tools.service_runtime import (
@@ -55,7 +55,7 @@ from kriya.workflow.dependency_invalidation import (
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _build_test_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, classify_environment_failure, extract_missing_project_local_python_module, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
 from kriya.workflow.contract_authority import derive_direct_contract_authorizations
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, build_grounded_java_launch_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, strip_package_declaration_matching_source_root
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, build_grounded_java_launch_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, ground_python_runtime_target, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, python_command_targets_test_path, python_file_has_main_guard, python_target_path_is_test_shaped, strip_package_declaration_matching_source_root
 from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
@@ -1975,6 +1975,94 @@ def _build_java_main_class_map(java_files: List[str], ctx: "AttemptContext") -> 
     return result
 
 
+# VER-005 implementation (2026-09-13): noise directories skipped while
+# discovering real Python repository facts (see
+# _build_python_runtime_grounding below) - dependency/build/cache
+# artifacts, never a repository's own source, that a naive full-tree walk
+# would otherwise scan (and could misidentify a vendored third-party
+# script's own __main__ guard as a real repository entrypoint).
+_PYTHON_RUNTIME_GROUNDING_EXCLUDED_DIRS = {
+    ".git", ".kriya", "__pycache__", ".venv", "venv", "env", "node_modules",
+    ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build",
+    ".eggs", "site-packages",
+}
+
+
+def _collect_python_runtime_grounding_facts(root: str) -> Tuple[FrozenSet[str], FrozenSet[str]]:
+    """Bounded, single-pass walk of `root` collecting every real, in-scope
+    `.py` file's workspace-relative path, plus the set of real Python
+    package directories (those containing __init__.py) - the two
+    repository-wide facts ground_python_runtime_target() (kriya/workflow/
+    file_resolution.py) needs to validate an LLM-proposed runtime target
+    against real evidence instead of trusting it. followlinks=False plus a
+    per-entry is_within_scope() check (the same symlink-safe containment
+    idiom PolymorphicValidator.run_app_sequence()'s own javac -d directory
+    creation already uses, kriya/tools/validate.py) - a malicious symlink
+    inside the repository can never smuggle an outside path into either
+    returned set."""
+    scope = make_workspace_scope(root)
+    all_py: set = set()
+    package_dirs: set = set()
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _PYTHON_RUNTIME_GROUNDING_EXCLUDED_DIRS and not d.startswith(".")
+        ]
+        rel_dir = os.path.relpath(dirpath, root)
+        if "__init__.py" in filenames:
+            norm_dir = "" if rel_dir == "." else rel_dir.replace(os.sep, "/")
+            package_dirs.add(norm_dir)
+        for fname in filenames:
+            if not fname.endswith(".py"):
+                continue
+            full = os.path.join(dirpath, fname)
+            if not is_within_scope(scope, full):
+                continue
+            rel = os.path.relpath(full, root).replace(os.sep, "/")
+            all_py.add(rel)
+    return frozenset(all_py), frozenset(package_dirs)
+
+
+def _build_python_runtime_grounding(root: str) -> Tuple[FrozenSet[str], FrozenSet[str], List[str]]:
+    """(all_python_files, package_dirs, entrypoint_files) - the real,
+    repository-wide facts ground_python_runtime_target() validates an
+    LLM-proposed Python runtime-verification target against (VER-005
+    implementation, 2026-09-13). Deliberately walks the real filesystem
+    from `root` rather than being scoped to this run's own
+    state.all_files_written the way Java's _build_java_main_class_map is:
+    Python entrypoint/package structure routinely PREDATES the current
+    attempt entirely in a brownfield repository (a pre-existing top-level
+    main.py never touched this run, a pre-existing validation/__init__.py
+    from before Kriya ever ran) - scoping to run-local writes would
+    silently reintroduce a false-negative version of the exact defect this
+    fixes (a genuinely valid, untouched entrypoint rejected as
+    "nonexistent"). Recomputed fresh every attempt, never cached alongside
+    RunVerifierAgent.judge()'s own judgment - same "a retry can edit file
+    content between attempts, so this must reflect what's actually on disk
+    right now" reasoning ground_java_entrypoint_in_no_build_file_projects's
+    own call sites already apply.
+
+    entrypoint_files is every real, non-test, non-__init__.py `.py` file
+    under root with a genuine top-level `if __name__ == "__main__":` guard
+    - the Python sibling of _build_java_main_class_map's real-main()-method
+    detection."""
+    all_py, package_dirs = _collect_python_runtime_grounding_facts(root)
+    entrypoints: List[str] = []
+    for rel in sorted(all_py):
+        if python_target_path_is_test_shaped(rel) or os.path.basename(rel) == "__init__.py":
+            continue
+        full = os.path.join(root, rel)
+        try:
+            with open(full, "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except Exception as e:
+            logger.debug(f"Python entrypoint detection: couldn't read {rel}, skipping it: {e}")
+            continue
+        if python_file_has_main_guard(content):
+            entrypoints.append(rel)
+    return all_py, package_dirs, entrypoints
+
+
 _JAVA_PACKAGE_DECL_RE = re.compile(r"^\s*package\s+([\w.]+)\s*;", re.MULTILINE)
 
 
@@ -2531,6 +2619,23 @@ def _validate_and_convert_managed_service_contract(
         return None, f"managed_service.service_command dependency resolution failed: {install_error}"
     service_command = grounded_commands[0]
 
+    # VER-005 implementation (2026-09-13): a MANAGED_SERVICE target has no
+    # safe deterministic substitute the way a FINITE_COMMAND target does
+    # (ground_python_runtime_target() above) - there is no principled way
+    # to guess which OTHER command should start a long-running service
+    # instead. The one thing this can and must still refuse deterministically,
+    # at this same pre-process-launch admission boundary every other
+    # managed_service field is already validated at: a test file/module is
+    # never a valid service entrypoint, regardless of what RunVerifierAgent.
+    # judge() returned. Structural-only (python_command_targets_test_path
+    # needs no repository-wide grounding facts) - fails closed here rather
+    # than ever reaching ProcessController.start_managed().
+    if python_command_targets_test_path(service_command):
+        return None, (
+            f"managed_service.service_command {service_command!r} targets a test file/module - "
+            "a test artifact is never a valid long-running service entrypoint"
+        )
+
     readiness, readiness_error = _validate_and_convert_readiness(managed_service.get("readiness"))
     if readiness_error:
         return None, readiness_error
@@ -2936,6 +3041,42 @@ async def _execute_runtime_verification_directly(
             elif corrected_commands != judgment["run_commands"]:
                 judgment = dict(judgment)
                 judgment["run_commands"] = corrected_commands
+
+        # VER-005 implementation (2026-09-13): the Python sibling of the
+        # Java entrypoint grounding just above - see ground_python_runtime_
+        # target()'s own docstring (kriya/workflow/file_resolution.py) for
+        # the live E4 defect this closes and why Python facts are resolved
+        # repository-wide rather than scoped to known_files. Independent of
+        # the Java branch above (different commands, never both touched by
+        # the same corrected_commands variable), so no interaction with it.
+        if any(f.endswith(".py") for f in known_files) or validator.stack == "python":
+            all_python_files, package_dirs, entrypoint_files = _build_python_runtime_grounding(
+                validator.workspace_path
+            )
+            corrected_py_commands = ground_python_runtime_target(
+                judgment["run_commands"], judgment["command_source"],
+                all_python_files, package_dirs, entrypoint_files,
+            )
+            if corrected_py_commands is None:
+                logger.info(
+                    "Deterministic Python runtime-target grounding: the run-verification "
+                    "judge's proposed target is not a valid application runtime target "
+                    "(test-shaped, nonexistent, or unguarded), and no unambiguous real "
+                    "entrypoint exists elsewhere in the repository to substitute - overriding "
+                    "should_run to False instead of executing an invalid target."
+                )
+                judgment = dict(judgment)
+                judgment["should_run"] = False
+                judgment["run_commands"] = None
+            elif corrected_py_commands != judgment["run_commands"]:
+                logger.info(
+                    "Deterministic Python runtime-target grounding: the run-verification "
+                    "judge's proposed target was not a valid application runtime target - "
+                    f"substituting {corrected_py_commands} instead of trusting the model's "
+                    "own guess."
+                )
+                judgment = dict(judgment)
+                judgment["run_commands"] = corrected_py_commands
 
     if not judgment.get("should_run"):
         return
@@ -6309,6 +6450,46 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         )
                         judgment = dict(judgment)
                         judgment["run_commands"] = corrected_commands
+
+                # VER-005 implementation (2026-09-13): the Python sibling of
+                # the Java entrypoint grounding just above - see
+                # ground_python_runtime_target()'s own docstring (kriya/
+                # workflow/file_resolution.py) for the live E4 defect this
+                # closes. Applied fresh every attempt, same as the Java
+                # branch above - never cached alongside judge()'s own
+                # judgment, since a retry can edit file content between
+                # attempts. Independent of the Java branch (mutually
+                # exclusive in practice - java_files is empty for a real
+                # Python project, and this block's own gate is False for a
+                # real Java one), so no interaction between them.
+                if any(f.endswith(".py") for f in entrypoint_known_files) or validator.stack == "python":
+                    all_python_files, package_dirs, entrypoint_files = _build_python_runtime_grounding(
+                        validator.workspace_path
+                    )
+                    corrected_py_commands = ground_python_runtime_target(
+                        judgment["run_commands"], judgment["command_source"],
+                        all_python_files, package_dirs, entrypoint_files,
+                    )
+                    if corrected_py_commands is None:
+                        logger.info(
+                            "Deterministic Python runtime-target grounding: the run-verification "
+                            "judge's proposed target is not a valid application runtime target "
+                            "(test-shaped, nonexistent, or unguarded), and no unambiguous real "
+                            "entrypoint exists elsewhere in the repository to substitute - "
+                            "overriding should_run to False instead of executing an invalid target."
+                        )
+                        judgment = dict(judgment)
+                        judgment["should_run"] = False
+                        judgment["run_commands"] = None
+                    elif corrected_py_commands != judgment["run_commands"]:
+                        logger.info(
+                            "Deterministic Python runtime-target grounding: the run-verification "
+                            "judge's proposed target was not a valid application runtime target - "
+                            f"substituting {corrected_py_commands} instead of trusting the model's "
+                            "own guess."
+                        )
+                        judgment = dict(judgment)
+                        judgment["run_commands"] = corrected_py_commands
             if judgment["should_run"]:
                 proceed_with_run = True
                 if judgment["command_source"] == "inferred" and not state.run_verification_confirmed:
