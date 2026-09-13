@@ -126,7 +126,7 @@ class PreparedContainment:
       `ProcessController` spawns it - e.g. `["docker", "run", "--rm",
       "--name", ..., "--network", "none", ..., image]` ahead of the
       caller's real `["mvn", "install"]`. `ProcessController` still owns
-      the ONE spawn point (`_spawn_popen`/`_spawn_subprocess_exec`) - this
+      the ONE spawn point (`_spawn_popen`/`spawn_subprocess_exec_fail_closed`) - this
       only changes what argv it spawns, not who spawns it (Invariant: no
       parallel execution architecture).
     - `cleanup`: a best-effort, no-raise callable `ProcessController` runs

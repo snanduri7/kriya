@@ -7,10 +7,10 @@ awaited - Kriya owns the complete process tree and terminates it before
 returning) and `start_managed()` (Managed Runtime Verification, 2026-09-03 -
 a long-lived service a caller wants to poll for readiness and probe while
 it's still running). All three share the exact same process-group
-isolation and termination primitive (`_terminate_tree`), the exact same
+isolation and termination primitive (`terminate_process_tree`), the exact same
 `ContainmentProfile`/`ContainmentBackend` composition (`_prepare_env_and_preexec`),
 and the exact same fail-closed classification of a resource/containment
-setup failure (`_spawn_popen`/`_spawn_subprocess_exec` both convert the one
+setup failure (`_spawn_popen`/`spawn_subprocess_exec_fail_closed` both convert the one
 `subprocess.SubprocessError` shape a broken `preexec_fn` produces into a
 real, typed `ContainmentSetupError` - see kriya/tools/containment.py and
 kriya/tools/sandbox.py's own 2026-09-11 fail-closed correction) -
@@ -59,6 +59,29 @@ def _bounded_tail(value: str, limit: int) -> tuple[str, bool]:
         return value, False
     omitted = len(value) - limit
     return f"[... {omitted} earlier characters omitted ...]\n" + value[-limit:], True
+
+
+def terminate_process_tree(process: Any) -> None:
+    """SIGKILLs the process's ENTIRE process group (POSIX) - not just the
+    direct PID - relying on every lifecycle in this module (and, since
+    SEC-004, kriya/mcp/lifecycle.py) spawning with `start_new_session=True`
+    so the child becomes its own session/process-group leader and every
+    descendant it spawns inherits that same group. This is the one
+    process-tree-ownership primitive shared by every caller (Invariant 14:
+    prefer one execution-control abstraction over scattered sandbox
+    logic) - promoted from a `ProcessController`-only staticmethod
+    (2026-09-13) specifically so SEC-004's MCP lifecycle controller can
+    reuse it instead of re-implementing process-group termination.
+    Idempotent - `ProcessLookupError` (already exited) is swallowed, not
+    raised, since "the process is already gone" is the desired end state,
+    not a failure."""
+    try:
+        if os.name == "posix":
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        else:
+            process.kill()
+    except ProcessLookupError:
+        pass
 
 
 class ManagedProcess:
@@ -156,7 +179,7 @@ class ManagedProcess:
         try:
             if self._popen.poll() is not None:
                 return True
-            ProcessController._terminate_tree(self._popen)
+            terminate_process_tree(self._popen)
             try:
                 self._popen.wait(timeout=reap_timeout)
                 return True
@@ -234,7 +257,7 @@ def _spawn_popen(*args: Any, **kwargs: Any) -> subprocess.Popen:
         ) from e
 
 
-async def _spawn_subprocess_exec(*args: Any, **kwargs: Any) -> "asyncio.subprocess.Process":
+async def spawn_subprocess_exec_fail_closed(*args: Any, **kwargs: Any) -> "asyncio.subprocess.Process":
     """Async sibling of `_spawn_popen` - identical fail-closed conversion,
     confirmed empirically to raise the same `subprocess.SubprocessError`
     shape for a failing `preexec_fn` under `asyncio.create_subprocess_exec`."""
@@ -290,7 +313,7 @@ class ProcessController:
                 stdout, stderr = process.communicate(input=stdin_payload or "", timeout=timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
-                self._terminate_tree(process)
+                terminate_process_tree(process)
                 try:
                     stdout, stderr = process.communicate(timeout=self.reap_timeout)
                 except subprocess.TimeoutExpired as reap_ex:
@@ -302,7 +325,7 @@ class ProcessController:
             # SEC-001-P6: a container backend's own authoritative teardown
             # (e.g. `docker rm -f`) - not optional even on the happy path,
             # see PreparedContainment.cleanup's own docstring for why
-            # `_terminate_tree`'s host-side process-group kill alone is not
+            # `terminate_process_tree`'s host-side process-group kill alone is not
             # sufficient for a VM-mediated container runtime.
             if resolved.cleanup is not None:
                 resolved.cleanup()
@@ -336,7 +359,7 @@ class ProcessController:
         """Async sibling of `run()` - the SEC-001-P3a design decision
         (docs/architecture/SEC001_HOSTILE_CODE_CONTAINMENT_DESIGN.md,
         SEC-001-P3a/P3b): a thin async-native method on THIS SAME class,
-        sharing `_prepare_env_and_preexec`/`_terminate_tree`/`_bounded_tail`/
+        sharing `_prepare_env_and_preexec`/`terminate_process_tree`/`_bounded_tail`/
         `ProcessResult` with `run()` rather than a parallel implementation.
         Only the low-level spawn/wait/kill-on-timeout primitives differ
         (asyncio vs. blocking I/O) - not a duplicated security semantic,
@@ -348,7 +371,7 @@ class ProcessController:
             env=env, preexec_fn=preexec_fn,
         )
         try:
-            process = await _spawn_subprocess_exec(
+            process = await spawn_subprocess_exec_fail_closed(
                 *resolved.command, cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.PIPE, env=resolved.env, preexec_fn=resolved.preexec_fn,
                 start_new_session=(os.name == "posix"),
@@ -361,7 +384,7 @@ class ProcessController:
                 )
             except asyncio.TimeoutError:
                 timed_out = True
-                self._terminate_tree(process)
+                terminate_process_tree(process)
                 try:
                     stdout_b, stderr_b = await asyncio.wait_for(
                         process.communicate(), timeout=self.reap_timeout,
@@ -431,12 +454,3 @@ class ProcessController:
             exec_target=resolved.exec_target,
         )
 
-    @staticmethod
-    def _terminate_tree(process: Any) -> None:
-        try:
-            if os.name == "posix":
-                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            else:
-                process.kill()
-        except ProcessLookupError:
-            pass

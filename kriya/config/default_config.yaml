@@ -47,6 +47,23 @@ logging:
 
 mcp: {}
 
+# SEC-004 (2026-09-13): bounded MCP subprocess lifecycle/resource controls,
+# applied uniformly to every configured mcp.<server>. Security-sensitive under
+# SEC-009 - a repository can never override any of these (see
+# kriya/config/authority.py's _SECURITY_AUTHORITY_FIELDS). See
+# kriya/config/config.py::MCPLifecycleConfig's own docstring for the full
+# rationale behind each default, including the honest CPU-lifetime-budget-vs-
+# rate-limit distinction.
+mcp_lifecycle:
+  startup_timeout_seconds: 30
+  request_timeout_seconds: 60
+  shutdown_grace_seconds: 5
+  force_kill_reap_seconds: 5
+  max_stdout_line_bytes: 4000000
+  max_stderr_buffer_bytes: 1000000
+  cpu_seconds: 3600
+  memory_mb: 2048
+
 llm_chain:
   # deepseek-r1:32b (the previous entry here) isn't pulled locally (confirmed via
   # `ollama list`, 2026-08-15) - this fallback slot was silently unreachable the

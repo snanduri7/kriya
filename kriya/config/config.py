@@ -92,6 +92,79 @@ class MCPServerConfig(BaseModel):
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
 
+class MCPLifecycleConfig(BaseModel):
+    """SEC-004 (2026-09-13): bounded MCP subprocess lifecycle/resource
+    controls, applied uniformly to every configured `mcp.<server>` -
+    deliberately ONE coherent section rather than per-server overrides
+    or scattered module-level constants (this risk's own explicit
+    instruction: "do not introduce unnecessary tuning knobs if two
+    bounds can share one clearly defined setting"). Every field here is
+    SECURITY_AUTHORITY under SEC-009 (kriya/config/authority.py) -
+    weakening any bound (a longer timeout, a bigger stdout limit, a
+    higher resource ceiling) is a security-relevant capability change, so
+    a repository can never set any of these without explicit SEC-009
+    approval; only the packaged default (this file) is trusted.
+
+    `startup_timeout_seconds` bounds the ENTIRE launch sequence (process
+    spawn + initialize request + initialize response/handshake
+    completion) - a child that starts but never completes the handshake
+    cannot hang Kriya past this bound.
+
+    `request_timeout_seconds` bounds every individual protocol request
+    made through `_send_request()` after startup (tools/list, tools/call,
+    any future method) - independent of the startup bound, since a
+    server can complete its handshake and then hang on a specific call.
+
+    `shutdown_grace_seconds` is how long `stop()` waits for a SIGTERM'd
+    process tree to exit cooperatively before escalating to SIGKILL.
+    `force_kill_reap_seconds` is the separate, additional bound on
+    reaping the tree AFTER the forced kill is sent - kept distinct from
+    the grace period because a killed process's exit is normally
+    near-instant, so a much shorter bound is appropriate there than the
+    grace period given to a cooperative shutdown attempt.
+
+    `max_stdout_line_bytes` is the hard ceiling on a single stdout
+    protocol line/frame (enforced via asyncio's own StreamReader `limit`,
+    which raises deterministically rather than allocating unboundedly -
+    see kriya/mcp/lifecycle.py). Measured empirically against Kriya's own
+    shipped MCP server's real `tools/list` response (1282 bytes) - the
+    default here is deliberately generous headroom over that, sized for
+    a legitimately tool-rich third-party server, not the smallest value
+    that happens to work today.
+
+    `max_stderr_buffer_bytes` bounds the ROLLING (not cumulative) stderr
+    buffer kept for diagnostics - a flooding server's stderr is
+    continuously drained (never blocking the child's own write()) but
+    only the most recent bytes up to this bound are retained.
+
+    `cpu_seconds`/`memory_mb` reuse `kriya/tools/sandbox.py::
+    posix_resource_limits_preexec_fn()` (SEC-001) exactly as-is - the
+    same primitive already used for target-code sandbox execution.
+    IMPORTANT ASYMMETRY, stated honestly rather than flattened: `memory_mb`
+    (RLIMIT_AS) is a true ceiling, deterministic/fail-closed on Linux,
+    advisory-only on macOS (an already-accepted SEC-001 platform
+    limitation, not new here). `cpu_seconds` (RLIMIT_CPU) is a CUMULATIVE
+    LIFETIME BUDGET, not a rate limit - appropriate for a finite
+    compile/test job, but an MCP server is a long-lived daemon for the
+    life of a Kriya session, so this is deliberately generous (a
+    legitimately busy server should not be SIGKILL'd mid-session for
+    having done a lot of honest work). It still bounds a genuinely
+    CPU-spinning/pathological server, which is the property SEC-004
+    requires - true CPU RATE limiting (cgroups CPU shares/quota) would
+    need real container/cgroup containment and is explicitly SEC-005's
+    scope, not attempted here (see docs/assurance/
+    KRIYA_PRODUCTION_RISK_REGISTER.md's SEC-004 entry for the full
+    native-vs-OCI decision record)."""
+
+    startup_timeout_seconds: int = Field(default=30, ge=1)
+    request_timeout_seconds: int = Field(default=60, ge=1)
+    shutdown_grace_seconds: int = Field(default=5, ge=0)
+    force_kill_reap_seconds: int = Field(default=5, ge=0)
+    max_stdout_line_bytes: int = Field(default=4_000_000, ge=1024)
+    max_stderr_buffer_bytes: int = Field(default=1_000_000, ge=1024)
+    cpu_seconds: Optional[int] = Field(default=3600, ge=1)
+    memory_mb: Optional[int] = Field(default=2048, ge=1)
+
 class EmbeddingConfig(BaseModel):
     model: str = Field(default="nomic-embed-text:latest")
     base_url: str = Field(default="http://localhost:11434/v1")
@@ -627,6 +700,7 @@ class AppConfig(BaseModel):
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     mcp: Dict[str, MCPServerConfig] = Field(default_factory=dict)
+    mcp_lifecycle: MCPLifecycleConfig = Field(default_factory=MCPLifecycleConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     autonomy: AutonomyConfig = Field(default_factory=AutonomyConfig)
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)

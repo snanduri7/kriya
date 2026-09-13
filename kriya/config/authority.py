@@ -179,6 +179,22 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # labeling and as the fail-closed static fallback if config.py's
     # runtime override were ever skipped by a bug.
     ("logging", "file"),
+    # SEC-004 (2026-09-13): every mcp_lifecycle.* bound is security-
+    # relevant - a repository weakening a timeout/output-limit/resource
+    # ceiling reopens exactly the hang/leak/resource-exhaustion classes
+    # SEC-004 exists to close. Only the packaged default (PACKAGED_DEFAULT,
+    # trusted) may set these; no runtime value-based override exists here
+    # (unlike paths.*/logging.file) - EVERY repository-equivalent source
+    # is denied outright, regardless of the value, since there is no
+    # "safe" direction to weaken any of these bounds toward.
+    ("mcp_lifecycle", "startup_timeout_seconds"),
+    ("mcp_lifecycle", "request_timeout_seconds"),
+    ("mcp_lifecycle", "shutdown_grace_seconds"),
+    ("mcp_lifecycle", "force_kill_reap_seconds"),
+    ("mcp_lifecycle", "max_stdout_line_bytes"),
+    ("mcp_lifecycle", "max_stderr_buffer_bytes"),
+    ("mcp_lifecycle", "cpu_seconds"),
+    ("mcp_lifecycle", "memory_mb"),
 })
 
 # NOTE: there is currently no AppConfig field for an "LSP executable path" -
