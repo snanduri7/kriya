@@ -17634,6 +17634,60 @@ def test_checkpoint_workspace_fingerprint_changes_on_new_commit(tmp_path):
     assert fp3 != fp1 and fp3 != fp2
 
 
+def test_checkpoint_workspace_fingerprint_cannot_distinguish_two_different_dirty_states(tmp_path):
+    """STATE-001 characterization (2026-09-13, VER/STATE/RECV/REPO
+    reconciliation package): a REPRODUCED, currently-real gap, permanently
+    pinned here so a future fix must update this test deliberately, not
+    regress silently past it (same convention as CORR-018's own
+    test_brownfield_guard_does_not_detect_public_method_body_behavior_
+    change).
+
+    compute_workspace_fingerprint() is HEAD SHA + a clean/dirty BOOLEAN
+    (kriya/workflow/checkpoint.py) - it has no notion of WHICH dirty
+    content is present, only THAT the tree is dirty. Two genuinely
+    different working-tree contents, at the identical HEAD, both dirty,
+    produce the IDENTICAL fingerprint string. This is the ordinary
+    generate/fix resume path's own drift-detection mechanism (workflow.py's
+    own resume-checkpoint block) - the stronger, tree-hash-based drift
+    check (kriya/workflow/checkpoint.py's compute_tree_hash/
+    validate_resume_against_reality) shares this exact same blind spot,
+    since `git rev-parse HEAD^{tree}` resolves the COMMITTED tree only,
+    never anything uncommitted - so this is not merely a coarse-fingerprint
+    weakness with a known stronger fallback; it is the actual current
+    ceiling of every resume-drift check in this codebase for UNCOMMITTED
+    content.
+
+    Practical exposure: a checkpoint saved while the tree is legitimately
+    dirty (e.g. mid-generation, after a candidate write but before the
+    stage completes) followed by ANY OTHER dirty-content change before
+    resume (a manual edit, an unrelated concurrent tool, a partially
+    -applied recovery) is invisible to this check - resume proceeds as
+    though the workspace still matches the checkpoint's own assumptions.
+    Not a hypothetical: this violates this reconciliation task's own
+    Invariant 11 ("Repository state changes after verification must
+    invalidate stale success evidence where architecture requires it").
+
+    Deliberately NOT fixed in this pass - matches this closure task's own
+    named STOP condition ("resume semantics cannot distinguish stale from
+    current verification"): a real general-purpose fix (hashing actual
+    working-tree content, e.g. via `git add -A && git write-tree` against
+    a scratch index, never touching the real index/HEAD) touches the
+    currently-stable resume path used by every `generate --resume`/`fix
+    --resume` call and deserves its own reviewed, scoped implementation
+    pass, not a fix folded into a primarily investigative package."""
+    _init_git_repo(tmp_path)
+    (tmp_path / "app.py").write_text("print(1)\n")
+    fp_state_a = compute_workspace_fingerprint(str(tmp_path))
+    assert fp_state_a is not None and fp_state_a.endswith(":dirty")
+
+    (tmp_path / "app.py").write_text("print(999999)  # a completely different, unrelated change\n")
+    fp_state_b = compute_workspace_fingerprint(str(tmp_path))
+    assert fp_state_b is not None and fp_state_b.endswith(":dirty")
+
+    # THE GAP: two materially different dirty states are indistinguishable.
+    assert fp_state_a == fp_state_b
+
+
 def test_checkpoint_workspace_fingerprint_none_for_non_git_dir(tmp_path):
     assert compute_workspace_fingerprint(str(tmp_path)) is None
 
