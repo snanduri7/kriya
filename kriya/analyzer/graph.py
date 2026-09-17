@@ -121,7 +121,21 @@ class DependencyGraph:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target)")
-        
+        # CTX-001 P0 (S1/S5 probes) found clear_file()'s own
+        # "DELETE FROM relations WHERE source_file = ?" doing a full table
+        # scan on every single file re-index, because source_file (added
+        # above via ALTER TABLE, after the table already existed) never got
+        # an index of its own - superimposing an extra O(N) scan onto every
+        # file indexed, i.e. O(N^2) total for a full cold index. This is the
+        # single highest-leverage fix P0 identified (root-caused via
+        # EXPLAIN QUERY PLAN). CREATE INDEX IF NOT EXISTS is itself safe to
+        # run against a pre-existing database that already has rows (and
+        # possibly NULL source_file values from before the ALTER TABLE
+        # above) - SQLite indexes NULL values like any other value, and
+        # clear_file()'s own OR-fallback clause for NULL rows is unaffected
+        # by whether source_file is indexed.
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_source_file ON relations(source_file)")
+
         self.conn.commit()
 
     def has_indexed_files(self) -> bool:
@@ -502,6 +516,28 @@ class DependencyGraph:
             self.conn.close()
 
 
+    @staticmethod
+    def _python_base_name(node: ast.expr) -> Optional[str]:
+        """Best-effort deterministic dotted name for a class base expression,
+        for CTX-001 P1 WP2 (Python inheritance relations). Only resolves
+        statically nameable forms:
+          - `Base` (ast.Name)
+          - `pkg.Base` / `pkg.sub.Base` (ast.Attribute chain rooted in a Name)
+        Returns None for anything else (a call - `get_base()`, a subscript -
+        `Generic[T]`, a conditional expression, ...) - deliberately
+        conservative, mirroring extract_class_names()'s own established
+        "degrade gracefully, never fabricate" precedent: an unsupported/
+        dynamic base must never invent a relationship (CTX-001 P1 WP2
+        requirement)."""
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            prefix = DependencyGraph._python_base_name(node.value)
+            if prefix is None:
+                return None
+            return f"{prefix}.{node.attr}"
+        return None
+
     def _parse_python(self, filepath: str, content: str) -> tuple:
         # Deliberately does not catch parse errors here - let them propagate to
         # index_file's except block, which already logs them properly. Swallowing
@@ -518,6 +554,26 @@ class DependencyGraph:
                     "start_line": node.lineno,
                     "end_line": getattr(node, "end_lineno", node.lineno)
                 })
+                # CTX-001 P1 WP2: inheritance relations, source-keyed by the
+                # class's own (bare) name - the same convention _parse_java()
+                # already established for its "inherits"/"implements"
+                # relations (source=class_name, target=base/interface name),
+                # so a class's base is a genuine Graph RAG neighbor exactly
+                # like a Java subclass's own superclass/interface already is.
+                # Only ast.ClassDef.bases is walked - metaclass=/keyword
+                # bases are never a base class and are correctly ignored by
+                # only iterating node.bases. No runtime import resolution,
+                # no general type inference: a base that isn't statically
+                # nameable (_python_base_name returns None) produces no
+                # relation at all, never a guessed one.
+                for base in node.bases:
+                    base_name = self._python_base_name(base)
+                    if base_name:
+                        relations.append({
+                            "source": node.name,
+                            "target": base_name,
+                            "type": "inherits",
+                        })
             # 2. Capture Functions
             elif isinstance(node, ast.FunctionDef):
                 symbols.append({
