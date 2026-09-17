@@ -127,8 +127,6 @@ UNVERIFIED_MODEL_CONSERVATIVE_PROFILE = ModelCapabilities(
     preferred_edit_protocol="full_file",
 )
 
-_BARE_DEFAULT_CAPABILITIES = ModelCapabilities()
-
 # Per-process, per-(model, source) log de-duplication - resolution can be
 # called once per completion, and this module must never log per-token/
 # per-call noise. Not persisted, not a security control, purely to keep
@@ -190,8 +188,24 @@ def _resolve_for_binding(model: str, capabilities: ModelCapabilities, explicit_s
     or just the untouched ModelCapabilities() class default - in the
     latter case, a KNOWN_MODEL_PROFILES entry (real evidence) outranks the
     untouched default, and the absence of one falls to the conservative
-    profile rather than silently trusting an unverified default."""
-    if capabilities != _BARE_DEFAULT_CAPABILITIES:
+    profile rather than silently trusting an unverified default.
+
+    Explicitness is determined by pydantic's own field-set provenance
+    (capabilities.model_fields_set), never by value-comparison against the
+    bare defaults - a value-equality check cannot distinguish "the user
+    explicitly wrote native_tool_calls: true" from "nobody touched this
+    block at all" when the explicit value happens to equal the class
+    default, which is a real, required invariant (confirmed live against
+    the actual kriya/config/config.py::load_config() merge path: a user
+    override's llm.capabilities dict replaces the whole sub-dict wholesale
+    rather than deep-merging field-by-field, so only the keys the user
+    actually wrote ever reach ModelCapabilities's own constructor, and
+    pydantic tracks exactly those in model_fields_set regardless of
+    whether the object was built from that merged dict, from a bare
+    AppConfig() plus a later plain attribute assignment, or by passing an
+    already-constructed ModelCapabilities instance as a constructor kwarg -
+    all three patterns verified experimentally, not assumed)."""
+    if capabilities.model_fields_set:
         return ResolvedCapabilityProfile(model=model, capabilities=capabilities, source=explicit_source)
     known = KNOWN_MODEL_PROFILES.get(_normalize_model_identity(model))
     if known is not None:
@@ -209,9 +223,12 @@ def resolve_model_capability_profile(config, model: str) -> ResolvedCapabilityPr
     Precedence:
       1. explicit validated override - a config binding for THIS exact
          model identity (primary llm, an llm_chain entry, or any
-         agent_llms role's own llm/llm_chain) whose .capabilities differs
-         from the bare ModelCapabilities() class defaults in at least one
-         field - a real user config value, not an untouched default.
+         agent_llms role's own llm/llm_chain) whose .capabilities has a
+         non-empty model_fields_set - i.e. at least one field was actually
+         present in the user's own config, per pydantic's own field-set
+         provenance (see _resolve_for_binding's docstring) - never a
+         value-equality guess, so an explicit override remains explicit
+         even when its value happens to equal the class default.
       2. known production profile - KNOWN_MODEL_PROFILES, live-measured
          MODEL-001 campaign evidence, used when a binding exists for this
          model but its own .capabilities was never touched.

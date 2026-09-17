@@ -111,14 +111,35 @@ provenance without changing what the two existing consumers already expect.
    selection prefer the safer full-file path for a genuinely unverified
    model, without inventing any new enforcement machinery.
 
-**Known limitation, disclosed rather than engineered around:** "explicit"
-detection is by value-equality against the bare class defaults. A user who
-explicitly sets every field to exactly its own default value is
-indistinguishable from a user who never touched the block at all. This is a
-deterministic, honest tradeoff (documented, not silent) — the alternative
-(tracking pydantic's `model_fields_set` through the full config-merge
-pipeline) was judged out of scope for "smallest production-grade
-mechanism"; revisit if it ever causes a real, observed problem.
+**Correction (2026-09-18, post-closure-check):** "explicit" detection was
+originally value-equality against the bare class defaults, with the above
+limitation disclosed as an accepted tradeoff. A dedicated closure check
+proved that tradeoff was a real defect, not an acceptable one: it violates
+the required invariant "explicitly configured capability values remain
+explicit even when equal to defaults." Verified against the actual
+`load_config()` merge path (`kriya/config/config.py:1177-1189` — a user's
+`llm.capabilities` override replaces that sub-dict wholesale, so only the
+keys the user actually wrote ever reach `ModelCapabilities`'s constructor)
+that pydantic's own `model_fields_set` correctly distinguishes "absent"
+(empty set) from "explicitly supplied, value equal to default" (non-empty
+set) — confirmed experimentally across all three construction patterns the
+codebase and test suite actually use (raw merged dict, bare `AppConfig()` +
+post-hoc attribute assignment, and constructor-kwarg with an
+already-built `ModelCapabilities` instance). `_resolve_for_binding` now
+checks `capabilities.model_fields_set` instead of value-inequality; the now
+provably-redundant `_BARE_DEFAULT_CAPABILITIES` constant was removed. Three
+new regression tests
+(`test_explicit_capability_value_equal_to_default_still_counts_as_explicit`,
+`test_capabilities_model_fields_set_is_the_real_provenance_mechanism`, plus
+a corrected `test_config_loading_path_preserves_resolution_contract` that
+now uses the real merge shape instead of a non-representative plain
+`model_dump()` round-trip — that round-trip technique doesn't preserve
+field-set provenance and doesn't correspond to any real Kriya code path;
+`model_dump(exclude_unset=True)` does and is now the documented correct
+technique, proven separately). This is a strict superset of the old
+detection (nothing previously classified "explicit" stops being so); the
+existing focused-test regression baseline (346 tests across the
+capability/config-adjacent set) was re-confirmed green after the fix.
 
 ## Known models
 

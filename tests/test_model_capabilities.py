@@ -143,6 +143,70 @@ def test_unknown_model_fails_closed_on_tool_calls_and_prefers_full_file_edit():
     assert result.capabilities.preferred_edit_protocol == "full_file"
 
 
+# --- required closure check: explicit-default override provenance ---
+
+def test_explicit_capability_value_equal_to_default_still_counts_as_explicit():
+    """The exact required invariant: a user who explicitly configures a
+    capability value that happens to equal ModelCapabilities' own class
+    default must still be treated as an explicit override, not silently
+    folded into "untouched, use the known/conservative profile instead."
+    Uses the REAL config-loading shape (a raw dict matching what
+    load_config() actually constructs AppConfig from - see
+    test_config_loading_path_preserves_resolution_contract's own docstring
+    for why this shape, not a bare AppConfig() + attribute mutation, is the
+    one that matters) so this is proof against the real mechanism
+    (pydantic's model_fields_set), not an assumption.
+
+    "unexplained-model:1b" is chosen deliberately NOT in KNOWN_MODEL_PROFILES:
+    if explicitness were (incorrectly) detected by value-equality against
+    the bare class default, native_tool_calls=True here would be
+    indistinguishable from "never touched," and resolution would
+    incorrectly report source=unverified_conservative_default with
+    native_tool_calls=False instead of honoring the user's real, explicit
+    True."""
+    # A: absent/untouched - no capabilities key in the user's own config at all.
+    absent = AppConfig(**{"llm": {"model": "unexplained-model:1b"}}, )
+    resolved_absent = resolve_model_capability_profile(absent, "unexplained-model:1b")
+
+    # B: explicitly supplied, value equal to the class default (native_tool_calls
+    # defaults to True already - this is the exact edge case).
+    explicit_default = AppConfig(**{
+        "llm": {"model": "unexplained-model:1b", "capabilities": {"native_tool_calls": True}},
+    })
+    resolved_explicit = resolve_model_capability_profile(explicit_default, "unexplained-model:1b")
+
+    assert resolved_absent.source == "unverified_conservative_default"
+    assert resolved_absent.capabilities.native_tool_calls is False
+
+    assert resolved_explicit.source == "explicit_primary"
+    assert resolved_explicit.capabilities.native_tool_calls is True
+    # The rest of the explicit binding's fields fall back to ModelCapabilities'
+    # own remaining class defaults, per pydantic's ordinary field-default
+    # behavior for a partially-specified object - only native_tool_calls was
+    # actually written by the user, so only it is asserted here.
+
+    # The two ARE value-equal on native_tool_calls specifically, proving this
+    # genuinely is the "equal to default" edge case, not a different value
+    # that a weaker check would have caught anyway.
+    assert resolved_absent.capabilities.native_tool_calls != resolved_explicit.capabilities.native_tool_calls
+
+
+def test_capabilities_model_fields_set_is_the_real_provenance_mechanism():
+    """Direct, minimal proof of the underlying pydantic mechanism this
+    package's explicitness check now relies on (kriya/core/
+    model_capabilities.py::_resolve_for_binding) - kept alongside the
+    higher-level resolution test above so a future reader can see the raw
+    mechanism in isolation, not just its effect through resolution."""
+    untouched = AppConfig(**{"llm": {"model": "x"}}).llm.capabilities
+    explicit_same_value = AppConfig(**{
+        "llm": {"model": "x", "capabilities": {"native_tool_calls": True}},
+    }).llm.capabilities
+
+    assert untouched == explicit_same_value  # value-equal
+    assert untouched.model_fields_set == set()
+    assert explicit_same_value.model_fields_set == {"native_tool_calls"}  # but provenance differs
+
+
 # --- 5/6: explicit valid override / invalid override ---
 
 def test_explicit_valid_override_wins_over_known_registry_entry():
@@ -344,23 +408,60 @@ def test_resolved_profile_for_unknown_model_never_exceeds_known_profile_authorit
 
 # --- 19: config serialization/loading preserves the contract ---
 
-def test_config_round_trip_through_dict_preserves_resolution_contract():
-    cfg = AppConfig()
-    cfg.llm.model = _M2
-    cfg.llm_chain = [FallbackModelConfig(model="explicit-fallback:1b", capabilities=ModelCapabilities(json_mode=False))]
+def test_config_loading_path_preserves_resolution_contract():
+    """Uses the REAL config-loading shape, not a generic pydantic round-trip:
+    kriya/config/config.py::load_config() always constructs AppConfig from a
+    single raw, already-merged dict (kriya/config/config.py:1264,
+    `AppConfig(**state.config_dict)`) - confirmed by grep as the ONLY
+    production AppConfig(**...) construction site anywhere in kriya/. A
+    user's llm.capabilities override replaces that whole sub-dict wholesale
+    (kriya/config/config.py:1177-1189's "simple deep merge of level-1
+    dicts" - .update() at the llm level, not a recursive per-field merge),
+    so only the keys actually written by the user ever reach
+    ModelCapabilities's own constructor - which is exactly what makes
+    model_fields_set an accurate provenance signal for the real path this
+    test reproduces."""
+    merged = {
+        "llm": {"model": _M2},  # capabilities key absent entirely - untouched
+        "llm_chain": [{
+            "model": "explicit-fallback:1b",
+            "capabilities": {"json_mode": False},  # exactly what the user wrote, nothing more
+        }],
+    }
+    cfg = AppConfig(**merged)
 
-    as_dict = cfg.model_dump()
+    resolved_primary = resolve_model_capability_profile(cfg, _M2)
+    assert resolved_primary.source == "known_production_profile"
+    _assert_matches_campaign_evidence(resolved_primary.capabilities)
+
+    resolved_fallback = resolve_model_capability_profile(cfg, "explicit-fallback:1b")
+    assert resolved_fallback.source == "explicit_llm_chain"
+    assert resolved_fallback.capabilities.json_mode is False
+
+
+def test_exclude_unset_serialization_preserves_provenance_on_reload():
+    """The provenance-preserving pydantic idiom (model_dump(exclude_unset=True),
+    not a plain model_dump()) round-trips correctly - documented here as the
+    correct technique, in case any future Kriya code path needs to
+    serialize/reload a config and must not silently convert "known
+    production profile" resolutions into "explicit, using whatever the
+    untouched default happened to be" ones. A plain model_dump() does NOT
+    have this property (every field looks "set" once dumped, even an
+    untouched one) - no production code path does that round-trip today
+    (verified: the only two kernel.config.model_dump() call sites,
+    kriya/workflow/workflow.py:1036/1720, feed compute_config_fingerprint(),
+    never AppConfig(**...) reconstruction), so this is a disclosed,
+    deliberately-not-engineered-around edge case, not a live production bug."""
+    cfg = AppConfig()
+    cfg.llm.model = _M2  # capabilities left untouched
+
+    as_dict = cfg.model_dump(exclude_unset=True)
     reloaded = AppConfig(**as_dict)
 
     original = resolve_model_capability_profile(cfg, _M2)
     round_tripped = resolve_model_capability_profile(reloaded, _M2)
+    assert original.source == round_tripped.source == "known_production_profile"
     assert original.capabilities == round_tripped.capabilities
-    assert original.source == round_tripped.source
-
-    original_fb = resolve_model_capability_profile(cfg, "explicit-fallback:1b")
-    round_tripped_fb = resolve_model_capability_profile(reloaded, "explicit-fallback:1b")
-    assert original_fb.capabilities.json_mode is False
-    assert round_tripped_fb.capabilities.json_mode is False
 
 
 # --- 20: effective profile / provenance observability ---
