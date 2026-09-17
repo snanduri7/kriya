@@ -22,6 +22,7 @@ structural extraction (WP5's own explicit requirement).
 """
 import ast
 import os
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
@@ -244,3 +245,164 @@ def extract_member_body(content: str, start_line: int, end_line: int) -> str:
     if start > end:
         return ""
     return "\n".join(lines[start - 1:end])
+
+
+# --- CTX-001 P1 C2 production integration: deterministic member-hint
+# resolution from two already-grounded evidence sources (docs/assurance/
+# CTX_001_P1_ARCHITECTURE.md section 25) ------------------------------------
+#
+# Both sources below produce CANDIDATES only - never trusted on their own.
+# The one real validation gate is the same for both: does this candidate
+# resolve to a REAL member_boundaries_for() range in the file's CURRENT
+# (CurrentSourceResolver-sourced) content? A candidate that fails this is
+# simply not returned - "no hint" is always a silent, safe, structural
+# no-op for the caller (Package 2's existing REASON_UNSUPPORTED_STRUCTURAL_
+# EXTRACTION/file-level fallback), never a special error path.
+#
+# No scoring/confidence framework: validation against real, current
+# structure is a binary gate, not a probabilistic score (see the
+# architecture addendum's own HINT_CONFIDENCE discussion) - `provenance` is
+# recorded on MemberHintCandidate purely for observability/trace, never for
+# ranking or arbitration between sources.
+
+@dataclass(frozen=True)
+class MemberHintCandidate:
+    member_id: str
+    provenance: str  # "vector_chunk_header" | "failure_location"
+
+
+# Matches ONLY the exact, controlled header line format
+# kriya/analyzer/analyzer.py::chunk_file_with_metadata_headers() itself
+# writes ("Method: {name}" / "Class: {name}", one per line, within the
+# first few lines of a chunk's own text) - never a general-purpose scan of
+# arbitrary source prose. A source file that happens to contain a literal
+# "Method: Foo" string mid-body does not false-positive here because real
+# indexed chunk headers are always among the FIRST lines of chunk text
+# (see _HEADER_SCAN_LINES below) and because chunk text passed to this
+# parser is the RETRIEVAL RESULT'S OWN text, never raw file content.
+_CONTROLLED_HEADER_LINE_RE = re.compile(r"^(?:Method|Class): (.+)$")
+_HEADER_SCAN_LINES = 8
+
+
+def parse_controlled_chunk_header_name(chunk_text: str) -> Optional[str]:
+    """Parses 'Method: X'/'Class: X' from a vector chunk's own text
+    (kriya/analyzer/analyzer.py::chunk_file_with_metadata_headers'
+    controlled format only). Returns the bare (unqualified) member/class
+    name, or None if no such line appears within the header region - a
+    malformed/absent header produces no candidate, never a guess.
+
+    A METHOD chunk's own header ALSO carries a "Class: {parent}" line
+    ahead of its "Method: {name}" line (parent-context, not the chunk's
+    own identity - see chunk_file_with_metadata_headers' method-chunk
+    header format, both the Python and Java branches). "Method:" is
+    therefore preferred deterministically whenever both are present in the
+    same header; "Class:" is only used when no "Method:" line exists at
+    all (a real class-declaration chunk)."""
+    if not chunk_text:
+        return None
+    class_name: Optional[str] = None
+    for line in chunk_text.splitlines()[:_HEADER_SCAN_LINES]:
+        match = _CONTROLLED_HEADER_LINE_RE.match(line)
+        if not match:
+            continue
+        kind = line.split(":", 1)[0]
+        name = match.group(1).strip()
+        if not name:
+            continue
+        if kind == "Method":
+            return name
+        if kind == "Class" and class_name is None:
+            class_name = name
+    return class_name
+
+
+def member_ids_matching_name(boundaries: List[MemberBoundary], name: str) -> List[str]:
+    """Every DISTINCT real member_id (java_member_boundaries/
+    python_member_boundaries output) whose own simple name equals `name` -
+    a member_id is either bare ("TopLevelFunc"/"ClassName") or dotted
+    ("Class.method"); matching on the LAST dotted segment (or the whole
+    string when there is no dot) lets a bare "Method: calculate_total"
+    header resolve against a real
+    "StandardInvoiceCalculator.calculate_total" boundary without needing
+    the enclosing type name at all.
+
+    Returns each DISTINCT member_id at most once, even when multiple
+    overloads share it (a Java class can have several overloads with the
+    same name - extract_java_members() gives each its own JavaMember/
+    MemberBoundary entry, but they all produce the identical dotted
+    member_id string) - the member_hints dict this feeds is a flat name
+    collection, not a boundary list. boundaries_matching_member_id() below
+    is the one that expands an ambiguous member_id back out to every real,
+    non-fabricated overload boundary sharing it, at consumption time - the
+    conservative choice (retain all real candidates, never guess which
+    overload was meant), not an error condition."""
+    seen: List[str] = []
+    for boundary in boundaries:
+        simple = boundary.member_id.rsplit(".", 1)[-1]
+        if (simple == name or boundary.member_id == name) and boundary.member_id not in seen:
+            seen.append(boundary.member_id)
+    return seen
+
+
+def boundaries_matching_member_id(boundaries: List[MemberBoundary], member_id: str) -> List[MemberBoundary]:
+    """Every boundary sharing this EXACT member_id - normally exactly one,
+    but more than one for an ambiguous (overloaded) Java method name that
+    member_ids_matching_name() above could not uniquely resolve. Consumers
+    (build_known_target_context) use this instead of a single next()
+    lookup specifically so an ambiguous member_id expands to ALL of its
+    real overload bodies rather than arbitrarily picking the first."""
+    return [b for b in boundaries if b.member_id == member_id]
+
+
+def resolve_member_hints_from_chunk_header(
+    path: str, current_content: str, chunk_text: str,
+) -> List[MemberHintCandidate]:
+    """SOURCE 1 (initial/attempt-1 evidence): a Graph-RAG vector hit's own
+    chunk `text` (already retrieved by query_hybrid(), previously discarded
+    at the retrieval call site) -> zero or more VALIDATED member hints for
+    `path`, checked against `current_content` (caller-supplied - always the
+    CurrentSourceResolver-resolved, worktree-authoritative content, never
+    re-derived here; this function does no I/O and makes no root-selection
+    decision of its own, per the "reuse CurrentSourceResolver" invariant).
+
+    Unsupported language (member_boundaries_for returns None) or a name
+    with zero structural matches both produce []; multiple structural
+    matches (Java overloads) all come back, per member_ids_matching_name's
+    own conservative-retention docstring."""
+    name = parse_controlled_chunk_header_name(chunk_text)
+    if not name:
+        return []
+    boundaries = member_boundaries_for(path, current_content)
+    if boundaries is None:
+        return []
+    return [
+        MemberHintCandidate(member_id=member_id, provenance="vector_chunk_header")
+        for member_id in member_ids_matching_name(boundaries, name)
+    ]
+
+
+def resolve_member_hints_from_failure_location(
+    path: str, current_content: str, line: int,
+) -> List[MemberHintCandidate]:
+    """SOURCE 2 (retry evidence): one Failure.file_locations entry's
+    (filepath, line) -> zero or one VALIDATED member hint for `path`, via
+    plain range containment against member_boundaries_for(path,
+    current_content) - `current_content` is always caller-supplied
+    (CurrentSourceResolver-resolved), matching resolve_member_hints_from_
+    chunk_header's own contract exactly.
+
+    A line can legitimately fall inside more than one containing boundary
+    at once (a method's own range is nested inside its enclosing class's
+    own range) - the MOST SPECIFIC (smallest span) containing boundary
+    wins deterministically, since a compiler/test failure at a specific
+    line is a far more precise signal about the METHOD than the whole
+    class. A line outside every known boundary, an unsupported language,
+    or an unreadable/stale line number all produce []."""
+    boundaries = member_boundaries_for(path, current_content)
+    if boundaries is None:
+        return []
+    containing = [b for b in boundaries if b.start_line <= line <= b.end_line]
+    if not containing:
+        return []
+    most_specific = min(containing, key=lambda b: b.end_line - b.start_line)
+    return [MemberHintCandidate(member_id=most_specific.member_id, provenance="failure_location")]

@@ -1576,6 +1576,13 @@ class WorkflowEngine:
         matched_files = []
         related_files = []
         graph_rag_context = ""
+        # CTX-001 P1 C2 production integration: path -> candidate member/
+        # class NAMES parsed from this run's own vector hits, before
+        # workflow.py's own file-level collapse below - see
+        # AttemptContext.retrieval_member_hints' own docstring (attempt.py)
+        # for why these are candidates only, validated later, never trusted
+        # here.
+        retrieval_member_hints: Dict[str, List[str]] = {}
         try:
             vector_index_path = os.path.join(self.kernel.config.paths.memory, "vector_index.db")
             db_path = os.path.join(self.kernel.config.paths.memory, "dependency_graph.db")
@@ -1606,13 +1613,28 @@ class WorkflowEngine:
                 query_emb = await embed_client.get_embedding(goal, is_query=True)
                 matches = vector_store.query_hybrid(goal, query_emb, top_k=retrieval_limits.top_k, model_name=self.kernel.config.embedding.model)
                 good_matches = [m for m in matches if m.get("score", 0.0) > 0.0]
+                from kriya.workflow.context_source import parse_controlled_chunk_header_name
                 for m in good_matches:
                     retrieved_chunks.append({
                         "filepath": m.get("filepath", "unknown"),
                         "score": m.get("score", 0.0),
                         "text": m.get("text", "")[:300] + "..." if len(m.get("text", "")) > 300 else m.get("text", "")
                     })
-                
+                    # CTX-001 P1 C2: parse (never trust) a candidate member/
+                    # class name from this hit's own chunk text - the exact
+                    # "Method: X"/"Class: X" controlled header format
+                    # chunk_file_with_metadata_headers() already writes at
+                    # index time. Real validation against CURRENT structural
+                    # boundaries happens later, in run_attempt() - this is
+                    # candidate extraction only.
+                    fp = m.get("filepath")
+                    if fp:
+                        candidate_name = parse_controlled_chunk_header_name(m.get("text", ""))
+                        if candidate_name:
+                            names = retrieval_member_hints.setdefault(fp, [])
+                            if candidate_name not in names:
+                                names.append(candidate_name)
+
                 if good_matches:
                     matched_files_list = list(dict.fromkeys([m["filepath"] for m in good_matches if "filepath" in m]))
                     related_files_set = set()
@@ -2399,6 +2421,7 @@ class WorkflowEngine:
                 for entry in generation_manifest.entries
             },
             established_files=established_files or [],
+            retrieval_member_hints=retrieval_member_hints,
             protected_relpath=protected_relpath,
             allowed_write_relpaths=list(allowed_write_relpaths or []),
             authorized_semantic_regions=list(authorized_semantic_regions or []),

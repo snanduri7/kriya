@@ -24330,3 +24330,308 @@ async def test_known_target_priority_does_not_alter_ctx_write_scope(tmp_path):
 
     assert ctx.write_scope_mode == WriteScopeMode.ALLOWLIST
     assert ctx.allowed_write_relpaths == ["Owner.java"]
+
+
+# --- CTX-001 P1 C2 production integration (2026-09-17) ----------------------
+# End-to-end production-reachability proofs: no test below manually
+# constructs a member_hints dict and hands it to build_known_target_context -
+# every one goes through the REAL attempt.py wiring
+# (_resolve_known_target_member_hints/_resolve_retry_member_hints), driven
+# only by ctx.retrieval_member_hints (what workflow.py's own retrieval stage
+# would have populated) or state.last_failure.file_locations (real,
+# structured failure evidence). See docs/assurance/CTX_001_P1_ARCHITECTURE.md
+# section 25 and tests/test_context_source.py / tests/test_context_budget.py
+# for the resolver/allocator-level unit tests this complements.
+
+@pytest.mark.asyncio
+async def test_known_target_with_graph_rag_member_evidence_triggers_member_aware_context(tmp_path):
+    """Required regression: known target + Graph-RAG member hit -> member-
+    aware known-target context, through the real attempt-1 wiring."""
+    (tmp_path / "Owner.py").write_text(
+        "class Owner:\n    def relevant_method(self):\n        return 'REAL_MARKER'\n"
+    )
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["Owner.py"], expected_files_upfront=["Owner.py"],
+        architect_basename_to_path={"Owner.py": "Owner.py"},
+        # Exactly what workflow.py's own retrieval-stage parsing would have
+        # produced from a real vector hit's chunk header - a CANDIDATE name
+        # only, not yet validated.
+        retrieval_member_hints={"Owner.py": ["relevant_method"]},
+    )
+
+    with pytest.raises(IncompleteGenerationError):
+        await run_attempt(state, ctx)
+
+    events = [e for e in state.run_events if e.kind == "context.known_target_package"]
+    assert events
+    assert events[0].details["member_hint_paths"] == ["Owner.py"]
+    call_kwargs = developer.run_generation.call_args.kwargs
+    assert "REAL_MARKER" in call_kwargs["existing_code_context"]
+
+
+@pytest.mark.asyncio
+async def test_known_target_without_member_evidence_retains_file_level_fallback(tmp_path):
+    """Required regression: known target WITHOUT a grounded member hit ->
+    existing file-level known-target behavior, unchanged."""
+    (tmp_path / "Owner.py").write_text("class Owner:\n    def method(self):\n        pass\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["Owner.py"], expected_files_upfront=["Owner.py"],
+        architect_basename_to_path={"Owner.py": "Owner.py"},
+        retrieval_member_hints={},
+    )
+
+    with pytest.raises(IncompleteGenerationError):
+        await run_attempt(state, ctx)
+
+    events = [e for e in state.run_events if e.kind == "context.known_target_package"]
+    assert events
+    assert events[0].details["member_hint_paths"] == []
+    tiers = {entry["tier"] for entry in events[0].details["tiers"]}
+    assert tiers <= {"full", "skeleton", "signatures"}
+
+
+@pytest.mark.asyncio
+async def test_c2_p0_large_file_production_reachable_member_retained_no_manual_hints(tmp_path):
+    """The C2 P0 fixture, driven end-to-end: a large file with a relevant
+    member near the end and substantial irrelevant body -> production
+    wiring alone (ctx.retrieval_member_hints, exactly as workflow.py would
+    populate it) resolves and validates the member -> exact relevant member
+    retained, irrelevant sibling content absent from that unit - with
+    NO manually supplied member_hints anywhere in this test."""
+    import sys
+    sys.path.insert(0, str((__file__.rsplit("/tests/", 1)[0]) + "/spikes/ctx_001_p0"))
+    from fixtures import build_large_file
+
+    content = build_large_file(target_lines=2000, placement="near_end")
+    (tmp_path / "Large.py").write_text(content)
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["Large.py"], expected_files_upfront=["Large.py"],
+        architect_basename_to_path={"Large.py": "Large.py"},
+        retrieval_member_hints={"Large.py": ["calculate_total"]},
+    )
+
+    with pytest.raises(IncompleteGenerationError):
+        await run_attempt(state, ctx)
+
+    call_kwargs = developer.run_generation.call_args.kwargs
+    existing_context = call_kwargs["existing_code_context"]
+    assert "subtotal * 0.05" in existing_context
+    # The relevant member's own body is present in full; the ~300+ padding
+    # methods' BODY statements (as opposed to their bare signature lines,
+    # which a "signatures"-tier sibling skeleton legitimately still shows)
+    # must not all be present verbatim - proves real degradation happened,
+    # not that the whole huge file was included unchanged.
+    assert content.count("total += i *") > 50
+    assert existing_context.count("total += i *") < content.count("total += i *")
+
+
+@pytest.mark.asyncio
+async def test_retry_failure_location_triggers_member_aware_retry_context_java(tmp_path):
+    """Required regression: compiler/test failure at a member line ->
+    current member resolved -> exact member context retained on a real
+    targeted retry, through the real attempt.py wiring."""
+    (tmp_path / "Owner.java").write_text(
+        "public class Owner {\n"
+        "    public String format(String x) {\n"
+        "        return x + \"_REAL_MARKER\";\n"
+        "    }\n"
+        "}\n"
+    )
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"Owner.java"}
+    state.last_implicated_files = ["Owner.java"]
+    state.error_context = "compile error at Owner.java:3"
+    state.last_failure = Failure(
+        type="compile", message="cannot find symbol",
+        file_locations=[FileLocation(filepath="Owner.java", line=3)],
+        likely_files=["Owner.java"],
+    )
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+    )
+
+    await run_attempt(state, ctx)
+
+    events = [e for e in state.run_events if e.kind == "context.retry_member_hint_package"]
+    assert events
+    assert events[0].details["target_files"] == ["Owner.java"]
+    assert any(entry["tier"] == "member_exact" for entry in events[0].details["tiers"])
+    call_kwargs = developer.run_generation.call_args.kwargs
+    assert "_REAL_MARKER" in call_kwargs["existing_code_context"]
+
+
+@pytest.mark.asyncio
+async def test_retry_failure_location_triggers_member_aware_retry_context_python(tmp_path):
+    (tmp_path / "owner.py").write_text(
+        "class Owner:\n    def method(self):\n        return 'REAL_MARKER_PY'\n"
+    )
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"owner.py"}
+    state.last_implicated_files = ["owner.py"]
+    state.error_context = "test failure at owner.py:3"
+    state.last_failure = Failure(
+        type="test", message="assertion failed",
+        file_locations=[FileLocation(filepath="owner.py", line=3)],
+        likely_files=["owner.py"],
+    )
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+    )
+
+    await run_attempt(state, ctx)
+
+    call_kwargs = developer.run_generation.call_args.kwargs
+    assert "REAL_MARKER_PY" in call_kwargs["existing_code_context"]
+
+
+@pytest.mark.asyncio
+async def test_retry_worktree_version_b_member_selected_over_stale_workspace_version_a(tmp_path):
+    """C3, at the retry member-hint level specifically: workspace has a
+    STALE copy, worktree has the CURRENT one - the resolved retry member
+    hint must reflect the worktree's own line numbers/content, never the
+    workspace's."""
+    workspace = tmp_path / "workspace"
+    worktree = tmp_path / "worktree"
+    workspace.mkdir()
+    worktree.mkdir()
+    (workspace / "Owner.py").write_text("class Owner:\n    def method(self):\n        return 'VERSION_A'\n")
+    (worktree / "Owner.py").write_text("class Owner:\n    def method(self):\n        return 'VERSION_B'\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"Owner.py"}
+    state.last_implicated_files = ["Owner.py"]
+    state.error_context = "test failure"
+    state.last_failure = Failure(
+        type="test", message="assertion failed",
+        file_locations=[FileLocation(filepath="Owner.py", line=3)],
+        likely_files=["Owner.py"],
+    )
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        workspace_path=str(workspace), worktree_path=str(worktree),
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+    )
+
+    await run_attempt(state, ctx)
+
+    call_kwargs = developer.run_generation.call_args.kwargs
+    existing_context = call_kwargs["existing_code_context"]
+    assert "VERSION_B" in existing_context
+    assert "VERSION_A" not in existing_context
+
+
+@pytest.mark.asyncio
+async def test_retry_failure_location_does_not_authorize_an_unimplicated_file(tmp_path):
+    """A FileLocation naming a file that is NOT one of this retry's own
+    already-authorized implicated targets must never surface that file's
+    content via the member-hint mechanism - failure location narrows WHICH
+    MEMBER of an authorized file is shown, never WHICH FILES are targeted."""
+    (tmp_path / "Owner.java").write_text("public class Owner {\n    void method() {}\n}\n")
+    (tmp_path / "Unrelated.java").write_text(
+        "public class Unrelated {\n    void secret() { /* SHOULD_NOT_APPEAR */ }\n}\n"
+    )
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"Owner.java"}
+    state.last_implicated_files = ["Owner.java"]
+    state.error_context = "compile error"
+    state.last_failure = Failure(
+        type="compile", message="error",
+        # Points at a DIFFERENT file than what this retry actually targets.
+        file_locations=[FileLocation(filepath="Unrelated.java", line=2)],
+        likely_files=["Owner.java"],
+    )
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+    )
+
+    await run_attempt(state, ctx)
+
+    events = [e for e in state.run_events if e.kind == "context.retry_member_hint_package"]
+    assert not events
+    call_kwargs = developer.run_generation.call_args.kwargs
+    assert "SHOULD_NOT_APPEAR" not in call_kwargs["existing_code_context"]
+
+
+@pytest.mark.asyncio
+async def test_member_hint_generation_does_not_expand_write_authority(tmp_path):
+    """Authority test: member-hint resolution/consumption (both the
+    known-target and retry paths) must never mutate or expand
+    allowed_write_relpaths/write_scope_mode - proven end-to-end, not just
+    structurally (see test_context_budget_functions_carry_no_write_
+    authority_parameters above for the structural companion proof)."""
+    (tmp_path / "Owner.java").write_text("public class Owner {\n    void method() {}\n}\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"Owner.java"}
+    state.last_implicated_files = ["Owner.java"]
+    state.error_context = "compile error"
+    state.last_failure = Failure(
+        type="compile", message="error",
+        file_locations=[FileLocation(filepath="Owner.java", line=2)],
+        likely_files=["Owner.java"],
+    )
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+        write_scope_mode=WriteScopeMode.ALLOWLIST, allowed_write_relpaths=["Owner.java"],
+    )
+
+    await run_attempt(state, ctx)
+
+    assert ctx.write_scope_mode == WriteScopeMode.ALLOWLIST
+    assert ctx.allowed_write_relpaths == ["Owner.java"]

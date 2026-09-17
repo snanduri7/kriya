@@ -339,3 +339,78 @@ def test_known_target_rendered_string_never_empty_when_evidence_omitted(tmp_path
 
     assert package.omitted
     assert "omitted" in rendered.lower()
+
+
+# --- CTX-001 P1 C2: multi-member-hint support (production integration) -----
+
+def test_known_target_member_hints_accepts_a_bare_string_backward_compatible(tmp_path):
+    """Package 2's original single-string shape must keep working
+    unchanged - the Union widening is additive, never a breaking change."""
+    _write(str(tmp_path), "Owner.py", "class Owner:\n    def method(self):\n        pass\n")
+
+    _rendered, package = build_known_target_context(
+        ["Owner.py"], str(tmp_path), str(tmp_path), 100000,
+        member_hints={"Owner.py": "Owner.method"},
+    )
+
+    member_items = [i for i in package.relevant_files if i.member_id == "Owner.method"]
+    assert len(member_items) == 1
+    assert member_items[0].tier == "member_exact"
+
+
+def test_known_target_member_hints_accepts_a_list_of_distinct_members(tmp_path):
+    content = (
+        "class Owner:\n"
+        "    def method_a(self):\n"
+        "        pass\n\n"
+        "    def method_b(self):\n"
+        "        pass\n"
+    )
+    _write(str(tmp_path), "Owner.py", content)
+
+    _rendered, package = build_known_target_context(
+        ["Owner.py"], str(tmp_path), str(tmp_path), 100000,
+        member_hints={"Owner.py": ["Owner.method_a", "Owner.method_b"]},
+    )
+
+    member_ids = {i.member_id for i in package.relevant_files if i.tier == "member_exact"}
+    assert member_ids == {"Owner.method_a", "Owner.method_b"}
+
+
+def test_known_target_ambiguous_java_overload_retains_both_real_bodies(tmp_path):
+    """A member_id that resolves to MULTIPLE real boundaries (an
+    unresolvable Java overload) must retain ALL of them - never an
+    arbitrary next()-style first pick."""
+    content = (
+        "public class Owner {\n"
+        "    public String format(String x) { return x; }\n"
+        "    public String format(String x, String y) { return x + y; }\n"
+        "}\n"
+    )
+    _write(str(tmp_path), "Owner.java", content)
+
+    _rendered, package = build_known_target_context(
+        ["Owner.java"], str(tmp_path), str(tmp_path), 100000,
+        member_hints={"Owner.java": "Owner.format"},
+    )
+
+    member_items = [i for i in package.relevant_files if i.member_id == "Owner.format"]
+    assert len(member_items) == 2
+    contents = {i.content for i in member_items}
+    assert any("String x, String y" in c for c in contents)
+    assert any("String x)" in c and "String x, String y" not in c for c in contents)
+
+
+def test_known_target_member_hint_that_no_longer_resolves_falls_back_to_whole_file(tmp_path):
+    """A member_id that doesn't match any real CURRENT boundary (stale/
+    renamed/removed) degrades to the existing whole-file handling - never
+    a fabricated member, never a silent drop."""
+    _write(str(tmp_path), "Owner.py", "class Owner:\n    def real_method(self):\n        pass\n")
+
+    _rendered, package = build_known_target_context(
+        ["Owner.py"], str(tmp_path), str(tmp_path), 100000,
+        member_hints={"Owner.py": "Owner.removed_method"},
+    )
+
+    assert any(o["reason"] == "unsupported_structural_extraction" for o in package.omitted)
+    assert package.relevant_files[0].tier == "full"

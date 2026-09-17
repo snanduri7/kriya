@@ -19,7 +19,7 @@ import re
 import statistics
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.agents.contracts import (
@@ -62,6 +62,12 @@ from kriya.workflow.context_budget import (
     _reserve_sibling_content_budget,
     build_code_context,
     build_known_target_context,
+)
+from kriya.workflow.context_source import (
+    CurrentSourceResolver,
+    member_boundaries_for,
+    member_ids_matching_name,
+    resolve_member_hints_from_failure_location,
 )
 from kriya.workflow.retry_prompts import _build_coordinated_retry_prompt, _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
@@ -191,6 +197,81 @@ def _filtered_candidates(paths: Any, exclude: set) -> List[str]:
     return [p for p in (paths or []) if p not in exclude]
 
 
+def _resolve_known_target_member_hints(
+    ctx: "AttemptContext", known_target_files: List[str],
+) -> Dict[str, List[str]]:
+    """CTX-001 P1 C2 production integration (docs/assurance/
+    CTX_001_P1_ARCHITECTURE.md section 25): correlates THIS run's own
+    attempt-1 Graph-RAG vector-hit candidate names
+    (ctx.retrieval_member_hints, populated in workflow.py's retrieval stage)
+    with known_target_files - a known-target file's member is NEVER
+    invented merely because it's a target (CTX001-P1's own explicit
+    constraint); a hint only exists here when an INDEPENDENT, already-
+    grounded retrieval signal named a candidate for that exact path.
+
+    Every candidate is validated against member_boundaries_for() on
+    CURRENT (CurrentSourceResolver-resolved, worktree-authoritative)
+    content before being returned - a name that no longer resolves to any
+    real boundary (renamed/removed/stale since indexing) is silently
+    dropped here, never fabricated. Reuses CurrentSourceResolver as-is;
+    this function makes no root-selection decision of its own."""
+    candidates_by_path = {
+        path: names for path, names in ctx.retrieval_member_hints.items()
+        if path in known_target_files and names
+    }
+    if not candidates_by_path:
+        return {}
+    resolver = CurrentSourceResolver(ctx.workspace_path, ctx.worktree_path)
+    member_hints: Dict[str, List[str]] = {}
+    for path, names in candidates_by_path.items():
+        resolved = resolver.resolve(path)
+        if not resolved.exists:
+            continue
+        boundaries = member_boundaries_for(path, resolved.content)
+        if boundaries is None:
+            continue
+        matched_ids: List[str] = []
+        for name in names:
+            for member_id in member_ids_matching_name(boundaries, name):
+                if member_id not in matched_ids:
+                    matched_ids.append(member_id)
+        if matched_ids:
+            member_hints[path] = matched_ids
+    return member_hints
+
+
+def _resolve_retry_member_hints(
+    ctx: "AttemptContext", state: GenerationState, target_files: List[str],
+) -> Dict[str, List[str]]:
+    """CTX-001 P1 C2 production integration: correlates state.last_failure.
+    file_locations (already-structured compiler/test evidence) with
+    target_files - the retry's OWN, already-authorized target set. A
+    failure_location's filepath is used ONLY to pick which already-
+    authorized target's member to resolve, NEVER to widen the target set
+    itself (a stack frame naming a different, untargeted file is simply
+    ignored here - "failure location must not authorize a new file").
+
+    Deduplicates across multiple file_locations deterministically (a set
+    per path, rendered back to a sorted list) - the same member reported
+    by two different locations produces one hint, not two."""
+    if state.last_failure is None or not target_files:
+        return {}
+    target_set = set(target_files)
+    resolver = CurrentSourceResolver(ctx.workspace_path, ctx.worktree_path)
+    member_hints: Dict[str, set] = {}
+    for location in state.last_failure.file_locations:
+        if location.filepath not in target_set or location.line is None:
+            continue
+        resolved = resolver.resolve(location.filepath)
+        if not resolved.exists:
+            continue
+        for candidate in resolve_member_hints_from_failure_location(
+            location.filepath, resolved.content, location.line,
+        ):
+            member_hints.setdefault(location.filepath, set()).add(candidate.member_id)
+    return {path: sorted(ids) for path, ids in member_hints.items()}
+
+
 def _operation_map(
     ctx: "AttemptContext", filepaths: List[str], attempt_operation: CodeOperation,
     state: Optional[GenerationState] = None,
@@ -291,6 +372,7 @@ def _retry_package_for_attempt(
     *,
     target_files: Optional[List[str]],
     context_window: int,
+    exclude: Optional[Iterable[str]] = None,
 ) -> Optional[RetryPackage]:
     if state.last_failure is None:
         return None
@@ -299,13 +381,27 @@ def _retry_package_for_attempt(
     # advertised token deliberately leaves ample room for goal, plan, design,
     # skills, instructions, and output on local models with smaller windows.
     max_chars = max(6000, min(48000, int(context_window * 1.5)))
+    # CTX-001 P1 C2: `exclude` (deliberately applied only to all_files, NOT
+    # to target_files) skips a path already given its own, higher-fidelity
+    # member-exact rendering (build_known_target_context(), called just
+    # before this in the targeted-retry branch) - avoids the exact
+    # DUPLICATE_SOURCE_CONTEXT_PATHS class of bug Package 2 already fixed
+    # once. Filtering all_files (not target_files) is deliberate:
+    # build_retry_package()'s own targets/references lists are BOTH derived
+    # from `sorted(set(all_files))`, so an excluded path is naturally
+    # dropped from both without risking target_files falling back to
+    # failure.likely_files (which build_retry_package does whenever
+    # target_files is falsy - filtering target_files itself down to []
+    # would silently re-trigger that fallback and undo the exclusion).
+    exclude_set = set(exclude or ())
+    all_files = (set(state.all_files_written) | set(ctx.established_files)) - exclude_set
     return build_retry_package(
         failure=state.last_failure,
         worktree_path=ctx.worktree_path,
         # Unioned with ctx.established_files (see that field's own docstring) -
         # a retry package's content candidates should include files earlier
         # milestones wrote too, not just this attempt's own writes.
-        all_files=sorted(set(state.all_files_written) | set(ctx.established_files)),
+        all_files=sorted(all_files),
         target_files=target_files,
         source_context=state.last_error_source_context,
         max_chars=max_chars,
@@ -504,6 +600,19 @@ class AttemptContext:
     # path -> direct manifest dependencies, in generation order. Default keeps
     # isolated tests and old checkpoints backward compatible.
     generation_dependencies: Dict[str, List[str]] = field(default_factory=dict)
+    # CTX-001 P1 C2 production integration: path -> candidate (unvalidated)
+    # member/class NAMES parsed from this attempt's own attempt-1 Graph-RAG
+    # vector hits (workflow.py's retrieval stage, via context_source.py::
+    # parse_controlled_chunk_header_name - the controlled "Method: X"/
+    # "Class: X" header chunk_file_with_metadata_headers() already writes
+    # into every indexed chunk, previously discarded at the retrieval call
+    # site). Deliberately CANDIDATES ONLY - run_attempt() is the one place
+    # that validates a name against member_boundaries_for() on CURRENT
+    # (CurrentSourceResolver-resolved) content before it is ever trusted as
+    # a real member_hints entry (see docs/assurance/CTX_001_P1_ARCHITECTURE.
+    # md section 25). Default empty dict keeps every existing test/caller
+    # that doesn't know about this field unaffected.
+    retrieval_member_hints: Dict[str, List[str]] = field(default_factory=dict)
     # Files known to exist from OUTSIDE this attempt's own generation - for a
     # milestone run, every file an earlier, already-completed milestone wrote
     # (kriya/workflow/milestones.py's MilestoneRunState.established_file_context
@@ -3983,10 +4092,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 for path, content in sorted(coordinated_candidate_view.items())
             )
         else:
+            # CTX-001 P1 C2 production integration: state.last_failure.
+            # file_locations (already-structured compiler/test evidence)
+            # resolved against THIS retry's own already-authorized target
+            # set - never widens which files are targeted, only which
+            # MEMBER within an already-targeted file is shown exact (see
+            # _resolve_retry_member_hints' own docstring).
+            retry_member_hints = _resolve_retry_member_hints(ctx, state, state.last_implicated_files)
             retry_package = _retry_package_for_attempt(
                 state, ctx,
                 target_files=state.last_implicated_files,
                 context_window=ctx.kernel.config.llm.context_window,
+                exclude=retry_member_hints.keys(),
             )
             retry_error_context = (
                 retry_package.authoritative_error if retry_package else state.error_context
@@ -4044,6 +4161,40 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 )
             else:
                 logger.info(f"Targeted retry {state.budgets.targeted_retry_count + 1}/{ctx.targeted_max_retries}: focusing on {', '.join(state.last_implicated_files)}.")
+
+            # CTX-001 P1 C2 production integration: only for the plain
+            # targeted-retry flow (never API_CONTRACT_RECOVERY, which has
+            # its own separate, already-tested deterministic evidence
+            # model - baseline_owners - untouched here). retry_member_hints
+            # is only non-empty for paths EXCLUDED from retry_package above,
+            # so this never duplicates what retry_package already rendered.
+            if not use_api_contract_recovery and retry_member_hints:
+                retry_member_limit = _reserve_graph_context_budget(
+                    ctx.kernel.config.llm.context_window, ctx.skills_prompt, ctx.learned_rag_context, base_code_context,
+                )
+                retry_member_rendered, retry_member_package = build_known_target_context(
+                    list(retry_member_hints.keys()), ctx.workspace_path, ctx.worktree_path, retry_member_limit,
+                    member_hints=retry_member_hints,
+                )
+                if retry_member_rendered:
+                    active_code_context += retry_member_rendered
+                state.record_event(RunEvent(
+                    kind="context.retry_member_hint_package",
+                    attempt=state.attempt_number,
+                    source="attempt.run_attempt",
+                    authority=EventAuthority.ADVISORY,
+                    message="Retry member-hint context package built from Failure.file_locations.",
+                    details={
+                        "target_files": sorted(retry_member_hints.keys()),
+                        "unit_count": len(retry_member_package.relevant_files),
+                        "tiers": [
+                            {"path": item.path, "member_id": item.member_id, "tier": item.tier}
+                            for item in retry_member_package.relevant_files
+                        ],
+                        "omitted": list(retry_member_package.omitted),
+                        "package_hash": retry_member_package.package_hash,
+                    },
+                ))
 
             if use_api_contract_recovery and contract.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT:
                 # Deterministic, not generative (control-plane audit,
@@ -4376,8 +4527,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             known_target_limit = _reserve_graph_context_budget(
                 active_context_window, ctx.skills_prompt, ctx.learned_rag_context, current_graph_context,
             )
+            # CTX-001 P1 C2: a known-target file's member is only ever
+            # supplied here when an INDEPENDENT retrieval signal grounded
+            # it for THIS exact path (see _resolve_known_target_member_
+            # hints' own docstring) - a known target with no such evidence
+            # gets {} and build_known_target_context() falls back to its
+            # existing file-level handling unchanged.
+            known_target_member_hints = _resolve_known_target_member_hints(ctx, known_target_files)
             known_target_rendered, known_target_package = build_known_target_context(
                 known_target_files, ctx.workspace_path, ctx.worktree_path, known_target_limit,
+                member_hints=known_target_member_hints,
             )
             if known_target_rendered:
                 active_code_context += known_target_rendered
@@ -4399,9 +4558,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 details={
                     "known_target_files": list(known_target_files),
                     "unit_count": len(known_target_package.relevant_files),
-                    "tiers": {item.path: item.tier for item in known_target_package.relevant_files},
+                    "tiers": [
+                        {"path": item.path, "member_id": item.member_id, "tier": item.tier}
+                        for item in known_target_package.relevant_files
+                    ],
                     "omitted": list(known_target_package.omitted),
                     "package_hash": known_target_package.package_hash,
+                    # CTX-001 P1 C2 observability: WHICH known-target paths
+                    # got a validated, production-derived member hint at
+                    # all - never the candidate names or source text.
+                    "member_hint_paths": sorted(known_target_member_hints.keys()),
                 },
             ))
 

@@ -14,7 +14,7 @@ import tokenize
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
 from kriya.workflow.edit_safety import _strip_java_comments_and_strings, content_revision
@@ -910,7 +910,7 @@ def build_known_target_context(
     budget_limit: int,
     *,
     file_scores: Optional[Dict[str, float]] = None,
-    member_hints: Optional[Dict[str, str]] = None,
+    member_hints: Optional[Dict[str, Union[str, Sequence[str]]]] = None,
     known_revisions: Optional[Dict[str, str]] = None,
     exclude: Optional[Iterable[str]] = None,
 ) -> Tuple[str, Any]:
@@ -942,7 +942,9 @@ def build_known_target_context(
     (instructions) - see the module-level split this function implements."""
     from kriya.policy.trust import TrustLevel
     from kriya.workflow.context_package import build_context_package, make_context_item, make_omitted_entry
-    from kriya.workflow.context_source import CurrentSourceResolver, extract_member_body, member_boundaries_for
+    from kriya.workflow.context_source import (
+        CurrentSourceResolver, boundaries_matching_member_id, extract_member_body, member_boundaries_for,
+    )
 
     exclude_set = set(exclude or ())
     resolver = CurrentSourceResolver(workspace_path, worktree_path, known_revisions)
@@ -981,52 +983,89 @@ def build_known_target_context(
             ))
             continue
 
-        member_id = (member_hints or {}).get(path)
+        # CTX-001 P1 C2 production integration: member_hints[path] may be a
+        # bare string (Package 2's original, single-member shape - still
+        # fully supported) or a list/tuple of member_ids (multiple grounded
+        # candidates for the same file - e.g. two Java overloads a bare
+        # name alone could not uniquely distinguish; see
+        # context_source.py::member_ids_matching_name's own docstring).
+        # Never a new type, never a redesign of the call boundary - just an
+        # additive Union on the existing dict's VALUE shape.
+        raw_hint = (member_hints or {}).get(path)
+        if isinstance(raw_hint, str):
+            member_id_candidates = [raw_hint]
+        elif raw_hint:
+            member_id_candidates = list(raw_hint)
+        else:
+            member_id_candidates = []
+
         member_produced = False
-        if member_id:
+        if member_id_candidates:
             boundaries = member_boundaries_for(path, resolved.content)
-            boundary = next((b for b in boundaries if b.member_id == member_id), None) if boundaries is not None else None
-            if boundaries is None or boundary is None:
-                omitted.append(make_omitted_entry(
-                    path=path, rank=rank, reason=REASON_UNSUPPORTED_STRUCTURAL_EXTRACTION,
-                    estimated_tokens=0, member_id=member_id,
-                ))
-            else:
-                member_content = extract_member_body(resolved.content, boundary.start_line, boundary.end_line)
-                member_cost = estimate_tokens(member_content)
-                if member_cost <= remaining:
-                    items.append(make_context_item(
-                        path=path, content=member_content, reason="known_target_member_exact",
-                        source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
-                        score=effective_score(path), member_id=member_id,
-                        start_line=boundary.start_line, end_line=boundary.end_line,
-                        tier="member_exact", is_exact=True, revision=resolved.revision,
-                        omitted_regions=False,
-                    ))
-                    consumed += member_cost
-                    member_produced = True
-                    sibling_remaining = budget_limit - consumed
-                    if sibling_remaining > 0:
-                        sibling_text = skeletonize_code(resolved.content, path, "signatures")
-                        if sibling_text:
-                            sib_cost = estimate_tokens(sibling_text)
-                            if sib_cost <= sibling_remaining:
-                                items.append(make_context_item(
-                                    path=path, content=sibling_text, reason="known_target_sibling_signatures",
-                                    source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
-                                    score=effective_score(path), tier="signatures", is_exact=False,
-                                    revision=resolved.revision, omitted_regions=True,
-                                ))
-                                consumed += sib_cost
-                            else:
-                                omitted.append(make_omitted_entry(
-                                    path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=sib_cost,
-                                ))
-                else:
+            if boundaries is None:
+                for member_id in member_id_candidates:
                     omitted.append(make_omitted_entry(
-                        path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=member_cost,
-                        member_id=member_id,
+                        path=path, rank=rank, reason=REASON_UNSUPPORTED_STRUCTURAL_EXTRACTION,
+                        estimated_tokens=0, member_id=member_id,
                     ))
+            else:
+                for member_id in member_id_candidates:
+                    # An ambiguous (overloaded) member_id expands to EVERY
+                    # real boundary sharing it - never an arbitrary "first
+                    # match" pick (context_source.py::
+                    # boundaries_matching_member_id's own docstring).
+                    matching_boundaries = boundaries_matching_member_id(boundaries, member_id)
+                    if not matching_boundaries:
+                        omitted.append(make_omitted_entry(
+                            path=path, rank=rank, reason=REASON_UNSUPPORTED_STRUCTURAL_EXTRACTION,
+                            estimated_tokens=0, member_id=member_id,
+                        ))
+                        continue
+                    for boundary in matching_boundaries:
+                        member_remaining = budget_limit - consumed
+                        if member_remaining <= 0:
+                            omitted.append(make_omitted_entry(
+                                path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
+                                estimated_tokens=0, member_id=member_id,
+                            ))
+                            continue
+                        member_content = extract_member_body(resolved.content, boundary.start_line, boundary.end_line)
+                        member_cost = estimate_tokens(member_content)
+                        if member_cost <= member_remaining:
+                            items.append(make_context_item(
+                                path=path, content=member_content, reason="known_target_member_exact",
+                                source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
+                                score=effective_score(path), member_id=member_id,
+                                start_line=boundary.start_line, end_line=boundary.end_line,
+                                tier="member_exact", is_exact=True, revision=resolved.revision,
+                                omitted_regions=False,
+                            ))
+                            consumed += member_cost
+                            member_produced = True
+                        else:
+                            omitted.append(make_omitted_entry(
+                                path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=member_cost,
+                                member_id=member_id,
+                            ))
+
+            if member_produced:
+                sibling_remaining = budget_limit - consumed
+                if sibling_remaining > 0:
+                    sibling_text = skeletonize_code(resolved.content, path, "signatures")
+                    if sibling_text:
+                        sib_cost = estimate_tokens(sibling_text)
+                        if sib_cost <= sibling_remaining:
+                            items.append(make_context_item(
+                                path=path, content=sibling_text, reason="known_target_sibling_signatures",
+                                source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
+                                score=effective_score(path), tier="signatures", is_exact=False,
+                                revision=resolved.revision, omitted_regions=True,
+                            ))
+                            consumed += sib_cost
+                        else:
+                            omitted.append(make_omitted_entry(
+                                path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=sib_cost,
+                            ))
 
         if member_produced:
             continue

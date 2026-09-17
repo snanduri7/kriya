@@ -3,11 +3,16 @@ import os
 
 from kriya.workflow.context_source import (
     CurrentSourceResolver,
+    boundaries_matching_member_id,
     extract_member_body,
     java_member_boundaries,
     member_boundaries_for,
+    member_ids_matching_name,
+    parse_controlled_chunk_header_name,
     python_member_boundaries,
     python_member_ranges,
+    resolve_member_hints_from_chunk_header,
+    resolve_member_hints_from_failure_location,
 )
 
 
@@ -284,3 +289,218 @@ def test_extract_member_body_returns_exact_line_range():
 def test_extract_member_body_clamps_out_of_range_lines():
     content = "line1\nline2\n"
     assert extract_member_body(content, 1, 100) == "line1\nline2"
+
+
+# --- CTX-001 P1 C2 production integration: member-hint resolvers -----------
+# docs/assurance/CTX_001_P1_ARCHITECTURE.md section 25. These tests use the
+# REAL kriya/analyzer/analyzer.py::chunk_file_with_metadata_headers() output
+# wherever practical (not a hand-authored approximation of its header
+# format), so a real drift in that function's own header shape would break
+# these tests too - not silently stop working in production.
+
+def _java_method_chunk(content: str, method_name: str) -> str:
+    from kriya.analyzer.analyzer import chunk_file_with_metadata_headers
+    chunks = chunk_file_with_metadata_headers(content, "Owner.java")
+    for c in chunks:
+        if f"Method: {method_name}\n" in c["text"]:
+            return c["text"]
+    raise AssertionError(f"no real chunk found for method {method_name}")
+
+
+def _python_chunk(content: str, path: str, marker: str) -> str:
+    from kriya.analyzer.analyzer import chunk_file_with_metadata_headers
+    chunks = chunk_file_with_metadata_headers(content, path)
+    for c in chunks:
+        if marker in c["text"]:
+            return c["text"]
+    raise AssertionError(f"no real chunk found containing {marker!r}")
+
+
+def test_parse_controlled_header_java_method_chunk_from_real_chunker():
+    content = (
+        "public class Owner {\n"
+        "    public String format(String x) { return x; }\n"
+        "}\n"
+    )
+    chunk_text = _java_method_chunk(content, "format")
+    assert parse_controlled_chunk_header_name(chunk_text) == "format"
+
+
+def test_parse_controlled_header_python_method_chunk_from_real_chunker():
+    content = (
+        "class StandardInvoiceCalculator:\n"
+        "    def calculate_total(self, items):\n"
+        "        return sum(items)\n"
+    )
+    chunk_text = _python_chunk(content, "invoice_impl.py", "Method: calculate_total")
+    assert parse_controlled_chunk_header_name(chunk_text) == "calculate_total"
+
+
+def test_parse_controlled_header_class_chunk_from_real_chunker():
+    content = "class StandardInvoiceCalculator:\n    \"\"\"doc\"\"\"\n    pass\n"
+    chunk_text = _python_chunk(content, "invoice_interface.py", "Class Declaration")
+    assert parse_controlled_chunk_header_name(chunk_text) == "StandardInvoiceCalculator"
+
+
+def test_parse_controlled_header_malformed_returns_none():
+    assert parse_controlled_chunk_header_name("just some random text\nwith no header at all\n") is None
+    assert parse_controlled_chunk_header_name("") is None
+    assert parse_controlled_chunk_header_name(None) is None
+
+
+def test_parse_controlled_header_ignores_arbitrary_source_prose_mentioning_method():
+    """A chunk whose BODY (not header) happens to contain the literal text
+    'Method: something' (a comment, a string literal, ...) far past the
+    controlled header region must not be mistaken for a real header."""
+    padding = "\n".join(f"line {i}" for i in range(20))
+    text = f"File: x.py\nModule: x\n{padding}\n// Method: fake_injected_name\n"
+    assert parse_controlled_chunk_header_name(text) is None
+
+
+def test_resolve_member_hints_from_chunk_header_java_method():
+    content = (
+        "public class Owner {\n"
+        "    public String format(String x) { return x; }\n"
+        "}\n"
+    )
+    chunk_text = _java_method_chunk(content, "format")
+    hints = resolve_member_hints_from_chunk_header("Owner.java", content, chunk_text)
+    assert [h.member_id for h in hints] == ["Owner.format"]
+    assert hints[0].provenance == "vector_chunk_header"
+
+
+def test_resolve_member_hints_from_chunk_header_python_method():
+    content = (
+        "class StandardInvoiceCalculator:\n"
+        "    def calculate_total(self, items):\n"
+        "        return sum(items)\n"
+    )
+    chunk_text = _python_chunk(content, "invoice_impl.py", "Method: calculate_total")
+    hints = resolve_member_hints_from_chunk_header("invoice_impl.py", content, chunk_text)
+    assert [h.member_id for h in hints] == ["StandardInvoiceCalculator.calculate_total"]
+
+
+def test_resolve_member_hints_from_chunk_header_stale_indexed_member_gone_from_current_source():
+    """The chunk was indexed against an OLDER revision naming a method that
+    no longer exists in the CURRENT worktree content - no hint, never a
+    fabricated one."""
+    indexed_content = "class Owner:\n    def old_method(self):\n        pass\n"
+    current_content = "class Owner:\n    def renamed_method(self):\n        pass\n"
+    chunk_text = _python_chunk(indexed_content, "owner.py", "Method: old_method")
+    hints = resolve_member_hints_from_chunk_header("owner.py", current_content, chunk_text)
+    assert hints == []
+
+
+def test_resolve_member_hints_from_chunk_header_malformed_header_produces_no_hint():
+    content = "class Owner:\n    def method(self):\n        pass\n"
+    hints = resolve_member_hints_from_chunk_header("owner.py", content, "not a real chunk header at all")
+    assert hints == []
+
+
+def test_resolve_member_hints_from_chunk_header_unsupported_language_produces_no_hint():
+    content = "func main() {}\n"
+    chunk_text = "File: main.go\nMethod: main\n=== Method Body ===\nfunc main() {}\n"
+    hints = resolve_member_hints_from_chunk_header("main.go", content, chunk_text)
+    assert hints == []
+
+
+def test_resolve_member_hints_from_chunk_header_ambiguous_java_overload_retains_all():
+    content = (
+        "public class Owner {\n"
+        "    public String format(String x) { return x; }\n"
+        "    public String format(String x, String y) { return x + y; }\n"
+        "}\n"
+    )
+    chunk_text = _java_method_chunk(content, "format")
+    hints = resolve_member_hints_from_chunk_header("Owner.java", content, chunk_text)
+    # A bare name cannot distinguish the two overloads - conservative
+    # behavior is one DISTINCT member_id (both overloads share it); the
+    # boundary-expansion step (build_known_target_context, tested
+    # separately) is what actually retains BOTH real bodies.
+    assert [h.member_id for h in hints] == ["Owner.format"]
+    boundaries = java_member_boundaries(content)
+    assert len(boundaries_matching_member_id(boundaries, "Owner.format")) == 2
+
+
+def test_resolve_member_hints_from_chunk_header_multiple_members_same_file():
+    content = (
+        "class Owner:\n"
+        "    def method_a(self):\n"
+        "        pass\n\n"
+        "    def method_b(self):\n"
+        "        pass\n"
+    )
+    chunk_a = _python_chunk(content, "owner.py", "Method: method_a")
+    chunk_b = _python_chunk(content, "owner.py", "Method: method_b")
+    hints_a = resolve_member_hints_from_chunk_header("owner.py", content, chunk_a)
+    hints_b = resolve_member_hints_from_chunk_header("owner.py", content, chunk_b)
+    assert {h.member_id for h in hints_a} == {"Owner.method_a"}
+    assert {h.member_id for h in hints_b} == {"Owner.method_b"}
+
+
+def test_resolve_member_hints_from_failure_location_java_line_inside_method():
+    content = (
+        "public class Owner {\n"
+        "    public String format(String x) {\n"
+        "        return x;\n"
+        "    }\n"
+        "}\n"
+    )
+    hints = resolve_member_hints_from_failure_location("Owner.java", content, 3)
+    assert [h.member_id for h in hints] == ["Owner.format"]
+    assert hints[0].provenance == "failure_location"
+
+
+def test_resolve_member_hints_from_failure_location_python_line_inside_method():
+    content = "class Owner:\n    def method(self):\n        return 1\n"
+    hints = resolve_member_hints_from_failure_location("owner.py", content, 3)
+    assert [h.member_id for h in hints] == ["Owner.method"]
+
+
+def test_resolve_member_hints_from_failure_location_line_outside_any_member():
+    """Module-level code (an import statement, before any class/function
+    declaration) is not inside any structural member boundary at all -
+    the class declaration LINE ITSELF is inside its own class boundary
+    (member_id="Owner"), so this needs genuinely pre-declaration content to
+    exercise "outside every boundary", not just "outside a method"."""
+    content = "import os\n\nclass Owner:\n    def method(self):\n        return 1\n"
+    hints = resolve_member_hints_from_failure_location("owner.py", content, 1)
+    assert hints == []
+
+
+def test_resolve_member_hints_from_failure_location_stale_out_of_range_line():
+    content = "class Owner:\n    def method(self):\n        return 1\n"
+    hints = resolve_member_hints_from_failure_location("owner.py", content, 9999)
+    assert hints == []
+
+
+def test_resolve_member_hints_from_failure_location_prefers_most_specific_containing_boundary():
+    """A line inside a method is ALSO inside that method's enclosing class
+    range - the method (more specific) must win, not the class."""
+    content = "class Owner:\n    def method(self):\n        return 1\n"
+    hints = resolve_member_hints_from_failure_location("owner.py", content, 3)
+    assert [h.member_id for h in hints] == ["Owner.method"]
+
+
+def test_resolve_member_hints_from_failure_location_unsupported_language():
+    hints = resolve_member_hints_from_failure_location("main.go", "func main() {}\n", 1)
+    assert hints == []
+
+
+def test_resolve_member_hints_from_failure_location_worktree_version_b_not_workspace_version_a():
+    """Callers always pass CurrentSourceResolver-sourced content - proving
+    here that a stale (workspace) copy's member boundaries are never what
+    gets used when a fresh (worktree) copy differs."""
+    workspace_content = "class Owner:\n    def method(self):\n        return 1\n"
+    worktree_content = (
+        "class Owner:\n"
+        "    def method(self):\n"
+        "        return 1\n\n"
+        "    def new_method(self):\n"
+        "        return 2\n"
+    )
+    # line 6 only exists/means something in the WORKTREE version.
+    hints_against_worktree = resolve_member_hints_from_failure_location("owner.py", worktree_content, 6)
+    hints_against_workspace = resolve_member_hints_from_failure_location("owner.py", workspace_content, 6)
+    assert [h.member_id for h in hints_against_worktree] == ["Owner.new_method"]
+    assert hints_against_workspace == []
