@@ -110,8 +110,14 @@ async def test_complete_empty_dict_extra_body_override_means_no_extra_body():
 
 @pytest.mark.asyncio
 async def test_complete_with_tools_uses_fallback_extra_body_not_the_primarys():
+    from kriya.config import FallbackModelConfig, ModelCapabilities
+
     cfg = AppConfig()
     cfg.llm.extra_body = {"reasoning_effort": "xhigh"}
+    # MODEL-001 P1: an unconfigured model no longer silently assumes
+    # native_tool_calls=True - this test is about extra_body threading, not
+    # capability gating, so give the overridden model an explicit binding.
+    cfg.llm_chain = [FallbackModelConfig(model="qwen3.8:27b", capabilities=ModelCapabilities(max_tool_argument_chars=16384))]
     llm = LLMClient(cfg)
 
     mock_message = MagicMock()
@@ -356,6 +362,7 @@ def _mock_tool_call_response(tool_calls=None, content=""):
 @pytest.mark.asyncio
 async def test_complete_with_tools_returns_tool_calls():
     cfg = AppConfig()
+    cfg.llm.capabilities.max_tool_argument_chars = 16384  # MODEL-001 P1: diverges from the bare default, making this an explicit (tool-calls-enabled) binding
     llm = LLMClient(cfg)
 
     raw_call = MagicMock()
@@ -378,6 +385,7 @@ async def test_complete_with_tools_returns_tool_calls():
 @pytest.mark.asyncio
 async def test_complete_with_tools_handles_empty_tool_calls():
     cfg = AppConfig()
+    cfg.llm.capabilities.max_tool_argument_chars = 16384  # MODEL-001 P1: diverges from the bare default, making this an explicit (tool-calls-enabled) binding
     llm = LLMClient(cfg)
 
     mock_create = AsyncMock(return_value=_mock_tool_call_response(tool_calls=None, content="all done"))
@@ -409,6 +417,7 @@ async def test_complete_with_tools_malformed_arguments_does_not_crash():
     truncated JSON even at small tool-call-argument scale - falling back to
     {} rather than raising keeps one bad tool call from crashing the loop."""
     cfg = AppConfig()
+    cfg.llm.capabilities.max_tool_argument_chars = 16384  # MODEL-001 P1: diverges from the bare default, making this an explicit (tool-calls-enabled) binding
     llm = LLMClient(cfg)
 
     raw_call = MagicMock()

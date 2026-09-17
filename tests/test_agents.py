@@ -2291,6 +2291,16 @@ async def test_fill_missing_content_prefers_anchored_edit_when_source_context_kn
 @pytest.mark.asyncio
 async def test_developer_explicit_patch_operation_overrides_locator_heuristic():
     cfg = AppConfig()
+    # MODEL-001 P1: an unconfigured model's capability profile now defaults to
+    # the conservative preferred_edit_protocol="full_file" (never silently
+    # trusting an unverified model with precise small-native-tools patches) -
+    # this test is specifically about the REPAIR_WITH_PATCH override itself,
+    # so give it an explicit binding confirming patch-style edits are
+    # supported, matching the bare default's own preferred_edit_protocol
+    # value ("small_native_tools") but making it a real, explicit override
+    # (max_tool_argument_chars diverges from its own class default) rather
+    # than an untouched, unverified default.
+    cfg.llm.capabilities.max_tool_argument_chars = 16384
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=(
         "FIX ANALYSIS: update the stale value.\n"
