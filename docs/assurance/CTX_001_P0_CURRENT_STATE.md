@@ -112,7 +112,7 @@ Traced from `kriya/cli.py::generate` (line 1498) → `WorkflowEngine.run_generat
 **Build/query cost:** cold build is super-linear in repository size (§8, F19 — root cause identified: unindexed `relations.source_file` column, `clear_file()` full-scans on every file). Query cost is linear in total indexed chunk count, confirmed empirically (§6.1) at ~1:1 with chunk count growth, regardless of how much of the repository is relevant to the query.
 **Repeated build/query behavior:** the vector query itself is stateless-cheap (single `query_hybrid` call per `generate` run in the default pipeline — not repeated across retries, since `matched_files`/`related_files` are computed once and reused as inputs to `build_code_context`), but `build_code_context`'s own per-file disk-read-and-skeletonize work IS repeated on every retry (§2, §9).
 
-**Classification: Graph RAG should be `PARTIALLY_REUSED` and `EXTENDED`, not replaced.** The retrieval algorithm (RRF + weighted BFS), the storage schema, and the mtime/hash incremental-indexing mechanism are all sound and load-bearing — replacing them would discard real, working machinery. The concrete, evidence-backed gaps are: (a) missing Python inheritance-edge extraction, (b) an unindexed column causing super-linear cold-build cost, (c) unqualified symbol names, (d) no per-attempt caching of `build_code_context`'s own output. All four are extensions to the existing component, not a redesign.
+**Classification: Graph RAG should be `PARTIALLY_REUSED` and `EXTENDED`, not replaced.** Graph RAG has demonstrated reusable foundations; replacement is not justified. Retrieval correctness and scalability require targeted extensions and remaining live evidence. The retrieval algorithm (RRF + weighted BFS), the storage schema, and the mtime/hash incremental-indexing mechanism are real, working machinery that replacing would discard for no evidenced benefit. The concrete, evidence-backed gaps are: (a) missing Python inheritance-edge extraction, (b) an unindexed column causing super-linear cold-build cost, (c) unqualified symbol names, (d) no per-attempt caching of `build_code_context`'s own output — plus the retrieval-precision question §19 hands to live validation, since P0's own fake-embedding harness cannot speak to whether the real vector half actually ranks relevant files usefully (see §19's live retrieval validation, now prepared as `spikes/ctx_001_p0/run_live_retrieval_validation.py`). All four named gaps are extensions to the existing component, not a redesign.
 
 ---
 
@@ -350,7 +350,7 @@ Responsibilities, not a monolith. Every item states its disposition and the actu
 | Relevance-independent floor for known target files | **EXTEND EXISTING** | `_brownfield_owner_contract_block` already does exactly this for one specific call path; the gap is its own 24,000-char cap (item below) and that it isn't the general mechanism `build_code_context`'s score-aware degradation uses. |
 | Non-silent, ordered, relevance-first truncation for the owner-contract cap | **EXTEND EXISTING** | `_brownfield_owner_contract_block` (`attempt.py:119-149`) — order by relevance/score instead of Architect-list order, and report omissions explicitly (mirroring `ContextOrchestrator`'s own `omitted[]` convention, item below) rather than silently truncating mid-file. |
 | Context provenance / non-silent omission tracking for the default pipeline | **REUSE EXISTING** | `context_orchestrator.py`/`context_package.py` already implement exactly this (`ContextItem`, `make_omitted_entry`) — currently reachable only via the opt-in, default-off `WorkflowController`. Wiring the default `run_generation_workflow` path through (or borrowing) this same mechanism is reuse, not new design. |
-| Graph RAG retrieval algorithm (RRF + weighted BFS) | **DO_NOT_BUILD / REUSE AS-IS** | No evidence justifies replacement; the algorithm itself is sound (§4). |
+| Graph RAG retrieval algorithm (RRF + weighted BFS) | **DO_NOT_BUILD / REUSE AS-IS** | No evidence justifies replacement — demonstrated reusable foundations, per §4's classification; retrieval correctness/scalability still need the targeted extensions listed there plus the live evidence in §19. |
 | A new vector database / ANN index | **DO_NOT_BUILD in P1** without further evidence | The measured O(N) scan cost (§8) is real, but whether it matters in practice depends on realistic repository/chunk-count ranges not yet validated against a live embedding model — flag for live validation (§19) before committing to a new indexing technology. |
 | Repository/module/package-level summarization | **DO_NOT_BUILD** | §16 — no evidence any traced failure was caused by its absence. |
 
@@ -362,44 +362,19 @@ P0 made zero live model or embedding calls, per the task's own constraint. Two t
 
 **A. Real embedding retrieval precision.** The fake-embedding harness (§6, caveat) measures cost correctly but cannot say whether a real embedding model ranks the true-relevant file highly enough to survive score-aware degradation (§6.5's F11 demonstration used a *synthetically assigned* low score to prove the mechanism is real — it does not by itself prove real embeddings actually produce low scores for relevant files in practice).
 
-- **Hypothesis:** a real embedding model, queried against the S1 "large" or "very_large" band (`spikes/ctx_001_p0/fixtures.py::build_s1_fixture`, reused directly), ranks `core/billing/invoice_impl.py` within `query_hybrid`'s top-`top_k=5` for the goal text in `fixtures.CORE_GROUND_TRUTH["goal"]`.
-- **Model/config:** whatever local Ollama endpoint + `embedding.model` (e.g. `nomic-embed-text:latest`) the user's `kriya.yaml` already points at.
-- **Evidence expected:** the real rank of `core/billing/invoice_impl.py` in `query_hybrid`'s output, at each S1 band, replacing the `rank=None` result this investigation obtained with fake vectors.
-- **Command to hand the user** (uses the exact same fixture/probe code, only swaps `probes.patched_embedding_client()` for a real `OllamaEmbeddingClient`):
+- **Hypothesis:** a real embedding model, queried against each of the four S1 bands (`spikes/ctx_001_p0/fixtures.py::build_s1_fixture`, reused directly — 60/260/760/1510 files), ranks `core/billing/invoice_impl.py` within `query_hybrid`'s top-10 for the unmodified goal text in `fixtures.CORE_GROUND_TRUTH["goal"]`, and that rank does not materially degrade as repository breadth grows.
+- **Model/config:** whatever local Ollama endpoint + `embedding.model` (e.g. `nomic-embed-text:latest`) the user's `kriya.yaml` (or the packaged default) already points at — the script uses `load_config()`, not a hardcoded value.
+- **Evidence expected:** real rank/score/top5/top10/retrieval-elapsed-time for `core/billing/invoice_impl.py` at all four bands, a `RANK_STABILITY` table across 60→260→760→1510, and a `RETRIEVAL_PRECISION_DEGRADATION: YES/NO` verdict judged primarily on rank/top-K loss (not raw score drift, since corpus size alone shifts score distributions) — replacing the `rank=None` result this investigation obtained with fake vectors.
+- **Script (prepared, not executed by this investigation):** `spikes/ctx_001_p0/run_live_retrieval_validation.py`. Reuses `fixtures.py`'s S1 generator and `CORE_GROUND_TRUTH` verbatim; the same query is used unmodified across every band. Safety (no chat/completion LLM call reachable) is verified deterministically, with zero network/embedding calls, via `python3 spikes/ctx_001_p0/run_live_retrieval_validation.py --safety-check` (AST-based import scan of the script's own source, confirms `llm.base_url` is forced unreachable, confirms the auto-skill directory that skips `index_repository()`'s own single LLM-call site is pre-created for every band) — this check was run by this investigation and passed; the live-embedding run itself was not.
+- **Command to hand the user:**
 
 ```bash
 cd /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode
 source .venv/bin/activate
-python3 - <<'PY'
-import asyncio, os, sys, tempfile
-sys.path.insert(0, "spikes/ctx_001_p0")
-import fixtures
-from kriya.analyzer.analyzer import RepositoryAnalyzer
-from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
-from kriya.config.config import AppConfig
-
-async def main():
-    tmp = tempfile.mkdtemp(prefix="ctx001_live_")
-    root = os.path.join(tmp, "repo")
-    mem = os.path.join(tmp, "memory")
-    fixtures.build_s1_fixture(root, band_filler_count=745)  # 'large' band
-    cfg = AppConfig()
-    cfg.paths.memory = mem
-    cfg.paths.skills = os.path.join(tmp, "skills")
-    os.makedirs(cfg.paths.skills, exist_ok=True)
-    os.makedirs(os.path.join(cfg.paths.skills, "auto-repo"), exist_ok=True)  # skip auto-skill LLM call
-    await RepositoryAnalyzer(root).index_repository(cfg)
-    store = LocalVectorStore(os.path.join(mem, "vector_index.db"))
-    client = OllamaEmbeddingClient(base_url=cfg.embedding.base_url, model=cfg.embedding.model)
-    q_emb = await client.get_embedding(fixtures.CORE_GROUND_TRUTH["goal"], is_query=True)
-    matches = store.query_hybrid(fixtures.CORE_GROUND_TRUTH["goal"], q_emb, top_k=10, model_name=cfg.embedding.model)
-    for i, m in enumerate(matches, 1):
-        print(i, m["filepath"], round(m.get("score", 0), 4))
-    store.close()
-
-asyncio.run(main())
-PY
+python3 spikes/ctx_001_p0/run_live_retrieval_validation.py
 ```
+
+Results are written to `spikes/ctx_001_p0/results/live_retrieval_validation.json`.
 
 **B. Whether F8's "invariant loss" actually changes model output.** Whether a real model, given a signatures-tier (body-elided) view of a dependency, actually produces an incorrect change vs. compensating correctly from the signature alone, is a model-capability question P0 explicitly must not answer (per the task's own Invariant 8/9 — don't use larger context or model-specific workarounds as the test). This belongs to a future `CTX-001 P1`-adjacent live campaign, not P0.
 
