@@ -1,0 +1,87 @@
+{
+  "probed_at": "2026-09-17T07:51:22.938130+00:00",
+  "base_url": "http://localhost:11434/v1",
+  "models": {
+    "qwen3-coder:30b": {
+      "native_tool_calls": {
+        "supported": true,
+        "raw_tool_calls": [
+          {
+            "id": "call_0zxosmir",
+            "index": 0,
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"location\":\"Boston\"}"
+            }
+          }
+        ],
+        "error": null
+      },
+      "json_mode": {
+        "supported": true,
+        "raw_content": "{\n  \"ok\": true\n}",
+        "error": null
+      },
+      "reliable_multiline_json": {
+        "supported": true,
+        "raw_content": "{\n  \"note\": \"line one\\nline two\\nline three\"\n}",
+        "error": null
+      }
+    },
+    "qwen3.6:35b-a3b-q4_K_M": {
+      "native_tool_calls": {
+        "supported": true,
+        "raw_tool_calls": [
+          {
+            "id": "call_fhgz0mlk",
+            "index": 0,
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"location\":\"Boston\"}"
+            }
+          }
+        ],
+        "error": null
+      },
+      "json_mode": {
+        "supported": true,
+        "raw_content": "{\"ok\": true}",
+        "error": null
+      },
+      "reliable_multiline_json": {
+        "supported": true,
+        "raw_content": "{\"note\": \"line one\\nline two\\nline three\"}",
+        "error": null
+      }
+    },
+    "qwen3.5:9B": {
+      "native_tool_calls": {
+        "supported": true,
+        "raw_tool_calls": [
+          {
+            "id": "call_3zrwe1vw",
+            "index": 0,
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"location\":\"Boston\"}"
+            }
+          }
+        ],
+        "error": null
+      },
+      "json_mode": {
+        "supported": true,
+        "raw_content": "{\"ok\": true}",
+        "error": null
+      },
+      "reliable_multiline_json": {
+        "supported": true,
+        "raw_content": "{\n  \"note\": \"line one\\nline two\\nline three\"\n}",
+        "error": null
+      }
+    }
+  }
+}
