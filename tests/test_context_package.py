@@ -113,6 +113,98 @@ def test_omitted_is_carried_through_untouched():
     assert reloaded.omitted[0]["path"] == "big.py"
 
 
+# --- CTX-001 P1 WP3: ContextItem's additive member/tier/revision fields ----
+
+def test_context_item_new_fields_default_to_backward_compatible_values():
+    """Every pre-P1 construction site (context_orchestrator.py, every
+    existing test) constructs a ContextItem with no knowledge of the new
+    fields at all - they must default to values that mean exactly what a
+    pre-P1 ContextItem always implicitly meant: a whole-file unit, shown in
+    full, not degraded."""
+    item = make_context_item(
+        path="x", content="y", reason="r", source_type="semantic_hit", trust_level="repository",
+    )
+    assert item.type_id is None
+    assert item.member_id is None
+    assert item.start_line is None
+    assert item.end_line is None
+    assert item.tier == "full"
+    assert item.is_exact is True
+    assert item.revision == ""
+    assert item.omitted_regions is False
+
+
+def test_make_context_item_accepts_new_keyword_only_fields():
+    item = make_context_item(
+        path="Impl.py", content="def calculate_total(): pass", reason="known_target_member_exact",
+        source_type="named_in_request", trust_level=TrustLevel.REPOSITORY, score=0.9,
+        type_id="StandardInvoiceCalculator", member_id="calculate_total",
+        start_line=10, end_line=14, tier="member_exact", is_exact=True,
+        revision="abc123", omitted_regions=False,
+    )
+    assert item.type_id == "StandardInvoiceCalculator"
+    assert item.member_id == "calculate_total"
+    assert item.start_line == 10
+    assert item.end_line == 14
+    assert item.tier == "member_exact"
+    assert item.revision == "abc123"
+
+
+def test_context_item_to_dict_from_dict_round_trips_new_fields():
+    item = make_context_item(
+        path="a.py", content="x=1", reason="r", source_type="semantic_hit", trust_level="repository",
+        member_id="foo", tier="skeleton", is_exact=False, revision="deadbeef", omitted_regions=True,
+        start_line=1, end_line=5,
+    )
+    reloaded = ContextItem.from_dict(item.to_dict())
+    assert reloaded == item
+
+
+def test_context_item_from_dict_defaults_new_fields_for_a_legacy_pre_p1_dict():
+    """LEGACY_COMPATIBILITY: a ContextPackage serialized BEFORE this package
+    (no WP3 keys at all in the dict) must still load correctly, not raise a
+    KeyError."""
+    legacy_dict = {
+        "path": "old.py", "content": "print(1)", "reason": "named_in_request",
+        "source_type": "named_in_request", "trust_level": "repository",
+        "score": None, "content_hash": "irrelevant",
+    }
+    reloaded = ContextItem.from_dict(legacy_dict)
+    assert reloaded.path == "old.py"
+    assert reloaded.member_id is None
+    assert reloaded.tier == "full"
+    assert reloaded.is_exact is True
+    assert reloaded.omitted_regions is False
+
+
+def test_context_package_from_dict_loads_a_legacy_pre_p1_package():
+    legacy_pkg_dict = {
+        "conventions": {}, "relevant_files": [{
+            "path": "old.py", "content": "x", "reason": "r", "source_type": "semantic_hit",
+            "trust_level": "repository", "score": None, "content_hash": "h",
+        }], "spec_slice": None, "carried_forward_criteria": [], "contract_entries": [],
+        "artifact_entries": [], "baseline": None, "omitted": [], "token_count": 1,
+        "package_hash": "whatever-a-pre-p1-run-computed",
+    }
+    reloaded = ContextPackage.from_dict(legacy_pkg_dict)
+    assert len(reloaded.relevant_files) == 1
+    assert reloaded.relevant_files[0].tier == "full"
+
+
+def test_make_omitted_entry_with_member_id_adds_the_key():
+    entry = make_omitted_entry(path="Big.py", rank=1, reason="body_elided", estimated_tokens=200, member_id="foo")
+    assert entry["member_id"] == "foo"
+
+
+def test_make_omitted_entry_without_member_id_matches_pre_p1_shape_exactly():
+    """No new key at all when member_id isn't supplied - the pre-P1
+    4-field dict shape is unchanged for every existing (non-member-aware)
+    caller."""
+    entry = make_omitted_entry(path="Big.py", rank=1, reason="over budget", estimated_tokens=200)
+    assert entry == {"path": "Big.py", "rank": 1, "reason": "over budget", "estimated_tokens": 200}
+    assert "member_id" not in entry
+
+
 def test_contract_entry_from_record_and_artifact_entry_from_record_are_plain_dicts():
     contract = ContractRecord(id="M1:X", name="X", provider_milestone_id="M1", shape={}, state=ContractState.PROPOSED)
     artifact = ArtifactRecord(milestone_id="M1", ecosystem="maven", kind="library")

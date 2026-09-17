@@ -209,19 +209,45 @@ def test_restore_public_contract_diagnosis_mismatch_cannot_veto():
     assert "deterministic exact-signature inspection" in reason
 
 
-def test_attempt_one_brownfield_contract_exposes_exact_existing_owner(tmp_path):
+def test_attempt_one_brownfield_contract_is_instruction_text_only(tmp_path):
+    """CTX-001 P1 WP7 (A3): _brownfield_owner_contract_block()'s own SOURCE-
+    CONTENT responsibility was retired in favor of
+    build_known_target_context() (kriya/workflow/context_budget.py) - this
+    function now emits ONLY the fixed instruction text, never the file's
+    real source, which was this test's own old assertion
+    ("public String format..." appearing in the block). The old expectation
+    is intentionally superseded by the accepted P1 architecture (docs/
+    assurance/CTX_001_P1_ARCHITECTURE.md section 9): source content is now
+    budget-allocated, member-aware where possible, and explicitly omitted
+    rather than silently capped at 24,000 chars - see
+    test_known_target_context_supplies_the_real_source_content_separately
+    below for where that source content actually comes from now."""
     owner = tmp_path / "Formatter.java"
     owner.write_text(
         "package existing; public class Formatter { public String format(String x) { return x; } }"
     )
-    ctx = MagicMock(workspace_path=str(tmp_path))
+    ctx = MagicMock(workspace_path=str(tmp_path), worktree_path=str(tmp_path))
 
     block = _brownfield_owner_contract_block(ctx, ["Formatter.java"])
 
     assert "AUTHORITATIVE BROWNFIELD OWNER CONTRACT" in block
-    assert "package existing" in block
-    assert "public String format(String x)" in block
+    assert "Formatter.java" in block
     assert "Do not paste a planned replacement class" in block
+    # The real source text must NOT be in the instruction block anymore -
+    # it now flows through build_known_target_context() into
+    # active_code_context instead of task_desc.
+    assert "public String format(String x)" not in block
+
+
+def test_brownfield_contract_returns_empty_for_a_genuinely_new_file(tmp_path):
+    """A known-target file that doesn't exist at either root yet is a new
+    file, not an in-place repair target - the "preserve existing identity"
+    contract has no meaning for it, so no instruction text is produced."""
+    ctx = MagicMock(workspace_path=str(tmp_path), worktree_path=str(tmp_path))
+
+    block = _brownfield_owner_contract_block(ctx, ["BrandNew.java"])
+
+    assert block == ""
 
 
 def test_api_contract_recovery_state_machine_requires_ordered_terminal_lifecycle():
@@ -24090,3 +24116,217 @@ def test_derive_repair_groups_literal_worked_example_filenames(tmp_path):
     assert groups[-1].artifacts == ("OrderServiceTest.java",)
     flattened = tuple(p for g in groups for p in g.generation_order)
     assert set(flattened) == set(participants)
+
+
+# --- CTX-001 P1 Package 2 (WP3-WP7) integration tests -----------------------
+# Real run_attempt() end-to-end wiring proofs, complementing the isolated
+# allocator-level tests in tests/test_context_budget.py and
+# tests/test_context_source.py. See docs/assurance/CTX_001_P1_ARCHITECTURE.md.
+
+@pytest.mark.asyncio
+async def test_known_target_context_supplies_the_real_source_content_separately(tmp_path):
+    """C1/C6 + WP7 wiring proof: attempt-1's known-target source content now
+    flows through build_known_target_context() into existing_code_context,
+    while _brownfield_owner_contract_block()'s own instruction text lands
+    in task_description - the two are never merged into one string, and
+    the real source is never duplicated into the instruction text."""
+    (tmp_path / "Owner.java").write_text(
+        "public class Owner { public void method() { /* REAL_MARKER_TEXT */ } }"
+    )
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["Owner.java"], expected_files_upfront=["Owner.java"],
+        architect_basename_to_path={"Owner.java": "Owner.java"},
+    )
+
+    # The Developer mock returns no files, which correctly raises
+    # IncompleteGenerationError further downstream - irrelevant to this
+    # test, which only cares about the kwargs the Developer was CALLED
+    # with (captured before that later, unrelated failure).
+    with pytest.raises(IncompleteGenerationError):
+        await run_attempt(state, ctx)
+
+    assert developer.run_generation.called
+    call_kwargs = developer.run_generation.call_args.kwargs
+    assert "AUTHORITATIVE BROWNFIELD OWNER CONTRACT" in call_kwargs["task_description"]
+    assert "REAL_MARKER_TEXT" not in call_kwargs["task_description"]
+    assert "REAL_MARKER_TEXT" in call_kwargs["existing_code_context"]
+
+
+@pytest.mark.asyncio
+async def test_known_target_package_recorded_as_run_evidence(tmp_path):
+    """C6: the default pipeline now produces a real ContextPackage/omission
+    record for attempt-1 known-target evidence - observable via the run's
+    own event trace, not just internal state."""
+    (tmp_path / "Owner.java").write_text("public class Owner {}\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["Owner.java"], expected_files_upfront=["Owner.java"],
+        architect_basename_to_path={"Owner.java": "Owner.java"},
+    )
+
+    with pytest.raises(IncompleteGenerationError):
+        await run_attempt(state, ctx)
+
+    events = [e for e in state.run_events if e.kind == "context.known_target_package"]
+    assert len(events) == 1
+    assert events[0].details["known_target_files"] == ["Owner.java"]
+    assert events[0].details["package_hash"]
+
+
+@pytest.mark.asyncio
+async def test_targeted_retry_context_uses_current_worktree_revision_java(tmp_path):
+    """C3/F9, exercised through the real retry path: workspace has a STALE
+    copy, worktree has the CURRENT one - the retry's own Graph-RAG matched/
+    related context (build_code_context, now ctx.worktree_path-sourced)
+    must show only the current content."""
+    workspace = tmp_path / "workspace"
+    worktree = tmp_path / "worktree"
+    workspace.mkdir()
+    worktree.mkdir()
+    (workspace / "Target.java").write_text("VERSION_A")
+    (worktree / "Target.java").write_text("VERSION_B")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = set()
+    state.last_implicated_files = []
+    state.error_context = "a compile error"
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        workspace_path=str(workspace), worktree_path=str(worktree),
+        related_files=["Target.java"], matched_files=[],
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+    )
+
+    await run_attempt(state, ctx)
+
+    existing_context = developer.run_generation.call_args.kwargs["existing_code_context"]
+    assert "VERSION_B" in existing_context
+    assert "VERSION_A" not in existing_context
+
+
+@pytest.mark.asyncio
+async def test_targeted_retry_context_uses_current_worktree_revision_python(tmp_path):
+    workspace = tmp_path / "workspace"
+    worktree = tmp_path / "worktree"
+    workspace.mkdir()
+    worktree.mkdir()
+    (workspace / "target.py").write_text("VERSION_A = True\n")
+    (worktree / "target.py").write_text("VERSION_B = True\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = set()
+    state.last_implicated_files = []
+    state.error_context = "a compile error"
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        workspace_path=str(workspace), worktree_path=str(worktree),
+        related_files=["target.py"], matched_files=[],
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+    )
+
+    await run_attempt(state, ctx)
+
+    existing_context = developer.run_generation.call_args.kwargs["existing_code_context"]
+    assert "VERSION_B = True" in existing_context
+    assert "VERSION_A = True" not in existing_context
+
+
+@pytest.mark.asyncio
+async def test_graph_context_excludes_a_path_already_shown_via_retry_evidence(tmp_path):
+    """DUPLICATE_SOURCE_CONTEXT_PATHS=0: a path that's both Graph-RAG
+    related AND already written by this attempt must be shown exactly
+    once in the prompt, not once (possibly skeletonized) via
+    build_code_context and again (full) via retry_prompts.py's own
+    all_files_written rendering."""
+    (tmp_path / "Written.java").write_text("class Written {}")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"Written.java"}
+    state.last_implicated_files = []
+    state.error_context = "a compile error"
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        related_files=["Written.java"], matched_files=[],
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+    )
+
+    await run_attempt(state, ctx)
+
+    existing_context = developer.run_generation.call_args.kwargs["existing_code_context"]
+    assert existing_context.count("class Written {}") == 1
+    assert "File: Written.java" not in existing_context
+
+
+def test_context_budget_functions_carry_no_write_authority_parameters():
+    """Authority boundary (architecture doc section 14): the new context
+    functions must be STRUCTURALLY incapable of reading or influencing
+    write authority - proven by their own signatures never accepting
+    WriteScopeMode/allowed_write_relpaths/AuthorizedSemanticRegion at all,
+    not merely by an outcome that happens not to exercise them."""
+    import inspect
+
+    from kriya.workflow.context_budget import build_code_context_package, build_known_target_context
+    from kriya.workflow.context_source import CurrentSourceResolver
+
+    forbidden = {"write_scope_mode", "allowed_write_relpaths", "authorized_semantic_regions", "protected_relpath"}
+    for fn in (build_code_context_package, build_known_target_context, CurrentSourceResolver.__init__):
+        params = set(inspect.signature(fn).parameters)
+        assert not (params & forbidden), f"{fn} unexpectedly accepts an authority parameter: {params & forbidden}"
+
+
+@pytest.mark.asyncio
+async def test_known_target_priority_does_not_alter_ctx_write_scope(tmp_path):
+    """Runtime companion to the structural proof above: a real attempt-1
+    run with known targets and a restricted write scope must leave
+    ctx.write_scope_mode/ctx.allowed_write_relpaths exactly as configured -
+    context selection never widens (or narrows) write authority."""
+    (tmp_path / "Owner.java").write_text("public class Owner {}\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        architect_files=["Owner.java"], expected_files_upfront=["Owner.java"],
+        architect_basename_to_path={"Owner.java": "Owner.java"},
+        write_scope_mode=WriteScopeMode.ALLOWLIST, allowed_write_relpaths=["Owner.java"],
+    )
+
+    with pytest.raises(IncompleteGenerationError):
+        await run_attempt(state, ctx)
+
+    assert ctx.write_scope_mode == WriteScopeMode.ALLOWLIST
+    assert ctx.allowed_write_relpaths == ["Owner.java"]

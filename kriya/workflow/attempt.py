@@ -61,6 +61,7 @@ from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
     build_code_context,
+    build_known_target_context,
 )
 from kriya.workflow.retry_prompts import _build_coordinated_retry_prompt, _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
@@ -116,37 +117,78 @@ def _target_exists(ctx: "AttemptContext", filepath: str) -> bool:
     )
 
 
-def _brownfield_owner_contract_block(
-    ctx: "AttemptContext", target_files: Optional[List[str]], *, max_chars: int = 24000,
-) -> str:
-    """Expose exact existing-owner identity before first generation."""
-    sections = []
-    remaining = max_chars
-    for filepath in target_files or []:
-        source_path = os.path.join(ctx.workspace_path, filepath)
-        if not os.path.isfile(source_path):
-            continue
-        try:
-            with open(source_path, "r", encoding="utf-8", errors="replace") as handle:
-                source = handle.read()
-        except OSError:
-            continue
-        if remaining <= 0:
-            break
-        excerpt = source[:remaining]
-        remaining -= len(excerpt)
-        sections.append(f"=== EXISTING OWNER: {filepath} ===\n{excerpt}")
-    if not sections:
+def _brownfield_owner_contract_block(ctx: "AttemptContext", target_files: Optional[List[str]]) -> str:
+    """CTX-001 P1 WP7 (A3): INSTRUCTION TEXT ONLY now - this function's own
+    source-content responsibility (a naive 24,000-combined-char prefix cap,
+    Architect-list order, silent drop of later files past the cap - CTX-001-
+    P0's C1/F1/F2 finding) is RETIRED, not enlarged. Source content for
+    known-target files now flows through build_known_target_context()
+    (kriya/workflow/context_budget.py) instead - member-aware where
+    possible, current-source-resolved (worktree-authoritative), priority-
+    floored rather than unconditionally included, explicitly omitted rather
+    than silently truncated. See run_attempt()'s own call site for how the
+    two are combined: this instruction text always lands in task_desc
+    unconditionally (its own token cost is negligible and constant, not
+    budget-managed - architecture doc section 9), while the source content
+    is budget-allocated separately and appended to active_code_context.
+
+    A file that doesn't actually exist yet (a genuinely NEW file Architect
+    listed as a "known target") produces no instruction text here - this
+    contract is about PRESERVING an existing owner's identity, which has no
+    meaning for a file with no existing owner yet."""
+    existing = [
+        filepath for filepath in target_files or []
+        if os.path.isfile(os.path.join(ctx.worktree_path, filepath))
+        or os.path.isfile(os.path.join(ctx.workspace_path, filepath))
+    ]
+    if not existing:
         return ""
     return (
         "\n\n=== AUTHORITATIVE BROWNFIELD OWNER CONTRACT ===\n"
-        "Every file below already exists and is an in-place repair target. Preserve its "
+        "The following existing file(s) are in-place repair targets: "
+        + ", ".join(sorted(existing)) + ". Preserve their "
         "package/module identity, existing public type names, constructors, and public "
-        "method signatures. Do not paste a planned replacement class into the resolved "
+        "method signatures. Do not paste a planned replacement class into a resolved "
         "owner path. Existing tests and callers are contract evidence. Repair behavior "
-        "behind the existing API, preferring private/internal changes.\n\n"
-        + "\n\n".join(sections)
+        "behind the existing API, preferring private/internal changes. Their real current "
+        "source, exactly as it exists now, is provided separately in the code context below."
     )
+
+
+def _graph_context_exclusion_set(
+    state: GenerationState, ctx: "AttemptContext", known_target_files: Optional[List[str]] = None,
+) -> set:
+    """CTX-001 P1 WP7 (DUPLICATE_SOURCE_CONTEXT_PATHS=0): a path already
+    represented through a MORE authoritative, current-source producer
+    (retry-time all_files_written content via retry_prompts.py's own
+    renderers, or attempt-1's known-target/owner-contract evidence via
+    build_known_target_context()) must be EXCLUDED from
+    build_code_context()'s own matched/related candidate lists before
+    they're rendered - never shown twice in the same prompt. Found live
+    while implementing this package: retry_prompts.py's own
+    _build_targeted_retry_prompt/_build_full_set_retry_prompt/
+    _build_missing_files_retry_prompt all append every state.all_files_
+    written path's FULL current content on top of active_code_context,
+    which already contains build_code_context()'s own (possibly
+    skeletonized) rendering of the SAME path whenever it also happens to be
+    Graph-RAG matched/related - a real, pre-existing duplication this
+    package closes as part of its own required no-duplicate-representation
+    guarantee, not a new one it introduces.
+
+    known_target_files is only non-empty for the attempt-1 owner-contract
+    call site - excluded there for the same reason, in the OPPOSITE
+    direction: a known-target path is excluded from the (possibly
+    degraded) Graph-RAG rendering so build_known_target_context()'s own
+    EXACT/priority-floored representation is the one that wins, never a
+    silently-lower-fidelity duplicate alongside it."""
+    exclusion = set(state.all_files_written) | set(ctx.established_files)
+    if known_target_files:
+        exclusion |= set(known_target_files)
+    return exclusion
+
+
+def _filtered_candidates(paths: Any, exclude: set) -> List[str]:
+    return [p for p in (paths or []) if p not in exclude]
 
 
 def _operation_map(
@@ -3859,7 +3901,20 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         api_key_override = None
         extra_body_override = None
 
-        current_graph_context = build_code_context(ctx.matched_files, ctx.related_files, ctx.workspace_path, current_limit)
+        # CTX-001 P1 WP4 (C3/F9 fix): ctx.worktree_path, not
+        # ctx.workspace_path - by the time any retry runs, create_git_
+        # worktree() has already returned, so the worktree is the current-
+        # source-of-truth root for the rest of this run (see
+        # CurrentSourceResolver's own docstring for the full invariant).
+        # WP7 dedup: exclude any path retry_prompts.py's own targeted-retry
+        # renderer will show fresh/full a moment later (see
+        # _graph_context_exclusion_set's own docstring).
+        _graph_exclude = _graph_context_exclusion_set(state, ctx)
+        current_graph_context = build_code_context(
+            _filtered_candidates(ctx.matched_files, _graph_exclude),
+            _filtered_candidates(ctx.related_files, _graph_exclude),
+            ctx.worktree_path, current_limit,
+        )
         base_code_context = ctx.skills_prompt
         if current_graph_context:
             base_code_context += current_graph_context
@@ -4056,7 +4111,15 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             "falling back to full-set regeneration."
         )
 
-        current_graph_context = build_code_context(ctx.matched_files, ctx.related_files, ctx.workspace_path, current_limit)
+        # CTX-001 P1 WP4/WP7 - see the targeted-retry branch above for the
+        # full rationale (worktree-authoritative source, dedup against
+        # retry_prompts.py's own all_files_written rendering).
+        _graph_exclude = _graph_context_exclusion_set(state, ctx)
+        current_graph_context = build_code_context(
+            _filtered_candidates(ctx.matched_files, _graph_exclude),
+            _filtered_candidates(ctx.related_files, _graph_exclude),
+            ctx.worktree_path, current_limit,
+        )
         base_code_context = ctx.skills_prompt
         if current_graph_context:
             base_code_context += current_graph_context
@@ -4122,7 +4185,15 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         api_key_override = None
         extra_body_override = None
 
-        current_graph_context = build_code_context(ctx.matched_files, ctx.related_files, ctx.workspace_path, current_limit)
+        # CTX-001 P1 WP4/WP7 - see the targeted-retry branch above for the
+        # full rationale (worktree-authoritative source, dedup against
+        # retry_prompts.py's own all_files_written rendering).
+        _graph_exclude = _graph_context_exclusion_set(state, ctx)
+        current_graph_context = build_code_context(
+            _filtered_candidates(ctx.matched_files, _graph_exclude),
+            _filtered_candidates(ctx.related_files, _graph_exclude),
+            ctx.worktree_path, current_limit,
+        )
         base_code_context = ctx.skills_prompt
         if current_graph_context:
             base_code_context += current_graph_context
@@ -4196,7 +4267,68 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             )
             logger.info(f"Escalating compilation attempt to fallback model: {model_override} (Limit: {current_limit} tokens)")
 
-        current_graph_context = build_code_context(ctx.matched_files, ctx.related_files, ctx.workspace_path, current_limit)
+        # On the very first attempt only (never a full-set retry, which
+        # already escalates through the fallback chain above and is
+        # regenerating in response to a real compile/test/runtime error,
+        # not a clean slate) - if the Architect's design yielded a
+        # deterministic file manifest, use it directly instead of asking
+        # the model to independently re-derive the same list. Confirmed
+        # live: "INCOMPLETE GENERATION" (the design called for N files,
+        # fewer were written) was one of the most common first-attempt
+        # failures observed this session, each one costing a full extra
+        # missing-file-recovery retry cycle - this prevents that failure
+        # category outright on attempt 1 instead of only recovering from
+        # it after the fact. Falls back to today's ask-the-model-for-a-
+        # list behavior when the design didn't yield a usable list.
+        # expected_files_upfront is already resolved to real paths by
+        # this point (architect_files comes pre-resolved either from the
+        # Architect's own structured JSON file list, or, in the fallback
+        # case above, from _resolve_file_paths_from_design already) - no
+        # separate resolution step needed here anymore.
+        #
+        # CTX-001 P1 WP7: moved BEFORE the build_code_context() call below
+        # (was previously computed after it) - purely a reordering, same
+        # logic, same inputs (none of which depend on current_graph_context/
+        # retry_package/task_desc computed further down) - needed so a
+        # known-target path can be excluded from the Graph-RAG matched/
+        # related candidate set before it's rendered, rather than
+        # potentially shown twice at two different fidelities
+        # (DUPLICATE_SOURCE_CONTEXT_PATHS=0).
+        known_target_files = None
+        active_failure_signature = state.budgets.last_failure_signature
+        if state.budgets.retry_count == 0 and ctx.expected_files_upfront and active_failure_signature is None:
+            known_target_files = ctx.expected_files_upfront
+        elif (
+            active_failure_signature is not None
+            and state.last_implicated_files
+            and state.budgets.scoped_full_set_failure_signature != active_failure_signature
+        ):
+            # Each distinct, grounded validator failure gets exactly one
+            # dependency-closure repair before broad regeneration, independent
+            # of global retry_count consumed by earlier, unrelated failures.
+            # Repetition of the SAME signature broadens after this one shot.
+            known_target_files = dependent_closure(
+                state.last_implicated_files, ctx.generation_dependencies,
+            )
+            state.budgets.scoped_full_set_failure_signature = active_failure_signature
+            logger.info(
+                f"First full-set attempt for this failure family has grounded implicated "
+                f"file(s) - scoping to their dependency closure "
+                f"{', '.join(known_target_files)} instead of the full file set."
+            )
+
+        # CTX-001 P1 WP4/WP7: ctx.worktree_path (current-source invariant),
+        # matched/related filtered to exclude known-target paths (which get
+        # their own, higher-fidelity representation below) and
+        # already-written paths (which retry_prompts.py's own renderer will
+        # show fresh/full a moment later) - see
+        # _graph_context_exclusion_set's own docstring.
+        _graph_exclude = _graph_context_exclusion_set(state, ctx, known_target_files)
+        current_graph_context = build_code_context(
+            _filtered_candidates(ctx.matched_files, _graph_exclude),
+            _filtered_candidates(ctx.related_files, _graph_exclude),
+            ctx.worktree_path, current_limit,
+        )
         active_code_context = ctx.skills_prompt
         if current_graph_context:
             active_code_context += current_graph_context
@@ -4225,47 +4357,6 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # Track model hops
         state.model_hops.append(model_override or ctx.kernel.config.llm.model)
 
-        # On the very first attempt only (never a full-set retry, which
-        # already escalates through the fallback chain above and is
-        # regenerating in response to a real compile/test/runtime error,
-        # not a clean slate) - if the Architect's design yielded a
-        # deterministic file manifest, use it directly instead of asking
-        # the model to independently re-derive the same list. Confirmed
-        # live: "INCOMPLETE GENERATION" (the design called for N files,
-        # fewer were written) was one of the most common first-attempt
-        # failures observed this session, each one costing a full extra
-        # missing-file-recovery retry cycle - this prevents that failure
-        # category outright on attempt 1 instead of only recovering from
-        # it after the fact. Falls back to today's ask-the-model-for-a-
-        # list behavior when the design didn't yield a usable list.
-        # expected_files_upfront is already resolved to real paths by
-        # this point (architect_files comes pre-resolved either from the
-        # Architect's own structured JSON file list, or, in the fallback
-        # case above, from _resolve_file_paths_from_design already) - no
-        # separate resolution step needed here anymore.
-        known_target_files = None
-        active_failure_signature = state.budgets.last_failure_signature
-        if state.budgets.retry_count == 0 and ctx.expected_files_upfront and active_failure_signature is None:
-            known_target_files = ctx.expected_files_upfront
-        elif (
-            active_failure_signature is not None
-            and state.last_implicated_files
-            and state.budgets.scoped_full_set_failure_signature != active_failure_signature
-        ):
-            # Each distinct, grounded validator failure gets exactly one
-            # dependency-closure repair before broad regeneration, independent
-            # of global retry_count consumed by earlier, unrelated failures.
-            # Repetition of the SAME signature broadens after this one shot.
-            known_target_files = dependent_closure(
-                state.last_implicated_files, ctx.generation_dependencies,
-            )
-            state.budgets.scoped_full_set_failure_signature = active_failure_signature
-            logger.info(
-                f"First full-set attempt for this failure family has grounded implicated "
-                f"file(s) - scoping to their dependency closure "
-                f"{', '.join(known_target_files)} instead of the full file set."
-            )
-
         if state.budgets.retry_count == 0:
             process_boundary_constraint = _initial_test_process_boundary_constraint(
                 _runtime_contract_requirements(ctx), known_target_files,
@@ -4274,18 +4365,45 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 task_desc += process_boundary_constraint
 
         if state.attempt_number == 1 and known_target_files:
+            # CTX-001 P1 WP7 (A3): instruction text (unconditional, fixed
+            # cost, stays in task_desc) is now fully separate from source
+            # content (budget-allocated, member-aware where possible,
+            # explicitly omitted rather than silently capped at 24,000
+            # chars - build_known_target_context(), context_budget.py).
             owner_contract = _brownfield_owner_contract_block(ctx, known_target_files)
             if owner_contract:
                 task_desc += owner_contract
-                active_code_context += owner_contract
+            known_target_limit = _reserve_graph_context_budget(
+                active_context_window, ctx.skills_prompt, ctx.learned_rag_context, current_graph_context,
+            )
+            known_target_rendered, known_target_package = build_known_target_context(
+                known_target_files, ctx.workspace_path, ctx.worktree_path, known_target_limit,
+            )
+            if known_target_rendered:
+                active_code_context += known_target_rendered
                 logger.info(
-                    "Attempt 1 brownfield owner contract: preserving existing identity/API "
-                    "for %s.",
-                    ", ".join(
-                        path for path in known_target_files
-                        if os.path.isfile(os.path.join(ctx.workspace_path, path))
-                    ),
+                    "Attempt 1 known-target context: %d unit(s), %d omission(s) for %s "
+                    "(see run trace for full detail).",
+                    len(known_target_package.relevant_files), len(known_target_package.omitted),
+                    ", ".join(known_target_files),
                 )
+            # Internal evidence (WP6/observability) - never the full source,
+            # just enough to answer "what tier/omission did each known
+            # target actually get" from the run trace alone.
+            state.record_event(RunEvent(
+                kind="context.known_target_package",
+                attempt=state.attempt_number,
+                source="attempt.run_attempt",
+                authority=EventAuthority.ADVISORY,
+                message="Known-target context package built for the attempt-1 owner-contract replacement.",
+                details={
+                    "known_target_files": list(known_target_files),
+                    "unit_count": len(known_target_package.relevant_files),
+                    "tiers": {item.path: item.tier for item in known_target_package.relevant_files},
+                    "omitted": list(known_target_package.omitted),
+                    "package_hash": known_target_package.package_hash,
+                },
+            ))
 
         # PlannerAgent's own prompt never asks for full code, but models
         # routinely over-deliver it anyway in fenced blocks inside the plan
