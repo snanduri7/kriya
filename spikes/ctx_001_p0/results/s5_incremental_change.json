@@ -1,0 +1,125 @@
+{
+  "fixture": {
+    "filler_files": 45
+  },
+  "runs": [
+    {
+      "label": "index_cold",
+      "elapsed_s": 0.10634324999773526,
+      "opens": 60,
+      "dirs_walked": 13,
+      "file_entries_seen": 60,
+      "db_counts": {
+        "symbols": 235,
+        "relations": 332,
+        "files_graph": 60,
+        "vector_chunks": 295,
+        "files_vector": 60
+      }
+    },
+    {
+      "label": "index_warm_no_change",
+      "elapsed_s": 0.0031859580012678634,
+      "opens": 0,
+      "dirs_walked": 13,
+      "file_entries_seen": 60,
+      "db_counts": {
+        "symbols": 235,
+        "relations": 332,
+        "files_graph": 60,
+        "vector_chunks": 295,
+        "files_vector": 60
+      }
+    },
+    {
+      "label": "index_one_file_content_changed",
+      "changed_file": "core/billing/invoice_impl.py",
+      "elapsed_s": 0.008443541002634447,
+      "opens": 1,
+      "dirs_walked": 13,
+      "file_entries_seen": 60,
+      "db_counts": {
+        "symbols": 235,
+        "relations": 332,
+        "files_graph": 60,
+        "vector_chunks": 295,
+        "files_vector": 60
+      }
+    },
+    {
+      "label": "index_mtime_touch_same_content",
+      "changed_file": "core/billing/invoice_impl.py",
+      "elapsed_s": 0.010130249997018836,
+      "opens": 1,
+      "dirs_walked": 13,
+      "file_entries_seen": 60,
+      "db_counts": {
+        "symbols": 235,
+        "relations": 332,
+        "files_graph": 60,
+        "vector_chunks": 295,
+        "files_vector": 60
+      }
+    },
+    {
+      "label": "index_reverted_to_original",
+      "changed_file": "core/billing/invoice_impl.py",
+      "elapsed_s": 0.011355333997926209,
+      "opens": 1,
+      "dirs_walked": 13,
+      "file_entries_seen": 60,
+      "db_counts": {
+        "symbols": 235,
+        "relations": 332,
+        "files_graph": 60,
+        "vector_chunks": 295,
+        "files_vector": 60
+      }
+    }
+  ],
+  "analyze_no_caching_baseline": [
+    {
+      "label": "cold",
+      "elapsed_s": 0.0008661249994474929,
+      "opens": 5,
+      "dirs_walked": 13,
+      "file_entries_seen": 60,
+      "total_files_indexed": 60,
+      "languages": {
+        "Python": 100.0
+      }
+    },
+    {
+      "label": "warm_no_change_1",
+      "elapsed_s": 0.0007031249988358468,
+      "opens": 5,
+      "dirs_walked": 13,
+      "file_entries_seen": 60,
+      "total_files_indexed": 60,
+      "languages": {
+        "Python": 100.0
+      }
+    },
+    {
+      "label": "warm_no_change_2",
+      "elapsed_s": 0.0006619999985559843,
+      "opens": 5,
+      "dirs_walked": 13,
+      "file_entries_seen": 60,
+      "total_files_indexed": 60,
+      "languages": {
+        "Python": 100.0
+      }
+    }
+  ],
+  "summary": {
+    "total_files_indexed": 60,
+    "opens_cold": 60,
+    "opens_warm_no_change": 0,
+    "opens_one_file_changed": 1,
+    "opens_mtime_touch_same_content": 1,
+    "opens_reverted": 1,
+    "pct_of_repo_reprocessed_on_one_file_change": 1.67,
+    "analyze_opens_are_constant_regardless_of_change": true
+  }
+}

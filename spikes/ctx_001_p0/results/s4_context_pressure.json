@@ -1,0 +1,44 @@
+{
+  "no_scores": {
+    "8000": {
+      "output_tokens_est": 7096,
+      "target_body_survives": true
+    },
+    "16000": {
+      "output_tokens_est": 7096,
+      "target_body_survives": true
+    },
+    "32000": {
+      "output_tokens_est": 24239,
+      "target_body_survives": true
+    }
+  },
+  "with_scores_target_low": {
+    "8000": {
+      "output_tokens_est": 6895,
+      "target_body_survives": false
+    },
+    "16000": {
+      "output_tokens_est": 12623,
+      "target_body_survives": true
+    },
+    "32000": {
+      "output_tokens_est": 24239,
+      "target_body_survives": true
+    }
+  },
+  "with_scores_target_high": {
+    "8000": {
+      "output_tokens_est": 7052,
+      "target_body_survives": true
+    },
+    "16000": {
+      "output_tokens_est": 12780,
+      "target_body_survives": true
+    },
+    "32000": {
+      "output_tokens_est": 24239,
+      "target_body_survives": true
+    }
+  }
+}
