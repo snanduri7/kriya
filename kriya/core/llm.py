@@ -227,7 +227,7 @@ class LLMClient:
 
         try:
             try:
-                content, prompt_tokens, completion_tokens = await self._request_once(
+                content, prompt_tokens, completion_tokens, finish_reason = await self._request_once(
                     client, model, system_prompt, user_prompt, temperature, max_tokens,
                     extra_body, response_format, stream_callback
                 )
@@ -244,7 +244,7 @@ class LLMClient:
                         f"reasoning model '{model}' ({e}) - retrying once without it (this backend/"
                         "model combination may not support JSON mode together with reasoning)."
                     )
-                    content, prompt_tokens, completion_tokens = await self._request_once(
+                    content, prompt_tokens, completion_tokens, finish_reason = await self._request_once(
                         client, model, system_prompt, user_prompt, temperature, max_tokens,
                         extra_body, None, stream_callback
                     )
@@ -271,7 +271,7 @@ class LLMClient:
                     f"max_tokens={max_tokens} (likely silent reasoning) - retrying once "
                     "with a 12288-token floor."
                 )
-                content, prompt_tokens, completion_tokens = await self._request_once(
+                content, prompt_tokens, completion_tokens, finish_reason = await self._request_once(
                     client, model, system_prompt, user_prompt, temperature, 12288,
                     extra_body, response_format, stream_callback
                 )
@@ -284,19 +284,28 @@ class LLMClient:
             if completion_tokens == 0:
                 completion_tokens = int(len(content) / 4)
 
-            click.secho(f"\n[Usage: {prompt_tokens} input tokens, {completion_tokens} output tokens | Time: {elapsed_time:.2f}s]", fg="blue", dim=True)
+            finish_reason_display = finish_reason or "unreported"
+            click.secho(
+                f"\n[Usage: {prompt_tokens} input tokens, {completion_tokens} output tokens | "
+                f"Time: {elapsed_time:.2f}s | Finish: {finish_reason_display}]",
+                fg="blue", dim=True,
+            )
             # R1 Deliverable 5 - observational only, see this attribute's own
             # docstring in __init__. tokens_estimated=True means the server's
             # response carried no usage field for prompt and/or completion
             # tokens, so one or both counts above are the existing char/4
             # heuristic, not a real measurement - never silently presented as
-            # exact.
+            # exact. finish_reason (VAL-001 G1-R3) is None when the
+            # provider/SDK never reported one - never presented as "stop" by
+            # default, since that would be a fabricated claim of a normal
+            # completion this code never actually observed.
             self.last_call_metrics = {
                 "model": model,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "tokens_estimated": tokens_estimated,
                 "duration_seconds": elapsed_time,
+                "finish_reason": finish_reason,
             }
             return content
         except Exception as e:
@@ -308,10 +317,23 @@ class LLMClient:
         extra_body, response_format, stream_callback
     ):
         """Issues a single completion request (streaming or not) and returns
-        (content, prompt_tokens, completion_tokens). Split out from complete() so a
-        reasoning model's response_format can be retried once without it on failure."""
+        (content, prompt_tokens, completion_tokens, finish_reason). Split out
+        from complete() so a reasoning model's response_format can be
+        retried once without it on failure.
+
+        finish_reason (VAL-001 G1-R3, 2026-09-18: a real investigation had
+        no way to tell "the model stopped naturally" from "the provider cut
+        it off at max_tokens" and had to infer it entirely from token counts
+        and content shape) is read the same defensive way `usage` already
+        is here - `getattr(..., "finish_reason", None)`, never a bare
+        attribute access - so a provider/SDK version that omits the field
+        entirely degrades to None exactly like a provider that omits
+        `usage` already degrades prompt_tokens/completion_tokens to 0
+        above. Never raises, never changes what content/token counts this
+        function already returns."""
         prompt_tokens = 0
         completion_tokens = 0
+        finish_reason = None
         if stream_callback:
             try:
                 response = await client.chat.completions.create(
@@ -347,10 +369,23 @@ class LLMClient:
                 if hasattr(chunk, "usage") and chunk.usage:
                     prompt_tokens = chunk.usage.prompt_tokens
                     completion_tokens = chunk.usage.completion_tokens
-                if chunk.choices and chunk.choices[0].delta.content:
-                    delta = chunk.choices[0].delta.content
-                    chunks.append(delta)
-                    stream_callback(delta)
+                if chunk.choices:
+                    # The finish_reason-carrying chunk is typically the LAST
+                    # one and usually has empty/None delta content - checked
+                    # unconditionally here (not gated on delta.content being
+                    # truthy like the append/callback below), and only
+                    # overwritten when a real value is present, so an
+                    # earlier chunk's own null finish_reason (every non-
+                    # final chunk) can never clobber a real one seen later -
+                    # not that ordering should matter for a well-behaved
+                    # stream, but this stays correct even if it doesn't.
+                    chunk_finish_reason = getattr(chunk.choices[0], "finish_reason", None)
+                    if chunk_finish_reason:
+                        finish_reason = chunk_finish_reason
+                    if chunk.choices[0].delta.content:
+                        delta = chunk.choices[0].delta.content
+                        chunks.append(delta)
+                        stream_callback(delta)
             content = "".join(chunks).strip()
         else:
             response = await client.chat.completions.create(
@@ -367,9 +402,11 @@ class LLMClient:
             if hasattr(response, "usage") and response.usage:
                 prompt_tokens = response.usage.prompt_tokens
                 completion_tokens = response.usage.completion_tokens
+            if response.choices:
+                finish_reason = getattr(response.choices[0], "finish_reason", None)
             content = response.choices[0].message.content or ""
             content = content.strip()
-        return content, prompt_tokens, completion_tokens
+        return content, prompt_tokens, completion_tokens, finish_reason
 
     async def complete_with_tools(
         self,

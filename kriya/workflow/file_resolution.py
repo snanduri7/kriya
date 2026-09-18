@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
 from kriya.workflow.failure import Failure
 
@@ -2310,21 +2311,180 @@ _STANDALONE_ARTIFACT_CHECK: Dict[str, Callable[[str], bool]] = {
 # checks below are both things actually observed in a real incident (true
 # empty content; an unclosed fence from running out of budget mid-response)
 # and neither can plausibly collide with a short hand-written test string.
+#
+# VAL-001 G1-R3 (2026-09-18): a real live run proved the raw
+# `count("```") % 2` parity check alone is a FALSE-POSITIVE-PRONE proxy for
+# "truncated" - a genuinely complete Planner response (valid, schema-
+# complete structured JSON, cleanly closed) was rejected purely because the
+# model wrapped its own prose in an extra, unrequested ```markdown fence
+# without also closing it before starting the required ```json block,
+# pushing the raw marker count to 3 (odd). Two PRIOR same-goal/model/config
+# live runs (g1_rerun/g1_rerun2) both show the model's own normal,
+# correctly-paired 4-marker shape for the exact same content - this was a
+# one-off formatting lapse in THAT response, not evidence the content was
+# cut off (667 output tokens against a 16384 configured ceiling; the
+# extracted JSON parses as fully valid, complete, schema-shaped data).
+#
+# classify_plan_completeness() (below) is the real fix: STRUCTURED evidence
+# (parse_planner_structured_output(), MA6.3 Stage A's own extractor -
+# already validates JSON syntax AND schema, including PlannedFile's
+# existing path-authority rule) is now the PRIMARY signal whenever it's
+# available - a cosmetic surrounding-fence mismatch can never block a
+# response whose structured payload is genuinely complete and valid, and a
+# structured payload that's genuinely invalid (bad JSON, wrong schema, an
+# unauthorized path) is never silently waved through just because it LOOKS
+# long enough. The raw fence-parity count survives as a NARROWER fallback,
+# used only for the one case structured extraction is structurally unable
+# to disambiguate on its own: no JSON-shaped block was found/attempted at
+# all. That is also the exact shape roughly a hundred short, terse test-
+# mock Planner strings across this codebase already rely on passing (no
+# JSON block, zero fenced code, even count by construction) - preserved
+# byte-for-byte by construction, not merely by intent, since that's the
+# literal branch selected for exactly that input.
+#
+# check_plan_completeness() itself is kept, as a thin, byte-for-byte
+# backward-compatible wrapper - every existing caller (workflow.py's
+# import, tests/test_workflow.py's own direct unit tests) keeps working
+# unchanged; new code should call classify_plan_completeness() directly for
+# the additional classification detail this wrapper collapses away.
 def check_plan_completeness(plan_text: str) -> Optional[str]:
     """Returns a human-readable reason string if the Planner's raw plan text
-    looks empty or truncated, None if it looks complete enough to proceed."""
-    stripped = plan_text.strip() if plan_text else ""
-    if not stripped:
-        return (
+    looks empty, truncated, or otherwise fails PlanCompletenessResult's own
+    "complete" classification; None if it looks complete enough to proceed.
+    See classify_plan_completeness() for the real logic and its own,
+    more detailed classification."""
+    result = classify_plan_completeness(plan_text)
+    return None if result.classification == "complete" else result.reason
+
+
+# The one label _non_blank_relative_path() (kriya/workflow/plan_schema.py)
+# always uses for PlannedFile.path - unique to that single field/call site
+# (confirmed: the only `_non_blank_relative_path(..., label=...)` call
+# anywhere in this codebase), so a plain substring match against it
+# reliably identifies "this schema-validation failure is specifically a
+# path-authority violation" without needing parse_planner_structured_output()
+# to expose pydantic's own raw ValidationError object (a contract change
+# every existing caller of that function would otherwise have to absorb).
+_PLANNED_FILE_PATH_AUTHORITY_MARKER = "planned file path"
+
+
+@dataclass(frozen=True)
+class PlanCompletenessResult:
+    """VAL-001 G1-R3 (2026-09-18): structural, evidence-based replacement
+    for the old bare `Optional[str]` fence-parity result - see
+    classify_plan_completeness()'s own docstring for the full incident and
+    design rationale this exists to close.
+
+    `classification` is exactly one of:
+      "complete"             - proceed. Either a structured plan parsed AND
+                                passed PlannerStructuredOutput's own schema
+                                (the authoritative case - a cosmetic
+                                surrounding-fence mismatch never blocks
+                                this), or no structured block was
+                                found/attempted at all and the raw text's
+                                own fence count is balanced (the pre-
+                                existing behavior for a prose-only or
+                                short/terse plan, preserved unchanged).
+      "incomplete_truncated" - fail closed. Empty text; a JSON-shaped block
+                                that was FOUND but did not parse (direct
+                                evidence of a cut-off structure); or no
+                                structured block was found AND the raw
+                                text's own fence count is unbalanced (the
+                                original heuristic, now used ONLY as a
+                                corroborating signal for this one
+                                structurally-ambiguous case).
+      "unauthorized_path"    - fail closed. The structured plan parsed as
+                                JSON but failed schema validation
+                                specifically because a planned_files[].path
+                                entry violates PlannedFile's own EXISTING
+                                path-authority rule (absolute, path-
+                                traversal, directory-shaped, or glob/
+                                wildcard - kriya/workflow/plan_schema.py::
+                                _non_blank_relative_path, unchanged, reused
+                                as-is - never a second, parallel path-
+                                authority rule invented here, and never
+                                silently rewritten to something "safe").
+      "schema_invalid"       - fail closed. The structured plan parsed as
+                                JSON but failed schema validation for any
+                                OTHER reason (missing required field, wrong
+                                enum value, etc.) - genuinely invalid
+                                content is never silently accepted merely
+                                because it is long/well-formatted-looking.
+
+    `structured_plan` is populated only when classification=="complete" AND
+    a structured plan actually parsed (may still be None on a "complete"
+    prose-only plan with no JSON block at all) - the already-parsed,
+    already-validated object, so a caller doesn't need a second parse to
+    use it as real evidence downstream."""
+
+    classification: str
+    reason: Optional[str]
+    structured_plan: Optional[Any]
+
+
+def classify_plan_completeness(plan_text: str) -> PlanCompletenessResult:
+    """The real completeness/authority classification MA6.3 Stage A's own
+    parse_planner_structured_output() now feeds as PRIMARY evidence (VAL-001
+    G1-R3) - see PlanCompletenessResult's own docstring for what each
+    classification means and this module's own header comment above for the
+    live incident (a real, complete, valid Planner response rejected purely
+    for a cosmetic extra fence marker) this replaces the old bare
+    count("```") % 2 heuristic to close, without losing that heuristic's own
+    real detection power for the one case structured extraction genuinely
+    cannot disambiguate alone (no JSON-shaped block attempted at all)."""
+    # Deferred import: kriya.agents.contracts -> kriya.agents.agent (package
+    # __init__ side effect) does not import this module, so there is no
+    # real cycle - deferred anyway, matching this module's own existing
+    # convention of keeping its top-level import list free of the agents
+    # package (file_resolution.py is imported very early, by kriya.workflow.
+    # workflow itself, before agents are necessarily set up).
+    from kriya.agents.contracts import parse_planner_structured_output
+
+    structured, structured_issue = parse_planner_structured_output(plan_text)
+    if structured is not None:
+        return PlanCompletenessResult("complete", None, structured)
+
+    issue = structured_issue or ""
+    if issue == "text is empty":
+        return PlanCompletenessResult(
+            "incomplete_truncated",
             "plan is empty - the model may have run out of token budget before producing "
-            "any real content (e.g. spent it all on reasoning/thinking)"
+            "any real content (e.g. spent it all on reasoning/thinking)",
+            None,
         )
+
+    if issue.startswith("structured plan JSON block failed schema validation"):
+        classification = (
+            "unauthorized_path" if _PLANNED_FILE_PATH_AUTHORITY_MARKER in issue else "schema_invalid"
+        )
+        return PlanCompletenessResult(classification, issue, None)
+
+    if issue.startswith("structured plan JSON object did not parse"):
+        return PlanCompletenessResult(
+            "incomplete_truncated",
+            f"{issue} - a fenced JSON block was found but its content is not valid JSON, consistent "
+            "with the response being cut off mid-structure",
+            None,
+        )
+
+    # issue == "no complete structured plan JSON object found in the text" -
+    # no structured block was found or attempted at all. Structured
+    # evidence is structurally unable to disambiguate this shape (nothing
+    # to validate), so fall back to the original raw fence-parity signal,
+    # preserved EXACTLY for this one case - the common shape for every
+    # short/terse test-mock Planner string across this codebase's own test
+    # suite (zero fenced code, even count by construction) and for any
+    # genuinely prose-only real plan that never attempted the required JSON
+    # block at all.
     if plan_text.count("```") % 2 != 0:
-        return (
-            "plan contains an unclosed fenced code block (odd number of ``` markers) - "
-            "looks truncated mid-response, likely ran out of token budget"
+        return PlanCompletenessResult(
+            "incomplete_truncated",
+            "plan contains an unclosed fenced code block (odd number of ``` markers) and no "
+            "complete structured plan JSON object could be found - looks truncated mid-response, "
+            "likely ran out of token budget",
+            None,
         )
-    return None
+    return PlanCompletenessResult("complete", None, None)
 
 
 def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -> Dict[str, str]:

@@ -859,6 +859,12 @@ async def _run_developer_generation(
             "prompt_tokens": (last_call_metrics or {}).get("prompt_tokens"),
             "completion_tokens": (last_call_metrics or {}).get("completion_tokens"),
             "tokens_estimated": (last_call_metrics or {}).get("tokens_estimated"),
+            # VAL-001 G1-R3 (2026-09-18): same observational-only posture as
+            # every other field here - None whenever the provider/SDK never
+            # reported one (LLMClient.complete()'s own last_call_metrics
+            # already carries that same honest None, never a fabricated
+            # "stop").
+            "finish_reason": (last_call_metrics or {}).get("finish_reason"),
         })
         state.record_event(RunEvent(
             kind="generation.completed" if succeeded else "generation.failed",

@@ -429,3 +429,122 @@ async def test_complete_with_tools_malformed_arguments_does_not_crash():
     with patch.object(llm.client.chat.completions, "create", new=mock_create):
         res = await llm.complete_with_tools([{"role": "user", "content": "fix it"}], [])
         assert res["tool_calls"] == [{"id": "call_1", "name": "apply_patch", "arguments": {}}]
+
+
+# =====================================================================
+# finish_reason capture (VAL-001 G1-R3, 2026-09-18) - a real investigation
+# had no way to directly confirm whether a Planner response was cut off by
+# the provider ("length") or ended naturally ("stop"), and had to infer it
+# entirely from token counts and content shape. Neither the streaming nor
+# the non-streaming completion path read `finish_reason` from the
+# provider's own response at all before this - now both do, defensively
+# (never a bare attribute access), and it is always present (possibly
+# None) on LLMClient.last_call_metrics after complete() returns.
+# =====================================================================
+
+class _FakeStreamChunk:
+    """Minimal stand-in for an OpenAI-SDK streaming chunk - only the
+    attributes _request_once's own streaming branch actually reads."""
+
+    def __init__(self, content=None, finish_reason=None, usage=None):
+        choice = MagicMock()
+        choice.delta.content = content
+        choice.finish_reason = finish_reason
+        self.choices = [choice]
+        self.usage = usage
+
+
+class _FakeStream:
+    """Minimal stand-in for the async-iterable streaming response object -
+    real chunks are yielded one at a time via `async for`, exactly how
+    _request_once's own streaming branch consumes them."""
+
+    def __init__(self, chunks):
+        self._chunks = chunks
+
+    def __aiter__(self):
+        return self._gen()
+
+    async def _gen(self):
+        for c in self._chunks:
+            yield c
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_captured_non_streaming_stop():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    mock_response = _mock_response("complete text")
+    mock_response.choices[0].finish_reason = "stop"
+    with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=mock_response)):
+        await llm.complete("system", "user")
+    assert llm.last_call_metrics["finish_reason"] == "stop"
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_captured_non_streaming_length():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    mock_response = _mock_response("cut off mid")
+    mock_response.choices[0].finish_reason = "length"
+    with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=mock_response)):
+        await llm.complete("system", "user")
+    assert llm.last_call_metrics["finish_reason"] == "length"
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_missing_non_streaming_is_none_not_fabricated():
+    """A provider/SDK that never reports finish_reason at all must produce
+    None, never a fabricated "stop" - real absence is a real, distinct
+    (and honestly reported) unknown, not silently presented as a normal
+    completion this code never actually observed."""
+    class _NoFinishReasonChoice:
+        def __init__(self):
+            self.message = MagicMock(content="no finish_reason field at all")
+
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    mock_response = MagicMock()
+    mock_response.choices = [_NoFinishReasonChoice()]
+    mock_response.usage = None
+    with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=mock_response)):
+        await llm.complete("system", "user")
+    assert llm.last_call_metrics["finish_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_captured_streaming_stop():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    chunks = [
+        _FakeStreamChunk(content="Hello "),
+        _FakeStreamChunk(content="world"),
+        _FakeStreamChunk(content=None, finish_reason="stop"),
+    ]
+    with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=_FakeStream(chunks))):
+        result = await llm.complete("system", "user", stream_callback=lambda t: None)
+    assert result == "Hello world"
+    assert llm.last_call_metrics["finish_reason"] == "stop"
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_captured_streaming_length():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    chunks = [
+        _FakeStreamChunk(content="cut off"),
+        _FakeStreamChunk(content=None, finish_reason="length"),
+    ]
+    with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=_FakeStream(chunks))):
+        await llm.complete("system", "user", stream_callback=lambda t: None)
+    assert llm.last_call_metrics["finish_reason"] == "length"
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_missing_streaming_is_none_not_fabricated():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    chunks = [_FakeStreamChunk(content="no chunk ever reports finish_reason")]
+    with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=_FakeStream(chunks))):
+        await llm.complete("system", "user", stream_callback=lambda t: None)
+    assert llm.last_call_metrics["finish_reason"] is None

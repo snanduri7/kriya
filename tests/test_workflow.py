@@ -173,6 +173,7 @@ from kriya.workflow.workflow import (
     _resolve_run_command,
     downgrade_ungrounded_goal_explicit_commands,
     check_plan_completeness,
+    classify_plan_completeness,
     extract_planner_code_blocks,
     _scoped_skill_gap_description,
     _strip_jdk_incompatible_jvm_flags,
@@ -23757,6 +23758,180 @@ def test_check_plan_completeness_accepts_a_complete_plan():
     assert check_plan_completeness(plan) is None
 
 
+# =====================================================================
+# classify_plan_completeness (VAL-001 G1-R3, 2026-09-18) - structural,
+# evidence-based replacement for the raw fence-parity heuristic above. See
+# kriya/workflow/file_resolution.py's own module-level comment for the full
+# live incident this closes: a real, complete, valid Planner response was
+# rejected as "planner_output_incomplete" purely because the model wrapped
+# its own markdown prose in an extra, unrequested ```markdown fence without
+# closing it before the required ```json block - a cosmetic formatting
+# lapse, not truncation (667 output tokens against a 16384 ceiling; the
+# extracted JSON parsed as fully valid, schema-complete data). The fixture
+# below is a SANITIZED reconstruction of that exact response shape (content
+# paraphrased, the real local filesystem path replaced with a synthetic
+# one) - same structural defect (missing intermediate closing fence +
+# out-of-workspace path), never the original repository-specific prose.
+# =====================================================================
+
+_G1R3_SANITIZED_MARKDOWN_PREFIX = (
+    "```markdown\n"
+    "# Fix Plan\n\n"
+    "## Problem Analysis\n"
+    "Some real analysis prose here, several paragraphs long in the real "
+    "response, condensed for this fixture.\n\n"
+    "## Files to Modify\n"
+    "### 1. `pkg/module.py`\n"
+    "- Issue: description of the issue\n\n"
+    "## Implementation Steps\n"
+    "1. Step one\n2. Step two\n\n"
+    "## Verification\n"
+    "- Run existing tests\n\n"
+)
+
+
+def _g1r3_shaped_plan(*, planned_file_path: str) -> str:
+    """The exact structural shape of the real G1-R3 response: a
+    ```markdown-wrapped prose section with NO intermediate closing fence,
+    directly followed by ```json (3 total ``` markers, odd - what tripped
+    the old heuristic), then a complete, schema-shaped JSON object with the
+    given planned_files[0].path."""
+    structured = {
+        "global_invariants": [{"id": "gi1", "statement": "some invariant"}],
+        "subtasks": [{
+            "id": "s1", "description": "do the fix", "execution_method": "model",
+            "execution_role": "implementation", "depends_on": [],
+            "planned_files": [{"path": planned_file_path, "action": "modify"}],
+            "provides": [], "requires": [], "relevant_global_invariant_ids": ["gi1"],
+            "acceptance_criteria_ids": ["ac1"], "verification": [],
+        }],
+        "acceptance_criteria": [{"id": "ac1", "description": "criteria", "method": "judgment"}],
+        "extension_points": [], "refactor_baseline": None,
+    }
+    return _G1R3_SANITIZED_MARKDOWN_PREFIX + "```json\n" + json.dumps(structured, indent=2) + "\n```"
+
+
+def test_classify_plan_completeness_valid_json_survives_cosmetic_fence_mismatch():
+    """The exact acceptance criterion: a valid, complete, schema-passing
+    structured plan is never rejected merely because the surrounding raw
+    text has an odd/mismatched fence count."""
+    plan = _g1r3_shaped_plan(planned_file_path="pkg/module.py")  # relative - authorized
+    assert plan.count("```") == 3, "fixture sanity check: must reproduce the odd-marker shape"
+    result = classify_plan_completeness(plan)
+    assert result.classification == "complete"
+    assert result.reason is None
+    assert result.structured_plan is not None
+    assert result.structured_plan.subtasks[0].planned_files[0].path == "pkg/module.py"
+
+
+def test_classify_plan_completeness_exact_g1r3_shape_is_unauthorized_path_not_incomplete():
+    """The exact G1-R3 outcome required: this response must no longer be
+    classified planner_output_incomplete, AND must fail for its OWN real
+    defect (an absolute, out-of-workspace planned_files[].path) under an
+    accurate, distinct classification - never silently accepted."""
+    plan = _g1r3_shaped_plan(planned_file_path="/abs/workspace/pkg/module.py")
+    assert plan.count("```") == 3, "fixture sanity check: reproduces the exact odd-marker shape"
+    result = classify_plan_completeness(plan)
+    assert result.classification == "unauthorized_path"
+    assert result.classification != "incomplete_truncated"
+    assert "planned file path" in (result.reason or "")
+    assert "workspace-relative" in (result.reason or "")
+    assert result.structured_plan is None
+
+
+def test_classify_plan_completeness_flags_path_traversal_as_unauthorized():
+    plan = _g1r3_shaped_plan(planned_file_path="../../etc/passwd")
+    result = classify_plan_completeness(plan)
+    assert result.classification == "unauthorized_path"
+
+
+def test_classify_plan_completeness_flags_directory_shaped_path_as_unauthorized():
+    plan = _g1r3_shaped_plan(planned_file_path="pkg/")
+    result = classify_plan_completeness(plan)
+    assert result.classification == "unauthorized_path"
+
+
+def test_classify_plan_completeness_flags_non_path_schema_defect_as_schema_invalid():
+    """A structurally-valid JSON object that fails schema validation for a
+    reason OTHER than path authority (an invalid enum value) must be
+    distinguished from both "incomplete" and "unauthorized_path" - genuinely
+    invalid content is never silently accepted, but is also never
+    misreported as a path problem it isn't."""
+    structured = {
+        "global_invariants": [{"id": "gi1", "statement": "x"}],
+        "subtasks": [{
+            "id": "s1", "description": "d", "execution_method": "model",
+            "execution_role": "implementation", "depends_on": [],
+            "planned_files": [{"path": "pkg/module.py", "action": "obliterate"}],
+            "provides": [], "requires": [], "relevant_global_invariant_ids": ["gi1"],
+            "acceptance_criteria_ids": ["ac1"], "verification": [],
+        }],
+        "acceptance_criteria": [{"id": "ac1", "description": "d", "method": "judgment"}],
+        "extension_points": [], "refactor_baseline": None,
+    }
+    plan = "Some plan text\n```json\n" + json.dumps(structured) + "\n```"
+    result = classify_plan_completeness(plan)
+    assert result.classification == "schema_invalid"
+    assert "planned file path" not in (result.reason or "")
+
+
+def test_classify_plan_completeness_flags_genuinely_truncated_json_no_closing_fence():
+    """A ```json fence that opens with real, plausible-looking content but
+    NEVER closes at all - the actual shape running out of budget mid-
+    response produces - must still fail."""
+    plan = (
+        "Some plan text\n```json\n"
+        '{"global_invariants": [], "subtasks": [{"id": "s1", "description": "incomplete because'
+    )
+    assert plan.count("```") == 1
+    result = classify_plan_completeness(plan)
+    assert result.classification == "incomplete_truncated"
+    assert result.structured_plan is None
+
+
+def test_classify_plan_completeness_flags_malformed_json_that_did_parse_as_fence_closed():
+    """A JSON block whose fence IS properly closed but whose content is not
+    valid JSON (a trailing comma) - direct evidence of a cut-off/corrupted
+    structure, caught even though the fence-parity count alone is even."""
+    plan = 'Some plan text\n```json\n{"subtasks": [1, 2,]}\n```'
+    assert plan.count("```") == 2, "fence count is even - must not be caught by parity alone"
+    result = classify_plan_completeness(plan)
+    assert result.classification == "incomplete_truncated"
+    assert "did not parse" in (result.reason or "")
+
+
+def test_classify_plan_completeness_flags_empty_plan():
+    result = classify_plan_completeness("")
+    assert result.classification == "incomplete_truncated"
+    result2 = classify_plan_completeness("   \n  ")
+    assert result2.classification == "incomplete_truncated"
+
+
+def test_classify_plan_completeness_accepts_short_terse_plan_with_no_json_block():
+    """Backward compatibility: a short, terse, JSON-less mock string (the
+    shape ~100 of this file's own Planner-position test mocks use) must
+    still classify complete - no structured block was attempted at all,
+    and the raw text's own fence count is trivially balanced (zero)."""
+    result = classify_plan_completeness("Step 1: do it")
+    assert result.classification == "complete"
+    assert result.structured_plan is None
+
+
+def test_classify_plan_completeness_flags_prose_only_plan_with_unclosed_fence_and_no_json():
+    """No structured block attempted at all AND the raw fence count is
+    unbalanced - the one case structured evidence can't disambiguate on its
+    own, so the original fence-parity fallback still correctly fires."""
+    plan = "A" * 150 + "\n```python\ndef foo():\n    pass\n"
+    result = classify_plan_completeness(plan)
+    assert result.classification == "incomplete_truncated"
+
+
+def test_classify_plan_completeness_accepts_prose_only_plan_with_closed_fence_and_no_json():
+    plan = "A" * 150 + "\n```python\ndef foo():\n    pass\n```\n"
+    result = classify_plan_completeness(plan)
+    assert result.classification == "complete"
+
+
 @pytest.mark.asyncio
 async def test_planner_prompt_includes_skill_conventions_reminder(tmp_path):
     """SME review finding 2: Planner receives convention_prompt the same as
@@ -23843,6 +24018,104 @@ async def test_workflow_stops_early_when_planner_output_is_truncated(tmp_path):
 
     assert res["status"] == "planner_output_incomplete"
     assert "reason" in res
+    assert llm.complete.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_workflow_stops_early_with_unauthorized_path_status_for_exact_g1r3_shape(tmp_path):
+    """VAL-001 G1-R3 (2026-09-18) end-to-end: the exact sanitized response
+    shape that live-produced planner_output_incomplete (a valid, complete,
+    schema-shaped plan with an out-of-workspace absolute path) now stops
+    the run BEFORE Architect with an ACCURATE, DISTINCT status - never
+    "planner_output_incomplete" (the response was not truncated), never
+    silently accepted (the path is genuinely unauthorized)."""
+    cfg = AppConfig()
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=_g1r3_shaped_plan(planned_file_path="/abs/workspace/pkg/module.py"))
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Fix the bug", workspace_path=str(tmp_path))
+
+    assert res["status"] == "planner_output_unauthorized_path"
+    assert res["status"] != "planner_output_incomplete"
+    assert "workspace-relative" in res["reason"]
+    assert llm.complete.call_count == 1, "must stop before Architect - no second (design) call"
+
+
+@pytest.mark.asyncio
+async def test_workflow_stops_early_with_schema_invalid_status_for_non_path_defect(tmp_path):
+    cfg = AppConfig()
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    structured = {
+        "global_invariants": [{"id": "gi1", "statement": "x"}],
+        "subtasks": [{
+            "id": "s1", "description": "d", "execution_method": "model",
+            "execution_role": "implementation", "depends_on": [],
+            "planned_files": [{"path": "pkg/module.py", "action": "obliterate"}],
+            "provides": [], "requires": [], "relevant_global_invariant_ids": ["gi1"],
+            "acceptance_criteria_ids": ["ac1"], "verification": [],
+        }],
+        "acceptance_criteria": [{"id": "ac1", "description": "d", "method": "judgment"}],
+        "extension_points": [], "refactor_baseline": None,
+    }
+    llm.complete = AsyncMock(return_value="Some plan text\n```json\n" + json.dumps(structured) + "\n```")
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Fix the bug", workspace_path=str(tmp_path))
+
+    assert res["status"] == "planner_output_schema_invalid"
+    assert llm.complete.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_workflow_valid_g1r3_shaped_plan_with_relative_path_proceeds_to_architect(tmp_path):
+    """The inverse proof: the SAME structural shape (missing intermediate
+    fence close, 3 total ``` markers) with a valid, relative path proceeds
+    past Planning - the cosmetic fence mismatch alone never blocks it."""
+    cfg = AppConfig()
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        _g1r3_shaped_plan(planned_file_path="pkg/module.py"),
+        "Design: modify pkg/module.py",
+        "OK",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Fix the bug", workspace_path=str(tmp_path))
+
+    assert res.get("status") != "planner_output_incomplete"
+    assert res.get("status") != "planner_output_unauthorized_path"
+    assert res.get("status") != "planner_output_schema_invalid"
+    assert llm.complete.call_count >= 2, "must have proceeded past Planning to at least the Architect call"
+
+
+@pytest.mark.asyncio
+async def test_workflow_genuine_truncated_json_still_stops_as_planner_output_incomplete(tmp_path):
+    """A NON-empty but genuinely truncated response (an opened ```json
+    fence with real content that never closes) must still stop the run as
+    planner_output_incomplete - classify_plan_completeness()'s new
+    structural logic must not accidentally become MORE permissive than the
+    original heuristic for a real truncation case."""
+    cfg = AppConfig()
+    cfg.paths.skills = str(tmp_path / "skills")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    truncated = (
+        "# Fix Plan\n\nSome real prose here.\n\n```json\n"
+        '{"global_invariants": [], "subtasks": [{"id": "s1", "description": "cut off because'
+    )
+    llm.complete = AsyncMock(return_value=truncated)
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(goal="Build something", workspace_path=str(tmp_path))
+
+    assert res["status"] == "planner_output_incomplete"
     assert llm.complete.call_count == 1
 
 

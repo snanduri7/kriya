@@ -111,6 +111,7 @@ from kriya.workflow.file_resolution import (
     _resolve_run_command,
     prefer_existing_artifact_owners,
     check_plan_completeness,
+    classify_plan_completeness,
     downgrade_ungrounded_goal_explicit_commands,
     extract_expected_files,
     extract_planner_code_blocks,
@@ -1852,11 +1853,31 @@ class WorkflowEngine:
         # used above for the KnowledgeGuard gap check, not a raised
         # exception - this is a real, expected-to-happen outcome the caller
         # should be able to handle/retry, not a crash.
-        plan_issue = check_plan_completeness(plan)
-        if plan_issue:
-            logger.warning(f"Planner output looks incomplete, stopping before Architect: {plan_issue}")
+        #
+        # VAL-001 G1-R3 (2026-09-18): classify_plan_completeness() replaces
+        # the old bare count("```") % 2 check with structural, evidence-
+        # based classification - see that function's own docstring
+        # (kriya/workflow/file_resolution.py) for the real live incident and
+        # full design rationale. Three distinct fail-closed outcomes now
+        # exist, each with its own accurate status/reason - a genuinely
+        # complete, schema-valid structured plan is never blocked merely for
+        # a cosmetic surrounding-fence mismatch, and an unauthorized/
+        # semantically invalid one is never silently waved through just
+        # because Stage A is elsewhere advisory-only (this check is NOT
+        # Stage A - it is authoritative here, gating whether Architect is
+        # ever reached at all). No Planner retry is added here - each
+        # branch below returns exactly once, the same single-attempt
+        # contract the old check already had.
+        plan_completeness = classify_plan_completeness(plan)
+        if plan_completeness.classification != "complete":
+            plan_issue = plan_completeness.reason or "plan failed completeness/authority classification"
+            status = {
+                "unauthorized_path": "planner_output_unauthorized_path",
+                "schema_invalid": "planner_output_schema_invalid",
+            }.get(plan_completeness.classification, "planner_output_incomplete")
+            logger.warning(f"Planner output rejected before Architect ({status}): {plan_issue}")
             if step_callback:
-                step_callback("planner_output_incomplete", plan_issue)
+                step_callback(status, plan_issue)
             try:
                 from kriya.core.trace import TraceLogger
                 trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
@@ -1866,9 +1887,9 @@ class WorkflowEngine:
                     goal=goal,
                     duration_sec=time.time() - start_time,
                     attempts=0,
-                    status="planner_output_incomplete",
+                    status=status,
                     files_modified=[],
-                    failure_category="planner_output_incomplete",
+                    failure_category=status,
                     milestone_group_id=milestone_group_id,
                     milestone_index=milestone_index,
                     milestone_total=milestone_total,
@@ -1876,7 +1897,7 @@ class WorkflowEngine:
             except Exception as trace_ex:
                 logger.warning(f"Failed to write run trace: {trace_ex}")
             return {
-                "status": "planner_output_incomplete",
+                "status": status,
                 "reason": plan_issue,
                 "plan": plan,
                 "goal": goal,
