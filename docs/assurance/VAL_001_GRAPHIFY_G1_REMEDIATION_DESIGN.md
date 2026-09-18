@@ -704,3 +704,91 @@ one change needing full-suite confirmation is clear, and the G1-R2 regression fi
 failures anywhere in the suite. The 5 deselected are the `-m live_model` tier (`tests/
 test_live_smoke.py`), excluded by this repo's own `pyproject.toml` `addopts` by default - expected,
 not a gap in this run.
+
+## G1-R3: retry-context-starvation fix (run 0c18ac70, 2026-09-19)
+
+A real live G1-R3 attempt (Kriya `4507eb2` against Graphify `67f99bd0`, run_id `0c18ac70`) spent 8
+Developer attempts — 5 anchored-edit failures, 2 full-file replacements D1 correctly rejected
+pre-write — and never fixed the bug. No tracked/unauthorized mutation occurred; D1 itself worked
+exactly as designed throughout. An independent, investigation-only forensic pass (no code changes,
+no live model, no G1 rerun) traced the full execution/data path and empirically reproduced the real
+cause, offline, against the pristine worktree — see that pass's own full findings for the complete
+timeline, contributing-cause analysis, and options considered; this section covers the production
+fix only.
+
+**Root cause**: `_retry_package_for_attempt()`'s own source universe (`all_files_written |
+established_files`) excludes a pre-existing brownfield repair target that fails *before* its first
+successful write — it belongs to neither set (`all_files_written` is only populated post-commit;
+`established_files` is prior-milestone paths only). `build_retry_package()`'s own `targets = [p for
+p in ordered_files if p in target_set]` then silently produces **zero** projections for a path
+`target_files` explicitly named, and doesn't even record it in `omitted_files` — confirmed by direct
+reproduction: `build_retry_package(all_files=[], target_files=['graphify/extractors/engine.py'],
+...)` returns `target_projections=()`. Every one of run `0c18ac70`'s 8 attempts reasoned about the
+target using only attempt 1's own skeleton rendering — Kriya never once showed the model the file's
+real current content, on any retry mode, at any point in the run.
+
+**Contributing defects, also fixed this pass**:
+- `fallback_targeted` (the one-shot targeted retry on the first fallback model) never called
+  `_resolve_retry_member_hints()` at all — C3's member-escalation logic was structurally unreachable
+  from that branch, independent of the root cause above.
+- Repeated retries could spend a Developer call while presenting materially identical evidence to
+  the model (proven live: attempts 7 and 8 both showed the identical `skeleton` `ContextItem`
+  revision to D1's own rejection check).
+- A member_exact grounding, once achieved, could be silently downgraded back to a coarser tier on a
+  later attempt (found while building this pass's own adversarial coverage for exactly the
+  investigation's own named "stronger hint overwritten by weaker fallback" hypothesis) — the general
+  retry package legitimately re-includes a path once nothing excludes it, and a same-revision
+  overwrite previously always won regardless of precision.
+- `build_known_target_context()` can legitimately return two `relevant_files` entries for the same
+  path when a member hint grounds (the member_exact slice, plus a broader signatures-level overview)
+  — the pre-existing `{item.path: item for item in relevant_files}` dict-comprehension applied list
+  order, so the broader, less precise entry silently won.
+
+**Fix** (`kriya/workflow/attempt.py`):
+1. `_retry_package_for_attempt()` unions `target_files` into its source universe — reachability only,
+   `build_retry_package()` itself untouched and exactly as generic as every other caller relies on.
+2. `_prepare_retry_context()` (new) centralizes retry-time source/member-hint preparation —
+   `targeted`, `fallback_targeted`, and `full_set` all call the same function now, so generation
+   strategy can never again gate whether member escalation is available.
+3. A `RetryEvidenceFingerprint` (mode, active model, per-target `known_target_context_items`
+   provenance, newly-grounded member hints, normalized failure signature — never raw model/candidate
+   text) is compared attempt-to-attempt inside `_prepare_retry_context()`; an exact match raises
+   `QualityGateFailure(type="no_progress_retry")` *before* the Developer call, reusing
+   `retry_strategy.py`'s own existing `handle_attempt_failure()`/`record_workspace_progress()`
+   consecutive-no-progress counter, forced-strategy-transition, and fail-closed termination for
+   everything downstream — no second, competing retry-budget mechanism. Scoped to
+   targeted/fallback_targeted/full_set only, never `API_CONTRACT_RECOVERY`'s own separate
+   deterministic state machine.
+4. `_preserve_member_exact_precision()` (new) prevents a same-revision, coarser projection from
+   overwriting an already-achieved member_exact record — deliberately narrow (member_exact only,
+   never `"full"`, whose cross-attempt preservation would be a materially more sensitive claim); both
+   member_exact and every coarser tier already force `REPAIR_WITH_PATCH` identically under D1, so
+   this changes zero authorized operations, only precision.
+5. The two `{item.path: item for item in relevant_files}` call sites now apply member-scoped entries
+   last, so a grounded member_exact entry is never overwritten by a same-path broader overview.
+
+**Invariants preserved (unchanged by this pass)**: D1's whole-file authority threshold (`tier="full"`,
+`is_exact=True`, `member_id=None`, matching revision) is untouched — member_exact still never
+authorizes `REPAIR_WITH_FULL_FILE`. All new content in `known_target_context_items` still originates
+exclusively from real worktree reads. No larger context-window/token-budget change anywhere. No
+Graphify/model-specific behavior.
+
+**Evidence script**: `~/kriya-live-validation/val001-g1-graphify-c3406/g1_r3_evidence/
+run_g1_r3_acceptance.sh` had a stale hardcoded `g1_r3_worktree` reference — the real G1-R3 run
+(`0c18ac70`) executed against `g1_r3b_worktree` (the fresh worktree `run_g1_r3.sh` itself switched to
+after `g1_r3_worktree` was consumed by an earlier real run) — corrected, evidence semantics
+unchanged.
+
+**Tests**: `tests/test_val001_g1r3_retry_context.py` (20 tests, all deterministic, no live model) —
+direct, offline reproduction of the real starvation condition and its resolution (mirroring run
+`0c18ac70`'s own real evidence); target reachability for an unwritten/already-written/established
+path; exclude-set and duplicate-source-context preservation; large-target budget constraint; unique
+vs. ambiguous member grounding; fabricated SEARCH text never becoming authority; common preparation
+across all three retry modes; member_exact surviving a real mode transition; the no-progress gate
+blocking a redundant call and permitting one when evidence genuinely changed; D1's whole-file
+threshold and stale-revision fail-closed behavior unchanged; and trace observability for target
+source/projection/progress decisions. Full run: `123 passed` across this file plus every existing
+file exercising the touched functions (`test_val001_g1_remediation.py`, `test_retry_package.py`,
+`test_context_budget.py`, `test_retry_policy.py`, `test_d1_operation_mode_authority.py`) — zero
+regressions. Full-suite confirmation is the user's own `.venv/bin/pytest` run, per this repo's
+standing quota-discipline convention.

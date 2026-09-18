@@ -70,6 +70,10 @@ def reset_state_for_independent_candidate(state) -> None:
     state.budgets.scoped_full_set_failure_signature = None
     state.budgets.fallback_targeted_requested = False
     state.budgets.anchor_failure_counts = {}
+    # Same reasoning as last_failure_signature above: a fresh, independent
+    # candidate must not be treated as a "no new evidence" repeat of
+    # whatever the just-discarded candidate's own last attempt showed.
+    state.budgets.last_retry_evidence_fingerprint = None
     state.last_failed_workspace_hash = None
     state.last_progress_failure_signature = None
     state.last_progress_stage = None

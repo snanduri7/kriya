@@ -218,6 +218,24 @@ class RetryBudgets:
     # mismatch, the next attempt changes only the edit protocol—never the file
     # scope—to a full-file repair, avoiding repeated skeleton/anchor failures.
     anchor_failure_counts: Dict[str, int] = field(default_factory=dict)
+    # VAL-001 G1-R3 (run 0c18ac70) no-progress gate: the retry-evidence
+    # fingerprint (see attempt.py's _compute_retry_evidence_fingerprint) that
+    # the immediately-preceding targeted/fallback_targeted/full_set attempt
+    # actually presented to the Developer - mode, active model, and, per
+    # implicated target path, the real known_target_context_items provenance
+    # (revision/tier/is_exact/member_id/omitted_regions) plus any newly
+    # grounded member hint. Compared, not merged, against each new attempt's
+    # own freshly-computed fingerprint in _prepare_retry_context() - an exact
+    # match means Kriya is about to show the model literally the same
+    # evidence it already failed against in the same mode/model, so that
+    # attempt is turned into an immediate (zero-LLM-cost) Failure instead of
+    # a real Developer call, reusing retry_strategy.py's own existing
+    # consecutive-no-progress/strategy-forcing/termination machinery for
+    # everything downstream of that Failure. None before the first retry
+    # (attempt 1 never compares) and left unset (not cleared) when a no-
+    # progress Failure is raised, so a same-mode repeat is still detected
+    # against the last REAL attempt's evidence, not the skipped one's.
+    last_retry_evidence_fingerprint: Optional[Tuple[Any, ...]] = None
 
 
 @dataclass

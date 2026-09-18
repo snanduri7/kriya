@@ -394,13 +394,349 @@ def _record_retry_projection_context_items(
     if retry_package is None:
         return
     for projection in (*retry_package.target_projections, *retry_package.reference_projections):
-        state.known_target_context_items[projection.path] = make_context_item(
+        new_item = make_context_item(
             path=projection.path, content=projection.content,
             reason=f"retry_package:{projection.reason}",
             source_type="named_in_request", trust_level="repository",
             tier=projection.level.value, is_exact=not projection.omitted_regions,
             revision=projection.revision, omitted_regions=projection.omitted_regions,
         )
+        state.known_target_context_items[projection.path] = _preserve_member_exact_precision(
+            state, projection.path, new_item,
+        )
+
+
+def _preserve_member_exact_precision(
+    state: GenerationState, path: str, new_item: "ContextItem",
+) -> "ContextItem":
+    """VAL-001 G1-R3 (test-discovered while building this pass's own
+    adversarial coverage for "stronger member_exact hint overwritten by
+    weaker fallback" - the investigation task's own named hypothesis):
+    once SOURCE 3 grounds a member_exact rendering (omitted_regions=False),
+    it correctly never re-fires on a later attempt for the same revision
+    (_resolve_retry_member_hints' own "nothing left to escalate" gate) - so
+    that later attempt's general retry package legitimately re-includes the
+    SAME path (nothing excluded it this time) and would otherwise silently
+    overwrite the precise member_exact record with a coarser, non-exact
+    excerpt/skeleton/signatures one, discarding real, still-current
+    evidence for no reason.
+
+    Deliberately narrow: only ever preserves a member_exact record (is_exact
+    AND member_id is not None) against a same-revision, less-exact
+    replacement - NEVER a "full" (whole-file) record, whose cross-attempt
+    preservation would be a materially different, more sensitive claim (D1
+    authorizes REPAIR_WITH_FULL_FILE off "full", never off "member_exact" -
+    see _completeness_gated_operation's own docstring; member_exact and
+    every coarser tier already force REPAIR_WITH_PATCH identically, so
+    preserving member_exact here changes zero authorized operations, only
+    precision/diagnostic value). A revision CHANGE always wins regardless -
+    stale evidence, exact or not, must never be preferred over fresh."""
+    existing = state.known_target_context_items.get(path)
+    if (
+        existing is not None
+        and existing.is_exact and existing.member_id is not None
+        and existing.revision == new_item.revision
+        and not (new_item.is_exact and new_item.member_id is not None)
+    ):
+        return existing
+    return new_item
+
+
+def _classify_retry_target_source_origin(
+    state: GenerationState, ctx: "AttemptContext", path: str,
+) -> str:
+    """VAL-001 G1-R3 observability (item 6): which universe a retry target's
+    real content actually came from, reconstructable from trace alone.
+    "current_worktree" covers exactly the case this pass's target-
+    reachability fix newly reaches - a path present in target_files but in
+    neither all_files_written nor established_files."""
+    if path in state.all_files_written:
+        return "already_written"
+    if path in ctx.established_files:
+        return "established"
+    return "current_worktree"
+
+
+def _target_source_record(
+    state: GenerationState, ctx: "AttemptContext", path: str,
+) -> Dict[str, Any]:
+    item = state.known_target_context_items.get(path)
+    return {
+        "path": path,
+        "source_origin": _classify_retry_target_source_origin(state, ctx, path),
+        "tier": item.tier if item else None,
+        "is_exact": item.is_exact if item else None,
+        "member_id": item.member_id if item else None,
+        "omitted_regions": item.omitted_regions if item else None,
+        "known": item is not None,
+    }
+
+
+# VAL-001 G1-R3 no-progress gate: the ONLY failure types where repeating
+# unchanged evidence can never possibly produce a different outcome, because
+# the verdict is Kriya's OWN deterministic gate reading known_target_context_
+# items, not the model's own (temperature-sampled) output. "operation_
+# contract" (D1's whole-file authority rejection, _validate_actual_mutation_
+# authority's own fixed, content-independent rejection string) is exactly
+# the real G1-R3 incident's own attempts-7-vs-8 shape - resampling the
+# Developer call cannot change whether the SAME recorded context authorizes
+# a full-file replacement. Deliberately NOT "anchored_edit" (the model's own
+# SEARCH text is genuinely resampled and could ground differently even
+# against unchanged context) or any compile/test/diagnosis failure (real,
+# CANDIDATE-CONTENT-dependent outcomes - confirmed live: an earlier,
+# unscoped version of this gate broke test_workflow_fallback_chain, which
+# explicitly validates that Kriya spends its full configured targeted_max_
+# retries budget - at a real, non-zero retry_temperature - even against
+# byte-identical compile-failure evidence, precisely BECAUSE resampling a
+# probabilistic failure genuinely can succeed). Never widen this set to a
+# failure type whose outcome depends on model output without the same
+# analysis this comment documents.
+_DETERMINISTIC_VERDICT_FAILURE_TYPES = frozenset({"operation_contract"})
+
+
+def _compute_retry_evidence_fingerprint(
+    state: GenerationState, target_files: Optional[List[str]], mode: Optional[str],
+    model_identity: str, member_hints: Dict[str, List[str]],
+) -> Tuple[Any, ...]:
+    """VAL-001 G1-R3 no-progress gate: what Kriya is ABOUT TO SHOW the
+    Developer this attempt, reduced to exactly the fields that matter for
+    detecting a genuine repeat - deliberately NOT just (revision, tier,
+    failure_type) (too coarse: that can't distinguish "no new evidence at
+    all" from "new evidence that still didn't resolve to a member", and
+    can't tell a real strategy transition from a same-mode repeat). Per
+    implicated path: current known_target_context_items provenance
+    (revision/tier/is_exact/member_id/omitted_regions - the exact real
+    state _completeness_gated_operation() itself authorizes off) plus any
+    NEWLY grounded member hint for that path. mode/model_identity are
+    included so a genuine strategy transition (different mode, or a
+    fallback-model swap within the same mode) is - by construction - never
+    mistaken for a repeat, without this function special-casing
+    "transition" itself; retry_strategy.py's own last_failure_signature is
+    reused as the normalized failure signature (never re-derived here) -
+    already excludes attempt-specific raw text (see build_failure_signature).
+
+    Never reads raw model/candidate output: state.last_failure.
+    attempted_edits' own SEARCH text feeds member-hint GROUNDING (see
+    _resolve_retry_member_hints), but only the deterministic, worktree-
+    derived OUTCOME of that grounding (member_hints) is part of this
+    fingerprint - fabricated SEARCH text can never itself become part of
+    what this gate treats as "evidence"."""
+    per_path = tuple(
+        (
+            path,
+            item.revision if item else None,
+            item.tier if item else None,
+            item.is_exact if item else None,
+            item.member_id if item else None,
+            item.omitted_regions if item else None,
+            tuple(sorted(member_hints.get(path, ()))),
+        )
+        for path, item in (
+            (path, state.known_target_context_items.get(path))
+            for path in sorted(set(target_files or ()))
+        )
+    )
+    return (mode, model_identity, per_path, state.budgets.last_failure_signature)
+
+
+@dataclass
+class RetryContextPreparation:
+    """Bundles everything a targeted/fallback_targeted/full_set retry needs
+    from centralized retry-context preparation - see _prepare_retry_context's
+    own docstring for why generation strategy must never gate whether any of
+    this runs, only what it runs WITH."""
+
+    retry_package: Optional["RetryPackage"]
+    retry_error_context: str
+    member_hints: Dict[str, List[str]]
+    member_hint_rendered: str
+
+
+def _prepare_retry_context(
+    state: GenerationState, ctx: "AttemptContext", *,
+    target_files: List[str], context_window: int, model_identity: str,
+    base_code_context: str = "", enable_no_progress_gate: bool = True,
+) -> RetryContextPreparation:
+    """VAL-001 G1-R3 (run 0c18ac70, 2026-09-18/19): the single, centralized
+    retry-time source/member-hint preparation step for every ordinary retry
+    mode (targeted, fallback_targeted, full_set). Generation strategy must
+    never determine whether authoritative context recovery is available -
+    before this function existed, `fallback_targeted` never called
+    _resolve_retry_member_hints() at all (a confirmed, real branch-coverage
+    gap in the G1-R3 investigation); centralizing here closes that by
+    construction rather than copying the same three calls into a third
+    branch.
+
+    Order matters, unchanged from the pre-centralization targeted-retry
+    branch this replaces: member hints are resolved FIRST so their paths
+    can be excluded from the general retry package (avoiding
+    DUPLICATE_SOURCE_CONTEXT_PATHS - a member-exact rendering already
+    covers that path at higher fidelity than the general excerpt would).
+
+    Raises QualityGateFailure (failure.type="no_progress_retry") BEFORE
+    returning - i.e. before the caller ever reaches its own Developer call -
+    when this attempt's freshly-computed RetryEvidenceFingerprint
+    (_compute_retry_evidence_fingerprint) exactly matches the immediately
+    preceding real attempt's. This is not a second, competing retry-budget
+    mechanism: the Failure it raises flows through retry_strategy.py's own
+    existing handle_attempt_failure()/record_workspace_progress() pipeline
+    exactly like any other Quality Gate failure, so the EXISTING
+    consecutive-no-progress counter, forced-strategy-transition (after 2
+    consecutive), and no_progress_terminated fail-closed termination (after
+    the configured limit) all apply unchanged - "enter existing legal
+    recovery if one remains, otherwise fail closed" is true by construction,
+    not a second policy this function re-implements. It only ever prevents
+    ONE avoidable Developer call from being spent to (re)discover, at model
+    cost, a "no new evidence" conclusion Kriya can already reach
+    deterministically and for free from state it already holds."""
+    retry_member_hints = _resolve_retry_member_hints(ctx, state, target_files)
+    retry_package = _retry_package_for_attempt(
+        state, ctx, target_files=target_files, context_window=context_window,
+        exclude=retry_member_hints.keys(),
+    )
+    retry_error_context = (
+        retry_package.authoritative_error if retry_package else state.error_context
+    )
+    _record_retry_projection_context_items(state, retry_package)
+
+    member_hint_rendered = ""
+    if retry_member_hints:
+        retry_member_limit = _reserve_graph_context_budget(
+            context_window, ctx.skills_prompt, ctx.learned_rag_context, base_code_context,
+        )
+        retry_member_rendered, retry_member_package = build_known_target_context(
+            list(retry_member_hints.keys()), ctx.workspace_path, ctx.worktree_path, retry_member_limit,
+            member_hints=retry_member_hints, cache=ctx.source_cache,
+        )
+        if retry_member_rendered:
+            member_hint_rendered = retry_member_rendered
+        # VAL-001 G1 D1: record real provenance for _completeness_gated_operation()'s
+        # own authorization check - never inferred from file size.
+        #
+        # VAL-001 G1-R3 (found while writing this pass's own adversarial
+        # coverage): build_known_target_context() can legitimately return
+        # MORE than one relevant_files entry for the SAME path when a
+        # member hint grounds - the member_exact slice itself, plus a
+        # broader signatures-level overview of the rest of the file for
+        # surrounding context. A plain dict-comprehension update() applies
+        # list order, so the LAST entry silently wins regardless of
+        # precision, discarding the very member_exact record C3 escalation
+        # exists to produce. Apply member-scoped (more precise) entries
+        # LAST so they are never overwritten by a broader same-path
+        # overview - never the reverse.
+        state.known_target_context_items.update({
+            item.path: item
+            for item in sorted(
+                retry_member_package.relevant_files,
+                key=lambda item: item.member_id is not None,
+            )
+        })
+        state.record_event(RunEvent(
+            kind="context.retry_member_hint_package",
+            attempt=state.attempt_number,
+            source="attempt._prepare_retry_context",
+            authority=EventAuthority.ADVISORY,
+            message="Retry member-hint context package built from Failure evidence.",
+            details={
+                "target_files": sorted(retry_member_hints.keys()),
+                "unit_count": len(retry_member_package.relevant_files),
+                "tiers": [
+                    {"path": item.path, "member_id": item.member_id, "tier": item.tier}
+                    for item in retry_member_package.relevant_files
+                ],
+                "omitted": list(retry_member_package.omitted),
+                "package_hash": retry_member_package.package_hash,
+            },
+        ))
+
+    # VAL-001 G1-R3 observability (item 6): reconstructable from trace alone
+    # what each requested target's own real source actually was this
+    # attempt - structural provenance only, never the raw source text.
+    state.record_event(RunEvent(
+        kind="context.retry_target_source",
+        attempt=state.attempt_number,
+        source="attempt._prepare_retry_context",
+        authority=EventAuthority.ADVISORY,
+        message="Retry-time source provenance resolved for this attempt's implicated target(s).",
+        details={
+            "mode": state.last_attempt_mode,
+            "targets": [
+                _target_source_record(state, ctx, path)
+                for path in sorted(set(target_files or ()))
+            ],
+        },
+    ))
+
+    # Scoped to targeted/fallback_targeted/full_set only (the task's own
+    # explicit scope) - never API_CONTRACT_RECOVERY, which is a separate,
+    # already-deterministic state machine with its own
+    # API_CONTRACT_RECOVERY_MAX_ATTEMPTS budget; this centralization still
+    # gives it the target-reachability fix and C3 member-hint resolution
+    # (a strict improvement), just not the new no-progress termination path.
+    if enable_no_progress_gate:
+        fingerprint = _compute_retry_evidence_fingerprint(
+            state, target_files, state.last_attempt_mode, model_identity, retry_member_hints,
+        )
+        # Only a deterministic-verdict failure (see _DETERMINISTIC_VERDICT_
+        # FAILURE_TYPES' own docstring) with at least one real, grounded
+        # target is eligible to block at all - a fingerprint over an empty
+        # target_files carries no per-path evidence worth acting on, and a
+        # probabilistic (model-output-dependent) failure type genuinely can
+        # resolve differently on an identically-evidenced resample.
+        eligible = (
+            bool(target_files)
+            and state.last_failure is not None
+            and state.last_failure.type in _DETERMINISTIC_VERDICT_FAILURE_TYPES
+        )
+        no_progress = (
+            eligible
+            and state.budgets.last_retry_evidence_fingerprint is not None
+            and fingerprint == state.budgets.last_retry_evidence_fingerprint
+        )
+        state.record_event(RunEvent(
+            kind="retry.progress_decision",
+            attempt=state.attempt_number,
+            source="attempt._prepare_retry_context",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                "No new retry evidence since the last attempt - skipping this Developer call."
+                if no_progress else "Retry evidence progressed since the last attempt."
+            ),
+            details={
+                "mode": state.last_attempt_mode,
+                "model": model_identity,
+                "target_files": sorted(set(target_files or ())),
+                "no_progress": no_progress,
+                "fingerprint_hash": content_revision(repr(fingerprint)),
+            },
+        ))
+        if no_progress:
+            raise QualityGateFailure(Failure(
+                type="no_progress_retry",
+                message=(
+                    "NO_PROGRESS_RETRY_EXHAUSTED: this attempt's retry evidence "
+                    f"(mode={state.last_attempt_mode}, model={model_identity}, "
+                    f"targets={sorted(set(target_files or ()))}) is materially identical to "
+                    "the immediately preceding attempt's - context tier/exactness/member "
+                    "grounding and the normalized failure signature are all unchanged. "
+                    "Spending another Developer call would present the exact same evidence "
+                    "again; deferring to the existing retry-strategy/no-progress machinery "
+                    "instead of spending it."
+                ),
+                raw_output=f"retry_evidence_fingerprint_hash={content_revision(repr(fingerprint))}",
+                source="orchestrator",
+                attempt=state.attempt_number,
+                mode=state.last_attempt_mode,
+                likely_files=sorted(set(target_files or ())),
+            ))
+        state.budgets.last_retry_evidence_fingerprint = fingerprint
+
+    return RetryContextPreparation(
+        retry_package=retry_package,
+        retry_error_context=retry_error_context,
+        member_hints=retry_member_hints,
+        member_hint_rendered=member_hint_rendered,
+    )
 
 
 def _record_all_files_written_as_exact_context(
@@ -744,7 +1080,34 @@ def _retry_package_for_attempt(
     # target_files is falsy - filtering target_files itself down to []
     # would silently re-trigger that fallback and undo the exclusion).
     exclude_set = set(exclude or ())
-    all_files = (set(state.all_files_written) | set(ctx.established_files)) - exclude_set
+    # VAL-001 G1-R3 (run 0c18ac70, 2026-09-18): a pre-existing brownfield
+    # repair target that fails BEFORE its first successful write belongs to
+    # neither all_files_written (only populated post-AuthorizedFileWriter.
+    # commit_batch - see that call site's own comment further down this
+    # file) nor established_files (prior-MILESTONE paths only - see that
+    # field's own docstring in workflow.py's run_generation_workflow()).
+    # Every retry for such a target previously built its source universe
+    # with the target itself absent, so build_retry_package()'s own
+    # `targets = [p for p in ordered_files if p in target_set]` silently
+    # produced ZERO projections for a path target_files explicitly named -
+    # confirmed by direct, offline reproduction against run 0c18ac70's real
+    # evidence: build_retry_package(all_files=[], target_files=[
+    # 'graphify/extractors/engine.py'], ...) returns target_projections=()
+    # and doesn't even record the path in omitted_files, so 7 of that run's
+    # 8 attempts reasoned about a 331KB file using only attempt 1's own
+    # skeleton rendering. Unioning the requested targets into the universe
+    # HERE - not widening build_retry_package()'s own filtering semantics -
+    # keeps that function exactly as generic as its other callers already
+    # rely on; a named target that doesn't actually exist on disk still
+    # resolves through this same union into build_retry_package()'s own
+    # pre-existing OSError->omitted_files handling, never a new failure
+    # mode. Real worktree content only (the same open()/read() every other
+    # entry in this universe already goes through) - never model/candidate
+    # output, so this can never let generated text become source authority.
+    requested_target_files = set(target_files or ())
+    all_files = (
+        set(state.all_files_written) | set(ctx.established_files) | requested_target_files
+    ) - exclude_set
     return build_retry_package(
         failure=state.last_failure,
         worktree_path=ctx.worktree_path,
@@ -4464,26 +4827,19 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 for path, content in sorted(coordinated_candidate_view.items())
             )
         else:
-            # CTX-001 P1 C2 production integration: state.last_failure.
-            # file_locations (already-structured compiler/test evidence)
-            # resolved against THIS retry's own already-authorized target
-            # set - never widens which files are targeted, only which
-            # MEMBER within an already-targeted file is shown exact (see
-            # _resolve_retry_member_hints' own docstring).
-            retry_member_hints = _resolve_retry_member_hints(ctx, state, state.last_implicated_files)
-            retry_package = _retry_package_for_attempt(
+            # VAL-001 G1-R3: centralized retry-time source/member-hint
+            # preparation (target reachability, C3 member escalation, no-
+            # progress gate) - see _prepare_retry_context's own docstring.
+            retry_prep = _prepare_retry_context(
                 state, ctx,
                 target_files=state.last_implicated_files,
                 context_window=ctx.kernel.config.llm.context_window,
-                exclude=retry_member_hints.keys(),
+                model_identity=ctx.kernel.config.llm.model,
+                base_code_context=base_code_context,
+                enable_no_progress_gate=not use_api_contract_recovery,
             )
-            retry_error_context = (
-                retry_package.authoritative_error if retry_package else state.error_context
-            )
-            # VAL-001 G1 D1: record real provenance for _completeness_gated_operation()'s
-            # own authorization check - see this function's own docstring for why the
-            # targeted-retry path needs this exactly like the known-target path does.
-            _record_retry_projection_context_items(state, retry_package)
+            retry_package = retry_prep.retry_package
+            retry_error_context = retry_prep.retry_error_context
             task_desc, active_code_context = _build_targeted_retry_prompt(
                 ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
                 state.all_files_written, ctx.worktree_path, base_code_context,
@@ -4539,43 +4895,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 logger.info(f"Targeted retry {state.budgets.targeted_retry_count + 1}/{ctx.targeted_max_retries}: focusing on {', '.join(state.last_implicated_files)}.")
 
             # CTX-001 P1 C2 production integration: only for the plain
-            # targeted-retry flow (never API_CONTRACT_RECOVERY, which has
-            # its own separate, already-tested deterministic evidence
-            # model - baseline_owners - untouched here). retry_member_hints
-            # is only non-empty for paths EXCLUDED from retry_package above,
-            # so this never duplicates what retry_package already rendered.
-            if not use_api_contract_recovery and retry_member_hints:
-                retry_member_limit = _reserve_graph_context_budget(
-                    ctx.kernel.config.llm.context_window, ctx.skills_prompt, ctx.learned_rag_context, base_code_context,
-                )
-                retry_member_rendered, retry_member_package = build_known_target_context(
-                    list(retry_member_hints.keys()), ctx.workspace_path, ctx.worktree_path, retry_member_limit,
-                    member_hints=retry_member_hints, cache=ctx.source_cache,
-                )
-                if retry_member_rendered:
-                    active_code_context += retry_member_rendered
-                # VAL-001 G1 D1: record real provenance for _completeness_gated_operation()'s
-                # own authorization check - never inferred from file size.
-                state.known_target_context_items.update(
-                    {item.path: item for item in retry_member_package.relevant_files}
-                )
-                state.record_event(RunEvent(
-                    kind="context.retry_member_hint_package",
-                    attempt=state.attempt_number,
-                    source="attempt.run_attempt",
-                    authority=EventAuthority.ADVISORY,
-                    message="Retry member-hint context package built from Failure.file_locations.",
-                    details={
-                        "target_files": sorted(retry_member_hints.keys()),
-                        "unit_count": len(retry_member_package.relevant_files),
-                        "tiers": [
-                            {"path": item.path, "member_id": item.member_id, "tier": item.tier}
-                            for item in retry_member_package.relevant_files
-                        ],
-                        "omitted": list(retry_member_package.omitted),
-                        "package_hash": retry_member_package.package_hash,
-                    },
-                ))
+            # targeted-retry flow (never API_CONTRACT_RECOVERY, which
+            # overwrote active_code_context with baseline_owners above -
+            # untouched here). _prepare_retry_context() already built and
+            # recorded the member-hint package (if any); appending its
+            # rendering here is the only thing this branch still needs to
+            # do with it.
+            if not use_api_contract_recovery and retry_prep.member_hint_rendered:
+                active_code_context += retry_prep.member_hint_rendered
 
             if use_api_contract_recovery and contract.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT:
                 # Deterministic, not generative (control-plane audit,
@@ -4659,17 +4986,20 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if ctx.learned_rag_context:
             base_code_context += ctx.learned_rag_context
 
-        retry_package = _retry_package_for_attempt(
+        # VAL-001 G1-R3: centralized retry-time source/member-hint
+        # preparation - previously this branch never called
+        # _resolve_retry_member_hints() at all (a confirmed, real C3
+        # branch-coverage gap), so C3 member escalation was structurally
+        # unavailable for the one-shot fallback-model targeted attempt.
+        retry_prep = _prepare_retry_context(
             state, ctx,
             target_files=state.last_implicated_files,
             context_window=fallback.context_window,
+            model_identity=model_override,
+            base_code_context=base_code_context,
         )
-        retry_error_context = (
-            retry_package.authoritative_error if retry_package else state.error_context
-        )
-        # VAL-001 G1 D1: same provenance recording as the primary targeted-retry
-        # branch above (this is the fallback-model retry path).
-        _record_retry_projection_context_items(state, retry_package)
+        retry_package = retry_prep.retry_package
+        retry_error_context = retry_prep.retry_error_context
         task_desc, active_code_context = _build_targeted_retry_prompt(
             ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
             state.all_files_written, ctx.worktree_path, base_code_context,
@@ -4679,6 +5009,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             retry_package=retry_package,
             recovery_contract_block=ctx.recovery_contract_block,
         )
+        if retry_prep.member_hint_rendered:
+            active_code_context += retry_prep.member_hint_rendered
         logger.info(f"Fallback-targeted retry: focusing on {', '.join(state.last_implicated_files)}.")
 
         state.model_hops.append(model_override)
@@ -4877,26 +5209,26 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if ctx.learned_rag_context:
             active_code_context += ctx.learned_rag_context
 
-        retry_package = _retry_package_for_attempt(
+        # VAL-001 G1-R3: centralized retry-time source/member-hint
+        # preparation (target reachability, C3 member escalation, no-
+        # progress gate) - see _prepare_retry_context's own docstring.
+        # retry_package.target_projections is empty only when state.
+        # last_failure is None (_retry_package_for_attempt's own early
+        # return) - true on a clean first attempt (this branch's other real
+        # caller, where state.last_implicated_files is necessarily still
+        # empty too) - _prepare_retry_context/_resolve_retry_member_hints/
+        # _retry_package_for_attempt/_record_retry_projection_context_items
+        # all no-op cleanly for that case, exactly as the code this replaces
+        # already did.
+        retry_prep = _prepare_retry_context(
             state, ctx,
             target_files=state.last_implicated_files,
             context_window=active_context_window,
+            model_identity=model_override or ctx.kernel.config.llm.model,
+            base_code_context=active_code_context,
         )
-        retry_error_context = (
-            retry_package.authoritative_error if retry_package else state.error_context
-        )
-        # VAL-001 G1 D1: records whatever real content this attempt's own
-        # RetryPackage actually shows the model - target_projections AND
-        # reference_projections (see that function's own docstring for the
-        # G1-R2 regression this closes). retry_package is None only when
-        # state.last_failure is None (_retry_package_for_attempt's own early
-        # return) - true on a clean first attempt (this branch's other real
-        # caller), where state.all_files_written is necessarily still empty
-        # too (nothing has been committed by this run yet), so there is
-        # nothing for a raw-read fallback to record here even in principle;
-        # _record_retry_projection_context_items already no-ops correctly on
-        # None, so no separate branch is needed.
-        _record_retry_projection_context_items(state, retry_package)
+        retry_package = retry_prep.retry_package
+        retry_error_context = retry_prep.retry_error_context
         task_desc, active_code_context = _build_full_set_retry_prompt(
             ctx.goal, ctx.plan, state.error_context, ctx.required_files_prompt_block,
             state.all_files_written, ctx.worktree_path, active_code_context,
@@ -4907,6 +5239,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             retry_package=retry_package,
             recovery_contract_block=ctx.recovery_contract_block,
         )
+        if retry_prep.member_hint_rendered:
+            active_code_context += retry_prep.member_hint_rendered
 
         # Track model hops
         state.model_hops.append(model_override or ctx.kernel.config.llm.model)
@@ -4954,9 +5288,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # context package run 8b6ee803's attempt 1 built (skeleton tier, body elided)
             # for graphify/extractors/engine.py; recording it here is what lets the
             # invariant see that a whole-file replacement was never authorized for it.
-            state.known_target_context_items.update(
-                {item.path: item for item in known_target_package.relevant_files}
-            )
+            #
+            # VAL-001 G1-R3: same same-path precedence fix as _prepare_retry_
+            # context's own identical update() - a grounded member_id entry
+            # must never be silently overwritten by a broader, less precise
+            # same-path overview merely because it happens to sort later.
+            state.known_target_context_items.update({
+                item.path: item
+                for item in sorted(
+                    known_target_package.relevant_files,
+                    key=lambda item: item.member_id is not None,
+                )
+            })
             # Internal evidence (WP6/observability) - never the full source,
             # just enough to answer "what tier/omission did each known
             # target actually get" from the run trace alone.
