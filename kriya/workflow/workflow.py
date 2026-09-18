@@ -35,6 +35,11 @@ from kriya.workflow.checkpoint import (
 )
 from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.validation_baseline import (
+    build_validation_outcome,
+    capture_brownfield_baselines,
+    classify_baseline_delta,
+)
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_reporting import build_failure_report_entry
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
@@ -1756,6 +1761,22 @@ class WorkflowEngine:
                 # resumes FROM this value, it only ever blocks an unsafe
                 # resume attempt that supplies none.
                 "had_authorized_semantic_regions": bool(authorized_semantic_regions),
+                # VAL-001 brownfield validation baselining - None for any
+                # checkpoint saved before baseline capture runs (the "plan"/
+                # "design" stage checkpoints above) or for any run that
+                # never configured baselining at all; a real dict once
+                # capture_brownfield_baselines() has run, letting a later
+                # resume reuse it (see capture_brownfield_baselines' own
+                # resume_baseline_targeted/resume_baseline_full_regression
+                # parameters).
+                "validation_baseline_targeted": (
+                    state.validation_baseline_targeted.to_dict()
+                    if state.validation_baseline_targeted is not None else None
+                ),
+                "validation_baseline_full_regression": (
+                    state.validation_baseline_full_regression.to_dict()
+                    if state.validation_baseline_full_regression is not None else None
+                ),
                 **extra,
             })
 
@@ -2330,6 +2351,75 @@ class WorkflowEngine:
                     "'javax.jms.*' import that was already compiling successfully via the existing "
                     "qpid-jms-client dependency alone - the addition was both wrong and unnecessary."
                 )
+
+        # VAL-001 brownfield validation baselining (2026-09-18,
+        # kriya/workflow/validation_baseline.py) - deliberately BEFORE the
+        # sandbox worktree is created a few lines below and before any
+        # Developer call anywhere in this method: the ONE point in this
+        # method where `workspace_path` is still guaranteed pristine
+        # (candidate writes only ever reach `worktree_path`, confirmed
+        # untouched at this line - see this same ordering guarantee already
+        # documented a few hundred lines above for checkpoint fingerprinting).
+        # Opt-in only (autonomy.brownfield_baseline_target_test /
+        # brownfield_full_regression_baseline_policy, both default to a
+        # complete no-op) - a run that doesn't configure either behaves
+        # byte-identically to before this package existed (proven by
+        # capture_brownfield_baselines() itself invoking neither injected
+        # callable at all when both are unset).
+        autonomy_baseline_cfg = self.kernel.config.autonomy
+        baseline_capture = capture_brownfield_baselines(
+            run_id=run_id,
+            target_test=autonomy_baseline_cfg.brownfield_baseline_target_test,
+            full_regression_policy=autonomy_baseline_cfg.brownfield_full_regression_baseline_policy,
+            run_validator=lambda target_test: PolymorphicValidator(
+                workspace_path, original_workspace_path=workspace_path,
+                autonomy_cfg=autonomy_baseline_cfg,
+            ).run_tests(target_test=target_test),
+            compute_revision=lambda: compute_workspace_content_hash(workspace_path),
+            resume_baseline_targeted=(resume_state or {}).get("validation_baseline_targeted"),
+            resume_baseline_full_regression=(resume_state or {}).get("validation_baseline_full_regression"),
+        )
+        state.validation_baseline_targeted = baseline_capture.targeted
+        state.validation_baseline_full_regression = baseline_capture.full_regression
+        if baseline_capture.targeted is not None:
+            if baseline_capture.targeted.status == "captured":
+                logger.info(
+                    "Brownfield PRE-mutation targeted validation baseline captured "
+                    f"(success={baseline_capture.targeted.outcome.success})."
+                )
+            else:
+                logger.warning(
+                    "Brownfield PRE-mutation targeted validation baseline is INDETERMINATE: "
+                    f"{baseline_capture.targeted.indeterminate_reason}"
+                )
+        if baseline_capture.hard_stop_reason is not None:
+            # FAILURE_BEHAVIOR: never silently proceed assuming a green
+            # baseline - an explicit, distinct terminal status, same shape
+            # as the existing knowledge_gap/planner_output_incomplete early
+            # returns just above in this same method.
+            logger.error(f"Brownfield validation baseline REQUIRED but indeterminate: {baseline_capture.hard_stop_reason}")
+            try:
+                from kriya.core.trace import TraceLogger
+                trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+                TraceLogger(trace_db).log_run(
+                    run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
+                    attempts=0, status="baseline_indeterminate", files_modified=[],
+                    failure_category="baseline_indeterminate",
+                    milestone_group_id=milestone_group_id, milestone_index=milestone_index,
+                    milestone_total=milestone_total,
+                )
+            except Exception as trace_ex:
+                logger.warning(f"Failed to write run trace: {trace_ex}")
+            return {
+                "status": "baseline_indeterminate",
+                "reason": baseline_capture.hard_stop_reason,
+                "plan": plan,
+                "design": design,
+                "goal": goal,
+                "workspace_path": workspace_path,
+                "run_id": trace_id,
+                "quality_gates_passed": False,
+            }
 
         # Create isolated git worktree sandbox
         worktree_path = workspace_path
@@ -2991,7 +3081,57 @@ class WorkflowEngine:
                 validator.java_home_override = state.java_home_override
 
                 full_test_res = validator.run_tests()
-                if not full_test_res["success"]:
+
+                # VAL-001 brownfield validation baselining - ONLY changes
+                # the blocking decision when a full-regression baseline was
+                # actually captured (autonomy.brownfield_full_regression_
+                # baseline_policy == "required"); otherwise
+                # `_regression_should_block` is byte-identical to the
+                # pre-existing `not full_test_res["success"]` check, so a
+                # run that never opted in behaves exactly as before this
+                # package existed. A captured baseline lets a genuinely
+                # PRE-EXISTING failure (present before Kriya ever touched
+                # this brownfield repository) pass through without
+                # blocking candidate acceptance - invariant 4 - while
+                # NEW_FAILURE/CHANGED_FAILURE/an unexplained disappearance
+                # of previously-executed validation still blocks exactly
+                # as strictly as before (invariants 5/"fail conservatively").
+                _regression_should_block = not full_test_res["success"]
+                _baseline_delta_result = None
+                if (
+                    state.validation_baseline_full_regression is not None
+                    and state.validation_baseline_full_regression.status == "captured"
+                ):
+                    _post_regression_outcome = build_validation_outcome(full_test_res)
+                    _baseline_delta_result = classify_baseline_delta(
+                        state.validation_baseline_full_regression, _post_regression_outcome,
+                    )
+                    _regression_should_block = _baseline_delta_result.blocking
+                    state.record_event(RunEvent(
+                        kind="validation_baseline.full_regression_delta",
+                        attempt=state.attempt_number,
+                        source="workflow.run_generation_workflow",
+                        authority=EventAuthority.ADVISORY,
+                        message=(
+                            f"Full-regression PRE/POST delta: level1={_baseline_delta_result.level1.classification.value} "
+                            f"blocking={_regression_should_block}"
+                        ),
+                        details={
+                            "level1_classification": _baseline_delta_result.level1.classification.value,
+                            "level2": {k: v.value for k, v in _baseline_delta_result.level2.items()},
+                            "aggregate_drop_detected": _baseline_delta_result.aggregate_drop_detected,
+                            "blocking": _baseline_delta_result.blocking,
+                            "blocking_reasons": list(_baseline_delta_result.blocking_reasons),
+                        },
+                    ))
+                    if not _regression_should_block and not full_test_res["success"]:
+                        logger.info(
+                            "Full-regression suite failed, but every failure is classified "
+                            "PRE_EXISTING_FAILURE relative to the captured PRE-mutation baseline - "
+                            "not attributed to this candidate, not blocking."
+                        )
+
+                if _regression_should_block:
                     # PRV-11 (2026-08-30): before treating this as an ordinary
                     # regression failure for the CURRENTLY executing subtask,
                     # check whether the approved plan's own provides/requires

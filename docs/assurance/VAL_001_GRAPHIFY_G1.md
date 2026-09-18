@@ -895,3 +895,58 @@ No D1/C3 decision logic was modified. A fix (most likely: route targeted/fallbac
 own model response through the SAME completeness check full_set already gets, regardless of the
 attempt's own base operation) is a separate, explicit implementation decision, not made this
 session.
+
+## 16. Brownfield validation baselining (2026-09-18, implemented)
+
+Closes the gap section 15's own investigation identified: Kriya had no way to distinguish a
+candidate-caused regression from a failure already present in a real brownfield repository before
+Kriya ever touched it - the full-regression gate treated any failure as disqualifying, implicitly
+assuming the repository started fully green.
+
+**New module** `kriya/workflow/validation_baseline.py` - a pure, deterministic PRE/POST comparison
+library (no subprocess/model calls of its own; `PolymorphicValidator`/`compute_workspace_content_hash`
+reused as-is via injected callables). `ValidationBaseline`/`ValidationOutcome`/`TestOutcome` data
+model; Level 1 (mandatory, whole-invocation, works for every ecosystem `PolymorphicValidator`
+already supports) + Level 2 (optional, an incremental pytest short-summary adapter - extracts
+FAILED/ERROR test identities precisely, discloses honestly that it cannot enumerate every PASSING
+test id without `-v`). Delta classification: `UNCHANGED_PASS`/`PRE_EXISTING_FAILURE`/
+`RESOLVED_FAILURE`/`NEW_FAILURE`/`CHANGED_FAILURE`/`NEWLY_SKIPPED_OR_NOT_EXECUTED`/
+`INFRASTRUCTURE_ENVIRONMENT_FAILURE`/`NOT_COMPARABLE` - only the first is never blocking beyond
+`NOT_COMPARABLE`. Failure fingerprinting normalizes volatile noise (temp paths, timestamps,
+durations, addresses) while preserving semantically material content (test identity, exception
+type, message, line number) - the "assertion failure A → ImportError, same test" case is proven to
+classify `CHANGED_FAILURE` (blocking), never conflated with a genuine pre-existing failure.
+
+**Wiring** (`kriya/workflow/workflow.py`): `capture_brownfield_baselines()` runs strictly before
+`create_git_worktree()` and therefore strictly before any Developer call, against `workspace_path`
+only (never a worktree/sandbox path - structurally proven, the module never imports
+`create_git_worktree`/`PolymorphicValidator`/`subprocess` at all). Opt-in only, via two new
+`AutonomyConfig` fields - `brownfield_baseline_target_test` (explicit `PolymorphicValidator.
+run_tests(target_test=...)` scope, e.g. G1's own two C# test files) and `brownfield_full_regression_
+baseline_policy` (`auto`/`required`/`disabled`, default `auto` currently behaving identically to
+`disabled` - no existing risk signal to hook "auto" to yet, stated honestly rather than silently
+activating a new default). Both default to a complete no-op - proven structurally (zero calls to
+either injected callable when unconfigured) and via the full existing `test_workflow.py` regression
+sweep (zero behavior change for any caller that doesn't opt in). `required` policy + an
+indeterminate baseline returns an explicit `"baseline_indeterminate"` terminal status - never
+silently proceeds assuming green. Checkpoint persistence (`_save_stage_checkpoint`) carries both
+baselines forward for resume; a resumed run reuses a checkpointed baseline only when the pristine
+`workspace_revision` (reusing STATE-001's own `compute_workspace_content_hash`) and the frozen
+`ValidationInvocation` both still match - any drift triggers a fresh capture, never a silent reuse
+across repository change.
+
+**Tests**: `tests/test_validation_baseline.py` (35 tests - fingerprint normalization, all 8 delta
+classifications including the critical assertion→ImportError rule, the pytest structured adapter,
+baseline-indeterminate fail-closed behavior, pristine-revision binding, sandbox-exclusion (structural
+proof), command/selection identity mismatch rejection, retry reuse without re-invoking the
+validator, repository-drift invalidation, a full end-to-end synthetic brownfield repo through the
+REAL `PolymorphicValidator` proving only a genuinely new failure is attributed while an unchanged
+pre-existing one is not, ground-truth/evaluator isolation (structural proof), `PolymorphicValidator`
+backward compatibility (zero changes to `kriya/tools/validate.py`), and a mechanically-tested
+ordering proof through the real `run_generation_workflow` that baseline capture always precedes
+worktree creation). All self-verified via direct execution; 19 pre-existing `test_workflow.py` tests
+(human_rejected/approval_required/member/anchor/full-regression) re-verified unchanged, plus the
+full `test_context_source.py`/`test_context_budget.py`/`test_val001_g1_remediation.py`/
+`test_d1_operation_mode_authority.py` suites - zero regressions found.
+
+No D1/C3 decision logic touched. No model routing/context-budget changes.

@@ -348,6 +348,22 @@ class GenerationState:
     # goes, so a prior attempt's now-stale item for the same path is always
     # replaced before it could be re-read for a later attempt on that file).
     known_target_context_items: Dict[str, "ContextItem"] = field(default_factory=dict)
+    # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/
+    # validation_baseline.py) - the PRE-candidate authoritative record(s),
+    # captured against workspace_path (never worktree_path/sandbox) before
+    # the first Developer call, when configured
+    # (autonomy.brownfield_baseline_target_test / brownfield_full_
+    # regression_baseline_policy). Two independent fields, not one, since
+    # the targeted (relevant-test) and full-regression baselines are
+    # captured under independently-configured policies and compared at two
+    # different gate points. None for every run that doesn't opt in - zero
+    # behavior change by default. Plain Any (not the dataclass type itself)
+    # to avoid this module importing validation_baseline.py at class-
+    # definition time - same "avoid an import cycle for a cross-module type
+    # used only by reference" pattern already used elsewhere in this file
+    # (e.g. "ContextItem" as a forward-ref string).
+    validation_baseline_targeted: Optional[Any] = None
+    validation_baseline_full_regression: Optional[Any] = None
     # Revisions that passed the real compile gate. A later candidate invalidates
     # only changed files and their manifest dependents; unrelated validated files
     # remain stable across targeted/dependency-scoped retries.

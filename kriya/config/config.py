@@ -458,6 +458,38 @@ class AutonomyConfig(BaseModel):
     # command primitive in this codebase (ProcessController.run(), used by
     # PolymorphicValidator/service_runtime) always has one.
     shell_command_timeout_seconds: int = Field(default=300)
+    # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/
+    # validation_baseline.py): both fields default to a complete no-op for
+    # every existing caller - zero new subprocess invocation, zero behavior
+    # change - deliberately, per this same precedent's own documented
+    # run_verification_enabled blast-radius lesson a few lines below (~110
+    # explicit test opt-outs needed for THAT default-True flip). Brownfield
+    # baselining is opt-in per-campaign, never an unconditional new default.
+    #
+    # brownfield_baseline_target_test: an explicit PolymorphicValidator.
+    # run_tests(target_test=...) value (its own existing, unchanged
+    # contract) naming the "relevant/targeted" test scope for a brownfield
+    # PRE/POST baseline comparison - e.g. VAL-001 G1's own two C# test
+    # files. None (default) means no targeted baseline is captured at all -
+    # this is deliberately NOT auto-derived from architect_files (that
+    # would require inventing a new affected-test-discovery heuristic,
+    # explicitly out of scope for this package - "do not create a parallel
+    # validation framework").
+    brownfield_baseline_target_test: Optional[str] = Field(default=None)
+    # brownfield_full_regression_baseline_policy: "auto" | "required" |
+    # "disabled". "required": capture a pristine full-suite PRE baseline
+    # once (before the first Developer call) and delta-compare the final
+    # candidate's own full-regression run against it - NEW_FAILURE/
+    # CHANGED_FAILURE block, PRE_EXISTING_FAILURE does not. "disabled":
+    # today's exact unmodified behavior (the full suite still runs
+    # post-approval as it always has; no PRE baseline, no delta - any
+    # failure blocks, matching current behavior byte-for-byte). "auto":
+    # reserved for a future risk-based trigger ("follow existing risk/
+    # validation policy") - currently behaves identically to "disabled"
+    # (no such existing policy signal exists yet to hook into) - stated
+    # honestly here rather than silently activating baselining as a new
+    # default behavior no compatibility analysis has covered.
+    brownfield_full_regression_baseline_policy: str = Field(default="auto")
     run_verification_enabled: bool = Field(default=True)
     run_verification_timeout_seconds: int = Field(default=90)
     # Gates on SpecComplianceAgent (kriya/agents/agent.py): unlike compile/test/
