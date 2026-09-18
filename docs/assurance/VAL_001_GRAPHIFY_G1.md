@@ -1,9 +1,10 @@
 # VAL-001 G1: Kriya's first real historical Graphify brownfield replay
 
-Status: PREPARATION COMPLETE, LIVE RUN NOT EXECUTED. This document is the immutable experiment
-definition and acceptance contract, written and committed **before** the live run. Do not edit
-this document's Phase 1–3 content after the run to fit the outcome — post-run findings belong in
-a separate results document.
+Status: LIVE RUN EXECUTED BY USER, FORENSICALLY CLASSIFIED. §§1–9 below are the immutable
+pre-run experiment definition and acceptance contract, written and committed **before** the live
+run — left unedited here as originally written. §10 ("Forensic classification") is a new,
+clearly-delimited section appended after the run, evidence-only, added per a separate follow-up
+task; it does not alter anything above it.
 
 Selected task: **H1 / #3406 — C# generic call-site resolution** (per
 `docs/assurance/VAL_001_GRAPHIFY_G0_QUALIFICATION.md` §7/§8, NARROW difficulty).
@@ -274,3 +275,371 @@ if that external directory is later cleaned up.
   are traceable to the issue itself; zero tokens overlap the diff without also appearing in the
   issue.** No diff-only vocabulary (e.g. the fix's own new symbol `_csharp_bare_call_name`, or any
   language describing the change itself rather than the pre-existing bug) appears in `goal.txt`.
+
+---
+
+## 10. Forensic classification (post-run, evidence-only)
+
+Run trace `8b6ee803`, checkpoint `20260918T085216-9ab100c7`, terminal result `Quality Gates:
+FAILED` / `failure_category: quality_gates_exhausted`. All evidence below comes from
+`~/kriya-live-validation/val001-g1-graphify-c3406/g1_evidence/` (`kriya_logs/traces.db`,
+`kriya_logs/terminal_transcript_20260918T032216Z.log`, `g1_run_worktree/.kriya/checkpoints/`) plus
+direct inspection of the true pre-fix Graphify tree and, where cited, Kriya's own source
+(`kriya/workflow/file_resolution.py`, `kriya/agents/agent.py`). No model was re-run. No Kriya or
+Graphify tracked file was modified during this analysis; a candidate reconstruction was tested
+only inside a throwaway scratch copy (`g1_evidence/forensics/candidate_test_scratch/`, deleted
+after use) built entirely from already-generated transcript content.
+
+### Task 1 — Evidence preservation
+
+| Artifact | Location | SHA-256 (where applicable) |
+|---|---|---|
+| Run trace (`runs` table, `run_id=8b6ee803`) | `g1_evidence/kriya_logs/traces.db` | `0f9cfd82e1263fee04ebc64caa5d8d307cc50c45ffe946c5a87f3d2154e45057` |
+| Checkpoint | `g1_run_worktree/.kriya/checkpoints/20260918T085216-9ab100c7.json` | `260ee319a2814fe5922c539afa10b9950b9ee40ca61d7831d1c99356484e3ad4` |
+| Terminal transcript | `g1_evidence/kriya_logs/terminal_transcript_20260918T032216Z.log` (1949 lines) | — |
+| Planner output | `traces.db.plan` field (also `checkpoint.plan`) | — |
+| Architect output | `traces.db.gate_outcomes`-adjacent `checkpoint.design`/`checkpoint.architect_files` | — |
+| Developer attempts (raw streamed candidates) | extracted verbatim from the terminal transcript into `g1_evidence/forensics/attempt1_candidate_raw.txt` (attempt 1, cleaned) and `attempt3_candidate_engine.py` (attempt 3) | — |
+| Validation results | `traces.db.gate_outcomes`, `.run_events`, `.evidence_records` | — |
+| Recovery instructions | `run_events` (`api_contract_recovery.phase_advanced` events), terminal transcript lines 1541–1893 | — |
+| Original Graphify file | `g1_run_worktree/graphify/extractors/engine.py` at `67f99bd0` | `1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78` |
+| Final untouched workspace file | same path, same hash, post-run | **identical** — confirms no mutation |
+
+`WORKSPACE_MUTATION_AFTER_FAILURE = NO`. Verified three independent ways: (1) `git diff --stat
+HEAD` in `g1_run_worktree` is completely empty (zero tracked files touched anywhere in the tree,
+not just `engine.py`); (2) `git status --porcelain` in `.kriya/worktree` (Kriya's own internal
+scratch worktree, where Developer edits are actually staged during the retry loop) is also
+completely clean at `67f99bd0`; (3) `engine.py`'s SHA-256 is identical before and after. The only
+untracked additions anywhere are `.kriya/` (checkpoint + scratch worktree + lockfile) and `logs/`
+(Kriya's own log file) — neither is a Graphify source or test file.
+
+Ground-truth material (maintainer diff, ground-truth test) was **not** consulted for Tasks 1–6
+below; it is addressed only in §Task 7, after the rest of the analysis was complete, per the
+task's own ordering requirement.
+
+### Task 2 — Attempt reconstruction
+
+Four `attempt` indices appear in the trace; only three are real Developer/LLM calls (`model_hops`
+= `["qwen3-coder:30b", "qwen3-coder:30b", "qwen3-coder:30b"]`, `generation_metrics.llm.
+developer_calls = 3`). Attempt 2 is a **deterministic, non-LLM restoration step**.
+
+| ATTEMPT | MODE | INPUT_CONTEXT | TARGET_FILES | MEMBER_HINTS | SOURCE_REVISION | OUTPUT_EDIT | SIGS BEFORE | SIGS AFTER | VALIDATOR_FAILURE | RECOVERY_DIRECTIVE | NEXT_ATTEMPT_CHANGE |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | `create_full_file` (`full_set`) | Known-target context package, **skeleton tier only**, body elided (`reason: body_elided`, `estimated_tokens: 24565`); `member_hint_paths: []` (empty) | `graphify/extractors/engine.py` | none | `67f99bd0` | Full-file replacement text returned by the model; **51 `def` statements** vs. baseline's 116 (see Task 4); output ends mid-file with the literal comment `# The rest of the file remains unchanged...` | present (4/4, in baseline) | **absent (0/4)** | `brownfield_public_api_changed` — `ownership_gate` (`find_brownfield_public_api_changes`) rejected before write | "Restore the existing owner contract before behavioral repair" | Enter `API_CONTRACT_RECOVERY` |
+| 2 | `repair_with_full_file` / `RESTORE_PUBLIC_CONTRACT` | N/A — **no Developer/LLM call this step** ("deterministic restore, no Developer call" per the trace log) | `graphify/extractors/engine.py` | n/a | attempt 1's candidate | Kriya's own code mechanically re-inserted the 4 missing signatures | absent (0/4) | **present (4/4)** | none — "RESTORE_PUBLIC_CONTRACT pre-check passed" | transition to `REPAIR_BEHAVIOR` | Developer call for behavior repair |
+| 3 | `repair_with_full_file` / `REPAIR_BEHAVIOR` | Same known-target skeleton-tier package as attempt 1 (no evidence of a different/fuller tier for the repair step) | `graphify/extractors/engine.py` | none | attempt 2's (restored) candidate, nominally | Model returned a **10-`def`, 287-line** file (down from attempt 1's 51/1394) — collapsed further, not incrementally edited | present (4/4, post-restore) | **absent (0/4) again** | `api_contract_recovery_incomplete` — same 4 signatures, byte-identical `evidence_files` lists to attempt 1 | "restore every authoritative baseline signature before quality gates" (verbatim repeat of attempt-1 signature list) | Retry `REPAIR_BEHAVIOR` again |
+| 4 | `repair_with_full_file` / `REPAIR_BEHAVIOR` | Same as attempt 3 | `graphify/extractors/engine.py` | none | attempt 3's candidate, nominally | **139 output tokens in 4.03s** (vs. attempt 3's 2,940 tokens / 128.6s and attempt 1's 12,935 tokens / 564.6s) — by far the shortest, most truncated response of the run | present (4/4, post-restore) | **absent (0/4), identical list** | `api_contract_recovery_incomplete`, identical to attempt 3 | same directive repeated | none — `retry_strategy`: "Quality Gates exceeded maximum debug retries"; terminal `FAILED` |
+
+`FIRST_DESTRUCTIVE_ATTEMPT = 1`. All four signatures disappeared simultaneously at attempt 1's
+first (and only) full-file write — not a gradual erosion across attempts. They were correctly,
+mechanically restored by attempt 2 (no model involved), then **destroyed again** by attempt 3's
+Developer call, and never recovered afterward.
+
+Determined from persisted `gate_outcomes`/`run_events`/reconstructed candidate content, not from
+reviewer prose. The Reviewer's own final narrative (transcript lines 1917–1928) was read only
+after this reconstruction, as a cross-check — it correctly names the same 4 signatures but,
+consistent with only ever seeing the `ownership_gate`'s narrow report, does not mention the
+far larger actual scope of content loss documented in Task 4 below.
+
+### Task 3 — Context correctness (initial attempt)
+
+- Selected file/member: `graphify/extractors/engine.py`, whole file (no member-level scoping —
+  `member_hint_paths: []`).
+- Context tier supplied: **skeleton** (`"tier": "skeleton"` in `run_events`'s
+  `context.known_target_package` entry) — not whole-file, not signatures-only, not member_exact.
+  The skeleton's own body was explicitly elided (`"reason": "body_elided"`), estimated at **24,565
+  tokens** — i.e., Kriya's own instrumentation recorded, before generation even began, that it was
+  withholding an amount of source content larger than the entire configured `max_tokens: 16384`
+  Developer completion ceiling.
+- Relevant member present: **NO** for the four cited signatures, and for the overwhelming majority
+  of the file's real content — a skeleton tier, by construction, elides function bodies, and all
+  four flagged signatures are function-*nested* closures (confirmed in Task 4) that live inside
+  those elided bodies. The model was never shown they existed, let alone their implementation.
+- Omissions explicitly recorded: **YES** — `run_events` logs the omission with a path, rank,
+  reason, and token estimate. This is itself evidence the omission was a deliberate, tracked
+  budget decision, not silent data loss.
+- Stale source present: no evidence found (single source revision throughout; `SOURCE_REVISION`
+  column above is `67f99bd0` for every attempt, no drift detected).
+- Duplicate stale/current representations: not observed.
+- Context budget causing relevant source loss: **YES, directly evidenced.** The "Engineering
+  Triage" stage (new to this run relative to what `CLAUDE.md`'s Architecture section documents —
+  see the Unexplained Findings note below) classified the task, before repository analysis had
+  identified the actual 6,318-line target file, as `initial_risk_class: LOW`, `execution_weight:
+  light`, `context_depth: narrow` (`reason_codes: ["no_signals_fired_defaulted_to_task"]`,
+  `router_used: false`). This triage classification is what produced the skeleton-tier context
+  package for a file whose real body (24,565 estimated tokens) cannot fit inside the "narrow"
+  budget it authorized, or even inside the full `max_tokens` completion ceiling on the way back out.
+
+`INITIAL_CONTEXT_SUFFICIENT = NO`
+
+This is a demonstrated instance of the specific problem shape CTX-001 targets (member-level
+context, skeletonization degrading large files) manifesting on a real, 6,318-line production file.
+CTX-001's own closure evidence never included a case this large relative to the configured
+completion budget. Per the task's own instruction, this is reported as a demonstrated
+context-insufficiency finding **for this run**, not a reopening of CTX-001 — CTX-001's closure
+evidence and this finding can both be true: CTX-001 closed specific, tested guarantees about
+member-hint derivation and skeletonization degradation *order*; nothing examined here contradicts
+those tests. What this run adds is a **new, previously untested combination**: a target file whose
+un-elided body alone exceeds the Developer's own completion token ceiling, paired with the
+CREATE_FULL_FILE edit protocol (Task 4) that requires reproducing that entire body in one shot
+regardless.
+
+### Task 4 — Edit protocol
+
+- **Production edit protocol selected**: `create_full_file` (attempt 1) / `repair_with_full_file`
+  (attempts 2–4) — i.e., **whole-file reconstruction**, not member-local/anchored editing, for
+  every single attempt including both recovery rounds. Confirmed in `generation_metrics.retry`:
+  `"full_set_attempts": 1, "targeted_attempts": 0"` — zero anchored/targeted attempts occurred at
+  any point in this run.
+- Tool calls/operations: a single `create_full_file`-mode LLM completion per attempt (3 completions
+  total), plus one non-LLM deterministic signature-restoration step (attempt 2).
+- Change shape: **whole-file reconstruction attempted, producing a drastically truncated partial
+  reconstruction** — not a member-local edit, and not a complete, faithful whole-file replacement
+  either. A third category the task's A–D options don't quite name in isolation: the model
+  attempted whole-file reconstruction and substantially failed at it.
+- Size of original file: **6,318 lines / 331,064 bytes** (116 `def` statements: 11 non-underscore,
+  105 underscore-prefixed). Note: G0's qualification doc (§4 of that document) reports this same
+  file at 6,955 LOC — that figure was measured at `26b02b5` (the `v8` branch tip); this run's
+  baseline is `67f99bd0`, several commits earlier on the same file's history. The two numbers are
+  both correct for their respective revisions; the difference is real revision drift, not a
+  measurement error.
+- Size of candidate:
+  - Attempt 1: **1,394 lines**, 51 `def` statements (44% of baseline's line count, 44% of its
+    function count) — ends with the literal placeholder comment `# The rest of the file remains
+    unchanged...`.
+  - Attempt 3: **287 lines**, 10 `def` statements (4.5% of baseline) — all 10 remaining names are
+    underscore-prefixed C#/Java type-reference helpers; every other category of logic (including
+    `_extract_generic`, the shared 3,394-line dispatch core, and all 29 non-C#/Java language
+    extractors' call sites into `engine.py`) is absent.
+  - Attempt 4: 139 output tokens in 4.03 seconds — by far the shortest response of the run;
+    `gate_outcomes` shows the identical 4-signature failure as attempt 3, consistent with a
+    candidate that changed little or nothing from attempt 3's.
+- Lines/regions preserved: the C#/Java generic-type-reference helpers the model judged relevant to
+  the stated goal (`_csharp_collect_type_refs`, `_csharp_classify_base`,
+  `_csharp_type_parameters_in_scope`, etc.) — a coherent, goal-relevant subset, not random.
+- Lines/regions lost: everything else — by attempt 3, that means **106 of 116** original functions,
+  spanning all 29 non-C#/Java-specific extractors that also live in this shared file.
+- **Destructive intermediate representation accepted before contract validation**: YES. Kriya's
+  `ownership_gate` (`find_brownfield_public_api_changes`, `kriya/workflow/file_resolution.py:619`)
+  ran and rejected the candidate *before* it reached the real workspace — correctly preventing
+  the worst outcome (§Task 6) — but the candidate itself, at 44%–4.5% of the original file's
+  content, was accepted as far as "committed generated/edited candidate to sandbox" (transcript
+  line 1544, 1859, 1882) without any completeness/size sanity check prior to that gate running.
+
+**Independent verification, not inference**: the attempt-1 candidate was reconstructed verbatim
+from the terminal transcript into an isolated scratch copy of the workspace (never touching the
+tracked worktree) and actually executed through `graphify extract`. Result: a real Python
+`ImportError: cannot import name '_cpp_declarator_name' from 'graphify.extractors.engine'`,
+raised the moment `graphify/extract.py`'s own module-level `from graphify.extractors.engine import
+..., _extract_generic, ...` statement runs — the candidate does not merely fail to fix the C# bug,
+it makes the **entire package fail to import**, before any extraction logic runs at all. This
+confirms the true scope of damage is categorically worse than the 4 named signatures the
+`ownership_gate` reported.
+
+**Determination — which of A–E caused the missing signatures**: **C — incomplete source/context
+supplied to model.** Compounding, secondary factors: A (the model's own reconstruction was
+additionally incomplete relative to even what it could infer from the insufficient context it did
+receive) and B (edit-application accepted an uncompleteness-unchecked candidate before contract
+validation). C is primary because it is the upstream, non-model-dependent cause — see the token-
+budget arithmetic below. Evidence against a pure "A"
+(model-generated destructive edit, full stop) reading: the model's own "FIX ANALYSIS" text on both
+completions independently and correctly diagnosed the real root cause (tree-sitter's
+`generic_name` vs. `identifier` node-type distinction, matching the original issue's own diagnosis
+almost exactly) — its *reasoning* was sound. What it could not do was faithfully reproduce ~6,300
+lines of implementation it was shown only a skeleton of, inside a completion budget
+(`max_tokens: 16384`) smaller than just the elided body's own estimated size (24,565 tokens). D
+(candidate parsing/rendering defect) was checked and ruled out: the candidate is syntactically
+valid Python (`ast.parse` succeeds); its incompleteness is real content loss, not a
+transcription/rendering artifact.
+
+### Task 5 — API contract recovery
+
+Two real recovery rounds (attempts 3 and 4), preceded by one non-LLM deterministic restoration
+(attempt 2).
+
+- Authoritative baseline source available to Kriya: yes — `67f99bd0`'s own on-disk
+  `engine.py` was read fresh for `find_brownfield_public_api_changes`'s "original" side (it walks
+  `original_contents`, populated from the real pre-attempt worktree state); the deterministic
+  restore in attempt 2 used this same source to splice the 4 signatures back in mechanically.
+- MUST_FIX signatures (as Kriya itself framed them): exactly the same 4 across every recovery
+  round — `bind(name: str | None, type_name: str | None, scope_node)`, `visit(n)`, `walk(n)`,
+  `walk(node, parent_class_nid: str | None = None)`.
+- MUST_PRESERVE evidence (`protected_evidence_files`): 27–30 files per round, computed by
+  `find_brownfield_public_api_changes`'s `evidence_files` search — **verified by direct source
+  reading (`kriya/workflow/file_resolution.py:700–704`) to be an unscoped, whole-workspace regex
+  text-substring search** (`re.search(rf"(?<![\w$]){re.escape(api_name)}\s*\(", evidence_content)`
+  against every file's raw text) with **no import/call-graph/reachability check at all**.
+- Recovery scope: narrowly the 4 named signatures — **demonstrably far narrower than the actual
+  damage** (106/116 functions missing by attempt 3, not 4/116).
+- Source/context actually supplied to Developer for the repair calls: the same skeleton-tier
+  package as attempt 1 — no evidence of the repair calls receiving fuller (full-body or
+  member-exact) context than the original, already-insufficient attempt.
+- Exact baseline bodies/signatures supplied: **NO** for the surrounding ~6,300 lines of context the
+  model would have needed to safely reconstruct the whole file without loss; **YES, but only as a
+  string in the failure message**, for the 4 named signatures themselves (the recovery directive
+  quotes their exact text, but does not supply their bodies or the bodies of the ~100 other
+  functions never mentioned at all).
+- Recovery instructed restoration before secondary work: YES, explicitly (`RESTORE_PUBLIC_CONTRACT
+  -> REPAIR_BEHAVIOR`, in that order) — and the *deterministic* half of that ordering worked
+  correctly (attempt 2 genuinely restored all 4 signatures with zero model involvement, and its own
+  pre-check passed).
+- Model response: both attempt-3 and attempt-4 Developer calls returned `create_full_file`-shaped
+  whole-file output again, discarding attempt 2's mechanically-restored content in the process —
+  attempt 3's own candidate (287 lines, 10 defs) is *smaller* than attempt 1's (1,394 lines, 51
+  defs), i.e. the "repair" calls did not build incrementally on the restored file; they
+  re-attempted full reconstruction from the same insufficient context and did categorically worse
+  each time.
+- Why each recovery attempt remained incomplete: the `REPAIR_BEHAVIOR` phase re-invokes the same
+  `create_full_file`-shaped generation path attempt 1 used, subject to the same skeleton-only
+  context and the same completion budget — there is no mechanism observed that constrains the
+  repair call to an anchored edit on top of the already-restored candidate, or that re-supplies the
+  now-restored content as a base to preserve. The recovery mechanism fixed the *narrow* symptom it
+  could see (4 signatures) exactly once (attempt 2, deterministically), then handed the file back
+  to a generation mode structurally certain to re-lose it.
+
+**Determination**: `RECOVERY_SCOPE_INCORRECT`, with a demonstrated compounding
+`RECOVERY_IMPLEMENTATION_DEFECT`. Scope is incorrect because the 4-signature target was never
+capable of producing a working file even if perfectly satisfied (106 functions were missing, not
+4 — see Task 4's `ImportError` reproduction). Implementation is defective because the
+`REPAIR_BEHAVIOR` phase's own generation mode discards the very restoration
+`RESTORE_PUBLIC_CONTRACT` just performed, rather than building on it. This is **not**
+`MODEL_FAILED_TO_FOLLOW_SUFFICIENT_RECOVERY_CONTEXT` — the context was not sufficient in the first
+place (same skeleton-tier package throughout), so "sufficient recovery context" was never actually
+supplied for the model to fail to follow.
+
+### Task 6 — Terminal correctness
+
+- `FALSE_SUCCESS = NO` — terminal status is `failure`/`Quality Gates: FAILED`, matching every
+  independently-verified fact below; nothing about this run claims or implies success anywhere in
+  the persisted record.
+- `ATOMIC_REJECTION = PASS` — the candidate was rejected by `ownership_gate` before ever being
+  copied into the real workspace (`applied: false` in every `attempt.failed` event); `git status`/
+  `git diff` on both the real worktree and Kriya's own internal scratch worktree are completely
+  clean at `67f99bd0`; SHA-256 of `engine.py` is unchanged.
+- `AUTHORITY_WIDENING = NO` — `autonomy.mode`, `execution_policy.mode`, and every other
+  campaign-config field were left at packaged defaults (§6 above); nothing in the trace shows a
+  policy, approval, or scope change during the run; the run terminated via the ordinary
+  `quality_gates_exhausted` path, not an approval bypass.
+- `MANUAL_REPAIR = NO` — this analysis made zero edits to any Kriya or Graphify tracked file; the
+  one file touched during verification (`candidate_test_scratch/graphify/extractors/engine.py`)
+  lives entirely inside a throwaway scratch copy outside both git repositories and was deleted
+  after use.
+- Checkpoint does not constitute accepted workspace state: confirmed — the checkpoint's own
+  `stage: "design"` field and its `plan`/`design`/`architect_files` contents predate the
+  Developer/Quality-Gates loop entirely; it exists solely to let a future `--resume-id` run skip
+  Plan/Design, not as a record of an accepted candidate.
+- Terminal `FAILED` agrees with deterministic gates: yes — `ownership_gate` (deterministic,
+  regex/text-based, not a model judgment) is what rejected every attempt; the Reviewer agent ran
+  only afterward, to narrate the already-terminal failure, and did not itself gate anything.
+
+### Task 7 — Acceptance / ground truth (consulted only after Tasks 1–6)
+
+| State | Behavioral result (via `check_acceptance.py`, the same script calibrated in §5) |
+|---|---|
+| Untouched baseline (`67f99bd0`, real workspace) | 2/5 — unchanged from the pre-run baseline recorded in §5; confirms the real workspace genuinely was never touched |
+| Rejected candidate (attempt 1, reconstructed in an isolated scratch copy only) | **Does not reach the 5-call-site check at all** — `graphify extract` itself crashes with `ImportError: cannot import name '_cpp_declarator_name'` before any C# file is parsed. Strictly worse than the pre-fix baseline, not a partial fix. |
+| Maintainer-fixed (`5d09dce4`, evaluator-side calibration only, §5) | 5/5, as previously recorded — for reference only, never exposed to Kriya |
+
+Kriya's intended approach, as evidenced by both Developer "FIX ANALYSIS" texts, was **conceptually
+aligned** with the maintainer's real fix: both independently identify that tree-sitter parses
+`Get<int>(...)` as a `generic_name` node (not `identifier`), that the existing code only handles
+the `identifier` case, and that the fallback path captures the raw text including the type-argument
+list instead of the bare method name — the same mechanism the original issue itself describes and
+the same mechanism the real fix (`_csharp_bare_call_name`, `5d09dce4`) addresses. Kriya never
+reached the point of implementing this diagnosis as a working patch; the conceptual alignment is
+visible only in the "FIX ANALYSIS" prose, never realized in either candidate's actual code (neither
+candidate contains any working, syntactically-integrated generic-name-stripping logic reachable
+from the real call sites — attempt 3's candidate is missing the call-handling code entirely, since
+`_extract_generic` itself is absent). Similarity to the maintainer's implementation was not used as
+a correctness criterion anywhere in this determination, per the task's own instruction.
+
+### Classification
+
+`G1_PRIMARY_CLASSIFICATION = CONTEXT_CORRECTNESS_GAP`
+
+Root cause, in causal order: Kriya's engineering-triage stage classified this goal as `LOW risk` /
+`light` execution weight / `narrow context_depth` before repository analysis had identified the
+actual target file's real size; this produced a skeleton-only (body-elided) context package for
+`graphify/extractors/engine.py`, whose elided body alone was estimated at 24,565 tokens — larger
+than the Developer's own `max_tokens: 16384` completion ceiling; Kriya's classic pipeline
+unconditionally uses `CREATE_FULL_FILE` (whole-file reconstruction) on a clean first attempt
+regardless of target-file size, and the `API_CONTRACT_RECOVERY` repair phase re-uses the same
+generation mode on every subsequent attempt; the combination made faithful, complete reproduction
+of this specific file structurally unachievable from the context actually supplied, independent of
+which model executed it. The model's own reasoning (both "FIX ANALYSIS" texts) was conceptually
+correct; its failure was reproduction of unseen content under an incompatible edit protocol, not
+diagnosis.
+
+**SECONDARY_FINDINGS** (each independently demonstrated, none used to adjust the primary
+classification above):
+
+1. **HARNESS_WEAKNESS in `find_brownfield_public_api_changes`** (`kriya/workflow/
+   file_resolution.py:563,619`): `_normalized_public_signatures()` extracts *any* `def` statement
+   matching `^[ \t]*(?:async\s+)?def\s+NAME(...)`, filtering only leading-underscore names — it
+   does not distinguish module-level (genuinely importable) functions from function-nested
+   closures. All 4 flagged signatures in this run are confirmed, by direct source inspection, to be
+   closures nested inside other functions (`_csharp_method_receiver_types`, `_ruby_local_class_
+   bindings`, `_extract_generic`, and four `_python_*`/`_js_*` name-collection helpers respectively)
+   — none returned or otherwise exposed outside their enclosing function, hence structurally
+   uncallable from any other file. Combined with `evidence_files`'s unscoped, repo-wide text-
+   substring search (no reachability check), the detector labeled genuinely private implementation
+   details as a "public API"/"owner contract" and cited unrelated files' own independent,
+   same-named local helpers as "evidence" of a dependency that does not exist. Of the baseline
+   file's 116 functions, 105 (91%) are underscore-prefixed and thus entirely invisible to this
+   detector regardless of whether they survive a candidate edit — meaning the detector's own
+   4-signature report drastically under-stated the true scope of damage (106/116 functions
+   actually missing by attempt 3). The detector's **rejection outcome** was still correct (the
+   candidate was catastrophically broken for reasons the detector never actually measured), but its
+   stated reasoning and the recovery scope it drove were not.
+2. **RECOVERY_GAP-adjacent**: the `REPAIR_BEHAVIOR` phase of `API_CONTRACT_RECOVERY` discards the
+   immediately-preceding deterministic restoration rather than building on it (Task 5).
+3. Configured `num_ctx: 32768` appears not to have hard-bounded attempt 1's actual usage
+   (23,626 input + 12,935 output = 36,561 tokens reported) — recorded as an open, unexplained
+   discrepancy (see below), not diagnosed further; it did not change this run's terminal outcome
+   either way.
+4. Kriya's own log-file resolution behavior for this run did not match this session's own prior
+   understanding of `logging.file`'s documented resolution rule (see Unexplained Findings) — noted
+   for the record, not investigated to a root cause here, and not a Graphify- or model-facing
+   issue.
+
+### RECV-002
+
+`RECV002 = PARTIAL_EVIDENCE`
+
+Not `CLOSED`: the production recovery contract (`API_CONTRACT_RECOVERY`) was genuinely entered and
+executed end-to-end in a real run, but did not produce a viable outcome, and this run directly
+demonstrates two independent reasons it could not have: an incorrectly narrow recovery scope (Task
+5) and a repair-phase implementation that discards its own prior restoration (Task 5/Secondary
+Finding 2). Not `NEEDS_EVIDENCE`: this is no longer an absence of evidence — this run provides
+direct, positive, reproducible evidence characterizing exactly how and why the mechanism falls
+short in a real case, which is what distinguishes `PARTIAL_EVIDENCE` from the prior status. Closing
+RECV-002 would require a run (or a targeted, separately-scoped test) demonstrating the recovery
+contract correctly restoring a **complete, accurate** candidate end-to-end, including a scope
+determination broad enough to cover actual damage — not demonstrated here.
+
+### Unexplained findings (documented, not chased to a root cause)
+
+- **"Engineering Triage" / `ownership_gate` / `API_CONTRACT_RECOVERY` machinery is not described in
+  `CLAUDE.md`'s Architecture section.** The mechanism is real and load-bearing (it produced the
+  entire terminal outcome of this run) but this project's own onboarding doc doesn't mention it —
+  most likely explained by the untracked `Kriya_MA8_Task_Correctness_Control_Plane_Implementation_
+  Instructions.md` / `Kriya_MA9_Obligation_Driven_Coordinated_Repair_Implementation_Instructions_
+  v1.0.md` files already sitting untracked in this repo's root (per this session's own git-status
+  snapshot) — plausibly a recently-landed feature whose CLAUDE.md update hasn't happened yet. Not
+  investigated further; flagged so a future session doesn't re-derive this mechanism from scratch
+  when `CLAUDE.md` doesn't mention it.
+- **`logging.file` resolved relative to the invoking process's CWD** (`g1_run_worktree/logs/
+  kriya.log`) rather than to `campaign_kriya.yaml`'s own config directory or "the install dir for
+  the packaged default" as this session's own prior understanding of the documented SEC-009
+  resolution rule would predict. `paths.logs` (explicitly overridden in `campaign_kriya.yaml`) DID
+  resolve correctly to the evidence directory (`traces.db` landed exactly where expected). Only the
+  *un*-overridden `logging.file` default behaved unexpectedly. Not investigated to a root cause —
+  flagged as a discrepancy between documented and observed behavior for whoever next touches
+  config-path resolution, not as a reopened SEC-009 finding (this run's evidence is insufficient to
+  characterize it as a security issue one way or the other; it may simply reflect something about
+  how this specific campaign config was constructed).
+- **`num_ctx` vs. observed total token usage** (Secondary Finding 3 above) — not chased further.
+
+None of the above blocks the primary classification, which rests on directly-observed,
+independently-reproduced evidence (the context-tier/token-budget mismatch, the reconstructed
+`ImportError`, the source-verified detector behavior) rather than on either unexplained item.
