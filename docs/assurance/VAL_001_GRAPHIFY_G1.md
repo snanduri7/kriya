@@ -829,3 +829,69 @@ is not automatic — C3 mechanism success (did escalation correctly fire) is ass
 from G1 task success (did the candidate pass quality gates and all acceptance criteria); if
 escalation fires correctly but the task still fails for a different reason, that is evidence for a
 new bottleneck to classify, not evidence against C3.
+
+## 15. G1-R2 observability fixes + PROVEN D1 defect (investigation, not fixed) — 2026-09-18
+
+**Observability fixes implemented and tested (production behavior for D1/C3 decisions unchanged):**
+
+1. **Termination trace loss (`kriya/workflow/workflow.py::_abort_without_applying`)**: the
+   `human_rejected`/`approval_required` termination path's own `trace_logger.log_run()` call
+   omitted `gate_outcomes`/`model_hops`/`run_events`/`evidence_records`/`generation_metrics` —
+   proven the root cause of run `8cc2018a`'s own trace showing `model_hops=[]` despite 9 real
+   Developer calls. Now mirrors the canonical terminal success/failure call's own field contract
+   (same derivation for `failure_report`, same `files_modified=list(state.all_files_written)`
+   semantic as every other termination path). Tests: `tests/test_workflow.py::
+   test_workflow_human_rejected_preserves_full_forensic_trace`, the parallel `approval_required`
+   extension on the existing no-callback test, and a synthetic-rich-state round-trip
+   (`test_termination_trace_survives_human_rejected_with_synthetic_rich_state`).
+2. **CTX-001-P1-C3 SOURCE 3 structured observability (`kriya/workflow/context_source.py`,
+   `kriya/workflow/attempt.py`)**: `evaluate_member_hints_from_search_evidence()` (new) returns the
+   same candidates `resolve_member_hints_from_search_evidence()` always has, plus a deterministic
+   `outcome` code (`grounded_by_name`/`grounded_by_containment`/`ambiguous_name_conflict`/
+   `ambiguous_containment`/`no_containment_match`/`no_distinctive_tokens`/`unsupported_language`/
+   `empty_search_text`). `_resolve_retry_member_hints` now emits one
+   `context.search_evidence_grounding` RunEvent per evaluated SEARCH edit — structured evidence
+   only (a `content_revision()` hash + length of the SEARCH text, never the raw text itself),
+   never a decision authority. Selection behavior is byte-identical before/after (proven: all 52
+   pre-existing `test_context_source.py` tests unchanged). Tests: `TestC3StructuredObservability`
+   in `tests/test_val001_g1_remediation.py` (accepted/ambiguous/no-grounding/not-triggered, all
+   observable).
+
+**PROVEN D1 DEFECT — investigated, NOT fixed this session (explicit STOP for review):**
+
+`operation_for_attempt("targeted"/"fallback_targeted", ...)` (`kriya/workflow/operations.py:81-82`)
+unconditionally returns `REPAIR_WITH_PATCH` as the attempt's own BASE operation, with no reference
+to context completeness. `_completeness_gated_operation()`'s own first-line check
+(`base_operation not in (CREATE_FULL_FILE, REPAIR_WITH_FULL_FILE): return base_operation, False`)
+therefore ALWAYS short-circuits for these two modes — `mandatory_patch` is structurally `False`
+regardless of whether the shown context was ever complete/exact/current. `validate_operation_
+result()`'s own documented-permissive patch→full-file fallback (intended for an ordinary,
+non-mandatory retry) is therefore **always** allowed to stand for a targeted/fallback_targeted-mode
+attempt whose model ignores the SEARCH:/REPLACE: instruction and returns full file content instead
+— exactly what happened at the real run's attempt 6 (fallback_targeted, ~744-line truncated
+candidate accepted with zero operation-contract rejection). A second, propagating defect compounds
+it: once that candidate is written to the sandbox worktree, the NEXT retry-package build reads the
+now-small file fresh from disk, finds it fits the reference/target budget unelided, and legitimately
+(by its own documented rules) records `tier=full/is_exact=True` for it — authorizing a SUBSEQUENT
+`full_set`-mode attempt against content that is itself an unvalidated, already-corrupted candidate,
+never the true original baseline. Both halves proven empirically and via deterministic tests in the
+new `tests/test_d1_operation_mode_authority.py` (11 tests: 8 named adversarial scenarios per the
+investigation task + 2 full attempt-2→attempt-6/8 state-transition reproductions + the control
+proving attempt-2's own correct rejection). Real-workspace atomicity was never breached (the
+post-approval, pre-workspace-mutation full-regression gate independently caught both bad
+candidates) — this is an authorization-boundary defect in the pre-approval gate, not a data-loss
+or atomicity defect.
+
+**Task 4 answer (D1 exactness semantics)**: `is_exact=True` means B — exact for the represented
+projection/member/region only, and D1's own `tier`/`member_id` check DOES correctly distinguish
+`full+exact` from `member_exact+exact` (a member slice never authorizes whole-file replacement,
+regardless of provenance — proven for both non-C3 and C3-sourced member_exact items). The proven
+defect is orthogonal to that distinction: a `full+exact` grant can currently be produced from a
+reference/target projection whose "current" content was never validated as safe — REFERENCE_
+PROJECTION_AUTHORITY is currently unconditional (any content fitting the budget unelided is
+treated as exact, with no distinction from genuinely-pristine baseline content).
+
+No D1/C3 decision logic was modified. A fix (most likely: route targeted/fallback_targeted modes'
+own model response through the SAME completeness check full_set already gets, regardless of the
+attempt's own base operation) is a separate, explicit implementation decision, not made this
+session.
