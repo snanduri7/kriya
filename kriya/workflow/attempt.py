@@ -501,37 +501,120 @@ def _completeness_gated_operation(
     ):
         return base_operation, False
 
-    if (
+    if _is_restore_public_contract_phase(state):
+        return base_operation, False
+
+    if _has_authoritative_full_source(filepath, ctx, state):
+        return base_operation, False
+
+    return CodeOperation.REPAIR_WITH_PATCH, True
+
+
+def _is_restore_public_contract_phase(state: Optional[GenerationState]) -> bool:
+    """D2's own deterministic-restoration exemption (see _completeness_
+    gated_operation's own docstring for the full rationale) - extracted so
+    _validate_actual_mutation_authority() below can share the EXACT same
+    exemption, never a second, independently-maintained copy of it."""
+    return bool(
         state is not None
         and state.api_contract_recovery is not None
         and state.api_contract_recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT
-    ):
-        return base_operation, False
+    )
 
+
+def _has_authoritative_full_source(
+    filepath: str, ctx: "AttemptContext", state: Optional[GenerationState],
+) -> bool:
+    """VAL-001 G1 D1 (2026-09-18, extracted from _completeness_gated_
+    operation's own original body - identical logic, now shared with
+    _validate_actual_mutation_authority() below so REQUESTED-operation
+    gating and ACTUAL-returned-shape gating can never independently drift
+    on what "authoritative" means). True only when state.known_target_
+    context_items records a ContextItem for this exact path that is
+    tier="full" (never a member slice - member_id is None), is_exact=True,
+    and whose recorded revision still matches the file's real CURRENT
+    content (read fresh, worktree first, workspace fallback - never
+    trusted from a stale in-memory copy). CONTENT EXACTNESS (is_exact=True
+    for whatever the item represents) is deliberately a narrower claim
+    than SOURCE AUTHORITY (safe to authorize a WHOLE-FILE mutation from) -
+    this function is the one place that gap is closed, by additionally
+    requiring tier=="full" and a live revision match; a member_exact item,
+    or a full/exact item recorded under a since-changed revision, both
+    correctly return False here despite each having is_exact=True on its
+    own ContextItem."""
     item = state.known_target_context_items.get(filepath) if state is not None else None
-    if (
-        item is not None
-        and item.tier == "full"
-        and item.is_exact
-        and item.member_id is None
-    ):
-        full_path = os.path.join(ctx.worktree_path, filepath)
-        if not os.path.exists(full_path):
-            full_path = os.path.join(ctx.workspace_path, filepath)
-        try:
-            with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
-                current_revision = content_revision(handle.read())
-        except OSError:
-            current_revision = None
-        # An item with no recorded revision at all predates CTX-001 P1 WP3
-        # (LEGACY_COMPATIBILITY default, see ContextItem.from_dict) - treated
-        # as current rather than stale, matching that field's own documented
-        # additive/optional contract; every real construction site
-        # (build_known_target_context()) always sets a real revision.
-        if not item.revision or current_revision == item.revision:
-            return base_operation, False
+    if item is None or item.tier != "full" or not item.is_exact or item.member_id is not None:
+        return False
+    full_path = os.path.join(ctx.worktree_path, filepath)
+    if not os.path.exists(full_path):
+        full_path = os.path.join(ctx.workspace_path, filepath)
+    try:
+        with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
+            current_revision = content_revision(handle.read())
+    except OSError:
+        current_revision = None
+    # An item with no recorded revision at all predates CTX-001 P1 WP3
+    # (LEGACY_COMPATIBILITY default, see ContextItem.from_dict) - treated
+    # as current rather than stale, matching that field's own documented
+    # additive/optional contract; every real construction site
+    # (build_known_target_context()) always sets a real revision.
+    return not item.revision or current_revision == item.revision
 
-    return CodeOperation.REPAIR_WITH_PATCH, True
+
+def _validate_actual_mutation_authority(
+    filepath: str, actual_operation: CodeOperation, *,
+    file_exists: bool, ctx: "AttemptContext", state: Optional[GenerationState],
+) -> Optional[str]:
+    """VAL-001 G1 D1-A (2026-09-18, closing the run d756a833/8cc2018a G1-R2
+    incident): the authority decision for a whole-file mutation must be
+    keyed on the operation the model ACTUALLY RETURNED (`actual_operation`,
+    from validate_operation_result() - already parsed/interpreted), never
+    on which operation was originally REQUESTED. "Requested operation
+    cannot grant authority" - _completeness_gated_operation()'s own
+    `mandatory_patch` output is about what SHOULD have been asked for, and
+    is only ever True when the ATTEMPT's own base operation (attempt_
+    operation, mode-derived) already happened to be full-file-shaped
+    (CREATE_FULL_FILE/REPAIR_WITH_FULL_FILE) - a targeted/fallback_
+    targeted-mode attempt's own base operation is UNCONDITIONALLY
+    REPAIR_WITH_PATCH (operations.py::operation_for_attempt), so
+    mandatory_patch is structurally always False for those modes,
+    regardless of actual context completeness. The proven G1-R2 gap: a
+    model in fallback_targeted mode that simply ignores the patch
+    instruction and returns full file content anyway was NEVER checked
+    against this invariant at all - mandatory_patch's own False value
+    (about the REQUEST) was silently treated as license for the RESPONSE.
+
+    This function is the independent, unconditional check on the RESPONSE
+    itself - called for EVERY attempt, every mode, right after actual_
+    operation is known, regardless of what mandatory_patch said. Shares
+    the exact same _has_authoritative_full_source()/_is_restore_public_
+    contract_phase() primitives _completeness_gated_operation() itself
+    uses, so the two can never disagree about what "authoritative" means -
+    only about WHEN they get to ask the question (request-time vs
+    response-time).
+
+    Returns None when authorized (not full-file-shaped at all; a genuinely
+    new file with no existing source to be incomplete about; the
+    deterministic RESTORE_PUBLIC_CONTRACT phase; or real, current,
+    authoritative full source IS on record) - otherwise a rejection
+    reason string, never raises itself (the caller decides how to turn
+    this into a QualityGateFailure, matching every other gate in this
+    module)."""
+    if actual_operation not in (CodeOperation.CREATE_FULL_FILE, CodeOperation.REPAIR_WITH_FULL_FILE):
+        return None
+    if not file_exists:
+        return None
+    if _is_restore_public_contract_phase(state):
+        return None
+    if _has_authoritative_full_source(filepath, ctx, state):
+        return None
+    return (
+        "a full-file replacement was returned, but this file's context this attempt was not "
+        "authoritative, complete, exact current source (skeleton/signatures/member-only/stale "
+        "revision/candidate-derived) - whole-file replacement requires authoritative pristine "
+        "current source regardless of which operation was originally requested. Return "
+        "SEARCH:/REPLACE: instead."
+    )
 
 
 def _operation_map(
@@ -5101,25 +5184,34 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 continue
             cumulative_content = state.last_candidate_contents.get(expected_path)
             if cumulative_content is not None:
-                files.append({"filepath": expected_path, "content": cumulative_content})
-    # Recorded on EVERY attempt, not just during recovery - Case A needs
-    # attempt 1's own legitimate content for a file captured before recovery
-    # ever begins. A later attempt's entry for the same path overwrites the
-    # earlier one (most-recent-candidate semantics); Case C (an explicit
-    # RESTORE_PUBLIC_CONTRACT restoration) naturally overwrites this the
-    # same way, since the restored content IS this attempt's own `files`
-    # entry for that owner. A targeted/anchored-edit response's own entries
-    # carry "edits", not "content" (resolved to full content later, by the
-    # anchored-edit application pipeline further down this function) -
-    # skipped here, not an error: this cache exists to carry forward a
-    # file's own most recent FULL content across attempt boundaries, and an
-    # edit-shaped entry with no prior full-content entry simply leaves the
-    # cache unchanged for that path, exactly as if this attempt hadn't
-    # touched it.
-    for file_obj in files:
-        content = file_obj.get("content")
-        if content is not None:
-            state.last_candidate_contents[file_obj["filepath"]] = content
+                # VAL-001 G1 D1-A (2026-09-18): this entry is Kriya's OWN
+                # continuity bookkeeping re-asserting a file's already-
+                # tracked cumulative state so completeness holds - it is not
+                # a mutation the Developer returned THIS attempt at all, so
+                # it carries no "actual returned shape" for
+                # _validate_actual_mutation_authority() to evaluate.
+                # Unmarked, this synthetic entry would look identical to a
+                # genuine unauthorized full-file replacement and be wrongly
+                # rejected; marked, the per-file loop below exempts it the
+                # same way it exempts a RESTORE_PUBLIC_CONTRACT restoration.
+                files.append({
+                    "filepath": expected_path, "content": cumulative_content,
+                    "_kriya_carried_forward_content": True,
+                })
+    # VAL-001 G1 D1-B (2026-09-18): this cache is recorded further down,
+    # inside the per-file operation-authority enforcement loop, ONLY after
+    # that file's own actual returned mutation shape has cleared
+    # _validate_actual_mutation_authority() (or was exempt as carried-
+    # forward content already itself authorized in an earlier attempt) -
+    # never unconditionally for every entry in `files` up front. Recording
+    # unconditionally here (the original P9-R1 shape) would let a full-file
+    # candidate this SAME attempt is about to reject on authority grounds
+    # still land in the cache, ready to be silently resurrected as
+    # `_kriya_carried_forward_content` on a LATER attempt that never asks
+    # the Developer for this file at all - required authority case #6
+    # ("failed/rejected candidate-derived full projection, later retry ->
+    # REJECT"). See that loop's own comment for the unchanged Case A/B/C
+    # recovery semantics this preserves exactly, just gated on authority.
 
     # Brownfield ownership is enforced before any candidate byte reaches the
     # sandbox. Path resolution alone is insufficient: a model can target the
@@ -5355,38 +5447,79 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             )
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
-        # VAL-001 G1 D1 (2026-09-18): validate_operation_result()'s own PATCH ->
-        # FULL_FILE transition is intentionally permissive for an ORDINARY
-        # targeted retry (the model may legitimately decide a small patch isn't
-        # enough). It must NOT be permissive here: `mandatory_patch` means
-        # REPAIR_WITH_PATCH was this invariant speaking - the model was never
-        # shown source complete enough to safely author a whole-file
-        # replacement - so a response that resolves to REPAIR_WITH_FULL_FILE
-        # anyway (the model ignoring the patch instruction and writing
-        # "FILE CONTENT:") is a REJECTED candidate, not an accepted fallback.
-        # This is the fix for the exact gap run 8b6ee803 exposed: attempts 3/4
-        # both took this path and were, before this change, treated as a
-        # normal fallback.
-        if mandatory_patch and actual_operation is CodeOperation.REPAIR_WITH_FULL_FILE:
+        # VAL-001 G1 D1-A (2026-09-18): independent of `mandatory_patch`
+        # above (which only ever reflects the REQUESTED operation - see
+        # _validate_actual_mutation_authority()'s own docstring for the
+        # full G1-R2 incident this closes) - this checks the ACTUAL
+        # returned shape, unconditionally, for every mode. validate_
+        # operation_result()'s own PATCH -> FULL_FILE transition is
+        # intentionally permissive at THAT layer (an ordinary targeted
+        # retry may legitimately decide a small patch isn't enough) - this
+        # is the layer that must never be permissive about a full-file
+        # response reaching the sandbox without real authority for it,
+        # PRE-WRITE (this whole loop runs strictly before the batch commit
+        # further down in this function - see AuthorizedFileWriter.
+        # commit_batch()'s own call site).
+        authority_rejection_reason = (
+            None if file_obj.get("_kriya_carried_forward_content")
+            else _validate_actual_mutation_authority(
+                filepath, actual_operation, file_exists=file_exists, ctx=ctx, state=state,
+            )
+        )
+        if authority_rejection_reason is not None:
+            state.record_event(RunEvent(
+                kind="operation_authority.rejected",
+                attempt=state.attempt_number,
+                source="attempt.run_attempt",
+                authority=EventAuthority.AUTHORITATIVE,
+                operation=actual_operation.value,
+                message=f"{filepath}: whole-file authority rejected - {authority_rejection_reason}",
+                details={
+                    "filepath": filepath,
+                    "requested_operation": expected_operation.value,
+                    "actual_operation": actual_operation.value,
+                    "mandatory_patch_from_request": mandatory_patch,
+                    "known_context_tier": (
+                        state.known_target_context_items[filepath].tier
+                        if filepath in state.known_target_context_items else None
+                    ),
+                    "known_context_is_exact": (
+                        state.known_target_context_items[filepath].is_exact
+                        if filepath in state.known_target_context_items else None
+                    ),
+                    "known_context_member_id": (
+                        state.known_target_context_items[filepath].member_id
+                        if filepath in state.known_target_context_items else None
+                    ),
+                    "known_context_revision": (
+                        state.known_target_context_items[filepath].revision
+                        if filepath in state.known_target_context_items else None
+                    ),
+                },
+            ))
             failure = Failure(
                 type="operation_contract",
-                message=(
-                    f"OPERATION CONTRACT FAILURE in {filepath}: a full-file replacement was "
-                    "returned, but this file's context this attempt was not authoritative, "
-                    "complete, exact current source (skeleton/signatures/member-only/stale "
-                    "revision) - REPAIR_WITH_PATCH was mandatory, not merely preferred, and a "
-                    "full-file fallback cannot be safely accepted without content Kriya never "
-                    "showed the model. Return SEARCH:/REPLACE: instead."
-                ),
-                raw_output=f"mandatory REPAIR_WITH_PATCH, got {actual_operation.value}",
+                message=f"OPERATION CONTRACT FAILURE in {filepath}: {authority_rejection_reason}",
+                raw_output=f"actual returned operation {actual_operation.value} lacks whole-file authority",
                 file_locations=[FileLocation(filepath=filepath)],
                 likely_files=[filepath],
                 attempted_edits=file_obj.get("edits") or [],
-                diagnostics={"reason_code": "MANDATORY_PATCH_FULL_FILE_FALLBACK_REJECTED"},
+                diagnostics={"reason_code": "ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED"},
                 attempt=state.attempt_number,
             )
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
+        # VAL-001 G1 D1-B: only reached once this file's actual mutation
+        # shape has cleared authority - see this cache's own recording-site
+        # comment above for why an unconditional/earlier recording would
+        # reopen required authority case #6. A targeted/anchored-edit
+        # response's own entries carry "edits", not "content" (resolved to
+        # full content later by the anchored-edit pipeline further down) -
+        # skipped here, not an error, exactly as the original P9-R1
+        # recording did.
+        _candidate_content = file_obj.get("content")
+        if _candidate_content is not None:
+            state.last_candidate_contents[filepath] = _candidate_content
         if actual_operation is not expected_operation:
             state.record_event(RunEvent(
                 kind="operation.fallback",

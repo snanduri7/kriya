@@ -603,6 +603,18 @@ async def test_narrow_recovery_preserves_other_generated_file(tmp_path):
     state.api_contract_recovery.begin_restoration()
     state.api_contract_recovery.owner_contract_restored()
     assert state.api_contract_recovery.phase is APIContractRecoveryPhase.REPAIR_BEHAVIOR
+    # VAL-001 G1 D1 (2026-09-18): a real REPAIR_BEHAVIOR attempt only ever
+    # narrows the Developer to the recovery owner after that owner's own
+    # current content has already been shown to it - recorded explicitly
+    # here so this test's own minimal setup reflects that real precondition,
+    # rather than looking like an unauthorized full-file replacement with no
+    # known authoritative source at all (which the new whole-file authority
+    # check now correctly refuses).
+    state.known_target_context_items[owner_b] = make_context_item(
+        path=owner_b, content=baseline_b, reason="known_target_full_source",
+        source_type="named_in_request", trust_level="repository",
+        tier="full", is_exact=True, revision=content_revision(baseline_b),
+    )
 
     developer = AsyncMock()
     developer.run_generation = AsyncMock(return_value=[
@@ -647,6 +659,15 @@ async def test_narrow_recovery_does_not_invent_never_generated_file(tmp_path):
     )
     state.api_contract_recovery.begin_restoration()
     state.api_contract_recovery.owner_contract_restored()
+    # VAL-001 G1 D1 (2026-09-18): see the identical comment in
+    # test_narrow_recovery_preserves_other_generated_file above - the
+    # repaired owner's own current content must be a known authoritative
+    # source for the whole-file repair to be authorized at all.
+    state.known_target_context_items[owner_b] = make_context_item(
+        path=owner_b, content=baseline_b, reason="known_target_full_source",
+        source_type="named_in_request", trust_level="repository",
+        tier="full", is_exact=True, revision=content_revision(baseline_b),
+    )
 
     developer = AsyncMock()
     developer.run_generation = AsyncMock(return_value=[
@@ -729,6 +750,13 @@ async def test_multi_file_recovery_cumulative_content(tmp_path):
     )
     state.api_contract_recovery.begin_restoration()
     state.api_contract_recovery.owner_contract_restored()
+    # VAL-001 G1 D1 (2026-09-18): see the identical comment in
+    # test_narrow_recovery_preserves_other_generated_file above.
+    state.known_target_context_items[owner_c] = make_context_item(
+        path=owner_c, content=baseline_c, reason="known_target_full_source",
+        source_type="named_in_request", trust_level="repository",
+        tier="full", is_exact=True, revision=content_revision(baseline_c),
+    )
 
     developer = AsyncMock()
     developer.run_generation = AsyncMock(return_value=[
@@ -834,6 +862,13 @@ async def test_prv08_shaped_recovery_regression(tmp_path):
     )
     state.api_contract_recovery.begin_restoration()
     state.api_contract_recovery.owner_contract_restored()
+    # VAL-001 G1 D1 (2026-09-18): see the identical comment in
+    # test_narrow_recovery_preserves_other_generated_file above.
+    state.known_target_context_items[summary_owner] = make_context_item(
+        path=summary_owner, content=original_summary, reason="known_target_full_source",
+        source_type="named_in_request", trust_level="repository",
+        tier="full", is_exact=True, revision=content_revision(original_summary),
+    )
 
     developer = AsyncMock()
     developer.run_generation = AsyncMock(return_value=[
@@ -3486,6 +3521,20 @@ async def test_run_attempt_uses_coordinated_generation_when_contract_active(tmp_
     state.last_implicated_files = [test_path]  # ordinary attribution would only ever name ONE file
     state.error_context = "TEST_PROCESS_TERMINATED: process boundary conflict"
     state.repair_contract = contract
+    # VAL-001 G1 D1 (2026-09-18): a real coordinated-repair attempt only ever
+    # reaches the Developer after each participant's own current content has
+    # already been shown to it - recorded explicitly here so this test's own
+    # minimal setup (which mocks _run_coordinated_repair_generation entirely)
+    # still reflects that real precondition, rather than looking like an
+    # unauthorized full-file replacement with no known authoritative source
+    # at all (which the new whole-file authority check now correctly
+    # refuses).
+    for _p, _c in ((app_path, (tmp_path / app_path).read_text()), (test_path, (tmp_path / test_path).read_text())):
+        state.known_target_context_items[_p] = make_context_item(
+            path=_p, content=_c, reason="known_target_full_source",
+            source_type="named_in_request", trust_level="repository",
+            tier="full", is_exact=True, revision=content_revision(_c),
+        )
 
     ctx = _minimal_attempt_ctx(
         tmp_path, architect_files=[app_path, test_path],
@@ -3547,6 +3596,15 @@ async def test_run_attempt_ordinary_targeted_retry_unaffected_without_contract(t
     state.last_implicated_files = [app_path]
     state.error_context = "COMPILE ERROR: missing return statement"
     assert state.repair_contract is None
+    # VAL-001 G1 D1 (2026-09-18): see the identical comment in
+    # test_run_attempt_uses_coordinated_generation_when_contract_active
+    # above.
+    _app_original = (tmp_path / app_path).read_text()
+    state.known_target_context_items[app_path] = make_context_item(
+        path=app_path, content=_app_original, reason="known_target_full_source",
+        source_type="named_in_request", trust_level="repository",
+        tier="full", is_exact=True, revision=content_revision(_app_original),
+    )
 
     ctx = _minimal_attempt_ctx(
         tmp_path, architect_files=[app_path, test_path],
@@ -3614,6 +3672,16 @@ async def test_run_attempt_coordinated_anchored_edit_response_reaches_shared_pip
     state.last_implicated_files = [test_path]
     state.error_context = "TEST_PROCESS_TERMINATED: process boundary conflict"
     state.repair_contract = contract
+    # VAL-001 G1 D1 (2026-09-18): see the identical comment in
+    # test_run_attempt_uses_coordinated_generation_when_contract_active
+    # above - test_path's own response below returns full content, which
+    # needs a known authoritative source to be authorized.
+    _test_original = (tmp_path / test_path).read_text()
+    state.known_target_context_items[test_path] = make_context_item(
+        path=test_path, content=_test_original, reason="known_target_full_source",
+        source_type="named_in_request", trust_level="repository",
+        tier="full", is_exact=True, revision=content_revision(_test_original),
+    )
 
     ctx = _minimal_attempt_ctx(
         tmp_path, architect_files=[app_path, test_path],
@@ -23957,6 +24025,18 @@ async def test_run_attempt_coordinated_repair_denies_unauthorized_participant_at
     state.last_implicated_files = [test_path]
     state.error_context = "TEST_PROCESS_TERMINATED: process boundary conflict"
     state.repair_contract = contract
+    # VAL-001 G1 D1 (2026-09-18): see the identical comment in
+    # test_run_attempt_uses_coordinated_generation_when_contract_active
+    # above - both participants return full content, so both need a known
+    # authoritative source to reach the (unrelated) write-scope denial this
+    # test is actually proving, rather than being rejected earlier for lack
+    # of one.
+    for _p, _c in ((app_path, app_baseline), (test_path, test_baseline)):
+        state.known_target_context_items[_p] = make_context_item(
+            path=_p, content=_c, reason="known_target_full_source",
+            source_type="named_in_request", trust_level="repository",
+            tier="full", is_exact=True, revision=content_revision(_c),
+        )
 
     fixed_app = (
         "public class App {\n"
@@ -24079,6 +24159,24 @@ async def test_run_attempt_coordinated_contract_survives_compile_failure_across_
     state.repair_contract = contract
     state.budgets.targeted_retry_count = 0
 
+    def _record_known_targets():
+        # VAL-001 G1 D1 (2026-09-18): see the identical comment in
+        # test_run_attempt_uses_coordinated_generation_when_contract_active
+        # above - re-recorded fresh before each attempt (mirroring what the
+        # real retry-package mechanism does every attempt) so this test
+        # keeps exercising the compile-failure/contract-survival behavior it
+        # actually names, rather than being rejected earlier for lack of a
+        # known authoritative source.
+        for _p in (app_path, test_path):
+            _c = (tmp_path / _p).read_text()
+            state.known_target_context_items[_p] = make_context_item(
+                path=_p, content=_c, reason="known_target_full_source",
+                source_type="named_in_request", trust_level="repository",
+                tier="full", is_exact=True, revision=content_revision(_c),
+            )
+
+    _record_known_targets()
+
     ctx = _minimal_attempt_ctx(
         tmp_path, architect_files=[app_path, test_path],
         expected_files_upfront=[app_path, test_path],
@@ -24110,6 +24208,7 @@ async def test_run_attempt_coordinated_contract_survives_compile_failure_across_
 
     # The NEXT attempt (simulating the outer retry loop calling run_attempt
     # again for the same subtask) must still take the coordinated path.
+    _record_known_targets()
     fixed_app = (
         "public class App {\n    public static void main(String[] args) {}\n}\n"
     )

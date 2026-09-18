@@ -950,3 +950,92 @@ full `test_context_source.py`/`test_context_budget.py`/`test_val001_g1_remediati
 `test_d1_operation_mode_authority.py` suites - zero regressions found.
 
 No D1/C3 decision logic touched. No model routing/context-budget changes.
+
+## 17. D1-A/D1-B fixed — actual-shape whole-file authority (2026-09-18, implemented)
+
+Closes the PROVEN D1 defect from §15 (both halves) plus a second, related defect (D1-B's own
+second propagation route) found while closing it. No C3 behavior change, no baseline-validation
+change, no model-specific logic, no live model, no G1 rerun this session.
+
+**D1-A — authority now follows the ACTUAL returned mutation shape, not the requested operation.**
+New, independent, unconditional function `_validate_actual_mutation_authority()`
+(`kriya/workflow/attempt.py`), called in the per-file "enforce the selected response contract"
+loop for every mode/every attempt, keyed on `actual_operation` (post-parse) rather than
+`expected_operation`/`mandatory_patch` (§15's own root cause: `mandatory_patch` is structurally
+`False` for targeted/fallback_targeted modes, whose base operation is already patch-shaped, so
+`_completeness_gated_operation()`'s first-line early-return never even asked the authority
+question for those modes). Shares its authoritative-source primitives
+(`_has_authoritative_full_source()`, `_is_restore_public_contract_phase()`, both extracted from
+`_completeness_gated_operation()`, not duplicated) so request-time and response-time authority can
+never independently drift on what "authoritative" means. Runs strictly BEFORE
+`AuthorizedFileWriter.commit_batch()` (confirmed the one write-to-sandbox call site for every
+mode) — rejection is PRE-WRITE, never relying on compile/test/regression/human-approval to catch
+this class. Rejection reason code: `ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED`.
+
+**D1-B, direct route — closed as a structural consequence of D1-A.** Since an unauthorized
+full-file candidate can no longer reach disk at all, the retry-package build that previously read
+a poisoned sandbox file back as "current, small, fits-budget" content can no longer observe
+poisoned content in the first place. No second code change needed for this route.
+
+**D1-B, second route — found and separately fixed.** `kriya/workflow/attempt.py`'s own
+pre-existing P9-R1 completeness-preservation mechanism (`state.last_candidate_contents`, folded
+back into a LATER, unrelated attempt's own `files` list as `_kriya_carried_forward_content`
+whenever an active `api_contract_recovery`/coordinated-repair attempt narrows the Developer's
+scope away from a file) recorded every attempt's own candidate content unconditionally, in a
+separate loop that ran BEFORE the new authority check. A candidate D1-A correctly rejected
+PRE-WRITE this attempt could still land in that cache, then be silently resurrected — written to
+disk with **zero** authority check — on a later attempt that never asked the Developer for that
+file at all. This is required authority case #6 verbatim ("failed/rejected candidate-derived full
+projection, later retry → REJECT"). Two matched changes, neither sound without the other:
+
+1. Carried-forward `files` entries are marked `_kriya_carried_forward_content: True` at the
+   fold-in site and exempted from `_validate_actual_mutation_authority()` — they are Kriya's own
+   continuity bookkeeping re-asserting a file's already-tracked state, not a mutation the Developer
+   returned this attempt, so they carry no "actual returned shape" to evaluate at all.
+2. The recording site itself moved from the old unconditional pre-loop into the per-file
+   enforcement loop, reached only once that file's own actual mutation shape has cleared authority
+   THIS attempt (or was itself already-authorized carried-forward content) — never for a file the
+   loop rejected, and never for a file the loop didn't reach because an earlier file in the same
+   batch raised first. Without this gating, item 1's exemption alone would have been the hole
+   (an unvalidated candidate could still be cached, then exempted-and-written on a later attempt);
+   the exemption is only sound because nothing unvalidated ever enters the cache in the first
+   place.
+
+**Accepted, deliberate narrowing of P9-R1 behavior**: because recording is now gated on authority,
+a file whose enforcement-loop iteration is never reached in a given attempt (an earlier file in
+the same batch raised first) no longer gets a `last_candidate_contents` entry it previously would
+have. Downstream this can surface as `IncompleteGenerationError` on a later attempt that expected
+to fold that file's content forward — fail-closed, no data loss (the file's real on-disk content
+is untouched), never a silent fabrication. `TestRejectedCandidateCannotResurrectViaCarryForward`
+tolerates and documents exactly this outcome as an acceptable one.
+
+**Human approval**: `TestApprovalNeverReached` proves an unauthorized full-file candidate never
+reaches `approval_callback` at all (call count 0) through the real `run_generation_workflow()`.
+
+**Validation-baseline interaction**: `TestValidationBaselinePreservedByD1Rejection` proves
+§16's `ValidationBaseline` (targeted and full-regression) is byte-unchanged across a D1 rejection.
+
+**Tests**: `tests/test_d1_operation_mode_authority.py` grew from 11 to 23 tests — every original
+investigation test retained (component behavior deliberately unchanged, docstrings updated to say
+so), plus `TestActualShapeMatrix` (8 tests, the requested/returned truth table),
+`TestCriticalPropagation` (the full G1 attempt-reproduction: PRE-WRITE rejection, sandbox
+byte-identical, zero files written, correct trace evidence with no raw candidate text persisted,
+honest retry-projection incompleteness, a subsequent `full_set` attempt still correctly mandatory),
+`TestRejectedCandidateCannotResurrectViaCarryForward` (required case #6, the second defect above),
+`TestApprovalNeverReached`, `TestValidationBaselinePreservedByD1Rejection`. Nine pre-existing
+`test_workflow.py` fixtures needed updates to keep passing: six via an added
+`known_target_context_items` precondition (a real production run would have legitimately recorded
+one for a small file before a targeted/`REPAIR_BEHAVIOR` retry — the same precedent already
+established in an earlier session); the other three
+(`test_narrow_recovery_preserves_other_generated_file`,
+`test_multi_file_recovery_cumulative_content`, `test_prv08_shaped_recovery_regression`) were
+actually resolved by the carried-forward-content production exemption itself, not by their own
+fixture edits — those edits cover only the Developer-returned recovery-owner file in each test:
+the OTHER, carried-forward participant file needed the production fix, not a fixture change. All
+216 tests spanning the changed surface reconfirmed green after both production changes:
+`test_d1_operation_mode_authority.py` (23), the full 140-of-141 `run_attempt`-calling subset of
+`test_workflow.py` (1 legitimately skipped, needs parametrize-style fixtures), and
+`test_val001_g1_remediation.py` (53). All via direct Python execution per this repo's standing
+quota-discipline convention — `.venv/bin/pytest` handed to the user, not run in-session.
+
+No C3 member-selection/context-budget/model-routing logic touched. No live model. No G1 rerun.
