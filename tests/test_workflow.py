@@ -20430,9 +20430,27 @@ async def test_workflow_passes_error_source_context_for_junit_stack_trace_test_f
                 {"filepath": "Calc.java", "content": calc_java},
                 {"filepath": "CalcTest.java", "content": calc_test_java},
             ],
+            # VAL-001 G1 D1 (2026-09-18): a JUnit stack trace names TWO real
+            # file:line locations (Calc.java:8 inside divide(), CalcTest.
+            # java:12 inside testDivide()), both of which resolve to real
+            # method bodies - so this targeted retry's own context is
+            # member_exact-scoped for each (CTX-001 P1 C2's retry-member-hint
+            # path), never a full/exact whole-file view. Under D1-A a
+            # full-file response for either file therefore correctly
+            # requires real whole-file authority it was never shown - so the
+            # retry response here must be shaped the way the real mandatory-
+            # patch protocol actually requires (an anchored SEARCH:/REPLACE:
+            # edit for the file that changed, a NO_CHANGE_NEEDED response for
+            # the one that didn't), exactly like a real model would respond
+            # to that protocol. This is orthogonal to the test's own actual
+            # invariant (error_source_context threading, asserted below),
+            # which does not depend on the response's shape at all.
             [
-                {"filepath": "Calc.java", "content": calc_java.replace("return a / b;", "return b == 0 ? 0 : a / b;")},
-                {"filepath": "CalcTest.java", "content": calc_test_java},
+                {
+                    "filepath": "Calc.java", "content": None,
+                    "edits": [{"search": "return a / b;", "replace": "return b == 0 ? 0 : a / b;"}],
+                },
+                {"filepath": "CalcTest.java", "content": None, "edits": []},
             ],
         ])
         res = await we.run_generation_workflow(goal="Create a Java app", workspace_path=str(tmp_path))
