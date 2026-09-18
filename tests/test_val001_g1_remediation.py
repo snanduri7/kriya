@@ -39,8 +39,9 @@ from kriya.workflow.attempt import (
     _record_all_files_written_as_exact_context,
     _record_retry_projection_context_items,
 )
-from kriya.workflow.context_budget import build_known_target_context
+from kriya.workflow.context_budget import build_known_target_context, estimate_tokens
 from kriya.workflow.context_package import make_context_item
+from kriya.workflow.context_source import extract_member_body, python_member_ranges
 from kriya.workflow.edit_safety import content_revision
 from kriya.workflow.failure import Failure, FileLocation
 from kriya.workflow.file_resolution import (
@@ -1007,30 +1008,55 @@ class TestC3ContextPromotion:
         assert "callee_name = read_text(mname, source)" in item.content
         assert item.content in content
 
-    def test_context_budget_unaffected_by_member_hint_presence(self, tmp_path):
-        """The allocator's own budget_limit is a caller-supplied parameter,
-        untouched by whether a member hint exists - CTX-001-P1-C3 only
-        ever changes WHAT gets shown within the existing budget, never the
-        budget itself."""
-        _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
-        budget_limit = 50_000
-        _, package_without = build_known_target_context(
-            ["engine.py"], str(tmp_path), str(tmp_path), budget_limit,
+    def test_member_exact_promotion_fits_within_a_realistically_tight_budget(self, tmp_path):
+        """Acceptance item 10 (no context-window increase), made concrete:
+        empirically measured against the REAL run d756a833 evidence
+        (graphify/extractors/engine.py, `_extract_generic.walk_calls`),
+        the grounded member is ~12,151 estimated tokens against a real
+        production known_target_limit of ~24,576 (see this test module's
+        own CTX-001-P1-C3 section header) - comfortably inside budget, not
+        merely inside an artificially generous one. This test proves the
+        same PRINCIPLE deterministically, using this file's own synthetic
+        fixture and its own real estimate_tokens() output, at a budget
+        sized to be tight-but-sufficient for the member alone (never a
+        magic number) - the member-exact item is returned with ZERO
+        omission and total consumption never exceeds the supplied budget."""
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        member_tokens = estimate_tokens(
+            extract_member_body(content, *python_member_ranges(content)["outer_extractor.walk_calls"])
         )
-        _, package_with = build_known_target_context(
-            ["engine.py"], str(tmp_path), str(tmp_path), budget_limit,
+        tight_budget = member_tokens + 5  # just enough for the member, not the rest of the file too
+
+        rendered, package = build_known_target_context(
+            ["engine.py"], str(tmp_path), str(tmp_path), tight_budget,
             member_hints={"engine.py": ["outer_extractor.walk_calls"]},
         )
-        # Same budget_limit parameter both times - this proves the call
-        # contract never widens; token consumption for each package stays
-        # within that one unchanged limit.
-        from kriya.workflow.context_budget import estimate_tokens
-        assert estimate_tokens(rendered_or_empty(package_without)) <= budget_limit
-        assert estimate_tokens(rendered_or_empty(package_with)) <= budget_limit
+        member_items = [item for item in package.relevant_files if item.member_id is not None]
+        assert len(member_items) == 1
+        assert member_items[0].tier == "member_exact"
+        assert not any(o.get("member_id") == "outer_extractor.walk_calls" for o in package.omitted)
+        total_consumed = sum(estimate_tokens(item.content or "") for item in package.relevant_files)
+        assert total_consumed <= tight_budget
 
+    def test_member_too_large_for_budget_omits_rather_than_exceeding_it(self, tmp_path):
+        """The inverse case - a budget too small even for the grounded
+        member alone must OMIT it (REASON_BUDGET_EXHAUSTED), never force-
+        fit it past the caller-supplied limit. Proves this package cannot
+        silently widen the context-window contract even when grounding
+        succeeds."""
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        member_tokens = estimate_tokens(
+            extract_member_body(content, *python_member_ranges(content)["outer_extractor.walk_calls"])
+        )
+        starved_budget = member_tokens - 5  # deliberately insufficient
 
-def rendered_or_empty(package) -> str:
-    return "".join(item.content or "" for item in package.relevant_files)
+        _, package = build_known_target_context(
+            ["engine.py"], str(tmp_path), str(tmp_path), starved_budget,
+            member_hints={"engine.py": ["outer_extractor.walk_calls"]},
+        )
+        member_items = [item for item in package.relevant_files if item.member_id is not None]
+        assert member_items == []
+        assert any(o.get("member_id") == "outer_extractor.walk_calls" for o in package.omitted)
 
 
 class TestC3D1Unchanged:

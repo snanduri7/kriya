@@ -744,16 +744,32 @@ structural member containing #3406's actual bug region (`_extract_generic.walk_c
 correctly fails closed rather than fabricating a nearby guess — an honest, disclosed limitation
 (this mechanism recovers real vocabulary, it does not repair a fully-hallucinated response).
 
+**Budget-fit measured, not assumed**: `_extract_generic.walk_calls` (the real grounded member) is
+~12,151 estimated tokens against run d756a833's own real, production `known_target_limit`
+(~24,576 tokens, per the run's own log — `Escalating compilation attempt to fallback model:
+qwen3.6:35b-a3b-q4_K_M (Limit: 24576 tokens)`) — comfortably inside budget with room left over for a
+`signatures`-tier rendering of the rest of the file, zero omission. This is the single load-bearing
+number for whether this package actually helps G1's real case, and it was measured directly against
+the real, external `engine.py`, not assumed from a synthetic fixture. `walk_calls` spans 770 real
+source lines (Python's AST-based member boundary - a `def`, the finest grain `python_member_ranges`
+can express for a nested function) - a genuine, large reduction from the 6,318-line whole file, but
+not isolation down to just the ~60-line C# branch actually containing the bug; stated plainly as an
+inherent characteristic, not oversold as precise line-level isolation.
+
 **Tests**: 11 new tests in `tests/test_context_source.py` (candidate-discovery/grounding rules in
 isolation, including a G1-shaped synthetic fixture, a non-Python/Java case, and the Java
-call-vs-declaration precision fix as its own regression test) + 11 new tests in
+call-vs-declaration precision fix as its own regression test) + 12 new tests in
 `tests/test_val001_g1_remediation.py` (escalation-trigger gating, context promotion to real
-`tier=member_exact`, D1-unchanged proofs including stale-revision rejection). All 22 self-verified
-via direct execution, plus the full pre-existing `test_context_source.py` (52/52),
-`test_val001_g1_remediation.py` (48/48), and `test_context_budget.py` (30/30) suites, plus 11
-targeted highest-risk `test_workflow.py` member/anchor tests — all green, zero regressions found
-this way. Full `.venv/bin/pytest` confirmation is the user's own, per repository convention (this
-agent does not run it).
+`tier=member_exact` at both a generous and a realistically-tight budget, the inverse
+too-large-to-fit-omits-rather-than-exceeds case, D1-unchanged proofs including stale-revision
+rejection). All 23 self-verified via direct execution, plus the full pre-existing
+`test_context_source.py` (52/52), `test_val001_g1_remediation.py` (49/49), and `test_context_budget.py`
+(30/30) suites, plus **11 specifically targeted, highest-risk `test_workflow.py` member/anchor
+tests — NOT the full file** (per this campaign's own G1-R2 lesson: a clean targeted sweep at this
+layer proves nothing about the rest of it; the user's own full `.venv/bin/pytest` run is what
+actually confirms the remainder). Zero regressions found across everything actually executed. Full
+`.venv/bin/pytest` confirmation is the user's own, per repository convention (this agent does not
+run it).
 
 No architecture change — an additive third evidence source into CTX-001 P1 C2's own,
 already-designed extension point. `D3-part-2` (persisted graph evidence) remains correctly
