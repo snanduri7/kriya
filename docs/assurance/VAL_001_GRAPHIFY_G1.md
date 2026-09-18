@@ -782,3 +782,50 @@ deselected, 140 warnings in 917.84s (0:15:17)**, 0 failed. Confirms commits `3e5
 implementation) and `9126def` (budget-fit test-evidence tightening per advisor review) on top of
 `015430d` introduce zero regressions across the full suite, not just the targeted/self-verified
 subset recorded above.
+
+## 14. Rerun #2 preparation (post CTX-001-P1-C3, not executed)
+
+Kriya checkpoint frozen and pushed: `7632e607d4b9c8c1cd48a828bf9bbf7b1802ea5c` (`015430d` + C3
+implementation `3e5c9c2` + test-evidence tightening `9126def` + this full-suite-confirmation doc
+commit `7632e60`, all on `origin/milestone-decomposition`). Diff `015430d..7632e60` touches exactly
+the 5 expected files (`kriya/workflow/attempt.py`, `kriya/workflow/context_source.py`, two test
+files, this doc) — zero unexplained production/config changes.
+
+Fresh, dedicated Graphify worktree: `~/kriya-live-validation/val001-g1-graphify-c3406/
+g1_rerun2_worktree` — never touched by run `d756a833` or any earlier reproduction/calibration check
+(that stale state lives only in the now-abandoned `g1_rerun_worktree`). Verified: SHA
+`67f99bd0059dd1bac9e44382907ef9f10098b39f`, clean, no `.kriya/` present, `engine.py` SHA-256
+`1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78` (unchanged), baseline
+behavioral acceptance re-reproduced at 2/5, worktree unmutated by the check.
+
+A/B control re-verified against run `d756a833`'s own setup: goal SHA-256
+`f96bf5a3400abdb3eddf4a6d39d14f7022cde66cf1621525f3edac759bfcb823` (byte-identical),
+`campaign_kriya.yaml` byte-identical, `git diff 10b5523..HEAD -- kriya/config/default_config.yaml`
+still empty (model/fallback/capability profiles/`num_ctx=32768` all unchanged), ground-truth
+isolation re-confirmed clean in both the new worktree and evidence directory. **The only intended
+experimental variable relative to `d756a833` is the CTX-001-P1-C3 failure-grounded member
+escalation implementation itself.**
+
+Prepared, not executed: `run_g1_rerun2.sh` (preflight re-derived to the new frozen Kriya SHA; no
+`--resume`/`--resume-id`) and `run_g1_rerun2_acceptance.sh` (all 18 required acceptance items,
+items 1-15 via the expanded `inspect_g1_rerun2_trace.py`, ground truth used only starting at item
+18). `inspect_g1_rerun2_trace.py` specifically instruments the CRITICAL C3 TRACE requirement
+(skeleton → anchored_edit failure → SEARCH evidence → failure-grounded `MemberHintCandidate` →
+structurally grounded member → `member_exact` → `REPAIR_WITH_PATCH`) directly from
+`context.retry_member_hint_package`/`gate_outcomes` trace data, never inferred from final task
+success. **Disclosed limitation, honestly**: today's instrumentation does not log a first-class
+provenance/`is_exact`/`revision` field on that event — the script DERIVES provenance from the
+logical impossibility of SOURCE 2 firing without a real line locator (a sound inference from
+concrete trace facts, not a guess), reports `is_exact` as implied by `tier=="member_exact"`
+per `ContextItem`'s own documented code contract, and reports `revision`/current-source evidence
+as not directly observable from the trace at all. A small future production enhancement (logging
+these three fields explicitly) would close this gap — out of scope for this preparation-only
+session. Self-tested (not executed live) against the real `d756a833` trace: correctly reproduces
+every previously-established forensic fact (8 attempts, `MEMBER_ESCALATION_FIRED=NO` since C3
+didn't exist in that run, zero applied candidates, zero unauthorized changes).
+
+Neither script has been run by this agent. Classification of the outcome, once the user runs both,
+is not automatic — C3 mechanism success (did escalation correctly fire) is assessed separately
+from G1 task success (did the candidate pass quality gates and all acceptance criteria); if
+escalation fires correctly but the task still fails for a different reason, that is evidence for a
+new bottleneck to classify, not evidence against C3.
