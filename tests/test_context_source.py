@@ -13,6 +13,7 @@ from kriya.workflow.context_source import (
     python_member_ranges,
     resolve_member_hints_from_chunk_header,
     resolve_member_hints_from_failure_location,
+    resolve_member_hints_from_search_evidence,
 )
 
 
@@ -504,3 +505,234 @@ def test_resolve_member_hints_from_failure_location_worktree_version_b_not_works
     hints_against_workspace = resolve_member_hints_from_failure_location("owner.py", workspace_content, 6)
     assert [h.member_id for h in hints_against_worktree] == ["Owner.new_method"]
     assert hints_against_workspace == []
+
+
+# --- CTX-001-P1-C3: resolve_member_hints_from_search_evidence --------------
+#
+# SOURCE 3 - a rejected anchored-edit's own SEARCH text, deterministically
+# grounded against real current structure. Added after VAL-001 G1's
+# post-remediation rerun (run d756a833) proved SOURCE 1/2 above can both be
+# silent for an entire run at once. No Graphify production source is copied
+# anywhere in this file (same convention as test_val001_g1_remediation.py) -
+# every fixture below is synthetic, built to mirror the *structural shape*
+# G1 exercised (a large module containing a nested member whose distinctive
+# vocabulary appears nowhere else), never real content.
+
+def _g1_shaped_python_module() -> str:
+    """A large Python module (mirrors graphify/extractors/engine.py's real
+    shape: one big nested-closure member handling several unrelated
+    languages inside a single outer function) containing a nested member
+    whose C#-related vocabulary is genuinely distinctive - it appears
+    nowhere else in the file, exactly like the real `_extract_generic.
+    walk_calls`/`fn_node`/`generic_name` shape G1's rerun forensics found."""
+    padding_before = "\n".join(f"def unrelated_helper_{i}(value):\n    return value * {i}\n" for i in range(40))
+    return f'''"""Synthetic large module - structural shape only, no real Graphify content."""
+{padding_before}
+
+def outer_extractor(nodes, config):
+    def add_node(node_id):
+        return node_id
+
+    def walk_calls(node, config, source):
+        callee_name = None
+        is_member_call = False
+        fn_node = node.child_by_field_name("function")
+        if fn_node is not None and fn_node.type == "identifier":
+            callee_name = read_text(fn_node, source)
+        elif fn_node is not None and fn_node.type == "member_access_expression":
+            mname = fn_node.child_by_field_name("name")
+            if mname is not None:
+                callee_name = read_text(mname, source)
+                is_member_call = True
+        return callee_name, is_member_call
+
+    for node in nodes:
+        walk_calls(node, config, node.source)
+    return add_node
+'''
+
+
+def test_search_evidence_grounds_g1_shaped_nested_member_uniquely():
+    """The core CTX-001-P1-C3 regression fixture: a rejected SEARCH block
+    referencing real, distinctive vocabulary from ONE nested member inside
+    a large module - must ground to exactly that member, not the enclosing
+    outer function, not any of the unrelated padding helpers."""
+    content = _g1_shaped_python_module()
+    search_text = (
+        'if fn_node is not None and fn_node.type == "identifier":\n'
+        "    callee_name = read_text(fn_node, source)\n"
+        'elif fn_node is not None and fn_node.type == "member_access_expression":\n'
+        '    mname = fn_node.child_by_field_name("name")\n'
+        "    callee_name = read_text(mname, source)\n"
+        "    is_member_call = True"
+    )
+    hints = resolve_member_hints_from_search_evidence("engine.py", content, search_text)
+    assert [h.member_id for h in hints] == ["outer_extractor.walk_calls"]
+    assert hints[0].provenance == "search_token_containment"
+
+
+def test_search_evidence_hallucinated_variable_names_fail_closed():
+    """Mirrors G1 rerun attempts 4/7: the model invents plausible-looking
+    local variable names that do not exist anywhere in the real file -
+    containment can never be satisfied, so this must return no hint rather
+    than a nearest-guess."""
+    content = _g1_shaped_python_module()
+    search_text = (
+        'if fn_node is not None:\n'
+        '    if fn_node.type == "generic_name":\n'
+        '        name_child = fn_node.child_by_field_name("name")\n'
+        "        callee_name = read_text(name_child, source)"
+    )
+    hints = resolve_member_hints_from_search_evidence("engine.py", content, search_text)
+    assert hints == []
+
+
+def test_search_evidence_sole_exact_member_name_grounds_directly():
+    content = "def unique_target_symbol(x):\n    return x + 1\n\ndef other_symbol(y):\n    return y - 1\n"
+    hints = resolve_member_hints_from_search_evidence("m.py", content, "unique_target_symbol")
+    assert [h.member_id for h in hints] == ["unique_target_symbol"]
+    assert hints[0].provenance == "search_symbol_reference"
+
+
+def test_search_evidence_reference_to_called_member_does_not_ground_alone():
+    """A SEARCH block editing one member (calculate_total) that merely
+    CALLS a different, real member (apply_discount) by name must not
+    ground to the called member - only joint containment across every
+    distinctive token (which only calculate_total's own body satisfies)
+    may ground it. Found live via this exact synthetic case during
+    CTX-001-P1-C3 development - an earlier version of the rule grounded
+    to apply_discount instead."""
+    content = (
+        "def calculate_total(items):\n"
+        "    running_subtotal = 0\n"
+        "    for entry in items:\n"
+        "        running_subtotal += entry.unit_price\n"
+        "    return apply_discount(running_subtotal)\n"
+        "\n"
+        "def apply_discount(running_subtotal):\n"
+        "    if running_subtotal > 1000:\n"
+        "        return running_subtotal * 0.9\n"
+        "    return running_subtotal\n"
+    )
+    search_text = (
+        "running_subtotal = 0\n"
+        "for entry in items:\n"
+        "    running_subtotal += entry.unit_price\n"
+        "return apply_discount(running_subtotal)"
+    )
+    hints = resolve_member_hints_from_search_evidence("m.py", content, search_text)
+    assert [h.member_id for h in hints] == ["calculate_total"]
+
+
+def test_search_evidence_ambiguous_sibling_members_return_no_hint():
+    """Two unrelated (non-nested) members whose bodies both happen to
+    contain the same distinctive tokens - genuine ambiguity, must return no
+    hint rather than an arbitrary pick between them."""
+    content = (
+        "def alpha_handler(raw_token):\n"
+        "    distinctive_marker_one = raw_token\n"
+        "    distinctive_marker_two = raw_token\n"
+        "    return distinctive_marker_one + distinctive_marker_two\n"
+        "\n"
+        "def beta_handler(raw_token):\n"
+        "    distinctive_marker_one = raw_token\n"
+        "    distinctive_marker_two = raw_token\n"
+        "    return distinctive_marker_two\n"
+    )
+    hints = resolve_member_hints_from_search_evidence(
+        "m.py", content, "distinctive_marker_one and distinctive_marker_two together"
+    )
+    assert hints == []
+
+
+def test_search_evidence_generic_common_tokens_alone_return_no_hint():
+    """Only stoplisted/short/pervasive words survive tokenization - no
+    distinctive evidence at all, must return no hint (never fabricate one
+    from generic vocabulary common to nearly every member)."""
+    content = "def f(self, node, name):\n    text = node\n    return text\n\ndef g(self, node, name):\n    text = node\n    return text\n"
+    hints = resolve_member_hints_from_search_evidence("m.py", content, "self node name text value data")
+    assert hints == []
+
+
+def test_search_evidence_partial_overlap_never_wins_over_no_full_match():
+    """A boundary sharing MOST but not ALL distinctive tokens must never be
+    selected - this module implements no scoring/ranking at all, so a
+    'highest overlap' candidate that isn't a COMPLETE, unique containment
+    match returns no hint, not a best-effort pick."""
+    content = (
+        "def close_but_not_complete(alpha_token, beta_token):\n"
+        "    combined = alpha_token + beta_token\n"
+        "    return combined\n"
+        "\n"
+        "def unrelated(gamma_token):\n"
+        "    return gamma_token\n"
+    )
+    # gamma_distinctive_token appears NOWHERE in the file - no boundary can
+    # ever satisfy full containment, even though close_but_not_complete
+    # shares 2 of the 3 distinctive tokens.
+    hints = resolve_member_hints_from_search_evidence(
+        "m.py", content, "alpha_token beta_token gamma_distinctive_token"
+    )
+    assert hints == []
+
+
+def test_search_evidence_unsupported_language_returns_no_hint():
+    hints = resolve_member_hints_from_search_evidence(
+        "Program.cs", 'void Get<T>(string key) { return default(T); }', "generic_name callee_name"
+    )
+    assert hints == []
+
+
+def test_search_evidence_empty_search_text_returns_no_hint():
+    content = "def f():\n    return 1\n"
+    assert resolve_member_hints_from_search_evidence("m.py", content, "") == []
+    assert resolve_member_hints_from_search_evidence("m.py", content, "   \n  ") == []
+
+
+def test_search_evidence_java_nested_call_grounds_to_calling_method_not_callee():
+    """Non-Python language case (Java, existing java_member_boundaries) -
+    proves the rule generalizes without any per-language code: a rejected
+    SEARCH block editing calculateTotal()'s own loop body, which CALLS a
+    real but different method applyDiscountSchedule() by name, must ground
+    to calculateTotal (the member whose body the evidence jointly belongs
+    to), never the called method."""
+    content = (
+        "public class InvoiceProcessor {\n"
+        "    public double calculateTotal(java.util.List<LineItem> items) {\n"
+        "        double runningSubtotal = 0.0;\n"
+        "        for (LineItem entry : items) {\n"
+        "            runningSubtotal += entry.getUnitPrice() * entry.getQuantity();\n"
+        "        }\n"
+        "        return applyDiscountSchedule(runningSubtotal);\n"
+        "    }\n"
+        "\n"
+        "    private double applyDiscountSchedule(double runningSubtotal) {\n"
+        "        if (runningSubtotal > 1000) {\n"
+        "            return runningSubtotal * 0.9;\n"
+        "        }\n"
+        "        return runningSubtotal;\n"
+        "    }\n"
+        "}\n"
+    )
+    search_text = (
+        "double runningSubtotal = 0.0;\n"
+        "for (LineItem entry : items) {\n"
+        "    runningSubtotal += entry.getUnitPrice() * entry.getQuantity();\n"
+        "}\n"
+        "return applyDiscountSchedule(runningSubtotal);"
+    )
+    hints = resolve_member_hints_from_search_evidence("InvoiceProcessor.java", content, search_text)
+    assert [h.member_id for h in hints] == ["InvoiceProcessor.calculateTotal"]
+
+
+def test_search_evidence_candidate_never_carries_source_text():
+    """Structural proof of the discovery-vs-authority separation: a
+    MemberHintCandidate has no field capable of carrying source content at
+    all - only member_id (a name) and provenance (a string label). The
+    caller must always re-derive real content via extract_member_body()
+    against current_content, never from anything this function returns."""
+    content = "def real_target(x):\n    return x\n"
+    hints = resolve_member_hints_from_search_evidence("m.py", content, "real_target")
+    assert hints
+    field_names = set(hints[0].__dataclass_fields__.keys())
+    assert field_names == {"member_id", "provenance"}

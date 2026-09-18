@@ -70,6 +70,7 @@ from kriya.workflow.context_source import (
     member_boundaries_for,
     member_ids_matching_name,
     resolve_member_hints_from_failure_location,
+    resolve_member_hints_from_search_evidence,
 )
 from kriya.workflow.retry_prompts import _build_coordinated_retry_prompt, _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
@@ -255,7 +256,26 @@ def _resolve_retry_member_hints(
 
     Deduplicates across multiple file_locations deterministically (a set
     per path, rendered back to a sorted list) - the same member reported
-    by two different locations produces one hint, not two."""
+    by two different locations produces one hint, not two.
+
+    CTX-001-P1-C3 (2026-09-18): a SECOND, additive evidence source - a
+    rejected anchored-edit's own SEARCH text (state.last_failure.
+    attempted_edits) - runs AFTER the file-location pass above and ONLY
+    ever fills in a path that pass left with no hint (line-grounded
+    evidence, when it exists at all, is never overridden by the weaker,
+    model-generated SEARCH-text evidence). Gated on every one of: the path
+    is still an authorized target (never widens scope, same invariant as
+    the file-location pass); at least one REAL anchored-edit failure has
+    already occurred for this exact path (state.budgets.
+    anchor_failure_counts) - never triggers on a first attempt or a
+    full-file rejection that produced no anchor failure at all; this run's
+    known-target context for the path still has a real omission (never
+    triggers once the file is already exact/full - nothing left to
+    escalate). See VAL-001 G1 rerun forensics (run d756a833) for why this
+    source exists: SOURCE 1/2 above were BOTH structurally silent for an
+    entire 8-attempt run despite the model's own rejected SEARCH blocks
+    already containing real, current-file vocabulary that nothing
+    consumed."""
     if state.last_failure is None or not target_files:
         return {}
     target_set = set(target_files)
@@ -271,6 +291,32 @@ def _resolve_retry_member_hints(
             location.filepath, resolved.content, location.line,
         ):
             member_hints.setdefault(location.filepath, set()).add(candidate.member_id)
+
+    if state.last_failure.attempted_edits:
+        failure_filepaths = {
+            location.filepath for location in state.last_failure.file_locations
+        } or set(state.last_failure.likely_files)
+        for filepath in failure_filepaths:
+            if filepath not in target_set or filepath in member_hints:
+                continue
+            if state.budgets.anchor_failure_counts.get(filepath, 0) < 1:
+                continue
+            known_item = state.known_target_context_items.get(filepath)
+            if known_item is None or not known_item.omitted_regions:
+                continue
+            resolved = resolver.resolve(filepath)
+            if not resolved.exists:
+                continue
+            search_grounded_ids: set = set()
+            for edit in state.last_failure.attempted_edits:
+                search_text = edit.get("search") or ""
+                for candidate in resolve_member_hints_from_search_evidence(
+                    filepath, resolved.content, search_text,
+                ):
+                    search_grounded_ids.add(candidate.member_id)
+            if len(search_grounded_ids) == 1:
+                member_hints[filepath] = search_grounded_ids
+
     return {path: sorted(ids) for path, ids in member_hints.items()}
 
 

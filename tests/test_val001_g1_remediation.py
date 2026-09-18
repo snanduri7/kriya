@@ -32,15 +32,17 @@ import pytest
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.workflow.attempt import (
+    _resolve_retry_member_hints,
     AttemptContext,
     _completeness_gated_operation,
     _operation_map,
     _record_all_files_written_as_exact_context,
     _record_retry_projection_context_items,
 )
+from kriya.workflow.context_budget import build_known_target_context
 from kriya.workflow.context_package import make_context_item
 from kriya.workflow.edit_safety import content_revision
-from kriya.workflow.failure import Failure
+from kriya.workflow.failure import Failure, FileLocation
 from kriya.workflow.file_resolution import (
     _normalized_public_signatures,
     find_brownfield_public_api_changes,
@@ -787,3 +789,286 @@ class TestD1MetaRegression:
             # FallbackClosure above; this loop proves validate_operation_
             # result's own classification doesn't change or "warm up" across
             # repeated calls with identical input.)
+
+
+# ---------------------------------------------------------------------------
+# CTX-001-P1-C3 - failure-grounded member escalation (2026-09-18)
+#
+# Added after VAL-001 G1's post-remediation rerun (Kriya run d756a833, same
+# baseline/checkpoint lineage as the D1/D2/D3 tests above) proved that the
+# two existing CTX-001 member-hint producers (vector_chunk_header,
+# failure_location) can BOTH be structurally silent for an entire 8-attempt
+# run: no Graph-RAG retrieval ran (the Architect already named the target
+# file directly) and neither anchored_edit nor operation_contract failures
+# ever populate a FileLocation.line. A rejected anchored-edit's own SEARCH
+# text was already captured in Failure.attempted_edits and never consumed.
+# See docs/assurance/VAL_001_GRAPHIFY_G1.md's rerun-forensics section for
+# the full evidence trail this closes.
+#
+# No Graphify production source is copied anywhere in this file (same
+# convention as the D1/D2/D3 tests above) - fixtures mirror the structural
+# shape only.
+# ---------------------------------------------------------------------------
+
+def _c3_g1_shaped_module() -> str:
+    """Same synthetic shape as test_context_source.py's own
+    _g1_shaped_python_module() - kept as a separate, smaller local copy here
+    (this file's own established per-file-fixture convention, see
+    _minimal_attempt_ctx's own docstring) since these tests exercise the
+    attempt.py wiring layer, not context_source.py's rule logic itself."""
+    return (
+        "def unrelated_helper(value):\n"
+        "    return value * 2\n"
+        "\n"
+        "def outer_extractor(nodes, config):\n"
+        "    def add_node(node_id):\n"
+        "        return node_id\n"
+        "\n"
+        "    def walk_calls(node, config, source):\n"
+        "        callee_name = None\n"
+        "        fn_node = node.child_by_field_name('function')\n"
+        "        if fn_node is not None and fn_node.type == 'identifier':\n"
+        "            callee_name = read_text(fn_node, source)\n"
+        "        elif fn_node is not None and fn_node.type == 'member_access_expression':\n"
+        "            mname = fn_node.child_by_field_name('name')\n"
+        "            if mname is not None:\n"
+        "                callee_name = read_text(mname, source)\n"
+        "        return callee_name\n"
+        "\n"
+        "    for node in nodes:\n"
+        "        walk_calls(node, config, node.source)\n"
+        "    return add_node\n"
+    )
+
+
+_C3_SEARCH_TEXT = (
+    "if fn_node is not None and fn_node.type == 'identifier':\n"
+    "    callee_name = read_text(fn_node, source)\n"
+    "elif fn_node is not None and fn_node.type == 'member_access_expression':\n"
+    "    mname = fn_node.child_by_field_name('name')\n"
+    "    callee_name = read_text(mname, source)"
+)
+
+
+def _c3_skeleton_context_item(revision: str):
+    return make_context_item(
+        path="engine.py", content="def outer_extractor(...): ...  # elided",
+        reason="known_target_bounded_excerpt",
+        source_type="named_in_request", trust_level="repository",
+        tier="skeleton", is_exact=False, omitted_regions=True, revision=revision,
+    )
+
+
+def _c3_anchored_edit_failure(search_text: str = _C3_SEARCH_TEXT) -> Failure:
+    return Failure(
+        type="anchored_edit",
+        message="ANCHORED EDIT FAILURE in engine.py: anchor mismatch",
+        raw_output="anchor mismatch",
+        file_locations=[FileLocation(filepath="engine.py")],  # no line - matches real anchored_edit/operation_contract construction
+        likely_files=["engine.py"],
+        attempted_edits=[{"search": search_text, "replace": search_text}] if search_text else [],
+        attempt=3,
+    )
+
+
+class TestC3RetryEscalationTrigger:
+    """Acceptance items 3/9/11 (part): the escalation trigger fires only
+    when every named condition holds, and remains fail-closed otherwise."""
+
+    def test_unique_grounded_evidence_produces_hint_on_second_anchor_failure(self, tmp_path):
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = _c3_skeleton_context_item(content_revision(content))
+        state.budgets.anchor_failure_counts["engine.py"] = 1
+        state.last_failure = _c3_anchored_edit_failure()
+
+        hints = _resolve_retry_member_hints(ctx, state, ["engine.py"])
+        assert hints == {"engine.py": ["outer_extractor.walk_calls"]}
+
+    def test_no_prior_anchor_failure_does_not_trigger(self, tmp_path):
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = _c3_skeleton_context_item(content_revision(content))
+        # anchor_failure_counts left at its default (0/missing) - never fired yet.
+        state.last_failure = _c3_anchored_edit_failure()
+
+        assert _resolve_retry_member_hints(ctx, state, ["engine.py"]) == {}
+
+    def test_no_omitted_source_does_not_trigger(self, tmp_path):
+        """Once a file's context is already exact/full, there's nothing to
+        escalate - the new producer must not run at all."""
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = make_context_item(
+            path="engine.py", content=content, reason="known_target",
+            source_type="named_in_request", trust_level="repository",
+            tier="full", is_exact=True, omitted_regions=False,
+            revision=content_revision(content),
+        )
+        state.budgets.anchor_failure_counts["engine.py"] = 1
+        state.last_failure = _c3_anchored_edit_failure()
+
+        assert _resolve_retry_member_hints(ctx, state, ["engine.py"]) == {}
+
+    def test_full_file_rejection_with_no_search_evidence_does_not_trigger(self, tmp_path):
+        """Acceptance item: 'do not trigger from full-file responses that
+        contain no SEARCH evidence' - an operation_contract failure from a
+        mandatory-patch-violating full-file response has an empty
+        attempted_edits list (see attempt.py's own construction site)."""
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = _c3_skeleton_context_item(content_revision(content))
+        state.budgets.anchor_failure_counts["engine.py"] = 1
+        state.last_failure = Failure(
+            type="operation_contract",
+            message="OPERATION CONTRACT FAILURE",
+            raw_output="mandatory REPAIR_WITH_PATCH, got repair_with_full_file",
+            file_locations=[FileLocation(filepath="engine.py")],
+            likely_files=["engine.py"],
+            attempted_edits=[],
+            attempt=8,
+        )
+        assert _resolve_retry_member_hints(ctx, state, ["engine.py"]) == {}
+
+    def test_target_not_authorized_does_not_widen_scope(self, tmp_path):
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = _c3_skeleton_context_item(content_revision(content))
+        state.budgets.anchor_failure_counts["engine.py"] = 1
+        state.last_failure = _c3_anchored_edit_failure()
+
+        # engine.py is NOT in target_files - the retry's own authorized set.
+        assert _resolve_retry_member_hints(ctx, state, []) == {}
+        assert _resolve_retry_member_hints(ctx, state, ["other_file.py"]) == {}
+
+    def test_line_grounded_source_2_hint_is_not_overridden_by_source_3(self, tmp_path):
+        """When SOURCE 2 (failure_location, a real line) already grounded a
+        member, SOURCE 3 must never override it with a different,
+        weaker-evidence pick - line-based evidence always wins."""
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = _c3_skeleton_context_item(content_revision(content))
+        state.budgets.anchor_failure_counts["engine.py"] = 1
+        state.last_failure = Failure(
+            type="anchored_edit",
+            message="x", raw_output="x",
+            # line 2 is inside unrelated_helper, NOT walk_calls.
+            file_locations=[FileLocation(filepath="engine.py", line=2)],
+            likely_files=["engine.py"],
+            attempted_edits=[{"search": _C3_SEARCH_TEXT, "replace": _C3_SEARCH_TEXT}],
+            attempt=3,
+        )
+        hints = _resolve_retry_member_hints(ctx, state, ["engine.py"])
+        assert hints == {"engine.py": ["unrelated_helper"]}
+
+    def test_hallucinated_search_text_fails_closed_no_escalation(self, tmp_path):
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = _c3_skeleton_context_item(content_revision(content))
+        state.budgets.anchor_failure_counts["engine.py"] = 1
+        invented_search = (
+            "if fn_node is not None:\n"
+            "    name_child = fn_node.child_by_field_name('name')\n"
+            "    callee_name = read_text(name_child, source)"
+        )
+        state.last_failure = _c3_anchored_edit_failure(invented_search)
+
+        assert _resolve_retry_member_hints(ctx, state, ["engine.py"]) == {}
+
+
+class TestC3ContextPromotion:
+    """Acceptance items 4/5/6/10: once uniquely grounded, the EXISTING
+    (unmodified) member-exact pipeline must produce real, current,
+    exact source - never source derived from the rejected candidate."""
+
+    def test_grounded_hint_promotes_to_member_exact_with_current_content(self, tmp_path):
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        rendered, package = build_known_target_context(
+            ["engine.py"], str(tmp_path), str(tmp_path), 50_000,
+            member_hints={"engine.py": ["outer_extractor.walk_calls"]},
+        )
+        member_items = [item for item in package.relevant_files if item.member_id is not None]
+        assert len(member_items) == 1
+        item = member_items[0]
+        assert item.tier == "member_exact"
+        assert item.is_exact is True
+        assert item.member_id == "outer_extractor.walk_calls"
+        assert item.revision == content_revision(content)
+        # Real, current source - not the rejected candidate's own text, and
+        # not the SEARCH evidence itself (this function never sees it).
+        assert "def walk_calls(node, config, source):" in item.content
+        assert "callee_name = read_text(mname, source)" in item.content
+        assert item.content in content
+
+    def test_context_budget_unaffected_by_member_hint_presence(self, tmp_path):
+        """The allocator's own budget_limit is a caller-supplied parameter,
+        untouched by whether a member hint exists - CTX-001-P1-C3 only
+        ever changes WHAT gets shown within the existing budget, never the
+        budget itself."""
+        _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        budget_limit = 50_000
+        _, package_without = build_known_target_context(
+            ["engine.py"], str(tmp_path), str(tmp_path), budget_limit,
+        )
+        _, package_with = build_known_target_context(
+            ["engine.py"], str(tmp_path), str(tmp_path), budget_limit,
+            member_hints={"engine.py": ["outer_extractor.walk_calls"]},
+        )
+        # Same budget_limit parameter both times - this proves the call
+        # contract never widens; token consumption for each package stays
+        # within that one unchanged limit.
+        from kriya.workflow.context_budget import estimate_tokens
+        assert estimate_tokens(rendered_or_empty(package_without)) <= budget_limit
+        assert estimate_tokens(rendered_or_empty(package_with)) <= budget_limit
+
+
+def rendered_or_empty(package) -> str:
+    return "".join(item.content or "" for item in package.relevant_files)
+
+
+class TestC3D1Unchanged:
+    """Acceptance items 7/13 (part): D1's own gate is untouched by this
+    package - a stale revision still fails closed, and repeated anchor
+    failures still never authorize an unsafe full-file mutation."""
+
+    def test_stale_revision_member_exact_item_still_rejected_by_d1(self, tmp_path):
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        # A member_exact item recorded under a STALE revision (the file was
+        # mutated after this item was built, before this attempt runs) -
+        # exactly D1's pre-existing revision-match requirement, unmodified.
+        state.known_target_context_items["engine.py"] = make_context_item(
+            path="engine.py", content=content, reason="known_target",
+            source_type="named_in_request", trust_level="repository",
+            tier="member_exact", is_exact=True, omitted_regions=False,
+            member_id="outer_extractor.walk_calls",
+            revision="stale-revision-does-not-match-current-content",
+        )
+        op, mandatory = _completeness_gated_operation(
+            "engine.py", CodeOperation.CREATE_FULL_FILE,
+            file_exists=True, ctx=ctx, state=state,
+        )
+        assert op is CodeOperation.REPAIR_WITH_PATCH
+        assert mandatory is True
+
+    def test_repeated_anchor_failures_never_authorize_full_file_mutation(self, tmp_path):
+        """Even with CTX-001-P1-C3 wired in, the PRE-EXISTING anchor_failure_
+        counts >= 1 -> REPAIR_WITH_FULL_FILE base-operation escalation
+        (_operation_map) still gets correctly neutralized back to
+        REPAIR_WITH_PATCH by _completeness_gated_operation whenever the
+        file's context item isn't authoritative - unchanged behavior."""
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = _c3_skeleton_context_item(content_revision(content))
+        state.budgets.anchor_failure_counts["engine.py"] = 3
+        ops = _operation_map(ctx, ["engine.py"], CodeOperation.REPAIR_WITH_FULL_FILE, state)
+        assert ops["engine.py"] is CodeOperation.REPAIR_WITH_PATCH

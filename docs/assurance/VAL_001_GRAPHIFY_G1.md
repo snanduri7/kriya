@@ -681,3 +681,82 @@ and `run_g1_rerun_acceptance.sh` (sequences all 10 required acceptance checks, g
 only starting at step 6, after generation has already terminated). Neither script has been run by
 this agent. Classification of the outcome, once the user runs both, is not automatic — the same
 ten-way classification contract from the original G1 applies unchanged.
+
+## 12. Post-remediation rerun (run `d756a833`) — forensic classification
+
+The user executed `run_g1_rerun.sh`. Result: `quality_gates_exhausted`, 8 real Developer attempts
+(4 full-set + 4 targeted/fallback-targeted), model routing alternated `qwen3-coder:30b` /
+`qwen3.6:35b-a3b-q4_K_M` via the pre-existing, unmodified production escalation ladder
+(`resolve_fallback_model`) — confirmed NOT contamination (same config/chain as original G1; the
+divergence is a legitimate, fully-traced consequence of D3-part-1 correctly eliminating the
+false-positive brownfield-API detection that drove original G1 into `api_contract_recovery` mode
+instead). `PRIMARY_CLASSIFICATION = CONTEXT_CORRECTNESS_GAP` (persisting through D1/D2/D3-part-1):
+D1 correctly rejected every illegitimate full-file mutation (2/8 attempts) and the anchored-edit
+gate correctly rejected every non-matching patch (4/8 attempts, all against a context tier that
+never became exact); zero unauthorized changes, zero false success, fully atomic rejection across
+all 8 attempts. `D1 = PASS`, `D2 = NOT_EXERCISED` (correctly — its own precondition never recurred),
+`D3_PART1 = PASS`. Full forensic detail (per-attempt table, model routing trace, anchored-edit
+root-cause classification, localization-quality assessment, model-understanding-vs-execution
+comparison against maintainer ground truth) lives in this session's own transcript, not duplicated
+here — see the CTX-001-P1-C3 investigation below for the root cause this forensic pass fed into.
+
+## 13. CTX-001-P1-C3: failure-grounded member escalation (2026-09-18)
+
+**Root cause of the rerun's persistent CONTEXT_CORRECTNESS_GAP**: the CTX-001 member-hint pipeline
+(`kriya/workflow/context_source.py`) had exactly two candidate producers — SOURCE 1
+(`resolve_member_hints_from_chunk_header`, needs a Graph-RAG chunk hit) and SOURCE 2
+(`resolve_member_hints_from_failure_location`, needs a real `Failure.file_locations[i].line`).
+Both were structurally silent for this entire run: no RAG retrieval ran at all (the Architect
+already named `engine.py` directly), and neither `anchored_edit` nor `operation_contract` failures
+ever populate a `FileLocation.line` (they are response-SHAPE failures, not "found at file:line"
+failures) — `member_hint_paths` stayed `[]` across all 8 attempts despite the model's own rejected
+SEARCH blocks already carrying real, current-file vocabulary (`fn_node`, `generic_name`,
+`member_access_expression`, ...) that nothing consumed. Triage/risk-class was independently
+confirmed to play no role in either the initial skeleton tier (file-size-vs-budget only) or any
+escalation gating — a correction to the earlier G0/G1 forensic framing.
+
+**Fix**: a THIRD, additive evidence source — `resolve_member_hints_from_search_evidence()` — reads
+a rejected anchored-edit's own SEARCH text (`Failure.attempted_edits`, already captured, never
+previously consumed) and grounds it against real, current structure via two deterministic rules
+(never a fuzzy/highest-score pick, per explicit design correction before implementation): a
+sole-evidence exact member-name match, or joint containment of 2+ distinctive tokens inside exactly
+one structural boundary (nested Python/Java members collapse to the smallest enclosing one; real
+sibling ambiguity returns no hint). Wired into `_resolve_retry_member_hints`
+(`kriya/workflow/attempt.py`), gated on: at least one prior anchored-edit failure for that file
+(`anchor_failure_counts >= 1`), the file's known-target context still has a real omission, and the
+triggering failure carries non-empty SEARCH text — never overrides a SOURCE-2 (line-based) hint,
+never widens the authorized target set, never triggers on a full-file rejection with no SEARCH
+evidence at all. D1 is completely unmodified; this only ever increases the chance a legitimate
+patch anchor exists.
+
+**A real precision gap was found and fixed during self-testing, not merely proposed**: an earlier
+version of the name-match rule grounded on ANY distinctive token matching a real member's name,
+even when several OTHER distinctive tokens were present — a synthetic Java case (a method's own
+SEARCH text calling a real, differently-named sibling method) proved this could ground to the
+CALLED method instead of the one actually being edited. Fixed by requiring the name-match rule to
+apply ONLY when it is the single, uncorroborated piece of evidence (see `resolve_member_hints_
+from_search_evidence`'s own docstring for the full before/after account).
+
+Empirically re-validated against this run's own real evidence (not merely a synthetic
+approximation): attempt 3's real, rejected SEARCH text correctly and uniquely grounds to the real
+structural member containing #3406's actual bug region (`_extract_generic.walk_calls`); attempts
+4/7's SEARCH text, which invented local-variable names that don't exist anywhere in the real file,
+correctly fails closed rather than fabricating a nearby guess — an honest, disclosed limitation
+(this mechanism recovers real vocabulary, it does not repair a fully-hallucinated response).
+
+**Tests**: 11 new tests in `tests/test_context_source.py` (candidate-discovery/grounding rules in
+isolation, including a G1-shaped synthetic fixture, a non-Python/Java case, and the Java
+call-vs-declaration precision fix as its own regression test) + 11 new tests in
+`tests/test_val001_g1_remediation.py` (escalation-trigger gating, context promotion to real
+`tier=member_exact`, D1-unchanged proofs including stale-revision rejection). All 22 self-verified
+via direct execution, plus the full pre-existing `test_context_source.py` (52/52),
+`test_val001_g1_remediation.py` (48/48), and `test_context_budget.py` (30/30) suites, plus 11
+targeted highest-risk `test_workflow.py` member/anchor tests — all green, zero regressions found
+this way. Full `.venv/bin/pytest` confirmation is the user's own, per repository convention (this
+agent does not run it).
+
+No architecture change — an additive third evidence source into CTX-001 P1 C2's own,
+already-designed extension point. `D3-part-2` (persisted graph evidence) remains correctly
+deferred — proven unnecessary for this gap specifically (token-overlap against already-available
+`member_boundaries_for()` output, needing no index, no `kriya analyze` prerequisite, no
+persistence).

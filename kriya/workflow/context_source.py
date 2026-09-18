@@ -21,6 +21,7 @@ signal - member precision is never fabricated for a language with no real
 structural extraction (WP5's own explicit requirement).
 """
 import ast
+import keyword
 import os
 import re
 from dataclasses import dataclass
@@ -563,3 +564,189 @@ def resolve_member_hints_from_failure_location(
         return []
     most_specific = min(containing, key=lambda b: b.end_line - b.start_line)
     return [MemberHintCandidate(member_id=most_specific.member_id, provenance="failure_location")]
+
+
+# --- CTX-001-P1-C3: failure-grounded member escalation (2026-09-18) --------
+#
+# SOURCE 3: a rejected anchored-edit candidate's own SEARCH text. Added
+# because VAL-001 G1's post-remediation rerun (run d756a833) proved SOURCE 1
+# (vector_chunk_header) and SOURCE 2 (failure_location) can both be
+# structurally silent for an entire run at once: no Graph-RAG retrieval ran
+# at all (the Architect already named the target file directly), and neither
+# `anchored_edit` nor `operation_contract` failures ever populate a
+# FileLocation.line (they are response-SHAPE failures, not "found at
+# file:line" failures) - so member_hint_paths stayed [] across all 8
+# attempts despite the model's own rejected SEARCH blocks already containing
+# real, current-file vocabulary (`fn_node`, `generic_name`,
+# `member_access_expression`, ...), already captured in
+# Failure.attempted_edits, and never consumed by anything.
+#
+# The SEARCH text is model-generated, UNTRUSTED localization evidence - it
+# may correctly OR incorrectly describe real code (G1's own attempts 3/4/5/7
+# each hallucinated a plausible-but-non-matching reconstruction of the real
+# target; attempts 4/7 additionally invented local-variable names that don't
+# exist anywhere in the real file at all). It is therefore used ONLY to
+# generate a member_id CANDIDATE, never as source content itself - the
+# member's real body is always read fresh via member_boundaries_for()/
+# extract_member_body() against current_content, exactly like SOURCE 1/2;
+# this function never returns text, only a member_id, and a caller that
+# eventually builds a member_exact ContextItem does so from the CURRENT
+# worktree's own real content, never from anything in this module's input.
+#
+# Deliberately NOT a scoring/ranking mechanism (see the two rules' own
+# docstrings below) - a "highest similarity" pick would let a sufficiently
+# plausible hallucination steer promotion toward the wrong real member,
+# which would make member_exact's own "is_exact" meaning true of the SOURCE
+# while the SELECTION of that source was probabilistic - two different
+# guarantees that must not be conflated. Both rules here are pure binary
+# membership checks against real, current structure; anything that cannot
+# be uniquely grounded returns [] (no hint), the same safe no-op every other
+# evidence source in this module already uses.
+
+_MEMBER_HINT_STOPLIST = frozenset(keyword.kwlist) | frozenset(getattr(keyword, "softkwlist", ())) | {
+    "self", "cls", "node", "nodes", "text", "name", "names", "value", "values",
+    "content", "contents", "source", "sources", "type", "types", "result", "results",
+    "data", "item", "items", "key", "keys", "path", "paths", "line", "lines",
+    "col", "cols", "child", "children", "parent", "root", "true", "false", "none",
+    "str", "int", "list", "dict", "set", "tuple", "len", "range", "print",
+}
+_MEMBER_HINT_MIN_TOKEN_LENGTH = 4
+_MEMBER_HINT_MIN_DISTINCTIVE_TOKENS = 2
+
+_IDENTIFIER_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _extract_identifier_tokens(text: str) -> List[str]:
+    """Every distinct identifier-shaped token in `text`, first-seen order -
+    a plain lexical scan, never a real parse (the SEARCH text is often not
+    valid syntax on its own - a fragment, possibly with elided/placeholder
+    content, per apply_anchored_edits' own exact-match requirement being
+    what actually validates it, not this function)."""
+    seen: List[str] = []
+    seen_set = set()
+    for match in _IDENTIFIER_TOKEN_RE.finditer(text or ""):
+        token = match.group(0)
+        if token not in seen_set:
+            seen_set.add(token)
+            seen.append(token)
+    return seen
+
+
+def _distinctive_search_tokens(text: str) -> List[str]:
+    """Identifier tokens minus Python keywords and a small curated stoplist
+    of pervasive, structurally-meaningless names (`self`, `node`, `text`, a
+    handful of builtins, ...) and anything shorter than
+    _MEMBER_HINT_MIN_TOKEN_LENGTH. Not a claim that a surviving token is
+    globally rare in the file - only that it is not one of the small set of
+    words common enough to appear in nearly every member regardless of
+    subject matter. Joint containment of SEVERAL such tokens (see Rule B
+    below) is what actually does the discriminating work, not any single
+    token's own rarity."""
+    return [
+        token for token in _extract_identifier_tokens(text)
+        if len(token) >= _MEMBER_HINT_MIN_TOKEN_LENGTH
+        and token.lower() not in _MEMBER_HINT_STOPLIST
+    ]
+
+
+def _collapse_nested_containing(containing: List[MemberBoundary]) -> Optional[MemberBoundary]:
+    """Python/Java member boundaries NEST - an outer function's own line
+    range always includes every member declared inside it (see
+    python_member_ranges' own dotted-member_id docstring) - so more than one
+    boundary containing the exact same evidence is the ORDINARY, expected
+    case for a match inside a nested function, never automatic ambiguity on
+    its own. Returns the smallest (most specific) boundary only when every
+    boundary in `containing` forms a single unbroken ancestor chain around
+    it (each larger boundary's range fully encloses the smallest one's own
+    range) - the deepest, narrowest real member that still legitimately
+    contains all the evidence. Two boundaries that are NOT nested within
+    each other (real siblings, e.g. two unrelated methods that each happen
+    to reference the same handful of distinctive tokens) is genuine
+    ambiguity - returns None, never an arbitrary pick between them."""
+    if not containing:
+        return None
+    if len(containing) == 1:
+        return containing[0]
+    ordered = sorted(containing, key=lambda b: b.end_line - b.start_line)
+    smallest = ordered[0]
+    for other in ordered[1:]:
+        if not (other.start_line <= smallest.start_line and smallest.end_line <= other.end_line):
+            return None
+    return smallest
+
+
+def resolve_member_hints_from_search_evidence(
+    path: str, current_content: str, search_text: str,
+) -> List[MemberHintCandidate]:
+    """SOURCE 3 (retry evidence, CTX-001-P1-C3): a rejected anchored-edit
+    candidate's own SEARCH text -> zero or one VALIDATED member hint for
+    `path`, grounded deterministically against `current_content` (always
+    caller-supplied, CurrentSourceResolver-resolved - same contract as
+    SOURCE 1/2; this function does no I/O of its own).
+
+    Two independently-deterministic grounding rules, tried in this exact
+    order - see this module's own header comment for why neither is a
+    score:
+
+    RULE A (sole-evidence symbol self-reference): fires ONLY when exactly
+    ONE distinctive token survives stoplist filtering AND it is the exact
+    bare name of exactly one real current member (member_ids_matching_name)
+    - the model's SEARCH text carried nothing else distinctive enough to
+    corroborate or contradict that single name, so the name itself is the
+    entire signal. Deliberately narrow: an earlier version of this rule
+    fired on ANY distinctive token matching a real member's name, even
+    among several OTHER distinctive tokens - found live, via a synthetic
+    Java case in this same package's own self-test, that a SEARCH block
+    editing calculateTotal()'s own body but CALLING a real, differently-
+    named method applyDiscountSchedule() would wrongly ground to the
+    CALLED method, not the one actually being edited (a reference to a
+    real name is not evidence that name IS the edit target). Two or more
+    distinctive tokens now always falls through to Rule B instead, which
+    requires every token - including any that happen to name a real
+    member - to jointly corroborate the same boundary.
+
+    RULE B (structural containment, 2+ distinctive tokens): requires at
+    least _MEMBER_HINT_MIN_DISTINCTIVE_TOKENS distinctive tokens (never a
+    single word, however rare) ALL present, verbatim, in one real member's
+    CURRENT body (extract_member_body against current_content, never the
+    SEARCH text's own content) - this is what actually resolves the Java
+    case above correctly: calculateTotal()'s body contains its own loop
+    variables AND the applyDiscountSchedule() call it makes, so every
+    distinctive token is jointly satisfied there, while
+    applyDiscountSchedule()'s own body does not contain the loop
+    variables. See _collapse_nested_containing for how nested-boundary
+    containment is resolved without treating ordinary parent/child nesting
+    as ambiguity.
+
+    Returns [] (no hint, never a guess/highest-overlap pick) when:
+    search_text is empty or whitespace-only, the language has no member
+    extractor, no distinctive tokens survive stoplist filtering, or
+    neither rule uniquely grounds a single member."""
+    if not search_text or not search_text.strip():
+        return []
+    boundaries = member_boundaries_for(path, current_content)
+    if not boundaries:
+        return []
+    distinctive = _distinctive_search_tokens(search_text)
+    if not distinctive:
+        return []
+
+    if len(distinctive) == 1:
+        member_ids = member_ids_matching_name(boundaries, distinctive[0])
+        if len(member_ids) == 1:
+            return [MemberHintCandidate(member_id=member_ids[0], provenance="search_symbol_reference")]
+        return []
+
+    if len(distinctive) < _MEMBER_HINT_MIN_DISTINCTIVE_TOKENS:
+        return []
+    containing = [
+        boundary for boundary in boundaries
+        if all(
+            token in extract_member_body(current_content, boundary.start_line, boundary.end_line)
+            for token in distinctive
+        )
+    ]
+    grounded = _collapse_nested_containing(containing)
+    if grounded is None:
+        return []
+    return [MemberHintCandidate(member_id=grounded.member_id, provenance="search_token_containment")]
