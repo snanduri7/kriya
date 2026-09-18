@@ -5,7 +5,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -317,6 +317,67 @@ def is_ignored(filepath: str, root_path: str, gitignore_patterns: List[str]) -> 
             return True
     return False
 
+
+def nested_gitignore_patterns_for(
+    root: str, repo_root: str, gitignore_cache: Dict[str, List[str]],
+) -> List[str]:
+    """CTX-001 P1 WP8: the ONE shared nested-.gitignore-accumulation step -
+    extracted verbatim from index_repository()'s own pre-existing walk
+    (which RepositoryAnalyzer.analyze() below now also calls, instead of
+    maintaining its own, entirely separate, non-.gitignore-aware notion of
+    'which directories are part of this repository') so both discovery
+    paths mean the same thing by 'the repository' rather than two
+    independently-evolved, silently-diverging answers.
+
+    `root` is the CURRENT os.walk() directory being visited; `gitignore_cache`
+    is mutated in place (root -> the accumulated pattern list applicable at
+    that directory, inherited from its parent plus any local .gitignore of
+    its own) - the caller is expected to pass the SAME dict across an
+    entire os.walk() so a subdirectory correctly inherits its ancestors'
+    patterns, exactly as real nested .gitignore resolution requires.
+    Callers must seed gitignore_cache with
+    `{repo_root: parse_gitignore(repo_root)}` before the walk begins."""
+    parent = os.path.dirname(root)
+    current_patterns = list(gitignore_cache.get(parent, gitignore_cache[repo_root]))
+
+    local_gitignore = os.path.join(root, ".gitignore")
+    if os.path.exists(local_gitignore) and root != repo_root:
+        try:
+            with open(local_gitignore, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        rel_dir = os.path.relpath(root, repo_root)
+                        if rel_dir != ".":
+                            current_patterns.append(os.path.join(rel_dir, line))
+                        else:
+                            current_patterns.append(line)
+        except Exception as e:
+            logger.debug(f"Failed to read '.gitignore' at '{local_gitignore}': {e}")
+    gitignore_cache[root] = current_patterns
+    return current_patterns
+
+
+# CTX-001 P1 WP8: a small, IN-PROCESS-ONLY cache - (root_path,
+# compute_workspace_content_hash()) -> the RepositoryModel last computed
+# for that exact real content identity. Deliberately module-level (not a
+# general caching framework, not a new persistent store): RepositoryAnalyzer
+# itself is constructed fresh on every real call site (kriya/workflow/
+# workflow.py), so a per-instance cache would be useless; a module-level
+# dict gives this the ONE lifetime that's actually useful - surviving
+# across REPEATED analyze() calls within one long-running process (a
+# milestone-decomposed run's own multiple run_generation_workflow() calls,
+# or a `kriya repl` session's multiple `generate`s) - while still
+# guaranteeing zero cross-process persistence (a fresh `kriya` CLI
+# invocation starts with an empty dict, by construction - nothing is ever
+# written to disk). _ANALYZE_CACHE_HITS/_MISSES are one-element lists (not
+# bare module ints) purely so they can be reset from a test without a
+# `global` statement leaking into this module's own runtime code path.
+_ANALYZE_CACHE: Dict[Tuple[str, str], "RepositoryModel"] = {}
+_ANALYZE_CACHE_HITS = [0]
+_ANALYZE_CACHE_MISSES = [0]
+
+
 class RepositoryAnalyzer:
     """Analyzes workspace directory to extract language, frameworks, architecture and dependencies."""
 
@@ -324,12 +385,59 @@ class RepositoryAnalyzer:
         self.root_path = os.path.abspath(root_path)
 
     def analyze(self) -> RepositoryModel:
-        """Run analysis on the repository and return a RepositoryModel."""
+        """Run analysis on the repository and return a RepositoryModel.
+
+        CTX-001 P1 WP8: transparently reuses a prior result for THIS
+        process's lifetime when the workspace's real content identity
+        (compute_workspace_content_hash(), STATE-001's own git-tree-based
+        primitive - reused, not reinvented) hasn't changed since the last
+        analyze() call for this exact root_path - see _analyze_cache_key()'s
+        own docstring for why this key is now safe to use (the discovery-
+        semantics alignment below closes the gap the original WP8 attempt
+        found unsafe). A non-git workspace (cache_key is None) always
+        recomputes, unchanged from pre-WP8 behavior - this cache never
+        makes a supported non-git workspace unanalyzable."""
         if not os.path.exists(self.root_path):
             raise FileNotFoundError(f"Root path '{self.root_path}' does not exist.")
 
+        cache_key = self._analyze_cache_key()
+        if cache_key is not None:
+            cached = _ANALYZE_CACHE.get(cache_key)
+            if cached is not None:
+                _ANALYZE_CACHE_HITS[0] += 1
+                # Never return the SAME shared instance a second caller
+                # could mutate (RepositoryModel/pydantic BaseModel is
+                # mutable by default) - deep-copy on every cache hit, cheap
+                # relative to a full re-walk+re-parse.
+                return cached.model_copy(deep=True)
+
+        _ANALYZE_CACHE_MISSES[0] += 1
+        model = self._analyze_uncached()
+        if cache_key is not None:
+            _ANALYZE_CACHE[cache_key] = model
+            return model.model_copy(deep=True)
+        return model
+
+    def _analyze_cache_key(self) -> Optional[Tuple[str, str]]:
+        """(root_path, workspace_content_hash) - None for a non-git
+        workspace or any other reason the hash can't be computed
+        (compute_workspace_content_hash() already fails closed to None for
+        exactly these cases - see its own docstring) - analyze() always
+        recomputes fresh when this is None, identical to every pre-WP8
+        call. Local import: kriya.workflow.checkpoint is a much heavier
+        module (git subprocess helpers, checkpoint I/O) that kriya/analyzer/
+        itself has no other reason to depend on at import time - deferred
+        to first actual use, mirroring this module's own existing deferred-
+        import convention (e.g. _parse_java's edit_safety import)."""
+        from kriya.workflow.checkpoint import compute_workspace_content_hash
+        workspace_hash = compute_workspace_content_hash(self.root_path)
+        if workspace_hash is None:
+            return None
+        return (self.root_path, workspace_hash)
+
+    def _analyze_uncached(self) -> RepositoryModel:
         model = RepositoryModel(root_path=self.root_path)
-        
+
         # 1. Walk repository and count files/extensions
         file_counts = {}
         total_files = 0
@@ -355,9 +463,28 @@ class RepositoryAnalyzer:
             "skills", "memory", "logs",
         }
 
+        # CTX-001 P1 WP8: the SAME nested-.gitignore-aware primitive
+        # index_repository() already uses (nested_gitignore_patterns_for/
+        # is_ignored, module-level above) - ADDITIVE to, never a
+        # replacement for, the ignore_dirs/dot-prefix checks already
+        # established above (both existing exclusions still apply
+        # unconditionally - this only makes analyze() ALSO honor a real
+        # project .gitignore, closing the gap where a project-specific
+        # ignored directory neither hardcoded set knows about was still
+        # walked, counted, and sampled while compute_workspace_content_
+        # hash() (which DOES honor .gitignore) stayed unchanged - the
+        # exact WP8 unsafe-cache finding this closes).
+        gitignore_cache = {self.root_path: parse_gitignore(self.root_path)}
+
         for root, dirs, files in os.walk(self.root_path):
+            current_patterns = nested_gitignore_patterns_for(root, self.root_path, gitignore_cache)
+
             # Modify dirs in-place to skip ignored directories
-            dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith(".")]
+            dirs[:] = [
+                d for d in dirs
+                if d not in ignore_dirs and not d.startswith(".")
+                and not is_ignored(os.path.join(root, d), self.root_path, current_patterns)
+            ]
 
             rel_path = os.path.relpath(root, self.root_path)
             # Only report a top-level folder as real project structure if it
@@ -366,21 +493,22 @@ class RepositoryAnalyzer:
             # it as an existing "top_level_folder" regardless of whether
             # anything was ever in it, which is exactly the false signal
             # that caused the skills/manage.py hallucination above.
-            real_files_here = [f for f in files if not f.startswith(".")]
+            real_files_here = [
+                f for f in files
+                if not f.startswith(".") and not is_ignored(os.path.join(root, f), self.root_path, current_patterns)
+            ]
             if rel_path != "." and real_files_here:
                 directories.add(rel_path.split(os.sep)[0])
 
-            for file in files:
-                if file.startswith("."):
-                    continue
+            for file in real_files_here:
                 _, ext = os.path.splitext(file)
                 ext = ext.lower()
-                
+
                 lang = EXTENSION_MAP.get(ext)
                 if lang:
                     file_counts[lang] = file_counts.get(lang, 0) + 1
                     total_files += 1
-                
+
                 file_list.append(os.path.join(root, file))
 
         # Calculate language percentages
@@ -683,24 +811,11 @@ class RepositoryAnalyzer:
         gitignore_cache = {self.root_path: parse_gitignore(self.root_path)}
 
         for root, dirs, files in os.walk(self.root_path):
-            parent = os.path.dirname(root)
-            current_patterns = list(gitignore_cache.get(parent, gitignore_cache[self.root_path]))
-            
-            local_gitignore = os.path.join(root, ".gitignore")
-            if os.path.exists(local_gitignore) and root != self.root_path:
-                try:
-                    with open(local_gitignore, "r", encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if line and not line.startswith("#"):
-                                rel_dir = os.path.relpath(root, self.root_path)
-                                if rel_dir != ".":
-                                    current_patterns.append(os.path.join(rel_dir, line))
-                                else:
-                                    current_patterns.append(line)
-                except Exception as e:
-                    logger.debug(f"Failed to read '.gitignore' at '{local_gitignore}': {e}")
-            gitignore_cache[root] = current_patterns
+            # CTX-001 P1 WP8: the shared nested-.gitignore primitive
+            # (nested_gitignore_patterns_for, above) - RepositoryAnalyzer.
+            # analyze() now walks against this SAME function, rather than
+            # this method's own logic being the only real implementation.
+            current_patterns = nested_gitignore_patterns_for(root, self.root_path, gitignore_cache)
 
             dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), self.root_path, current_patterns)]
             for file in files:
