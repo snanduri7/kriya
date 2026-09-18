@@ -536,8 +536,97 @@ _JAVA_PUBLIC_METHOD_RE = re.compile(
     r"([A-Za-z_$][\w$]*)\s*\(([^)]*)\)",
 )
 _PYTHON_PUBLIC_FUNCTION_RE = re.compile(
-    r"^[ \t]*(?:async\s+)?def\s+([A-Za-z][A-Za-z0-9]*)\s*\(([^)]*)\)", re.MULTILINE,
+    # VAL-001 G1 D3-part-1 (2026-09-18): the name group was `[A-Za-z][A-Za-z0-9]*`
+    # - no underscore anywhere in the name, not even mid-word - which silently
+    # missed essentially every real snake_case Python function (public or
+    # private) rather than just filtering leading-underscore ones the way the
+    # separate `name.startswith("_")` check right after every use of this
+    # pattern clearly intends. Widened to allow underscores throughout the
+    # name (still requires an alphabetic first character); this only WIDENS
+    # which real signatures get tracked - the separate leading-underscore
+    # filter, unchanged, is still what decides public vs. private.
+    r"^[ \t]*(?:async\s+)?def\s+([A-Za-z][A-Za-z0-9_]*)\s*\(([^)]*)\)", re.MULTILINE,
 )
+
+
+def _python_module_and_class_level_signatures(content: str) -> Dict[str, str]:
+    """VAL-001 G1 D3-part-1 (2026-09-18): scope-correct replacement for the
+    indentation-blind regex this function used to use directly. A function
+    NESTED inside another function or method is lexically private - Python
+    scoping makes it uncallable from any other module - and must never be
+    treated as public API regardless of its name. Demonstrated live in run
+    8b6ee803: `bind`/`visit`/`walk`, all function-nested closures never
+    returned or otherwise exposed by their enclosing function, were flagged
+    as "removed public signatures" purely because a regex over indentation
+    can't tell a closure from a module-level function.
+
+    Scope rule (exactly two levels, matching this function's own prior,
+    intended behavior for the cases that were never actually buggy):
+    - `tree.body` (module-level) functions - the primary case.
+    - Each module-level class's own direct body - a class's methods are
+      externally reachable via attribute access even though they're not a
+      bare module-level name, so they keep being captured (bare method
+      name, same key shape as a module-level function - `find_brownfield_
+      public_api_changes()`'s evidence_files search already only ever
+      matched on the bare callable name, never a class-qualified one, so
+      this preserves that existing contract exactly rather than changing
+      it).
+    - Anything nested inside a function OR a method (a closure, a nested
+      def, a method defined inside another method) is excluded outright -
+      never captured, regardless of name. This is the actual fix.
+
+    A class nested inside another class, or a function/class defined
+    inside a function, is intentionally NOT walked into beyond these two
+    levels - out of scope for this fix (neither is the shape G1 or any
+    known adjacent case demonstrated), and going further would risk
+    capturing MORE than the established two-level contract rather than
+    correcting the one real gap.
+
+    Falls back to the empty dict (never raises) on a syntax error - the
+    caller's existing contract already tolerates a signature-free file
+    (see the regex-based version's own implicit behavior: `.findall()`
+    against unparseable text just finds nothing, never raises either).
+
+    Parameter text is read back from the SOURCE via ast.get_source_segment()
+    (Python's own exact-span slice, not a reconstruction from `ast.arguments`
+    field names) and run through the exact same `_PYTHON_PUBLIC_FUNCTION_RE`
+    the old whole-file regex used - applied here to one node's own source
+    segment instead of the whole file. This is deliberate, not incidental:
+    reconstructing the parameter list from AST fields alone would silently
+    DROP type annotations and default values (`bind(name: str | None,
+    type_name: str | None, scope_node)` would become `bind(name, type_name,
+    scope_node)`), which would break every EXISTING exact-signature-string
+    comparison this module's callers already rely on - not just for nested
+    closures, for every function in every file. AST supplies the scope
+    decision (which defs even count); the original regex still supplies the
+    exact text, unchanged, only ever applied to a definition already known
+    to be at module or class level."""
+    signatures: Dict[str, str] = {}
+    try:
+        tree = ast.parse(content or "")
+    except (SyntaxError, ValueError):
+        return signatures
+
+    def _record(node) -> None:
+        if node.name.startswith("_"):
+            return
+        segment = ast.get_source_segment(content, node)
+        if not segment:
+            return
+        match = _PYTHON_PUBLIC_FUNCTION_RE.match(segment.lstrip("\n"))
+        if not match or match.group(1) != node.name:
+            return
+        normalized_parameters = re.sub(r"\s+", " ", match.group(2).strip())
+        signatures[f"{node.name}({normalized_parameters})"] = node.name
+
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _record(node)
+        elif isinstance(node, ast.ClassDef):
+            for member in node.body:
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    _record(member)
+    return signatures
 # A public Java/Kotlin/Groovy record's own canonical constructor component
 # list - its real, established data contract, distinct from any method it
 # declares. _JAVA_PUBLIC_METHOD_RE explicitly excludes `record` declarations
@@ -600,11 +689,11 @@ def _normalized_public_signatures(path: str, content: str) -> Dict[str, str]:
             normalized_components = _normalize_java_type_list(components)
             signatures[f"record {record_name}({normalized_components})"] = record_name
     elif extension == ".py":
-        for name, parameters in _PYTHON_PUBLIC_FUNCTION_RE.findall(content or ""):
-            if name.startswith("_"):
-                continue
-            normalized_parameters = re.sub(r"\s+", " ", parameters.strip())
-            signatures[f"{name}({normalized_parameters})"] = name
+        # VAL-001 G1 D3-part-1: scope-aware (module-level + class-method only,
+        # never a function-nested closure) - see _python_module_and_class_
+        # level_signatures's own docstring for why this replaced the prior
+        # indentation-blind regex-over-the-whole-file approach.
+        signatures.update(_python_module_and_class_level_signatures(content or ""))
     return signatures
 
 

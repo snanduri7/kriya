@@ -18,6 +18,7 @@ from kriya.workflow.edit_safety import content_revision
 from kriya.workflow.triage import EngineeringRoute
 from kriya.workflow.process_profile import ProcessProfile
 from kriya.workflow.repair_contract import RepairContract
+from kriya.workflow.context_package import ContextItem
 
 
 class APIContractRecoveryPhase(str, Enum):
@@ -329,6 +330,24 @@ class GenerationState:
     # never actually generated in any attempt (get() returns None; the
     # caller does not fall back to baseline).
     last_candidate_contents: Dict[str, str] = field(default_factory=dict)
+    # VAL-001 G1 D1 (2026-09-18): path -> the ContextItem actually shown to the
+    # Developer for that file THIS attempt, whenever it was built through
+    # build_known_target_context() (attempt.py's own known_target_package/
+    # retry_member_package call sites - see each site's own comment for why
+    # the OTHER known-target producer, API_CONTRACT_RECOVERY's baseline_owners
+    # text block, is a separate, non-ContextItem mechanism and does not
+    # populate this dict). Consulted only by _completeness_gated_operation()
+    # (attempt.py) to decide whether a whole-file replacement of an EXISTING
+    # file is authorized: real evidence of what representation (tier/
+    # is_exact/member_id/revision) the model actually saw, never inferred
+    # from file size. Absence of an entry for a path is not evidence of
+    # exactness - see that function's own docstring for the fail-closed
+    # default. Reset is unnecessary (a fresh GenerationState is built per
+    # run start, not reused across `generate` invocations; a later attempt's
+    # own build_known_target_context() call overwrites/adds entries as it
+    # goes, so a prior attempt's now-stale item for the same path is always
+    # replaced before it could be re-read for a later attempt on that file).
+    known_target_context_items: Dict[str, "ContextItem"] = field(default_factory=dict)
     # Revisions that passed the real compile gate. A later candidate invalidates
     # only changed files and their manifest dependents; unrelated validated files
     # remain stable across targeted/dependency-scoped retries.

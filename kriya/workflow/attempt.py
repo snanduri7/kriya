@@ -63,6 +63,7 @@ from kriya.workflow.context_budget import (
     build_code_context,
     build_known_target_context,
 )
+from kriya.workflow.context_package import make_context_item
 from kriya.workflow.context_source import (
     CurrentSourceResolver,
     SourceDerivationCache,
@@ -273,6 +274,127 @@ def _resolve_retry_member_hints(
     return {path: sorted(ids) for path, ids in member_hints.items()}
 
 
+def _record_retry_projection_context_items(
+    state: GenerationState, retry_package: Optional["RetryPackage"],
+) -> None:
+    """VAL-001 G1 D1 (2026-09-18): a targeted retry's own content-supply
+    mechanism (RetryPackage/FileProjection, kriya/workflow/retry_package.py
+    + context_projection.py) is a SEPARATE producer from build_known_target_
+    context()'s ContextItem/ContextPackage, but carries the exact same real
+    signal (path/revision/level/omitted_regions) - confirmed live: the
+    existing test `test_first_anchor_failure_switches_next_protocol_
+    without_widening_scope` demonstrates a targeted retry legitimately
+    falling back to REPAIR_WITH_FULL_FILE after an anchor-match failure, and
+    that fallback IS safe exactly when the retry's own projection for that
+    file was ProjectionLevel.FULL (no omission) - so this function converts
+    each FileProjection into the same ContextItem shape _completeness_
+    gated_operation() already reads, rather than either re-deriving a
+    second signal or exempting the targeted-retry path from the invariant
+    outright (which would silently reopen it for a genuinely-projected/
+    truncated target file, not just the always-safe case)."""
+    if retry_package is None:
+        return
+    for projection in retry_package.target_projections:
+        state.known_target_context_items[projection.path] = make_context_item(
+            path=projection.path, content=projection.content,
+            reason=f"retry_package:{projection.reason}",
+            source_type="named_in_request", trust_level="repository",
+            tier=projection.level.value, is_exact=not projection.omitted_regions,
+            revision=projection.revision, omitted_regions=projection.omitted_regions,
+        )
+
+
+def _completeness_gated_operation(
+    filepath: str, base_operation: CodeOperation, *,
+    file_exists: bool, ctx: "AttemptContext", state: Optional[GenerationState],
+) -> Tuple[CodeOperation, bool]:
+    """VAL-001 G1 D1 (2026-09-18): `permitted mutation precision <=
+    authoritative current-source precision available to the Developer`, for
+    an EXISTING file. Whole-file replacement (CREATE_FULL_FILE/
+    REPAIR_WITH_FULL_FILE - never anything else; a new file, a targeted
+    patch, or a no-change assessment carry no such risk and pass through
+    unchanged) is authorized only when the model was actually shown a
+    ContextItem for this exact path that is tier="full" (never a member
+    slice - `member_id is None` - "member_exact" is real, exact evidence
+    for the MEMBER it covers, never authority to rewrite the surrounding
+    file), is_exact=True, and whose recorded revision still matches the
+    file's real current content.
+
+    Absence of a recorded ContextItem is NOT evidence of exactness - it is
+    evidence of nothing, and the invariant reads "requires authoritative
+    complete exact current source", not "requires proof of its absence" -
+    so a file with no known_target_context_items entry fails closed to
+    REPAIR_WITH_PATCH exactly like a recorded skeleton/signatures/
+    member_exact/stale entry does. REPAIR_WITH_PATCH is not a workaround:
+    apply_anchored_edits (kriya/workflow/attempt.py's own edit-application
+    path) already refuses a SEARCH: block that doesn't match the real
+    current content exactly once, so downgrading to it never authorizes an
+    ungrounded mutation - it either succeeds against real content or fails
+    closed on its own, through the exact same failure-handling path any
+    other Quality Gate rejection already uses.
+
+    Returns (operation, mandatory). `mandatory=True` means this downgrade is
+    the invariant speaking, not an ordinary retry preference - a caller MUST
+    additionally reject (not merely allow validate_operation_result's own,
+    intentionally more permissive, patch-may-fall-back-to-full-file
+    transition) a result that still resolves to a full-file shape for this
+    file. See run_attempt()'s own operation-contract enforcement block,
+    which applies that additional check using this same function's output.
+
+    EXEMPTION (found while implementing this design, against the real
+    existing test suite - not merely theorized): RESTORE_PUBLIC_CONTRACT is
+    deterministic, never a Developer/LLM call at all -
+    _restore_api_contract_owners_deterministically() writes
+    state.all_original_contents[owner] (the exact, already-known baseline)
+    verbatim, and its own docstring is explicit that its output is shaped
+    identically to real Developer output specifically so downstream
+    consumers "are completely unaware this attempt never called the
+    Developer at all." This invariant is about the risk of PROBABILISTIC
+    generation from incomplete context - a risk that provably does not
+    exist for a deterministic byte-for-byte restoration of content Kriya
+    itself already held before the risky candidate was even sandboxed. Gating
+    it here would have rejected Kriya's own correct, hard-won PRV-11 fix
+    (state.py's own restoration mechanism, 2026-08-30) as if it were an
+    unsafe model response.
+    """
+    if not file_exists or base_operation not in (
+        CodeOperation.CREATE_FULL_FILE, CodeOperation.REPAIR_WITH_FULL_FILE,
+    ):
+        return base_operation, False
+
+    if (
+        state is not None
+        and state.api_contract_recovery is not None
+        and state.api_contract_recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT
+    ):
+        return base_operation, False
+
+    item = state.known_target_context_items.get(filepath) if state is not None else None
+    if (
+        item is not None
+        and item.tier == "full"
+        and item.is_exact
+        and item.member_id is None
+    ):
+        full_path = os.path.join(ctx.worktree_path, filepath)
+        if not os.path.exists(full_path):
+            full_path = os.path.join(ctx.workspace_path, filepath)
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
+                current_revision = content_revision(handle.read())
+        except OSError:
+            current_revision = None
+        # An item with no recorded revision at all predates CTX-001 P1 WP3
+        # (LEGACY_COMPATIBILITY default, see ContextItem.from_dict) - treated
+        # as current rather than stale, matching that field's own documented
+        # additive/optional contract; every real construction site
+        # (build_known_target_context()) always sets a real revision.
+        if not item.revision or current_revision == item.revision:
+            return base_operation, False
+
+    return CodeOperation.REPAIR_WITH_PATCH, True
+
+
 def _operation_map(
     ctx: "AttemptContext", filepaths: List[str], attempt_operation: CodeOperation,
     state: Optional[GenerationState] = None,
@@ -290,6 +412,11 @@ def _operation_map(
                 and _target_exists(ctx, filepath)
             ):
                 operations[filepath] = CodeOperation.REPAIR_WITH_FULL_FILE
+    for filepath in filepaths:
+        operations[filepath], _mandatory = _completeness_gated_operation(
+            filepath, operations[filepath],
+            file_exists=_target_exists(ctx, filepath), ctx=ctx, state=state,
+        )
     return operations
 
 
@@ -3957,6 +4084,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     use_fallback_targeted = state.last_attempt_mode == "fallback_targeted"
     attempt_operation = operation_for_attempt(
         state.last_attempt_mode, has_prior_failure=bool(state.error_context),
+        recovery_phase=(
+            state.api_contract_recovery.phase if state.api_contract_recovery else None
+        ),
     )
     state.record_event(RunEvent(
         kind="attempt.started",
@@ -4122,6 +4252,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             retry_error_context = (
                 retry_package.authoritative_error if retry_package else state.error_context
             )
+            # VAL-001 G1 D1: record real provenance for _completeness_gated_operation()'s
+            # own authorization check - see this function's own docstring for why the
+            # targeted-retry path needs this exactly like the known-target path does.
+            _record_retry_projection_context_items(state, retry_package)
             task_desc, active_code_context = _build_targeted_retry_prompt(
                 ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
                 state.all_files_written, ctx.worktree_path, base_code_context,
@@ -4192,6 +4326,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 )
                 if retry_member_rendered:
                     active_code_context += retry_member_rendered
+                # VAL-001 G1 D1: record real provenance for _completeness_gated_operation()'s
+                # own authorization check - never inferred from file size.
+                state.known_target_context_items.update(
+                    {item.path: item for item in retry_member_package.relevant_files}
+                )
                 state.record_event(RunEvent(
                     kind="context.retry_member_hint_package",
                     attempt=state.attempt_number,
@@ -4300,6 +4439,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         retry_error_context = (
             retry_package.authoritative_error if retry_package else state.error_context
         )
+        # VAL-001 G1 D1: same provenance recording as the primary targeted-retry
+        # branch above (this is the fallback-model retry path).
+        _record_retry_projection_context_items(state, retry_package)
         task_desc, active_code_context = _build_targeted_retry_prompt(
             ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
             state.all_files_written, ctx.worktree_path, base_code_context,
@@ -4563,6 +4705,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     len(known_target_package.relevant_files), len(known_target_package.omitted),
                     ", ".join(known_target_files),
                 )
+            # VAL-001 G1 D1: record real provenance for _completeness_gated_operation()'s
+            # own authorization check - never inferred from file size. This is the exact
+            # context package run 8b6ee803's attempt 1 built (skeleton tier, body elided)
+            # for graphify/extractors/engine.py; recording it here is what lets the
+            # invariant see that a whole-file replacement was never authorized for it.
+            state.known_target_context_items.update(
+                {item.path: item for item in known_target_package.relevant_files}
+            )
             # Internal evidence (WP6/observability) - never the full source,
             # just enough to answer "what tier/omission did each known
             # target actually get" from the run trace alone.
@@ -5025,8 +5175,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     for file_obj in files:
         filepath = file_obj["filepath"]
         file_exists = _target_exists(ctx, filepath)
-        expected_operation = operation_for_file(
-            attempt_operation, file_exists=file_exists,
+        expected_operation, mandatory_patch = _completeness_gated_operation(
+            filepath,
+            operation_for_file(attempt_operation, file_exists=file_exists),
+            file_exists=file_exists, ctx=ctx, state=state,
         )
         actual_operation, contract_error = validate_operation_result(
             file_obj,
@@ -5044,6 +5196,38 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 file_locations=[FileLocation(filepath=filepath)],
                 likely_files=[filepath],
                 attempted_edits=file_obj.get("edits") or [],
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        # VAL-001 G1 D1 (2026-09-18): validate_operation_result()'s own PATCH ->
+        # FULL_FILE transition is intentionally permissive for an ORDINARY
+        # targeted retry (the model may legitimately decide a small patch isn't
+        # enough). It must NOT be permissive here: `mandatory_patch` means
+        # REPAIR_WITH_PATCH was this invariant speaking - the model was never
+        # shown source complete enough to safely author a whole-file
+        # replacement - so a response that resolves to REPAIR_WITH_FULL_FILE
+        # anyway (the model ignoring the patch instruction and writing
+        # "FILE CONTENT:") is a REJECTED candidate, not an accepted fallback.
+        # This is the fix for the exact gap run 8b6ee803 exposed: attempts 3/4
+        # both took this path and were, before this change, treated as a
+        # normal fallback.
+        if mandatory_patch and actual_operation is CodeOperation.REPAIR_WITH_FULL_FILE:
+            failure = Failure(
+                type="operation_contract",
+                message=(
+                    f"OPERATION CONTRACT FAILURE in {filepath}: a full-file replacement was "
+                    "returned, but this file's context this attempt was not authoritative, "
+                    "complete, exact current source (skeleton/signatures/member-only/stale "
+                    "revision) - REPAIR_WITH_PATCH was mandatory, not merely preferred, and a "
+                    "full-file fallback cannot be safely accepted without content Kriya never "
+                    "showed the model. Return SEARCH:/REPLACE: instead."
+                ),
+                raw_output=f"mandatory REPAIR_WITH_PATCH, got {actual_operation.value}",
+                file_locations=[FileLocation(filepath=filepath)],
+                likely_files=[filepath],
+                attempted_edits=file_obj.get("edits") or [],
+                diagnostics={"reason_code": "MANDATORY_PATCH_FULL_FILE_FALLBACK_REJECTED"},
                 attempt=state.attempt_number,
             )
             state.gate_outcomes.append(failure.to_gate_outcome())

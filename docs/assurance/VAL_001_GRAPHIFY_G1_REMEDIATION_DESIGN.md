@@ -551,3 +551,103 @@ No STOP condition is triggered: no authority widening, no model-specific or Grap
 handling (the regression fixture deliberately does not copy Graphify source), no CTX-001
 replacement, and every fix extends an existing mechanism rather than introducing new editing/
 recovery architecture.
+
+---
+
+## Implementation status (2026-09-18)
+
+D1, D2, and D3-part-1 are **implemented**, exactly as designed above, plus one closed gap and one
+scope extension found only while implementing (both documented here, not silently folded into the
+design narrative above, which is left as originally written):
+
+- **Closed gap**: `validate_operation_result()`'s own PATCH→FULL_FILE fallback (intentionally
+  permissive for an ordinary targeted retry) would otherwise have made the new invariant advisory,
+  not deterministic, for a model that simply ignores the patch instruction. Closed with a
+  caller-side "mandatory patch" check at `run_attempt()`'s existing operation-contract enforcement
+  block (`kriya/workflow/attempt.py`) — `validate_operation_result()` itself is unchanged.
+- **Scope extension found via the real existing test suite, not anticipated in the design above**:
+  a targeted retry's own content-supply mechanism (`RetryPackage`/`FileProjection`,
+  `kriya/workflow/retry_package.py` + `context_projection.py`) is a second, independent producer of
+  exactly the same real completeness signal `ContextItem` carries (`path`/`revision`/`level`/
+  `omitted_regions`) — proven necessary by `test_first_anchor_failure_switches_next_protocol_
+  without_widening_scope` (an existing test whose own legitimate full-file fallback would otherwise
+  have been wrongly blocked). `_record_retry_projection_context_items()`
+  (`kriya/workflow/attempt.py`) converts `FileProjection` → `ContextItem` at both
+  `_build_targeted_retry_prompt()` call sites, the same shape and same target dict
+  (`state.known_target_context_items`) as the known-target path already uses.
+- **Exemption found the same way**: `RESTORE_PUBLIC_CONTRACT` is deterministic (never a Developer
+  call — `_restore_api_contract_owners_deterministically()`) and its own docstring documents that
+  its output is deliberately shaped identically to real Developer output so downstream consumers
+  don't need to know the difference. The new invariant is about the risk of *probabilistic*
+  generation from incomplete context — a risk this phase provably does not carry — so
+  `_completeness_gated_operation()` exempts it explicitly rather than gate it.
+
+**Verification performed** (no `.venv/bin/pytest` invocation, per this repo's own quota-discipline
+convention — every check below ran via direct Python import/execution against this project's own
+`.venv`, not a mocked or reimplemented harness):
+
+- All 28 new deterministic tests (`tests/test_val001_g1_remediation.py`) pass.
+- 288 existing tests across `tests/test_agents.py`, `tests/test_corr016_planner_authority_gate.py`,
+  `tests/test_corr018_general_case_closure.py`, and `tests/test_semantic_region_authority.py` pass
+  unchanged.
+- All 145 directly-invokable `run_attempt()`-exercising tests in `tests/test_workflow.py` pass,
+  including all 18 that directly exercise `find_brownfield_public_api_changes()`. Three genuine
+  interactions were found this way (not found by reasoning about the design alone) and resolved:
+  the anchor-failure fallback test above, and two runtime-artifact-cleanup tests
+  (`test_run_attempt_cleans_up_runtime_artifacts_between_attempts[_without_git]`) plus one
+  process-boundary-recurrence test (`test_run_attempt_escalates_message_when_process_boundary_
+  failure_recurs`) whose own mocked `developer.run_generation` bypasses the real context-building
+  step this invariant depends on — each fixed by recording the same real-content `ContextItem` a
+  production run's own preceding steps would have produced, not by weakening any assertion.
+- The one existing test whose own fixture needed updating
+  (`test_first_anchor_failure_switches_next_protocol_without_widening_scope`) had its *setup*
+  extended (one `known_target_context_items` entry added, reflecting real production sequencing) —
+  its assertion and intent are unchanged.
+
+**D3-part-2 prerequisite check (investigation only, no code changed for it)**: confirmed directly
+against source that `dependency_graph.db` is populated exclusively by `index_repository()`, which
+runs only from the explicit `kriya analyze` CLI command by default. `autonomy.auto_index_missing_
+dependency_graph` (the only auto-population path during ordinary `generate`/`fix`) defaults to
+`False` in the packaged config, and even when enabled, silently degrades back to an empty graph on
+any failure. `kriya/workflow/triage.py`'s own code comment states plainly that "dependency_graph.db
+is frequently empty." This confirms the design's own disclosed fail-closed tradeoff is a **live**
+risk for the packaged-default deployment, not a theoretical one — D3-part-2 should not ship as "query
+the persisted DependencyGraph" without addressing it. Two already-implemented, reusable patterns
+exist for a corrected future design, found during this same investigation: `kriya/workflow/
+attempt.py`'s duplicate-type-check builds a live, DB-independent per-file parse whenever the
+persisted graph is empty/stale, and `kriya/workflow/workflow_controller.py`'s cross-file
+symbol-mismatch gate builds a purely ephemeral, in-memory `DependencyGraph` scoped to just the
+relevant candidate files, never touching the persisted DB at all — either pattern would let
+D3-part-2 reuse real `DependencyGraph`/symbol evidence (per its own original design constraint)
+without depending on `kriya analyze` having been run.
+
+**Files changed** (matches the task's own expected-scope list exactly, plus `state.py` for the one
+new field + import both D1 and D2 read/write):
+
+- `kriya/workflow/operations.py` — `operation_for_attempt()` gains `recovery_phase` (D2).
+- `kriya/workflow/attempt.py` — `_completeness_gated_operation()` (new), `_operation_map()`
+  extended, `_record_retry_projection_context_items()` (new), two `build_known_target_context()`
+  call sites + two `_build_targeted_retry_prompt()` call sites now record `ContextItem`s, the
+  operation-contract enforcement block gains the mandatory-patch-fallback rejection, the
+  `operation_for_attempt()` call site passes `recovery_phase`.
+- `kriya/agents/agent.py` — the anchored-edit system prompt and fix-analysis instruction now branch
+  on `apply_fix_analysis` instead of unconditionally claiming a retry.
+- `kriya/workflow/file_resolution.py` — `_PYTHON_PUBLIC_FUNCTION_RE`'s character class widened
+  (a discovered, adjacent, in-scope bug: it silently missed any function name containing an
+  underscore anywhere, not just a leading one); `_python_module_and_class_level_signatures()` (new,
+  AST-based, module/class-scope-only) replaces the old whole-file regex for Python specifically;
+  `evidence_files`'s unscoped text search is unchanged (D3-part-2, explicitly out of scope here).
+  **This is the highest-risk single change in this package, stated plainly rather than buried in a
+  risk-level label**: widening the character class changes what counts as a tracked signature for
+  *every* Python file `find_brownfield_public_api_changes()` ever sees, and it changes it in the
+  direction of finding MORE signatures than before (previously-invisible snake_case functions are
+  now tracked) — meaning it can surface genuinely NEW brownfield-API violations on Python files that
+  reported zero violations before this change, not just fix the nested-closure false positives it
+  was written for. The 145+288-test sweep in this section covers every test that actually exercises
+  this code path in this repository today and all of them pass, but that is not the same claim as
+  "the full suite is clear" — it is a necessary, not sufficient, check. The full suite (below) is
+  what actually closes this out.
+- `kriya/workflow/state.py` — `GenerationState.known_target_context_items` (new field).
+- `tests/test_val001_g1_remediation.py` (new) — the designed D1/D2/D3-part-1 test suite.
+- `tests/test_workflow.py` — three existing tests' *setup* extended (not their assertions) to
+  supply the same real-content evidence a production run's preceding steps would have produced.

@@ -1711,12 +1711,29 @@ class DeveloperAgent(BaseAgent):
                     "content for any sibling file."
                 )
             elif prefer_anchored_edit:
+                # VAL-001 G1 D1 (2026-09-18): this branch is reachable two ways - a genuine
+                # RETRY (apply_fix_analysis=True, a real prior error exists to describe) and,
+                # since kriya/workflow/attempt.py's own completeness invariant can now request
+                # REPAIR_WITH_PATCH on a file's FIRST attempt (no error exists yet - the file's
+                # context this attempt simply wasn't complete/exact enough to safely regenerate
+                # whole), a cold first attempt too. Confirmed live in run 8b6ee803's own design
+                # review: the "FIX ANALYSIS: ... the reported error" framing below is correct
+                # for the former and factually false for the latter - there is no error to
+                # analyze on a clean first attempt. Both text blocks branch on
+                # apply_fix_analysis (the same signal that already gates whether real error
+                # context exists at all) rather than assuming every anchored-edit request is a
+                # retry.
+                _first_attempt_scope_reason = (
+                    "the reported error in this file" if apply_fix_analysis
+                    else "the requested change in this file - the complete current content of "
+                    "this file was not available to you this attempt, so only a change grounded "
+                    "in the source actually shown to you above is safe"
+                )
                 file_sys_prompt = (
                     "You are the Kriya Developer Agent. MODE: REPAIR.\n"
                     "Repair exactly one existing file - do not touch or return content for any other file, "
                     "even one you're told is also part of this batch. Write, in this exact order:\n"
-                    "\"FIX ANALYSIS:\" - 1-3 sentences identifying the SPECIFIC cause of the reported error "
-                    "in this file.\n"
+                    f"\"FIX ANALYSIS:\" - 1-3 sentences identifying the SPECIFIC cause of {_first_attempt_scope_reason}.\n"
                     "Then exactly ONE of:\n"
                     "  \"SEARCH:\" <exact original text, copied verbatim from the source shown to you>\n"
                     "  \"REPLACE:\" <the corrected replacement - only the lines that actually change, plus "
@@ -1747,20 +1764,29 @@ class DeveloperAgent(BaseAgent):
             if create_full_file or repair_full_file_without_failure:
                 fix_analysis_instruction = ""
             elif prefer_anchored_edit:
+                _retry_or_first_attempt_preamble = (
+                    "This is a RETRY: the previous attempt at this file failed the error described "
+                    "in the Task section above."
+                ) if apply_fix_analysis else (
+                    "This file's complete current content was not available to you this attempt "
+                    "(only a partial/summarized view was shown) - a full rewrite risks silently "
+                    "discarding correct, unrelated code you never saw."
+                )
+                _analysis_topic = "that error" if apply_fix_analysis else "the requested change"
+                _no_change_topic = "address the error" if apply_fix_analysis else "make the requested change"
                 fix_analysis_instruction = (
-                    "\nThis is a RETRY: the previous attempt at this file failed the error described "
-                    "in the Task section above. Before writing any code, you MUST first write a line "
-                    "\"FIX ANALYSIS:\" followed by 1-3 sentences identifying the SPECIFIC cause of that "
-                    "error and exactly what you are changing to address it. Then, PREFER a small, "
+                    f"\n{_retry_or_first_attempt_preamble} Before writing any code, you MUST first write a line "
+                    f"\"FIX ANALYSIS:\" followed by 1-3 sentences identifying the SPECIFIC cause of {_analysis_topic} "
+                    "and exactly what you are changing to address it. Then, PREFER a small, "
                     "localized fix: write the line \"SEARCH:\" followed by the exact original code "
                     "(copied verbatim from the source context above) that needs to change, then the line "
                     "\"REPLACE:\" followed by the corrected code - include only the lines that actually "
                     "need to change plus the minimum surrounding context needed to uniquely identify them, "
                     "not the whole file. Only if the fix genuinely requires broader restructuring beyond a "
                     "small patch, instead write \"FILE CONTENT:\" followed by the complete corrected file. "
-                    "If, after your analysis, THIS SPECIFIC FILE genuinely requires no code change to "
-                    "address the error (for example, this file only calls into or references another file "
-                    "where the actual bug lives), instead write the line \"NO CHANGE NEEDED:\" followed by "
+                    f"If, after your analysis, THIS SPECIFIC FILE genuinely requires no code change to "
+                    f"{_no_change_topic} (for example, this file only calls into or references another file "
+                    "where the actual work belongs), instead write the line \"NO CHANGE NEEDED:\" followed by "
                     "one sentence explaining why, and do NOT write a SEARCH:/REPLACE:/FILE CONTENT: block "
                     "at all - do not invent an edit just to have one.\n"
                 )

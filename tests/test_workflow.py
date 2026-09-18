@@ -114,6 +114,7 @@ from kriya.workflow.edit_safety import (
     content_revision,
     find_cross_file_type_conflict,
 )
+from kriya.workflow.context_package import make_context_item
 from kriya.workflow.retry_strategy import (
     compute_effective_workspace_hash,
     handle_attempt_failure,
@@ -3905,6 +3906,21 @@ async def test_run_attempt_escalates_message_when_process_boundary_failure_recur
         with pytest.raises(QualityGateFailure) as first:
             await run_attempt(state1, ctx1)
         state2, ctx2 = _attempt_ctx(1)
+        # VAL-001 G1 D1 (2026-09-18): attempt 1's own candidate for test_path is
+        # left on disk (this test shares tmp_path as both worktree_path and
+        # workspace_path across two independent run_attempt() calls, with no
+        # real worktree reset between them - unlike a real run, where each
+        # retry's own context-building step, not a leftover file, is what
+        # _completeness_gated_operation() sees). By attempt 2, test_path
+        # therefore already exists on disk; recorded here so the invariant
+        # sees the same exact, trivially-small-file context a real second
+        # attempt's own build_known_target_context() call would have produced,
+        # rather than treating this test-harness artifact as missing evidence.
+        state2.known_target_context_items[test_path] = make_context_item(
+            path=test_path, content="class AppTest {}\n", reason="known_target_full_source",
+            source_type="named_in_request", trust_level="repository",
+            tier="full", is_exact=True, revision=content_revision("class AppTest {}\n"),
+        )
         with pytest.raises(QualityGateFailure) as second:
             await run_attempt(state2, ctx2)
 
@@ -10735,10 +10751,25 @@ def test_progress_gate_stops_failure_family_churn_without_content_change():
 
 def test_first_anchor_failure_switches_next_protocol_without_widening_scope(tmp_path):
     target = tmp_path / "Owner.py"
-    target.write_text("value = 1\n")
+    content = "value = 1\n"
+    target.write_text(content)
     ctx = MagicMock(worktree_path=str(tmp_path), workspace_path=str(tmp_path))
     state = GenerationState()
     state.budgets.anchor_failure_counts["Owner.py"] = 1
+    # VAL-001 G1 D1 (2026-09-18): in a real run, this escape hatch is only ever
+    # reached after a targeted retry's own content-supply step
+    # (_record_retry_projection_context_items(), attempt.py) has already run,
+    # which is exactly what makes the fallback below safe - the retry showed
+    # real, exact, current content for this file. Recorded explicitly here so
+    # this isolated call to _operation_map() (deliberately bypassing the rest
+    # of run_attempt()) still reflects that real precondition, rather than
+    # looking like an anchor-failure fallback authorized with no evidence at
+    # all (which _completeness_gated_operation() now correctly refuses).
+    state.known_target_context_items["Owner.py"] = make_context_item(
+        path="Owner.py", content=content, reason="known_target_full_source",
+        source_type="named_in_request", trust_level="repository",
+        tier="full", is_exact=True, revision=content_revision(content),
+    )
 
     operations = _operation_map(
         ctx, ["Owner.py"], CodeOperation.REPAIR_WITH_PATCH, state,
@@ -12830,6 +12861,18 @@ async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts(tmp_path
             f.write(f"attempt-{state.attempt_number}")
         return {"success": True, "timed_out": False, "returncode": 0, "output": "hi\n[VERIFICATION] PASS"}
 
+    # VAL-001 G1 D1 (2026-09-18): this test mocks developer.run_generation
+    # directly, bypassing the real build_known_target_context() call a
+    # second (repair) attempt on this now-existing file would have made -
+    # recorded here so _completeness_gated_operation() sees the same exact,
+    # trivially-small-file context a real run would have produced, matching
+    # this test's own unrelated purpose (runtime-artifact cleanup between
+    # attempts, not context-completeness authorization).
+    state.known_target_context_items["app.py"] = make_context_item(
+        path="app.py", content="print('hi')\n", reason="known_target_full_source",
+        source_type="named_in_request", trust_level="repository",
+        tier="full", is_exact=True, revision=content_revision("print('hi')\n"),
+    )
     with patch(
         "kriya.tools.validate.PolymorphicValidator.run_compile_check",
         return_value={"success": True, "output": ""},
@@ -12895,6 +12938,18 @@ async def test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_
             f.write(f"attempt-{state.attempt_number}")
         return {"success": True, "timed_out": False, "returncode": 0, "output": "hi\n[VERIFICATION] PASS"}
 
+    # VAL-001 G1 D1 (2026-09-18): this test mocks developer.run_generation
+    # directly, bypassing the real build_known_target_context() call a
+    # second (repair) attempt on this now-existing file would have made -
+    # recorded here so _completeness_gated_operation() sees the same exact,
+    # trivially-small-file context a real run would have produced, matching
+    # this test's own unrelated purpose (runtime-artifact cleanup between
+    # attempts, not context-completeness authorization).
+    state.known_target_context_items["app.py"] = make_context_item(
+        path="app.py", content="print('hi')\n", reason="known_target_full_source",
+        source_type="named_in_request", trust_level="repository",
+        tier="full", is_exact=True, revision=content_revision("print('hi')\n"),
+    )
     with patch(
         "kriya.tools.validate.PolymorphicValidator.run_compile_check",
         return_value={"success": True, "output": ""},

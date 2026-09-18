@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, Iterable, Optional
 
+from kriya.workflow.state import APIContractRecoveryPhase
+
 
 class CodeOperation(str, Enum):
     CREATE_FULL_FILE = "create_full_file"
@@ -70,14 +72,37 @@ OPERATION_CONTRACTS = {
 }
 
 
-def operation_for_attempt(mode: str, *, has_prior_failure: bool) -> CodeOperation:
+def operation_for_attempt(
+    mode: str, *, has_prior_failure: bool,
+    recovery_phase: Optional[APIContractRecoveryPhase] = None,
+) -> CodeOperation:
     if mode == "missing_files":
         return CodeOperation.CREATE_FULL_FILE
     if mode in ("targeted", "fallback_targeted"):
         return CodeOperation.REPAIR_WITH_PATCH
     if mode == "api_contract_recovery":
-        # Full-file repair avoids making restoration of a missing declaration
-        # depend on an anchor that may no longer exist in the bad candidate.
+        # VAL-001 G1 D2 (2026-09-18): full-file repair's own rationale below
+        # ("an anchor that may no longer exist in the bad candidate") only
+        # ever applied to RESTORE_PUBLIC_CONTRACT - and that phase is a
+        # deterministic, non-Developer restoration (attempt.py's own
+        # _restore_api_contract_owners_deterministically()), so operation
+        # selection never actually reaches a real generation call for it.
+        # REPAIR_BEHAVIOR is the one phase that DOES call the Developer, and
+        # it runs strictly after owner_contract_restored() - i.e. against a
+        # file Kriya itself just confirmed contains every required
+        # signature. A full-file rewrite there has no anchor-safety
+        # rationale to justify it and, demonstrated live in run 8b6ee803,
+        # let a probabilistic repair discard the deterministic restoration
+        # it was handed. AWAIT_TERMINAL_SUCCESS is included alongside
+        # REPAIR_BEHAVIOR because attempt.py's own baseline_owners/task_desc
+        # branch (the REPAIR_BEHAVIOR prompt) already treats the two phases
+        # identically - see that branch's own `contract.phase in (...)`
+        # check.
+        if recovery_phase in (
+            APIContractRecoveryPhase.REPAIR_BEHAVIOR,
+            APIContractRecoveryPhase.AWAIT_TERMINAL_SUCCESS,
+        ):
+            return CodeOperation.REPAIR_WITH_PATCH
         return CodeOperation.REPAIR_WITH_FULL_FILE
     return (
         CodeOperation.REPAIR_WITH_FULL_FILE
