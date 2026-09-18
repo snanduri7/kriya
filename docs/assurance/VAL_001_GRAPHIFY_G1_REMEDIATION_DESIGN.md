@@ -696,3 +696,11 @@ lock in the corrected semantics directly, including a real `build_retry_package(
 `RetryPackage` (not a hand-rolled fake) proving the exact `reference_projections` shape that
 regressed, and structural proofs that self-correction and live-lookup cannot bypass D1 (neither
 constructs a full-file operation or a competing context-recording path at all).
+
+**Full-suite confirmation (user-run, 2026-09-18):** `.venv/bin/pytest` — **4279 passed, 5
+deselected, 139 warnings, 0 failed** (929.92s). This closes out VAL-001 G1's D1/D2/D3-part-1
+remediation end to end: the `_PYTHON_PUBLIC_FUNCTION_RE`/D3-part-1 widening flagged above as the
+one change needing full-suite confirmation is clear, and the G1-R2 regression fix introduced no new
+failures anywhere in the suite. The 5 deselected are the `-m live_model` tier (`tests/
+test_live_smoke.py`), excluded by this repo's own `pyproject.toml` `addopts` by default - expected,
+not a gap in this run.
