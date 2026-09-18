@@ -46,11 +46,12 @@ investigation's own RETURN contract):
 """
 from __future__ import annotations
 
+import json
 import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from kriya.workflow.edit_safety import content_revision
 
@@ -62,20 +63,50 @@ class ValidationInvocation:
     """What was run, frozen once and reused byte-for-byte PRE and POST -
     the "PRE and POST validation command/selection identities are frozen
     and equivalent" invariant, made an explicit, comparable value rather
-    than an implicit assumption."""
+    than an implicit assumption.
+
+    `target_test` (VAL-001 G1-R3) is the STRUCTURAL selection value itself -
+    an ordered tuple of individual targets (a single-target selection is
+    still a 1-tuple), never a joined/parsed string - so a POST replay can
+    reuse the EXACT frozen PRE selection directly (`invocation.target_test`)
+    without re-deriving it from config/workspace state, which could have
+    drifted since PRE capture (see `capture_brownfield_baselines()`'s own
+    resume/reuse docstring for the same "never let a candidate/drifted
+    value silently stand in for the frozen PRE one" principle applied
+    elsewhere in this module). `selection_identity` remains the STABLE,
+    human-readable COMPARISON key (`matches()`/drift detection, trace
+    logging) - `target_test` is the separate, structural REPLAY value;
+    the two are kept in sync by construction wherever an invocation is
+    built (see `_selection_identity_for_targets()` below, used by every
+    real construction site in this module), never independently derived."""
 
     command_identity: str
     selection_identity: str
     environment_fingerprint: Optional[str] = None
+    target_test: Optional[Tuple[str, ...]] = None
 
     def matches(self, other: "ValidationInvocation") -> bool:
         """Command/selection identity equality - the caller-visible check
         behind PRE/POST command-identity-mismatch rejection. Environment
         fingerprint is compared only when BOTH sides have one (a validator
-        that never sets it is not thereby "incompatible with itself")."""
+        that never sets it is not thereby "incompatible with itself").
+
+        `target_test` is compared explicitly too (VAL-001 G1-R3), not left
+        to `selection_identity` alone to imply equality: every invocation
+        THIS module itself builds keeps the two in sync by construction, but
+        `ValidationInvocation` is a public constructor and `from_dict` reads
+        both fields independently from a checkpoint dict - a malformed or
+        hand-edited checkpoint could in principle carry a `selection_
+        identity` string that doesn't actually match its own `target_test`
+        value. Comparing both closes that gap structurally rather than
+        trusting the string alone - a POST replay must never run a
+        DIFFERENT target_test than the one the matched PRE baseline was
+        actually captured against."""
         if self.command_identity != other.command_identity:
             return False
         if self.selection_identity != other.selection_identity:
+            return False
+        if self.target_test != other.target_test:
             return False
         if self.environment_fingerprint is not None and other.environment_fingerprint is not None:
             return self.environment_fingerprint == other.environment_fingerprint
@@ -165,6 +196,10 @@ class ValidationBaseline:
                 "command_identity": self.invocation.command_identity,
                 "selection_identity": self.invocation.selection_identity,
                 "environment_fingerprint": self.invocation.environment_fingerprint,
+                "target_test": (
+                    list(self.invocation.target_test)
+                    if self.invocation.target_test is not None else None
+                ),
             },
             "captured_at": self.captured_at,
             "outcome": outcome_dict,
@@ -203,6 +238,10 @@ class ValidationBaseline:
                 command_identity=raw_invocation["command_identity"],
                 selection_identity=raw_invocation["selection_identity"],
                 environment_fingerprint=raw_invocation.get("environment_fingerprint"),
+                target_test=(
+                    tuple(raw_invocation["target_test"])
+                    if raw_invocation.get("target_test") is not None else None
+                ),
             ),
             captured_at=data["captured_at"],
             outcome=outcome,
@@ -634,13 +673,41 @@ class BrownfieldBaselineCaptureResult:
     hard_stop_reason: Optional[str] = None
 
 
+def _normalized_targets(target_test: Optional[Union[str, Sequence[str]]]) -> Optional[Tuple[str, ...]]:
+    """The one place a target_test value (str, sequence, or None) becomes
+    the canonical, ordered tuple this module carries everywhere after -
+    never re-derived, never joined into a string, never split back out of
+    one. A single string normalizes to a 1-tuple (existing single-target
+    behavior, unchanged in effect)."""
+    if target_test is None:
+        return None
+    if isinstance(target_test, str):
+        return (target_test,)
+    return tuple(target_test)
+
+
+def _selection_identity_for_targets(targets: Optional[Tuple[str, ...]]) -> str:
+    """Deterministic, order-preserving, collision-free encoding of the
+    complete ordered selection - json.dumps (never a joined string with an
+    ad-hoc separator character that could theoretically collide with a real
+    path) so two DIFFERENT orderings or DIFFERENT target sets can never
+    produce the same selection_identity, and so `ValidationInvocation.
+    matches()` (which compares this string) correctly detects a changed
+    target_test value as a drift, never a silent reuse."""
+    if targets is None:
+        return "full_suite"
+    return f"target_test:{json.dumps(list(targets))}"
+
+
 def _capture_single_baseline(
-    *, run_id: str, selection_identity: str, target_test: Optional[str],
-    run_validator: Callable[[Optional[str]], Dict[str, Any]],
+    *, run_id: str, target_test: Optional[Tuple[str, ...]],
+    run_validator: Callable[[Optional[Tuple[str, ...]]], Dict[str, Any]],
     compute_revision: Callable[[], Optional[str]],
 ) -> ValidationBaseline:
     invocation = ValidationInvocation(
-        command_identity="polymorphic_validator.run_tests", selection_identity=selection_identity,
+        command_identity="polymorphic_validator.run_tests",
+        selection_identity=_selection_identity_for_targets(target_test),
+        target_test=target_test,
     )
     workspace_revision = compute_revision()
     if workspace_revision is None:
@@ -667,13 +734,15 @@ def _capture_single_baseline(
 
 
 def _reuse_or_capture(
-    *, run_id: str, selection_identity: str, target_test: Optional[str],
+    *, run_id: str, target_test: Optional[Tuple[str, ...]],
     resume_baseline: Optional[Dict[str, Any]],
-    run_validator: Callable[[Optional[str]], Dict[str, Any]],
+    run_validator: Callable[[Optional[Tuple[str, ...]]], Dict[str, Any]],
     compute_revision: Callable[[], Optional[str]],
 ) -> ValidationBaseline:
     invocation = ValidationInvocation(
-        command_identity="polymorphic_validator.run_tests", selection_identity=selection_identity,
+        command_identity="polymorphic_validator.run_tests",
+        selection_identity=_selection_identity_for_targets(target_test),
+        target_test=target_test,
     )
     if resume_baseline is not None:
         try:
@@ -685,16 +754,16 @@ def _reuse_or_capture(
         except Exception:
             pass  # malformed/legacy checkpoint payload - fall through to a fresh capture, never raise
     return _capture_single_baseline(
-        run_id=run_id, selection_identity=selection_identity, target_test=target_test,
+        run_id=run_id, target_test=target_test,
         run_validator=run_validator, compute_revision=compute_revision,
     )
 
 
 def capture_brownfield_baselines(
     *, run_id: str,
-    target_test: Optional[str],
+    target_test: Optional[Union[str, Sequence[str]]],
     full_regression_policy: str,
-    run_validator: Callable[[Optional[str]], Dict[str, Any]],
+    run_validator: Callable[[Optional[Tuple[str, ...]]], Dict[str, Any]],
     compute_revision: Callable[[], Optional[str]],
     resume_baseline_targeted: Optional[Dict[str, Any]] = None,
     resume_baseline_full_regression: Optional[Dict[str, Any]] = None,
@@ -706,6 +775,13 @@ def capture_brownfield_baselines(
     function (and everything it calls) stays free of subprocess/git
     execution and fully deterministic to unit-test.
 
+    `target_test` accepts a single string (existing behavior, unchanged in
+    effect) or an ordered sequence of strings (VAL-001 G1-R3: an explicit,
+    ordered, MULTI-target selection - e.g. the calibrated pair of C# test
+    files) - normalized ONCE, here, into the canonical tuple every
+    downstream call carries (`_normalized_targets()`), never re-parsed or
+    re-joined anywhere else in this module.
+
     Captures a TARGETED baseline whenever `target_test` is set (regardless
     of `full_regression_policy`) and a FULL-REGRESSION baseline only when
     `full_regression_policy == "required"` - "disabled"/"auto" (today,
@@ -716,11 +792,16 @@ def capture_brownfield_baselines(
     Resume/reuse: a checkpointed baseline dict is reused (never re-run)
     when its own pristine workspace_revision and invocation both still
     match current reality - repository drift transparently invalidates it
-    and triggers a fresh capture, never a silent reuse across drift."""
+    and triggers a fresh capture, never a silent reuse across drift. A
+    changed target_test SELECTION (a different file, a different order, an
+    added/removed target) changes `selection_identity` and is therefore
+    drift exactly like any other invocation change - never silently reused
+    across a target_test edit."""
+    normalized_target_test = _normalized_targets(target_test)
     targeted = None
-    if target_test is not None:
+    if normalized_target_test is not None:
         targeted = _reuse_or_capture(
-            run_id=run_id, selection_identity=f"target_test:{target_test}", target_test=target_test,
+            run_id=run_id, target_test=normalized_target_test,
             resume_baseline=resume_baseline_targeted,
             run_validator=run_validator, compute_revision=compute_revision,
         )
@@ -729,7 +810,7 @@ def capture_brownfield_baselines(
     hard_stop_reason = None
     if full_regression_policy == "required":
         full_regression = _reuse_or_capture(
-            run_id=run_id, selection_identity="full_suite", target_test=None,
+            run_id=run_id, target_test=None,
             resume_baseline=resume_baseline_full_regression,
             run_validator=run_validator, compute_revision=compute_revision,
         )

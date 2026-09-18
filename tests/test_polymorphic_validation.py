@@ -840,6 +840,153 @@ def test_java_run_tests_no_target_test_omits_dtest_flag(tmp_path):
     cmd = mock_popen.call_args_list[0].args[0]
     assert cmd == ["mvn", "test"]
 
+
+# ---------------------------------------------------------------------------
+# VAL-001 G1-R3: multi-target selection (ordered sequence -> separate argv
+# entries, never a shell-joined string)
+# ---------------------------------------------------------------------------
+
+def test_python_run_tests_multi_target_uses_separate_argv_entries_never_joined_string(tmp_path):
+    """Structural proof: a tuple of two targets becomes TWO separate argv
+    entries at the end of the real command list, never one space/newline-
+    joined string. This is the exact shape G1-R3 PREPARE proved was
+    required - a single opaque token containing a space is NOT multiple
+    paths to pytest's own arg parser (empirically confirmed against a real
+    Graphify worktree during PREPARE: 0 collected, "file or directory not
+    found" for the joined-string form)."""
+    (tmp_path / "app.py").write_text("pass\n")
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "python"
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("2 passed", "")
+        mock_popen.return_value = process
+
+        validator.run_tests(target_test=("tests/a.py", "tests/b.py"))
+
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert cmd[-2:] == ["tests/a.py", "tests/b.py"], (
+        f"expected the two targets as separate trailing argv entries, got {cmd}"
+    )
+    assert "tests/a.py tests/b.py" not in cmd, "must never be joined into one string"
+    assert not any(" " in arg and "tests/a.py" in arg and "tests/b.py" in arg for arg in cmd)
+
+
+def test_python_run_tests_multi_target_list_form_equivalent_to_tuple(tmp_path):
+    """A plain list (the shape a YAML-loaded config field actually produces)
+    behaves identically to a tuple - both are just "an ordered sequence of
+    strings" to run_tests()."""
+    (tmp_path / "app.py").write_text("pass\n")
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("2 passed", "")
+        mock_popen.return_value = process
+
+        validator.run_tests(target_test=["tests/a.py", "tests/b.py"])
+
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert cmd[-2:] == ["tests/a.py", "tests/b.py"]
+
+
+def test_python_run_tests_single_string_target_unchanged_single_argv_entry(tmp_path):
+    """Existing single-target behavior remains compatible: a bare string
+    still produces exactly one trailing argv entry, identical to before
+    multi-target support existed."""
+    (tmp_path / "app.py").write_text("pass\n")
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("1 passed", "")
+        mock_popen.return_value = process
+
+        validator.run_tests(target_test="tests/a.py")
+
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert cmd[-1] == "tests/a.py"
+    assert cmd.count("tests/a.py") == 1
+
+
+def test_python_run_tests_multi_target_real_execution_selects_exactly_both_files(tmp_path):
+    """End-to-end, unmocked proof (mirrors this file's own existing
+    src-layout tests, which run real pytest rather than mocking Popen):
+    two real test files, selected together via a tuple, both actually run -
+    reproduces the exact 38+38=76 shape G1-R3 PREPARE calibrated against
+    the real Graphify worktree, at a scale that doesn't depend on any
+    specific real file's content."""
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_a.py").write_text(
+        "def test_one():\n    assert 1 + 1 == 2\n\ndef test_two():\n    assert 2 + 2 == 4\n"
+    )
+    (tests_dir / "test_b.py").write_text(
+        "def test_three():\n    assert 3 + 3 == 6\n"
+    )
+    (tests_dir / "test_unselected.py").write_text(
+        "def test_never_runs():\n    assert False\n"
+    )
+    validator = PolymorphicValidator(str(tmp_path))
+
+    res = validator.run_tests(target_test=("tests/test_a.py", "tests/test_b.py"))
+
+    assert res["success"] is True, res["output"]
+    assert "3 passed" in res["output"], res["output"]
+    assert "test_never_runs" not in res["output"]
+
+
+def test_java_run_tests_multi_target_honors_only_first_target(tmp_path):
+    """Disclosed, minimal-scope limitation: multi-target selection is a
+    Python-stack (pytest) concept today - Java honors only the first target,
+    unchanged single-target behavior for the (so far only real) case of one
+    string being passed. Never crashes on a multi-element input."""
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("Tests run: 1", "")
+        mock_popen.return_value = process
+
+        res = validator.run_tests(target_test=(
+            "src/test/java/com/example/ProtocolTest.java",
+            "src/test/java/com/example/OtherTest.java",
+        ))
+
+    assert res["success"] is True
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert "-Dtest=ProtocolTest" in cmd
+    assert not any("OtherTest" in arg for arg in cmd)
+
+
+def test_ruby_run_tests_multi_target_extends_argv(tmp_path):
+    """rspec accepts multiple positional path args natively - same
+    structural argv-extend treatment as the Python branch, not limited to
+    the first target the way Java's -Dtest=/--tests single-class-name
+    convention is."""
+    (tmp_path / "Rakefile").write_text("")
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "ruby"
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("2 examples, 0 failures", "")
+        mock_popen.return_value = process
+
+        res = validator.run_tests(target_test=["spec/a_spec.rb", "spec/b_spec.rb"])
+
+    assert res["success"] is True
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert cmd[-2:] == ["spec/a_spec.rb", "spec/b_spec.rb"]
+
+
 def test_ruby_run_tests_reports_bundle_install_failure_without_running_rspec(tmp_path):
     (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\ngem 'rspec'\n")
 

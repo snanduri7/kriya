@@ -266,6 +266,54 @@ def test_12_selection_identity_mismatch_rejects_reuse():
     assert is_baseline_reusable(baseline, current_workspace_revision="rev1", invocation=inv_b) is False
 
 
+def test_target_test_mismatch_rejects_reuse_even_with_identical_selection_identity():
+    """VAL-001 G1-R3: target_test is compared explicitly in matches(), not
+    left to selection_identity alone to imply equality - a checkpoint (or
+    hand-built ValidationInvocation) whose selection_identity string
+    happens to match but whose own target_test value differs must still be
+    rejected. Guards against a malformed/hand-edited checkpoint silently
+    letting a POST replay run a DIFFERENT target_test than the one PRE was
+    actually captured against."""
+    inv_a = ValidationInvocation("cmd", "sel", target_test=("a.py", "b.py"))
+    inv_b = ValidationInvocation("cmd", "sel", target_test=("a.py", "c.py"))  # same identity string, different targets
+    baseline = capture_validation_baseline(
+        workspace_revision="rev1", run_id="r", invocation=inv_a, raw_result={"success": True, "output": ""},
+    )
+    assert is_baseline_reusable(baseline, current_workspace_revision="rev1", invocation=inv_b) is False
+
+
+def test_malformed_checkpoint_string_target_test_fails_closed_via_matches_not_reused():
+    """A malformed checkpoint dict where target_test is a bare string
+    (never produced by to_dict() itself, which always emits a list or None)
+    does not raise in from_dict() - tuple("a.py") silently succeeds as
+    ('a','.','p','y') rather than erroring - but the downstream matches()
+    comparison against a freshly, correctly-normalized invocation still
+    catches the divergence and refuses reuse, falling through to a fresh
+    capture rather than corrupting anything."""
+    malformed_dict = {
+        "workspace_revision": "rev1", "run_id": "r1", "captured_at": 0.0,
+        "status": "captured", "indeterminate_reason": None,
+        "invocation": {
+            "command_identity": "polymorphic_validator.run_tests",
+            "selection_identity": "target_test:[\"a.py\"]",
+            "target_test": "a.py",  # malformed: a bare string, not a list
+        },
+        "outcome": {
+            "execution_status": "completed", "success": True, "failure_fingerprint": None,
+            "evidence_ref": None, "aggregate_counts": None, "test_outcomes": None,
+        },
+    }
+    restored = ValidationBaseline.from_dict(malformed_dict)  # does not raise
+    assert restored.invocation.target_test == ("a", ".", "p", "y")  # confirms the malformed shape, not asserted as "correct"
+
+    correct_invocation = ValidationInvocation(
+        "polymorphic_validator.run_tests", "target_test:[\"a.py\"]", target_test=("a.py",),
+    )
+    assert is_baseline_reusable(
+        restored, current_workspace_revision="rev1", invocation=correct_invocation,
+    ) is False, "a malformed checkpoint's own bad target_test must never be silently reused"
+
+
 def test_13_retry_reuses_pristine_baseline_without_rerunning_validator():
     inv = ValidationInvocation("cmd", "target_test:tests/x.py")
     calls = []
@@ -278,14 +326,18 @@ def test_13_retry_reuses_pristine_baseline_without_rerunning_validator():
         run_id="r1", target_test="tests/x.py", full_regression_policy="disabled",
         run_validator=rv, compute_revision=lambda: "rev1",
     ).targeted
-    assert calls == ["tests/x.py"]
+    # run_validator always receives the canonical, NORMALIZED tuple form
+    # (VAL-001 G1-R3) - a single string input still selects exactly that
+    # one target, structurally represented as a 1-tuple, never re-derived
+    # or re-parsed from a string anywhere downstream.
+    assert calls == [("tests/x.py",)]
 
     second = capture_brownfield_baselines(
         run_id="r1", target_test="tests/x.py", full_regression_policy="disabled",
         run_validator=rv, compute_revision=lambda: "rev1",
         resume_baseline_targeted=first.to_dict(),
     ).targeted
-    assert calls == ["tests/x.py"], "reuse must not invoke the validator a second time"
+    assert calls == [("tests/x.py",)], "reuse must not invoke the validator a second time"
     assert second == first
 
 
@@ -306,8 +358,175 @@ def test_14_repository_revision_drift_invalidates_reuse():
         run_validator=rv, compute_revision=lambda: "rev2-DRIFTED",
         resume_baseline_targeted=first.to_dict(),
     ).targeted
-    assert calls == ["tests/x.py", "tests/x.py"], "drift must trigger a fresh capture"
+    assert calls == [("tests/x.py",), ("tests/x.py",)], "drift must trigger a fresh capture"
     assert second.workspace_revision == "rev2-DRIFTED"
+
+
+# ---------------------------------------------------------------------------
+# VAL-001 G1-R3: multi-target selection - structural representation,
+# PRE->POST replay via the frozen invocation, delta blocking, checkpoint
+# reuse/drift
+# ---------------------------------------------------------------------------
+
+def test_multi_target_becomes_ordered_tuple_two_argv_entries_never_joined_string():
+    """capture_brownfield_baselines() passes run_validator the CANONICAL,
+    NORMALIZED tuple - never a joined string - for a multi-element
+    selection, mirroring PolymorphicValidator.run_tests()'s own separate-
+    argv-entries contract at this layer."""
+    calls = []
+    capture_brownfield_baselines(
+        run_id="r1", target_test=["tests/a.py", "tests/b.py"], full_regression_policy="disabled",
+        run_validator=lambda t: calls.append(t) or {"success": True, "output": ""},
+        compute_revision=lambda: "rev1",
+    )
+    assert calls == [("tests/a.py", "tests/b.py")]
+
+
+def test_multi_target_order_is_preserved_in_selection_identity_and_invocation():
+    inv_ab = ValidationInvocation("cmd", "sel", target_test=("tests/a.py", "tests/b.py"))
+    calls = []
+    baseline = capture_brownfield_baselines(
+        run_id="r1", target_test=("tests/a.py", "tests/b.py"), full_regression_policy="disabled",
+        run_validator=lambda t: calls.append(t) or {"success": True, "output": ""},
+        compute_revision=lambda: "rev1",
+    ).targeted
+    assert baseline.invocation.target_test == ("tests/a.py", "tests/b.py")
+    assert "tests/a.py" in baseline.invocation.selection_identity
+    assert "tests/b.py" in baseline.invocation.selection_identity
+
+
+def test_multi_target_selection_identity_distinguishes_order():
+    """Two different orderings of the SAME two targets must produce
+    DIFFERENT selection_identity values - order is part of the frozen
+    selection, not incidental."""
+    calls = []
+    baseline_ab = capture_brownfield_baselines(
+        run_id="r1", target_test=["tests/a.py", "tests/b.py"], full_regression_policy="disabled",
+        run_validator=lambda t: calls.append(t) or {"success": True, "output": ""},
+        compute_revision=lambda: "rev1",
+    ).targeted
+    baseline_ba = capture_brownfield_baselines(
+        run_id="r1", target_test=["tests/b.py", "tests/a.py"], full_regression_policy="disabled",
+        run_validator=lambda t: calls.append(t) or {"success": True, "output": ""},
+        compute_revision=lambda: "rev1",
+    ).targeted
+    assert baseline_ab.invocation.selection_identity != baseline_ba.invocation.selection_identity
+
+
+def test_multi_target_drift_adding_a_target_invalidates_reuse_and_recaptures():
+    """Target/config drift (adding a third target to a previously-captured
+    two-target selection) must NOT silently reuse the stale baseline - a
+    changed target list is drift exactly like a changed single target is."""
+    calls = []
+
+    def rv(t):
+        calls.append(t)
+        return {"success": True, "output": ""}
+
+    first = capture_brownfield_baselines(
+        run_id="r1", target_test=["tests/a.py", "tests/b.py"], full_regression_policy="disabled",
+        run_validator=rv, compute_revision=lambda: "rev1",
+    ).targeted
+
+    second = capture_brownfield_baselines(
+        run_id="r1", target_test=["tests/a.py", "tests/b.py", "tests/c.py"], full_regression_policy="disabled",
+        run_validator=rv, compute_revision=lambda: "rev1",
+        resume_baseline_targeted=first.to_dict(),
+    ).targeted
+    assert calls == [("tests/a.py", "tests/b.py"), ("tests/a.py", "tests/b.py", "tests/c.py")], (
+        "an expanded target set must trigger a fresh capture, never a silent reuse of the "
+        "narrower baseline"
+    )
+    assert second.invocation.target_test == ("tests/a.py", "tests/b.py", "tests/c.py")
+
+
+def test_multi_target_unchanged_selection_reuses_without_rerunning_validator():
+    calls = []
+
+    def rv(t):
+        calls.append(t)
+        return {"success": True, "output": ""}
+
+    first = capture_brownfield_baselines(
+        run_id="r1", target_test=["tests/a.py", "tests/b.py"], full_regression_policy="disabled",
+        run_validator=rv, compute_revision=lambda: "rev1",
+    ).targeted
+    second = capture_brownfield_baselines(
+        run_id="r1", target_test=["tests/a.py", "tests/b.py"], full_regression_policy="disabled",
+        run_validator=rv, compute_revision=lambda: "rev1",
+        resume_baseline_targeted=first.to_dict(),
+    ).targeted
+    assert calls == [("tests/a.py", "tests/b.py")], "identical selection must reuse, not re-run"
+    assert second == first
+
+
+def test_multi_target_checkpoint_round_trip_preserves_ordered_tuple():
+    """to_dict()/from_dict() (the exact checkpoint persistence shape) must
+    preserve the ordered tuple exactly - list on the wire, tuple in memory,
+    never silently reordered or collapsed."""
+    baseline = capture_validation_baseline(
+        workspace_revision="rev1", run_id="r1",
+        invocation=ValidationInvocation(
+            "polymorphic_validator.run_tests", "target_test:[\"a.py\", \"b.py\"]",
+            target_test=("a.py", "b.py"),
+        ),
+        raw_result={"success": True, "output": ""},
+    )
+    as_dict = baseline.to_dict()
+    assert as_dict["invocation"]["target_test"] == ["a.py", "b.py"]
+    restored = ValidationBaseline.from_dict(as_dict)
+    assert restored.invocation.target_test == ("a.py", "b.py")
+    assert isinstance(restored.invocation.target_test, tuple)
+
+
+def test_legacy_checkpoint_without_target_test_key_deserializes_as_none():
+    """A checkpoint written before this field existed (no "target_test" key
+    in the invocation dict at all) must deserialize cleanly with
+    target_test=None, never raise a KeyError - backward compatibility for
+    an in-flight resumed run captured under the pre-G1-R3 codebase."""
+    legacy_dict = {
+        "workspace_revision": "rev1", "run_id": "r1", "captured_at": 0.0,
+        "status": "captured", "indeterminate_reason": None,
+        "invocation": {"command_identity": "polymorphic_validator.run_tests", "selection_identity": "full_suite"},
+        "outcome": {
+            "execution_status": "completed", "success": True, "failure_fingerprint": None,
+            "evidence_ref": None, "aggregate_counts": None, "test_outcomes": None,
+        },
+    }
+    restored = ValidationBaseline.from_dict(legacy_dict)
+    assert restored.invocation.target_test is None
+
+
+def test_targeted_post_delta_blocks_on_new_failure_with_multi_target_selection():
+    """The SAME classify_baseline_delta() the full-regression path already
+    uses works identically for a targeted, multi-file baseline - a genuine
+    NEW_FAILURE in the POST run (absent from a fully-passing PRE) blocks."""
+    baseline = capture_brownfield_baselines(
+        run_id="r1", target_test=["tests/a.py", "tests/b.py"], full_regression_policy="disabled",
+        run_validator=lambda t: {"success": True, "output": _pytest_output(passed=76)},
+        compute_revision=lambda: "rev1",
+    ).targeted
+    post = build_validation_outcome(
+        {"success": False, "output": _pytest_output("tests/b.py::test_x - AssertionError: broke it", passed=75)}
+    )
+    result = classify_baseline_delta(baseline, post)
+    assert result.blocking is True
+    assert result.level1.classification == DeltaClassification.NEW_FAILURE
+
+
+def test_targeted_post_delta_unchanged_permits_continuation():
+    """An unchanged 76/76 POST result (identical to a passing PRE) never
+    blocks - the exact 'targeted unchanged 76/76 permits continuation'
+    acceptance criterion."""
+    raw = {"success": True, "output": _pytest_output(passed=76)}
+    baseline = capture_brownfield_baselines(
+        run_id="r1", target_test=["tests/a.py", "tests/b.py"], full_regression_policy="disabled",
+        run_validator=lambda t: raw, compute_revision=lambda: "rev1",
+    ).targeted
+    post = build_validation_outcome(raw)
+    result = classify_baseline_delta(baseline, post)
+    assert result.blocking is False
+    assert result.level1.classification == DeltaClassification.UNCHANGED_PASS
 
 
 # ---------------------------------------------------------------------------
@@ -593,7 +812,7 @@ def test_15_checkpoint_payload_includes_baseline_for_resume(tmp_path):
         compute_revision=lambda: "rev1",
         resume_baseline_targeted=checkpoint_payload["validation_baseline_targeted"],
     ).targeted
-    assert calls == ["tests/x.py"], "only the FIRST (pre-resume) capture should have run the validator"
+    assert calls == [("tests/x.py",)], "only the FIRST (pre-resume) capture should have run the validator"
     assert resumed == baseline
 
 
@@ -612,5 +831,187 @@ def test_16_checkpoint_resume_with_repository_drift_recaptures(tmp_path):
         compute_revision=lambda: "rev1-DRIFTED",
         resume_baseline_targeted=checkpoint_payload["validation_baseline_targeted"],
     ).targeted
-    assert calls == ["tests/x.py", "tests/x.py"], "drift on resume must trigger re-capture, never silent reuse"
+    assert calls == [("tests/x.py",), ("tests/x.py",)], "drift on resume must trigger re-capture, never silent reuse"
     assert resumed.workspace_revision == "rev1-DRIFTED"
+
+
+# ---------------------------------------------------------------------------
+# VAL-001 G1-R3: targeted POST wiring through the REAL run_generation_workflow
+# ---------------------------------------------------------------------------
+
+def _init_git_repo_val001(repo):
+    _run_git(["init", "-q"], repo)
+    _run_git(["config", "user.email", "t@example.com"], repo)
+    _run_git(["config", "user.name", "t"], repo)
+    _run_git(["add", "-A"], repo)
+    _run_git(["commit", "-q", "-m", "initial"], repo)
+
+
+def _latest_trace_run_events(logs_dir):
+    """Same pattern test_workflow.py's own _latest_trace_row() uses - the
+    only way to observe state.run_events from OUTSIDE a full
+    run_generation_workflow() call, since it is not part of the returned
+    result dict."""
+    import json
+    import sqlite3
+
+    db_path = os.path.join(logs_dir, "traces.db")
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = conn.execute("SELECT run_events FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    conn.close()
+    return json.loads(row["run_events"] or "[]") if row else []
+
+
+@pytest.mark.asyncio
+async def test_targeted_post_replays_frozen_multi_target_selection_and_does_not_block_when_unchanged(tmp_path):
+    """Real run_generation_workflow(), no live model. Two pre-existing,
+    passing test files are configured as the multi-target brownfield
+    selection; the goal only ever creates a brand-new, unrelated file (so
+    the candidate structurally cannot touch either targeted file - no D1
+    authority question even arises for them). Proves: (1) PRE captures the
+    exact ordered multi-target tuple; (2) the POST call replays that SAME
+    frozen tuple (never re-derived); (3) an unchanged targeted suite does
+    not block; (4) the run completes successfully."""
+    import kriya.tools.validate as validate_module
+
+    (tmp_path / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    (tmp_path / "test_a.py").write_text(
+        "from calc import add\ndef test_add():\n    assert add(2, 3) == 5\n"
+    )
+    (tmp_path / "test_b.py").write_text(
+        "from calc import add\ndef test_add_zero():\n    assert add(0, 0) == 0\n"
+    )
+    _init_git_repo_val001(tmp_path)
+
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.spec_compliance_enabled = False
+    cfg.autonomy.brownfield_full_regression_baseline_policy = "required"
+    cfg.autonomy.brownfield_baseline_target_test = ["test_a.py", "test_b.py"]
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write a greeting function",
+        "Design: Write greet.py",
+        '[{"filepath": "greet.py", "content": "def greet(name):\\n    return f\\"hi {name}\\"\\n"}]',
+        "Review: Approved",
+    ])
+
+    real_run_tests = validate_module.PolymorphicValidator.run_tests
+    observed_target_test_calls = []
+
+    def spy_run_tests(self, target_test=None):
+        observed_target_test_calls.append(target_test)
+        return real_run_tests(self, target_test=target_test)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(validate_module.PolymorphicValidator, "run_tests", spy_run_tests)
+        we = WorkflowEngine(kernel, llm)
+        result = await we.run_generation_workflow(goal="Add a greet function", workspace_path=str(tmp_path))
+
+    assert result["quality_gates_passed"] is True, result
+
+    # PRE captured the exact ordered tuple.
+    targeted_delta_events = [
+        e for e in _latest_trace_run_events(cfg.paths.logs)
+        if e.get("kind") == "validation_baseline.targeted_delta"
+    ]
+    assert len(targeted_delta_events) == 1
+    details = targeted_delta_events[0]["details"]
+    assert details["target_test"] == ["test_a.py", "test_b.py"]
+    assert details["blocking"] is False
+
+    # The frozen tuple was replayed verbatim for the POST call - at least
+    # one observed call to the real PolymorphicValidator.run_tests used
+    # EXACTLY this tuple (never re-derived/re-parsed into something else).
+    assert ("test_a.py", "test_b.py") in observed_target_test_calls
+
+
+@pytest.mark.asyncio
+async def test_targeted_post_new_failure_blocks_and_prevents_quality_gates_passed(tmp_path):
+    """Same fixture shape as above, but the targeted suite's OWN POST
+    invocation is deterministically made to fail (via a monkeypatched
+    PolymorphicValidator.run_tests that returns a controlled failing result
+    ONLY for the targeted multi-file call, distinguishing it from the
+    full-suite call by its own target_test argument) - proves the targeted
+    delta genuinely blocks the candidate, the exact 'targeted NEW/CHANGED
+    failure blocks success' acceptance criterion, without depending on
+    engineering a real generated-code regression."""
+    import kriya.tools.validate as validate_module
+
+    (tmp_path / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    (tmp_path / "test_a.py").write_text(
+        "from calc import add\ndef test_add():\n    assert add(2, 3) == 5\n"
+    )
+    (tmp_path / "test_b.py").write_text(
+        "from calc import add\ndef test_add_zero():\n    assert add(0, 0) == 0\n"
+    )
+    _init_git_repo_val001(tmp_path)
+
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.spec_compliance_enabled = False
+    cfg.autonomy.brownfield_full_regression_baseline_policy = "required"
+    cfg.autonomy.brownfield_baseline_target_test = ["test_a.py", "test_b.py"]
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    # The candidate is genuinely rejected every attempt (the targeted suite
+    # keeps regressing no matter how many times it's re-evaluated - see the
+    # spy below), so the retry loop runs to natural exhaustion before this
+    # run reaches a terminal state - enough Developer-JSON entries for
+    # every retry attempt (same content each time; what matters is that the
+    # targeted POST check keeps failing, not that the candidate itself
+    # varies), plus a final Reviewer completion.
+    _developer_json = '[{"filepath": "greet.py", "content": "def greet(name):\\n    return f\\"hi {name}\\"\\n"}]'
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write a greeting function",
+        "Design: Write greet.py",
+        _developer_json, _developer_json, _developer_json, _developer_json,
+        "Review: rejected candidate",
+    ])
+
+    real_run_tests = validate_module.PolymorphicValidator.run_tests
+    post_targeted_call_count = {"n": 0}
+
+    def spy_run_tests(self, target_test=None):
+        if target_test == ("test_a.py", "test_b.py"):
+            post_targeted_call_count["n"] += 1
+            if post_targeted_call_count["n"] >= 2:
+                # First call is the PRE capture (must stay real/passing so a
+                # real baseline is actually established); every call from
+                # the SECOND onward (POST, and any retry's own POST) is
+                # deterministically failed - the same real candidate keeps
+                # regressing this suite no matter how many times it's
+                # re-evaluated, so the run terminates via exhausted retries
+                # (or the repeated-action guard) rather than ever passing.
+                return {
+                    "success": False,
+                    "output": _pytest_output("test_b.py::test_add_zero - AssertionError: broke it", passed=1),
+                }
+        return real_run_tests(self, target_test=target_test)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(validate_module.PolymorphicValidator, "run_tests", spy_run_tests)
+        we = WorkflowEngine(kernel, llm)
+        result = await we.run_generation_workflow(goal="Add a greet function", workspace_path=str(tmp_path))
+
+    assert result["quality_gates_passed"] is False
+    targeted_delta_events = [
+        e for e in _latest_trace_run_events(cfg.paths.logs)
+        if e.get("kind") == "validation_baseline.targeted_delta"
+    ]
+    # One per retry attempt that reached the full-regression gate (every
+    # attempt here, since the candidate never stops regressing) - every one
+    # of them must show the SAME frozen selection and a blocking NEW_FAILURE
+    # classification, not just the first.
+    assert len(targeted_delta_events) >= 1
+    for event in targeted_delta_events:
+        details = event["details"]
+        assert details["target_test"] == ["test_a.py", "test_b.py"]
+        assert details["blocking"] is True
+        assert details["level1_classification"] == DeltaClassification.NEW_FAILURE.value

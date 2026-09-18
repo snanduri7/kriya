@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from kriya.config.config import AutonomyConfig
 from kriya.policy.enforcement import enforce_hard_invariants
@@ -1321,8 +1321,25 @@ class PolymorphicValidator:
             ),
         }
 
-    def run_tests(self, target_test: Optional[str] = None) -> Dict[str, Any]:
-        """Runs tech-stack specific test execution suite."""
+    def run_tests(self, target_test: Optional[Union[str, Sequence[str]]] = None) -> Dict[str, Any]:
+        """Runs tech-stack specific test execution suite.
+
+        `target_test` accepts either a single string (unchanged, existing
+        contract - every pre-existing caller keeps working identically) or
+        an ordered sequence of strings (VAL-001 G1-R3: brownfield PRE/POST
+        baseline comparison needs to select several specific test files at
+        once - e.g. the calibrated `tests/test_csharp_type_resolution.py` +
+        `tests/test_csharp_member_calls.py` pair). A sequence is NEVER
+        joined into one string and NEVER shell-interpreted - each element
+        becomes its own separate argv entry to the underlying test-runner
+        subprocess, structurally, the same way a real shell would word-split
+        several unquoted paths - see the Python-stack branch below for the
+        one place this actually matters today (a single opaque argv token
+        containing a space is not multiple paths to pytest's own arg
+        parser - proven empirically during G1-R3 PREPARE, not assumed)."""
+        target_test_list: Optional[List[str]] = None
+        if target_test is not None:
+            target_test_list = [target_test] if isinstance(target_test, str) else list(target_test)
         try:
             if self.stack == "python":
                 # Explicitly (re-)add the workspace root and, if present, its src/ layout
@@ -1388,11 +1405,15 @@ class PolymorphicValidator:
                     "import pytest; sys.exit(pytest.main(sys.argv[1:]))",
                     "--"
                 ]
-                if target_test:
-                    cmd.append(target_test)
+                if target_test_list:
+                    # Each target its OWN argv entry - never joined into one
+                    # string (see this method's own docstring: a single
+                    # space-joined token is not multiple paths to pytest,
+                    # empirically confirmed, not assumed).
+                    cmd.extend(target_test_list)
                 res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 return {"success": res["returncode"] in (0, 5), "output": res["stdout"] + "\n" + res["stderr"]}
- 
+
             elif self.stack == "java":
                 # target_test comes from extract_target_test() as a raw file path
                 # (e.g. "src/test/java/com/example/ProtocolTest.java") - Maven's
@@ -1411,8 +1432,12 @@ class PolymorphicValidator:
                 # src-root convention (which isn't always the same layout - see
                 # the src/main/python vs flat layout drift documented elsewhere
                 # in this project).
+                # Multi-target selection is a Python-stack (pytest) concept
+                # only today (VAL-001 G1-R3) - Java honors just the first
+                # target, unchanged single-target behavior for the common
+                # (and, so far, only real) case of one string being passed.
                 java_test_class = (
-                    os.path.splitext(os.path.basename(target_test))[0] if target_test else None
+                    os.path.splitext(os.path.basename(target_test_list[0]))[0] if target_test_list else None
                 )
                 if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
                     goals = ["test"]
@@ -1456,9 +1481,13 @@ class PolymorphicValidator:
                             "success": False,
                             "output": f"'bundle install' failed:\n{install_res['stdout']}\n{install_res['stderr']}",
                         }
+                # Multi-target selection is a Python-stack (pytest) concept
+                # only today - Ruby honors every target given (rspec accepts
+                # multiple path args natively), same structural argv-extend
+                # treatment as the Python branch above.
                 cmd = ["bundle", "exec", "rspec"]
-                if target_test:
-                    cmd.append(target_test)
+                if target_test_list:
+                    cmd.extend(target_test_list)
                 try:
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 except ContainmentSetupError:
@@ -1473,8 +1502,8 @@ class PolymorphicValidator:
                 except Exception as e:
                     logger.debug(f"'bundle exec rspec' failed, falling back to plain 'rspec': {e}")
                     cmd = ["rspec"]
-                    if target_test:
-                        cmd.append(target_test)
+                    if target_test_list:
+                        cmd.extend(target_test_list)
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
 

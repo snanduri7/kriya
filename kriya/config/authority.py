@@ -108,6 +108,27 @@ _REPOSITORY_SAFE_FIELDS: frozenset = frozenset({
     ("autonomy", "best_of_n_first_attempt"),
     ("autonomy", "shell_command_timeout_seconds"),
     ("autonomy", "run_verification_enabled"), ("autonomy", "run_verification_timeout_seconds"),
+    # VAL-001 G1-R3 (2026-09-18): found never classified at all when af23008
+    # introduced it - fell through to the fail-closed SECURITY_AUTHORITY
+    # default, denying it from ANY non-packaged-default source including an
+    # operator's own explicit --config. A closed, three-value enum
+    # ("auto"/"required"/"disabled", enforced by AppConfig's own
+    # field_validator - not merely documented - so this premise is true in
+    # code, not just in this comment) controlling only WHICH ALREADY-
+    # EXISTING repository test(s) get compared PRE/POST and how a failure
+    # is attributed (pre-existing vs. new) - never new execution/network/
+    # filesystem/policy authority, exactly the same risk shape as
+    # run_verification_enabled/spec_compliance_enabled immediately above.
+    # Deliberately NOT extended to brownfield_baseline_target_test (the
+    # sibling field) - that one carries an attacker-controlled arbitrary
+    # path string (or list of them) that becomes literal subprocess argv
+    # content, resolved relative to workspace CWD with no path-containment
+    # check, and pytest genuinely IMPORTS whatever it collects - a real,
+    # if narrow, traversal-to-arbitrary-import risk this closed-enum field
+    # does not share. See docs/assurance/VAL_001_GRAPHIFY_G1.md's own G1-R3
+    # section for the full writeup - that field stays unclassified
+    # (fail-closed, approval-gated per workspace) on purpose.
+    ("autonomy", "brownfield_full_regression_baseline_policy"),
     ("autonomy", "sandbox_cpu_seconds"), ("autonomy", "sandbox_memory_mb"),
     ("autonomy", "acquisition_cpu_seconds"), ("autonomy", "acquisition_memory_mb"),
     ("skills", "load_global"), ("skills", "load_cwd"),

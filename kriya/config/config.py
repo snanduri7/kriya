@@ -1,7 +1,7 @@
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -467,15 +467,19 @@ class AutonomyConfig(BaseModel):
     # baselining is opt-in per-campaign, never an unconditional new default.
     #
     # brownfield_baseline_target_test: an explicit PolymorphicValidator.
-    # run_tests(target_test=...) value (its own existing, unchanged
-    # contract) naming the "relevant/targeted" test scope for a brownfield
-    # PRE/POST baseline comparison - e.g. VAL-001 G1's own two C# test
-    # files. None (default) means no targeted baseline is captured at all -
-    # this is deliberately NOT auto-derived from architect_files (that
-    # would require inventing a new affected-test-discovery heuristic,
-    # explicitly out of scope for this package - "do not create a parallel
-    # validation framework").
-    brownfield_baseline_target_test: Optional[str] = Field(default=None)
+    # run_tests(target_test=...) value naming the "relevant/targeted" test
+    # scope for a brownfield PRE/POST baseline comparison - a single string
+    # (one target) or an ORDERED LIST of strings (VAL-001 G1-R3: several
+    # specific targets at once, e.g. VAL-001 G1's own two C# test files,
+    # represented STRUCTURALLY as a YAML list - never as one shell-joined
+    # string; kriya/tools/validate.py's own PolymorphicValidator.run_tests()
+    # passes each list entry as its own separate argv entry, no shell
+    # involved anywhere in this path). None (default) means no targeted
+    # baseline is captured at all - this is deliberately NOT auto-derived
+    # from architect_files (that would require inventing a new affected-
+    # test-discovery heuristic, explicitly out of scope for this package -
+    # "do not create a parallel validation framework").
+    brownfield_baseline_target_test: Optional[Union[str, List[str]]] = Field(default=None)
     # brownfield_full_regression_baseline_policy: "auto" | "required" |
     # "disabled". "required": capture a pristine full-suite PRE baseline
     # once (before the first Developer call) and delta-compare the final
@@ -490,6 +494,16 @@ class AutonomyConfig(BaseModel):
     # honestly here rather than silently activating baselining as a new
     # default behavior no compatibility analysis has covered.
     brownfield_full_regression_baseline_policy: str = Field(default="auto")
+
+    @field_validator("brownfield_full_regression_baseline_policy")
+    @classmethod
+    def _brownfield_policy_must_be_known_value(cls, v: str) -> str:
+        if v not in ("auto", "required", "disabled"):
+            raise ValueError(
+                "autonomy.brownfield_full_regression_baseline_policy must be "
+                f"'auto', 'required', or 'disabled', got {v!r}"
+            )
+        return v
     run_verification_enabled: bool = Field(default=True)
     run_verification_timeout_seconds: int = Field(default=90)
     # Gates on SpecComplianceAgent (kriya/agents/agent.py): unlike compile/test/

@@ -2365,7 +2365,11 @@ class WorkflowEngine:
         # complete no-op) - a run that doesn't configure either behaves
         # byte-identically to before this package existed (proven by
         # capture_brownfield_baselines() itself invoking neither injected
-        # callable at all when both are unset).
+        # callable at all when both are unset). brownfield_baseline_
+        # target_test may be a single string or an ordered list (VAL-001
+        # G1-R3: several specific targets at once) - capture_brownfield_
+        # baselines() normalizes it once; this call site passes it straight
+        # through unmodified either way.
         autonomy_baseline_cfg = self.kernel.config.autonomy
         baseline_capture = capture_brownfield_baselines(
             run_id=run_id,
@@ -3131,6 +3135,86 @@ class WorkflowEngine:
                             "not attributed to this candidate, not blocking."
                         )
 
+                # VAL-001 G1-R3 (2026-09-18): the targeted baseline's own
+                # POST comparison - separate from, and additive to, the
+                # full-regression one immediately above. A no-op (zero extra
+                # subprocess calls, _targeted_regression_should_block stays
+                # False) whenever brownfield_baseline_target_test was never
+                # set, matching this package's own established "opt-in,
+                # complete no-op otherwise" precedent exactly.
+                #
+                # POST_REPLAY invariant: the target(s) re-run here are read
+                # from `state.validation_baseline_targeted.invocation.
+                # target_test` - the frozen, structural selection PRE
+                # capture itself used - NEVER re-read from
+                # `self.kernel.config.autonomy.brownfield_baseline_target_
+                # test` fresh. The two are the same value for an ordinary,
+                # non-resumed run, but a resumed run could in principle carry
+                # a checkpointed PRE baseline captured under a DIFFERENT
+                # config than the one active now - replaying the frozen
+                # invocation, not re-deriving from current config/workspace
+                # state, is what makes "PRE and POST validation command/
+                # selection identities are frozen and equivalent" true by
+                # construction rather than by coincidence.
+                _targeted_test_res = None
+                _targeted_regression_should_block = False
+                _targeted_baseline_delta_result = None
+                if (
+                    state.validation_baseline_targeted is not None
+                    and state.validation_baseline_targeted.status == "captured"
+                ):
+                    _frozen_targets = state.validation_baseline_targeted.invocation.target_test
+                    _targeted_test_res = validator.run_tests(target_test=_frozen_targets)
+                    _post_targeted_outcome = build_validation_outcome(_targeted_test_res)
+                    _targeted_baseline_delta_result = classify_baseline_delta(
+                        state.validation_baseline_targeted, _post_targeted_outcome,
+                    )
+                    _targeted_regression_should_block = _targeted_baseline_delta_result.blocking
+                    state.record_event(RunEvent(
+                        kind="validation_baseline.targeted_delta",
+                        attempt=state.attempt_number,
+                        source="workflow.run_generation_workflow",
+                        authority=EventAuthority.ADVISORY,
+                        message=(
+                            f"Targeted PRE/POST delta ({_frozen_targets}): "
+                            f"level1={_targeted_baseline_delta_result.level1.classification.value} "
+                            f"blocking={_targeted_regression_should_block}"
+                        ),
+                        details={
+                            "target_test": list(_frozen_targets) if _frozen_targets else None,
+                            "level1_classification": _targeted_baseline_delta_result.level1.classification.value,
+                            "level2": {k: v.value for k, v in _targeted_baseline_delta_result.level2.items()},
+                            "aggregate_drop_detected": _targeted_baseline_delta_result.aggregate_drop_detected,
+                            "blocking": _targeted_regression_should_block,
+                            "blocking_reasons": list(_targeted_baseline_delta_result.blocking_reasons),
+                        },
+                    ))
+                    if not _targeted_regression_should_block and not _targeted_test_res["success"]:
+                        logger.info(
+                            "Targeted baseline suite failed, but every failure is classified "
+                            "PRE_EXISTING_FAILURE relative to the captured PRE-mutation baseline - "
+                            "not attributed to this candidate, not blocking."
+                        )
+
+                _regression_should_block = _regression_should_block or _targeted_regression_should_block
+
+                # Combined failure evidence: the full-regression output is
+                # always included (unchanged from before this package
+                # existed); the targeted suite's own output is appended,
+                # clearly labeled, whenever it was actually run AND is
+                # itself a genuine cause (failed outright, or its own delta
+                # blocked) - never omitted when it's the reason blocking
+                # fired, never included as noise when it isn't.
+                _regression_failure_output = full_test_res.get("output", "")
+                if _targeted_test_res is not None and (
+                    not _targeted_test_res["success"] or _targeted_regression_should_block
+                ):
+                    _regression_failure_output = (
+                        f"{_regression_failure_output}\n\n"
+                        f"=== TARGETED BASELINE SUITE ({state.validation_baseline_targeted.invocation.target_test}) ===\n"
+                        f"{_targeted_test_res.get('output', '')}"
+                    )
+
                 if _regression_should_block:
                     # PRV-11 (2026-08-30): before treating this as an ordinary
                     # regression failure for the CURRENTLY executing subtask,
@@ -3166,8 +3250,8 @@ class WorkflowEngine:
                                 obligation_ledger, current_subtask_id, satisfied=False,
                             )
                         failure = _build_quality_gate_failure(
-                            "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{full_test_res['output']}",
-                            full_test_res.get("output", ""), worktree_path,
+                            "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{_regression_failure_output}",
+                            _regression_failure_output, worktree_path,
                             state.all_files_written, state.attempt_number,
                         )
                         state.gate_outcomes.append(failure.to_gate_outcome())
