@@ -1098,3 +1098,105 @@ class TestC3D1Unchanged:
         state.budgets.anchor_failure_counts["engine.py"] = 3
         ops = _operation_map(ctx, ["engine.py"], CodeOperation.REPAIR_WITH_FULL_FILE, state)
         assert ops["engine.py"] is CodeOperation.REPAIR_WITH_PATCH
+
+
+class TestC3StructuredObservability:
+    """CTX-001-P1-C3 Task 2 (2026-09-18, VAL-001 G1-R2 post-mortem): every
+    SOURCE 3 evaluation - accepted or rejected - must emit a structured
+    context.search_evidence_grounding RunEvent, never only human-readable
+    text. Proves observability is additive: selection outcomes (member_hints
+    dict) are identical to the pre-observability behavior already proven in
+    TestC3RetryEscalationTrigger above."""
+
+    def _events(self, state):
+        return [e for e in state.run_events if e.kind == "context.search_evidence_grounding"]
+
+    def test_grounded_evaluation_is_observable(self, tmp_path):
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = _c3_skeleton_context_item(content_revision(content))
+        state.budgets.anchor_failure_counts["engine.py"] = 1
+        state.last_failure = _c3_anchored_edit_failure()
+
+        hints = _resolve_retry_member_hints(ctx, state, ["engine.py"])
+        assert hints == {"engine.py": ["outer_extractor.walk_calls"]}
+
+        events = self._events(state)
+        assert len(events) == 1
+        details = events[0].details
+        assert details["outcome"] == "grounded_by_containment"
+        assert details["grounded"] is True
+        assert details["candidate_member_ids"] == ["outer_extractor.walk_calls"]
+        # The raw SEARCH text is never persisted - only a bounded hash/length,
+        # matching this module's own "hash, never raw untrusted content" rule.
+        assert "search_text" not in details
+        assert details["search_text_hash"] == content_revision(_C3_SEARCH_TEXT)
+        assert details["search_text_length"] == len(_C3_SEARCH_TEXT)
+        assert details["current_revision"] == content_revision(content)
+
+    def test_ambiguous_evaluation_is_observably_rejected(self, tmp_path):
+        ambiguous_module = (
+            "def alpha_handler(raw_token):\n"
+            "    distinctive_marker_one = raw_token\n"
+            "    distinctive_marker_two = raw_token\n"
+            "    return distinctive_marker_one\n"
+            "\n"
+            "def beta_handler(raw_token):\n"
+            "    distinctive_marker_one = raw_token\n"
+            "    distinctive_marker_two = raw_token\n"
+            "    return distinctive_marker_two\n"
+        )
+        content = _write_target(tmp_path, "engine.py", ambiguous_module)
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = _c3_skeleton_context_item(content_revision(content))
+        state.budgets.anchor_failure_counts["engine.py"] = 1
+        state.last_failure = _c3_anchored_edit_failure(
+            "distinctive_marker_one and distinctive_marker_two"
+        )
+
+        hints = _resolve_retry_member_hints(ctx, state, ["engine.py"])
+        assert hints == {}
+
+        events = self._events(state)
+        assert len(events) == 1
+        assert events[0].details["outcome"] == "ambiguous_containment"
+        assert events[0].details["grounded"] is False
+        assert events[0].details["candidate_member_ids"] == []
+
+    def test_no_grounding_evaluation_is_observably_rejected(self, tmp_path):
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = _c3_skeleton_context_item(content_revision(content))
+        state.budgets.anchor_failure_counts["engine.py"] = 1
+        invented_search = (
+            "if fn_node is not None:\n"
+            "    name_child = fn_node.child_by_field_name('name')\n"
+            "    callee_name = read_text(name_child, source)"
+        )
+        state.last_failure = _c3_anchored_edit_failure(invented_search)
+
+        hints = _resolve_retry_member_hints(ctx, state, ["engine.py"])
+        assert hints == {}
+
+        events = self._events(state)
+        assert len(events) == 1
+        assert events[0].details["outcome"] == "no_containment_match"
+        assert events[0].details["grounded"] is False
+
+    def test_no_trigger_produces_no_search_evidence_event(self, tmp_path):
+        """The gating conditions (Task 3 of the earlier package) are
+        untouched by observability - no anchor failure yet means no
+        evaluation happens AT ALL, not merely an unobservable one."""
+        content = _write_target(tmp_path, "engine.py", _c3_g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path, architect_files=["engine.py"])
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = _c3_skeleton_context_item(content_revision(content))
+        # anchor_failure_counts left at 0 - trigger condition not met.
+        state.last_failure = _c3_anchored_edit_failure()
+
+        hints = _resolve_retry_member_hints(ctx, state, ["engine.py"])
+        assert hints == {}
+        assert self._events(state) == []

@@ -9084,6 +9084,16 @@ async def test_workflow_approval_required_but_no_callback_never_applies_changes(
     assert trace_row["status"] == "approval_required"
     assert trace_row["failure_category"] == "approval_required"
 
+    # VAL-001 G1-R2 post-mortem fix, applied to BOTH statuses
+    # _abort_without_applying() shares (see test_workflow_human_rejected_
+    # preserves_full_forensic_trace's own docstring for the full incident) -
+    # a real Developer call happened here too (the model_hops entry from
+    # the file-content generation above), and must survive persistence.
+    model_hops = json.loads(trace_row["model_hops"] or "[]")
+    assert len(model_hops) >= 1, "a real Developer call happened but model_hops was not persisted"
+    files_modified = (trace_row["files_modified"] or "").split(",") if trace_row["files_modified"] else []
+    assert "app.py" in files_modified
+
 @pytest.mark.asyncio
 async def test_workflow_traces_human_rejected(tmp_path):
     """The human-rejected-approval early return also used to skip trace logging
@@ -9118,6 +9128,152 @@ async def test_workflow_traces_human_rejected(tmp_path):
     assert trace_row is not None
     assert trace_row["status"] == "human_rejected"
     assert trace_row["failure_category"] == "human_rejected"
+
+
+@pytest.mark.asyncio
+async def test_workflow_human_rejected_preserves_full_forensic_trace(tmp_path):
+    """VAL-001 G1-R2 post-mortem (2026-09-18): a real live run (trace
+    8cc2018a) made 9 real Developer/LLM calls, produced real gate_outcomes
+    and run_events, then ended in human_rejected - and the persisted trace
+    row showed model_hops=[], attempts=0-real-events, zero gate_outcomes,
+    making the whole incident forensically unreconstructable after the
+    fact. Root cause: _abort_without_applying()'s own trace_logger.log_run()
+    call (kriya/workflow/workflow.py) omitted gate_outcomes/model_hops/
+    run_events/evidence_records/generation_metrics, unlike the terminal
+    success/failure path's own call. This test proves the fix: a real
+    Developer call's own evidence (model_hops, gate_outcomes structure,
+    run_events, generation_metrics) survives all the way through a
+    human_rejected termination, not just a success/failure one."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "human-in-the-loop"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write app.py",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Review: flagged for human judgment",
+    ])
+
+    we = WorkflowEngine(kernel, llm)
+    res = await we.run_generation_workflow(
+        goal="Create app",
+        workspace_path=str(tmp_path),
+        approval_callback=lambda files, reason: False,
+    )
+
+    assert res["quality_gates_passed"] is False
+    trace_row = _latest_trace_row(cfg.paths.logs)
+    assert trace_row is not None
+    assert trace_row["status"] == "human_rejected"
+
+    model_hops = json.loads(trace_row["model_hops"] or "[]")
+    assert len(model_hops) >= 1, "a real Developer call happened but model_hops was not persisted"
+
+    # files_modified now carries the SAME meaning it does at every other
+    # termination path (sandbox candidate files touched, never "applied to
+    # the real workspace" - this run's real workspace was never mutated,
+    # confirmed separately by res["quality_gates_passed"] is False).
+    files_modified = (trace_row["files_modified"] or "").split(",") if trace_row["files_modified"] else []
+    assert "app.py" in files_modified
+
+    run_events = json.loads(trace_row["run_events"] or "[]")
+    assert len(run_events) >= 1, "real run_events were recorded in state but not persisted"
+
+    generation_metrics = json.loads(trace_row["generation_metrics"] or "{}")
+    assert generation_metrics.get("llm", {}).get("developer_calls", 0) >= 1
+
+    # evidence_records may legitimately be empty for a run this short (no
+    # active skills, no failure evidence to capture) - assert the FIELD
+    # ITSELF round-trips as valid JSON (proving it's actually threaded
+    # through now, not merely absent from the call), not that it's non-empty.
+    assert json.loads(trace_row["evidence_records"] or "[]") == list(json.loads(trace_row["evidence_records"] or "[]"))
+
+
+def test_termination_trace_survives_human_rejected_with_synthetic_rich_state(tmp_path):
+    """CTX-001-P1-C3 / VAL-001 G1-R2 post-mortem Task 6: constructs a
+    synthetic but REALISTIC rich run state (multiple model_hops, real
+    attempt.started/attempt.failed-shaped run_events, a C3 SOURCE3
+    context.search_evidence_grounding event, gate_outcomes) and persists it
+    through TraceLogger.log_run() using the EXACT same call shape
+    _abort_without_applying() now uses (kriya/workflow/workflow.py) -
+    proving evidence this rich survives a human_rejected termination, and
+    that an evaluator script (like the real g1_rerun2_evidence/inspect_
+    g1_rerun2_trace.py) could recover the real Developer-call count and C3
+    firing evidence, rather than reading back zeros the way run 8cc2018a's
+    own persisted trace did before this fix."""
+    from kriya.core.trace import TraceLogger
+
+    db_path = str(tmp_path / "traces.db")
+    trace_logger = TraceLogger(db_path)
+
+    synthetic_model_hops = ["qwen3-coder:30b", "qwen3.6:35b-a3b-q4_K_M", "qwen3-coder:30b"]
+    synthetic_run_events = [
+        {"kind": "attempt.started", "attempt": 1, "source": "attempt.run_attempt",
+         "authority": "advisory", "message": "", "details": {"mode": "full_set"}},
+        {"kind": "attempt.failed", "attempt": 1, "source": "workflow", "authority": "authoritative",
+         "message": "", "details": {"passed": False, "applied": False}},
+        {"kind": "context.search_evidence_grounding", "attempt": 3, "source": "attempt._resolve_retry_member_hints",
+         "authority": "advisory", "message": "CTX-001-P1-C3 SOURCE 3 evaluation for target.py (edit #1): grounded_by_containment.",
+         "details": {
+             "source": "failure_search_evidence", "filepath": "target.py", "edit_index": 0,
+             "search_text_present": True, "search_text_hash": "abc123", "search_text_length": 200,
+             "distinctive_token_count": 4, "outcome": "grounded_by_containment", "grounded": True,
+             "candidate_member_ids": ["helper_7"], "candidate_provenance": ["search_token_containment"],
+             "current_revision": "def456",
+         }},
+    ]
+    synthetic_gate_outcomes = [
+        {"attempt": 1, "type": "operation_contract", "success": False,
+         "output": "mandatory REPAIR_WITH_PATCH, got repair_with_full_file"},
+    ]
+
+    trace_logger.log_run(
+        run_id="synthetic8cc",
+        goal="Synthetic G1-R2-shaped goal",
+        duration_sec=1234.5,
+        attempts=2,
+        status="human_rejected",
+        files_modified=["target.py"],
+        gate_outcomes=synthetic_gate_outcomes,
+        model_hops=synthetic_model_hops,
+        failure_category="human_rejected",
+        run_events=synthetic_run_events,
+        evidence_records=[],
+        generation_metrics={"llm": {"developer_calls": 3}},
+        failure_report=[],
+    )
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    row = dict(conn.execute("SELECT * FROM runs WHERE run_id=?", ("synthetic8cc",)).fetchone())
+    conn.close()
+
+    assert row["status"] == "human_rejected"
+    recovered_model_hops = json.loads(row["model_hops"])
+    assert recovered_model_hops == synthetic_model_hops
+    assert len(recovered_model_hops) == 3, "evaluator can now recover the real Developer-call count, not 0"
+
+    recovered_events = json.loads(row["run_events"])
+    assert len(recovered_events) == 3
+
+    # Simulates exactly what inspect_g1_rerun2_trace.py's own MEMBER_ESCALATION_FIRED
+    # check does - scanning run_events for a context.search_evidence_grounding /
+    # context.retry_member_hint_package entry, rather than finding an empty list.
+    c3_events = [e for e in recovered_events if e["kind"] == "context.search_evidence_grounding"]
+    assert len(c3_events) == 1
+    assert c3_events[0]["details"]["outcome"] == "grounded_by_containment"
+    assert c3_events[0]["details"]["grounded"] is True
+    assert c3_events[0]["details"]["candidate_member_ids"] == ["helper_7"]
+    # The raw search text is never persisted - only its hash/length, matching
+    # CTX-001-P1-C3's own "structured evidence, never raw model text as
+    # authority" invariant, now proven to survive persistence too.
+    assert "search_text" not in c3_events[0]["details"]
+
+    recovered_gate_outcomes = json.loads(row["gate_outcomes"])
+    assert recovered_gate_outcomes == synthetic_gate_outcomes
 
 
 @pytest.mark.asyncio

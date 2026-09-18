@@ -675,6 +675,80 @@ def _collapse_nested_containing(containing: List[MemberBoundary]) -> Optional[Me
     return smallest
 
 
+@dataclass(frozen=True)
+class SearchEvidenceGroundingResult:
+    """CTX-001-P1-C3 observability (2026-09-18, VAL-001 G1-R2 post-mortem):
+    the same candidates resolve_member_hints_from_search_evidence() already
+    returns, PLUS a deterministic `outcome` code explaining why - never a
+    new decision, purely a label on a decision this module already made.
+    Callers that only need the candidates keep using
+    resolve_member_hints_from_search_evidence() unchanged; a caller that
+    needs to emit structured evidence (attempt.py's RunEvent recording)
+    uses evaluate_member_hints_from_search_evidence() for this richer
+    shape instead - one real implementation, two return shapes, never two
+    independently-maintained copies of the grounding logic itself.
+
+    `outcome` is one of: "empty_search_text", "unsupported_language",
+    "no_distinctive_tokens", "grounded_by_name", "no_name_match",
+    "ambiguous_name_conflict", "insufficient_distinctive_tokens",
+    "no_containment_match", "ambiguous_containment",
+    "grounded_by_containment"."""
+
+    candidates: List[MemberHintCandidate]
+    outcome: str
+    distinctive_token_count: int
+
+
+def evaluate_member_hints_from_search_evidence(
+    path: str, current_content: str, search_text: str,
+) -> SearchEvidenceGroundingResult:
+    """The real implementation behind resolve_member_hints_from_search_
+    evidence() (below, now a thin wrapper) - see that function's own
+    docstring for the full Rule A/Rule B design rationale, unchanged here.
+    This wrapper adds only a deterministic `outcome` label alongside the
+    exact same candidates - selection semantics are byte-for-byte
+    identical to before this function existed (confirmed by the existing
+    resolve_member_hints_from_search_evidence() test suite, which now
+    exercises this same code through the wrapper)."""
+    if not search_text or not search_text.strip():
+        return SearchEvidenceGroundingResult([], "empty_search_text", 0)
+    boundaries = member_boundaries_for(path, current_content)
+    if not boundaries:
+        return SearchEvidenceGroundingResult([], "unsupported_language", 0)
+    distinctive = _distinctive_search_tokens(search_text)
+    if not distinctive:
+        return SearchEvidenceGroundingResult([], "no_distinctive_tokens", 0)
+
+    if len(distinctive) == 1:
+        member_ids = member_ids_matching_name(boundaries, distinctive[0])
+        if len(member_ids) == 1:
+            return SearchEvidenceGroundingResult(
+                [MemberHintCandidate(member_id=member_ids[0], provenance="search_symbol_reference")],
+                "grounded_by_name", 1,
+            )
+        outcome = "ambiguous_name_conflict" if len(member_ids) > 1 else "no_name_match"
+        return SearchEvidenceGroundingResult([], outcome, 1)
+
+    if len(distinctive) < _MEMBER_HINT_MIN_DISTINCTIVE_TOKENS:
+        return SearchEvidenceGroundingResult([], "insufficient_distinctive_tokens", len(distinctive))
+    containing = [
+        boundary for boundary in boundaries
+        if all(
+            token in extract_member_body(current_content, boundary.start_line, boundary.end_line)
+            for token in distinctive
+        )
+    ]
+    if not containing:
+        return SearchEvidenceGroundingResult([], "no_containment_match", len(distinctive))
+    grounded = _collapse_nested_containing(containing)
+    if grounded is None:
+        return SearchEvidenceGroundingResult([], "ambiguous_containment", len(distinctive))
+    return SearchEvidenceGroundingResult(
+        [MemberHintCandidate(member_id=grounded.member_id, provenance="search_token_containment")],
+        "grounded_by_containment", len(distinctive),
+    )
+
+
 def resolve_member_hints_from_search_evidence(
     path: str, current_content: str, search_text: str,
 ) -> List[MemberHintCandidate]:
@@ -721,32 +795,10 @@ def resolve_member_hints_from_search_evidence(
     Returns [] (no hint, never a guess/highest-overlap pick) when:
     search_text is empty or whitespace-only, the language has no member
     extractor, no distinctive tokens survive stoplist filtering, or
-    neither rule uniquely grounds a single member."""
-    if not search_text or not search_text.strip():
-        return []
-    boundaries = member_boundaries_for(path, current_content)
-    if not boundaries:
-        return []
-    distinctive = _distinctive_search_tokens(search_text)
-    if not distinctive:
-        return []
+    neither rule uniquely grounds a single member.
 
-    if len(distinctive) == 1:
-        member_ids = member_ids_matching_name(boundaries, distinctive[0])
-        if len(member_ids) == 1:
-            return [MemberHintCandidate(member_id=member_ids[0], provenance="search_symbol_reference")]
-        return []
-
-    if len(distinctive) < _MEMBER_HINT_MIN_DISTINCTIVE_TOKENS:
-        return []
-    containing = [
-        boundary for boundary in boundaries
-        if all(
-            token in extract_member_body(current_content, boundary.start_line, boundary.end_line)
-            for token in distinctive
-        )
-    ]
-    grounded = _collapse_nested_containing(containing)
-    if grounded is None:
-        return []
-    return [MemberHintCandidate(member_id=grounded.member_id, provenance="search_token_containment")]
+    Thin wrapper over evaluate_member_hints_from_search_evidence() (above) -
+    identical selection behavior, just without that function's added
+    `outcome` diagnostic. Existing callers that only need candidates keep
+    using this exact signature unchanged."""
+    return evaluate_member_hints_from_search_evidence(path, current_content, search_text).candidates

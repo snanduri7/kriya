@@ -2693,7 +2693,27 @@ class WorkflowEngine:
                     """Shared cleanup for both 'a human said no' and 'approval was
                     required but there was no way to even ask' - never applies
                     worktree changes to the real workspace, restoring/removing
-                    exactly as the original human-rejection path already did."""
+                    exactly as the original human-rejection path already did.
+
+                    Trace-persistence contract (2026-09-18, VAL-001 G1-R2
+                    post-mortem): this path runs strictly AFTER the full
+                    Developer + Quality Gates loop has already populated
+                    `state` with real gate_outcomes/model_hops/run_events/
+                    evidence_records - unlike the knowledge_gap/planner_
+                    output_incomplete early-abort paths above (which
+                    correctly log the sparse shape, since nothing has
+                    happened yet at that point in the workflow). A real
+                    G1-R2 run (trace 8cc2018a) proved this distinction
+                    matters: the previous, sparse log_run() call here
+                    persisted `model_hops=[]`/`attempts=0 events`/zero gate
+                    outcomes for a run that had made 9 real Developer calls,
+                    making the whole approval-diff incident forensically
+                    unreconstructable after the fact. This call site now
+                    mirrors the SAME full contract the terminal success/
+                    failure path uses (this method's own trailing
+                    trace_logger.log_run() call) - not a blind duplication,
+                    the exact fields that call already treats as the
+                    canonical "a real Developer loop ran" shape."""
                     if worktree_path != workspace_path:
                         remove_git_worktree(workspace_path, worktree_path)
                     else:
@@ -2723,6 +2743,17 @@ class WorkflowEngine:
                         from kriya.core.trace import TraceLogger
                         trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
                         trace_logger = TraceLogger(trace_db)
+                        # Same derivation the terminal success/failure path uses below
+                        # (this method's own trailing trace_logger.log_run() call) -
+                        # not re-implemented independently, so the two can never drift.
+                        abort_failure_report = [
+                            build_failure_report_entry(outcome.get("type", ""), outcome.get("attribution_tier"))
+                            for outcome in state.gate_outcomes
+                        ]
+                        abort_failure_report_dicts = [
+                            {"failure_type": e.failure_type, "category": e.category.value, "attribution_tier": e.attribution_tier}
+                            for e in abort_failure_report
+                        ]
                         trace_logger.log_run(
                             run_id=trace_id,
                             goal=goal,
@@ -2733,11 +2764,26 @@ class WorkflowEngine:
                             # each fresh candidate - see kriya/workflow/best_of_n.py).
                             attempts=state.budgets.retry_count + state.budgets.best_of_n_candidates_tried,
                             status=status,
-                            files_modified=[],
+                            # Sandbox candidate files touched this run - the SAME meaning
+                            # this field carries at the terminal success/failure call site
+                            # below (list(state.all_files_written), never "applied to the
+                            # real workspace", which this path by definition never did).
+                            files_modified=list(state.all_files_written),
+                            retrieved_chunks=retrieved_chunks,
+                            active_skills=active_skills,
+                            prompt_rendered=plan_prompt,
+                            gate_outcomes=state.gate_outcomes,
+                            model_hops=state.model_hops,
                             failure_category=status,
+                            failure_report=abort_failure_report_dicts,
                             milestone_group_id=milestone_group_id,
                             milestone_index=milestone_index,
                             milestone_total=milestone_total,
+                            run_events=[event.to_dict() for event in state.run_events],
+                            evidence_records=[record.to_dict() for record in state.evidence_records],
+                            generation_metrics=state.generation_metrics(
+                                total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
+                            ),
                         )
                     except Exception as trace_ex:
                         logger.warning(f"Failed to write run trace: {trace_ex}")

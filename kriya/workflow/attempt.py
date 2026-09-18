@@ -69,8 +69,8 @@ from kriya.workflow.context_source import (
     SourceDerivationCache,
     member_boundaries_for,
     member_ids_matching_name,
+    evaluate_member_hints_from_search_evidence,
     resolve_member_hints_from_failure_location,
-    resolve_member_hints_from_search_evidence,
 )
 from kriya.workflow.retry_prompts import _build_coordinated_retry_prompt, _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
@@ -308,12 +308,49 @@ def _resolve_retry_member_hints(
             if not resolved.exists:
                 continue
             search_grounded_ids: set = set()
-            for edit in state.last_failure.attempted_edits:
+            for edit_index, edit in enumerate(state.last_failure.attempted_edits):
                 search_text = edit.get("search") or ""
-                for candidate in resolve_member_hints_from_search_evidence(
+                result = evaluate_member_hints_from_search_evidence(
                     filepath, resolved.content, search_text,
-                ):
+                )
+                for candidate in result.candidates:
                     search_grounded_ids.add(candidate.member_id)
+                # CTX-001-P1-C3 observability (2026-09-18, VAL-001 G1-R2 post-mortem):
+                # structured evidence, not human-readable text, is the authoritative
+                # record of this evaluation - the search TEXT itself is never
+                # persisted here (untrusted, model-generated, and potentially large),
+                # only a bounded content_revision() hash and its length, matching
+                # this module's own established "hash, never raw content" pattern
+                # for anything derived from untrusted model output. `outcome` and
+                # `candidates` are read directly off the SAME evaluate_member_hints_
+                # from_search_evidence() call whose result feeds search_grounded_ids
+                # above - this event can never disagree with the real decision,
+                # because it is not a second, independently-derived classification
+                # of it.
+                state.record_event(RunEvent(
+                    kind="context.search_evidence_grounding",
+                    attempt=state.attempt_number,
+                    source="attempt._resolve_retry_member_hints",
+                    authority=EventAuthority.ADVISORY,
+                    message=(
+                        f"CTX-001-P1-C3 SOURCE 3 evaluation for {filepath} "
+                        f"(edit #{edit_index + 1}): {result.outcome}."
+                    ),
+                    details={
+                        "source": "failure_search_evidence",
+                        "filepath": filepath,
+                        "edit_index": edit_index,
+                        "search_text_present": bool(search_text.strip()) if search_text else False,
+                        "search_text_hash": content_revision(search_text) if search_text else None,
+                        "search_text_length": len(search_text) if search_text else 0,
+                        "distinctive_token_count": result.distinctive_token_count,
+                        "outcome": result.outcome,
+                        "grounded": bool(result.candidates),
+                        "candidate_member_ids": [c.member_id for c in result.candidates],
+                        "candidate_provenance": [c.provenance for c in result.candidates],
+                        "current_revision": resolved.revision,
+                    },
+                ))
             if len(search_grounded_ids) == 1:
                 member_hints[filepath] = search_grounded_ids
 
