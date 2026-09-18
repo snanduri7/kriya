@@ -643,3 +643,41 @@ determination broad enough to cover actual damage — not demonstrated here.
 None of the above blocks the primary classification, which rests on directly-observed,
 independently-reproduced evidence (the context-tier/token-budget mismatch, the reconstructed
 `ImportError`, the source-verified detector behavior) rather than on either unexplained item.
+
+---
+
+## 11. G1 RERUN (post-remediation) — prepared, not executed (2026-09-18)
+
+Following D1/D2/D3-part-1 remediation (`docs/assurance/VAL_001_GRAPHIFY_G1_REMEDIATION_DESIGN.md`,
+commits `7bc52b5` G1-R1, `1fc3210` G1-R2) and the user's own independent full-suite confirmation
+(`.venv/bin/pytest`: 4279 passed, 0 failed), a fresh rerun of this exact experiment was prepared.
+
+**Kriya checkpoint frozen and pushed**: `a8e81a1e5d5f15dd77cbdb16440d826142869e20`
+(`origin/milestone-decomposition`). Contains G0 + this document + the forensic classification +
+the remediation design + G1-R1 + G1-R2 + the full-suite-confirmation doc commit — nothing else.
+Verified: `git diff 10b5523..a8e81a1 -- kriya/config/default_config.yaml` is empty (model config,
+including `num_ctx`, is byte-identical to the original failed run).
+
+**New, dedicated Graphify worktree** (never touched by the original run or any evaluator
+reproduction): `~/kriya-live-validation/val001-g1-graphify-c3406/g1_rerun_worktree`, detached at
+`67f99bd0059dd1bac9e44382907ef9f10098b39f`. `git status --porcelain` empty. `graphify/extractors/
+engine.py` SHA-256 confirmed identical to the original G1 forensic record
+(`1158691a0a856c90aac2c717f31246a286f4ac757ae717793889ba1684fd9d78`). Baseline defect
+independently re-reproduced via the same calibrated `check_acceptance.py`: **2/5** — unchanged from
+the original run, proving the defect this replay targets is still genuinely present and the
+worktree itself is unmodified.
+
+**Goal and config**: `~/kriya-live-validation/val001-g1-graphify-c3406/g1_rerun_evidence/goal.txt`
+is byte-identical (SHA-256 `f96bf5a3400abdb3eddf4a6d39d14f7022cde66cf1621525f3edac759bfcb823`) to
+the original run's `g1_evidence/goal.txt`. `campaign_kriya.yaml` is byte-identical content —
+relative `paths.*` resolve against its own directory, so it relocates its own output to the new
+evidence directory automatically, with zero textual change. No member hints, no context-window
+change, no skill additions, no exposure of this document, the forensic classification, or the
+remediation design to the model.
+
+**Prepared, not executed**: `run_g1_rerun.sh` (preflight-checks the frozen Kriya commit and the
+fresh worktree's SHA/cleanliness before prompting to proceed; no `--resume`/`--resume-id` anywhere)
+and `run_g1_rerun_acceptance.sh` (sequences all 10 required acceptance checks, ground truth used
+only starting at step 6, after generation has already terminated). Neither script has been run by
+this agent. Classification of the outcome, once the user runs both, is not automatic — the same
+ten-way classification contract from the original G1 applies unchanged.
