@@ -776,3 +776,9 @@ already-designed extension point. `D3-part-2` (persisted graph evidence) remains
 deferred — proven unnecessary for this gap specifically (token-overlap against already-available
 `member_boundaries_for()` output, needing no index, no `kriya analyze` prerequisite, no
 persistence).
+
+**Full-suite confirmation (user-run, 2026-09-18)**: `.venv/bin/pytest` — **4302 passed, 5
+deselected, 140 warnings in 917.84s (0:15:17)**, 0 failed. Confirms commits `3e5c9c2` (CTX-001-P1-C3
+implementation) and `9126def` (budget-fit test-evidence tightening per advisor review) on top of
+`015430d` introduce zero regressions across the full suite, not just the targeted/self-verified
+subset recorded above.
