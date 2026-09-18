@@ -1,0 +1,29 @@
+{
+  "c2_automatic": {
+    "parsed_member_name_from_real_chunk": "calculate_total",
+    "member_hint_paths_from_real_event": [
+      "Large.py"
+    ],
+    "member_exact_tier_reached": true,
+    "relevant_body_present_in_prompt": true,
+    "padding_method_body_count_in_source": 413,
+    "padding_method_body_count_in_prompt": 0
+  },
+  "s1_query_plan": {
+    "plan_before": "(3, 0, 216, 'SCAN relations') | (12, 0, 0, 'LIST SUBQUERY 1') | (16, 12, 62, 'SEARCH symbols USING INDEX idx_symbols_filepath (filepath=?)') | (27, 12, 0, 'CREATE BLOOM FILTER') | (40, 0, 0, 'LIST SUBQUERY 2') | (44, 40, 62, 'SEARCH symbols USING INDEX idx_symbols_filepath (filepath=?)') | (55, 40, 0, 'CREATE BLOOM FILTER')",
+    "plan_after": "(4, 0, 0, 'MULTI-INDEX OR') | (5, 4, 0, 'INDEX 1') | (13, 5, 62, 'SEARCH relations USING INDEX idx_relations_source_file (source_file=?)') | (16, 4, 0, 'INDEX 2') | (26, 16, 0, 'LIST SUBQUERY 1') | (30, 26, 62, 'SEARCH symbols USING INDEX idx_symbols_filepath (filepath=?)') | (41, 26, 0, 'CREATE BLOOM FILTER') | (54, 16, 0, 'LIST SUBQUERY 2') | (58, 54, 62, 'SEARCH symbols USING INDEX idx_symbols_filepath (filepath=?)') | (69, 54, 0, 'CREATE BLOOM FILTER') | (78, 16, 70, 'SEARCH relations USING INDEX idx_relations_source_file (source_file=?)')",
+    "full_scan_before": true,
+    "full_scan_after": false,
+    "index_used_after": true,
+    "indexes_present": [
+      "idx_relations_source",
+      "idx_relations_target",
+      "idx_relations_source_file"
+    ]
+  },
+  "cold_indexing": {
+    "n_files": 300,
+    "full_table_scan_delete_calls_before": 300,
+    "full_table_scan_delete_calls_after": 0
+  }
+}
