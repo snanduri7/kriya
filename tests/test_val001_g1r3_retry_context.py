@@ -480,6 +480,7 @@ class TestNoProgressGate:
         state.last_failure = Failure(
             type="operation_contract", message="whole-file authority rejected",
             raw_output="whole-file authority rejected", likely_files=["engine.py"], attempt=7,
+            diagnostics={"reason_code": "ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED"},
         )
         state.budgets.last_failure_signature = ("operation_contract", "whole-file authority rejected")
 
@@ -534,6 +535,7 @@ class TestNoProgressGate:
         state.last_failure = Failure(
             type="operation_contract", message="whole-file authority rejected",
             raw_output="whole-file authority rejected", likely_files=["engine.py"], attempt=7,
+            diagnostics={"reason_code": "ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED"},
         )
         state.budgets.last_failure_signature = ("operation_contract", "whole-file authority rejected")
         _prepare_retry_context(
@@ -550,6 +552,45 @@ class TestNoProgressGate:
         _prepare_retry_context(
             state, ctx, target_files=["engine.py"], context_window=16384,
             model_identity="fallback-model",
+        )
+
+    def test_operation_contract_malformed_response_is_not_deterministic_verdict(self, tmp_path):
+        """VAL-001 G1-R3 review (2026-09-19): Failure.type == 'operation_
+        contract' is shared by TWO structurally different raise sites -
+        _validate_actual_mutation_authority()'s own fixed D1 rejection
+        (reason_code=ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED, genuinely
+        deterministic given unchanged evidence) and validate_operation_
+        result()'s own contract_error (a malformed/mismatched RESPONSE
+        SHAPE classification - content-dependent, no reason_code at all).
+        Only the first is eligible for the no-progress gate; a repeat of
+        the second, with byte-identical evidence, must NOT be blocked -
+        resampling a malformed response is exactly as probabilistic as
+        resampling a compile failure."""
+        content = _write_target(tmp_path, "engine.py", _g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path)
+        state = GenerationState()
+        state.last_attempt_mode = "targeted"
+        state.known_target_context_items["engine.py"] = _skeleton_context_item(content_revision(content))
+        state.last_failure = Failure(
+            type="operation_contract",
+            message="OPERATION CONTRACT FAILURE in engine.py: malformed repair response: "
+            "missing repair outcome marker",
+            raw_output="malformed repair response: missing repair outcome marker",
+            likely_files=["engine.py"], attempt=3,
+        )
+        state.budgets.last_failure_signature = (
+            "operation_contract", "malformed repair response: missing repair outcome marker",
+        )
+
+        _prepare_retry_context(
+            state, ctx, target_files=["engine.py"], context_window=32768,
+            model_identity="primary-model",
+        )
+        # Second call, byte-identical evidence and failure signature - must
+        # NOT raise, unlike the real D1-rejection case in test_L.
+        _prepare_retry_context(
+            state, ctx, target_files=["engine.py"], context_window=32768,
+            model_identity="primary-model",
         )
 
 

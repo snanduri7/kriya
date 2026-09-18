@@ -472,26 +472,36 @@ def _target_source_record(
     }
 
 
-# VAL-001 G1-R3 no-progress gate: the ONLY failure types where repeating
+# VAL-001 G1-R3 no-progress gate: the ONLY verdicts where repeating
 # unchanged evidence can never possibly produce a different outcome, because
 # the verdict is Kriya's OWN deterministic gate reading known_target_context_
-# items, not the model's own (temperature-sampled) output. "operation_
-# contract" (D1's whole-file authority rejection, _validate_actual_mutation_
-# authority's own fixed, content-independent rejection string) is exactly
-# the real G1-R3 incident's own attempts-7-vs-8 shape - resampling the
-# Developer call cannot change whether the SAME recorded context authorizes
-# a full-file replacement. Deliberately NOT "anchored_edit" (the model's own
-# SEARCH text is genuinely resampled and could ground differently even
-# against unchanged context) or any compile/test/diagnosis failure (real,
-# CANDIDATE-CONTENT-dependent outcomes - confirmed live: an earlier,
-# unscoped version of this gate broke test_workflow_fallback_chain, which
-# explicitly validates that Kriya spends its full configured targeted_max_
-# retries budget - at a real, non-zero retry_temperature - even against
-# byte-identical compile-failure evidence, precisely BECAUSE resampling a
-# probabilistic failure genuinely can succeed). Never widen this set to a
-# failure type whose outcome depends on model output without the same
-# analysis this comment documents.
-_DETERMINISTIC_VERDICT_FAILURE_TYPES = frozenset({"operation_contract"})
+# items, not the model's own (temperature-sampled) output.
+#
+# Deliberately keyed on Failure.diagnostics["reason_code"], never on
+# Failure.type alone: type="operation_contract" is shared by TWO structurally
+# different raise sites in this module - _validate_actual_mutation_
+# authority()'s own fixed, content-independent D1 rejection string (real
+# reason_code="ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED", exactly the real
+# G1-R3 incident's own attempts-7-vs-8 shape - resampling cannot change
+# whether the SAME recorded context authorizes a full-file replacement) and
+# validate_operation_result()'s own contract_error (protocol_error/shape-
+# mismatch classification of what the MODEL actually wrote - genuinely
+# content-dependent/probabilistic, no reason_code set at all, found during a
+# 2026-09-19 review of this exact gate's own scope). Matching on the bare
+# type string would have silently swept the second, probabilistic case into
+# zero-tolerance blocking too.
+#
+# Deliberately NOT "anchored_edit" (the model's own SEARCH text is genuinely
+# resampled and could ground differently even against unchanged context) or
+# any compile/test/diagnosis failure (real, CANDIDATE-CONTENT-dependent
+# outcomes - confirmed live: an earlier, unscoped version of this gate broke
+# test_workflow_fallback_chain, which explicitly validates that Kriya spends
+# its full configured targeted_max_retries budget - at a real, non-zero
+# retry_temperature - even against byte-identical compile-failure evidence,
+# precisely BECAUSE resampling a probabilistic failure genuinely can
+# succeed). Never widen this set to a verdict whose outcome depends on model
+# output without the same analysis this comment documents.
+_DETERMINISTIC_VERDICT_REASON_CODES = frozenset({"ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED"})
 
 
 def _compute_retry_evidence_fingerprint(
@@ -686,7 +696,8 @@ def _prepare_retry_context(
         eligible = (
             bool(target_files)
             and state.last_failure is not None
-            and state.last_failure.type in _DETERMINISTIC_VERDICT_FAILURE_TYPES
+            and (state.last_failure.diagnostics or {}).get("reason_code")
+            in _DETERMINISTIC_VERDICT_REASON_CODES
         )
         no_progress = (
             eligible
