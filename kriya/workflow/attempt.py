@@ -291,16 +291,72 @@ def _record_retry_projection_context_items(
     gated_operation() already reads, rather than either re-deriving a
     second signal or exempting the targeted-retry path from the invariant
     outright (which would silently reopen it for a genuinely-projected/
-    truncated target file, not just the always-safe case)."""
+    truncated target file, not just the always-safe case).
+
+    Found via the real focused-suite regression after 7bc52b5 (2026-09-18,
+    test_workflow_checks_toolchain_only_once_across_retries): a full-set
+    retry with no grounded implicated files (`target_files=[]`) produces a
+    non-None RetryPackage whose `target_projections` is empty - every
+    already-written file lands in `reference_projections` instead
+    (kriya/workflow/retry_package.py's own `targets`/`references` split,
+    reason="dependency_reference"). Originally this function only read
+    `target_projections`, so a file shown ONLY as reference content (exactly
+    this test's pom.xml) was recorded nowhere, and _completeness_gated_
+    operation() correctly-but-wrongly treated real, shown content as unknown.
+    `reference_projections` uses the exact same budgeted `project_
+    implementation_source()` mechanism as targets (a real `reference_budget`,
+    not an unbounded read) - it can legitimately be partial, so it gets the
+    identical tier/is_exact/omitted_regions handling, not a blanket "always
+    exact" shortcut."""
     if retry_package is None:
         return
-    for projection in retry_package.target_projections:
+    for projection in (*retry_package.target_projections, *retry_package.reference_projections):
         state.known_target_context_items[projection.path] = make_context_item(
             path=projection.path, content=projection.content,
             reason=f"retry_package:{projection.reason}",
             source_type="named_in_request", trust_level="repository",
             tier=projection.level.value, is_exact=not projection.omitted_regions,
             revision=projection.revision, omitted_regions=projection.omitted_regions,
+        )
+
+
+def _record_all_files_written_as_exact_context(
+    state: GenerationState, ctx: "AttemptContext", filepaths: Iterable[str],
+) -> None:
+    """VAL-001 G1 D1 (found via the real focused-suite regression after
+    7bc52b5, 2026-09-18): a full-set retry (state.attempt_number > 1) and a
+    missing-files retry do NOT go through build_known_target_context() at
+    all - that call is gated on `state.attempt_number == 1` (see the
+    known_target_files block above). Their own content-supply functions
+    (_build_full_set_retry_prompt/_build_missing_files_retry_prompt,
+    kriya/workflow/retry_prompts.py) instead read every file in
+    all_files_written FRESH from ctx.worktree_path via a plain, unbounded
+    `fh.read()` - real, complete, current content, exactly the same
+    "files_with_current_content" guarantee _completeness_gated_operation()
+    already trusts elsewhere (see kriya/agents/agent.py's own
+    prefer_anchored_edit reasoning) - whenever `retry_package` is None (the
+    branch _build_full_set_retry_prompt itself takes for this exact case).
+    This function makes that same, already-real guarantee visible to
+    _completeness_gated_operation(), mirroring _build_full_set_retry_prompt's
+    OWN read (same path, same files, same error-tolerant skip) so the two
+    can never disagree about what was actually shown.
+
+    Only ever records tier="full"/is_exact=True/member_id=None - never a
+    fabricated exactness claim: if the read fails, that path is silently
+    skipped here exactly as it is in the prompt-builder itself (no entry
+    recorded, so _completeness_gated_operation() correctly falls back to its
+    own fail-closed default for that path)."""
+    for filepath in filepaths:
+        full_path = os.path.join(ctx.worktree_path, filepath)
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
+                current_content = handle.read()
+        except OSError:
+            continue
+        state.known_target_context_items[filepath] = make_context_item(
+            path=filepath, content=current_content, reason="all_files_written_current_source",
+            source_type="named_in_request", trust_level="repository",
+            tier="full", is_exact=True, revision=content_revision(current_content),
         )
 
 
@@ -4524,6 +4580,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             ctx.architect_basename_to_path.get(basename, basename) for basename in state.last_missing_files
         ]
 
+        # VAL-001 G1 D1: _build_missing_files_retry_prompt reads every file in
+        # all_files_written fresh from the worktree (real, complete, current) -
+        # record that same real evidence before _operation_map() runs.
+        _record_all_files_written_as_exact_context(state, ctx, state.all_files_written)
         task_desc, active_code_context = _build_missing_files_retry_prompt(
             ctx.goal, ctx.plan, ctx.design, resolved_missing_files,
             state.all_files_written, ctx.worktree_path, base_code_context,
@@ -4653,6 +4713,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         retry_error_context = (
             retry_package.authoritative_error if retry_package else state.error_context
         )
+        # VAL-001 G1 D1: records whatever real content this attempt's own
+        # RetryPackage actually shows the model - target_projections AND
+        # reference_projections (see that function's own docstring for the
+        # G1-R2 regression this closes). retry_package is None only when
+        # state.last_failure is None (_retry_package_for_attempt's own early
+        # return) - true on a clean first attempt (this branch's other real
+        # caller), where state.all_files_written is necessarily still empty
+        # too (nothing has been committed by this run yet), so there is
+        # nothing for a raw-read fallback to record here even in principle;
+        # _record_retry_projection_context_items already no-ops correctly on
+        # None, so no separate branch is needed.
+        _record_retry_projection_context_items(state, retry_package)
         task_desc, active_code_context = _build_full_set_retry_prompt(
             ctx.goal, ctx.plan, state.error_context, ctx.required_files_prompt_block,
             state.all_files_written, ctx.worktree_path, active_code_context,

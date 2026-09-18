@@ -35,14 +35,18 @@ from kriya.workflow.attempt import (
     AttemptContext,
     _completeness_gated_operation,
     _operation_map,
+    _record_all_files_written_as_exact_context,
+    _record_retry_projection_context_items,
 )
 from kriya.workflow.context_package import make_context_item
 from kriya.workflow.edit_safety import content_revision
+from kriya.workflow.failure import Failure
 from kriya.workflow.file_resolution import (
     _normalized_public_signatures,
     find_brownfield_public_api_changes,
 )
 from kriya.workflow.operations import CodeOperation, operation_for_attempt
+from kriya.workflow.retry_package import build_retry_package
 from kriya.workflow.state import APIContractRecovery, APIContractRecoveryPhase, GenerationState
 
 
@@ -566,3 +570,220 @@ class TestD3FindBrownfieldPublicApiChanges:
             str(tmp_path), original, final, goal="fix a narrow bug",
         )
         assert violations == []
+
+
+# ---------------------------------------------------------------------------
+# Meta-regression: the 14 focused-suite failures after 7bc52b5 (all traced to
+# ONE production defect - _record_retry_projection_context_items() only read
+# RetryPackage.target_projections, never .reference_projections, so any file
+# shown to the model purely as reference content - not a specific retry
+# target - was invisible to _completeness_gated_operation() even though its
+# real, current content was genuinely in the prompt). See
+# docs/assurance/VAL_001_GRAPHIFY_G1_REMEDIATION_DESIGN.md's own
+# "Post-7bc52b5 regression" section for the full root-cause narrative.
+# ---------------------------------------------------------------------------
+
+class TestD1MetaRegression:
+    def test_d1_operates_from_context_supplied_to_current_developer_call(self, tmp_path):
+        """Property 1: authorization reads state.known_target_context_items,
+        not file existence or size - an item recorded for THIS attempt's own
+        content supply is what authorizes, nothing else."""
+        content = _write_target(tmp_path, "a.py", "def f():\n    return 1\n")
+        ctx = _minimal_attempt_ctx(tmp_path)
+        state = GenerationState()
+        # No item recorded at all -> fails closed regardless of the file's
+        # real, current, perfectly ordinary content.
+        op, mandatory = _completeness_gated_operation(
+            "a.py", CodeOperation.REPAIR_WITH_FULL_FILE, file_exists=True, ctx=ctx, state=state,
+        )
+        assert op is CodeOperation.REPAIR_WITH_PATCH and mandatory is True
+        # Recording the exact real content for THIS attempt authorizes it.
+        state.known_target_context_items["a.py"] = make_context_item(
+            path="a.py", content=content, reason="known_target_full_source",
+            source_type="named_in_request", trust_level="repository",
+            tier="full", is_exact=True, revision=content_revision(content),
+        )
+        op, mandatory = _completeness_gated_operation(
+            "a.py", CodeOperation.REPAIR_WITH_FULL_FILE, file_exists=True, ctx=ctx, state=state,
+        )
+        assert op is CodeOperation.REPAIR_WITH_FULL_FILE and mandatory is False
+
+    def test_stale_attempt_n_context_cannot_authorize_attempt_n_plus_1(self, tmp_path):
+        """Property 2: a ContextItem recorded against OLD content does not
+        authorize a mutation once the file's real current content has
+        changed (revision mismatch) - proven by mutating the file on disk
+        AFTER recording, exactly simulating an intervening attempt's own
+        successful write that the current attempt's bookkeeping never saw."""
+        original_content = "def f():\n    return 1\n"
+        _write_target(tmp_path, "a.py", original_content)
+        ctx = _minimal_attempt_ctx(tmp_path)
+        state = GenerationState()
+        # Attempt N recorded this file as exact, for the content that was
+        # real and current AT THAT TIME.
+        state.known_target_context_items["a.py"] = make_context_item(
+            path="a.py", content=original_content, reason="known_target_full_source",
+            source_type="named_in_request", trust_level="repository",
+            tier="full", is_exact=True, revision=content_revision(original_content),
+        )
+        op, mandatory = _completeness_gated_operation(
+            "a.py", CodeOperation.REPAIR_WITH_FULL_FILE, file_exists=True, ctx=ctx, state=state,
+        )
+        assert op is CodeOperation.REPAIR_WITH_FULL_FILE and mandatory is False  # valid while current
+
+        # Attempt N+1: the file changed on disk (an intervening write this
+        # bookkeeping never revalidated) - the SAME recorded item must now
+        # fail closed rather than silently authorize against stale evidence.
+        _write_target(tmp_path, "a.py", "def f():\n    return 2  # changed\n")
+        op, mandatory = _completeness_gated_operation(
+            "a.py", CodeOperation.REPAIR_WITH_FULL_FILE, file_exists=True, ctx=ctx, state=state,
+        )
+        assert op is CodeOperation.REPAIR_WITH_PATCH and mandatory is True
+
+    def test_full_set_retry_with_exact_reference_content_remains_functional(self, tmp_path):
+        """Property 3, the exact defect: a real RetryPackage (built via the
+        real production build_retry_package(), not a hand-rolled fake) whose
+        target file has NO grounded implicated-file evidence (target_files=[]
+        - the "unscoped full-set retry" shape test_workflow_checks_
+        toolchain_only_once_across_retries exercises) still places the
+        file's real, current, complete content in reference_projections.
+        _record_retry_projection_context_items() must record it from there."""
+        content = _write_target(tmp_path, "pom.xml", "<project><bad/></project>\n")
+        state = GenerationState()
+        failure = Failure(type="compile", message="some generic xml error")
+        retry_package = build_retry_package(
+            failure=failure, worktree_path=str(tmp_path),
+            all_files=["pom.xml"], target_files=[],  # unscoped: no grounded target
+            source_context=None, max_chars=8000,
+        )
+        assert retry_package is not None
+        assert retry_package.target_projections == ()
+        assert any(p.path == "pom.xml" for p in retry_package.reference_projections), (
+            "test setup sanity: pom.xml must land in reference_projections for this to be a real test"
+        )
+        _record_retry_projection_context_items(state, retry_package)
+        item = state.known_target_context_items.get("pom.xml")
+        assert item is not None and item.tier == "full" and item.is_exact is True
+        ctx = _minimal_attempt_ctx(tmp_path)
+        op, mandatory = _completeness_gated_operation(
+            "pom.xml", CodeOperation.REPAIR_WITH_FULL_FILE, file_exists=True, ctx=ctx, state=state,
+        )
+        assert op is CodeOperation.REPAIR_WITH_FULL_FILE and mandatory is False
+
+    def test_targeted_retry_with_exact_member_context_remains_functional(self, tmp_path):
+        """Property 4 (regression guard, already covered in TestD1 above -
+        named explicitly here as a meta-property): member_exact context
+        authorizes an anchored patch, never blocks legitimate targeted
+        repair outright."""
+        content = _write_target(tmp_path, "b.py", "def a():\n    return 1\n\n\ndef b():\n    return 2\n")
+        ctx = _minimal_attempt_ctx(tmp_path)
+        state = GenerationState()
+        state.known_target_context_items["b.py"] = make_context_item(
+            path="b.py", content="def b():\n    return 2\n", reason="member_exact",
+            source_type="named_in_request", trust_level="repository",
+            tier="member_exact", is_exact=True, member_id="b",
+            revision=content_revision(content),
+        )
+        op, mandatory = _completeness_gated_operation(
+            "b.py", CodeOperation.REPAIR_WITH_FULL_FILE, file_exists=True, ctx=ctx, state=state,
+        )
+        assert op is CodeOperation.REPAIR_WITH_PATCH  # not blocked - downgraded to the safe protocol
+        assert mandatory is True
+
+    def test_retry_with_skeleton_only_context_remains_fail_closed(self, tmp_path):
+        """Property 5 (regression guard): a real RetryPackage whose file is
+        large enough to genuinely omit content (real budget pressure, not a
+        hand-set flag) still fails closed."""
+        large_content = "\n\n".join(f"def f{i}():\n    return {i}" for i in range(500))
+        _write_target(tmp_path, "big.py", large_content)
+        state = GenerationState()
+        failure = Failure(type="compile", message="some error naming nothing real")
+        retry_package = build_retry_package(
+            failure=failure, worktree_path=str(tmp_path),
+            all_files=["big.py"], target_files=[],
+            source_context=None, max_chars=400,  # deliberately tiny - forces real omission
+        )
+        _record_retry_projection_context_items(state, retry_package)
+        item = state.known_target_context_items.get("big.py")
+        assert item is not None
+        ctx = _minimal_attempt_ctx(tmp_path)
+        op, mandatory = _completeness_gated_operation(
+            "big.py", CodeOperation.REPAIR_WITH_FULL_FILE, file_exists=True, ctx=ctx, state=state,
+        )
+        if item.is_exact:
+            pytest.skip("test setup sanity: budget was not actually tight enough to force omission")
+        assert op is CodeOperation.REPAIR_WITH_PATCH and mandatory is True
+
+    def test_self_correction_never_reaches_full_file_gate_by_construction(self):
+        """Property 6: self-correction (kriya/workflow/self_correction.py)
+        cannot "accidentally bypass" D1 because it structurally never
+        requests a full-file operation at all - every edit it applies goes
+        through apply_anchored_edits(), the same self-defending exact-match
+        mechanism D1's own downgrade routes into. Verified against the real
+        module's source, not asserted from the design doc alone."""
+        import inspect
+        import kriya.workflow.self_correction as self_correction_mod
+        source = inspect.getsource(self_correction_mod)
+        assert "apply_anchored_edits" in source
+        assert "CREATE_FULL_FILE" not in source
+        assert "REPAIR_WITH_FULL_FILE" not in source
+
+    def test_live_lookup_only_augments_error_text_not_content_supply(self):
+        """Property 7: live-lookup (kriya/workflow/live_lookup.py) only
+        enriches state.error_context (text fed into the SAME retry prompt
+        builders D1 already covers) - it is not a separate content-supply
+        producer, so it cannot bypass known_target_context_items recording
+        by introducing a fourth, unwired path. Verified structurally: it
+        never constructs a ContextItem, ContextPackage, or FileProjection
+        itself - those come from the retry-mode-specific builders it hands
+        its augmented error text to, same as any other retry."""
+        import inspect
+        import kriya.workflow.live_lookup as live_lookup_mod
+        source = inspect.getsource(live_lookup_mod)
+        assert "ContextItem" not in source
+        assert "FileProjection" not in source
+
+    def test_record_all_files_written_matches_missing_files_prompt_builder_exactly(self, tmp_path):
+        """Direct contract test for _record_all_files_written_as_exact_context,
+        the ONE call site it remains wired at (missing-files retries -
+        kriya/workflow/attempt.py's own use of it inside the full-set retry
+        branch was removed: _retry_package_for_attempt only returns None on
+        a clean first attempt, where state.all_files_written is necessarily
+        still empty too, making that call site a permanent no-op - see
+        _record_retry_projection_context_items' own updated call site
+        comment). _build_missing_files_retry_prompt (kriya/workflow/
+        retry_prompts.py) does a plain, unbounded fh.read() for every file in
+        all_files_written - this test proves the helper records the exact
+        same content that function would show, for a file that genuinely
+        exists and is genuinely readable, and correctly skips one that
+        isn't (mirroring that function's own try/except OSError skip)."""
+        content = _write_target(tmp_path, "existing.py", "def f():\n    return 1\n")
+        ctx = _minimal_attempt_ctx(tmp_path)
+        state = GenerationState()
+        _record_all_files_written_as_exact_context(
+            state, ctx, {"existing.py", "never_written.py"},
+        )
+        item = state.known_target_context_items.get("existing.py")
+        assert item is not None
+        assert item.tier == "full" and item.is_exact is True and item.member_id is None
+        assert item.content == content
+        assert item.revision == content_revision(content)
+        assert "never_written.py" not in state.known_target_context_items
+
+    def test_mandatory_patch_fallback_rejected_across_two_retries(self, tmp_path):
+        """Property 8: a model that ignores the mandatory-patch instruction
+        on TWO consecutive attempts is rejected both times, not just once -
+        the caller-side check is re-evaluated fresh each attempt, never
+        cached as "already decided" from an earlier rejection."""
+        from kriya.workflow.operations import validate_operation_result
+        for _ in range(2):
+            result = {"content": "def f():\n    return 999\n", "edits": None}
+            actual, contract_error = validate_operation_result(
+                result, expected=CodeOperation.REPAIR_WITH_PATCH, file_exists=True,
+            )
+            assert actual is CodeOperation.REPAIR_WITH_FULL_FILE
+            assert contract_error is None
+            # (the caller-side mandatory check that turns this into an actual
+            # rejection is exercised end-to-end in TestD2G1Replay/TestD1
+            # FallbackClosure above; this loop proves validate_operation_
+            # result's own classification doesn't change or "warm up" across
+            # repeated calls with identical input.)

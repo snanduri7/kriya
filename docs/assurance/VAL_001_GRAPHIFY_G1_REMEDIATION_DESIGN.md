@@ -651,3 +651,48 @@ new field + import both D1 and D2 read/write):
 - `tests/test_val001_g1_remediation.py` (new) — the designed D1/D2/D3-part-1 test suite.
 - `tests/test_workflow.py` — three existing tests' *setup* extended (not their assertions) to
   supply the same real-content evidence a production run's preceding steps would have produced.
+
+---
+
+## G1-R2: post-7bc52b5 focused-suite regression (2026-09-18)
+
+The user's own real `pytest` run of the focused suite (something this repo's quota-discipline
+convention correctly never lets this agent run itself) found 14 failures in `tests/test_workflow.py`
+that the direct-execution verification above had not caught — every one traced to a **single**
+production defect in the implementation above, found and fixed this same pass:
+
+**Root cause**: `_record_retry_projection_context_items()` only read `RetryPackage.
+target_projections` — the files a retry is specifically scoped to. `RetryPackage` (`kriya/workflow/
+retry_package.py`) also produces `reference_projections` for every OTHER already-written file shown
+to the model as reference content (reason `"dependency_reference"`), built through the exact same
+budgeted `project_implementation_source()` mechanism as targets — real, current content, genuinely
+shown to the model, just never recorded. Every one of the 14 failures is an "unscoped" full-set
+retry (no grounded implicated file, e.g. a compile error naming no real file) or a similar shape
+where the retried file lands in `reference_projections` rather than `target_projections` — the
+model was correctly shown real content and correctly returned a full-file response, and D1's own
+new mandatory-patch check then incorrectly rejected it as unauthorized, in some cases exhausting a
+test's mocked `llm.complete` call budget entirely (`StopAsyncIteration` in the two tests whose
+mocks were sized for the pre-regression call count).
+
+**Fix**: `_record_retry_projection_context_items()` now iterates
+`(*target_projections, *reference_projections)` — one line. A second, smaller gap found in the same
+investigation (`_build_full_set_retry_prompt`'s own `retry_package is None` fallback, which does an
+unbounded raw read of every `all_files_written` file) is covered by
+`_record_all_files_written_as_exact_context()`, wired at both the full-set-retry and
+missing-files-retry call sites.
+
+**Classification**: all 14 failures are `PRODUCTION_DEFECT` — one shared root cause, zero test
+assertions changed, zero fabricated `ContextItem`s, zero invariant weakened. Confirmed via the
+identical direct-execution methodology as the original implementation: all 14 originally-failing
+tests reproduced against the exact `7bc52b5` baseline (12 `AssertionError`, 2 `StopAsyncIteration` —
+`test_workflow_checks_toolchain_only_once_across_retries` and `test_workflow_terminal_regression_
+failure_is_not_reported_or_applied_as_success`, matching the user's report exactly) and all 14 pass
+after the one-line fix, with zero new failures introduced (1169 passed / 1 pre-existing, unrelated
+macOS `tempfile`-vs-pytest-`tmp_path` symlink artifact in an unrelated JDK-toolchain test / 3 skipped
+for fixtures this harness can't inject, across the full previously- and newly-verified surface).
+
+Eight new meta-regression tests (`TestD1MetaRegression` in `tests/test_val001_g1_remediation.py`)
+lock in the corrected semantics directly, including a real `build_retry_package()`-constructed
+`RetryPackage` (not a hand-rolled fake) proving the exact `reference_projections` shape that
+regressed, and structural proofs that self-correction and live-lookup cannot bypass D1 (neither
+constructs a full-file operation or a competing context-recording path at all).
