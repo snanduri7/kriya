@@ -24635,3 +24635,105 @@ async def test_member_hint_generation_does_not_expand_write_authority(tmp_path):
 
     assert ctx.write_scope_mode == WriteScopeMode.ALLOWLIST
     assert ctx.allowed_write_relpaths == ["Owner.java"]
+
+
+# --- CTX-001 P1 Package 3 (WP9) production-reachability (2026-09-18) -------
+# Real ctx.source_cache reuse ACROSS two real run_attempt() calls sharing
+# the SAME AttemptContext - exactly how a real retry loop reuses one
+# AttemptContext across attempts (run_generation_workflow builds AttemptContext
+# ONCE, then calls run_attempt() repeatedly with the same object).
+
+@pytest.mark.asyncio
+async def test_source_cache_reused_across_two_real_run_attempt_calls(tmp_path):
+    """Attempt 1 (full-set) derives Shared.java's Graph-RAG skeleton;
+    attempt 2 (a targeted retry, SAME ctx/source_cache, Shared.java
+    unchanged) must reuse that derivation - a real, production-path
+    demonstration of the required cross-attempt scenario."""
+    (tmp_path / "Shared.java").write_text(
+        "public class Shared {\n    public void method() {}\n}\n" + "// pad\n" * 200
+    )
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        related_files=["Shared.java"], matched_files=[],
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+    )
+
+    await run_attempt(state, ctx)
+
+    misses_after_attempt1 = ctx.source_cache.derivation_misses
+    assert misses_after_attempt1 > 0 or ctx.source_cache.content_reads > 0
+
+    # Attempt 2: a targeted retry over the SAME (unmodified) ctx.
+    state.last_attempt_mode = "targeted"
+    state.last_implicated_files = []
+    state.error_context = "a compile error"
+
+    await run_attempt(state, ctx)
+
+    # No NEW derivation misses for Shared.java - its own skeleton was
+    # already cached by attempt 1 and reused here.
+    assert ctx.source_cache.derivation_misses == misses_after_attempt1
+    assert ctx.source_cache.derivation_hits > 0
+    assert ctx.source_cache.content_read_hits > 0
+
+
+@pytest.mark.asyncio
+async def test_source_cache_does_not_interfere_with_member_rename_fallback(tmp_path):
+    """Member-hint interaction (required scenario): ctx.source_cache's own
+    read cache (populated by an attempt-1 Graph-RAG read of Owner.py) must
+    never let a STALE attempt-1 member boundary survive a real rename
+    before a retry - the retry's own failure-location resolution must see
+    the CURRENT member, through the SAME shared cache."""
+    (tmp_path / "Owner.py").write_text("class Owner:\n    def old_name(self):\n        return 1\n")
+
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[])
+    ctx = _minimal_attempt_ctx(
+        tmp_path, developer=developer,
+        related_files=["Owner.py"], matched_files=[],
+        architect_files=[], expected_files_upfront=[], architect_basename_to_path={},
+    )
+
+    # Attempt 1: a plain Graph-RAG related-file pass - populates
+    # ctx.source_cache's own read cache for Owner.py's OLD content.
+    await run_attempt(state, ctx)
+    assert ctx.source_cache.content_cache  # something was actually cached
+
+    # Rename the member before a retry - a real content mutation.
+    import time
+    time.sleep(0.01)
+    (tmp_path / "Owner.py").write_text("class Owner:\n    def new_name(self):\n        return 1\n")
+    os.utime(str(tmp_path / "Owner.py"), None)
+
+    state.last_attempt_mode = "targeted"
+    state.all_files_written = {"Owner.py"}
+    state.last_implicated_files = ["Owner.py"]
+    state.error_context = "test failure"
+    state.last_failure = Failure(
+        type="test", message="assertion failed",
+        file_locations=[FileLocation(filepath="Owner.py", line=3)],
+        likely_files=["Owner.py"],
+    )
+
+    await run_attempt(state, ctx)
+
+    events = [e for e in state.run_events if e.kind == "context.retry_member_hint_package"]
+    assert events
+    # The retry resolved the CURRENT member (new_name) - never a stale
+    # cached boundary for the renamed old_name.
+    call_kwargs = developer.run_generation.call_args.kwargs
+    assert "new_name" in call_kwargs["existing_code_context"] or any(
+        entry["member_id"] == "Owner.new_name" for entry in events[-1].details["tiers"]
+    )
+    assert not any(entry["member_id"] == "Owner.old_name" for entry in events[-1].details["tiers"])

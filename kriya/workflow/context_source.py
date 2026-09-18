@@ -24,7 +24,7 @@ import ast
 import os
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from kriya.analyzer.java_members import extract_java_members
 from kriya.workflow.edit_safety import content_revision
@@ -86,10 +86,27 @@ class CurrentSourceResolver:
     def __init__(
         self, workspace_path: str, worktree_path: Optional[str] = None,
         known_revisions: Optional[Dict[str, str]] = None,
+        content_cache: Optional[Dict[str, Tuple[float, str, str]]] = None,
     ) -> None:
         self.workspace_path = workspace_path
         self.worktree_path = worktree_path
         self.known_revisions = known_revisions or {}
+        # CTX-001 P1 WP9: an OPTIONAL, caller-owned mtime-fast-pathed read
+        # cache - "root\x00relpath" -> (mtime, revision, content). None (the
+        # default) makes this resolver instance keep its own private,
+        # empty dict, matching every existing caller's exact per-call-
+        # fresh-read behavior unchanged (this resolver has never cached
+        # anything across separate resolve() calls before this). A caller
+        # that wants cross-call reuse within one attempt's own lifetime
+        # (attempt.py) passes the SAME dict into every CurrentSourceResolver
+        # it constructs during that attempt (AttemptContext.source_cache's
+        # own content_cache) - this class never persists it anywhere else
+        # or shares it across attempts/runs itself; that scoping is entirely
+        # the caller's responsibility, matching this class's own established
+        # "makes no root-selection decision of its own" discipline.
+        self._content_cache: Dict[str, Tuple[float, str, str]] = (
+            content_cache if content_cache is not None else {}
+        )
 
     def _current_root(self) -> str:
         # Once a worktree exists, it is authoritative for the ENTIRE run -
@@ -117,21 +134,161 @@ class CurrentSourceResolver:
                 path=relpath, exists=False, content=None, revision="",
                 root_used=root, status=status,
             )
-        try:
-            with open(full, "r", encoding="utf-8", errors="replace") as fh:
-                content = fh.read()
-        except OSError:
+        read = _cached_read(self._content_cache, root, relpath)
+        if read is None:
             return ResolvedSource(
                 path=relpath, exists=False, content=None, revision="",
                 root_used=root, status="unavailable",
             )
-        real_revision = content_revision(content)
+        content, real_revision = read
         hint = self.known_revisions.get(relpath)
         stale = hint is not None and hint != real_revision
         return ResolvedSource(
             path=relpath, exists=True, content=content, revision=real_revision,
             root_used=root, status="current", stale_hint=stale,
         )
+
+
+def _cached_read(
+    content_cache: Dict[str, Tuple[float, str, str]], root: str, relpath: str,
+) -> Optional[Tuple[str, str]]:
+    """WP9's one real mtime-fast-pathed read primitive, shared by
+    CurrentSourceResolver.resolve() above and build_code_context_package()'s
+    own matched/related file reads (context_budget.py) - a single
+    implementation, not two independently-maintained copies of the same
+    mtime-then-hash pattern. os.stat() (cheap, no file body read) lets an
+    unchanged file skip its own open()+read() entirely when this exact
+    root+relpath was already read earlier in the SAME cache's lifetime AND
+    its mtime hasn't moved since - the same two-tier pattern
+    DependencyGraph's own index_repository() incremental logic already
+    established (graph.py get_cached_mtime/get_cached_hash), reused here
+    rather than invented fresh. mtime is NEVER trusted as proof of
+    identical content on its own - only as a reason to skip a read; any
+    mtime change always falls through to a real read and a freshly-
+    computed, real revision, which is the only value ever used as an
+    actual cache/derivation key anywhere in this module. Returns None only
+    when the file cannot be read at all (a real OSError) - the caller
+    already established the path exists as a file before calling this."""
+    full = os.path.join(root, relpath)
+    try:
+        stat_result = os.stat(full)
+    except OSError:
+        return None
+    cache_key = f"{root}\x00{relpath}"
+    cached = content_cache.get(cache_key)
+    if cached is not None and cached[0] == stat_result.st_mtime:
+        return cached[2], cached[1]
+    try:
+        with open(full, "r", encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+    except OSError:
+        return None
+    revision = content_revision(content)
+    content_cache[cache_key] = (stat_result.st_mtime, revision, content)
+    return content, revision
+
+
+# --- CTX-001 P1 WP9: AttemptContext-lifetime source-derivation reuse -------
+# Scope, per the accepted architecture's own §12 B3/B4 design: cache the
+# EXPENSIVE, DETERMINISTIC per-unit derivations (skeleton/signatures/member-
+# exact rendering, and their own token estimate) a retry loop would
+# otherwise recompute from scratch on every iteration for a file that
+# hasn't changed at all - never authority, retry decisions, failure
+# classification, terminal state, or a fully-rendered prompt (whose
+# surrounding evidence legitimately differs attempt to attempt). Explicitly
+# NOT a persistent cache - lives exactly as long as the AttemptContext it's
+# attached to (one dict, discarded when that object is), never written to
+# disk, never shared across separate `generate` invocations.
+
+@dataclass(frozen=True)
+class SourceDerivationKey:
+    """(source identity, revision, tier) - the exact key the architecture
+    doc's own B3 design names, made concrete: source identity is
+    (path, member_id) - member_id is None for a whole-file-level
+    derivation - NEVER pathname alone, since one file can have several
+    independently-cacheable derivations at once (its own whole-file tiers,
+    plus any member-exact/sibling-signature units). `revision` is always a
+    real, freshly-verified content_revision() (via CurrentSourceResolver,
+    §7's own current-source invariant) - a lookup miss on ANY part of this
+    key, including a revision change, is a correctness-safe cache miss by
+    construction, never a stale hit."""
+
+    path: str
+    member_id: Optional[str]
+    tier: str
+    revision: str
+
+
+class SourceDerivationCache:
+    """One small, source-derived cache object with two internal maps
+    (content and derivations) - deliberately not two independent top-level
+    caches (the task's own "prefer one small cache with optional derived
+    fields" instruction): `content_cache` is handed straight through to
+    every CurrentSourceResolver this attempt constructs (see that class's
+    own content_cache constructor parameter); `derivations` holds this
+    module's own SourceDerivationKey -> (rendered_content, token_count)
+    entries.
+
+    Concurrency: every value here is produced by a fully SYNCHRONOUS
+    compute function (skeletonize_code/extract_member_body - no `await`
+    anywhere inside them) called from a single asyncio task with no
+    concurrent asyncio.gather()/create_task() over the same AttemptContext
+    anywhere in this codebase (confirmed by inspection of kriya/workflow/
+    attempt.py's own retry loop and coordinated-repair generation, both
+    strictly sequential) - a plain dict needs no additional lock for this
+    exact usage pattern. Every stored value is treated as immutable -
+    nothing here ever mutates an already-returned tuple in place.
+
+    hits/misses are exposed as plain counters (not a full telemetry
+    system) for CTX-001 P1's own required deterministic performance
+    evidence - never anything beyond that."""
+
+    def __init__(self) -> None:
+        self.content_cache: Dict[str, Tuple[float, str, str]] = {}
+        self._derivations: Dict[SourceDerivationKey, Tuple[str, int]] = {}
+        self.derivation_hits = 0
+        self.derivation_misses = 0
+        self.content_reads = 0
+        self.content_read_hits = 0
+
+    def read(self, root: str, relpath: str) -> Optional[Tuple[str, str]]:
+        """Convenience wrapper around this module's own _cached_read() -
+        lets a non-CurrentSourceResolver caller (build_code_context_package,
+        context_budget.py) share the SAME mtime-fast-pathed read cache/
+        implementation, rather than a second, independently-maintained
+        read path. Returns (content, revision) or None if unreadable."""
+        self.content_reads += 1
+        try:
+            was_cached = os.stat(os.path.join(root, relpath)).st_mtime == (
+                self.content_cache.get(f"{root}\x00{relpath}", (None,))[0]
+            )
+        except OSError:
+            was_cached = False
+        result = _cached_read(self.content_cache, root, relpath)
+        if result is not None and was_cached:
+            self.content_read_hits += 1
+        return result
+
+    def get_or_compute_derivation(
+        self, path: str, member_id: Optional[str], tier: str, revision: str,
+        compute_fn: "Callable[[], str]",
+    ) -> Tuple[str, int]:
+        """compute_fn is called at most once per distinct
+        (path, member_id, tier, revision) - its return value's own token
+        count is memoized alongside it (folds context_budget.py's own
+        estimate_tokens() work into the SAME cache entry, rather than a
+        second independent token cache the task explicitly warns against)."""
+        key = SourceDerivationKey(path=path, member_id=member_id, tier=tier, revision=revision)
+        cached = self._derivations.get(key)
+        if cached is not None:
+            self.derivation_hits += 1
+            return cached
+        self.derivation_misses += 1
+        content = compute_fn()
+        from kriya.workflow.context_budget import estimate_tokens
+        result = (content, estimate_tokens(content))
+        self._derivations[key] = result
+        return result
 
 
 @dataclass(frozen=True)

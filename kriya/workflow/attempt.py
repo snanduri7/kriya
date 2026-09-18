@@ -65,6 +65,7 @@ from kriya.workflow.context_budget import (
 )
 from kriya.workflow.context_source import (
     CurrentSourceResolver,
+    SourceDerivationCache,
     member_boundaries_for,
     member_ids_matching_name,
     resolve_member_hints_from_failure_location,
@@ -221,7 +222,7 @@ def _resolve_known_target_member_hints(
     }
     if not candidates_by_path:
         return {}
-    resolver = CurrentSourceResolver(ctx.workspace_path, ctx.worktree_path)
+    resolver = CurrentSourceResolver(ctx.workspace_path, ctx.worktree_path, content_cache=ctx.source_cache.content_cache)
     member_hints: Dict[str, List[str]] = {}
     for path, names in candidates_by_path.items():
         resolved = resolver.resolve(path)
@@ -257,7 +258,7 @@ def _resolve_retry_member_hints(
     if state.last_failure is None or not target_files:
         return {}
     target_set = set(target_files)
-    resolver = CurrentSourceResolver(ctx.workspace_path, ctx.worktree_path)
+    resolver = CurrentSourceResolver(ctx.workspace_path, ctx.worktree_path, content_cache=ctx.source_cache.content_cache)
     member_hints: Dict[str, set] = {}
     for location in state.last_failure.file_locations:
         if location.filepath not in target_set or location.line is None:
@@ -613,6 +614,18 @@ class AttemptContext:
     # md section 25). Default empty dict keeps every existing test/caller
     # that doesn't know about this field unaffected.
     retrieval_member_hints: Dict[str, List[str]] = field(default_factory=dict)
+    # CTX-001 P1 WP9: one small AttemptContext-lifetime cache for
+    # deterministic source-derived artifacts (skeleton/signatures/member-
+    # exact rendering + their own token estimates), keyed by
+    # (path, member_id, tier, revision) - see context_source.py::
+    # SourceDerivationCache's own docstring. Built fresh per AttemptContext
+    # (default_factory, one instance per real run - never shared across
+    # separate `generate` invocations, never persisted). Every context-
+    # building call site in this module passes it through so unchanged
+    # source units are reused across retries within the SAME attempt;
+    # nothing about a cache hit vs. miss ever changes what content is
+    # produced, only how much work it costs to produce it.
+    source_cache: "SourceDerivationCache" = field(default_factory=SourceDerivationCache)
     # Files known to exist from OUTSIDE this attempt's own generation - for a
     # milestone run, every file an earlier, already-completed milestone wrote
     # (kriya/workflow/milestones.py's MilestoneRunState.established_file_context
@@ -4023,6 +4036,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             _filtered_candidates(ctx.matched_files, _graph_exclude),
             _filtered_candidates(ctx.related_files, _graph_exclude),
             ctx.worktree_path, current_limit,
+            cache=ctx.source_cache,
         )
         base_code_context = ctx.skills_prompt
         if current_graph_context:
@@ -4174,7 +4188,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 )
                 retry_member_rendered, retry_member_package = build_known_target_context(
                     list(retry_member_hints.keys()), ctx.workspace_path, ctx.worktree_path, retry_member_limit,
-                    member_hints=retry_member_hints,
+                    member_hints=retry_member_hints, cache=ctx.source_cache,
                 )
                 if retry_member_rendered:
                     active_code_context += retry_member_rendered
@@ -4270,6 +4284,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             _filtered_candidates(ctx.matched_files, _graph_exclude),
             _filtered_candidates(ctx.related_files, _graph_exclude),
             ctx.worktree_path, current_limit,
+            cache=ctx.source_cache,
         )
         base_code_context = ctx.skills_prompt
         if current_graph_context:
@@ -4344,6 +4359,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             _filtered_candidates(ctx.matched_files, _graph_exclude),
             _filtered_candidates(ctx.related_files, _graph_exclude),
             ctx.worktree_path, current_limit,
+            cache=ctx.source_cache,
         )
         base_code_context = ctx.skills_prompt
         if current_graph_context:
@@ -4479,6 +4495,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             _filtered_candidates(ctx.matched_files, _graph_exclude),
             _filtered_candidates(ctx.related_files, _graph_exclude),
             ctx.worktree_path, current_limit,
+            cache=ctx.source_cache,
         )
         active_code_context = ctx.skills_prompt
         if current_graph_context:
@@ -4536,7 +4553,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             known_target_member_hints = _resolve_known_target_member_hints(ctx, known_target_files)
             known_target_rendered, known_target_package = build_known_target_context(
                 known_target_files, ctx.workspace_path, ctx.worktree_path, known_target_limit,
-                member_hints=known_target_member_hints,
+                member_hints=known_target_member_hints, cache=ctx.source_cache,
             )
             if known_target_rendered:
                 active_code_context += known_target_rendered

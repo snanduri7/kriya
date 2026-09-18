@@ -414,3 +414,171 @@ def test_known_target_member_hint_that_no_longer_resolves_falls_back_to_whole_fi
 
     assert any(o["reason"] == "unsupported_structural_extraction" for o in package.omitted)
     assert package.relevant_files[0].tier == "full"
+
+
+# --- CTX-001 P1 WP9: AttemptContext-lifetime source-derivation reuse -------
+
+def test_build_code_context_package_cached_equals_uncached(tmp_path):
+    """Semantic equivalence: for identical inputs, the cached-path output
+    must equal the uncached-path output exactly - cache hits may change
+    hit/miss COUNTERS, never rendered context content."""
+    from kriya.workflow.context_source import SourceDerivationCache
+
+    _write(str(tmp_path), "a.py", "x = 1\n" * 500)
+    _write(str(tmp_path), "b.py", "y = 2\n" * 500)
+
+    uncached_rendered, uncached_package = build_code_context_package(
+        ["a.py"], ["b.py"], str(tmp_path), budget_limit=50,
+    )
+    cache = SourceDerivationCache()
+    cached_rendered, cached_package = build_code_context_package(
+        ["a.py"], ["b.py"], str(tmp_path), budget_limit=50, cache=cache,
+    )
+
+    assert uncached_rendered == cached_rendered
+    assert [i.to_dict() for i in uncached_package.relevant_files] == [i.to_dict() for i in cached_package.relevant_files]
+    assert uncached_package.omitted == cached_package.omitted
+
+
+def test_build_code_context_package_reuses_derivation_across_calls(tmp_path):
+    """Cross-attempt scenario (file-level): attempt 1 derives a skeleton for
+    a file; attempt 2 (same cache, unchanged file) must reuse it - zero
+    additional skeletonization work for that file."""
+    from kriya.workflow.context_source import SourceDerivationCache
+
+    content = "x = 1\n" * 2000
+    _write(str(tmp_path), "a.py", content)
+    cache = SourceDerivationCache()
+
+    build_code_context_package(["a.py"], [], str(tmp_path), budget_limit=10, cache=cache)
+    misses_after_first = cache.derivation_misses
+    assert misses_after_first > 0
+
+    build_code_context_package(["a.py"], [], str(tmp_path), budget_limit=10, cache=cache)
+    assert cache.derivation_misses == misses_after_first
+    assert cache.derivation_hits > 0
+
+
+def test_cross_attempt_file_a_reused_file_b_recomputed(tmp_path):
+    """Required deterministic scenario: attempt 1 derives A and B; B is
+    modified between attempts; attempt 2 must reuse A's derivation and
+    recompute B's - no stale B representation may enter the result."""
+    from kriya.workflow.context_source import SourceDerivationCache
+
+    _write(str(tmp_path), "A.py", "a_content = 1\n" * 2000)
+    _write(str(tmp_path), "B.py", "b_content = 'VERSION_1'\n" * 2000)
+    cache = SourceDerivationCache()
+
+    build_code_context_package(["A.py", "B.py"], [], str(tmp_path), budget_limit=20, cache=cache)
+    hits_before, misses_before = cache.derivation_hits, cache.derivation_misses
+
+    import time
+    time.sleep(0.01)
+    _write(str(tmp_path), "B.py", "b_content = 'VERSION_2'\n" * 2000)
+    os.utime(str(tmp_path / "B.py"), None)
+
+    rendered, _package = build_code_context_package(["A.py", "B.py"], [], str(tmp_path), budget_limit=20, cache=cache)
+
+    # A's own derivation was reused (a new hit recorded); B's was recomputed
+    # (a new miss recorded) - and the rendered output reflects B's CURRENT
+    # content, never a stale cached one.
+    assert cache.derivation_hits > hits_before
+    assert cache.derivation_misses > misses_before
+    assert "VERSION_1" not in rendered
+
+
+def test_known_target_context_cached_equals_uncached_member_exact(tmp_path):
+    from kriya.workflow.context_source import SourceDerivationCache
+
+    _write(str(tmp_path), "Owner.py", "class Owner:\n    def method(self):\n        return 1\n")
+
+    uncached_rendered, uncached_package = build_known_target_context(
+        ["Owner.py"], str(tmp_path), str(tmp_path), 100000,
+        member_hints={"Owner.py": "Owner.method"},
+    )
+    cache = SourceDerivationCache()
+    cached_rendered, cached_package = build_known_target_context(
+        ["Owner.py"], str(tmp_path), str(tmp_path), 100000,
+        member_hints={"Owner.py": "Owner.method"}, cache=cache,
+    )
+
+    assert uncached_rendered == cached_rendered
+    assert [i.to_dict() for i in uncached_package.relevant_files] == [i.to_dict() for i in cached_package.relevant_files]
+
+
+def test_known_target_context_overload_boundaries_do_not_collide_in_cache(tmp_path):
+    """The cache-key discriminator (member_id + line range) must keep two
+    real overload bodies distinct - never one clobbering the other's cache
+    entry."""
+    from kriya.workflow.context_source import SourceDerivationCache
+
+    content = (
+        "public class Owner {\n"
+        "    public String format(String x) { return \"ONE_ARG\"; }\n"
+        "    public String format(String x, String y) { return \"TWO_ARG\"; }\n"
+        "}\n"
+    )
+    _write(str(tmp_path), "Owner.java", content)
+    cache = SourceDerivationCache()
+
+    _rendered, package = build_known_target_context(
+        ["Owner.java"], str(tmp_path), str(tmp_path), 100000,
+        member_hints={"Owner.java": "Owner.format"}, cache=cache,
+    )
+
+    member_items = [i for i in package.relevant_files if i.member_id == "Owner.format"]
+    assert len(member_items) == 2
+    contents = {i.content for i in member_items}
+    assert any("ONE_ARG" in c for c in contents)
+    assert any("TWO_ARG" in c for c in contents)
+
+
+def test_member_hint_renamed_before_retry_cached_boundaries_do_not_survive(tmp_path):
+    """Member-hint interaction (required scenario): attempt 1 resolves a
+    real member; the member is renamed before a retry; the SAME
+    SourceDerivationCache must not let a stale attempt-1 derivation for the
+    OLD name leak into attempt 2's result - the resolver falls back
+    conservatively (unsupported_structural_extraction) against CURRENT
+    source, exactly as the uncached path already does."""
+    from kriya.workflow.context_source import SourceDerivationCache
+
+    _write(str(tmp_path), "Owner.py", "class Owner:\n    def old_name(self):\n        return 1\n")
+    cache = SourceDerivationCache()
+
+    build_known_target_context(
+        ["Owner.py"], str(tmp_path), str(tmp_path), 100000,
+        member_hints={"Owner.py": "Owner.old_name"}, cache=cache,
+    )
+
+    import time
+    time.sleep(0.01)
+    _write(str(tmp_path), "Owner.py", "class Owner:\n    def new_name(self):\n        return 1\n")
+    os.utime(str(tmp_path / "Owner.py"), None)
+
+    _rendered, package = build_known_target_context(
+        ["Owner.py"], str(tmp_path), str(tmp_path), 100000,
+        member_hints={"Owner.py": "Owner.old_name"}, cache=cache,
+    )
+
+    assert not any(i.member_id == "Owner.old_name" for i in package.relevant_files)
+    assert any(o["reason"] == "unsupported_structural_extraction" for o in package.omitted)
+
+
+def test_source_derivation_cache_performance_counters_report_reuse(tmp_path):
+    """Deterministic instrumentation, not wall-clock: hits/misses must
+    concretely demonstrate reuse on an unchanged repeated call."""
+    from kriya.workflow.context_source import SourceDerivationCache
+
+    _write(str(tmp_path), "a.py", "x = 1\n" * 500)
+    cache = SourceDerivationCache()
+
+    build_code_context_package(["a.py"], [], str(tmp_path), budget_limit=5, cache=cache)
+    first_misses = cache.derivation_misses
+    first_reads = cache.content_reads
+
+    build_code_context_package(["a.py"], [], str(tmp_path), budget_limit=5, cache=cache)
+
+    assert cache.derivation_misses == first_misses  # no NEW misses - fully reused
+    assert cache.derivation_hits > 0
+    assert cache.content_reads > first_reads  # a read attempt still happens...
+    assert cache.content_read_hits > 0  # ...but is itself a cache hit (mtime unchanged)

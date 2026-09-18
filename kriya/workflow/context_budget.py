@@ -727,6 +727,7 @@ def _build_file_tiers(
 def build_code_context_package(
     matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int,
     file_scores: Optional[Dict[str, float]] = None,
+    cache: "Optional[SourceDerivationCache]" = None,
 ) -> Tuple[str, Any]:
     """CTX-001 P1 WP6: the real implementation build_code_context() (below)
     is now a thin wrapper around - becomes the one unit-producing AND
@@ -751,33 +752,59 @@ def build_code_context_package(
     from kriya.policy.trust import TrustLevel
     from kriya.workflow.context_package import build_context_package, make_context_item, make_omitted_entry
 
+    def _read(full_p: str, f: str) -> Optional[str]:
+        # CTX-001 P1 WP9: cache is None for every existing caller (default) -
+        # byte-identical fresh-read behavior, unchanged. A caller that wants
+        # attempt-lifetime reuse passes its own SourceDerivationCache
+        # (context_source.py) - shared with CurrentSourceResolver's own
+        # content_cache, so a file already read via either path this
+        # attempt is never re-read via the other.
+        if cache is not None:
+            read = cache.read(workspace_path, f)
+            return read[0] if read is not None else None
+        try:
+            with open(full_p, "r", encoding="utf-8", errors="replace") as fh:
+                return fh.read()
+        except Exception as e:
+            logger.debug(f"Failed to read '{full_p}' for RAG context: {e}")
+            return None
+
     matched_contents = {}
     for f in matched_files:
         full_p = os.path.join(workspace_path, f)
         if os.path.exists(full_p):
-            try:
-                with open(full_p, "r", encoding="utf-8", errors="replace") as fh:
-                    matched_contents[f] = fh.read()
-            except Exception as e:
-                logger.debug(f"Failed to read matched file '{full_p}' for RAG context: {e}")
+            content = _read(full_p, f)
+            if content is not None:
+                matched_contents[f] = content
 
     related_contents = {}
     for f in related_files:
         full_p = os.path.join(workspace_path, f)
         if os.path.exists(full_p):
-            try:
-                with open(full_p, "r", encoding="utf-8", errors="replace") as fh:
-                    related_contents[f] = fh.read()
-            except Exception as e:
-                logger.debug(f"Failed to read related file '{full_p}' for RAG context: {e}")
+            content = _read(full_p, f)
+            if content is not None:
+                related_contents[f] = content
 
-    # Introduce cache for skeletonized content to optimize performance
+    # Per-call memo (unchanged from pre-WP9 behavior) PLUS, when `cache` is
+    # given, the attempt-lifetime SourceDerivationCache - the per-call dict
+    # still avoids a second dict lookup for the ~3-5 repeat calls each file
+    # gets within ONE _build_file_tiers() budget search; `cache` is what
+    # actually survives across separate build_code_context_package() calls
+    # (different retries in the same attempt).
     skel_cache = {}
 
     def get_skeletonized(content: str, filepath: str, tier: str) -> str:
         key = (filepath, tier)
         if key not in skel_cache:
-            skel_cache[key] = skeletonize_code(content, filepath, tier)
+            if cache is not None:
+                revision = content_revision(content)
+                rendered, _tokens = cache.get_or_compute_derivation(
+                    filepath, None, tier, revision,
+                    lambda: skeletonize_code(content, filepath, tier),
+                )
+                skel_cache[key] = rendered
+            else:
+                skel_cache[key] = skeletonize_code(content, filepath, tier)
         return skel_cache[key]
 
     omitted: List[Dict[str, Any]] = []
@@ -836,8 +863,11 @@ def build_code_context_package(
     return graph_rag_context, package
 
 
-def build_code_context(matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int, file_scores: Optional[Dict[str, float]] = None) -> str:
-    return build_code_context_package(matched_files, related_files, workspace_path, budget_limit, file_scores)[0]
+def build_code_context(
+    matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int,
+    file_scores: Optional[Dict[str, float]] = None, cache: "Optional[SourceDerivationCache]" = None,
+) -> str:
+    return build_code_context_package(matched_files, related_files, workspace_path, budget_limit, file_scores, cache)[0]
 
 
 def _fit_whole_file(content: str, remaining_tokens: int) -> Optional[Tuple[str, str, str, bool]]:
@@ -855,7 +885,20 @@ def _fit_whole_file(content: str, remaining_tokens: int) -> Optional[Tuple[str, 
     when remaining_tokens <= 0 (nothing at all can fit - the caller must
     record an explicit budget_exhausted omission instead; every other case
     always returns real content, since project_implementation_source always
-    fits within the given character budget by construction)."""
+    fits within the given character budget by construction).
+
+    CTX-001 P1 WP9 (deliberately NOT cache-routed): unlike skeletonize_code()/
+    extract_member_body() (pure functions of content+tier/line-range alone,
+    safe to cache by (path, tier-or-member_id, revision)), this function's
+    own bounded-excerpt output is a function of `remaining_tokens` too - the
+    SAME file's cached excerpt from an earlier call (when a different
+    amount of budget happened to be left) would be WRONG-SIZED for a later
+    call with a different remaining_tokens, silently violating cached-vs-
+    uncached semantic equivalence. Caching this would require folding the
+    budget into the cache key, defeating cross-call reuse for exactly the
+    case (budget genuinely differs run to run) real reuse would matter
+    least. Left uncached; the FULL-content branch just above needs no
+    caching benefit anyway (no real computation beyond estimate_tokens)."""
     if remaining_tokens <= 0:
         return None
     full_cost = estimate_tokens(content)
@@ -913,6 +956,7 @@ def build_known_target_context(
     member_hints: Optional[Dict[str, Union[str, Sequence[str]]]] = None,
     known_revisions: Optional[Dict[str, str]] = None,
     exclude: Optional[Iterable[str]] = None,
+    cache: "Optional[SourceDerivationCache]" = None,
 ) -> Tuple[str, Any]:
     """CTX-001 P1 WP7 (A3+A5): replaces attempt.py's own
     _brownfield_owner_contract_block()'s SOURCE-CONTENT responsibility (its
@@ -947,7 +991,16 @@ def build_known_target_context(
     )
 
     exclude_set = set(exclude or ())
-    resolver = CurrentSourceResolver(workspace_path, worktree_path, known_revisions)
+    # CTX-001 P1 WP9: cache is None for every existing caller (default) -
+    # a fresh, private content_cache dict, byte-identical to pre-WP9
+    # behavior. A caller wanting attempt-lifetime reuse passes its own
+    # SourceDerivationCache - shared with build_code_context_package()'s
+    # own reads, so no file is ever read twice via two different producers
+    # in the same attempt.
+    resolver = CurrentSourceResolver(
+        workspace_path, worktree_path, known_revisions,
+        content_cache=(cache.content_cache if cache is not None else None),
+    )
 
     def effective_score(path: str) -> float:
         return max((file_scores or {}).get(path, 0.0), KNOWN_TARGET_FLOOR)
@@ -1029,8 +1082,25 @@ def build_known_target_context(
                                 estimated_tokens=0, member_id=member_id,
                             ))
                             continue
-                        member_content = extract_member_body(resolved.content, boundary.start_line, boundary.end_line)
-                        member_cost = estimate_tokens(member_content)
+                        if cache is not None:
+                            # Cache-key discriminator includes the boundary's
+                            # own line range, not just member_id - an
+                            # ambiguous (overloaded) name can resolve to
+                            # SEVERAL distinct boundaries sharing one
+                            # member_id (see boundaries_matching_member_id's
+                            # own docstring); using member_id alone here
+                            # would collide two real, DIFFERENT bodies into
+                            # one cache entry. The ContextItem's own
+                            # member_id (below) stays the clean, real value -
+                            # this discriminator is a cache-key-only detail.
+                            cache_member_id = f"{member_id}:{boundary.start_line}-{boundary.end_line}"
+                            member_content, member_cost = cache.get_or_compute_derivation(
+                                path, cache_member_id, "member_exact", resolved.revision,
+                                lambda b=boundary: extract_member_body(resolved.content, b.start_line, b.end_line),
+                            )
+                        else:
+                            member_content = extract_member_body(resolved.content, boundary.start_line, boundary.end_line)
+                            member_cost = estimate_tokens(member_content)
                         if member_cost <= member_remaining:
                             items.append(make_context_item(
                                 path=path, content=member_content, reason="known_target_member_exact",
@@ -1051,9 +1121,15 @@ def build_known_target_context(
             if member_produced:
                 sibling_remaining = budget_limit - consumed
                 if sibling_remaining > 0:
-                    sibling_text = skeletonize_code(resolved.content, path, "signatures")
+                    if cache is not None:
+                        sibling_text, sib_cost = cache.get_or_compute_derivation(
+                            path, None, "signatures", resolved.revision,
+                            lambda: skeletonize_code(resolved.content, path, "signatures"),
+                        )
+                    else:
+                        sibling_text = skeletonize_code(resolved.content, path, "signatures")
+                        sib_cost = estimate_tokens(sibling_text) if sibling_text else 0
                     if sibling_text:
-                        sib_cost = estimate_tokens(sibling_text)
                         if sib_cost <= sibling_remaining:
                             items.append(make_context_item(
                                 path=path, content=sibling_text, reason="known_target_sibling_signatures",
