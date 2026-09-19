@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 import re
@@ -228,6 +229,26 @@ class PolymorphicValidator:
         # MA4.4 (control-plane implementation plan) - audit-only. See
         # _run_cmd_with_timeout below; never consulted for enforcement.
         self.execution_policy = ExecutionPolicy()
+        # PERF/DEPENDENCY-001 (2026-09-19): one instance of PolymorphicValidator
+        # is constructed ONCE per attempt and reused across compile_check/
+        # run_tests/run_app_sequence (kriya/workflow/attempt.py's own real
+        # construction sites - e.g. line ~6914's `validator`, threaded through
+        # every gate in that one attempt) - each of which independently calls
+        # _resolve_python_interpreter() -> _ensure_project_venv(), which
+        # unconditionally re-ran `pip install` every single call even when
+        # nothing changed. This cache is scoped to THIS INSTANCE's own
+        # lifetime only (never a module-level/global cache - a fresh
+        # PolymorphicValidator, e.g. the next attempt or a different
+        # workspace, always starts with an empty cache and performs its own
+        # real acquisition) - see _venv_install_signature()'s own docstring
+        # for how the key stays correctly invalidated on a real dependency-
+        # manifest content change within that lifetime, not merely on
+        # `install_args`' own (path-only, content-blind) shape.
+        self._venv_install_cache: Dict[Tuple[Any, ...], Tuple[Optional[str], Optional[str]]] = {}
+        # Observability counter (task's own "record before/after acquisition
+        # count deterministically") - incremented ONLY on a real cache MISS,
+        # i.e. only when the expensive pip install subprocess actually ran.
+        self.venv_install_attempts = 0
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
         return get_pom_dependencies(pom_path)
@@ -273,7 +294,52 @@ class PolymorphicValidator:
                 missing.append(module)
         return missing
 
+    def _venv_install_signature(self, install_args: List[str]) -> Tuple[Any, ...]:
+        """PERF/DEPENDENCY-001: a cache key that correctly invalidates when
+        the underlying dependency MANIFEST'S REAL CONTENT changes, not
+        merely when `install_args`' own shape stays the same. The
+        requirements.txt branch's install_args is `["-r", <path>]` - a
+        PATH, which does not itself change on a content edit (a retry that
+        just edited requirements.txt would otherwise get a stale cache hit)
+        - so this hashes that file's current bytes instead. The
+        pyproject.toml branch's install_args IS already a flat list of
+        dependency specifiers freshly re-parsed from the file on every
+        _resolve_python_interpreter() call (_pyproject_dependencies), so
+        its own tuple form is already a correct, content-derived key with
+        no extra hashing needed."""
+        if len(install_args) == 2 and install_args[0] == "-r":
+            req_path = install_args[1]
+            full = req_path if os.path.isabs(req_path) else os.path.join(self.workspace_path, req_path)
+            try:
+                with open(full, "rb") as fh:
+                    digest = hashlib.sha256(fh.read()).hexdigest()
+            except OSError:
+                digest = "unreadable"
+            return ("-r", digest)
+        return tuple(install_args)
+
     def _ensure_project_venv(self, install_args: List[str]) -> Tuple[Optional[str], Optional[str]]:
+        """PERF/DEPENDENCY-001 (2026-09-19): instance-scoped memoization
+        wrapper over _ensure_project_venv_impl() (the real, unmodified
+        implementation below) - see this class's own __init__ docstring
+        comment for why instance scope (never global/cross-workspace) is
+        the correct, safe boundary. Caches the EXACT (venv_python,
+        install_error) tuple _ensure_project_venv_impl() returned,
+        including a genuine failure - the alternative (re-running a 300s-
+        timeout-bounded `pip install` a second/third time in the SAME
+        attempt against byte-identical manifest content, which pip would
+        resolve identically) burns real wall-clock time for a
+        deterministically identical outcome, never a "failure silently
+        becomes success" risk (the cached value IS the real, already-
+        observed outcome, verbatim - not re-derived or reinterpreted)."""
+        signature = self._venv_install_signature(install_args)
+        if signature in self._venv_install_cache:
+            return self._venv_install_cache[signature]
+        result = self._ensure_project_venv_impl(install_args)
+        self._venv_install_cache[signature] = result
+        return result
+
+    def _ensure_project_venv_impl(self, install_args: List[str]) -> Tuple[Optional[str], Optional[str]]:
         """Creates (if not already present) a project-local virtual environment
         under .kriya/venv and pip-installs `install_args` into it, so a Python
         goal needing a real third-party package can actually be tested -
@@ -353,9 +419,17 @@ class PolymorphicValidator:
                 )
                 return None, None
 
-        # Re-run on every call, even when the venv already existed - a retry
-        # may have just edited requirements.txt/pyproject.toml, and pip itself
-        # is a fast no-op when nothing actually changed since the last install.
+        # PERF/DEPENDENCY-001 (2026-09-19): this method (the real
+        # implementation, only ever reached through _ensure_project_venv()'s
+        # own caching wrapper above on a genuine cache MISS) still re-runs on
+        # every call whose manifest content actually differs from the last
+        # one this instance observed - a retry that just edited requirements.
+        # txt/pyproject.toml correctly reaches here again (a different cache
+        # key), and pip itself is a fast no-op when its OWN dependency
+        # resolution finds nothing to do. What no longer happens is
+        # re-running this exact subprocess for byte-identical manifest
+        # content within the same instance's lifetime (e.g. compile_check
+        # then run_tests then run_app_sequence, all in one attempt).
         # network=UNRESTRICTED (SEC-001-P6 Stage 2): this is the ACQUISITION
         # step - a no-op under contained_execution_required=False (default
         # network stays irrelevant there), and under containment this is
@@ -366,6 +440,7 @@ class PolymorphicValidator:
         # resource authority - never the (possibly deliberately very
         # tight) target-code cap this same run may be using to bound a
         # suspected-hostile application.
+        self.venv_install_attempts += 1
         install_res = self._run_cmd_with_timeout(
             [venv_python, "-m", "pip", "install", "-q", *install_args, "pytest"],
             cwd=self.workspace_path, timeout=300, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,

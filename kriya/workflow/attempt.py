@@ -267,11 +267,13 @@ def _resolve_retry_member_hints(
     is still an authorized target (never widens scope, same invariant as
     the file-location pass); at least one REAL anchored-edit failure has
     already occurred for this exact path (state.budgets.
-    anchor_failure_counts) - never triggers on a first attempt or a
-    full-file rejection that produced no anchor failure at all; this run's
-    known-target context for the path still has a real omission (never
-    triggers once the file is already exact/full - nothing left to
-    escalate). See VAL-001 G1 rerun forensics (run d756a833) for why this
+    anchor_failure_counts) - never triggers on a full-file rejection that
+    produced no anchor failure at all; this run's known-target context for
+    the path is not POSITIVELY known to already be full/exact (an absent
+    entry is evidence of nothing, not of exactness - see the gate's own
+    2026-09-19 comment below; only a recorded, non-omitted "shown in full"
+    entry means there is genuinely nothing left to escalate to). See
+    VAL-001 G1 rerun forensics (run d756a833) for why this
     source exists: SOURCE 1/2 above were BOTH structurally silent for an
     entire 8-attempt run despite the model's own rejected SEARCH blocks
     already containing real, current-file vocabulary that nothing
@@ -301,8 +303,25 @@ def _resolve_retry_member_hints(
                 continue
             if state.budgets.anchor_failure_counts.get(filepath, 0) < 1:
                 continue
+            # PERF/SOURCE-2 residual (2026-09-19): `known_item is None` -
+            # NO recorded evidence of what the Developer was shown for this
+            # path - was previously treated identically to "shown in full"
+            # (skip, nothing left to escalate). That's backwards: this
+            # function's own D1 sibling (_has_authoritative_full_source)
+            # already establishes "absence of a recorded ContextItem is NOT
+            # evidence of exactness - it is evidence of nothing" - applied
+            # here too, an unknown view is exactly the case SOURCE 3 exists
+            # to help ground, not one to skip. Only a POSITIVE, recorded
+            # "shown in full" (known_item is not None and not
+            # known_item.omitted_regions) still means there is genuinely
+            # nothing more precise to escalate to. Confirmed empirically
+            # (2026-09-19): the prior condition silently blocked SOURCE 3
+            # grounding on the realistic "no known_target_context_items
+            # entry yet for this path" shape, even though the identical
+            # search text grounds correctly via evaluate_member_hints_from_
+            # search_evidence() in isolation.
             known_item = state.known_target_context_items.get(filepath)
-            if known_item is None or not known_item.omitted_regions:
+            if known_item is not None and not known_item.omitted_regions:
                 continue
             resolved = resolver.resolve(filepath)
             if not resolved.exists:

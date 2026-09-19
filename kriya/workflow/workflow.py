@@ -523,7 +523,29 @@ class WorkflowEngine:
         # Developer deliberately isn't here - it stays on the top-level llm/llm_chain,
         # escalated by the existing quality-gate retry loop below, not this mechanism.
         roles = kernel.config.agent_llms
-        self.planner = PlannerAgent("planner", llm_client, roles.planner.llm, roles.planner.llm_chain)
+        # Planner max-token residual (2026-09-19): BaseAgent.max_output_tokens
+        # (unset here previously) is exactly the existing "stage-specific
+        # configured budget" mechanism - passing it once, at construction,
+        # fixes every self.planner.run(...) call site at once (this class's
+        # own plain/Legacy call below AND WorkflowController's structured-
+        # planning calls, kriya/workflow/workflow_controller.py, which
+        # already separately derive and pass config.llm.planner_max_tokens
+        # as an explicit per-call max_tokens_override - that explicit
+        # override still takes precedence unchanged, per BaseAgent.run()'s
+        # own `max_tokens_override if max_tokens_override is not None else
+        # self.max_output_tokens` precedence). Without this, an ordinary
+        # (non-WorkflowController) Planner call fell through to LLMClient.
+        # complete()'s own general config.llm.max_tokens instead of the
+        # Planner-specific budget - a real, silent mismatch between the
+        # configured stage-specific value and what actually reached the
+        # model. MilestonePlannerAgent below deliberately keeps its own
+        # existing, separately-documented "no dedicated agent_llms entry,
+        # falls back to LLMClient's own default" behavior unchanged - it is
+        # a distinct agent, not the ordinary Planner path this fixes.
+        self.planner = PlannerAgent(
+            "planner", llm_client, roles.planner.llm, roles.planner.llm_chain,
+            max_output_tokens=kernel.config.llm.planner_max_tokens,
+        )
         # No dedicated agent_llms entry (unlike the roles above) - this agent is
         # new (kriya/workflow/milestones.py's orchestrator), and adding a config
         # schema field is out of scope for this feature; falls back to
