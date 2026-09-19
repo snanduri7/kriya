@@ -54,6 +54,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
 
+from kriya.agents.contracts import REPOSITORY_PRECEDENT_REUSE_GUIDANCE
 from kriya.config.config import ModelCapabilities
 from kriya.core.llm import LLMClient
 from kriya.policy.errors import PolicyDeniedError
@@ -779,7 +780,8 @@ def _native_system_prompt() -> str:
         "- These tools are READ-ONLY. They can never write or change anything.\n"
         "- Call at most one tool per turn.\n"
         "- When you have enough evidence, stop calling tools and reply with a short plain-text "
-        "confirmation that you are ready to propose the implementation."
+        "confirmation that you are ready to propose the implementation.\n"
+        f"{REPOSITORY_PRECEDENT_REUSE_GUIDANCE}"
     )
 
 

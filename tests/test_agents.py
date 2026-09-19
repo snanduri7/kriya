@@ -1299,6 +1299,25 @@ def test_developer_agent_system_prompt_documents_authority_sections():
     assert PLANNED_IMPLEMENTATION_SECTION_HEADER in sp
 
 
+def test_developer_agent_system_prompt_carries_repository_precedent_guidance():
+    """VAL-001 G1 follow-up (2026-09-19): the generic "search for an
+    existing repository mechanism before inventing new logic" instruction
+    (kriya/agents/contracts.py::REPOSITORY_PRECEDENT_REUSE_GUIDANCE) must
+    reach the Developer's own generation-call prompt, and must remain
+    strategy guidance only - no reference to any specific repository,
+    language construct, or helper name it was motivated by."""
+    from kriya.agents.contracts import REPOSITORY_PRECEDENT_REUSE_GUIDANCE
+
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    dev = DeveloperAgent("developer", llm)
+    sp = dev.system_prompt
+    assert REPOSITORY_PRECEDENT_REUSE_GUIDANCE in sp
+    for forbidden in ("Graphify", "generic_name", "_read_csharp_type_name", "C#", "tree-sitter"):
+        assert forbidden not in sp
+        assert forbidden not in REPOSITORY_PRECEDENT_REUSE_GUIDANCE
+
+
 @pytest.mark.asyncio
 async def test_fill_missing_content_reminds_authority_split_when_sections_present():
     """PRV-11 authority-isolation fix (2026-08-30, follow-up): a live
@@ -1648,6 +1667,73 @@ def test_split_fix_analysis_edit_does_not_corrupt_ordinary_indented_code():
         "public class App {\n"
         "  public static void main(String[] args) {"
     )
+
+
+def test_split_fix_analysis_edit_fenced_indented_search_replace_survives_exact():
+    """Regression test (2026-09-19, VAL-001 G1 qwen3.6:35b-a3b comparison):
+    the real, live failure mode this closes end-to-end - a model wraps its
+    SEARCH/REPLACE bodies in markdown fences (```python ... ```) whose
+    first content line is itself deeply indented, exactly as a real edit
+    fragment quoting the inside of a function always is. Before the
+    _strip_markdown_fences fix, the SEARCH block's leading indentation was
+    silently destroyed here, producing a search string that could never
+    exact-match the real file and, when it DID splice in via the
+    whitespace-tolerant fallback, corrupted the REPLACE side into invalid
+    Python. Both SEARCH and REPLACE must survive with EXACT source bytes
+    (indentation included) intact through the full _split_fix_analysis_edit
+    -> sanitize_generated_content -> _strip_markdown_fences pipeline."""
+    text = (
+        "FIX ANALYSIS: strip generic type arguments before comparing callee names.\n"
+        "SEARCH:\n"
+        "```python\n"
+        "                    if mname is not None:\n"
+        "                        callee_name = _read_text(mname, source)\n"
+        "```\n"
+        "REPLACE:\n"
+        "```python\n"
+        "                    if mname is not None:\n"
+        "                        if mname.type == \"generic_name\":\n"
+        "                            callee_name = _strip_generic(mname, source)\n"
+        "                        else:\n"
+        "                            callee_name = _read_text(mname, source)\n"
+        "```"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert len(edits) == 1
+    assert edits[0]["search"] == (
+        "                    if mname is not None:\n"
+        "                        callee_name = _read_text(mname, source)"
+    )
+    assert edits[0]["replace"] == (
+        "                    if mname is not None:\n"
+        "                        if mname.type == \"generic_name\":\n"
+        "                            callee_name = _strip_generic(mname, source)\n"
+        "                        else:\n"
+        "                            callee_name = _read_text(mname, source)"
+    )
+
+
+def test_split_fix_analysis_edit_unclosed_fence_falls_back_safely():
+    """A malformed/unclosed fence (an opening ```python with no matching
+    closing ``` anywhere in the block) must never crash the parser or
+    silently fabricate a plausible-looking edit. _strip_markdown_fences'
+    own opening-fence removal fires unconditionally on a recognized
+    opening marker regardless of whether a matching close exists - it is
+    the closing-fence removal that is conditional (only strips a LAST
+    line that itself starts with ```) - so an unclosed fence degrades
+    safely to "fence marker removed, real content (indentation intact)
+    kept exactly", never a crash and never a leftover fence artifact
+    misread as real code."""
+    text = (
+        "SEARCH:\n"
+        "```python\n"
+        "    old_code()\n"
+        "REPLACE:\n"
+        "    new_code()"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits == [{"search": "    old_code()", "replace": "    new_code()"}]
+
 
 def test_split_fix_analysis_edit_strips_same_line_marker_separator():
     """Regression test for a real bug found live, 2026-08-17
@@ -2769,6 +2855,70 @@ def test_strip_markdown_fences_picks_largest_of_multiple_fences():
         "```python\ndef add(a, b):\n    return a + b\n```"
     )
     assert DeveloperAgent._strip_markdown_fences(text) == "def add(a, b):\n    return a + b"
+
+
+def test_strip_markdown_fences_preserves_indented_first_line():
+    """Regression test (2026-09-19, VAL-001 G1 qwen3.6:35b-a3b comparison):
+    a real anchored-edit response reproduced live had its SEARCH block's
+    leading indentation entirely eaten by this function's own former bare
+    `.strip()` call, corrupting an otherwise-correct apply_anchored_edits()
+    splice into invalid Python. Every prior existing test for this function
+    happened to use a zero-indent first line (`def add(...)`), which never
+    exercised this path - this is the case that actually matters, since a
+    real edit fragment quoting the inside of a function almost always has
+    an indented first line."""
+    text = "```python\n                    if mname is not None:\n                        callee_name = _read_text(mname, source)\n```"
+    assert DeveloperAgent._strip_markdown_fences(text) == (
+        "                    if mname is not None:\n                        callee_name = _read_text(mname, source)"
+    )
+
+
+def test_strip_markdown_fences_preserves_all_indentation_in_nested_block():
+    text = (
+        "```python\n"
+        "    if outer:\n"
+        "        if inner:\n"
+        "            do_something()\n"
+        "        else:\n"
+        "            do_other()\n"
+        "```"
+    )
+    assert DeveloperAgent._strip_markdown_fences(text) == (
+        "    if outer:\n"
+        "        if inner:\n"
+        "            do_something()\n"
+        "        else:\n"
+        "            do_other()"
+    )
+
+
+def test_strip_markdown_fences_indented_first_line_in_prose_wrapped_fence():
+    """Same fix, exercised through the SECOND extraction path (prose
+    preamble/postamble around the fence, not a leading fence) - both
+    return paths had the identical bare-.strip() defect."""
+    text = (
+        "Here is the fix:\n\n"
+        "```python\n"
+        "    for child in mname.children:\n"
+        "        if child.type == \"identifier\":\n"
+        "            callee_name = _read_text(child, source)\n"
+        "```\n\n"
+        "That should resolve it."
+    )
+    assert DeveloperAgent._strip_markdown_fences(text) == (
+        "    for child in mname.children:\n"
+        "        if child.type == \"identifier\":\n"
+        "            callee_name = _read_text(child, source)"
+    )
+
+
+def test_strip_markdown_fences_still_removes_genuine_blank_fence_padding():
+    """A blank line immediately after the opening fence and immediately
+    before the closing fence is still removed - only a REAL line's own
+    leading space/tab is protected, not blank-line padding around the
+    fence itself."""
+    text = "```python\n\n    real_code()\n\n```"
+    assert DeveloperAgent._strip_markdown_fences(text) == "    real_code()"
 
 def test_extract_json_value_direct_parse():
     assert DeveloperAgent._extract_json_value('["a.txt", "b.txt"]') == ["a.txt", "b.txt"]

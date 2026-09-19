@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
+    REPOSITORY_PRECEDENT_REUSE_GUIDANCE,
     MilestoneV2,
     parse_file_list,
     parse_milestone_list,
@@ -809,6 +810,8 @@ class DeveloperAgent(BaseAgent):
             "actually says. When neither section label is present, treat your entire task description as "
             "authoritative, exactly as before.\n"
             "\n"
+            f"{REPOSITORY_PRECEDENT_REUSE_GUIDANCE}\n"
+            "\n"
             "Return a clean JSON block list containing the code modifications. Do NOT wrap your JSON in any extra markdown text (no ```json code blocks), just return the raw JSON array. "
             "Format your output EXACTLY as a JSON array of file objects, like this:\n"
             "[\n"
@@ -832,6 +835,29 @@ class DeveloperAgent(BaseAgent):
         # all - the same blanket strip also dropped a real file's own
         # trailing newline for plain (non-fenced) full-file content passed
         # through the workflow write loop's own new sanitization step.
+        # VAL-001 G1 qwen comparison (2026-09-19): the SAME blanket-strip
+        # mistake this docstring already names one incident for (a bare
+        # .strip() eating meaningful leading indentation) was ALSO present
+        # one level up, on this function's own two return paths below - a
+        # bare `.strip()` on the whole REJOINED fence content removes every
+        # space/tab at the very start of the string, not just the fence-
+        # adjacent blank line(s) it was meant to clean up. For ANY real
+        # edit whose first content line is itself indented (the
+        # overwhelming common case for a fenced block quoting the inside
+        # of a function - confirmed live via a real qwen3.6:35b-a3b
+        # anchored-edit response), that call silently deleted the ENTIRE
+        # leading indentation of that one line, corrupting an otherwise-
+        # correct apply_anchored_edits() splice into invalid Python.
+        # Reproduced directly in isolation (a 3-line fenced string with an
+        # indented first line) before this fix; both fence-extraction paths
+        # below now strip only LEADING/TRAILING NEWLINE characters
+        # (`.strip("\n")`, never a blanket `.strip()`) - the exact same
+        # narrower idiom _split_fix_analysis_edit's own SEARCH/REPLACE
+        # boundary trimming already uses elsewhere in this file, never a
+        # newly-invented convention. A genuinely blank fence-adjacent line
+        # is still removed (an empty line contributes only "\n" characters
+        # to the joined string), but a real line's own leading space/tab is
+        # never at risk, no matter how deeply indented.
         stripped_for_fence_check = text.strip()
         if stripped_for_fence_check.startswith("```"):
             lines = stripped_for_fence_check.splitlines()
@@ -839,7 +865,7 @@ class DeveloperAgent(BaseAgent):
                 lines = lines[1:]
             if lines and lines[-1].startswith("```"):
                 lines = lines[:-1]
-            return "\n".join(lines).strip()
+            return "\n".join(lines).strip("\n")
 
         # Reasoning models sometimes wrap the actual content in a fenced block but
         # surround it with conversational preamble/postamble instead of returning
@@ -847,7 +873,7 @@ class DeveloperAgent(BaseAgent):
         # case (largest, since a short illustrative aside could also be fenced).
         fences = re.findall(r"```[a-zA-Z0-9_+-]*\n(.*?)\n```", stripped_for_fence_check, re.DOTALL)
         if fences:
-            return max(fences, key=len).strip()
+            return max(fences, key=len).strip("\n")
 
         return text
 

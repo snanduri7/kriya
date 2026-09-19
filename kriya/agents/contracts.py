@@ -63,6 +63,31 @@ AUTHORITATIVE_GOAL_SECTION_HEADER = "=== Authoritative Goal ==="
 PLANNED_IMPLEMENTATION_SECTION_HEADER = "=== Planned Implementation Strategy ==="
 
 
+# Repository-precedent reuse guidance (VAL-001 G1 follow-up, 2026-09-19):
+# strategy guidance only, model-independent, deliberately never naming any
+# specific repository, language construct, or helper - three independent
+# generations across two models (this session's own G1 diagnostic
+# experiment) each reinvented a bespoke fix for the same structural problem
+# a nearby, already-correct repository helper already solved, and each
+# reinvention introduced its own distinct defect the existing helper did
+# not have. Shared by DeveloperAgent.system_prompt (kriya/agents/agent.py)
+# and DEV-INV-001's own investigation-loop system prompts (kriya/workflow/
+# investigation.py) - defined once here so the two can never drift apart,
+# the same reason AUTHORITATIVE_GOAL_SECTION_HEADER above is shared rather
+# than duplicated. Deliberately does NOT force a search for every response
+# (a trivial or genuinely novel change has no precedent to find) and grants
+# no new read/write authority or investigation verb of its own - it only
+# shapes how existing, already-governed capabilities (reading the current
+# file/module, or an existing DEV-INV-001 investigation verb) are used.
+REPOSITORY_PRECEDENT_REUSE_GUIDANCE = (
+    "Before writing new parsing, normalization, conversion, lookup, validation, protocol, or "
+    "resolution logic, check whether this file or module already contains an existing "
+    "implementation of the same structural operation. Prefer reusing a proven, existing "
+    "repository mechanism when one is semantically appropriate, rather than reimplementing it "
+    "from scratch. Only write new logic when no suitable existing pattern applies."
+)
+
+
 class FileList(BaseModel):
     """A validated list of workspace-relative file paths - the authoritative
     set of files a design calls for (ArchitectAgent), or the set a Developer

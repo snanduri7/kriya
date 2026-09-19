@@ -1733,3 +1733,36 @@ class TestSearchToMemberPromotionReachesDeveloperContext:
         for item in package.relevant_files:
             if item.path == "engine.py":
                 assert not (item.member_id == "outer_extractor.walk_calls" and item.is_exact)
+
+
+# ---------------------------------------------------------------------------
+# Repository-precedent reuse guidance (VAL-001 G1 follow-up, 2026-09-19)
+# ---------------------------------------------------------------------------
+
+def test_investigation_system_prompts_carry_repository_precedent_guidance():
+    """The same generic "search for an existing repository mechanism
+    before inventing new logic" instruction DeveloperAgent's own
+    system_prompt carries (kriya/agents/contracts.py::
+    REPOSITORY_PRECEDENT_REUSE_GUIDANCE, shared, not duplicated) must ALSO
+    reach DEV-INV-001's own investigation-loop system prompts (both the
+    native tool-calling and marker-fallback protocols), and must remain
+    strategy guidance only - no reference to any specific repository,
+    language construct, or helper name it was motivated by, and no new
+    investigation verb or authority grant alongside it."""
+    from kriya.agents.contracts import REPOSITORY_PRECEDENT_REUSE_GUIDANCE
+    from kriya.workflow.investigation import (
+        INVESTIGATION_VERBS,
+        _marker_system_prompt,
+        _native_system_prompt,
+    )
+
+    native = _native_system_prompt()
+    marker = _marker_system_prompt()
+    assert REPOSITORY_PRECEDENT_REUSE_GUIDANCE in native
+    assert REPOSITORY_PRECEDENT_REUSE_GUIDANCE in marker
+    for forbidden in ("Graphify", "generic_name", "_read_csharp_type_name", "C#", "tree-sitter"):
+        assert forbidden not in native
+        assert forbidden not in marker
+    # No new verb/authority introduced alongside the guidance - still
+    # exactly the same 4-verb closed set as before.
+    assert INVESTIGATION_VERBS == ("inspect_member", "find_symbol", "find_callers", "search_code")
