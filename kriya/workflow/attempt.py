@@ -311,17 +311,36 @@ def _resolve_retry_member_hints(
             # already establishes "absence of a recorded ContextItem is NOT
             # evidence of exactness - it is evidence of nothing" - applied
             # here too, an unknown view is exactly the case SOURCE 3 exists
-            # to help ground, not one to skip. Only a POSITIVE, recorded
-            # "shown in full" (known_item is not None and not
-            # known_item.omitted_regions) still means there is genuinely
-            # nothing more precise to escalate to. Confirmed empirically
+            # to help ground, not one to skip. Confirmed empirically
             # (2026-09-19): the prior condition silently blocked SOURCE 3
             # grounding on the realistic "no known_target_context_items
             # entry yet for this path" shape, even though the identical
             # search text grounds correctly via evaluate_member_hints_from_
             # search_evidence() in isolation.
+            #
+            # MUTATION_RELEVANCE_GATE residual (2026-09-19, VAL-001 G1
+            # DEV-INV rerun): a recorded tier="member_exact" item only
+            # means ONE member of this path was shown in full - it does
+            # NOT mean "nothing left to escalate to" the way a genuine
+            # tier="full" (whole file) record does. The prior condition
+            # treated `omitted_regions is False` alone (true for BOTH
+            # tiers) as that terminal signal, so once ANY member_exact was
+            # recorded for a path - even a provably WRONG one, whose own
+            # anchored edit keeps failing - SOURCE 3 was permanently
+            # suppressed for every LATER, possibly differently-relevant
+            # failing edit against that same path for the rest of the run.
+            # That is "merely any member_exact from the same file"
+            # authorizing escalation silence for an unrelated member - the
+            # exact gap this residual closes. Only tier="full" is treated
+            # as genuinely terminal now; a tier="member_exact" record lets
+            # this loop re-run below, which will correctly re-derive the
+            # SAME member again when it is still the relevant one (a
+            # harmless, idempotent re-confirmation - see test_K's own
+            # updated assertion), or correctly escalate to a DIFFERENT
+            # member when the currently-failing search text actually
+            # grounds there instead.
             known_item = state.known_target_context_items.get(filepath)
-            if known_item is not None and not known_item.omitted_regions:
+            if known_item is not None and not known_item.omitted_regions and known_item.tier == "full":
                 continue
             resolved = resolver.resolve(filepath)
             if not resolved.exists:

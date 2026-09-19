@@ -42,6 +42,7 @@ from kriya.workflow.attempt import (
     _maybe_run_developer_investigation,
     _preserve_member_exact_precision,
 )
+from kriya.workflow.context_budget import build_known_target_context, _reserve_graph_context_budget
 from kriya.workflow.context_package import ContextItem, make_context_item
 from kriya.workflow.context_source import SourceDerivationCache
 from kriya.workflow.edit_safety import content_revision
@@ -374,6 +375,146 @@ class TestResolvers:
             deps, InvestigationRequest("search_code", {"query": "nothing indexed"}),
         )
         assert items == []
+
+    # -- SEARCH_TO_MEMBER_PROMOTION (2026-09-19, VAL-001 G1 DEV-INV rerun) --
+    # A search_code hit's own `text` carries the analyzer's real, controlled
+    # chunk header (chunk_file_with_metadata_headers - never hand-rolled
+    # here, to avoid the tests drifting from the real header format) - these
+    # exercise the promotion path this closes: reusing context_source.py's
+    # existing resolve_member_hints_from_chunk_header (SOURCE 1) to turn a
+    # uniquely-grounded hit into real, exact, fully-quotable current source.
+
+    @pytest.mark.asyncio
+    async def test_search_code_hit_uniquely_inside_member_promotes_to_exact(self, tmp_path):
+        from kriya.analyzer.analyzer import chunk_file_with_metadata_headers
+        source = (
+            "def outer_extractor(nodes):\n"
+            "    def walk_calls(node, source):\n"
+            "        callee_name = read_text(node, source)\n"
+            "        return callee_name\n"
+            "    return [walk_calls(n, nodes) for n in nodes]\n"
+        )
+        _write(tmp_path, "engine.py", source)
+        chunks = chunk_file_with_metadata_headers(source, "engine.py")
+        walk_calls_chunk = next(c for c in chunks if "Method: walk_calls" in c["text"])
+
+        async def stub_search(query):
+            return [{"filepath": "engine.py", "text": walk_calls_chunk["text"], "score": 0.87}]
+
+        deps = _deps(tmp_path, search_code=stub_search)
+        text, items = await dispatch_investigation_request(
+            deps, InvestigationRequest("search_code", {"query": "generic call resolution"}),
+        )
+        assert len(items) == 1
+        item = items[0]
+        assert item.tier == "member_exact"
+        assert item.is_exact is True
+        assert item.member_id == "outer_extractor.walk_calls"
+        assert item.omitted_regions is False
+        # The FULL real body, not the vector store's own (here identical,
+        # but never trusted as the source) chunk text - CurrentSourceResolver
+        # remains source authority per the module's own invariant.
+        assert "def walk_calls(node, source):" in item.content
+        assert "return callee_name" in item.content
+        assert item.revision  # real content_revision(), never blank
+        assert item.member_id in text  # rendered feedback also shows the real grounding
+
+    @pytest.mark.asyncio
+    async def test_search_code_ambiguous_hit_does_not_promote(self, tmp_path):
+        # Two distinct top-level members both literally named "helper" (one
+        # nested inside each of two unrelated outer functions) - a header
+        # naming the bare "helper" simple name resolves to TWO distinct
+        # member_ids, per member_ids_matching_name's own conservative
+        # ambiguity handling. No authority increase: falls through to
+        # today's unchanged skeleton rendering, never a guess between them.
+        source = (
+            "def group_a():\n"
+            "    def helper(x):\n        return x\n"
+            "    return helper\n\n"
+            "def group_b():\n"
+            "    def helper(x):\n        return x + 1\n"
+            "    return helper\n"
+        )
+        _write(tmp_path, "engine.py", source)
+        ambiguous_header_text = (
+            "File: engine.py\nModule: engine\nMethod: helper\nDocstring: \n"
+            "=== Method Body ===\ndef helper(x):\n    return x\n"
+        )
+
+        async def stub_search(query):
+            return [{"filepath": "engine.py", "text": ambiguous_header_text, "score": 0.5}]
+
+        deps = _deps(tmp_path, search_code=stub_search)
+        text, items = await dispatch_investigation_request(
+            deps, InvestigationRequest("search_code", {"query": "helper"}),
+        )
+        assert len(items) == 1
+        assert items[0].tier == "skeleton"
+        assert items[0].is_exact is False
+        assert items[0].member_id is None
+
+    @pytest.mark.asyncio
+    async def test_search_code_stale_hit_name_no_longer_real_does_not_promote(self, tmp_path):
+        # The indexed chunk header names a member that has since been
+        # renamed/removed in the CURRENT worktree content - resolve_member_
+        # hints_from_chunk_header validates against member_boundaries_for()
+        # on that CURRENT content, so a stale name simply fails to ground
+        # (never a fabricated body for a member that no longer exists).
+        _write(tmp_path, "engine.py", "def renamed_walk(node, source):\n    return node\n")
+        stale_header_text = (
+            "File: engine.py\nModule: engine\nMethod: walk_calls\nDocstring: \n"
+            "=== Method Body ===\ndef walk_calls(node, source):\n    return node\n"
+        )
+
+        async def stub_search(query):
+            return [{"filepath": "engine.py", "text": stale_header_text, "score": 0.5}]
+
+        deps = _deps(tmp_path, search_code=stub_search)
+        text, items = await dispatch_investigation_request(
+            deps, InvestigationRequest("search_code", {"query": "walk_calls"}),
+        )
+        assert len(items) == 1
+        assert items[0].tier == "skeleton"
+        assert items[0].is_exact is False
+
+    @pytest.mark.asyncio
+    async def test_search_code_promoted_large_member_needs_no_full_file_authority(self, tmp_path):
+        # "Large file can be fixed through bounded member context without
+        # full-file generation": a big enclosing file, one large nested
+        # member promoted to member_exact - _has_authoritative_full_source
+        # (kriya/workflow/attempt.py) still correctly refuses full-file
+        # authority for it (member_id is not None), exactly as inspect_
+        # member's own equivalent case already proves (test_inspect_member_
+        # never_produces_full_tier) - promotion never grants more than a
+        # bounded member slice, regardless of that slice's own size.
+        from kriya.analyzer.analyzer import chunk_file_with_metadata_headers
+        filler = "".join(f"def _filler_{i}(x):\n    return x + {i}\n\n\n" for i in range(300))
+        body_lines = "\n".join(f"        step_{i} = i * {i}" for i in range(200))
+        source = (
+            filler
+            + "def outer_extractor(nodes):\n"
+            + "    def walk_calls(node, source):\n"
+            + f"{body_lines}\n"
+            + "        return node\n"
+            + "    return [walk_calls(n, nodes) for n in nodes]\n"
+        )
+        _write(tmp_path, "engine.py", source)
+        chunks = chunk_file_with_metadata_headers(source, "engine.py")
+        walk_calls_chunk = next(c for c in chunks if "Method: walk_calls" in c["text"])
+
+        async def stub_search(query):
+            return [{"filepath": "engine.py", "text": walk_calls_chunk["text"], "score": 0.9}]
+
+        deps = _deps(tmp_path, search_code=stub_search)
+        text, items = await dispatch_investigation_request(
+            deps, InvestigationRequest("search_code", {"query": "walk_calls body"}),
+        )
+        assert len(items) == 1
+        item = items[0]
+        assert item.tier == "member_exact"
+        assert item.member_id == "outer_extractor.walk_calls"
+        assert "step_199" in item.content  # the FULL body, unbounded/untruncated
+        assert item.content.count("\n") > 200  # genuinely the large member, not a fragment
 
     @pytest.mark.asyncio
     async def test_repository_instruction_shaped_content_remains_untrusted(self, tmp_path):
@@ -1118,3 +1259,213 @@ class TestSyntheticEndToEnd:
         assert result.evidence == []
         assert result.terminal_reason == "PROPOSE"
         assert render_investigation_evidence(result.evidence) == ""
+
+
+# ---------------------------------------------------------------------------
+# SEARCH_TO_MEMBER_PROMOTION reaches the real Developer context (2026-09-19,
+# VAL-001 G1 DEV-INV rerun follow-up): end-to-end proof that a search_code
+# promotion is not merely a correctly-shaped ContextItem in isolation, but
+# actually flows through to what build_known_target_context() would render
+# for the Developer, under REALISTIC (non-zero) skill/RAG/graph context
+# overhead - not the empty-string best case only.
+# ---------------------------------------------------------------------------
+
+def _outer_extractor_source(filler_count: int = 0) -> str:
+    """Real, structurally-realistic Python (two distinct top-level-nested
+    members of the SAME outer function) - mirrors the real G1 shape
+    (outer_extractor.add_node / outer_extractor.walk_calls) without copying
+    any real Graphify content."""
+    filler = "".join(f"def _filler_{i}(x):\n    return x + {i}\n\n\n" for i in range(filler_count))
+    return (
+        filler
+        + "def outer_extractor(nodes, config):\n"
+        + "    def add_node(node_id):\n"
+        + "        return node_id\n\n"
+        + "    def walk_calls(node, source):\n"
+        + "        fn_node = node.child_by_field_name('function')\n"
+        + "        if fn_node is not None and fn_node.type == 'generic_name':\n"
+        + "            mname = fn_node.child_by_field_name('name')\n"
+        + "            return read_text(mname, source)\n"
+        + "        return None\n\n"
+        + "    return [walk_calls(n, n.source) for n in nodes], add_node\n"
+    )
+
+
+class TestSearchToMemberPromotionReachesDeveloperContext:
+    @pytest.mark.asyncio
+    async def test_promoted_member_reaches_build_known_target_context_under_realistic_budget(self, tmp_path):
+        """Proves the full chain, not just each link in isolation:
+        1. DEV-INV search_code returns a uniquely-groundable hit (a real
+           chunk_file_with_metadata_headers() header, exactly what the real
+           production search_code path indexes and returns).
+        2. Promotion (investigation.py::_promote_search_hit_to_members)
+           yields tier=member_exact, is_exact=True, current revision.
+        3. run_investigation_loop's evidence is merged into
+           known_target_context_items via _preserve_member_exact_precision -
+           the EXACT function attempt.py's real _maybe_run_developer_
+           investigation() seam calls (mirrors TestSyntheticEndToEnd's own
+           established "merged exactly the way attempt.py's real seam does"
+           pattern, since driving _maybe_run_developer_investigation itself
+           would require a live embedding call for its own internal
+           OllamaEmbeddingClient - deliberately avoided everywhere in this
+           file, per its own no-live-call docstring guarantee).
+        4. build_known_target_context() - the SAME function attempt.py calls
+           for both the attempt-1 owner-contract block and every retry's own
+           member-hint rendering - is called with a REALISTIC, non-zero
+           known_target_limit (via _reserve_graph_context_budget with real,
+           non-empty skills/RAG/graph strings, not the empty-string best
+           case) and is proven to actually place the FULL real member body
+           into relevant_files, not omit or truncate it.
+        5. A DIFFERENT, unrelated member_exact record already present for
+           the SAME path (simulating an earlier, unrelated grounding) does
+           not suppress or get silently overwritten - both survive as
+           independent evidence."""
+        from kriya.analyzer.analyzer import chunk_file_with_metadata_headers
+
+        source = _outer_extractor_source(filler_count=150)
+        _write(tmp_path, "engine.py", source)
+
+        chunks = chunk_file_with_metadata_headers(source, "engine.py")
+        walk_calls_chunk = next(c for c in chunks if "Method: walk_calls" in c["text"])
+
+        async def stub_search(query):
+            return [{"filepath": "engine.py", "text": walk_calls_chunk["text"], "score": 0.83}]
+
+        llm = MagicMock()
+        llm.complete_with_tools = AsyncMock(side_effect=[
+            _native_result("search_code", {"query": "C# generic call resolution"}),
+            _propose_result(),
+        ])
+        deps = InvestigationDependencies(
+            workspace_path=str(tmp_path), worktree_path=None,
+            dependency_graph_db_path=str(tmp_path / "dependency_graph.db"),
+            search_code=stub_search, source_cache=SourceDerivationCache(),
+        )
+        result = await run_investigation_loop(
+            llm=llm, capabilities=ModelCapabilities(native_tool_calls=True),
+            deps=deps, task_description="Fix generic call resolution",
+            design_context="Minimal change", existing_code_context="(nothing retrieved yet)",
+            max_turns=4,
+        )
+        assert result.terminal_reason == "PROPOSE"
+        assert len(result.evidence) == 1
+        promoted = result.evidence[0]
+
+        # --- 1/2: promotion itself ---
+        assert promoted.tier == "member_exact"
+        assert promoted.is_exact is True
+        assert promoted.member_id == "outer_extractor.walk_calls"
+        assert promoted.revision == content_revision(source)
+        assert "fn_node.type == 'generic_name'" in promoted.content
+
+        # --- 5 (set up BEFORE the merge, to prove it survives, not just
+        # that it was never written): an unrelated existing member_exact
+        # for the SAME path, from some earlier, unrelated grounding.
+        state = GenerationState()
+        state.known_target_context_items["engine.py"] = make_context_item(
+            path="engine.py", content="def add_node(node_id):\n    return node_id\n",
+            reason="developer_investigation:inspect_member:outer_extractor.add_node",
+            source_type="named_in_request", trust_level="repository",
+            member_id="outer_extractor.add_node", tier="member_exact", is_exact=True,
+            revision=content_revision(source),
+        )
+
+        # --- 3: the exact merge attempt.py's real seam performs ---
+        for item in result.evidence:
+            if item.tier == "member_exact":
+                state.known_target_context_items[item.path] = _preserve_member_exact_precision(
+                    state, item.path, item,
+                )
+        # The relevant (search-grounded) member won the single-slot record -
+        # _preserve_member_exact_precision's own documented precedence, not
+        # a new rule this test introduces.
+        assert state.known_target_context_items["engine.py"].member_id == "outer_extractor.walk_calls"
+
+        # --- 4: realistic (non-zero) skill/RAG/graph overhead, matching a
+        # real 32768-context-window run - not the empty-string best case.
+        skills_prompt = "=== Active Skills ===\n" + ("Skill guidance line.\n" * 40)
+        learned_rag_context = "=== Learned Knowledge ===\n" + ("Learned fact line.\n" * 40)
+        graph_context = "=== Related Files ===\n" + ("def unrelated_helper(): pass\n" * 60)
+        known_target_limit = _reserve_graph_context_budget(
+            32768, skills_prompt, learned_rag_context, graph_context,
+        )
+        rendered, package = build_known_target_context(
+            ["engine.py"], str(tmp_path), None, known_target_limit,
+            member_hints={"engine.py": [promoted.member_id]},
+            cache=SourceDerivationCache(),
+        )
+        member_items = [item for item in package.relevant_files if item.member_id is not None]
+        assert package.omitted == ()
+        assert len(member_items) == 1
+        assert member_items[0].member_id == "outer_extractor.walk_calls"
+        assert member_items[0].tier == "member_exact"
+        assert member_items[0].is_exact is True
+        assert "fn_node.type == 'generic_name'" in member_items[0].content
+        assert "fn_node.type == 'generic_name'" in rendered
+
+    def test_promoted_member_too_large_for_realistic_budget_is_omitted_not_truncated(self, tmp_path):
+        """Item 7: when the exact member genuinely cannot fit even the
+        realistic budget, build_known_target_context() must OMIT it
+        (REASON_BUDGET_EXHAUSTED, explicit and observable via
+        package.omitted) rather than silently truncating it - a truncated-
+        but-still-labeled-is_exact=True record is exactly the lie that
+        would let anchored-edit generation proceed as if it had seen the
+        full member when it had not. Starves the SAME realistic-overhead
+        budget down further with a large member body, mirroring
+        TestC3ContextPromotion's own established starved-budget pattern
+        (test_member_too_large_for_budget_omits_rather_than_exceeding_it)
+        for this NEW (search_code-origin, not failure-origin) grounding
+        path specifically."""
+        from kriya.workflow.context_budget import estimate_tokens
+        from kriya.workflow.context_source import extract_member_body, python_member_ranges
+
+        # A large member body (well above _MIN_GRAPH_CONTEXT_BUDGET's own
+        # 1000-token floor) so a starved budget genuinely cannot fit it even
+        # after that floor applies - a tiny member would trivially fit the
+        # floor alone regardless of overhead, proving nothing.
+        padded_body = "\n".join(f"        step_{i} = i * {i}" for i in range(400))
+        source = (
+            "def outer_extractor(nodes, config):\n"
+            "    def add_node(node_id):\n"
+            "        return node_id\n\n"
+            "    def walk_calls(node, source):\n"
+            f"{padded_body}\n"
+            "        return None\n\n"
+            "    return [walk_calls(n, n.source) for n in nodes], add_node\n"
+        )
+        _write(tmp_path, "engine.py", source)
+        start, end = python_member_ranges(source)["outer_extractor.walk_calls"]
+        member_tokens = estimate_tokens(extract_member_body(source, start, end))
+        assert member_tokens > 1000  # comfortably above the floor
+
+        skills_prompt = "=== Active Skills ===\n" + ("Skill guidance line.\n" * 40)
+        learned_rag_context = "=== Learned Knowledge ===\n" + ("Learned fact line.\n" * 40)
+        graph_context = "=== Related Files ===\n" + ("def unrelated_helper(): pass\n" * 60)
+        # A small (fallback-model-shaped) context window with the SAME
+        # realistic overhead subtracted - deliberately forces starvation
+        # without fabricating an unrealistic (zero-overhead) scenario.
+        known_target_limit = _reserve_graph_context_budget(
+            4096, skills_prompt, learned_rag_context, graph_context,
+        )
+        assert known_target_limit < member_tokens
+
+        rendered, package = build_known_target_context(
+            ["engine.py"], str(tmp_path), None, known_target_limit,
+            member_hints={"engine.py": ["outer_extractor.walk_calls"]},
+            cache=SourceDerivationCache(),
+        )
+        member_items = [item for item in package.relevant_files if item.member_id is not None]
+        assert member_items == []
+        omitted_entry = next(
+            o for o in package.omitted if o.get("member_id") == "outer_extractor.walk_calls"
+        )
+        assert omitted_entry["reason"] == "body_elided"
+        # Whatever DID get included for this path (a coarser, honestly-
+        # labeled file-level fallback, since the file as a whole still fits
+        # even though the member alone does not) must never itself claim
+        # exactness for the member - never a partial/truncated stand-in
+        # silently presented as if it were real member-exact evidence a
+        # later anchored-edit call could safely quote from.
+        for item in package.relevant_files:
+            if item.path == "engine.py":
+                assert not (item.member_id == "outer_extractor.walk_calls" and item.is_exact)

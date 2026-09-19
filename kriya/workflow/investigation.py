@@ -65,6 +65,7 @@ from kriya.workflow.context_source import (
     boundaries_matching_member_id,
     extract_member_body,
     member_boundaries_for,
+    resolve_member_hints_from_chunk_header,
 )
 from kriya.workflow.run_events import EventAuthority, RunEvent
 
@@ -512,6 +513,59 @@ def _resolve_find_callers(
     return _render_location_matches(deps, symbol, locations, verb="find_callers")
 
 
+def _promote_search_hit_to_members(
+    deps: InvestigationDependencies, filepath: str, hit_text: str, query: str,
+) -> List[ContextItem]:
+    """SEARCH_TO_MEMBER_PROMOTION (2026-09-19, VAL-001 G1 DEV-INV rerun):
+    reuses context_source.py's own SOURCE 1 resolver
+    (resolve_member_hints_from_chunk_header) - already relied on by
+    workflow.py's initial Graph-RAG retrieval for exactly this purpose - so
+    a search_code hit whose own `text` carries the analyzer's real,
+    controlled "Method: X"/"Class: X" chunk header (chunk_file_with_
+    metadata_headers - never model-generated) can be promoted from an
+    unquotable truncated skeleton fragment into real, exact, fully-quotable
+    current source. `hit_text` is the vector store's own indexed chunk text
+    (used ONLY to read its controlled header line - the real body always
+    comes from CurrentSourceResolver below, never from the store's own,
+    possibly-stale/truncated snippet - "CurrentSourceResolver remains
+    source authority").
+
+    Deliberately conservative: promotes only when resolve_member_hints_
+    from_chunk_header grounds to exactly ONE distinct member_id against the
+    file's CURRENT real structure - zero (no header, unsupported language)
+    or ambiguous grounding both return [] here, falling through to the
+    caller's existing skeleton rendering unchanged ("ambiguous hit -> no
+    authority increase", never a guess). A grounded member_id sharing more
+    than one real boundary (an overloaded Java method) returns every real
+    overload body, mirroring _resolve_inspect_member's own established,
+    non-fabricated-ambiguity handling - never an arbitrary pick."""
+    resolver = CurrentSourceResolver(
+        deps.workspace_path, deps.worktree_path, content_cache=deps.source_cache.content_cache,
+    )
+    resolved = resolver.resolve(filepath)
+    if not resolved.exists:
+        return []
+    candidates = resolve_member_hints_from_chunk_header(filepath, resolved.content, hit_text)
+    if len(candidates) != 1:
+        return []
+    boundaries = member_boundaries_for(filepath, resolved.content)
+    if not boundaries:
+        return []
+    matches = boundaries_matching_member_id(boundaries, candidates[0].member_id)
+    if not matches:
+        return []
+    return [
+        make_context_item(
+            path=filepath, content=extract_member_body(resolved.content, boundary.start_line, boundary.end_line),
+            reason=f"developer_investigation:search_code:{query}",
+            source_type="semantic_hit", trust_level="repository",
+            member_id=candidates[0].member_id, start_line=boundary.start_line, end_line=boundary.end_line,
+            tier="member_exact", is_exact=True, revision=resolved.revision,
+        )
+        for boundary in matches
+    ]
+
+
 async def _resolve_search_code(
     deps: InvestigationDependencies, arguments: Dict[str, Any],
 ) -> Tuple[str, List[ContextItem]]:
@@ -537,14 +591,34 @@ async def _resolve_search_code(
         except PolicyDeniedError:
             omitted += 1
             continue
+
+        promoted = _promote_search_hit_to_members(deps, filepath, text, query)
+        if promoted:
+            for item in promoted:
+                items.append(item)
+                lines.append(
+                    f"=== {filepath}::{item.member_id} (lines {item.start_line}-{item.end_line}, "
+                    f"score={hit.get('score', 0.0):.3f}) ===\n{item.content}"
+                )
+            continue
+
         bounded_text = text[:_MAX_SEARCH_RESULT_CHARS]
+        # Explicit fragment marker (2026-09-19): a truncated skeleton hit
+        # with no marker looks, to the model, indistinguishable from a
+        # short but COMPLETE snippet - directly upstream of a SEARCH block
+        # quoting text past what was actually shown ("search text is
+        # localization evidence, never source authority").
+        truncated_notice = (
+            " [TRUNCATED - not the complete member; call inspect_member on this path for the full body]"
+            if len(text) > _MAX_SEARCH_RESULT_CHARS else ""
+        )
         items.append(make_context_item(
             path=filepath, content=bounded_text,
             reason=f"developer_investigation:search_code:{query}",
             source_type="semantic_hit", trust_level="repository",
             tier="skeleton", is_exact=False, omitted_regions=True, revision="",
         ))
-        lines.append(f"=== {filepath} (score={hit.get('score', 0.0):.3f}) ===\n{bounded_text}")
+        lines.append(f"=== {filepath} (score={hit.get('score', 0.0):.3f}){truncated_notice} ===\n{bounded_text}")
     if not items:
         return f"ERROR: every match for '{query}' is outside investigation read authority.", []
     if omitted:

@@ -393,6 +393,55 @@ class TestMemberEscalation:
 
         assert _resolve_retry_member_hints(ctx, state, ["engine.py"]) == {}
 
+    def test_exact_unrelated_member_does_not_authorize_mutation_elsewhere(self, tmp_path):
+        """MUTATION_RELEVANCE_GATE (2026-09-19, VAL-001 G1 DEV-INV rerun):
+        a member_exact record for a DIFFERENT, unrelated member of the same
+        path must never be treated as "nothing left to escalate to" for a
+        CURRENTLY failing edit that actually concerns a different member.
+        Before this fix, once ANY member_exact was recorded for a path
+        (here: outer_extractor.add_node, from some earlier, unrelated
+        escalation), SOURCE 3 was blanket-suppressed for the rest of the
+        run - so a LATER anchor failure whose real SEARCH text grounds to
+        outer_extractor.walk_calls instead would be silently starved of the
+        escalation it needs, and the stale, irrelevant add_node record
+        would remain in known_target_context_items unchanged - exactly
+        "merely any member_exact from the same file" authorizing silence
+        for an unrelated member. The fix: only tier="full" is genuinely
+        terminal; a member_exact record for the WRONG member must not block
+        re-grounding for the RIGHT one."""
+        content = _write_target(tmp_path, "engine.py", _g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path)
+        state = GenerationState()
+        # Simulates an earlier, unrelated grounding (e.g. inspect_member
+        # named a different member, or an earlier failure grounded here) -
+        # genuinely exact, genuinely real, genuinely NOT the member the
+        # CURRENT failing edit concerns.
+        state.known_target_context_items["engine.py"] = make_context_item(
+            path="engine.py", content="def add_node(node_id):\n    return node_id\n",
+            reason="developer_investigation:inspect_member:outer_extractor.add_node",
+            source_type="named_in_request", trust_level="repository",
+            member_id="outer_extractor.add_node", tier="member_exact", is_exact=True,
+            revision=content_revision(content),
+        )
+        state.budgets.anchor_failure_counts["engine.py"] = 1
+        # The REAL failing edit's own SEARCH text is real content that
+        # exists in walk_calls, not add_node - the exact G1 shape (a
+        # different member than the one already recorded as "exact").
+        state.last_failure = _anchored_edit_failure()
+
+        hints = _resolve_retry_member_hints(ctx, state, ["engine.py"])
+        assert hints == {"engine.py": ["outer_extractor.walk_calls"]}
+
+        # The previously-recorded, unrelated member_exact record must not
+        # survive as the FINAL authority once the actually-relevant member
+        # is re-grounded through the full retry-preparation pipeline.
+        prep = _prepare_retry_context(
+            state, ctx, target_files=["engine.py"], context_window=32768,
+            model_identity="primary-model",
+        )
+        assert prep.member_hints == {"engine.py": ["outer_extractor.walk_calls"]}
+        assert state.known_target_context_items["engine.py"].member_id == "outer_extractor.walk_calls"
+
 
 # ---------------------------------------------------------------------------
 # Items J/K: centralized preparation, mode transitions
@@ -448,20 +497,28 @@ class TestCentralizedPreparation:
 
         # Transition to full_set on the fallback model - the SAME grounded
         # SEARCH evidence (the model tried the same fix again), different
-        # mode/model entirely. SOURCE 3 correctly does NOT re-fire here
-        # (omitted_regions is now False - "nothing left to escalate", per
-        # _resolve_retry_member_hints' own docstring) - the real property
-        # under test is that the general retry package's own re-inclusion
-        # of this now-unexcluded path (retry_member_hints is {} this call,
-        # so nothing excludes it) does not silently DOWNGRADE the already-
-        # achieved member_exact record back to a coarser tier.
+        # mode/model entirely. MUTATION_RELEVANCE_GATE residual (2026-09-19,
+        # VAL-001 G1 DEV-INV rerun): SOURCE 3 now correctly RE-EVALUATES
+        # here rather than being blanket-suppressed just because SOME
+        # member_exact is already recorded for this path (a prior version
+        # of this gate treated any member_exact as "nothing left to
+        # escalate to", which silently froze a WRONG recorded member in
+        # place across the rest of a run - see _resolve_retry_member_hints'
+        # own updated docstring). Re-evaluating the SAME unchanged SEARCH
+        # text against the SAME real content deterministically re-derives
+        # the SAME single member again - a harmless, idempotent
+        # re-confirmation, not a new escalation - so the real property
+        # under test is unchanged: the general retry package's own
+        # re-inclusion of this now-unexcluded path does not silently
+        # DOWNGRADE the already-achieved member_exact record back to a
+        # coarser tier.
         state.last_attempt_mode = "full_set"
         state.last_failure = _anchored_edit_failure()
         prep = _prepare_retry_context(
             state, ctx, target_files=["engine.py"], context_window=16384,
             model_identity="fallback-model",
         )
-        assert prep.member_hints == {}
+        assert prep.member_hints == {"engine.py": ["outer_extractor.walk_calls"]}
         assert state.known_target_context_items["engine.py"].member_id == "outer_extractor.walk_calls"
         assert state.known_target_context_items["engine.py"].tier == "member_exact"
 
@@ -588,6 +645,49 @@ class TestNoProgressGate:
         )
         # Second call, byte-identical evidence and failure signature - must
         # NOT raise, unlike the real D1-rejection case in test_L.
+        _prepare_retry_context(
+            state, ctx, target_files=["engine.py"], context_window=32768,
+            model_identity="primary-model",
+        )
+
+    def test_anchored_edit_repeat_is_deliberately_not_a_deterministic_verdict(self, tmp_path):
+        """UNCHANGED_EVIDENCE_RETRY_BLOCK (2026-09-19, VAL-001 G1 DEV-INV
+        rerun): considered and REJECTED adding "anchored_edit" (or a new,
+        narrower reason_code for its "search text matched nothing real"
+        subclass) to _DETERMINISTIC_VERDICT_REASON_CODES, to make the
+        no-progress gate above also block a repeated anchored-edit failure.
+        Real counter-evidence from the live G1 rerun this package
+        investigates: two consecutive anchored-edit failures against
+        materially the same context produced textually DIFFERENT SEARCH
+        blocks each time (the model resampled, quoting different - still
+        wrong - fabricated identifiers each time) - exactly the
+        "resampling with unchanged evidence CAN change the model's own
+        output" case _DETERMINISTIC_VERDICT_REASON_CODES' own module
+        comment already documents and guards (confirmed regression-tested
+        via test_workflow_fallback_chain). Blocking here would also cut off
+        SOURCE 3's own re-grounding path (this file's own MUTATION_
+        RELEVANCE_GATE fix): a resampled SEARCH block that grounds to a
+        DIFFERENT, more relevant member is real evidence progress, not a
+        repeat, and _resolve_retry_member_hints must get the chance to see
+        it. Fixing the structural cause of frozen evidence (this file's own
+        member-escalation/relevance-gate fixes) is the real closure here,
+        not an additional blocking gate on top of a now-unstuck mechanism."""
+        content = _write_target(tmp_path, "engine.py", _g1_shaped_module())
+        ctx = _minimal_attempt_ctx(tmp_path)
+        state = GenerationState()
+        state.last_attempt_mode = "targeted"
+        state.known_target_context_items["engine.py"] = _skeleton_context_item(content_revision(content))
+        state.last_failure = _anchored_edit_failure()
+        assert state.last_failure.diagnostics is None  # no reason_code attached, by design
+        state.budgets.last_failure_signature = ("anchored_edit", "anchor mismatch")
+
+        _prepare_retry_context(
+            state, ctx, target_files=["engine.py"], context_window=32768,
+            model_identity="primary-model",
+        )
+        # Second call, byte-identical evidence and failure signature - must
+        # NOT raise. Unlike test_L's genuine D1-rejection case, an anchored-
+        # edit failure is never eligible for this gate at all.
         _prepare_retry_context(
             state, ctx, target_files=["engine.py"], context_window=32768,
             model_identity="primary-model",
