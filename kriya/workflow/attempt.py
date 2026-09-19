@@ -1195,6 +1195,106 @@ def _ensure_generation_time_budget(
         raise QualityGateFailure(failure)
 
 
+async def _maybe_run_developer_investigation(
+    state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any], active_model: str,
+) -> None:
+    """DEV-INV-001 (2026-09-19): opt-in (default OFF via autonomy.
+    developer_investigation_enabled) bounded, read-only pre-pass that lets
+    the Developer request additional repository evidence BEFORE this
+    attempt's real generation call - see kriya/workflow/investigation.py for
+    the full turn-loop/protocol/governance machinery this only wires up.
+
+    Mutates only kwargs["existing_code_context"] (appending rendered
+    evidence text, the same way retrieval-sourced Graph RAG context is
+    already appended in workflow.py) and, for a genuinely member-exact
+    result only, state.known_target_context_items (via the SAME
+    _preserve_member_exact_precision() merge D1's own retry-projection path
+    already uses below - never a second, independently-invented merge rule)
+    - never touches kwargs otherwise, never calls ctx.developer.run_generation
+    itself, never writes to disk. Flag OFF (the default): returns
+    immediately before any of this, byte-identical to pre-DEV-INV-001
+    behavior.
+
+    Available for every brownfield attempt (every call through
+    _run_developer_generation, every attempt/retry) when enabled - the one
+    exception is a workspace with no dependency-graph index at all yet
+    (this module's own `_dependency_graph_db_path` existence check, the
+    same operational "has this workspace ever been indexed" signal
+    workflow.py's own auto_index_missing_dependency_graph gate already
+    uses): with no index, find_symbol/find_callers/search_code can only
+    ever report "nothing found," so running the loop at all would just
+    burn turns for no benefit - retains existing (no-investigation) flow
+    for that case rather than activating on tier/is_exact signals, per the
+    task's own explicit instruction not to gate on those."""
+    autonomy_cfg = ctx.kernel.config.autonomy
+    if not autonomy_cfg.developer_investigation_enabled:
+        return
+    db_path = _dependency_graph_db_path(ctx)
+    if not os.path.exists(db_path):
+        return
+    configured_max = max(0, autonomy_cfg.developer_investigation_max_turns)
+    used_so_far = state.investigation_turns_used_by_attempt.get(state.attempt_number, 0)
+    remaining = configured_max - used_so_far
+    if remaining <= 0:
+        return
+
+    from kriya.core.model_capabilities import resolve_model_capability_profile
+    from kriya.workflow.investigation import (
+        InvestigationDependencies, render_investigation_evidence, run_investigation_loop,
+    )
+
+    capability_profile = resolve_model_capability_profile(ctx.kernel.config, active_model)
+
+    async def _search_code(query: str) -> List[Dict[str, Any]]:
+        vector_index_path = os.path.join(ctx.kernel.config.paths.memory, "vector_index.db")
+        if not os.path.exists(vector_index_path):
+            return []
+        from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
+        embed_client = OllamaEmbeddingClient(
+            base_url=ctx.kernel.config.embedding.base_url, model=ctx.kernel.config.embedding.model,
+        )
+        query_emb = await embed_client.get_embedding(query, is_query=True)
+        store = LocalVectorStore(vector_index_path)
+        try:
+            return store.query_hybrid(
+                query, query_emb, top_k=5, model_name=ctx.kernel.config.embedding.model,
+            )
+        finally:
+            store.close()
+
+    deps = InvestigationDependencies(
+        workspace_path=ctx.workspace_path, worktree_path=ctx.worktree_path,
+        dependency_graph_db_path=db_path, search_code=_search_code,
+        source_cache=ctx.source_cache,
+    )
+    result = await run_investigation_loop(
+        llm=ctx.developer.llm, capabilities=capability_profile.capabilities, deps=deps,
+        task_description=str(kwargs.get("task_description") or ""),
+        design_context=str(kwargs.get("design_context") or ""),
+        existing_code_context=str(kwargs.get("existing_code_context") or ""),
+        max_turns=remaining,
+        known_target_files=kwargs.get("known_target_files"),
+        model_override=kwargs.get("model_override"),
+        base_url_override=kwargs.get("base_url_override"),
+        api_key_override=kwargs.get("api_key_override"),
+        extra_body_override=kwargs.get("extra_body_override"),
+        attempt_number=state.attempt_number,
+    )
+    state.investigation_turns_used_by_attempt[state.attempt_number] = used_so_far + result.turns_used
+    for event in result.events:
+        state.record_event(event)
+    if not result.evidence:
+        return
+    for item in result.evidence:
+        if item.tier == "member_exact":
+            state.known_target_context_items[item.path] = _preserve_member_exact_precision(
+                state, item.path, item,
+            )
+    rendered = render_investigation_evidence(result.evidence)
+    if rendered:
+        kwargs["existing_code_context"] = str(kwargs.get("existing_code_context") or "") + rendered
+
+
 async def _run_developer_generation(
     state: GenerationState, ctx: "AttemptContext", **kwargs,
 ) -> List[Dict[str, str]]:
@@ -1204,6 +1304,7 @@ async def _run_developer_generation(
     _ensure_generation_time_budget(
         state, ctx, file_count=file_count, active_model=active_model,
     )
+    await _maybe_run_developer_investigation(state, ctx, kwargs, active_model)
     started = time.monotonic()
     succeeded = False
     try:

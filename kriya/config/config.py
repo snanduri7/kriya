@@ -549,6 +549,26 @@ class AutonomyConfig(BaseModel):
     # stays a narrow, additive recovery path, not a parallel generation architecture.
     self_correction_loop_enabled: bool = Field(default=False)
     self_correction_loop_max_turns: int = Field(default=4)
+    # DEV-INV-001 (2026-09-19): off by default for the same reason as
+    # self_correction_loop_enabled above - a genuinely new capability (the
+    # Developer may request bounded, read-only repository evidence -
+    # inspect_member/find_symbol/find_callers/search_code, kriya/workflow/
+    # investigation.py - mid-attempt, BEFORE proposing any code), not a
+    # tuning knob on an existing one. Strictly read-only: every path-backed
+    # result passes through kriya/policy/filesystem.py::AuthorizedFileReader
+    # (workspace containment + sensitive-path denial) before being shown to
+    # the model, and D1's own `_completeness_gated_operation` (kriya/
+    # workflow/attempt.py) is completely unchanged - investigation evidence
+    # can only ever help authorize a MORE precise patch, never a whole-file
+    # replacement it wouldn't otherwise be authorized for.
+    developer_investigation_enabled: bool = Field(default=False)
+    # Per-attempt budget (shared across every _run_developer_generation call
+    # within the SAME attempt_number, including coordinated-repair's several
+    # per-participant calls - see kriya/workflow/attempt.py's own
+    # investigation_turns_used_by_attempt accounting), not per-call: a
+    # coordinated repair with several participants must not get this many
+    # turns EACH.
+    developer_investigation_max_turns: int = Field(default=4, ge=0)
     # Default 1 = today's exact behavior (a single first attempt, unchanged). A value
     # above 1 tries that many INDEPENDENT full-set candidates for the very first
     # generation attempt only (never on later retries, which already have real error

@@ -105,6 +105,14 @@ _REPOSITORY_SAFE_FIELDS: frozenset = frozenset({
     ("autonomy", "auto_index_missing_dependency_graph"),
     ("autonomy", "web_lookup_enabled"), ("autonomy", "web_lookup_auto_approve"),
     ("autonomy", "self_correction_loop_enabled"), ("autonomy", "self_correction_loop_max_turns"),
+    # DEV-INV-001 (2026-09-19): the strictly-read-only sibling of
+    # self_correction_loop_enabled immediately above - same risk shape
+    # (controls only whether/how many bounded, already-governed read-only
+    # lookups the Developer may request; every lookup still passes through
+    # AuthorizedFileReader's own real containment/sensitive-path enforcement
+    # regardless of this flag's value, and grants no new execution/network/
+    # filesystem/policy authority of its own).
+    ("autonomy", "developer_investigation_enabled"), ("autonomy", "developer_investigation_max_turns"),
     ("autonomy", "best_of_n_first_attempt"),
     ("autonomy", "shell_command_timeout_seconds"),
     ("autonomy", "run_verification_enabled"), ("autonomy", "run_verification_timeout_seconds"),

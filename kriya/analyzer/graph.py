@@ -266,6 +266,34 @@ class DependencyGraph:
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
 
+    def find_symbol_locations(self, name: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """DEV-INV-001: exact, indexed point lookup on the `symbols` table's
+        own `idx_symbols_name` index - name -> every {filepath, type,
+        start_line, end_line} this repository's own parse produced for that
+        exact string. Backs the `find_symbol` investigation verb.
+
+        Deliberately an EXACT match only, never a LIKE/substring scan - a
+        symbol name search must stay a cheap, indexed point lookup regardless
+        of repository size (see this module's own performance discipline:
+        get_callers/get_callees already only ever do exact-match lookups
+        against idx_relations_source/idx_relations_target). _parse_java()
+        stores QUALIFIED names (package_prefix + class name) for class-level
+        symbols, so an exact match on a bare simple name will legitimately
+        find nothing for those - this is an honest MVP limitation (the
+        caller should be told to try the fully-qualified name), never
+        silently widened into a `LIKE '%.' || ? ` scan, which would defeat
+        the whole point of an indexed lookup."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT filepath, name, type, start_line, end_line FROM symbols "
+            "WHERE name = ? LIMIT ?",
+            (name, limit),
+        )
+        return [
+            {"filepath": r[0], "name": r[1], "type": r[2], "start_line": r[3], "end_line": r[4]}
+            for r in cursor.fetchall()
+        ]
+
     def get_imports(self, filepath: str) -> List[str]:
         """Fetch all dependency import files or packages for a specific file path."""
         cursor = self.conn.cursor()

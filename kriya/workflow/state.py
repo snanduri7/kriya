@@ -366,6 +366,17 @@ class GenerationState:
     # goes, so a prior attempt's now-stale item for the same path is always
     # replaced before it could be re-read for a later attempt on that file).
     known_target_context_items: Dict[str, "ContextItem"] = field(default_factory=dict)
+    # DEV-INV-001 (2026-09-19): attempt_number -> investigation turns already
+    # consumed THIS attempt, across every _run_developer_generation call
+    # within it - a coordinated-repair attempt calls that function once per
+    # contract participant (kriya/workflow/attempt.py's own
+    # _run_coordinated_repair_generation), and this dict is what stops each
+    # participant getting its own full autonomy.developer_investigation_
+    # max_turns budget (see attempt.py's own _maybe_run_developer_
+    # investigation). Keyed by attempt_number rather than a single running
+    # counter so a later attempt always starts fresh without needing an
+    # explicit reset call anywhere.
+    investigation_turns_used_by_attempt: Dict[int, int] = field(default_factory=dict)
     # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/
     # validation_baseline.py) - the PRE-candidate authoritative record(s),
     # captured against workspace_path (never worktree_path/sandbox) before
