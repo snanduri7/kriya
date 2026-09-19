@@ -197,6 +197,11 @@ from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.review_context import build_review_batches, build_reviewer_verified_evidence
 from kriya.workflow.state import GenerationState, RecoveryPhaseAdvanced
 from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS, EngineeringPlan
+from kriya.workflow.planner_repair import (
+    STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
+    build_structured_plan_repair_prompt,
+    classify_structured_plan_parse_issue,
+)
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 
 logger = logging.getLogger(__name__)
@@ -1823,6 +1828,30 @@ class WorkflowEngine:
                 "exact stack. Your plan must not contradict any Rule listed there."
             )
 
+        # PLANNER-ROBUST-001 (2026-09-19): the same real, already-resolved
+        # tool-registry source WorkflowController's own structured-planning
+        # loop already uses (kernel.registry.list_components("tool")) -
+        # reused as-is, never a hardcoded duplicate list, never a name this
+        # runtime doesn't actually have registered. Surfaced to the Planner
+        # here (never invented in the system prompt itself, which has no
+        # per-run context) so a subtask that genuinely needs execution_
+        # method="tool" can name a real Subtask.tool_name instead of
+        # guessing - see kriya/agents/agent.py::PlannerAgent.system_prompt
+        # for the schema-level distinction this pairs with (Subtask.
+        # tool_name vs. a verification[] entry's own, differently-
+        # vocabularied tool_name).
+        try:
+            available_tool_names = sorted(self.kernel.registry.list_components("tool"))
+        except Exception as e:
+            available_tool_names = []
+            logger.debug(f"Could not list registered tools for the Planner prompt: {e}")
+        if available_tool_names:
+            plan_prompt += (
+                "\n\nRegistered Kriya tools available for a subtask's own execution_method=\"tool\" "
+                f"(Subtask.tool_name must be exactly one of these, never invented): "
+                f"{', '.join(available_tool_names)}."
+            )
+
         if predetermined_plan is not None:
             plan = predetermined_plan
             logger.info("Using predetermined plan (bounded subtask execution) - skipping Planner Agent call.")
@@ -1890,7 +1919,119 @@ class WorkflowEngine:
         # ever reached at all). No Planner retry is added here - each
         # branch below returns exactly once, the same single-attempt
         # contract the old check already had.
-        plan_completeness = classify_plan_completeness(plan)
+        #
+        # available_tool_names is passed through here too (PLANNER-
+        # ROBUST-001 P2/P3, 2026-09-19) - the EXACT SAME snapshot already
+        # captured above for the prompt (never a second, independently-
+        # timed registry read): the catalog advertised to the Planner and
+        # the catalog its response is validated against must always be
+        # the same one, or a tool registered/unregistered between the two
+        # reads could silently authorize (or reject) something the
+        # Planner was never actually shown. This is also what makes the
+        # legacy path share WorkflowController's own tool-capability
+        # membership semantics (kriya/workflow/planner_validation.py) for
+        # the first time - previously this path had no such check at all.
+        plan_completeness = classify_plan_completeness(plan, available_tool_names=available_tool_names)
+        # PLANNER-ROBUST-001 (2026-09-19): bounded structured-plan repair,
+        # reusing WorkflowController's own existing PLAN_REPAIR primitives
+        # (kriya/workflow/planner_repair.py) rather than a second,
+        # independently-maintained repair mechanism - see that module's own
+        # docstring for the full extraction rationale and the live G1
+        # incident this closes (a single schema-invalid subtask - e.g. a
+        # TOOL-execution-method subtask missing its required tool_name -
+        # discarded an otherwise-correct Planner response and terminated
+        # the whole run before Architect, with zero repair opportunity).
+        #
+        # Only ever attempted for "schema_invalid" - a structurally
+        # parseable, COMPLETE response whose structured JSON block failed
+        # PlannerStructuredOutput's own schema validation. Deliberately
+        # NEVER attempted for "unauthorized_path" (an authority/security
+        # classification - repairing it would convert a security rejection
+        # into an opportunity to resubmit a differently-worded but still-
+        # illegitimate plan) or "incomplete_truncated" (a genuinely
+        # different failure shape - a truncated/empty response gives a
+        # repair prompt nothing real to correct; unlike unauthorized_path,
+        # this is not an authority concern, simply not this mechanism's
+        # job). Bounded at the SAME STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS
+        # WorkflowController's own loop already uses - never increased,
+        # never a second policy.
+        #
+        # The legacy path has no ObligationLedger of its own, so
+        # must_preserve/validation_evidence/route_kind/extension_candidates/
+        # repository_candidates are simply never passed (every one already
+        # defaults to None/empty in build_structured_plan_repair_prompt,
+        # producing the identical core, reason-code-driven correction text).
+        # On success, the repaired response becomes the new `plan` used for
+        # Architect below, exactly as the original would have been had it
+        # been schema-valid the first time. On repeated failure (or a
+        # repaired response that is itself unauthorized_path/still
+        # schema_invalid/truncated), execution falls through to the SAME
+        # terminal-rejection block immediately below, completely
+        # unmodified - a repaired plan is revalidated through the EXACT
+        # same classify_plan_completeness() call as any other plan, never a
+        # relaxed or bypassed check.
+        legacy_plan_repair_attempts = 0
+        while (
+            plan_completeness.classification == "schema_invalid"
+            and legacy_plan_repair_attempts < STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS
+        ):
+            repair_reason_codes = classify_structured_plan_parse_issue(
+                plan_completeness.reason, plan_completeness.reason_codes,
+            )
+            state.record_event(RunEvent(
+                kind="structured_plan_validation", attempt=0, source="workflow.legacy_planner_repair",
+                authority=EventAuthority.ADVISORY,
+                message=(
+                    "Legacy Planner output failed structured-plan schema validation "
+                    f"(repair_attempts_so_far={legacy_plan_repair_attempts})."
+                ),
+                details={
+                    "valid": False, "repair_attempts": legacy_plan_repair_attempts,
+                    "reason_codes": repair_reason_codes,
+                },
+            ))
+            repair_prompt = build_structured_plan_repair_prompt(
+                goal, plan,
+                [plan_completeness.reason or "structured plan schema validation failed"],
+                repair_reason_codes, legacy_plan_repair_attempts + 1,
+                available_tool_names=available_tool_names,
+            )
+            legacy_plan_repair_attempts += 1
+            state.record_event(RunEvent(
+                kind="structured_plan_repair_requested", attempt=0, source="workflow.legacy_planner_repair",
+                authority=EventAuthority.ADVISORY,
+                message=(
+                    f"Requesting bounded Planner repair (attempt "
+                    f"{legacy_plan_repair_attempts}/{STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS})."
+                ),
+                details={"repair_attempt": legacy_plan_repair_attempts, "reason_codes": repair_reason_codes},
+            ))
+            _repair_started = time.monotonic()
+            # No max_tokens_override passed: self.planner already carries
+            # max_output_tokens=config.llm.planner_max_tokens from its own
+            # construction (WorkflowEngine.__init__, R3 fix) - the exact
+            # same Planner-stage budget the initial call above used, never
+            # a silent fallback to the general llm.max_tokens default.
+            plan = await self.planner.run(repair_prompt)
+            state.planner_calls += 1
+            state.planner_llm_seconds += time.monotonic() - _repair_started
+            _save_stage_checkpoint("plan", plan=plan)
+            # Same captured available_tool_names snapshot as the initial
+            # classification above - a repaired response is revalidated
+            # against the identical catalog, never a re-read that could
+            # have drifted mid-operation (P5: no weaker validation path
+            # for a repaired plan than for the initial one).
+            plan_completeness = classify_plan_completeness(plan, available_tool_names=available_tool_names)
+            state.record_event(RunEvent(
+                kind="structured_plan_repair_result", attempt=0, source="workflow.legacy_planner_repair",
+                authority=EventAuthority.ADVISORY,
+                message=f"Repair attempt {legacy_plan_repair_attempts} result: {plan_completeness.classification}.",
+                details={
+                    "repair_attempt": legacy_plan_repair_attempts,
+                    "classification": plan_completeness.classification,
+                    "accepted": plan_completeness.classification == "complete",
+                },
+            ))
         if plan_completeness.classification != "complete":
             plan_issue = plan_completeness.reason or "plan failed completeness/authority classification"
             status = {

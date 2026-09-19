@@ -448,10 +448,45 @@ class PlannerAgent(BaseAgent):
             "file it may create, modify, or delete, UNLESS execution_role is \"verification\" (see below), "
             "in which case planned_files MUST be empty). "
             "A build, test, run, or output check that does not edit files belongs in verification or "
-            "acceptance_criteria, NOT in a fake MODEL subtask. A subtask may instead be \"tool\" (a "
-            "deterministic check like a test/lint run - must set "
-            "tool_name; only use \"tool\" for a check you are certain is a real, already-registered tool, "
-            "never invent one).\n"
+            "acceptance_criteria, NOT in a fake MODEL subtask.\n"
+            "\n"
+            "A subtask may instead be execution_method \"tool\" - but ONLY when the SUBTASK ITSELF is to "
+            "be directly executed by a registered Kriya tool, with no model call at all. When you use it, "
+            "the subtask's own top-level tool_name field is MANDATORY and must name a real, already-"
+            "registered Kriya tool (never invent one). This is a DIFFERENT field, with a DIFFERENT "
+            "vocabulary, from a verification[] entry's own tool_name (e.g. \"compile\"/\"test\") - a "
+            "verification entry's tool_name identifies WHICH DETERMINISTIC CHECK that entry runs, and "
+            "never satisfies the subtask's own top-level tool_name requirement. Setting the "
+            "verification[] entry's tool_name alone, with the subtask's own top-level tool_name left "
+            "unset, is INVALID and will be rejected - this is the single most common mistake with "
+            "execution_method \"tool\", so check it explicitly before emitting a \"tool\" subtask. In "
+            "practice, a subtask whose OWN work is verification (execution_role \"verification\", "
+            "planned_files empty, checked via a deterministic tool like a test/compile run) should "
+            "almost always use execution_method \"model\" with a real verification[] entry instead of "
+            "execution_method \"tool\" at the subtask level - reserve execution_method \"tool\" for the "
+            "rare case where a registered Kriya tool needs to run directly as the subtask's own action, "
+            "with no verification[] entry involved at all.\n"
+            "\n"
+            "Worked example A (verification-only, the common case for a test/build check): "
+            '{"id": "s3", "description": "Run the existing test suite to confirm no regressions", '
+            '"execution_method": "model", "execution_role": "verification", "depends_on": ["s2"], '
+            '"planned_files": [], "provides": [], "requires": [], "relevant_global_invariant_ids": ["gi1"], '
+            '"acceptance_criteria_ids": ["ac1"], "verification": [{"type": "tool", "tool_name": "test", '
+            '"verifier_kind": "test", "description": "run the test suite"}]} - note execution_method is '
+            '"model" here, never "tool", even though the actual check is a deterministic tool run; the '
+            "verification[] entry's own tool_name (\"test\") is what names the check, not the subtask's "
+            "top-level tool_name (which this shape correctly never sets).\n"
+            "\n"
+            "Worked example B (a genuine direct tool-executed subtask, rare - only when a real registered "
+            "Kriya tool listed for you elsewhere in this prompt should run directly, with no model call): "
+            '{"id": "s4", "description": "Run the registered refactor-validation tool directly", '
+            '"execution_method": "tool", "tool_name": "validate_refactor", "execution_role": '
+            '"verification", "depends_on": ["s2"], "planned_files": [], "provides": [], "requires": [], '
+            '"relevant_global_invariant_ids": ["gi1"], "acceptance_criteria_ids": ["ac1"], "verification": '
+            '[]} - note the subtask\'s own top-level tool_name ("validate_refactor") is set here, to an '
+            "exact name from the registered-tools list given to you elsewhere in this prompt, never a "
+            "verifier keyword like \"test\"/\"compile\"/\"pytest\" (those are not valid Subtask.tool_name "
+            "values) and never a name you are not certain is actually registered this run.\n"
             "\n"
             "execution_role is WHAT the subtask is for, separate from execution_method (HOW it runs): "
             "\"implementation\" (the default - this subtask writes/modifies real source, and MUST declare "

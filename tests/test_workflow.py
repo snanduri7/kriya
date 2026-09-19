@@ -130,6 +130,7 @@ from kriya.workflow.workflow_controller import (
     build_planning_structural_evidence,
     find_missing_grounded_production_artifacts,
 )
+from kriya.workflow.planner_repair import STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS
 from kriya.workflow.checkpoint import (
     checkpoint_path,
     compute_config_fingerprint,
@@ -24046,6 +24047,18 @@ async def test_workflow_stops_early_with_unauthorized_path_status_for_exact_g1r3
 
 @pytest.mark.asyncio
 async def test_workflow_stops_early_with_schema_invalid_status_for_non_path_defect(tmp_path):
+    """PLANNER-ROBUST-001 (2026-09-19): schema_invalid is no longer a
+    single-shot terminal rejection - it now gets STRUCTURED_PLAN_REPAIR_MAX_
+    ATTEMPTS bounded repair attempts first (kriya/workflow/planner_repair.py,
+    shared with WorkflowController's own pre-existing PLAN_REPAIR loop)
+    before falling through to the same terminal status this test always
+    asserted. Here the mocked Planner returns the SAME schema-invalid
+    response on every call (an unfixable defect from the model's own
+    perspective), so repair is genuinely attempted (proving the loop fires)
+    and still correctly ends in the same truthful terminal classification -
+    this is the intended "repair attempted, still fails, bounded, no
+    infinite retry" shape, not a regression of the original single-shot
+    behavior."""
     cfg = AppConfig()
     cfg.paths.skills = str(tmp_path / "skills")
     kernel = Kernel(config=cfg)
@@ -24068,7 +24081,9 @@ async def test_workflow_stops_early_with_schema_invalid_status_for_non_path_defe
     res = await we.run_generation_workflow(goal="Fix the bug", workspace_path=str(tmp_path))
 
     assert res["status"] == "planner_output_schema_invalid"
-    assert llm.complete.call_count == 1
+    # 1 initial call + STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS bounded repair
+    # calls, never unbounded - the same defect every time still terminates.
+    assert llm.complete.call_count == 1 + STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS
 
 
 @pytest.mark.asyncio

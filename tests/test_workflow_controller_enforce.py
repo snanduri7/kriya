@@ -7498,6 +7498,15 @@ def _scan_structured_plan_reason_codes():
 # TOOL-execution-method subtask with no tool_name is still invalid).
 _CODES_WITH_TARGETED_GUIDANCE = {
     "TOOL_SUBTASK_MISSING_TOOL_NAME",
+    # PLANNER-ROBUST-001 P2/P9 (2026-09-19): a real reason code where
+    # before there was none - plan_validation.py's tool-capability
+    # membership check (now delegated to kriya/workflow/
+    # planner_validation.py::validate_tool_capability_membership) used to
+    # only append to `errors`, falling through to the PLAN_VALIDATION_
+    # FAILED catch-all. Shares TOOL_SUBTASK_MISSING_TOOL_NAME's own
+    # targeted_correction block (build_structured_plan_repair_prompt) -
+    # same corrective action (point at the real tool catalog).
+    "UNREGISTERED_TOOL_NAME",
     "MODEL_SUBTASK_MISSING_PLANNED_FILES",
     "STRUCTURED_PLAN_SCHEMA_INVALID",
     "SUBTASK_REQUIREMENT_UNPROVIDED",
@@ -7628,8 +7637,17 @@ _TARGETED_CORRECTION_START_MARKER = (
     "never a fake planned_files path invented just to pass validation.\n"
 )
 _TARGETED_CORRECTION_END_MARKER = (
-    "- Do not emit TOOL subtasks: authoritative enforce mode has no "
-    "policy-mediated TOOL router yet.\n"
+    # PLANNER-ROBUST-001 P6 (2026-09-19): replaces the obsolete "Do not
+    # emit TOOL subtasks: authoritative enforce mode has no policy-
+    # mediated TOOL router yet" claim - false since TOOL-001 closed. A
+    # test must protect correct production behavior, not preserve
+    # historical wording known to be false; this marker is updated to the
+    # new, truthful, always-present trailer line verbatim.
+    "- A TOOL-execution-method subtask is valid only when it is directly dispatched to a "
+    "real, currently registered Kriya tool named in its own top-level tool_name (never "
+    "invented) - never confuse this with a verification[] entry's own tool_name, a separate "
+    "field naming a deterministic check. Ordinary verification-only work should normally use "
+    "execution_method=model with a concrete verification[] entry instead.\n"
 )
 
 

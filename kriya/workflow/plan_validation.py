@@ -56,16 +56,15 @@ from kriya.workflow.obligations import (
     ObligationStatus,
 )
 from kriya.workflow.plan_schema import (
-    BUILTIN_QUALITY_GATE_VERIFIERS,
     EngineeringPlan,
     ExecutionMethod,
     ExecutionRole,
     FileAction,
     FileOwnershipRelation,
     Subtask,
-    VerificationMethodType,
     VerifierKind,
 )
+from kriya.workflow.planner_validation import validate_tool_capability_membership
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService, _workspace_appears_empty
 from kriya.workflow.static_checks import StackContract, validate_stack_contract_artifacts
 
@@ -1064,27 +1063,28 @@ async def validate_plan(
                 terminal_required=True,
             ))
 
-    if available_tool_names is not None:
-        available = set(available_tool_names)
-        for st in plan.subtasks:
-            if st.execution_method == ExecutionMethod.TOOL and st.tool_name not in available:
-                errors.append(f"subtask {st.id!r} references unregistered tool_name {st.tool_name!r}")
-            for vm in st.verification:
-                if (
-                    vm.type == VerificationMethodType.TOOL
-                    and vm.tool_name not in available
-                    and vm.tool_name not in BUILTIN_QUALITY_GATE_VERIFIERS
-                ):
-                    errors.append(
-                        f"subtask {st.id!r} verification references unregistered tool_name {vm.tool_name!r}"
-                    )
-        for ac in plan.acceptance_criteria:
-            if (
-                ac.method == VerificationMethodType.TOOL
-                and ac.tool_name not in available
-                and ac.tool_name not in BUILTIN_QUALITY_GATE_VERIFIERS
-            ):
-                errors.append(f"acceptance criterion {ac.id!r} references unregistered tool_name {ac.tool_name!r}")
+    # PLANNER-ROBUST-001 P2 (2026-09-19): delegates to the ONE shared
+    # tool-capability membership check (kriya/workflow/planner_validation.py)
+    # the legacy run_generation_workflow() path's own classify_plan_
+    # completeness() also calls - "ONE PLAN CONTRACT -> ONE VALIDATION
+    # SEMANTICS -> MULTIPLE ORCHESTRATORS". Previously this block appended
+    # only to `errors`, with no dedicated reason code at all - a real
+    # unregistered tool_name fell through to the PLAN_VALIDATION_FAILED
+    # catch-all, indistinguishable from any other not-yet-classified
+    # validation defect. UNREGISTERED_TOOL_NAME is a new, real reason code
+    # this pass adds (see _CODES_WITH_TARGETED_GUIDANCE in
+    # tests/test_workflow_controller_enforce.py).
+    capability_result = validate_tool_capability_membership(plan, available_tool_names=available_tool_names)
+    errors.extend(capability_result.errors)
+    if not capability_result.valid:
+        # Literal `reason_codes.append("...")` kept HERE (not merely
+        # `.extend(capability_result.reason_codes)`) deliberately -
+        # tests/test_workflow_controller_enforce.py's own
+        # _scan_structured_plan_reason_codes() regex-scans this module's
+        # source text directly for exactly this call shape; extracting the
+        # membership CHECK to planner_validation.py must never also make
+        # the reason code invisible to that completeness tripwire.
+        reason_codes.append("UNREGISTERED_TOOL_NAME")
 
     if context_files is not None:
         context_set = set(context_files)

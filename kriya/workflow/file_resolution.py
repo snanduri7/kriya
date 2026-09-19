@@ -2410,19 +2410,48 @@ class PlanCompletenessResult:
                                 enum value, etc.) - genuinely invalid
                                 content is never silently accepted merely
                                 because it is long/well-formatted-looking.
+                                PLANNER-ROBUST-001 (2026-09-19): also
+                                reused for a structurally-valid plan (full
+                                Pydantic schema validation passes) that
+                                nonetheless references an unregistered
+                                tool_name - see available_tool_names below.
+                                This is a SEMANTIC failure, not a schema
+                                one (nothing in PlannerStructuredOutput's
+                                own schema can know what's registered at
+                                runtime), but it shares this classification
+                                rather than introducing a new terminal
+                                status string, since both are "structurally
+                                parseable, not yet authorized to execute as
+                                given" - never a security/authority
+                                concern like unauthorized_path, which stays
+                                separately, permanently hard-terminal.
 
     `structured_plan` is populated only when classification=="complete" AND
     a structured plan actually parsed (may still be None on a "complete"
     prose-only plan with no JSON block at all) - the already-parsed,
     already-validated object, so a caller doesn't need a second parse to
-    use it as real evidence downstream."""
+    use it as real evidence downstream.
+
+    `reason_codes` (PLANNER-ROBUST-001, additive, default None): populated
+    ONLY for the one failure this module can classify with a real typed
+    code at the source, rather than by a caller later string-matching
+    `reason` - currently just ["UNREGISTERED_TOOL_NAME"]. None means "no
+    typed code available for this classification" - a caller (kriya/
+    workflow/planner_repair.py::classify_structured_plan_parse_issue)
+    falls back to its own existing substring inference over `reason` in
+    that case, exactly as it always has; this field never narrows or
+    replaces that fallback, only bypasses it when a typed code already
+    exists."""
 
     classification: str
     reason: Optional[str]
     structured_plan: Optional[Any]
+    reason_codes: Optional[List[str]] = None
 
 
-def classify_plan_completeness(plan_text: str) -> PlanCompletenessResult:
+def classify_plan_completeness(
+    plan_text: str, *, available_tool_names: Optional[Iterable[str]] = None,
+) -> PlanCompletenessResult:
     """The real completeness/authority classification MA6.3 Stage A's own
     parse_planner_structured_output() now feeds as PRIMARY evidence (VAL-001
     G1-R3) - see PlanCompletenessResult's own docstring for what each
@@ -2431,7 +2460,25 @@ def classify_plan_completeness(plan_text: str) -> PlanCompletenessResult:
     for a cosmetic extra fence marker) this replaces the old bare
     count("```") % 2 heuristic to close, without losing that heuristic's own
     real detection power for the one case structured extraction genuinely
-    cannot disambiguate alone (no JSON-shaped block attempted at all)."""
+    cannot disambiguate alone (no JSON-shaped block attempted at all).
+
+    available_tool_names (PLANNER-ROBUST-001, 2026-09-19, additive,
+    default None): the caller's own already-resolved
+    kernel.registry.list_components("tool") snapshot - None SKIPS the
+    tool-capability membership check entirely (mirrors plan_validation.py
+    ::validate_plan()'s own identical, pre-existing convention for the
+    same parameter), an empty collection runs the check for real and
+    correctly fails every execution_method=tool subtask (an empty
+    registry authorizes nothing - see
+    kriya/workflow/planner_validation.py's own docstring). This check
+    only ever runs AFTER parse_planner_structured_output() has already
+    fully succeeded (path authority and every other schema-level
+    invariant, enforced inside Pydantic, take precedence and are
+    unaffected by this parameter) - the SAME shared semantic validator
+    (kriya/workflow/planner_validation.py::validate_tool_capability_
+    membership) plan_validation.py::validate_plan() also calls, so the
+    legacy and WorkflowController paths can never disagree on tool
+    membership."""
     # Deferred import: kriya.agents.contracts -> kriya.agents.agent (package
     # __init__ side effect) does not import this module, so there is no
     # real cycle - deferred anyway, matching this module's own existing
@@ -2439,9 +2486,21 @@ def classify_plan_completeness(plan_text: str) -> PlanCompletenessResult:
     # package (file_resolution.py is imported very early, by kriya.workflow.
     # workflow itself, before agents are necessarily set up).
     from kriya.agents.contracts import parse_planner_structured_output
+    from kriya.workflow.planner_validation import validate_tool_capability_membership
 
     structured, structured_issue = parse_planner_structured_output(plan_text)
     if structured is not None:
+        capability_result = validate_tool_capability_membership(
+            structured, available_tool_names=available_tool_names,
+        )
+        if not capability_result.valid:
+            reason = (
+                "structured plan references unregistered tool_name(s): "
+                + "; ".join(capability_result.errors)
+            )
+            return PlanCompletenessResult(
+                "schema_invalid", reason, None, reason_codes=list(capability_result.reason_codes),
+            )
         return PlanCompletenessResult("complete", None, structured)
 
     issue = structured_issue or ""
