@@ -568,7 +568,15 @@ class AutonomyConfig(BaseModel):
     # investigation_turns_used_by_attempt accounting), not per-call: a
     # coordinated repair with several participants must not get this many
     # turns EACH.
-    developer_investigation_max_turns: int = Field(default=4, ge=0)
+    #
+    # Raised from 4 to 10 (2026-09-19, VAL-001 G1 follow-up): safe to raise
+    # now that run_investigation_loop() stops itself the moment mutation-
+    # readiness is achieved (see that function's own EVIDENCE-DRIVEN
+    # PROGRESSION docstring) rather than only on the model's own say-so or
+    # this count - this ceiling is now a genuine safety valve for a
+    # pathological loop, not the primary stopping mechanism, so a higher
+    # default costs nothing in the common (readiness-reached-early) case.
+    developer_investigation_max_turns: int = Field(default=10, ge=0)
     # Default 1 = today's exact behavior (a single first attempt, unchanged). A value
     # above 1 tries that many INDEPENDENT full-set candidates for the very first
     # generation attempt only (never on later retries, which already have real error

@@ -1616,6 +1616,12 @@ class WorkflowEngine:
         # for why these are candidates only, validated later, never trusted
         # here.
         retrieval_member_hints: Dict[str, List[str]] = {}
+        # PRE-PLAN GROUNDING (2026-09-19): declared here (not only inside the
+        # try block below) so both degrade safely to {} - never populated,
+        # never referenced as fact - whenever Graph RAG retrieval itself is
+        # unavailable/fails, exactly like every other variable in this stage.
+        verified_grounding: Dict[str, List[str]] = {}
+        hypothesis_candidates: Dict[str, List[str]] = {}
         try:
             vector_index_path = os.path.join(self.kernel.config.paths.memory, "vector_index.db")
             db_path = os.path.join(self.kernel.config.paths.memory, "dependency_graph.db")
@@ -1646,7 +1652,43 @@ class WorkflowEngine:
                 query_emb = await embed_client.get_embedding(goal, is_query=True)
                 matches = vector_store.query_hybrid(goal, query_emb, top_k=retrieval_limits.top_k, model_name=self.kernel.config.embedding.model)
                 good_matches = [m for m in matches if m.get("score", 0.0) > 0.0]
-                from kriya.workflow.context_source import parse_controlled_chunk_header_name
+                from kriya.workflow.context_source import (
+                    CurrentSourceResolver, parse_controlled_chunk_header_name,
+                    resolve_verified_grounding_member_id,
+                )
+                # PRE-PLAN GROUNDING (2026-09-19, VAL-001 G1 follow-up): the
+                # real, live-run root cause this closes - the Planner
+                # fabricated a specific function name
+                # (`_csharp_walk_invocation_expression`) that never existed
+                # anywhere in the corpus, and nothing checked that BEFORE the
+                # plan was accepted. retrieval_member_hints below (CTX-001 P1
+                # C2, unchanged) already parses a candidate name from each
+                # hit's own controlled chunk header, but only ever VALIDATES
+                # it against current structure later, in run_attempt() - and
+                # only for a path that already made it into known_target_
+                # files, i.e. only after the Planner already committed to a
+                # target. This block does that SAME validation (reusing
+                # member_boundaries_for/member_ids_matching_name - the exact
+                # primitives resolve_member_hints_from_chunk_header itself
+                # uses - not a new resolver) for EVERY retrieved candidate,
+                # right here, BEFORE the Planner ever runs, and explicitly
+                # separates the result into two buckets the Planner prompt
+                # renders distinctly below:
+                #   verified_grounding: the name resolves to exactly ONE real,
+                #     current member - "Planning specificity must not exceed
+                #     repository evidence specificity" - this is the ONLY
+                #     bucket the Planner may treat as fact.
+                #   hypothesis_candidates: a header name was parsed but did
+                #     NOT resolve to exactly one real current member (zero
+                #     matches - stale since indexing, or an unsupported
+                #     language; more than one - a genuinely ambiguous name,
+                #     e.g. an overloaded method) - surfaced as an explicit,
+                #     labeled "unconfirmed" lead, never silently dropped and
+                #     never presented as though it were verified.
+                # No previously-named target file is required for either
+                # bucket - this runs over the full retrieved candidate set,
+                # not merely files the Planner/Architect already chose.
+                _grounding_resolver = CurrentSourceResolver(workspace_path, None)
                 for m in good_matches:
                     retrieved_chunks.append({
                         "filepath": m.get("filepath", "unknown"),
@@ -1658,8 +1700,10 @@ class WorkflowEngine:
                     # "Method: X"/"Class: X" controlled header format
                     # chunk_file_with_metadata_headers() already writes at
                     # index time. Real validation against CURRENT structural
-                    # boundaries happens later, in run_attempt() - this is
-                    # candidate extraction only.
+                    # boundaries also happens later, in run_attempt() (for a
+                    # known target file only) - retrieval_member_hints itself
+                    # is unchanged, still candidate-only, still consumed the
+                    # same way there.
                     fp = m.get("filepath")
                     if fp:
                         candidate_name = parse_controlled_chunk_header_name(m.get("text", ""))
@@ -1667,6 +1711,20 @@ class WorkflowEngine:
                             names = retrieval_member_hints.setdefault(fp, [])
                             if candidate_name not in names:
                                 names.append(candidate_name)
+
+                            resolved = _grounding_resolver.resolve(fp)
+                            verified_member_id = (
+                                resolve_verified_grounding_member_id(fp, resolved.content, candidate_name)
+                                if resolved.exists else None
+                            )
+                            if verified_member_id is not None:
+                                verified_list = verified_grounding.setdefault(fp, [])
+                                if verified_member_id not in verified_list:
+                                    verified_list.append(verified_member_id)
+                            else:
+                                hyp_list = hypothesis_candidates.setdefault(fp, [])
+                                if candidate_name not in hyp_list:
+                                    hyp_list.append(candidate_name)
 
                 if good_matches:
                     matched_files_list = list(dict.fromkeys([m["filepath"] for m in good_matches if "filepath" in m]))
@@ -1851,6 +1909,43 @@ class WorkflowEngine:
                 f"(Subtask.tool_name must be exactly one of these, never invented): "
                 f"{', '.join(available_tool_names)}."
             )
+
+        # PRE-PLAN GROUNDING (2026-09-19, VAL-001 G1 follow-up): the real,
+        # live incident this closes - the Planner named a specific function
+        # (`_csharp_walk_invocation_expression`) that never existed anywhere
+        # in the corpus, then everything downstream (Architect, Developer)
+        # treated that fabrication as fact for 8 attempts before it was
+        # caught. verified_grounding/hypothesis_candidates (built above,
+        # same retrieval pass, reusing member_boundaries_for/member_ids_
+        # matching_name - no new resolver) are rendered as two EXPLICITLY
+        # separate, labeled sections, never merged into one "here is the
+        # code" blob: the Planner may treat only the first as fact.
+        if verified_grounding or hypothesis_candidates:
+            grounding_block = "\n\n=== Repository Grounding (from retrieval, before this plan) ===\n"
+            if verified_grounding:
+                grounding_block += (
+                    "VERIFIED (confirmed to exist right now, by name, in the current repository "
+                    "- safe to reference by this exact name):\n"
+                )
+                for path, member_ids in verified_grounding.items():
+                    grounding_block += f"  {path}: {', '.join(sorted(member_ids))}\n"
+            if hypothesis_candidates:
+                grounding_block += (
+                    "UNCONFIRMED CANDIDATES (retrieval matched this file for the goal, but this "
+                    "exact name could not be confirmed against current repository structure - "
+                    "stale, ambiguous, or an unsupported language for name verification; treat as "
+                    "a lead to investigate, never as a fact):\n"
+                )
+                for path, names in hypothesis_candidates.items():
+                    grounding_block += f"  {path}: {', '.join(sorted(names))}\n"
+            grounding_block += (
+                "Planning specificity must not exceed repository evidence specificity: only name a "
+                "specific function/method/class in your plan if it appears in the VERIFIED list "
+                "above. For anything else - including every UNCONFIRMED CANDIDATE - describe the "
+                "target descriptively (e.g. \"the C# call-site handler\") rather than inventing a "
+                "specific name; Kriya will investigate further before mutating."
+            )
+            plan_prompt += grounding_block
 
         if predetermined_plan is not None:
             plan = predetermined_plan

@@ -22165,6 +22165,159 @@ async def test_workflow_wires_hybrid_match_scores_into_graph_rag_context_degrada
     assert "File: LowRel.txt (Tier: signatures)" in planner_prompt
 
 
+# ---------------------------------------------------------------------------
+# PRE-PLAN GROUNDING (2026-09-19, VAL-001 G1 follow-up): the Planner must
+# receive real, verified repository evidence BEFORE it drafts a plan -
+# never invent a specific function name the corpus never had, the way the
+# real G1 incident's own Planner named `_csharp_walk_invocation_expression`,
+# a function that never existed anywhere in that repository.
+# ---------------------------------------------------------------------------
+
+def _real_python_chunk(content: str, path: str, marker: str) -> str:
+    from kriya.analyzer.analyzer import chunk_file_with_metadata_headers
+    for c in chunk_file_with_metadata_headers(content, path):
+        if marker in c["text"]:
+            return c["text"]
+    raise AssertionError(f"no real chunk found containing {marker!r}")
+
+
+@pytest.mark.asyncio
+async def test_workflow_pre_plan_grounding_reaches_planner_with_verified_and_hypothesis_labels(tmp_path):
+    """End-to-end through the real run_generation_workflow(): a retrieved
+    chunk that resolves to exactly one real current member reaches the
+    Planner's own prompt labeled VERIFIED; a chunk indexed against a since-
+    renamed member and a chunk whose bare name is genuinely ambiguous
+    (shared by two distinct real members) both reach the Planner labeled
+    UNCONFIRMED, never VERIFIED - "Planning specificity must not exceed
+    repository evidence specificity" is enforced by construction, not by
+    asking the model nicely."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.memory = str(tmp_path / "memory")
+    cfg.paths.skills = str(tmp_path / "skills")
+    os.makedirs(cfg.paths.memory, exist_ok=True)
+
+    current_content = (
+        "class Calculator:\n"
+        "    def compute_total(self, items):\n"
+        "        return sum(items)\n\n"
+        "class A:\n"
+        "    def foo(self):\n"
+        "        return 1\n\n"
+        "class B:\n"
+        "    def foo(self):\n"
+        "        return 2\n"
+    )
+    (tmp_path / "engine.py").write_text(current_content, encoding="utf-8")
+
+    verified_chunk = _real_python_chunk(current_content, "engine.py", "Method: compute_total")
+    ambiguous_chunk = _real_python_chunk(current_content, "engine.py", "Method: foo")
+    # A chunk indexed against an OLDER revision naming a method that has
+    # since been renamed away - simulates real index drift, never real
+    # Graphify content.
+    stale_indexed_content = "class Calculator:\n    def old_helper(self):\n        pass\n"
+    stale_chunk = _real_python_chunk(stale_indexed_content, "engine.py", "Method: old_helper")
+
+    from kriya.memory.vector import LocalVectorStore
+    dim = 768
+    vs = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
+    vs.add_document("engine.py", verified_chunk, [1.0] + [0.0] * (dim - 1), chunk_index=0, model_name=cfg.embedding.model, dimensions=dim)
+    vs.add_document("engine.py", ambiguous_chunk, [0.9] + [0.1] + [0.0] * (dim - 2), chunk_index=1, model_name=cfg.embedding.model, dimensions=dim)
+    vs.add_document("engine.py", stale_chunk, [0.8] + [0.0, 0.1] + [0.0] * (dim - 3), chunk_index=2, model_name=cfg.embedding.model, dimensions=dim)
+    vs.close()
+
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        "def add(a,b):\n    return a+b",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+
+    query_emb = [1.0] + [0.0] * (dim - 1)
+    with patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", new=AsyncMock(return_value=query_emb)):
+        res = await we.run_generation_workflow(
+            goal="Fix the calculator's totals",
+            workspace_path=str(tmp_path),
+        )
+    assert res["quality_gates_passed"] is True
+
+    planner_prompt = llm.complete.call_args_list[0].args[1]
+    assert "Repository Grounding" in planner_prompt
+    assert "VERIFIED" in planner_prompt
+    assert "engine.py: Calculator.compute_total" in planner_prompt
+    assert "UNCONFIRMED CANDIDATES" in planner_prompt
+    # The stale name reaches the Planner (as a lead), but never under the
+    # VERIFIED label, and never with a fabricated member_id attached to it.
+    assert "old_helper" in planner_prompt
+    verified_section, _, rest = planner_prompt.partition("UNCONFIRMED CANDIDATES")
+    assert "old_helper" not in verified_section
+    assert "Calculator.old_helper" not in planner_prompt
+    # The ambiguous "foo" (two distinct real members, A.foo and B.foo) must
+    # also never be presented as verified - no previously-named target file
+    # was required for any of this; nothing here was ever in known_target_
+    # files, since Architect (which produces it) hasn't run yet.
+    assert "A.foo" not in planner_prompt
+    assert "B.foo" not in planner_prompt
+
+
+@pytest.mark.asyncio
+async def test_workflow_pre_plan_grounding_resolves_nested_member_g1_shaped(tmp_path):
+    """Regression resembling the real G1 incident's own structural shape (a
+    nested closure inside an outer function) WITHOUT any Graphify-specific
+    production logic: retrieval finds the region, SOURCE-1 (reused, not
+    reimplemented) identifies the real CONTAINING member (dotted, not just
+    the bare inner name), and the Planner receives that real identity
+    before drafting anything - the exact step that was structurally
+    missing when the live G1 Planner instead fabricated a function name
+    that never existed anywhere in that repository."""
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.memory = str(tmp_path / "memory")
+    cfg.paths.skills = str(tmp_path / "skills")
+    os.makedirs(cfg.paths.memory, exist_ok=True)
+
+    content = (
+        "def outer_extractor(nodes):\n"
+        "    def walk_calls(node):\n"
+        "        return node\n"
+        "    return [walk_calls(n) for n in nodes]\n"
+    )
+    (tmp_path / "engine.py").write_text(content, encoding="utf-8")
+    chunk_text = _real_python_chunk(content, "engine.py", "Method: walk_calls")
+
+    from kriya.memory.vector import LocalVectorStore
+    dim = 768
+    vs = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
+    vs.add_document("engine.py", chunk_text, [1.0] + [0.0] * (dim - 1), chunk_index=0, model_name=cfg.embedding.model, dimensions=dim)
+    vs.close()
+
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        "def add(a,b):\n    return a+b",
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(kernel, llm)
+
+    query_emb = [1.0] + [0.0] * (dim - 1)
+    with patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", new=AsyncMock(return_value=query_emb)):
+        res = await we.run_generation_workflow(
+            goal="Fix generic call site edge handling",
+            workspace_path=str(tmp_path),
+        )
+    assert res["quality_gates_passed"] is True
+
+    planner_prompt = llm.complete.call_args_list[0].args[1]
+    assert "engine.py: outer_extractor.walk_calls" in planner_prompt
+
+
 @pytest.mark.asyncio
 async def test_workflow_heavy_context_depth_widens_retrieval_top_k(tmp_path):
     """MA2.6 (control-plane implementation plan): with process_profiles.

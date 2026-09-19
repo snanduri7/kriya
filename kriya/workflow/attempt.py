@@ -1263,7 +1263,13 @@ async def _maybe_run_developer_investigation(
     ever report "nothing found," so running the loop at all would just
     burn turns for no benefit - retains existing (no-investigation) flow
     for that case rather than activating on tier/is_exact signals, per the
-    task's own explicit instruction not to gate on those."""
+    task's own explicit instruction not to gate on those.
+
+    Also computes known_target_member_hints (2026-09-19) - which member_id
+    is CURRENTLY believed relevant, per declared target path - and passes
+    it to run_investigation_loop so its own mutation-readiness check can
+    require member-level relevance, not merely "some exact member in the
+    right file" (see that function's own docstring)."""
     autonomy_cfg = ctx.kernel.config.autonomy
     if not autonomy_cfg.developer_investigation_enabled:
         return
@@ -1305,6 +1311,30 @@ async def _maybe_run_developer_investigation(
         dependency_graph_db_path=db_path, search_code=_search_code,
         source_cache=ctx.source_cache,
     )
+    # MUTATION_RELEVANCE_GATE for readiness (2026-09-19, VAL-001 G1 follow-
+    # up): "an exact member exists in the right file" is NOT the same claim
+    # as "an exact member exists for the region this attempt actually
+    # cares about" - G1's own add_node/walk_calls shape proved that
+    # distinction matters. run_investigation_loop's own mutation-readiness
+    # check needs to know which member_id(s), if any, are CURRENTLY
+    # believed relevant for each declared target - reuses the SAME two
+    # already-proven resolvers this module's own retry-context preparation
+    # already calls (_resolve_known_target_member_hints for SOURCE 1/
+    # Graph-RAG grounding, _resolve_retry_member_hints for SOURCE 2/3
+    # failure-grounded escalation), never a new resolver or data model.
+    # Both are safe to call unconditionally: _resolve_retry_member_hints
+    # itself returns {} with no state.last_failure yet (attempt 1).
+    known_target_files_list = list(kwargs.get("known_target_files") or [])
+    known_target_member_hints: Dict[str, List[str]] = {}
+    for hints_source in (
+        _resolve_known_target_member_hints(ctx, known_target_files_list),
+        _resolve_retry_member_hints(ctx, state, known_target_files_list),
+    ):
+        for path, member_ids in hints_source.items():
+            existing = known_target_member_hints.setdefault(path, [])
+            for member_id in member_ids:
+                if member_id not in existing:
+                    existing.append(member_id)
     result = await run_investigation_loop(
         llm=ctx.developer.llm, capabilities=capability_profile.capabilities, deps=deps,
         task_description=str(kwargs.get("task_description") or ""),
@@ -1312,6 +1342,7 @@ async def _maybe_run_developer_investigation(
         existing_code_context=str(kwargs.get("existing_code_context") or ""),
         max_turns=remaining,
         known_target_files=kwargs.get("known_target_files"),
+        known_target_member_hints=known_target_member_hints,
         model_override=kwargs.get("model_override"),
         base_url_override=kwargs.get("base_url_override"),
         api_key_override=kwargs.get("api_key_override"),

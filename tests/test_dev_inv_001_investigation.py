@@ -51,6 +51,7 @@ from kriya.workflow.investigation import (
     InvestigationRequest,
     MalformedInvestigationRequest,
     ProposeSignal,
+    _mutation_readiness_achieved,
     dispatch_investigation_request,
     normalize_native_tool_call,
     parse_marker_response,
@@ -782,6 +783,228 @@ class TestInvestigationLoopBudget:
 
 
 # ---------------------------------------------------------------------------
+# Evidence-driven progression (2026-09-19, VAL-001 G1 follow-up): the loop's
+# PRIMARY stopping signal is mutation-readiness, not an arbitrary turn
+# count - simply raising max_turns alone would have been the wrong fix.
+# ---------------------------------------------------------------------------
+
+class TestEvidenceDrivenMutationReadiness:
+    @pytest.mark.asyncio
+    async def test_stops_immediately_once_mutation_readiness_achieved(self, tmp_path):
+        """A single inspect_member call against the DECLARED target, naming
+        the member independently GROUNDED as relevant (known_target_member_
+        hints - MUTATION_RELEVANCE_GATE), produces real, exact evidence -
+        the loop stops right there (terminal_reason=MUTATION_READY) rather
+        than spending any of the remaining, generously-sized turn budget or
+        waiting for the model to say it's ready on its own."""
+        _write(tmp_path, "a.py", "class Foo:\n    def bar(self):\n        return 1\n")
+        llm = MagicMock()
+        llm.complete_with_tools = AsyncMock(
+            return_value=_native_result("inspect_member", {"path": "a.py", "member_id": "Foo.bar"}),
+        )
+        deps = _deps(tmp_path)
+        result = await run_investigation_loop(
+            llm=llm, capabilities=ModelCapabilities(native_tool_calls=True),
+            deps=deps, task_description="t", design_context="d", existing_code_context="",
+            max_turns=8, known_target_files=["a.py"],
+            known_target_member_hints={"a.py": ["Foo.bar"]},
+        )
+        assert result.terminal_reason == "MUTATION_READY"
+        assert result.turns_used == 1
+        assert llm.complete_with_tools.await_count == 1
+        assert len(result.evidence) == 1
+        readiness_events = [e for e in result.events if e.kind == "investigation.mutation_ready"]
+        assert len(readiness_events) == 1
+        assert readiness_events[0].details["turn"] == 1
+
+    @pytest.mark.asyncio
+    async def test_readiness_fires_mid_stream_not_only_on_turn_one(self, tmp_path):
+        """Turn 1 is real progress (a signatures-tier find_symbol hit) but
+        not yet mutation-grade evidence; turn 2 reaches the declared
+        target's real member body and readiness fires there - proving the
+        check runs every turn, not merely once at the start."""
+        _write(tmp_path, "a.py", "class Foo:\n    def bar(self):\n        return 1\n")
+        db_path = tmp_path / "dependency_graph.db"
+        graph = DependencyGraph(str(db_path))
+        graph.index_file("a.py", "class Foo:\n    def bar(self):\n        return 1\n", 1.0)
+        graph.close()
+        llm = MagicMock()
+        llm.complete_with_tools = AsyncMock(side_effect=[
+            _native_result("find_symbol", {"symbol": "Foo"}),
+            _native_result("inspect_member", {"path": "a.py", "member_id": "Foo.bar"}),
+            _propose_result(),  # never reached
+        ])
+        deps = _deps(tmp_path, db_path=str(db_path))
+        result = await run_investigation_loop(
+            llm=llm, capabilities=ModelCapabilities(native_tool_calls=True),
+            deps=deps, task_description="t", design_context="d", existing_code_context="",
+            max_turns=8, known_target_files=["a.py"],
+            known_target_member_hints={"a.py": ["Foo.bar"]},
+        )
+        assert result.terminal_reason == "MUTATION_READY"
+        assert result.turns_used == 2
+        assert llm.complete_with_tools.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_exact_member_without_a_relevant_hint_does_not_trigger_readiness(self, tmp_path):
+        """MUTATION_RELEVANCE_GATE (2026-09-19): a declared target with NO
+        currently-grounded relevant member hint at all - real, exact
+        member_exact evidence for that path must NOT establish readiness on
+        its own; the loop falls through to its other exit paths (here, the
+        model's own PROPOSE) instead of mistaking "some exact member in the
+        right file" for "the relevant one"."""
+        _write(tmp_path, "a.py", "class Foo:\n    def bar(self):\n        return 1\n")
+        llm = MagicMock()
+        llm.complete_with_tools = AsyncMock(side_effect=[
+            _native_result("inspect_member", {"path": "a.py", "member_id": "Foo.bar"}),
+            _propose_result(),
+        ])
+        deps = _deps(tmp_path)
+        result = await run_investigation_loop(
+            llm=llm, capabilities=ModelCapabilities(native_tool_calls=True),
+            deps=deps, task_description="t", design_context="d", existing_code_context="",
+            max_turns=8, known_target_files=["a.py"],
+            # No known_target_member_hints at all - nothing yet grounded as relevant.
+        )
+        assert result.terminal_reason == "PROPOSE"
+        assert result.turns_used == 2
+
+    @pytest.mark.asyncio
+    async def test_continues_past_the_old_four_turn_default_when_evidence_keeps_changing(self, tmp_path):
+        """Six DISTINCT find_symbol turns (never a repeat - no-progress
+        never fires) that never happen to reach member-exact evidence (a
+        realistic case: the model is still narrowing down which symbol
+        matters) all genuinely run - the loop is bounded by real budget/
+        progress signals, never by the OLD small default (4) that used to
+        be baked into autonomy.developer_investigation_max_turns."""
+        db_path = tmp_path / "dependency_graph.db"
+        graph = DependencyGraph(str(db_path))
+        for i in range(6):
+            graph.index_file(f"m{i}.py", f"def sym{i}():\n    pass\n", 1.0)
+        graph.close()
+        llm = MagicMock()
+        llm.complete_with_tools = AsyncMock(side_effect=[
+            _native_result("find_symbol", {"symbol": f"sym{i}"}) for i in range(6)
+        ])
+        deps = _deps(tmp_path, db_path=str(db_path))
+        result = await run_investigation_loop(
+            llm=llm, capabilities=ModelCapabilities(native_tool_calls=True),
+            deps=deps, task_description="t", design_context="d", existing_code_context="",
+            max_turns=6, known_target_files=["a.py"],
+        )
+        assert result.turns_used == 6
+        assert result.terminal_reason == "BUDGET_EXHAUSTED"
+        assert llm.complete_with_tools.await_count == 6
+
+    @pytest.mark.asyncio
+    async def test_readiness_never_assessed_without_a_declared_target(self, tmp_path):
+        """No known_target_files at all - there is nothing concrete to be
+        "ready" FOR, so readiness is never assessed and the loop defers
+        entirely to its pre-existing exit paths (here: the turn budget),
+        exactly like every no-progress/oscillation test in this file that
+        also declares no target - a real member_exact hit alone must never
+        short-circuit a caller that never said what it was investigating
+        FOR."""
+        _write(tmp_path, "a.py", "class Foo:\n    def bar(self):\n        return 1\n    def baz(self):\n        return 2\n")
+        llm = MagicMock()
+        llm.complete_with_tools = AsyncMock(side_effect=[
+            _native_result("inspect_member", {"path": "a.py", "member_id": "Foo.bar"}),
+            _native_result("inspect_member", {"path": "a.py", "member_id": "Foo.baz"}),
+        ])
+        deps = _deps(tmp_path)
+        result = await run_investigation_loop(
+            llm=llm, capabilities=ModelCapabilities(native_tool_calls=True),
+            deps=deps, task_description="t", design_context="d", existing_code_context="",
+            max_turns=2,
+        )
+        assert result.terminal_reason == "BUDGET_EXHAUSTED"
+        assert result.turns_used == 2
+
+    @pytest.mark.asyncio
+    async def test_readiness_ignores_exact_evidence_for_an_undeclared_path(self, tmp_path):
+        """Real, exact evidence exists, but for a DIFFERENT path than the
+        one this attempt declared as its target - must not be mistaken for
+        readiness on the declared target, which the model still has zero
+        evidence for."""
+        _write(tmp_path, "a.py", "class Foo:\n    def bar(self):\n        return 1\n")
+        _write(tmp_path, "b.py", "class Other:\n    def unrelated(self):\n        return 2\n")
+        llm = MagicMock()
+        llm.complete_with_tools = AsyncMock(side_effect=[
+            _native_result("inspect_member", {"path": "a.py", "member_id": "Foo.bar"}),
+            _propose_result(),
+        ])
+        deps = _deps(tmp_path)
+        result = await run_investigation_loop(
+            llm=llm, capabilities=ModelCapabilities(native_tool_calls=True),
+            deps=deps, task_description="t", design_context="d", existing_code_context="",
+            max_turns=4, known_target_files=["b.py"],
+        )
+        # PROPOSE (the model's own signal), never MUTATION_READY - a.py's
+        # exact evidence never counts toward b.py's own readiness.
+        assert result.terminal_reason == "PROPOSE"
+        assert result.turns_used == 2
+
+
+class TestMutationRelevanceGate:
+    """Direct unit coverage of _mutation_readiness_achieved()'s own
+    MUTATION_RELEVANCE_GATE (2026-09-19, second VAL-001 G1 follow-up),
+    mirroring the real G1 shape: engine.py has two real members,
+    outer_extractor.add_node (exact but NOT the relevant one) and
+    outer_extractor.walk_calls (the actually relevant one)."""
+
+    @staticmethod
+    def _member_exact_item(path: str, member_id: str) -> ContextItem:
+        return make_context_item(
+            path=path, content=f"def {member_id.rsplit('.', 1)[-1]}(): ...\n",
+            reason=f"developer_investigation:inspect_member:{member_id}",
+            source_type="named_in_request", trust_level="repository",
+            member_id=member_id, tier="member_exact", is_exact=True,
+        )
+
+    @staticmethod
+    def _full_file_item(path: str) -> ContextItem:
+        return make_context_item(
+            path=path, content="<entire current file content>\n",
+            reason="all_files_written_current_source",
+            source_type="named_in_request", trust_level="repository",
+            tier="full", is_exact=True,
+        )
+
+    def test_1_exact_but_unrelated_member_is_not_readiness(self):
+        evidence = [self._member_exact_item("engine.py", "outer_extractor.add_node")]
+        hints = {"engine.py": ["outer_extractor.walk_calls"]}
+        assert _mutation_readiness_achieved(evidence, ["engine.py"], hints) is False
+
+    def test_2_exact_relevant_member_is_readiness(self):
+        evidence = [
+            self._member_exact_item("engine.py", "outer_extractor.add_node"),
+            self._member_exact_item("engine.py", "outer_extractor.walk_calls"),
+        ]
+        hints = {"engine.py": ["outer_extractor.walk_calls"]}
+        assert _mutation_readiness_achieved(evidence, ["engine.py"], hints) is True
+
+    def test_3_exact_member_from_wrong_path_is_not_readiness(self):
+        evidence = [self._member_exact_item("unrelated_other_file.py", "outer_extractor.walk_calls")]
+        hints = {"engine.py": ["outer_extractor.walk_calls"]}
+        assert _mutation_readiness_achieved(evidence, ["engine.py"], hints) is False
+
+    def test_4_exact_full_current_target_file_is_readiness_without_member_match(self):
+        evidence = [self._full_file_item("engine.py")]
+        # No relevant member hint at all - full-file exact source is exempt
+        # from the member-relevance check by design.
+        assert _mutation_readiness_achieved(evidence, ["engine.py"], {}) is True
+
+    def test_member_exact_with_zero_grounded_hints_anywhere_is_not_readiness(self):
+        """The disclosed-in-spec case: no relevant member has been grounded
+        for the path AT ALL (missing dict entry, not merely a mismatched
+        one) - arbitrary member_exact evidence still must not establish
+        readiness."""
+        evidence = [self._member_exact_item("engine.py", "outer_extractor.walk_calls")]
+        assert _mutation_readiness_achieved(evidence, ["engine.py"], {}) is False
+        assert _mutation_readiness_achieved(evidence, ["engine.py"], None) is False
+
+
+# ---------------------------------------------------------------------------
 # Malformed-request handling (R, S)
 # ---------------------------------------------------------------------------
 
@@ -1177,6 +1400,47 @@ class TestFeatureFlagIntegration:
         # already exhausted and skip entirely (no 3rd call recorded beyond 2).
         assert state.investigation_turns_used_by_attempt[state.attempt_number] == 2
         assert ctx.developer.llm.complete_with_tools.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_flag_on_wires_known_target_member_hints_into_readiness(self, tmp_path):
+        """Real production wiring proof (2026-09-19, MUTATION_RELEVANCE_
+        GATE): _maybe_run_developer_investigation itself - not just
+        run_investigation_loop in isolation - computes known_target_member_
+        hints from ctx.retrieval_member_hints (SOURCE 1, via the SAME
+        _resolve_known_target_member_hints() the attempt-1 owner-contract
+        block already calls) and threads it through, so a real inspect_
+        member call against the independently-grounded relevant member
+        reaches MUTATION_READY through the real seam, not merely through a
+        hand-constructed run_investigation_loop() call."""
+        _write(tmp_path, "a.py", "class Foo:\n    def bar(self):\n        return 1\n    def baz(self):\n        return 2\n")
+        ctx = _minimal_attempt_ctx(
+            tmp_path,
+            # The SAME raw, structurally-unvalidated candidate shape
+            # workflow.py's own retrieval stage populates - "bar" is the
+            # bare simple name; _resolve_known_target_member_hints is what
+            # validates it against current structure into "Foo.bar".
+            retrieval_member_hints={"a.py": ["bar"]},
+        )
+        ctx.kernel.config.autonomy.developer_investigation_enabled = True
+        ctx.kernel.config.autonomy.developer_investigation_max_turns = 8
+        ctx.kernel.config.paths.memory = str(tmp_path)
+        ctx.kernel.config.llm.capabilities = ModelCapabilities(native_tool_calls=True)
+        (tmp_path / "dependency_graph.db").write_bytes(b"")
+        ctx.developer.llm = MagicMock()
+        ctx.developer.llm.complete_with_tools = AsyncMock(
+            return_value=_native_result("inspect_member", {"path": "a.py", "member_id": "Foo.bar"}),
+        )
+        state = GenerationState()
+        kwargs = {
+            "existing_code_context": "", "task_description": "t", "design_context": "d",
+            "known_target_files": ["a.py"],
+        }
+        await _maybe_run_developer_investigation(state, ctx, kwargs, ctx.kernel.config.llm.model)
+        # A single turn was enough - readiness fired through the real seam,
+        # merging the grounded member into known_target_context_items.
+        assert ctx.developer.llm.complete_with_tools.await_count == 1
+        assert state.known_target_context_items["a.py"].member_id == "Foo.bar"
+        assert state.known_target_context_items["a.py"].tier == "member_exact"
 
 
 # ---------------------------------------------------------------------------

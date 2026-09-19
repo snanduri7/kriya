@@ -539,6 +539,35 @@ def resolve_member_hints_from_chunk_header(
     ]
 
 
+def resolve_verified_grounding_member_id(
+    path: str, current_content: str, candidate_name: str,
+) -> Optional[str]:
+    """Pre-plan grounding (2026-09-19, VAL-001 G1 follow-up): the same
+    real-vs-hypothesis validation resolve_member_hints_from_chunk_header()
+    already performs for a full chunk header, exposed here for a caller
+    (workflow.py's own pre-plan retrieval pass) that has ALREADY parsed the
+    candidate name itself (parse_controlled_chunk_header_name) and needs to
+    keep that raw name available for its own "unconfirmed candidate"
+    bucket when validation does not resolve to exactly one real member -
+    unlike resolve_member_hints_from_chunk_header, which simply discards
+    the raw name on a validation miss (none of its own existing callers
+    ever needed it back). Reuses the exact same two primitives
+    (member_boundaries_for/member_ids_matching_name) - no new resolution
+    logic, only a different return shape for a different caller's need.
+
+    Returns the single real member_id when `candidate_name` resolves to
+    EXACTLY one current structural member; None for zero matches (stale
+    since indexing, or genuinely never existed), an unsupported language,
+    or more than one match (a genuinely ambiguous name, e.g. an overloaded
+    method sharing it) - ambiguity is never resolved by guessing, it stays
+    unverified for the caller to treat as a hypothesis instead."""
+    boundaries = member_boundaries_for(path, current_content)
+    if boundaries is None:
+        return None
+    matches = member_ids_matching_name(boundaries, candidate_name)
+    return matches[0] if len(matches) == 1 else None
+
+
 def resolve_member_hints_from_failure_location(
     path: str, current_content: str, line: int,
 ) -> List[MemberHintCandidate]:

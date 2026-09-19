@@ -14,6 +14,7 @@ from kriya.workflow.context_source import (
     resolve_member_hints_from_chunk_header,
     resolve_member_hints_from_failure_location,
     resolve_member_hints_from_search_evidence,
+    resolve_verified_grounding_member_id,
 )
 
 
@@ -437,6 +438,71 @@ def test_resolve_member_hints_from_chunk_header_multiple_members_same_file():
     hints_b = resolve_member_hints_from_chunk_header("owner.py", content, chunk_b)
     assert {h.member_id for h in hints_a} == {"Owner.method_a"}
     assert {h.member_id for h in hints_b} == {"Owner.method_b"}
+
+
+# --- Pre-plan grounding (2026-09-19, VAL-001 G1 follow-up) -----------------
+# resolve_verified_grounding_member_id() is the same real-vs-hypothesis
+# validation resolve_member_hints_from_chunk_header() already performs,
+# exposed for a caller that has already parsed the candidate name itself
+# and needs the raw name back on a validation miss (workflow.py's own
+# pre-plan retrieval pass, which renders an "unconfirmed candidate" from
+# it - see that module's own PRE-PLAN GROUNDING block).
+
+def test_resolve_verified_grounding_member_id_unique_match_is_verified():
+    content = "class Owner:\n    def calculate_total(self, items):\n        return sum(items)\n"
+    assert resolve_verified_grounding_member_id(
+        "owner.py", content, "calculate_total",
+    ) == "Owner.calculate_total"
+
+
+def test_resolve_verified_grounding_member_id_stale_name_is_not_verified():
+    """The retrieved chunk was indexed against an older revision naming a
+    member that no longer exists under this name in current content - the
+    caller's own raw candidate_name survives (unlike resolve_member_hints_
+    from_chunk_header's list-based return) so it can still be rendered as
+    an explicit, labeled hypothesis rather than silently vanishing."""
+    current_content = "class Owner:\n    def renamed_method(self):\n        pass\n"
+    assert resolve_verified_grounding_member_id(
+        "owner.py", current_content, "old_method",
+    ) is None
+
+
+def test_resolve_verified_grounding_member_id_ambiguous_name_is_not_verified():
+    """Two DISTINCT real members (different enclosing classes) share the
+    same bare simple name - genuinely ambiguous at the member_id level
+    (unlike same-class overloads, which member_ids_matching_name already
+    collapses to one shared id) - never resolved by guessing which one was
+    meant, so it must remain a hypothesis, not a verified fact."""
+    content = (
+        "class A:\n"
+        "    def foo(self):\n"
+        "        return 1\n\n"
+        "class B:\n"
+        "    def foo(self):\n"
+        "        return 2\n"
+    )
+    assert resolve_verified_grounding_member_id("owner.py", content, "foo") is None
+
+
+def test_resolve_verified_grounding_member_id_unsupported_language_is_not_verified():
+    content = "func main() {}\n"
+    assert resolve_verified_grounding_member_id("main.go", content, "main") is None
+
+
+def test_resolve_verified_grounding_member_id_no_previously_named_target_required():
+    """The function takes only (path, current_content, candidate_name) -
+    structurally incapable of requiring a caller to have already declared
+    this path as a known/target file first; workflow.py's own pre-plan
+    grounding pass calls this for every retrieved candidate, before any
+    plan (and therefore before any known_target_files) exists at all."""
+    content = "class Owner:\n    def calculate_total(self, items):\n        return sum(items)\n"
+    import inspect
+    assert list(inspect.signature(resolve_verified_grounding_member_id).parameters) == [
+        "path", "current_content", "candidate_name",
+    ]
+    assert resolve_verified_grounding_member_id(
+        "brand_new_never_named_path.py", content, "calculate_total",
+    ) == "Owner.calculate_total"
 
 
 def test_resolve_member_hints_from_failure_location_java_line_inside_method():

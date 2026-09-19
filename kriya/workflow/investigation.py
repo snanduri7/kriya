@@ -650,6 +650,77 @@ async def dispatch_investigation_request(
 
 # --- 5. No-progress / loop control (section 9) -------------------------------
 
+def _mutation_readiness_achieved(
+    evidence: List[ContextItem],
+    known_target_files: Optional[List[str]],
+    known_target_member_hints: Optional[Dict[str, List[str]]] = None,
+) -> bool:
+    """Evidence-driven early-exit condition (2026-09-19, VAL-001 G1 follow-
+    up): the investigation loop's PRIMARY stopping signal is "do we now
+    have authoritative, exact current source for a believed mutation
+    target" - never merely "did the model say it's ready" (ProposeSignal,
+    a separate and weaker signal this check runs ahead of every turn) and
+    never merely "did we hit the turn ceiling" (BUDGET_EXHAUSTED stays a
+    safety valve, never the primary mechanism - see run_investigation_
+    loop's own docstring for why simply raising max_turns alone would have
+    been the wrong fix).
+
+    Readiness is only ever a well-formed question when there IS a declared
+    target to be ready FOR - with no known_target_files at all (e.g. a
+    full-set retry with no single implicated file, or a caller exercising
+    the loop purely for its own no-progress/oscillation mechanics), this
+    always returns False and defers entirely to the existing exit paths
+    (ProposeSignal / no-progress / budget), exactly like before this check
+    existed. This is deliberately the STRICT reading, not the permissive
+    one: an earlier draft treated "any real, exact evidence anywhere" as
+    sufficient when no target was declared, which wrongly short-circuited
+    scenarios that were never about mutation-readiness at all (a bare
+    inspect_member call used only to exercise the no-progress tracker,
+    with no known_target_files in sight, would otherwise stop the loop
+    after turn one regardless of what the test/caller actually wanted to
+    observe next).
+
+    MUTATION_RELEVANCE_GATE (2026-09-19, second VAL-001 G1 follow-up): a
+    real, exact `member_exact` item for a declared target PATH is still
+    NOT sufficient on its own - the live G1 incident's own add_node/
+    walk_calls shape proved that an exact-but-UNRELATED member in the
+    correct file must not read as readiness. For tier="member_exact",
+    additionally require `item.member_id` to appear in `known_target_
+    member_hints[item.path]` - the set of member_id(s) some INDEPENDENT,
+    already-proven resolver (SOURCE 1's _resolve_known_target_member_hints/
+    Graph-RAG grounding, or SOURCE 2/3's _resolve_retry_member_hints/
+    failure-grounded escalation - see attempt.py's own caller) currently
+    believes is relevant for that path - never the evidence's own say-so.
+    With no relevant member yet grounded for a path at all (missing entry,
+    or an empty list), arbitrary member_exact evidence for that path can
+    NEVER establish readiness on its own, no matter how exact it is - it
+    can only ever help ground a LATER relevant-member hint (SOURCE 3, from
+    a subsequent failure), which is a genuinely different, later event.
+
+    tier="full" is exempt from this member-relevance check: exact, current,
+    WHOLE-FILE source trivially covers whatever the relevant region turns
+    out to be, so no member-level match is needed - only path membership,
+    exactly as before this residual was closed."""
+    if not known_target_files:
+        return False
+    targets = set(known_target_files)
+    hints = known_target_member_hints or {}
+    for item in evidence:
+        if not item.is_exact or item.tier not in ("member_exact", "full"):
+            continue
+        if item.path not in targets:
+            continue
+        if item.tier == "full":
+            return True
+        # tier == "member_exact": relevance to a currently grounded hint
+        # is required - an exact member the caller never independently
+        # believed was relevant is not evidence of readiness for the
+        # target this attempt actually cares about.
+        if item.member_id is not None and item.member_id in hints.get(item.path, ()):
+            return True
+    return False
+
+
 def request_fingerprint(request: InvestigationRequest) -> str:
     """Deterministic identity for (verb, arguments) - a different verb or a
     different argument value is always a different fingerprint (progress by
@@ -760,6 +831,7 @@ async def run_investigation_loop(
     existing_code_context: str,
     max_turns: int,
     known_target_files: Optional[List[str]] = None,
+    known_target_member_hints: Optional[Dict[str, List[str]]] = None,
     model_override: Optional[str] = None,
     base_url_override: Optional[str] = None,
     api_key_override: Optional[str] = None,
@@ -777,7 +849,33 @@ async def run_investigation_loop(
     unexpected exception from the LLM call itself is treated as an early,
     safe PROPOSE (mirroring self_correction.py's own "optional micro-loop,
     never worse than not having run" posture), never propagated up to fail
-    the whole Developer attempt over an optional evidence-gathering step."""
+    the whole Developer attempt over an optional evidence-gathering step.
+
+    EVIDENCE-DRIVEN PROGRESSION (2026-09-19, VAL-001 G1 follow-up): the
+    live G1 incident this closes burned 8 Developer attempts / 10 LLM
+    calls / 57 minutes partly because investigation was bounded by a small
+    fixed turn count (4) that was reached long before any useful evidence
+    had accumulated. Simply raising max_turns would have been the wrong
+    fix on its own - a bigger fixed number is still an arbitrary count,
+    not a reason to stop. The actual exit conditions, in the order they're
+    checked each turn, are: the model itself signals ProposeSignal (today's
+    original behavior, unchanged); _mutation_readiness_achieved() - a NEW,
+    deterministic, model-independent check of the evidence gathered SO
+    FAR, not of the model's own turn count or say-so - fires the moment
+    real, exact (member_exact/full, is_exact=True) evidence exists for a
+    target this attempt cares about AND, for member_exact specifically,
+    relevant to a currently grounded member hint for that target (see
+    _mutation_readiness_achieved's own MUTATION_RELEVANCE_GATE docstring -
+    an exact-but-unrelated member in the right file must not read as
+    readiness), ending terminal_reason="MUTATION_READY"; the existing
+    no-progress tracker (unchanged); and only then,
+    as a genuine safety valve rather than the primary mechanism, max_turns
+    itself (terminal_reason="BUDGET_EXHAUSTED") - callers may configure
+    this considerably higher than before (autonomy.developer_investigation_
+    max_turns' own default moved from 4 to 10) precisely because the loop
+    now stops on its own the moment it has what it needs, so a higher
+    ceiling costs nothing in the common case and only helps the case where
+    evidence is still genuinely improving turn over turn."""
     if max_turns <= 0:
         return InvestigationLoopResult(turns_used=0, terminal_reason="BUDGET_EXHAUSTED")
 
@@ -906,6 +1004,19 @@ async def run_investigation_loop(
             break
 
         evidence.extend(items)
+        if _mutation_readiness_achieved(evidence, known_target_files, known_target_member_hints):
+            events.append(RunEvent(
+                kind="investigation.mutation_ready", attempt=attempt_number,
+                source="investigation.run_investigation_loop", authority=EventAuthority.ADVISORY,
+                message=(
+                    f"Mutation-readiness achieved on turn {turn + 1} - authoritative exact "
+                    "evidence is now available; stopping early rather than spending remaining "
+                    "turn budget or waiting for the model to say it's ready."
+                ),
+                details={"turn": turn + 1, "evidence_count": len(evidence)},
+            ))
+            terminal_reason = "MUTATION_READY"
+            break
     else:
         terminal_reason = "BUDGET_EXHAUSTED"
 

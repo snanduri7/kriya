@@ -76,7 +76,10 @@ legal, how it's resolved, how much comes back, and whether it's current.
   vocabulary already accurately represents the evidence, so extending it
   was unnecessary and, once found, reverted.
 - `autonomy.developer_investigation_enabled` (default `False`) and
-  `autonomy.developer_investigation_max_turns` (default `4`), classified
+  `autonomy.developer_investigation_max_turns` (default `10` - raised from
+  `4` on 2026-09-19 once the loop's primary stopping condition became
+  evidence-driven mutation-readiness rather than the turn count itself;
+  see `run_investigation_loop`'s own docstring), classified
   `REPOSITORY_SAFE` in `kriya/config/authority.py`, mirroring
   `self_correction_loop_enabled`/`_max_turns` exactly (same risk shape: an
   already-governed, strictly-read-only capability toggle, never new
