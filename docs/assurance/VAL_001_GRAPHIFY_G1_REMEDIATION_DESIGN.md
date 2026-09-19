@@ -779,16 +779,75 @@ run_g1_r3_acceptance.sh` had a stale hardcoded `g1_r3_worktree` reference — th
 after `g1_r3_worktree` was consumed by an earlier real run) — corrected, evidence semantics
 unchanged.
 
-**Tests**: `tests/test_val001_g1r3_retry_context.py` (20 tests, all deterministic, no live model) —
+**Tests**: `tests/test_val001_g1r3_retry_context.py` (21 tests, all deterministic, no live model) —
 direct, offline reproduction of the real starvation condition and its resolution (mirroring run
 `0c18ac70`'s own real evidence); target reachability for an unwritten/already-written/established
 path; exclude-set and duplicate-source-context preservation; large-target budget constraint; unique
 vs. ambiguous member grounding; fabricated SEARCH text never becoming authority; common preparation
 across all three retry modes; member_exact surviving a real mode transition; the no-progress gate
 blocking a redundant call and permitting one when evidence genuinely changed; D1's whole-file
-threshold and stale-revision fail-closed behavior unchanged; and trace observability for target
-source/projection/progress decisions. Full run: `123 passed` across this file plus every existing
-file exercising the touched functions (`test_val001_g1_remediation.py`, `test_retry_package.py`,
-`test_context_budget.py`, `test_retry_policy.py`, `test_d1_operation_mode_authority.py`) — zero
-regressions. Full-suite confirmation is the user's own `.venv/bin/pytest` run, per this repo's
-standing quota-discipline convention.
+threshold and stale-revision fail-closed behavior unchanged; a malformed-response `operation_contract`
+failure correctly NOT blocked (see the reason-code correction below); and trace observability for
+target source/projection/progress decisions.
+
+### Post-review correction: no-progress gate keyed on D1 reason_code, not bare `operation_contract` type
+
+A same-day architecture review of the no-progress gate's own scoping (see REVIEW TASK dated
+2026-09-19 in this campaign's own session record) found a real precision defect, not a policy
+error: `Failure.type == "operation_contract"` is emitted by two structurally different raise sites
+in `kriya/workflow/attempt.py` — `_validate_actual_mutation_authority()`'s own fixed,
+content-independent D1 rejection (genuinely deterministic given unchanged evidence,
+`diagnostics["reason_code"] == "ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED"`) and
+`validate_operation_result()`'s own `contract_error` (a malformed/mismatched response-shape
+classification of what the model actually wrote — content-dependent/probabilistic, no reason_code
+set at all). Matching on the bare type string silently swept the second, probabilistic case into
+zero-tolerance no-progress blocking too. Fixed by keying gate eligibility on the reason_code instead
+(`_DETERMINISTIC_VERDICT_REASON_CODES = frozenset({"ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED"})`).
+Strictly narrows an already-narrow gate — cannot regress anything it previously (correctly) blocked,
+since the only behavior removed was an incorrect inclusion. The review separately confirmed
+`anchored_edit`/`compile`/`test` remain correctly excluded from the gate (genuinely probabilistic
+given non-zero `retry_temperature`, proven against the real G1 evidence's own differing SEARCH-block
+lengths across resamples), and that a repeated-`anchored_edit`-with-unchanged-evidence loop remains
+bounded by the pre-existing, unmodified `retry_strategy.py::record_workspace_progress`/
+`consecutive_no_progress_attempts`/`no_progress_terminated` mechanism, not a gap this pass needed to
+close.
+
+### Checkpoint evidence (2026-09-19)
+
+Four distinct layers of proof, kept explicitly separate:
+
+1. **Deterministic implementation proof** — the reachability fix, centralization, precision
+   preservation, and reason-code correction, each traced directly against production source and
+   confirmed by direct reproduction against run `0c18ac70`'s own real evidence (see above).
+2. **Focused/adversarial test proof** — `tests/test_val001_g1r3_retry_context.py`, 21/21 passing,
+   covering items A–R of the implementation task's own adversarial list plus the reason-code
+   correction; zero regressions across every pre-existing file exercising the touched functions
+   (`test_val001_g1_remediation.py`, `test_retry_package.py`, `test_context_budget.py`,
+   `test_retry_policy.py`, `test_d1_operation_mode_authority.py`, `test_workflow.py`) — 980/981
+   passed in the last direct-execution batch, the one failure (
+   `test_django_test_command_bypasses_application_entrypoint_infrastructure_classification`)
+   confirmed via `git stash` to fail identically against the unmodified pre-remediation baseline
+   (`4507eb2`) — pre-existing and unrelated.
+3. **User-run full-suite regression proof** — `.venv/bin/pytest`: **4427 passed, 5 deselected, 146
+   warnings, 0 failed in 892.90s (0:14:52)**. The 5 deselected are the `-m live_model` tier,
+   excluded by this repo's own `pyproject.toml` `addopts` by default — expected, not a gap.
+4. **Deferred real-world G1 live proof** — NOT part of this checkpoint. G1-R3's own live Graphify
+   rerun (a real Ollama/local-model invocation against `g1_r3b_worktree`) is deliberately deferred
+   until after the separately-scoped DEV-INV-001 investigative-capability work, per explicit user
+   instruction — the remediation closing this document is the *implementation and regression*
+   closure, not a claim that G1's real-world Graphify task itself has been re-attempted and passed.
+
+**Final production commits**: `ac8ca35` (retry-context-starvation fix + centralization + no-progress
+gate + tests + doc), `b2cc042` (reason-code precision correction + test). Both on
+`milestone-decomposition`.
+
+**Status**: G1-R3 *remediation* (implementation + regression) — **CLOSED**. G1 *real-world Graphify
+task* — **NOT CLOSED**, live validation intentionally deferred until after DEV-INV-001.
+
+**Residuals (explicitly out of scope for this pass, not fixed)**: duplicate dependency-acquisition
+calls during PRE-baseline capture (`PERF/DEPENDENCY-001`, `_ensure_project_venv()` lacks per-run
+memoization across gate invocations); SOURCE 2 (`resolve_member_hints_from_failure_location`) never
+fires for `anchored_edit` failures, which carry no real line number; the Planner max-token residual
+noted elsewhere in this document; `test_django_test_command_bypasses_application_entrypoint_
+infrastructure_classification`'s own pre-existing, unrelated failure (present on the baseline before
+this remediation, not investigated further).
