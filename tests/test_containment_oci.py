@@ -557,8 +557,37 @@ def test_registry_scoped_never_mutates_preexisting_host_permissions_on_success(t
         network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, network_destinations=("repo.maven.apache.org",),
     )
     result = controller.run(
-        ["mvn", "-B", "-Dmaven.repo.local=/kriya/cache/m2", "dependency:go-offline"],
-        cwd=str(workspace), timeout=180, containment_profile=profile, containment_backend=OCIContainmentBackend(),
+        # PLANNER-ROBUST-001/PLUGIN-BOOTSTRAP-001 investigation (2026-09-19):
+        # root-caused a full-suite failure here to the WRONG Maven goal, not
+        # a containment/firewall/security defect. Direct reproduction
+        # (calling this exact controller.run() outside pytest, with full
+        # untruncated stdout/stderr) showed EVERY setup step succeeding
+        # (KRIYA_STEP_PROXY_CONNECT/FIREWALL/IPV6_DISABLE/SELFTEST/PRIVDROP
+        # all OK, zero host-permission mutation even on timeout) - the
+        # pytest short-summary display had truncated the real assertion
+        # message down to its first line ("KRIYA_STEP_PROXY_CONNECT=OK"),
+        # which is what made this look like a firewall-setup failure.
+        # `dependency:go-offline` does not merely resolve this POM's own
+        # declared <dependencies> - it resolves the ENTIRE effective
+        # default-lifecycle plugin closure (compiler/surefire/jar/install/
+        # deploy, each with its own deep, real-Maven-Central transitive POM
+        # chain) - confirmed it still timed out even at a generous 300s,
+        # actively downloading dozens of unrelated plugin artifacts having
+        # nothing to do with this test's own actual intent ("a real,
+        # successful acquisition" of ONE declared dependency,
+        # commons-lang3). `dependency:resolve` is the Maven goal actually
+        # scoped to a POM's own declared <dependencies> - confirmed
+        # empirically to complete in ~20s with BUILD SUCCESS and zero
+        # permission mutation, exercising the exact same real Docker/proxy/
+        # firewall/privilege-drop/registry-scoped-network path this test
+        # exists to prove, without pulling in Maven's unrelated (and
+        # steadily growing, since it depends on upstream ecosystem
+        # evolution) default-lifecycle plugin closure. Not a security
+        # weakening: same real acquisition mechanism, same real network
+        # containment, same real permission-preservation check - only a
+        # more correctly-SCOPED Maven goal.
+        ["mvn", "-B", "-Dmaven.repo.local=/kriya/cache/m2", "dependency:resolve"],
+        cwd=str(workspace), timeout=90, containment_profile=profile, containment_backend=OCIContainmentBackend(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
 

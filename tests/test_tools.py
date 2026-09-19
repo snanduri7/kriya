@@ -1,13 +1,13 @@
 import os
-import sys
 
 import pytest
 
-# Ensure workspace root is in path to import plugins
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from _plugin_test_support import load_core_tools_module
 
 from kriya.tools.tool import ToolExecutionError
-from plugins.core_tools import FilesystemTool, GitTool, ShellTool
+
+_core_tools = load_core_tools_module()
+FilesystemTool, GitTool, ShellTool = _core_tools.FilesystemTool, _core_tools.GitTool, _core_tools.ShellTool
 
 
 @pytest.mark.asyncio

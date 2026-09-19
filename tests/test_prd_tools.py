@@ -1,12 +1,12 @@
-import os
-import sys
-
 import pytest
 
-# Add workspace root to sys.path to allow importing from plugins
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from _plugin_test_support import load_core_tools_module
 
-from plugins.core_tools import ASTArgs, ASTTool, FilesystemArgs, FilesystemTool, SearchArgs, SearchTool
+_core_tools = load_core_tools_module()
+ASTArgs, ASTTool, FilesystemArgs, FilesystemTool, SearchArgs, SearchTool = (
+    _core_tools.ASTArgs, _core_tools.ASTTool, _core_tools.FilesystemArgs,
+    _core_tools.FilesystemTool, _core_tools.SearchArgs, _core_tools.SearchTool,
+)
 
 
 @pytest.mark.asyncio

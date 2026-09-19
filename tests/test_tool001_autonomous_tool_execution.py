@@ -34,6 +34,8 @@ import sys
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+from _plugin_test_support import load_core_tools_module
+
 from kriya.config.config import AppConfig, AutonomyConfig, ExecutionPolicyConfig, MCPLifecycleConfig
 from kriya.control.workspace_identity import workspace_identity
 from kriya.core.kernel import Kernel
@@ -191,7 +193,7 @@ def test_registry_lookup_is_exact_match_never_fuzzy():
 async def test_malformed_arguments_fail_closed_via_validation_error():
     """A TOOL subtask's tool_arguments that don't match the tool's own
     arguments_schema must fail - never silently coerced/dropped."""
-    from plugins.core_tools import FilesystemTool
+    FilesystemTool = load_core_tools_module().FilesystemTool
 
     subtask = _tool_subtask(tool_name="filesystem", tool_arguments={"operation": "read"})  # missing required 'path'
     kernel = MagicMock()
@@ -227,7 +229,7 @@ def test_tool_arguments_pass_through_unmodified_no_extra_authority_inferred():
 
 @pytest.mark.asyncio
 async def test_scenario_c_policy_denial_zero_side_effect(tmp_path):
-    from plugins.core_tools import ShellTool
+    ShellTool = load_core_tools_module().ShellTool
 
     sentinel = tmp_path / "sudo_ran.txt"
     subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": f"sudo touch {sentinel}"})
@@ -251,7 +253,7 @@ async def test_policy_exception_fails_closed():
     ALLOW - MCPTool._run()'s own pre-existing wrapper (unmodified)
     already guarantees this; here proven reached through the
     SubtaskExecutor boundary specifically."""
-    from plugins.core_tools import ShellTool
+    ShellTool = load_core_tools_module().ShellTool
 
     tool = ShellTool()
     tool._execution_policy = ExecutionPolicy()
@@ -463,7 +465,7 @@ def test_scenario_f_mcp_approved_contained_malicious_action_hidden_effects_block
 
 @pytest.mark.asyncio
 async def test_scenario_g_shelltool_ordinary_command_unaffected_when_uncontained():
-    from plugins.core_tools import ShellTool
+    ShellTool = load_core_tools_module().ShellTool
 
     subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": "echo hi"})
     kernel = MagicMock()
@@ -479,8 +481,8 @@ async def test_scenario_g_shelltool_ordinary_command_unaffected_when_uncontained
 @pytest.mark.asyncio
 async def test_scenario_g_shelltool_maven_registry_scoped_when_contained():
     from kriya.tools.containment import DummyContainmentBackend, NetworkAuthority
-    from plugins.core_tools import ShellTool
-    import plugins.core_tools as core_tools_module
+    core_tools_module = load_core_tools_module()
+    ShellTool = core_tools_module.ShellTool
 
     cfg = AppConfig()
     cfg.autonomy.contained_execution_required = True
@@ -507,8 +509,8 @@ async def test_scenario_g_shelltool_maven_registry_scoped_when_contained():
 @pytest.mark.asyncio
 async def test_scenario_g_shelltool_unmapped_manager_denied_when_contained():
     from kriya.tools.containment import DummyContainmentBackend, NetworkAuthority
-    from plugins.core_tools import ShellTool
-    import plugins.core_tools as core_tools_module
+    core_tools_module = load_core_tools_module()
+    ShellTool = core_tools_module.ShellTool
 
     cfg = AppConfig()
     cfg.autonomy.contained_execution_required = True
@@ -534,7 +536,7 @@ async def test_scenario_g_shelltool_unmapped_manager_denied_when_contained():
 def test_scenario_g_real_pip_through_autonomous_path_authorized_vs_unauthorized():
     """Real-Docker proof through the autonomous SubtaskExecutor path -
     reuses SEC-005's own registry-scoped mechanism unchanged."""
-    from plugins.core_tools import ShellTool
+    ShellTool = load_core_tools_module().ShellTool
 
     def contained_shell_tool(registry_hosts):
         c = AppConfig()

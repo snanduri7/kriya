@@ -25,11 +25,10 @@ pre-existing ShellTool test in tests/test_tools.py already establishes.
 import os
 import shutil
 import subprocess
-import sys
 
 import pytest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from _plugin_test_support import load_core_tools_module
 
 from kriya.config import AppConfig
 from kriya.policy.execution import classify_shell_acquisition_command
@@ -39,7 +38,9 @@ from kriya.tools.containment import (
     NetworkAuthority,
 )
 from kriya.tools.tool import ToolExecutionError
-from plugins.core_tools import ShellTool
+
+_core_tools = load_core_tools_module()
+ShellTool = _core_tools.ShellTool
 
 
 # --- Layer 1: deterministic classification (Tasks 2/6/9) ---
@@ -98,7 +99,7 @@ def _capturing_tool(monkeypatch, **autonomy_overrides):
     for key, value in autonomy_overrides.items():
         setattr(cfg.autonomy, key, value)
     backend = DummyContainmentBackend()
-    monkeypatch.setattr("plugins.core_tools.resolve_containment_backend", lambda name: backend)
+    monkeypatch.setattr(_core_tools, "resolve_containment_backend", lambda name: backend)
     tool = ShellTool(autonomy_cfg=cfg.autonomy)
     return tool, backend
 
@@ -219,7 +220,7 @@ async def test_execution_policy_mode_does_not_influence_network_authority(monkey
     cfg.autonomy.contained_execution_required = True
     cfg.autonomy.acquisition_registry_hosts = ["repo.maven.apache.org"]
     backend = DummyContainmentBackend()
-    monkeypatch.setattr("plugins.core_tools.resolve_containment_backend", lambda name: backend)
+    monkeypatch.setattr(_core_tools, "resolve_containment_backend", lambda name: backend)
 
     audit_tool = ShellTool(autonomy_cfg=cfg.autonomy, execution_policy_cfg=ExecutionPolicyConfig(mode="audit"))
     await audit_tool.execute(command="npm install left-pad")
