@@ -1,0 +1,32 @@
+F.........                                                               [100%]
+=================================== FAILURES ===================================
+_________ test_authority_annotations_resolve_on_lazy_annotation_python _________
+
+    def test_authority_annotations_resolve_on_lazy_annotation_python():
+        # Python 3.14 defers annotations, masking missing imports at bootstrap.
+>       assert get_type_hints(get_field_value)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_bootstrap_contract.py:19: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/typing.py:2401: in get_type_hints
+    hints = _lazy_annotationlib.get_annotations(obj, format=format)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/annotationlib.py:987: in get_annotations
+    ann = _get_dunder_annotations(obj)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/annotationlib.py:1180: in _get_dunder_annotations
+    ann = getattr(obj, "__annotations__", None)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+format = 1
+
+>   def get_field_value(config_dict: Dict[str, Any], top_key: Optional[str], leaf_key: str) -> Any:
+                                               ^^^
+E   NameError: name 'Any' is not defined
+
+kriya/config/authority.py:431: NameError
+=========================== short test summary info ============================
+FAILED tests/test_bootstrap_contract.py::test_authority_annotations_resolve_on_lazy_annotation_python
+1 failed, 9 passed in 3.16s

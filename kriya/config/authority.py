@@ -31,7 +31,7 @@ are ever authorized from repository-equivalent provenance).
 import os
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class ConfigSource(str, Enum):

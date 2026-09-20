@@ -1,5 +1,12 @@
 # Kriya Production Risk Register
 
+**PRD-001 configuration reconciliation (2026-09-20):** Current
+`ExecutionPolicyConfig` accepts both `audit` and opt-in `enforce`; the default
+remains `audit`. Historical POL-001 entries below describing an enforce-mode
+rejection record an earlier state, not the current configuration contract.
+Configuration authority checks and WorkflowController's separate opt-in remain
+unchanged. The packaged configuration comments now reflect this contract.
+
 Governed by `KRIYA_PRODUCTION_RISK_REGISTER_SPEC.md` (schema, v2, APPROVED)
 against `KRIYA_V1_DEPLOYMENT_ENVELOPE.md` (APPROVED 2026-09-08).
 
