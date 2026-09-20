@@ -14270,6 +14270,43 @@ async def test_handle_attempt_failure_classifies_containment_setup_error_determi
 
 
 @pytest.mark.asyncio
+async def test_handle_attempt_failure_stops_immediately_on_regression_unattributed(tmp_path):
+    """VAL-001 G1-DEVINV2 (2026-09-20): a full-regression block with no
+    candidate-attributable evidence (kriya/workflow/workflow.py's own
+    _full_regression_unattributed branch, after isolated pristine-AND-
+    candidate replay of every ambiguous entry) must stop the retry loop
+    immediately, exactly like containment_setup_failed/time_budget_
+    exhausted/internal_framework_error above - no amount of Developer
+    regeneration can resolve an aggregate-level delta with no attributable
+    test. Live-confirmed: a real G1 run (qwen3.8:27b, 2026-09-19/20) burned
+    6 further attempts across two models on exactly this failure shape
+    before this fix, discarding an independently-verified CORRECT
+    Attempt-1 candidate in the process."""
+    state = GenerationState()
+    state.attempt_number = 1
+    state.last_attempt_mode = "full_set"
+    ctx = _minimal_attempt_ctx(tmp_path, max_retries=4)
+    exc = QualityGateFailure(Failure(
+        type="regression_unattributed",
+        message=(
+            "REGRESSION_UNATTRIBUTED: the full-regression suite's aggregate "
+            "outcome changed relative to the captured PRE-mutation baseline "
+            "(level1=CHANGED_FAILURE), but no specific test could be confirmed "
+            "as caused by this candidate."
+        ),
+        raw_output="142 failed, 4973 passed, 255 skipped",
+    ))
+
+    should_break = await handle_attempt_failure(state, ctx, exc)
+
+    assert should_break is True
+    assert state.environment_failure is not None
+    assert state.environment_failure.startswith("REGRESSION_UNATTRIBUTED:")
+    assert state.last_failure.type == "regression_unattributed"
+    assert state.budgets.retry_count == 1
+
+
+@pytest.mark.asyncio
 async def test_handle_attempt_failure_stops_immediately_on_missing_external_dependency(tmp_path):
     """PRV-17 (2026-09-03): a deterministically missing external Python
     package (`ModuleNotFoundError: No module named 'django'`) with NO legal

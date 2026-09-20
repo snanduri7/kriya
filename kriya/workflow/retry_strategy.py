@@ -477,6 +477,14 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             # SEC-001 (2026-09-11): same reasoning - see the
             # is_containment_setup_failure comment above.
             "containment_setup_failed",
+            # VAL-001 G1-DEVINV2 (2026-09-20): a full-regression block with
+            # zero candidate-attributable evidence (kriya/workflow/
+            # workflow.py's own _full_regression_unattributed branch, after
+            # isolated-pristine replay of every ambiguous entry) is exactly
+            # as unfixable-by-retrying as the three types above - no amount
+            # of Developer regeneration can resolve an aggregate-level delta
+            # that names no specific test.
+            "regression_unattributed",
         }
         else classify_environment_failure(
             raw_error_context,

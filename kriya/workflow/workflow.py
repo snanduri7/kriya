@@ -39,6 +39,9 @@ from kriya.workflow.validation_baseline import (
     build_validation_outcome,
     capture_brownfield_baselines,
     classify_baseline_delta,
+    render_blocking_regression_evidence,
+    parse_pytest_structured_outcomes,
+    DeltaClassification,
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_reporting import build_failure_report_entry
@@ -3494,6 +3497,83 @@ class WorkflowEngine:
                         f"{_targeted_test_res.get('output', '')}"
                     )
 
+                # VAL-001 G1-DEVINV2 (2026-09-20): a captured full-regression
+                # baseline means classify_baseline_delta() already computed,
+                # per test, whether each failure is PRE_EXISTING_FAILURE
+                # (never candidate-caused) or NEW_FAILURE/CHANGED_FAILURE
+                # (blocking, and attributable). Before this fix, the
+                # Developer-facing failure text above ignored that structure
+                # entirely and used the RAW full-suite output - in a real
+                # brownfield repo with substantial pre-existing test debt
+                # (live-confirmed: 140 pre-existing failures alongside 0-1
+                # genuinely new ones), that floods the repair prompt with
+                # noise the classification above already had the information
+                # to exclude, and was the proximate cause of a real G1 run
+                # (qwen3.8:27b, 2026-09-19/20) discarding an independently-
+                # verified CORRECT Attempt-1 candidate after 6 further
+                # attempts of cascading malformed repair responses across
+                # both the primary and fallback model. This ONLY changes
+                # what evidence is shown for an ALREADY-blocking regression -
+                # `_regression_should_block` above (the actual accept/reject
+                # decision) is completely untouched, preserving "full
+                # regression remains the final acceptance gate" exactly.
+                # Byte-identical to before this fix whenever a full-
+                # regression baseline was never captured at all (the
+                # overwhelming majority of runs, which never opted into
+                # `brownfield_full_regression_baseline_policy: "required"`).
+                _confirmed_regression_ids: List[str] = []
+                # True only when NOTHING attributable was found anywhere -
+                # neither the full baseline (after ambiguous-entry replay
+                # resolution) nor the targeted baseline (a small, already-
+                # trustworthy 76-test signal with no flooding concern, whose
+                # own independent block is never second-guessed here). When
+                # the targeted baseline itself blocks, this stays False and
+                # the pre-existing raw-output-plus-targeted-section text
+                # built above is used completely unchanged - this fix only
+                # ever narrows what's shown for the FULL-suite signal, never
+                # touches the targeted one.
+                _full_regression_unattributed = False
+                if _regression_should_block and _baseline_delta_result is not None:
+                    from kriya.workflow.regression_attribution import confirm_ambiguous_regressions
+                    _resolved_level2, _replay_evidence = confirm_ambiguous_regressions(
+                        _baseline_delta_result.level2,
+                        pristine_workspace_path=workspace_path,
+                        candidate_workspace_path=worktree_path,
+                        autonomy_cfg=self.kernel.config.autonomy,
+                    )
+                    if _replay_evidence:
+                        state.record_event(RunEvent(
+                            kind="validation_baseline.ambiguous_regression_replay",
+                            attempt=state.attempt_number,
+                            source="workflow.run_generation_workflow",
+                            authority=EventAuthority.ADVISORY,
+                            message=(
+                                f"Isolated-pristine replay resolved {len(_replay_evidence)} "
+                                "ambiguous (NOT_COMPARABLE) full-regression test(s)."
+                            ),
+                            details={"replay_evidence": _replay_evidence},
+                        ))
+                    _confirmed_regression_ids = sorted(
+                        test_id for test_id, cls in _resolved_level2.items()
+                        if cls in (DeltaClassification.NEW_FAILURE, DeltaClassification.CHANGED_FAILURE)
+                    )
+                    if _confirmed_regression_ids:
+                        _regression_failure_output = render_blocking_regression_evidence(
+                            baseline=state.validation_baseline_full_regression,
+                            confirmed_test_ids=_confirmed_regression_ids,
+                            raw_output=full_test_res.get("output", ""),
+                        )
+                        if _targeted_test_res is not None and (
+                            not _targeted_test_res["success"] or _targeted_regression_should_block
+                        ):
+                            _regression_failure_output = (
+                                f"{_regression_failure_output}\n\n"
+                                f"=== TARGETED BASELINE SUITE ({state.validation_baseline_targeted.invocation.target_test}) ===\n"
+                                f"{_targeted_test_res.get('output', '')}"
+                            )
+                    elif not _targeted_regression_should_block:
+                        _full_regression_unattributed = True
+
                 if _regression_should_block:
                     # PRV-11 (2026-08-30): before treating this as an ordinary
                     # regression failure for the CURRENTLY executing subtask,
@@ -3528,11 +3608,55 @@ class WorkflowEngine:
                             _settle_future_owner_verification_obligations(
                                 obligation_ledger, current_subtask_id, satisfied=False,
                             )
-                        failure = _build_quality_gate_failure(
-                            "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{_regression_failure_output}",
-                            _regression_failure_output, worktree_path,
-                            state.all_files_written, state.attempt_number,
-                        )
+                        if _full_regression_unattributed:
+                            # VAL-001 G1-DEVINV2 (2026-09-20): the full-
+                            # regression gate still BLOCKS (safety unchanged
+                            # - `_regression_should_block` above is never
+                            # weakened by this branch), but nothing could be
+                            # confirmed candidate-attributable even after
+                            # isolated-pristine replay of every ambiguous
+                            # entry - only a LEVEL1-only aggregate delta with
+                            # zero attributable per-test evidence. Feeding
+                            # this into the ordinary Developer repair retry
+                            # loop (either the raw full-suite dump, or an
+                            # empty/uninformative filtered context) is
+                            # exactly what produced a cascading malformed-
+                            # response failure across both the primary and
+                            # fallback model in a real live G1 run - not
+                            # developer-fixable, so this reuses the SAME
+                            # state.environment_failure/STOP_ENVIRONMENT
+                            # mechanism containment_setup_failed/internal_
+                            # framework_error/time_budget_exhausted already
+                            # use for "no amount of Developer regeneration
+                            # can fix this" (kriya/workflow/retry_strategy.py),
+                            # rather than a bare "regression_test" failure
+                            # that would re-enter the ordinary repair loop.
+                            failure = Failure(
+                                type="regression_unattributed",
+                                message=(
+                                    "REGRESSION_UNATTRIBUTED: the full-regression suite's "
+                                    "aggregate outcome changed relative to the captured "
+                                    f"PRE-mutation baseline (level1="
+                                    f"{_baseline_delta_result.level1.classification.value}), but no "
+                                    "specific test could be confirmed as caused by this candidate - "
+                                    "every per-test failure either matches the PRE-mutation baseline "
+                                    "exactly, or was independently replayed (in isolation) against "
+                                    "both a pristine and a candidate copy and could not be confirmed "
+                                    "either way (an indeterminate/non-reproducible result is never "
+                                    "treated as a known pre-existing failure, only as unattributable). "
+                                    "This is not a code-fixable defect signal; further Developer "
+                                    "regeneration cannot resolve an aggregate-level delta with no "
+                                    "attributable test."
+                                ),
+                                raw_output=full_test_res.get("output", ""),
+                                source="orchestrator", attempt=state.attempt_number,
+                            )
+                        else:
+                            failure = _build_quality_gate_failure(
+                                "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{_regression_failure_output}",
+                                _regression_failure_output, worktree_path,
+                                state.all_files_written, state.attempt_number,
+                            )
                         state.gate_outcomes.append(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)
                     _record_future_owner_verification_deferred(
@@ -4105,12 +4229,24 @@ class WorkflowEngine:
                 bool(state.environment_failure)
                 and state.environment_failure.startswith("CONTAINMENT_SETUP_FAILED:")
             )
+            # VAL-001 G1-DEVINV2 (2026-09-20): same message-prefix convention
+            # as the four categories above - a full-regression block with no
+            # candidate-attributable evidence (kriya/workflow/workflow.py's
+            # own _full_regression_unattributed branch) is neither an
+            # environment/toolchain problem nor an ordinary retryable code
+            # defect; `kriya doctor` cannot fix an aggregate-level test-suite
+            # delta with no attributable test.
+            is_regression_unattributed_stop = (
+                bool(state.environment_failure)
+                and state.environment_failure.startswith("REGRESSION_UNATTRIBUTED:")
+            )
             failure_category = (
                 "plan_scope_revision_required" if state.plan_scope_conflict
                 else "unauthorized_generation_target" if is_scope_defect_stop
                 else "candidate_independent_deterministic_failure" if is_candidate_independent_deterministic_failure
                 else "generation_budget_exhausted" if is_generation_budget_exhausted_stop
                 else "containment_setup_failed" if is_containment_setup_failed_stop
+                else "regression_unattributed" if is_regression_unattributed_stop
                 else "environment_failure" if state.environment_failure
                 else "quality_gates_exhausted"
             )

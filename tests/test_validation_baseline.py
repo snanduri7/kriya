@@ -39,9 +39,11 @@ from kriya.workflow.validation_baseline import (
     classify_level2_delta,
     compute_failure_fingerprint,
     environment_failure_outcome,
+    extract_test_failure_sections,
     is_baseline_reusable,
     normalize_failure_text,
     parse_pytest_structured_outcomes,
+    render_blocking_regression_evidence,
 )
 from kriya.workflow.workflow import WorkflowEngine
 
@@ -147,6 +149,102 @@ def test_pytest_adapter_extracts_failed_identities_and_aggregate_counts():
 
 def test_pytest_adapter_returns_none_for_non_pytest_output():
     assert parse_pytest_structured_outcomes("[ERROR] Maven build failed: cannot find symbol at Foo.java:12") is None
+
+
+def test_pytest_adapter_captures_id_containing_a_literal_space():
+    """Regex fix, VAL-001 G1-DEVINV2 (2026-09-20): a parametrize id can
+    genuinely contain a space with no trailing " - reason" text on its own
+    FAILED line - live-confirmed to silently vanish from BOTH PRE and POST
+    parsed test_outcomes before this fix (a real qwen3.8:27b G1 run)."""
+    raw = _pytest_output(
+        'tests/test_hook_guard.py::test_dispatch[args0-{"tool_input":{"command":"grep x"}}]',
+        passed=1,
+    )
+    parsed = parse_pytest_structured_outcomes(raw)
+    assert parsed is not None
+    ids = {o.test_id for o in parsed[0]}
+    assert 'tests/test_hook_guard.py::test_dispatch[args0-{"tool_input":{"command":"grep x"}}]' in ids
+
+
+# ---------------------------------------------------------------------------
+# VAL-001 G1-DEVINV2 (2026-09-20): blocking-only evidence rendering - closes
+# a real, live-confirmed gap where the Developer-facing regression failure
+# text used the RAW full-suite output instead of the already-computed
+# per-test classification, flooding a real repair attempt with 140
+# pre-existing failures alongside 0-2 genuinely new ones.
+# ---------------------------------------------------------------------------
+
+def _realistic_pytest_output(failing_ids_with_traceback, failing_ids_summary_only):
+    """Builds a raw pytest string with a real "FAILURES" section (one
+    "____ name ____" traceback block per id) plus a short-summary section
+    covering every failing id - closer to real pytest output than
+    _pytest_output()'s own minimal shape, needed to exercise
+    extract_test_failure_sections's own per-test isolation, not just its
+    short-summary fallback."""
+    failures_body = "\n\n".join(
+        f"{'_' * 20} {test_id.rsplit('::', 1)[-1]} {'_' * 20}\n"
+        f"    def {test_id.rsplit('::', 1)[-1]}():\n"
+        ">       assert False\n"
+        "E       assert False\n"
+        for test_id in failing_ids_with_traceback
+    )
+    all_ids = list(failing_ids_with_traceback) + list(failing_ids_summary_only)
+    summary = "\n".join(f"FAILED {tid}" for tid in all_ids)
+    return (
+        "============================= test session starts ==============================\n"
+        f"collected {len(all_ids) + 1} items\n\n"
+        "=================================== FAILURES ===================================\n"
+        f"{failures_body}\n"
+        "=========================== short test summary info ============================\n"
+        f"{summary}\n"
+        f"===== {len(all_ids)} failed, 1 passed in 1.00s ====="
+    )
+
+
+def test_render_blocking_regression_evidence_includes_only_confirmed_ids():
+    """140 pre-existing + 2 confirmed-new in the SAME raw pytest output ->
+    the rendered Developer-facing evidence must contain ONLY the 2
+    confirmed ids' own content - never any pre-existing failure text."""
+    pre_existing_ids = [f"tests/pre_existing_{i}.py::test_x" for i in range(140)]
+    confirmed_ids = ["tests/new_a.py::test_regression_a", "tests/new_b.py::test_regression_b"]
+    raw = _realistic_pytest_output(confirmed_ids, pre_existing_ids)
+
+    baseline = capture_validation_baseline(
+        workspace_revision="rev1", run_id="r1", invocation=ValidationInvocation("cmd", "full_suite"),
+        raw_result={
+            "success": False,
+            "output": _pytest_output(*[f"{tid} - old bug" for tid in pre_existing_ids]),
+        },
+    )
+    evidence = render_blocking_regression_evidence(
+        baseline=baseline, confirmed_test_ids=confirmed_ids, raw_output=raw,
+    )
+    assert "test_regression_a" in evidence
+    assert "test_regression_b" in evidence
+    for pre_id in pre_existing_ids:
+        assert pre_id not in evidence, f"pre-existing failure {pre_id} leaked into confirmed-only evidence"
+
+
+def test_render_blocking_regression_evidence_empty_for_no_confirmed_ids():
+    baseline = capture_validation_baseline(
+        workspace_revision="rev1", run_id="r1", invocation=ValidationInvocation("cmd", "full_suite"),
+        raw_result={"success": True, "output": _pytest_output(passed=1)},
+    )
+    assert render_blocking_regression_evidence(baseline=baseline, confirmed_test_ids=[], raw_output="anything") == ""
+
+
+def test_extract_test_failure_sections_isolates_real_failures_section():
+    raw = _realistic_pytest_output(["tests/a.py::test_one", "tests/b.py::test_two"], [])
+    sections = extract_test_failure_sections(raw, ["tests/a.py::test_one", "tests/b.py::test_two"])
+    assert "assert False" in sections["tests/a.py::test_one"]
+    assert "test_two" in sections["tests/b.py::test_two"]
+    assert "test_one" not in sections["tests/b.py::test_two"]
+
+
+def test_extract_test_failure_sections_falls_back_to_summary_line():
+    raw = _pytest_output("tests/x.py::test_untracebacked - AssertionError: boom", passed=0)
+    sections = extract_test_failure_sections(raw, ["tests/x.py::test_untracebacked"])
+    assert "FAILED tests/x.py::test_untracebacked" in sections["tests/x.py::test_untracebacked"]
 
 
 def test_9_previously_executed_test_disappearing_is_blocking():
@@ -1015,3 +1113,75 @@ async def test_targeted_post_new_failure_blocks_and_prevents_quality_gates_passe
         assert details["target_test"] == ["test_a.py", "test_b.py"]
         assert details["blocking"] is True
         assert details["level1_classification"] == DeltaClassification.NEW_FAILURE.value
+
+
+@pytest.mark.asyncio
+async def test_full_regression_unattributed_stops_after_one_developer_call(tmp_path):
+    """VAL-001 G1-DEVINV2 (2026-09-20): a full-regression LEVEL1 delta
+    (CHANGED_FAILURE) with ZERO level2-attributable NEW_FAILURE/
+    CHANGED_FAILURE test ids must stop the run after exactly ONE Developer
+    call - never retry Developer regeneration for an aggregate-level delta
+    that names no specific test. This is the exact live-confirmed failure
+    shape from a real G1 run (qwen3.8:27b, 2026-09-19/20): the SAME
+    pre-existing failing test id/reason appears PRE and POST (level2 ->
+    PRE_EXISTING_FAILURE, never attributable), but an extra, non-volatile
+    line elsewhere in the raw POST output makes the whole-invocation level1
+    fingerprint differ anyway - level1 alone blocks, with nothing
+    attributable at all. Before this fix, that real run discarded an
+    independently-verified CORRECT Attempt-1 candidate and then burned 6
+    further Developer attempts that could never have succeeded."""
+    import kriya.tools.validate as validate_module
+
+    (tmp_path / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    (tmp_path / "test_a.py").write_text(
+        "def test_pre_existing_bug():\n    assert 1 == 2\n"
+    )
+    _init_git_repo_val001(tmp_path)
+
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.spec_compliance_enabled = False
+    cfg.autonomy.brownfield_full_regression_baseline_policy = "required"
+    cfg.paths.logs = str(tmp_path / "logs")
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    _developer_json = '[{"filepath": "greet.py", "content": "def greet(name):\\n    return f\\"hi {name}\\"\\n"}]'
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write a greeting function",
+        "Design: Write greet.py",
+        _developer_json,
+        "Review: candidate looks fine",
+    ])
+
+    real_run_tests = validate_module.PolymorphicValidator.run_tests
+    full_call_count = {"n": 0}
+    base_failure = "test_a.py::test_pre_existing_bug - AssertionError: old bug"
+
+    def spy_run_tests(self, target_test=None):
+        if target_test is None:
+            full_call_count["n"] += 1
+            if full_call_count["n"] == 1:
+                return {"success": False, "output": _pytest_output(base_failure, passed=0)}
+            return {
+                "success": False,
+                "output": _pytest_output(
+                    base_failure, passed=0,
+                    extra_final="1 unrelated warning captured only in this run\n",
+                ),
+            }
+        return real_run_tests(self, target_test=target_test)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(validate_module.PolymorphicValidator, "run_tests", spy_run_tests)
+        we = WorkflowEngine(kernel, llm)
+        result = await we.run_generation_workflow(goal="Add a greet function", workspace_path=str(tmp_path))
+
+    assert result["quality_gates_passed"] is False
+    assert result["failure_category"] == "regression_unattributed"
+    # Exactly one PRE + one POST full-suite call - a second (retry) POST
+    # call would mean the run wrongly re-entered the Developer repair loop.
+    assert full_call_count["n"] == 2
+    # plan, design, ONE developer call, ONE review - no repair retry ever
+    # reached a second Developer call.
+    assert llm.complete.call_count == 4

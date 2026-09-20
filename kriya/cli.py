@@ -1935,13 +1935,33 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 # advice must not fire for it.
                 if res.get("environment_failure") and res.get("failure_category") not in (
                     "unauthorized_generation_target", "candidate_independent_deterministic_failure",
-                    "generation_budget_exhausted", "containment_setup_failed",
+                    "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
                 ):
                     click.secho(
                         f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
                         "Kriya stopped retrying early rather than burning its retry budget "
                         "re-generating code that could never fix this - run `kriya doctor` "
                         "to check your language toolchain resolution.",
+                        fg="yellow", bold=True
+                    )
+                # VAL-001 G1-DEVINV2 (2026-09-20): a full-regression block
+                # with no candidate-attributable evidence is neither an
+                # environment/toolchain problem nor an ordinary retryable
+                # code defect - see kriya/workflow/workflow.py's own
+                # _full_regression_unattributed branch.
+                if res.get("failure_category") == "regression_unattributed":
+                    click.secho(
+                        f"\n[REGRESSION UNATTRIBUTED] {res['environment_failure']}\n"
+                        "Kriya stopped retrying early: the full-regression suite's aggregate "
+                        "outcome changed relative to the captured PRE-mutation baseline, but "
+                        "no specific test could be confirmed as caused by this candidate - "
+                        "every per-test failure either matches the baseline exactly, or was "
+                        "independently replayed (in isolation, against both a pristine and a "
+                        "candidate copy) and could not be confirmed either way - an "
+                        "indeterminate/non-reproducible result is never treated as a known "
+                        "pre-existing failure, only as unattributable. "
+                        "Investigate the full-regression output directly; further Developer "
+                        "regeneration cannot resolve this.",
                         fg="yellow", bold=True
                     )
                 # PRV-17 (2026-09-08, P7 efficiency finding): a candidate-
@@ -3165,13 +3185,30 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             # problem, and must not print this Java/Maven-specific advice.
             if res.get("environment_failure") and res.get("failure_category") not in (
                 "unauthorized_generation_target", "candidate_independent_deterministic_failure",
-                "generation_budget_exhausted", "containment_setup_failed",
+                "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
             ):
                 click.secho(
                     f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
                     "Kriya stopped retrying early rather than burning its retry budget "
                     "re-generating code that could never fix this - run `kriya doctor` "
                     "to check your Java/Maven toolchain resolution.",
+                    fg="yellow", bold=True
+                )
+            # VAL-001 G1-DEVINV2 (2026-09-20): see the matching branch above
+            # in this file's other quality-gates-failure branch.
+            if res.get("failure_category") == "regression_unattributed":
+                click.secho(
+                    f"\n[REGRESSION UNATTRIBUTED] {res['environment_failure']}\n"
+                    "Kriya stopped retrying early: the full-regression suite's aggregate "
+                    "outcome changed relative to the captured PRE-mutation baseline, but "
+                    "no specific test could be confirmed as caused by this candidate - "
+                    "every per-test failure either matches the baseline exactly, or was "
+                    "independently replayed (in isolation, against both a pristine and a "
+                    "candidate copy) and could not be confirmed either way - an "
+                    "indeterminate/non-reproducible result is never treated as a known "
+                    "pre-existing failure, only as unattributable. "
+                    "Investigate the full-regression output directly; further Developer "
+                    "regeneration cannot resolve this.",
                     fg="yellow", bold=True
                 )
             # PRV-17 (2026-09-08, P7 efficiency finding): see the matching

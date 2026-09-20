@@ -309,7 +309,21 @@ def compute_failure_fingerprint(raw: str) -> str:
 # rather than fabricated per-test PASS entries.
 
 _PYTEST_SUMMARY_LINE_RE = re.compile(
-    r"^(FAILED|ERROR)\s+(\S+?)(?:\s+-\s+(.*))?$", re.MULTILINE,
+    # VAL-001 G1-DEVINV2 (2026-09-20): a bare `\S+?` id group cannot cross a
+    # LITERAL SPACE - and a parametrize id can genuinely contain one (e.g. a
+    # dict repr embedded in the id, `[args0-{"tool_input":{"command":"grep
+    # x"}}]`). Live-confirmed: this exact id was silently absent from BOTH
+    # PRE and POST parsed test_outcomes for a real qwen3.8:27b G1 run,
+    # because `\S+?` cannot extend across the space before "x" and no
+    # trailing " - reason" exists on that line for the rest of the pattern
+    # to fall back on, so the whole line failed to match at all. `.+?`
+    # (still non-greedy, so the common `id - reason` split is unaffected)
+    # fixes that case. NOT a complete fix: an id containing an actual
+    # " - " substring (e.g. `test_baz[a - b]`) still mis-splits on the
+    # first occurrence, identically to before this change - full
+    # correctness would need pytest's own structured JSON report, not a
+    # text regex; this only strictly narrows the prior gap, never widens it.
+    r"^(FAILED|ERROR)\s+(.+?)(?:\s+-\s+(.*))?$", re.MULTILINE,
 )
 _PYTEST_FINAL_SUMMARY_RE = re.compile(
     r"=+ ("
@@ -647,6 +661,117 @@ def classify_baseline_delta(baseline: ValidationBaseline, post: ValidationOutcom
         level1=level1, level2=level2, aggregate_drop_detected=aggregate_drop,
         blocking=blocking, blocking_reasons=tuple(reasons),
     )
+
+
+# --- Blocking-only evidence rendering (VAL-001 G1-DEVINV2, 2026-09-20) ------
+#
+# Closes a real, live-confirmed gap: kriya/workflow/workflow.py's own full-
+# regression retry-context construction used to hand the Developer the ENTIRE
+# raw pytest output on a blocking regression failure - in a real brownfield
+# repo with substantial pre-existing test debt (proven live: 140 pre-existing
+# failures alongside 0-1 genuinely candidate-attributable ones), that floods
+# the repair prompt with noise the classify_baseline_delta() call above this
+# section already had the structured information to exclude. A real live
+# run produced a functionally correct Attempt-1 candidate (independently
+# confirmed correct via review external to this module and to Kriya's own
+# generation pipeline) that was then discarded because the raw-output-
+# flooded repair prompt drove both the primary and fallback model into
+# repeated malformed responses across 6 further attempts. These
+# functions are pure text rendering only - no subprocess, no model call,
+# consistent with this module's own "pure, deterministic comparison
+# library" scope (see its top-of-file docstring); the caller
+# (kriya/workflow/workflow.py) decides WHICH test ids are confirmed
+# candidate-attributable (including any isolated-pristine-replay
+# resolution of an ambiguous NOT_COMPARABLE entry) and passes only that set
+# in here.
+
+_PYTEST_FAILURES_SECTION_RE = re.compile(
+    r"=+ FAILURES =+\n(.*?)(?:\n=+ (?:ERRORS|warnings summary|short test summary info) =+|\Z)",
+    re.DOTALL,
+)
+_PYTEST_FAILURE_BLOCK_HEADER_RE = re.compile(r"^_{5,} (.+?) _{5,}\n", re.MULTILINE)
+
+
+def _short_test_name(test_id: str) -> str:
+    """`tests/foo.py::TestClass::test_name[param]` -> `test_name[param]`
+    (pytest's own per-failure block header uses only the last `::`
+    segment, never the file path or intermediate class name)."""
+    return test_id.rsplit("::", 1)[-1]
+
+
+def extract_test_failure_sections(raw_output: str, test_ids: Sequence[str]) -> Dict[str, str]:
+    """Best-effort per-test isolation of pytest's own "FAILURES" section,
+    keyed by the FULL test_id. Falls back to the short-summary FAILED/ERROR
+    line alone (matching _PYTEST_SUMMARY_LINE_RE) when the detailed
+    traceback block can't be located by header name (e.g. pytest truncated
+    a very long parametrize id in its own header) - a requested test id is
+    never silently dropped, and this never falls back to including the
+    WHOLE raw_output, which is exactly the flooding this mechanism exists
+    to avoid."""
+    match = _PYTEST_FAILURES_SECTION_RE.search(raw_output or "")
+    failures_body = match.group(1) if match else ""
+    parts = _PYTEST_FAILURE_BLOCK_HEADER_RE.split(failures_body)
+    # re.split with one capturing group returns [pre, header1, body1,
+    # header2, body2, ..., trailing] - headers are odd indices.
+    header_to_body = {
+        parts[i].strip(): parts[i + 1] for i in range(1, len(parts) - 1, 2)
+    }
+    result: Dict[str, str] = {}
+    for test_id in test_ids:
+        short = _short_test_name(test_id)
+        body = None
+        for header, block_body in header_to_body.items():
+            if header == short or header.startswith(short) or short.startswith(header):
+                body = block_body
+                break
+        if body is not None:
+            result[test_id] = f"____ {short} ____\n{body.strip()}"
+            continue
+        summary_match = re.search(
+            rf"^(FAILED|ERROR)\s+{re.escape(test_id)}(?:\s+-\s+(.*))?$",
+            raw_output or "", re.MULTILINE,
+        )
+        result[test_id] = (
+            summary_match.group(0) if summary_match
+            else f"FAILED {test_id} (failure detail unavailable in raw output)"
+        )
+    return result
+
+
+def render_blocking_regression_evidence(
+    *, baseline: "ValidationBaseline", confirmed_test_ids: Sequence[str], raw_output: str,
+) -> str:
+    """Builds the Developer-facing regression-failure text from ONLY the
+    caller-confirmed candidate-attributable test ids - never the raw
+    full-suite output. Each test gets its own isolated failure section (see
+    extract_test_failure_sections) plus a concise PRE-status line, so a
+    repair attempt receives exactly the evidence it needs and nothing a
+    pre-existing, non-candidate failure would otherwise drown it in.
+    Returns "" for an empty confirmed_test_ids - the caller is responsible
+    for treating that as "nothing attributable" (see workflow.py's own
+    REGRESSION_UNATTRIBUTED handling), never as "no failure to report"."""
+    if not confirmed_test_ids:
+        return ""
+    pre_by_id = {
+        o.test_id: o for o in (baseline.outcome.test_outcomes or ())
+    } if baseline.outcome is not None else {}
+    sections = extract_test_failure_sections(raw_output, confirmed_test_ids)
+    lines = [
+        f"{len(confirmed_test_ids)} test(s) newly fail relative to the captured "
+        "PRE-mutation baseline (every other full-regression failure is classified "
+        "PRE_EXISTING_FAILURE and deliberately excluded from this evidence - it is "
+        "not caused by this candidate):",
+        "",
+    ]
+    for test_id in confirmed_test_ids:
+        pre_status = (
+            pre_by_id[test_id].status.value if test_id in pre_by_id
+            else "PASS or absent (not in the PRE-mutation failing set)"
+        )
+        lines.append(f"=== {test_id} (PRE: {pre_status} -> POST: FAIL) ===")
+        lines.append(sections.get(test_id, "(detail unavailable)"))
+        lines.append("")
+    return "\n".join(lines)
 
 
 # --- Pre-mutation orchestration ---------------------------------------------
