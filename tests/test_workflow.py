@@ -4171,6 +4171,56 @@ async def test_run_attempt_application_runtime_verification_only_never_calls_dev
 
 
 @pytest.mark.asyncio
+async def test_run_attempt_runtime_verification_fails_closed_with_no_approval_callback(tmp_path):
+    """VAL-001 G1-DEVINV2 (2026-09-20): human-in-the-loop mode's entire
+    purpose is preventing an unreviewed command from executing - an
+    inferred (not deterministic-contract) runtime command must NEVER
+    execute just because no approval_callback happened to be wired for
+    this call. Before this fix, the missing-callback branch logged a
+    warning and "proceeded under default policy" (fail OPEN) - the exact
+    same shape workflow.py's own code-application approval gate was fixed
+    for on 2026-08-16 (adversarial review Finding 2), but this sibling
+    runtime-verification gate never received the matching fix. _minimal_
+    attempt_ctx's own defaults are exactly the vulnerable shape:
+    approval_callback=None, autonomy.mode="human-in-the-loop" (both real
+    AppConfig defaults, not test-specific overrides)."""
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(
+        side_effect=AssertionError("Developer must never be called for this verification-only shape"),
+    )
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["java", "-cp", "target/classes", "com.example.App"]],
+        "command_source": "inferred", "success_criteria": "prints HELLO",
+    })
+    run_verifier.grade = AsyncMock(
+        side_effect=AssertionError("A declined runtime command must never be graded"),
+    )
+    # Explicit override - _runtime_verifier_ctx/_minimal_attempt_ctx now
+    # default to an auto-approving callback (most tests aren't about this
+    # gate itself); THIS test is specifically about the no-callback path,
+    # so it must not silently inherit that default.
+    ctx = _runtime_verifier_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier, approval_callback=None,
+    )
+    assert ctx.approval_callback is None
+    assert ctx.kernel.config.autonomy.mode == "human-in-the-loop"
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+        side_effect=AssertionError("An unapproved runtime command must never actually execute"),
+    ):
+        await run_attempt(state, ctx)  # must not raise - runtime verification is optional here
+
+    assert state.run_verification_declined is True
+    assert not run_verifier.grade.called
+
+
+@pytest.mark.asyncio
 async def test_run_attempt_intermediate_subtask_treats_inferred_runtime_verification_as_advisory(tmp_path):
     """PRV-17 (2026-09-03) stage-scoped verification: an intermediate
     subtask (s1, scaffolding a Django project) whose own approved plan
@@ -11091,7 +11141,24 @@ def _minimal_attempt_ctx(tmp_path, **overrides) -> AttemptContext:
         chain=[],
         targeted_max_retries=3,
         stream_callback=None,
-        approval_callback=None,
+        # VAL-001 G1-DEVINV2 (2026-09-20): auto-approve by default, not
+        # None. Production code now correctly fails CLOSED (refuses to
+        # execute) when human-in-the-loop mode needs runtime-verification
+        # approval and no approval_callback is wired (see attempt.py's own
+        # "Fail-closed (2026-09-20)" comment) - a real fix for a real gap
+        # (the sibling of workflow.py's own 2026-08-16 adversarial-review
+        # Finding 2 fix). Most run_attempt() tests are not ABOUT testing
+        # that approval gate; they exercise what happens once a command is
+        # approved/executing, so the default here mirrors the "happy path
+        # proceeds" convention already used elsewhere in this fixture (e.g.
+        # approve_web_lookup below still defaults to declining, but that
+        # gate's own tests already pass an explicit override same as this
+        # one now needs for the OPPOSITE case). A test that specifically
+        # covers the no-callback/declined path passes approval_callback=
+        # None explicitly (see test_run_attempt_runtime_verification_
+        # fails_closed_with_no_approval_callback) - never relies on this
+        # default silently matching its own intent.
+        approval_callback=lambda diffs, reason: True,
         active_skills=[],
         active_skill_rules_snapshot={},
         developer=AsyncMock(),
@@ -11380,6 +11447,125 @@ async def test_run_attempt_passes_when_spec_compliant(tmp_path):
 
     spec_compliance.check.assert_called_once()
     assert any(g.get("type") == "goal_spec_compliance" and g.get("success") for g in state.gate_outcomes)
+    # A real, genuine compliant verdict carries no `status` key at all -
+    # unchanged from before the 2026-09-20 verifier-availability fix below.
+    outcome = next(g for g in state.gate_outcomes if g.get("type") == "goal_spec_compliance")
+    assert "status" not in outcome
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_records_unavailable_not_a_real_pass_when_spec_check_call_fails(tmp_path):
+    """VAL-001 G1-DEVINV2 (2026-09-20, run 7ec06f51 forensic follow-up):
+    live-confirmed real incident - SpecComplianceAgent.check()'s own call-
+    failure/malformed-JSON handler returns {"compliant": True, "status":
+    "unknown", ...} (this gate's own deliberate, documented advisory
+    fail-open default), and that used to be recorded and logged completely
+    indistinguishably from a real compliant verdict ("Quality Gates: Goal
+    spec compliance PASSED: Check call failed: Error code: 500..."). An
+    unavailable verifier must never contribute successful verification
+    evidence - the persisted gate_outcome must say explicitly that this
+    was not a real evaluation, even though (matching ctx.strict_spec_
+    compliance's own existing, unmodified fail-closed escalation policy for
+    the non-default case) the attempt is still allowed to proceed when not
+    strict."""
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+
+    state = GenerationState()
+    state.all_files_written = {"Protocol.java"}
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "Protocol.java",
+        "content": "class Protocol {\n    int protocolVersion;\n}\n",
+    }])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": True,
+        "status": "unknown",
+        "reasoning": "Check call failed: Error code: 500 - simulated infra failure",
+        "missing_requirements": [],
+        "likely_files": [],
+    })
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        goal="Create a Protocol class with a protocolVersion field",
+        developer=developer,
+        architect_files=["Protocol.java"],
+        expected_files_upfront=["Protocol.java"],
+        architect_basename_to_path={"Protocol.java": "Protocol.java"},
+        spec_compliance=spec_compliance,
+        kernel=Kernel(config=cfg),
+    )
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        # ctx.strict_spec_compliance defaults to False (_minimal_attempt_ctx
+        # does not set it) - the attempt is expected to proceed, matching
+        # this gate's own existing, unmodified non-strict/advisory policy.
+        await run_attempt(state, ctx)
+
+    outcome = next(g for g in state.gate_outcomes if g.get("type") == "goal_spec_compliance")
+    assert outcome["success"] is True
+    assert outcome["status"] == "unknown"
+    assert state.candidate_gates_succeeded is True
+
+
+@pytest.mark.asyncio
+async def test_run_attempt_strict_spec_compliance_fails_closed_on_unavailable_check(tmp_path):
+    """The EXISTING escalation policy (ctx.strict_spec_compliance=True) must
+    still raise on an unavailable check exactly as before this fix - this
+    fix only changes what gets RECORDED in the non-strict/default path,
+    never the strict path's own fail-closed behavior."""
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+
+    state = GenerationState()
+    state.all_files_written = {"Protocol.java"}
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "Protocol.java",
+        "content": "class Protocol {\n    int protocolVersion;\n}\n",
+    }])
+    spec_compliance = AsyncMock()
+    spec_compliance.check = AsyncMock(return_value={
+        "compliant": True,
+        "status": "unknown",
+        "reasoning": "Check call failed: Error code: 500 - simulated infra failure",
+        "missing_requirements": [],
+        "likely_files": [],
+    })
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    ctx = _minimal_attempt_ctx(
+        tmp_path,
+        goal="Create a Protocol class with a protocolVersion field",
+        developer=developer,
+        architect_files=["Protocol.java"],
+        expected_files_upfront=["Protocol.java"],
+        architect_basename_to_path={"Protocol.java": "Protocol.java"},
+        spec_compliance=spec_compliance,
+        kernel=Kernel(config=cfg),
+    )
+    ctx.strict_spec_compliance = True
+
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": True, "output": ""},
+    ), patch(
+        "kriya.tools.validate.PolymorphicValidator.run_tests",
+        return_value={"success": True, "output": ""},
+    ):
+        with pytest.raises(QualityGateFailure) as exc_info:
+            await run_attempt(state, ctx)
+
+    assert exc_info.value.failure.type == "verification_infrastructure_failure"
 
 
 @pytest.mark.asyncio
@@ -15908,6 +16094,15 @@ async def test_workflow_run_verification_timeout_grades_captured_output_as_succe
         res = await we.run_generation_workflow(
             goal="Run with python app.py; it should print [SUCCESS]",
             workspace_path=str(tmp_path),
+            # VAL-001 G1-DEVINV2 (2026-09-20): sys.executable's own basename
+            # (e.g. "python3.14") is not a literal substring of this goal's
+            # "python app.py" text, so downgrade_ungrounded_goal_explicit_
+            # commands() correctly downgrades this "goal_explicit" command
+            # to "inferred" - which now correctly requires approval (the
+            # production fail-closed fix this test predates). Not what this
+            # test is about; auto-approve so it still reaches the actual
+            # timeout/grading behavior under test.
+            approval_callback=lambda *_a, **_k: True,
         )
 
     # A hang is always disqualifying, regardless of grade()'s verdict on the
@@ -15972,6 +16167,10 @@ async def test_workflow_run_verification_timeout_with_genuine_failure_stays_plai
         res = await we.run_generation_workflow(
             goal="Run with python app.py; it should print [SUCCESS]",
             workspace_path=str(tmp_path),
+            # VAL-001 G1-DEVINV2 (2026-09-20): see the identical comment in
+            # test_workflow_run_verification_timeout_grades_captured_
+            # output_as_succeeded_then_hung above.
+            approval_callback=lambda *_a, **_k: True,
         )
 
     assert res["quality_gates_passed"] is False

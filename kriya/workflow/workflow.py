@@ -122,6 +122,7 @@ from kriya.workflow.file_resolution import (
     find_brownfield_test_redirections,
     find_brownfield_public_api_changes,
     find_missing_expected_files,
+    identify_redirected_test_obligations,
     include_response_construction_owners,
     normalize_written_filepath,
 )
@@ -197,7 +198,7 @@ from kriya.workflow.retry_prompts import (
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.retry_strategy import handle_attempt_failure
-from kriya.workflow.review_context import build_review_batches, build_reviewer_verified_evidence
+from kriya.workflow.review_context import build_candidate_diff_context, build_review_batches, build_reviewer_verified_evidence
 from kriya.workflow.state import GenerationState, RecoveryPhaseAdvanced
 from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS, EngineeringPlan
 from kriya.workflow.planner_repair import (
@@ -2239,8 +2240,23 @@ class WorkflowEngine:
             engineering_route is not None
             and engineering_route.kind in (ChangeKind.TASK, ChangeKind.ENHANCEMENT)
         ):
+            _pre_redirect_architect_files = list(architect_files)
             architect_files = prefer_existing_artifact_owners(
                 architect_files, goal, workspace_path,
+            )
+            # Test-obligation preservation (2026-09-20): captured HERE,
+            # before include_response_construction_owners() below can add
+            # further entries unrelated to this specific redirect - a
+            # planned-but-nonexistent test artifact silently mapped onto an
+            # existing owner must not let that redirect alone discharge the
+            # acceptance obligation the goal's own test-coverage intent
+            # created (see identify_redirected_test_obligations()'s own
+            # docstring and kriya/workflow/attempt.py's own consumer for the
+            # live incident this closes).
+            state.redirected_test_obligations.update(
+                identify_redirected_test_obligations(
+                    _pre_redirect_architect_files, architect_files, workspace_path,
+                )
             )
             # Full synchronous tree-walk + per-file read; offload so it
             # doesn't block the event loop inside this async workflow.
@@ -4088,6 +4104,26 @@ class WorkflowEngine:
                         file_contents_for_review.append((filepath, f.read()))
                 except Exception as e:
                     logger.debug(f"Failed to read '{full_path}' for reviewer prompt: {e}")
+
+            # Reviewer mutation-evidence priority (2026-09-20): a real live
+            # incident - a large brownfield file's own candidate diff sat
+            # deep past where build_review_batches's own from-the-front
+            # token-budget truncation reached, so the Reviewer was shown
+            # thousands of lines of untouched code and never the actual
+            # changed region, then correctly (but unhelpfully) rejected the
+            # candidate for "insufficient evidence." Prepended to goal_header
+            # so it reaches the Reviewer in EVERY batch, ahead of the
+            # (possibly-truncated) full-file content - see build_candidate_
+            # diff_context()'s own docstring for the full incident and why
+            # this is additive, never a replacement for the existing
+            # full-file block. "" (no candidate files changed relative to
+            # their own original content - e.g. every written file is
+            # brand new) is a complete no-op, byte-identical to before this
+            # fix.
+            candidate_diff_context = build_candidate_diff_context(
+                state.all_original_contents, dict(file_contents_for_review),
+            )
+            goal_header = candidate_diff_context + goal_header
 
             # Stage 6 SME review, Finding 2: previously concatenated every file's full
             # raw content with no token-budget check at all - the exact silent-

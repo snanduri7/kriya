@@ -55,7 +55,7 @@ from kriya.workflow.dependency_invalidation import (
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_grounding import _build_quality_gate_failure, _build_test_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, classify_environment_failure, extract_missing_project_local_python_module, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
 from kriya.workflow.contract_authority import derive_direct_contract_authorizations
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, build_grounded_java_launch_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, ground_python_runtime_target, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, python_command_targets_test_path, python_file_is_runnable_script, python_target_path_is_test_shaped, strip_package_declaration_matching_source_root
+from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, build_grounded_java_launch_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unpreserved_test_obligation, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, ground_python_runtime_target, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, python_command_targets_test_path, python_file_is_runnable_script, python_target_path_is_test_shaped, strip_package_declaration_matching_source_root
 from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
@@ -4166,10 +4166,23 @@ async def _execute_runtime_verification_directly(
                     approved = await approved
                 proceed_with_run = bool(approved)
             else:
+                # Fail-closed (2026-09-20) - mirrors workflow.py's own
+                # code-application approval gate fix for the IDENTICAL
+                # shape (2026-08-16 adversarial review Finding 2: "this
+                # gate used to fail OPEN... execution silently fell
+                # through... with no approval ever having been
+                # requested"). human-in-the-loop mode's entire purpose is
+                # preventing exactly this - a real command executing
+                # inside the sandboxed worktree with zero human
+                # involvement because no approval_callback happened to be
+                # wired for this call, previously treated as "proceed
+                # under default policy" (fail open).
                 logger.warning(
                     "Runtime verification warrants human approval but no approval_callback "
-                    "is available. Proceeding under default policy."
+                    "is available - refusing to execute unreviewed rather than proceeding "
+                    "under default policy."
                 )
+                proceed_with_run = False
         if not proceed_with_run:
             state.run_verification_declined = True
     if not proceed_with_run:
@@ -6117,6 +6130,25 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             state.budgets.last_failure_signature, self_diagnosed, state.attempt_number,
         )
 
+    # Test-obligation preservation (2026-09-20): a planned-but-nonexistent
+    # test artifact that got redirected onto an already-existing owner must
+    # never have its acceptance obligation discharged by a bare NO CHANGE
+    # NEEDED response for that owner - file/semantic similarity alone is not
+    # evidence the goal's own test-coverage intent is actually satisfied.
+    # Applies on EVERY attempt mode (not just targeted/fallback_targeted,
+    # unlike the block below) - a fresh, first full-set attempt's own bare
+    # NO CHANGE NEEDED response is the live incident this closes, not a
+    # retry-only shape. See find_unpreserved_test_obligation()'s own
+    # docstring (kriya/workflow/file_resolution.py) for the full check.
+    # Reuses the ordinary QualityGateFailure/retry-loop machinery unchanged
+    # - no new retry budget, no new control flow.
+    _unpreserved_obligation = find_unpreserved_test_obligation(
+        files, state.redirected_test_obligations, state.all_files_written, state.attempt_number,
+    )
+    if _unpreserved_obligation is not None:
+        state.gate_outcomes.append(_unpreserved_obligation.to_gate_outcome())
+        raise QualityGateFailure(_unpreserved_obligation)
+
     # "NO CHANGE NEEDED" is useful negative attribution evidence, not a
     # successful repair. In a targeted attempt, rerunning compile/tests/runtime
     # after every returned target was explicitly left untouched wastes an
@@ -7815,7 +7847,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 approved = await approved
                             proceed_with_run = bool(approved)
                         else:
-                            logger.warning("Runtime verification warrants human approval but no approval_callback is available. Proceeding under default policy.")
+                            # Fail-closed (2026-09-20) - same fix as the
+                            # sibling gate in _execute_runtime_verification_
+                            # directly() above; see that call site's own
+                            # comment for the full 2026-08-16 precedent.
+                            logger.warning(
+                                "Runtime verification warrants human approval but no "
+                                "approval_callback is available - refusing to execute "
+                                "unreviewed rather than proceeding under default policy."
+                            )
+                            proceed_with_run = False
                     if not proceed_with_run:
                         state.run_verification_declined = True
                 if proceed_with_run:
@@ -8500,6 +8541,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 spec_result = {
                     "compliant": True, "reasoning": spec_result.get("reasoning", ""),
                     "missing_requirements": [], "likely_files": [],
+                    "status": "indeterminate_suppressed",
+                    "reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
                 }
             else:
                 message = (
@@ -8658,11 +8701,30 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 evidence={"fingerprint": goal_spec_evidence_fingerprint},
                 owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
             ))
+        # Verifier-availability honesty (2026-09-20): `success: True` here
+        # has historically meant two structurally different things - a real
+        # PASS verdict, and an infrastructure failure (status="unknown",
+        # from SpecComplianceAgent.check()'s own call/parse-exception
+        # handler) or a suppressed contradictory verdict
+        # (status="indeterminate_suppressed", set just above) that this
+        # non-strict path deliberately does not block on. `success: True`
+        # is kept unchanged for backward structural compatibility (nothing
+        # here weakens ctx.strict_spec_compliance's own existing fail-closed
+        # escalation a few lines above, which still raises before reaching
+        # this point whenever that flag is set) - but `status` now always
+        # says explicitly which case this is, so a genuinely unavailable or
+        # suppressed check can never be silently read back as real
+        # verification evidence downstream (traces.db's own persisted
+        # gate_outcomes, or any future consumer). PASS / UNAVAILABLE /
+        # SUPPRESSED are the only values; a real compliant verdict carries
+        # no `status` key at all (unchanged from before this fix).
+        _spec_status = spec_result.get("status")
         state.gate_outcomes.append({
             "attempt": state.attempt_number,
             "type": "goal_spec_compliance",
             "success": True,
             "output": spec_result["reasoning"],
+            **({"status": _spec_status} if _spec_status else {}),
             **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
                 "arbitrated_contradictions": arbitrated_contradictions}
                if arbitrated_contradictions else {}),
@@ -8671,7 +8733,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                if planner_only_requirements else {}),
             **({"reason_code": spec_result["reason_code"]} if spec_result.get("reason_code") else {}),
         })
-        logger.info(f"Quality Gates: Goal spec compliance PASSED: {spec_result['reasoning']}")
+        if _spec_status == "unknown":
+            logger.info(
+                "Quality Gates: Goal spec compliance UNAVAILABLE (the check itself could "
+                f"not run - advisory only, not evaluated as verification evidence): {spec_result['reasoning']}"
+            )
+        elif _spec_status == "indeterminate_suppressed":
+            logger.info(
+                "Quality Gates: Goal spec compliance SUPPRESSED (contradictory verdict "
+                f"against deterministically-satisfied authority, not evaluated as verification evidence): {spec_result['reasoning']}"
+            )
+        else:
+            logger.info(f"Quality Gates: Goal spec compliance PASSED: {spec_result['reasoning']}")
 
     # The isolated candidate passed its inner checks. Terminal full regression
     # and application still remain, so this must never claim overall success.

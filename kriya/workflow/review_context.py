@@ -10,6 +10,7 @@ review anything, produces a confused non-review response, and the caller has no 
 anything went wrong. Confirmed live as a real, severe bug for the CLI path; the
 workflow.py Reviewer stage(s) had no equivalent protection at all until this fix.
 """
+import difflib
 import os
 import re
 from dataclasses import dataclass, field
@@ -132,6 +133,66 @@ def build_review_batches(files: List[Tuple[str, str]], budget: int) -> Tuple[Lis
         batches.append(current_batch)
 
     return batches, truncated_relpaths
+
+
+def build_candidate_diff_context(
+    original_contents: Dict[str, str], final_contents: Dict[str, str], context_lines: int = 20,
+) -> str:
+    """Builds a dedicated, ALWAYS-PLACED-FIRST block showing the candidate's
+    actual diff hunks (a real unified diff, via Python's own stdlib
+    difflib - no new diff engine) plus `context_lines` of surrounding
+    source on each side, for every file whose content actually changed.
+
+    This closes a real, live-confirmed gap (2026-09-20): build_review_
+    batches() above truncates an oversized file from a syntactic PREFIX
+    (chunk 1, 2, 3, ... until the token budget runs out) with no awareness
+    of WHERE the candidate's own change actually is - for a large file
+    whose mutation sits deep in the middle (e.g. line 5362 of a 6000+ line
+    file), prefix truncation can show the reviewer thousands of lines of
+    untouched code while never reaching the changed region at all, and the
+    Reviewer then correctly (but unhelpfully) reports "insufficient
+    evidence" for a change it was never actually shown.
+
+    This is the Reviewer's PRIMARY mutation evidence, meant to be placed
+    ahead of (never instead of) the existing full-file content block - a
+    diff hunk is reviewable on its own even when the surrounding full file
+    is truncated elsewhere, directly answering "do not require full-file
+    context when the mutation can be reviewed from exact changed evidence."
+    Generic - keys only on (original content, final content) pairs, no
+    language/framework/G1-specific logic.
+
+    Returns "" when nothing actually changed (every current content is
+    byte-identical to its own original, or there is no original at all,
+    i.e. a brand-new file - the existing full-file content block already
+    covers a new file completely, so no diff evidence is needed for it)."""
+    sections = []
+    for relpath in sorted(final_contents):
+        final_text = final_contents[relpath]
+        original_text = original_contents.get(relpath)
+        if original_text is None or original_text == final_text:
+            continue
+        diff_lines = list(difflib.unified_diff(
+            original_text.splitlines(keepends=True),
+            final_text.splitlines(keepends=True),
+            fromfile=f"{relpath} (before)", tofile=f"{relpath} (candidate)",
+            n=context_lines,
+        ))
+        if not diff_lines:
+            continue
+        sections.append(f"=== Candidate diff: {relpath} ===\n" + "".join(diff_lines))
+    if not sections:
+        return ""
+    return (
+        "=== CANDIDATE MUTATION EVIDENCE (authoritative - review this FIRST) ===\n"
+        "The following unified diff(s) show EXACTLY what this candidate changed, with "
+        f"{context_lines} lines of real surrounding source context on each side - this is "
+        "the primary evidence for reviewing the mutation itself, taking priority over the "
+        "full file content shown below (which may be truncated by the review's own size "
+        "budget for a large file). A changed region is fully interpretable from this "
+        "evidence alone even when the surrounding full file is not shown in its entirety.\n\n"
+        + "\n\n".join(sections) +
+        "\n=== END CANDIDATE MUTATION EVIDENCE ===\n\n"
+    )
 
 
 # --- A1-P1 (Java Repository-Aware Code Review, 2026-09-09): bounded

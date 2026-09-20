@@ -9,6 +9,7 @@ from kriya.workflow.review_context import (
     ProposedModification,
     StructuredFinding,
     adjudicate_findings,
+    build_candidate_diff_context,
     build_member_evidence_ids,
     build_proposed_modification,
     build_relation_evidence_ids,
@@ -174,6 +175,70 @@ def test_build_review_batches_empty_input_returns_no_batches():
 
     assert batches == []
     assert truncated == []
+
+
+# ---------------------------------------------------------------------------
+# build_candidate_diff_context (2026-09-20, run 7ec06f51 forensic follow-up)
+# ---------------------------------------------------------------------------
+
+def test_candidate_diff_context_survives_truncation_that_would_hide_the_change():
+    """The exact live incident: a real candidate diff sitting deep past
+    where build_review_batches's own from-the-front truncation reaches
+    (proven above: test_build_review_batches_oversized_single_file_is_
+    truncated_and_reported shows the tail never makes it in) must still be
+    fully visible via the dedicated diff-context block, independent of
+    that truncation."""
+    original = "\n".join(f"x_{i} = {i}  # padding line number {i}" for i in range(200))
+    final = original.replace("x_199 = 199", "x_199 = 199  # FIXED: the actual candidate change")
+
+    # Reproduce the exact truncation the sibling test above proves.
+    batches, truncated = build_review_batches([("big.py", final)], budget=375)
+    assert truncated == ["big.py"]
+    assert "FIXED: the actual candidate change" not in batches[0]
+
+    diff_context = build_candidate_diff_context({"big.py": original}, {"big.py": final})
+    assert "FIXED: the actual candidate change" in diff_context
+    assert "CANDIDATE MUTATION EVIDENCE" in diff_context
+
+
+def test_candidate_diff_context_empty_when_nothing_changed():
+    assert build_candidate_diff_context({"a.py": "same\n"}, {"a.py": "same\n"}) == ""
+
+
+def test_candidate_diff_context_empty_for_a_brand_new_file():
+    """A file with no prior original content (a genuinely new file, never
+    in original_contents at all) is fully covered by the existing full-file
+    content block already - no diff evidence needed or produced for it."""
+    assert build_candidate_diff_context({}, {"new_file.py": "content\n"}) == ""
+
+
+def test_candidate_diff_context_includes_real_unified_diff_markers():
+    original = "line1\nline2\nline3\n"
+    final = "line1\nCHANGED\nline3\n"
+    result = build_candidate_diff_context({"f.py": original}, {"f.py": final})
+    assert "-line2" in result
+    assert "+CHANGED" in result
+    assert "Candidate diff: f.py" in result
+
+
+def test_candidate_diff_context_multiple_changed_files_all_included():
+    originals = {"a.py": "a1\n", "b.py": "b1\n", "unchanged.py": "same\n"}
+    finals = {"a.py": "a2\n", "b.py": "b2\n", "unchanged.py": "same\n"}
+    result = build_candidate_diff_context(originals, finals)
+    assert "Candidate diff: a.py" in result
+    assert "Candidate diff: b.py" in result
+    assert "unchanged.py" not in result
+
+
+def test_candidate_diff_context_prepended_placement_is_the_callers_responsibility():
+    """Pure function contract check - this function only ever returns a
+    self-contained block; ordering (placed before the full-file content) is
+    the caller's own responsibility (kriya/workflow/workflow.py's REVIEW
+    stage), verified structurally rather than re-testing workflow.py's own
+    giant run_generation_workflow here."""
+    result = build_candidate_diff_context({"f.py": "a\n"}, {"f.py": "b\n"})
+    assert result.startswith("=== CANDIDATE MUTATION EVIDENCE")
+    assert result.rstrip().endswith("=== END CANDIDATE MUTATION EVIDENCE ===")
 
 
 def test_build_reviewer_verified_evidence_includes_a_passing_run_verification():

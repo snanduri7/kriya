@@ -15,7 +15,7 @@ import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
-from kriya.workflow.failure import Failure
+from kriya.workflow.failure import Failure, FileLocation
 
 logger = logging.getLogger(__name__)
 
@@ -304,6 +304,100 @@ def prefer_existing_artifact_owners(
         else:
             resolved.append(path)
     return resolved
+
+
+def identify_redirected_test_obligations(
+    planned_files: List[str], resolved_files: List[str], workspace_path: str,
+) -> Dict[str, str]:
+    """Given a planned file list (as originally requested, e.g. the
+    Architect's own file list) and its resolved counterpart (after
+    prefer_existing_artifact_owners() has run over it), returns a mapping
+    {resolved_owner_path: original_planned_path} for every entry where a
+    genuinely NEW test artifact (is_runnable_test_file()==True, no file at
+    that path in the pristine workspace) was redirected onto an
+    ALREADY-EXISTING owner instead. Generic - no language/framework/
+    G1-specific hardcoding beyond is_runnable_test_file()'s own
+    already-established recognition of what counts as a test file.
+
+    Callers (kriya/workflow/attempt.py's own run_attempt()) use this to
+    refuse a bare NO CHANGE NEEDED response for the resolved owner - a
+    file/semantic-similarity redirect may RELOCATE the acceptance
+    obligation the goal's own test-coverage intent created, but must never
+    let that redirect alone DISCHARGE it. `planned_files`/`resolved_files`
+    must be the same length and order (as prefer_existing_artifact_owners()
+    itself always returns) - a length mismatch is a caller bug, not
+    something this function silently tolerates by zipping to the shorter
+    one, so it raises rather than returning a partial/misleading mapping."""
+    if len(planned_files) != len(resolved_files):
+        raise ValueError(
+            "identify_redirected_test_obligations: planned_files and resolved_files "
+            f"must be the same length ({len(planned_files)} != {len(resolved_files)})"
+        )
+    obligations: Dict[str, str] = {}
+    for original, resolved_path in zip(planned_files, resolved_files):
+        if original == resolved_path:
+            continue
+        if not is_runnable_test_file(original):
+            continue
+        if os.path.exists(os.path.join(workspace_path, original)):
+            continue
+        obligations[resolved_path] = original
+    return obligations
+
+
+def find_unpreserved_test_obligation(
+    files: List[Dict[str, Any]],
+    redirected_test_obligations: Dict[str, str],
+    all_files_written: Iterable[str],
+    attempt_number: int,
+) -> Optional[Failure]:
+    """Pure check, called from kriya/workflow/attempt.py's own run_attempt()
+    on EVERY attempt (not only targeted/fallback_targeted retries): does
+    this batch of Developer file responses (`files`, the same per-file
+    {"filepath", "content", "edits", "analysis", ...} shape agent.py's own
+    DeveloperAgent.run_generation() returns) discharge a redirected test
+    obligation (identify_redirected_test_obligations()'s own output) with a
+    bare NO CHANGE NEEDED response - `content is None` and no `edits` - for
+    a file that has never been genuinely written in this run before?
+
+    Returns the first such violation as a Failure ready for
+    QualityGateFailure (never raises itself, and never partially mutates
+    caller state - the caller decides what to do with the result). Returns
+    None when every redirected obligation either isn't present in this
+    batch, was already discharged by a real write on an earlier attempt
+    (`filepath in all_files_written`), or received real content/edits this
+    attempt. Generic - no language/framework/G1-specific hardcoding; the
+    only inputs are structural (redirect map, per-file response shape,
+    already-written set)."""
+    all_files_written = set(all_files_written)
+    for file_obj in files:
+        filepath = file_obj.get("filepath", "")
+        original_planned = redirected_test_obligations.get(filepath)
+        if original_planned is None or filepath in all_files_written:
+            continue
+        if file_obj.get("content") is not None or file_obj.get("edits"):
+            continue
+        return Failure(
+            type="test_obligation_not_preserved",
+            message=(
+                f"TEST OBLIGATION NOT PRESERVED: '{filepath}' was substituted for the "
+                f"originally planned new test artifact '{original_planned}' (a file/name-"
+                "similarity redirect - see kriya/workflow/file_resolution.py::"
+                "prefer_existing_artifact_owners), but the Developer reported NO CHANGE "
+                f"NEEDED for it. {file_obj.get('analysis') or 'No FIX ANALYSIS was supplied.'} "
+                "A redirect may relocate the acceptance obligation the goal's own "
+                "test-coverage intent created; it must never discharge it. Add equivalent "
+                f"regression coverage to '{filepath}' for the goal's own described "
+                "behavior - a claim that existing tests already cover it is not "
+                "sufficient without an actual corresponding change to this file."
+            ),
+            raw_output=file_obj.get("analysis") or "",
+            source="developer",
+            likely_files=[filepath],
+            file_locations=[FileLocation(filepath=filepath)],
+            attempt=attempt_number,
+        )
+    return None
 
 
 # Bounded deterministic positive-intent gate (Production Validation P4,

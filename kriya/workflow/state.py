@@ -333,6 +333,21 @@ class GenerationState:
     files_written: List[Dict[str, str]] = field(default_factory=list)
     all_files_written: Set[str] = field(default_factory=set)
     all_original_contents: Dict[str, str] = field(default_factory=dict)
+    # Test-obligation preservation (2026-09-20): populated once, in
+    # workflow.py's own Architect-stage prefer_existing_artifact_owners()
+    # call, whenever a PLANNED-BUT-NONEXISTENT test file (is_runnable_
+    # test_file()==True, no prior file at that path) gets redirected onto
+    # an already-existing owner file - keyed by the RESOLVED owner path,
+    # valued by the ORIGINAL planned path the Planner/Architect actually
+    # intended to satisfy the goal's own test-coverage intent with.
+    # kriya/workflow/attempt.py's own run_attempt() consults this on every
+    # attempt (not just the first) to refuse a bare NO CHANGE NEEDED
+    # response for that owner - a redirect may relocate the acceptance
+    # obligation the goal's test-coverage intent created, but must never
+    # let file/semantic similarity alone discharge it. Generic across every
+    # language is_runnable_test_file() already recognizes - no G1/C#-
+    # specific logic anywhere in this mechanism.
+    redirected_test_obligations: Dict[str, str] = field(default_factory=dict)
     # P9-R1 (P9/PRV-08, 2026-09-08): the most recent content `files` (this
     # attempt's own Developer/deterministic-restore response) carried for
     # each path, updated on EVERY attempt regardless of that attempt's own
