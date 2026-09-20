@@ -113,6 +113,28 @@ def _canonical(path: str) -> str:
     return os.path.realpath(os.path.expanduser(path))
 
 
+def normalize_workspace_relpath(path: str) -> str:
+    """Canonical STRING identity for a workspace-relative path, independent
+    of trailing-slash/'./' formatting - 'customers_project',
+    'customers_project/', and './customers_project' must all compare equal
+    wherever a planned/authorized relpath is checked against a Developer-
+    generated target. Pure `os.path.normpath` string normalization, never
+    touches the filesystem or resolves symlinks (unlike `_canonical` above,
+    which is only for a real, already-on-disk path) - safe to call on a
+    CREATE target that doesn't exist yet.
+
+    PRV-17 (2026-09-03): this exact mismatch (plan-declared
+    'customers_project/' vs. Developer-reported 'customers_project')
+    tripped FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE even though both names the
+    same directory - AuthorizedFileWriter.__init__/.authorize() below
+    already normalized both sides via a bare inline `os.path.normpath`, but
+    kriya/workflow/attempt.py's EARLIER raw-string pre-write gate did not.
+    Both call sites now share this one helper so the two enforcement layers
+    can never disagree about path identity again."""
+
+    return os.path.normpath(path) if path else path
+
+
 @dataclass(frozen=True)
 class FilesystemScope:
     """The explicit, closed set of canonical roots a write may land under.
@@ -182,10 +204,10 @@ class AuthorizedFileWriter:
         # path is only known at call time, from the actual CLI invocation.
         self._workspace_root = _canonical(workspace_root)
         self._protected_relpaths = tuple(
-            os.path.normpath(p) for p in protected_relpaths if p
+            normalize_workspace_relpath(p) for p in protected_relpaths if p
         )
         self._allowed_relpaths = frozenset(
-            os.path.normpath(p) for p in allowed_relpaths if p
+            normalize_workspace_relpath(p) for p in allowed_relpaths if p
         )
         # Backward-compatible inference when the caller doesn't pass
         # write_scope_mode explicitly: every call site written before this
@@ -265,7 +287,17 @@ class AuthorizedFileWriter:
 
     def _raise_if_denied(self, target_path: str) -> None:
         result = self.authorize(target_path)
-        if result.decision == PolicyDecision.DENY:
+        # POL-001: fail-closed on REQUIRE_APPROVAL too, not just DENY. No
+        # stage this instance's evaluate() can reach currently produces
+        # REQUIRE_APPROVAL for a WRITE_FILE request built by authorize()
+        # above (it never sets process_profile/engineering_route, and
+        # _check_filesystem never emits REQUIRE_APPROVAL for WRITE_FILE) -
+        # verified, not assumed - so this is a defensive tightening with no
+        # behavior change for any real caller today, not a fix for an
+        # observed silent-allow. This writer has no approval_callback of
+        # its own to ask a human, so a hypothetical future REQUIRE_APPROVAL
+        # verdict here must never fall through as if it were ALLOW.
+        if result.decision != PolicyDecision.ALLOW and result.decision != PolicyDecision.ALLOW_SANDBOXED:
             raise PolicyDeniedError(
                 request=ActionRequest(action_type=ActionType.WRITE_FILE, target=target_path),
                 result=result,
@@ -293,3 +325,81 @@ class AuthorizedFileWriter:
         return commit_revision_grounded_batch(
             materialized, workspace_path=self._scope.writable_roots[0],
         )
+
+
+class AuthorizedFileReader:
+    """DEV-INV-001: the read-side sibling of AuthorizedFileWriter above -
+    same composition (make_workspace_scope/is_within_scope for canonical,
+    symlink-resolved containment + a dedicated ExecutionPolicy instance for
+    the sensitive-path check), same real-enforcement posture (raises
+    PolicyDeniedError, never audit-only), for ActionType.READ_FILE instead
+    of WRITE_FILE.
+
+    This closes the gap the DEV-INV-001 architecture review flagged:
+    ExecutionPolicy._check_filesystem already governs READ_FILE and
+    WRITE_FILE symmetrically (kriya/policy/execution.py), but no real
+    call site ever built a READ_FILE ActionRequest with a real
+    workspace_path - so the containment/sensitive-path rule never actually
+    ran for a read. This class is that missing call site, reused by every
+    DEV-INV-001 investigation resolver that touches path-backed content
+    (kriya/workflow/investigation.py) - never a second, independently
+    invented read-authority mechanism.
+
+    Uses the SAME narrower _ENFORCEMENT_SENSITIVE_PATH_PATTERNS set
+    AuthorizedFileWriter uses, not ExecutionPolicy's broader default list -
+    this is also real enforcement (a false-positive DENY here blocks a
+    legitimate investigation read, not just a logged signal), and the
+    broader default's bare `credentials`/`secrets`/`password` substrings
+    would incorrectly block reading an ordinarily-named business file like
+    `credentials_service.py` - the exact false-positive AuthorizedFileWriter
+    was already narrowed to avoid, for the identical reason.
+
+    `FilesystemScope.writable_roots` is reused as-is for the readable-root
+    list (a naming artifact from the write-side class it was built for, not
+    worth renaming and touching that closed, already-hardened path)."""
+
+    def __init__(self, workspace_root: str, extra_readable_roots: Sequence[str] = ()) -> None:
+        self._scope = make_workspace_scope(workspace_root, extra_readable_roots)
+        self._execution_policy = ExecutionPolicy(sensitive_path_patterns=_ENFORCEMENT_SENSITIVE_PATH_PATTERNS)
+
+    def authorize(self, target_path: str) -> PolicyResult:
+        if not is_within_scope(self._scope, target_path):
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="PATH_OUTSIDE_AUTHORIZED_READABLE_ROOTS",
+                explanation=(
+                    f"'{target_path}' resolves (canonically, symlinks included) outside every "
+                    f"authorized readable root: {self._scope.writable_roots}."
+                ),
+                matched_rule="filesystem.authorized_reader.outside_scope",
+            )
+        # Deliberately omits workspace_path here, unlike AuthorizedFileWriter's
+        # otherwise-identical delegation - is_within_scope() above is already
+        # the authoritative, MULTI-root containment decision (workspace_path
+        # PLUS every extra_readable_root, e.g. a run's worktree_path - see
+        # kriya/workflow/investigation.py's own _reader() construction).
+        # ExecutionPolicy._check_filesystem's own containment rule only ever
+        # checks a SINGLE workspace_path value; passing self._scope.
+        # writable_roots[0] here would re-deny a target legitimately inside
+        # a second/third readable root (found live: a worktree_path target,
+        # correctly allowed by is_within_scope, was then re-rejected as
+        # PATH_OUTSIDE_WORKSPACE_DENIED by this exact single-root re-check).
+        # Omitting workspace_path makes _check_filesystem run ONLY its
+        # sensitive-path rule (still real, still unconditional) and fall
+        # through to evaluate()'s own default-ALLOW backstop for READ_FILE -
+        # correct, since containment was already conclusively decided above.
+        return self._execution_policy.evaluate(ActionRequest(
+            action_type=ActionType.READ_FILE, target=target_path,
+        ))
+
+    def raise_if_denied(self, target_path: str) -> None:
+        """Public (unlike AuthorizedFileWriter's private _raise_if_denied) -
+        every DEV-INV-001 resolver calls this directly before touching disk
+        or returning a path in a result; there is no commit_file()-style
+        wrapping primitive to call it from internally on the read side."""
+        result = self.authorize(target_path)
+        if result.decision != PolicyDecision.ALLOW and result.decision != PolicyDecision.ALLOW_SANDBOXED:
+            raise PolicyDeniedError(
+                request=ActionRequest(action_type=ActionType.READ_FILE, target=target_path),
+                result=result,
+            )

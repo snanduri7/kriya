@@ -156,11 +156,14 @@ import os
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, FrozenSet, List, Literal, Optional
+from typing import Any, Callable, Dict, FrozenSet, List, Literal, Optional, Tuple
 
-from kriya.workflow.edit_safety import normalize_whitespace
+from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
+from kriya.workflow.edit_safety import normalize_whitespace, _strip_java_comments_and_strings
 from kriya.workflow.failure import Failure
-from kriya.workflow.failure_grounding import extract_error_source_locations, extract_implicated_files
+from kriya.workflow.failure_grounding import (
+    extract_error_source_locations, extract_implicated_files, _files_by_basename,
+)
 from kriya.workflow.generation_manifest import FileRole, classify_file_role
 from kriya.workflow.plan_schema import EngineeringPlan
 from kriya.workflow.subtask_checkpoint import topological_subtask_order
@@ -460,6 +463,224 @@ def _attribute_from_locator(failure: Failure, known_files: List[str]) -> Optiona
                 reasoning="Precise file:line locator found in the failure output.",
             )
     return None
+
+
+_STACK_FRAME_RE = re.compile(
+    r"at\s+(?:[\w$]+\.)*(?P<method>[\w$<>]+)\((?P<file>[\w.-]+\.java):(?P<line>\d+)\)"
+)
+
+
+def _parse_stack_frames(raw_text: str) -> List[Tuple[str, str, int]]:
+    """Ordered (method, basename, line) triples from a Java stack trace's own
+    'at pkg.Class.method(File.java:line)' frames, innermost (throwing) first -
+    the same textual order a JVM always prints a trace in. Deliberately
+    separate from extract_error_source_locations() (failure_grounding.py):
+    that function is shared across three unrelated error shapes (javac,
+    stack trace, Python SyntaxError) and drops the method name entirely by
+    design; this one exists only to answer "what production METHOD threw,
+    and what called it directly" for the test-fixture-precondition check
+    below, which needs the method name and the frame ORDER, not just a
+    deduped (file, line) set."""
+    return [
+        (m.group("method"), m.group("file"), int(m.group("line")))
+        for m in _STACK_FRAME_RE.finditer(raw_text)
+    ]
+
+
+def _enumerate_java_methods(content: str) -> List[Tuple[str, int, int, str]]:
+    """Every (method_name, start_line, end_line, body_text) in content -
+    1-indexed, end_line inclusive of the closing brace's own line. Reuses
+    the SAME brace-counting mechanism chunk_file_with_metadata_headers()
+    (kriya/analyzer/analyzer.py) already uses for .java method-body
+    chunking, narrowly re-implemented here rather than imported (that
+    function also does javadoc capture, class-header chunks, and XML/Python
+    branches this doesn't need) - but _strip_java_comments_and_strings()
+    (edit_safety.py), the one genuinely tricky part of that mechanism (safe
+    brace-counting when a Java string/char literal or comment contains a
+    stray '{' or '}'), IS reused, not reinvented, from the same tested
+    source both call sites share.
+
+    Deliberately more careful than that shared mechanism's own hardcoded
+    `brace_count = 1` on one point: the signature line's OWN net brace
+    balance is computed from the safe mirror, not assumed - a one-line
+    method (`void x() { return; }`, opening AND closing brace on the same
+    line) would otherwise have its "body" incorrectly extended into
+    whatever follows (e.g. the enclosing class's own closing brace),
+    silently corrupting both this method's span and every later method's
+    scan position. A method whose closing brace is never found before EOF
+    (malformed/truncated content) is skipped entirely, never guessed."""
+    lines = content.splitlines()
+    brace_count_lines = _strip_java_comments_and_strings(content).splitlines()
+    methods: List[Tuple[str, int, int, str]] = []
+    current_class = ""
+    i = 0
+    while i < len(lines):
+        line_strip = lines[i].strip()
+        class_match = re.search(r"\bclass\s+(\w+)", line_strip)
+        if class_match:
+            current_class = class_match.group(1)
+        method_match = re.search(
+            JAVA_METHOD_SIGNATURE_CORE + r'(?:\s+throws\s+[\w\s,]+)?\s*\{', line_strip,
+        )
+        if method_match and current_class:
+            method_name = method_match.group(1)
+            if method_name not in {"class", "interface", "enum", "if", "for", "while", "switch", "catch"}:
+                start_idx = i
+                brace_count = brace_count_lines[i].count("{") - brace_count_lines[i].count("}")
+                i += 1
+                while i < len(lines) and brace_count > 0:
+                    brace_count += brace_count_lines[i].count("{") - brace_count_lines[i].count("}")
+                    i += 1
+                if brace_count <= 0:
+                    methods.append((method_name, start_idx + 1, i, "\n".join(lines[start_idx:i])))
+                continue
+        i += 1
+    return methods
+
+
+def _unchanged_enclosing_java_method(
+    baseline_content: str, current_content: str, throw_line: int,
+) -> bool:
+    """(2026-09-05, strengthened per user review) Line-level baseline
+    preservation is insufficient: a throwing line can be byte-identical to
+    baseline while a DIFFERENT statement earlier in the SAME method was
+    modified by this generation, changing control flow so execution now
+    reaches that unchanged guard in a case it never used to (e.g. an
+    early-return's threshold condition widened, newly letting a request
+    fall through into a pre-existing validation guard it previously never
+    reached). That is real evidence of a genuine, newly-introduced
+    production defect - the enclosing method's OWN behavior changed - even
+    though the throwing line itself never moved. Requires the ENTIRE
+    enclosing method body (not just the throwing line) to be identical
+    (whitespace-normalized) between baseline and current content.
+
+    Deliberately conservative both ways this can fail closed: if the
+    throwing line doesn't fall inside exactly one enclosing method in the
+    CURRENT content, or the current method's name doesn't resolve to
+    exactly one method in the BASELINE content (missing, renamed, or an
+    ambiguous overload - Java permits several same-named methods), this
+    returns False - "cannot identify deterministically" is treated the
+    same as "differs," never as "assume unchanged." Never guesses."""
+    current_methods = [m for m in _enumerate_java_methods(current_content) if m[1] <= throw_line <= m[2]]
+    if len(current_methods) != 1:
+        return False
+    method_name, _, _, current_body = current_methods[0]
+
+    baseline_methods = [m for m in _enumerate_java_methods(baseline_content) if m[0] == method_name]
+    if len(baseline_methods) != 1:
+        return False
+    _, _, _, baseline_body = baseline_methods[0]
+
+    return normalize_whitespace(baseline_body) == normalize_whitespace(current_body)
+
+
+def _attribute_test_fixture_precondition_failure(
+    failure: Failure,
+    known_files: List[str],
+    original_contents: Optional[Dict[str, str]],
+    file_content_provider: Optional[Callable[[str], Optional[str]]],
+) -> Optional[AttributionResult]:
+    """P1 production-validation (2026-09-04, spring-ignite-demo): a test's
+    own fixture/setup call threw from an EXISTING, unmodified production
+    guard the test never satisfied (EmployeeServiceTest mocked
+    DepartmentRepository but never stubbed existsById(), so
+    EmployeeService.hire() - called only to seed test data, not the method
+    under test - correctly threw IllegalArgumentException("Department
+    id=101 does not exist")). The plain locator tier attributed this to
+    EmployeeService.java (the throwing frame) and dispatched a bounded
+    cross-owner recovery there; no edit to hire() could ever satisfy a
+    missing mock stub in the test's own fixture, so the recovery
+    attempt exhausted its bounded budget by construction, not chance.
+
+    Two deterministic, already-available signals distinguish this shape
+    from a genuine production behavior violation (never a guess, never the
+    model's own semantic judgment as primary authority):
+
+    1. Call depth: the frame that threw is a known PRODUCTION file, and the
+       next KNOWN-file frame walking outward (skipping unmatched JDK/
+       reflection frames, which never appear in known_files) is a known
+       TEST file - i.e. the test called directly into this production
+       method with zero intervening production call depth. A genuine bug
+       reached through several layers of production code before surfacing
+       (the shape _attribute_from_locator's own docstring cites,
+       BufferUnderflowException deep inside a hand-rolled parser) never
+       matches this: its caller frame is another production file, not the
+       test itself.
+    2. Pre-existing, unmodified ENCLOSING METHOD (2026-09-05, strengthened
+       per review - see _unchanged_enclosing_java_method's own docstring):
+       state.all_original_contents (already populated the first time ANY
+       generation attempt in this run wrote that file -
+       kriya/workflow/attempt.py's "Read original file contents before
+       overwriting" step) gives the true pre-goal baseline. Line-level
+       comparison alone is insufficient - a throwing line can be
+       byte-identical to baseline while a DIFFERENT statement earlier in
+       the SAME method was modified by this generation, changing control
+       flow so execution now reaches that unchanged guard in a case it
+       never used to (a genuine, newly-introduced defect the throwing
+       line's own text would never reveal). This checks the ENTIRE
+       enclosing method body for equality (whitespace-normalized), not
+       just the one line. A throwing method that IS new/changed, or whose
+       boundaries can't be resolved unambiguously in either version, fails
+       this check and falls through to the ordinary locator tier - "cannot
+       identify deterministically" is treated the same as "differs," never
+       as "assume unchanged."
+
+    Both must hold. Only reachable for test/targeted_test/regression_test
+    failures (mirrors _exclude_test_files_for_junit_assertion_mismatch's own
+    type gate) and requires an unambiguous (exactly one) known-file match
+    for both frames - never guesses between two files sharing a basename.
+    Returns tier="locator" (this IS a precise file:line mechanism, just
+    resolved to the correct owner instead of the throwing frame) naming
+    ONLY the test file - the production file is never included, so no
+    caller can silently merge it back in."""
+    if failure.type not in ("test", "targeted_test", "regression_test"):
+        return None
+    if not original_contents or file_content_provider is None:
+        return None
+    raw_text = failure.raw_output or failure.message
+    frames = _parse_stack_frames(raw_text)
+    if len(frames) < 2:
+        return None
+    by_basename = _files_by_basename(known_files)
+
+    _, throw_basename, throw_line = frames[0]
+    throw_candidates = by_basename.get(throw_basename, [])
+    if len(throw_candidates) != 1:
+        return None
+    throw_file = throw_candidates[0]
+    if classify_file_role(throw_file) is FileRole.TEST:
+        return None
+
+    caller_file = None
+    for _, basename, _ in frames[1:]:
+        candidates = by_basename.get(basename, [])
+        if len(candidates) > 1:
+            return None
+        if len(candidates) == 1:
+            caller_file = candidates[0]
+            break
+    if caller_file is None or classify_file_role(caller_file) is not FileRole.TEST:
+        return None
+
+    baseline_content = original_contents.get(throw_file)
+    if baseline_content is None:
+        return None
+    current_content = file_content_provider(throw_file)
+    if current_content is None:
+        return None
+    if not _unchanged_enclosing_java_method(baseline_content, current_content, throw_line):
+        return None
+
+    return AttributionResult(
+        tier="locator", files=[caller_file], confidence="high",
+        reasoning=(
+            f"{throw_file}:{throw_line} threw from inside an unmodified, pre-existing "
+            f"production method (whole-method baseline comparison, not just the throwing "
+            f"line), called directly from {caller_file}'s own test method with no "
+            "intervening production call depth - a test fixture/precondition gap, not a "
+            "production behavior violation. Repair belongs to the test artifact."
+        ),
+    )
 
 
 def _attribute_from_judge_evidence(failure: Failure, known_files: List[str]) -> Optional[AttributionResult]:
@@ -816,6 +1037,7 @@ async def attribute_failure(
     file_content_provider: Callable[[str], Optional[str]],
     self_diagnosed_files: Optional[List[str]] = None,
     plan: Optional[EngineeringPlan] = None,
+    original_contents: Optional[Dict[str, str]] = None,
 ) -> AttributionResult:
     """The one entry point every retry site should call instead of
     independently re-deriving "which file". Always returns a result - the
@@ -829,6 +1051,14 @@ async def attribute_failure(
     grounding within MA6's structured subtask execution passes its
     EngineeringPlan here; every other, non-MA6 caller passes nothing and
     sees IDENTICAL behavior to before this parameter existed.
+
+    original_contents (2026-09-04, optional): state.all_original_contents -
+    the true pre-goal baseline content for every file this run has written,
+    whenever the caller has it. Unlocks the test-fixture-precondition check
+    (_attribute_test_fixture_precondition_failure, below) between the
+    locator tier and everything after it; a caller that omits it sees
+    IDENTICAL behavior to before this parameter existed, matching plan's
+    own opt-in convention above.
 
     self_diagnosed_files, when passed, MUST already be gated by the caller
     to only the case where the CURRENT failure is a confirmed repeat of the
@@ -902,6 +1132,19 @@ async def attribute_failure(
                 "from the preceding authoritative file:line locator."
             ),
         )
+
+    # Ahead of the plain locator: a real file:line match that names a
+    # production file is still only "where the failure surfaced," not
+    # necessarily "where the fix belongs" (this module's own PRV-11 tier-0
+    # precedent, above) - here checked deterministically rather than via
+    # self-diagnosis, since the evidence (call depth + baseline diff) is
+    # already available without a model call at all. See the function's own
+    # docstring for the live incident.
+    result = _attribute_test_fixture_precondition_failure(
+        failure, known_files, original_contents, file_content_provider,
+    )
+    if result:
+        return result
 
     result = _attribute_from_locator(failure, known_files)
     if result:

@@ -128,3 +128,108 @@ check real correctness - not `exec()` in-process. This is locally
 generated code from a local model on your own machine, the same trust
 boundary as running any other script in your own dev loop; not something
 that would be safe to do with untrusted/remote model output.
+
+## MTP (multi-token prediction) tag comparison - result and verdict (2026-09-04)
+
+**Question:** `qwen3.6:35b-a3b-mtp-q4_K_M` is a separately-tagged Ollama
+build of the same qwen3.6-35b-a3b model. Does its MTP/speculative-decoding
+support actually deliver a real speedup on this machine (M1 Max, Ollama
+0.33.2), and does it match the "~2x faster" claims circulating for MTP on
+Apple Silicon?
+
+**Setup:** `qwen3.6:35b-a3b-mtp-q4_K_M` added to `THINKING_MODELS` in
+`bench.py` (see that file's own comment block for the Modelfile evidence
+that motivated it - `PARAMETER draft_num_predict 2`, absent from the plain
+tag). Run via:
+```bash
+python3 bench.py qwen3.6:35b-a3b-q4_K_M qwen3.6:35b-a3b-mtp-q4_K_M
+```
+Result: `results/bench_20260904T051757Z.json`.
+
+**Blob structure (confirmed via `ollama show <tag> --modelfile` + `ls -lh`
+on the underlying blob files under `~/OllamaModels/blobs/`):** the plain
+tag is a single 22G blob (`FROM` line only). The `-mtp-` tag is a 20G main-
+model blob **plus a separate 861M blob**, passed to `llama-server` via
+`--mmproj` - not classic two-model speculative decoding with an
+independent draft LLM, but Ollama loading the model's own embedded MTP
+head as a draft context against the same target model (confirmed in
+`~/.ollama/logs/server.log`: `common_speculative_init_result: creating MTP
+draft context against the target model ...`, launch flags `--spec-type
+draft-mtp --spec-draft-n-max 2 --spec-draft-backend-sampling`).
+
+**MTP genuinely engaged** - this is not a case of the parameter being
+silently ignored. `~/.ollama/logs/server.log` (macOS Ollama.app) carries
+per-request telemetry:
+```
+grep -i "draft\|speculativ\|mtp" ~/.ollama/logs/server.log | tail -60
+```
+showed real draft-acceptance rates of 70-93% across the three prompts,
+mean accepted draft length ~2.4-3.0 tokens per cycle (max possible = 2
+drafted + 1 verified = 3, given `spec-draft-n-max=2`) - a genuinely good
+acceptance rate, not a misconfiguration.
+
+**Result: net SLOWER despite good acceptance**, matched pair by pair
+(`generation_tps`, straight from Ollama's own `eval_count`/`eval_duration`):
+
+| prompt | mode | plain tps | mtp tps | delta |
+|---|---|---|---|---|
+| short_fn | no_think | 62.3 | 72.1 | +15.7% |
+| short_fn | think | 60.9 | 49.9 | -18.1% |
+| medium_refactor | no_think | 61.8 | 56.2 | -9.1% |
+| medium_refactor | think | 60.5 | 46.1 | -23.8% |
+| longer_task | no_think | 61.7 | 49.3 | -20.1% |
+| longer_task | think | 57.5 | 44.6 | -22.4% |
+
+5 of 6 matched pairs slower under MTP; the one win is the shortest
+possible response (37 tokens), the least reliable data point. `ttft`
+showed no consistent MTP advantage either. One secondary, non-conclusive
+data point: `medium_refactor`/`no_think` was the only syntax failure among
+the no_think rows, on the MTP model - noted, not treated as proven (one
+sample, could be ordinary model variance or the `-mtp-` tag's own higher
+`presence_penalty` of 1.5 vs the plain tag's default).
+
+**Why this doesn't match the "MTP is ~2x faster on Apple Silicon" claims
+circulating online:** every one of those claims traces to
+[MTPLX](https://github.com/dbuck/mtplx) (and its predecessor
+[MTPLX](https://github.com/youssofal/MTPLX)) - an **MLX-native**
+implementation, not llama.cpp/GGUF (what Ollama runs). MTPLX's own README
+states the mechanism directly: "Small-M qmv retuning cuts the verify-MLP
+region by enough to be the difference between 'MTP loses to AR' and 'MTP
+at ~2.24x'" - i.e. without a custom Metal kernel specifically retuned for
+speculative decoding's small-batch (2-3 token) verify step, MTP loses to
+plain autoregressive decoding **even in MTPLX's own stack**. MTPLX adds
+that retuned kernel plus a separately-quantized 3/4-bit draft-only LM head
+(~29% faster draft step) and a compiled-graph cache to remove per-cycle
+Python dispatch overhead. Ollama's bundled `llama-server` uses generic
+llama.cpp Metal kernels, not kernels retuned for this specific shape - the
+mechanism (MTP draft+verify) is the same, the acceptance rate is
+genuinely good, but the backend implementation quality gap is large enough
+to erase the win and turn it slightly negative. Same model family
+(qwen3.6), same MTP mechanism, two very different runtimes.
+
+**Do any Ollama parameters fix this? No identified path.** The bottleneck
+is the kernel implementation itself, not configuration:
+- `draft_num_predict` (Modelfile PARAMETER -> `--spec-draft-n-max`) is the
+  only user-tunable knob Ollama exposes for this. Since the loss is driven
+  by per-cycle verify *cost*, not draft-depth/acceptance, increasing it
+  would very likely make things worse, not better. `draft_num_predict=1`
+  (shallowest draft) would be a cheap way to test whether the loss scales
+  down with draft depth as that theory predicts, but there's no reason to
+  expect it to flip net-positive.
+- `--spec-draft-backend-sampling` and the batch-size flags (`-b`/`-ub`)
+  are hardcoded by Ollama when it launches `llama-server` for this tag,
+  not exposed as Modelfile-tunable parameters.
+
+**Real path to the claimed 2x, if wanted:** run MTPLX (or the underlying
+converted MLX weights) directly on MLX instead of through Ollama - a
+genuinely different serving stack (separate install, separate OpenAI/
+Anthropic-compatible API layer, MLX-format converted weights), not a
+config change to the current Ollama setup. Out of scope for this pass;
+flagged as the actual next step if MTP speed is still wanted. See also
+`spikes/mlx_benchmark/` (this repo's own prior raw-MLX-runtime comparison,
+different question, same underlying hardware) for related prior art before
+starting that investigation from scratch.
+
+**Verdict for Kriya:** stay on `qwen3.6:35b-a3b-q4_K_M` (plain tag). The
+`-mtp-` tag is not a drop-in speed win on this Ollama/Apple-Silicon
+combination as tested.

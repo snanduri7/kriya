@@ -24,6 +24,7 @@ from kriya.workflow.obligations import ObligationKind, ObligationLedger, Obligat
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.static_checks import derive_stack_contract
+from kriya.workflow.workflow_controller import revise_plan_for_grounded_scope_owner
 
 
 def _plan(subtasks, **overrides):
@@ -44,6 +45,46 @@ async def test_valid_single_subtask_plan_passes(tmp_path):
     result = await validate_plan(plan, workspace_path=str(tmp_path))
     assert result.valid is True
     assert result.errors == []
+
+
+# --- Repair Guidance audit (2026-09-07, before P7) -------------------------
+# Three structural checks had error text but genuinely no reason code at
+# all - not merely unwired, invisible to the entire reason-code-based
+# repair-guidance system until this audit gave each its own code.
+
+@pytest.mark.asyncio
+async def test_duplicate_subtask_id_reports_dedicated_reason_code(tmp_path):
+    a = _model_subtask(id="s1", description="first")
+    b = _model_subtask(id="s1", description="second, same id")
+
+    result = await validate_plan(_plan([a, b]), workspace_path=str(tmp_path))
+
+    assert result.valid is False
+    assert "DUPLICATE_SUBTASK_ID" in result.reason_codes
+    assert any("duplicate subtask ids" in e for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_depends_on_unknown_id_reports_dedicated_reason_code(tmp_path):
+    a = _model_subtask(id="s1", description="depends on a subtask that does not exist", depends_on=["s99"])
+
+    result = await validate_plan(_plan([a]), workspace_path=str(tmp_path))
+
+    assert result.valid is False
+    assert "SUBTASK_DEPENDS_ON_UNKNOWN_ID" in result.reason_codes
+    assert any("depends_on unknown subtask id" in e for e in result.errors)
+
+
+@pytest.mark.asyncio
+async def test_dependency_cycle_reports_dedicated_reason_code(tmp_path):
+    a = _model_subtask(id="s1", description="first", depends_on=["s2"])
+    b = _model_subtask(id="s2", description="second", depends_on=["s1"])
+
+    result = await validate_plan(_plan([a, b]), workspace_path=str(tmp_path))
+
+    assert result.valid is False
+    assert "SUBTASK_DEPENDENCY_CYCLE" in result.reason_codes
+    assert any("cycle" in e for e in result.errors)
 
 
 @pytest.mark.asyncio
@@ -150,6 +191,143 @@ async def test_plan_validation_enforces_authoritative_stack_contract(tmp_path):
     assert "AUTHORITATIVE_STACK_SUBSTITUTION" in rejected.reason_codes
 
 
+# --- Verification prerequisite closure (PRV-17, 2026-09-03): a stack-
+# dependent TEST/APPLICATION_RUNTIME verification consumer needs its
+# language's dependency manifest established or ordered ahead of it. ---
+
+_DJANGO_CONTRACT = derive_stack_contract(
+    "Create a Python 3.12 Django application with a customers app and a /customers/health endpoint."
+)
+
+
+def _test_verification() -> VerificationMethod:
+    return VerificationMethod(type=VerificationMethodType.TOOL, description="run tests", tool_name="test")
+
+
+@pytest.mark.asyncio
+async def test_stack_dependent_verification_without_any_manifest_is_rejected(tmp_path):
+    """Negative plan: source files -> Django-dependent verification -> no
+    dependency-manifest/provider anywhere in the plan or the real
+    workspace - the exact live PRV-17 (Run 6) shape."""
+    scaffold = _model_subtask(
+        id="s1", description="scaffold",
+        planned_files=[
+            PlannedFile(path="manage.py", action=FileAction.CREATE),
+            PlannedFile(path="customers/views.py", action=FileAction.CREATE),
+        ],
+    )
+    tests = _model_subtask(
+        id="s2", description="test the customers app", depends_on=["s1"],
+        planned_files=[PlannedFile(path="customers/tests.py", action=FileAction.CREATE)],
+        verification=[_test_verification()],
+    )
+    result = await validate_plan(
+        _plan([scaffold, tests]), workspace_path=str(tmp_path), stack_contract=_DJANGO_CONTRACT,
+    )
+    assert result.valid is False
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" in result.reason_codes
+    assert "s2" in result.errors[0]
+
+
+@pytest.mark.asyncio
+async def test_stack_dependent_verification_with_prior_manifest_provider_passes(tmp_path):
+    """Positive plan: dependency manifest/provider -> source files ->
+    Django-dependent verification - the manifest-planning subtask is
+    ordered (via depends_on) strictly before the verification consumer."""
+    scaffold = _model_subtask(
+        id="s1", description="scaffold and declare dependencies",
+        planned_files=[
+            PlannedFile(path="manage.py", action=FileAction.CREATE),
+            PlannedFile(path="requirements.txt", action=FileAction.CREATE),
+        ],
+        provides=["project_scaffold"],
+    )
+    app = _model_subtask(
+        id="s2", description="implement the customers app", depends_on=["s1"], requires=["project_scaffold"],
+        planned_files=[PlannedFile(path="customers/views.py", action=FileAction.CREATE)],
+    )
+    tests = _model_subtask(
+        id="s3", description="test the customers app", depends_on=["s2"],
+        planned_files=[PlannedFile(path="customers/tests.py", action=FileAction.CREATE)],
+        verification=[_test_verification()],
+    )
+    result = await validate_plan(
+        _plan([scaffold, app, tests]), workspace_path=str(tmp_path), stack_contract=_DJANGO_CONTRACT,
+    )
+    assert result.valid is True
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_stack_dependent_verification_manifest_only_after_consumer_is_still_rejected(tmp_path):
+    """The Planner establishing the manifest is not enough on its own - it
+    must be CURRENT or PAST-ORDERED relative to the verification consumer.
+    A manifest planned by a subtask that only runs AFTER the test
+    consumer (FUTURE_ORDERED) does not satisfy the invariant - the
+    Planner must reorder it ahead, not merely include it somewhere."""
+    tests = _model_subtask(
+        id="s1", description="test the customers app",
+        planned_files=[
+            PlannedFile(path="manage.py", action=FileAction.CREATE),
+            PlannedFile(path="customers/tests.py", action=FileAction.CREATE),
+        ],
+        verification=[_test_verification()],
+    )
+    late_manifest = _model_subtask(
+        id="s2", description="declare dependencies too late", depends_on=["s1"],
+        planned_files=[PlannedFile(path="requirements.txt", action=FileAction.CREATE)],
+    )
+    result = await validate_plan(
+        _plan([tests, late_manifest]), workspace_path=str(tmp_path), stack_contract=_DJANGO_CONTRACT,
+    )
+    assert result.valid is False
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_stack_dependent_verification_satisfied_by_already_established_environment(tmp_path):
+    """An already-established environment dependency (a real requirements.txt
+    already present in the workspace - a brownfield project) satisfies the
+    invariant without any NEW planned manifest at all."""
+    (tmp_path / "requirements.txt").write_text("Django>=5.0\n")
+    tests = _model_subtask(
+        id="s1", description="test the customers app",
+        planned_files=[
+            PlannedFile(path="customers/views.py", action=FileAction.CREATE),
+            PlannedFile(path="customers/tests.py", action=FileAction.CREATE),
+        ],
+        verification=[_test_verification()],
+    )
+    result = await validate_plan(
+        _plan([tests]), workspace_path=str(tmp_path), stack_contract=_DJANGO_CONTRACT,
+    )
+    assert result.valid is True
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_ordinary_verification_with_no_named_framework_is_unaffected(tmp_path):
+    """A goal naming no external framework (StackContract.frameworks empty,
+    or no stack_contract supplied at all) never triggers this check -
+    ordinary tests for a plain script need no dependency manifest."""
+    plain_contract = derive_stack_contract("Write a Python calculator module with unit tests.")
+    assert plain_contract is not None and plain_contract.frameworks == ()
+    calc = _model_subtask(
+        id="s1", description="write and test a calculator",
+        planned_files=[
+            PlannedFile(path="calculator.py", action=FileAction.CREATE),
+            PlannedFile(path="test_calculator.py", action=FileAction.CREATE),
+        ],
+        verification=[_test_verification()],
+    )
+    with_contract = await validate_plan(
+        _plan([calc]), workspace_path=str(tmp_path), stack_contract=plain_contract,
+    )
+    assert with_contract.valid is True
+    without_contract = await validate_plan(_plan([calc]), workspace_path=str(tmp_path))
+    assert without_contract.valid is True
+
+
 def _planned_prerequisite_plan(*, artifact_requires, consumer_requires, consumer_depends_on):
     provider = _model_subtask(
         id="s1", description="provide test tooling", provides=["test_tooling"],
@@ -197,6 +375,161 @@ async def test_planned_artifact_prerequisite_provider_not_upstream_is_rejected(t
     result = await validate_plan(plan, workspace_path=str(tmp_path))
     assert result.valid is False
     assert "SEMANTIC_DEPENDENCY_EDGE_MISSING" in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_planned_artifact_prerequisite_self_satisfied_by_sole_provider_passes(tmp_path):
+    """A subtask whose own planned artifact requires_capabilities names a
+    capability THIS SAME subtask is the sole provider of needs no
+    `requires` edge - nothing to sequence, since the capability and its
+    consumer execute together in the same subtask's own generation pass.
+    Mirrors revise_plan_for_grounded_scope_owner()'s own merge predicate
+    (kriya/workflow/workflow_controller.py: "if item not in failed.provides")
+    - see the end-to-end merge test below for the live incident this closes."""
+    subtask = _model_subtask(
+        id="s1", provides=["employee_service_code"],
+        planned_files=[PlannedFile(
+            path="checks/behavior.spec", action=FileAction.CREATE,
+            requires_capabilities=["employee_service_code"],
+        )],
+    )
+    result = await validate_plan(_plan([subtask]), workspace_path=str(tmp_path))
+    assert result.valid is True, result.errors
+    assert "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_planned_artifact_prerequisite_ambiguous_provider_is_not_self_satisfied(tmp_path):
+    """The self-satisfaction exemption above must key off "this subtask is
+    the SOLE provider" (capability_providers[requirement] == [st.id]), not
+    a bare `requirement in st.provides` membership check - a capability
+    with two providers is already a separate, real ambiguity
+    (AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER) and must still ALSO be flagged
+    here when the declaring subtask never put it in its own `requires`."""
+    same_capability_elsewhere = _model_subtask(
+        id="s2", provides=["shared_capability"],
+    )
+    subtask = _model_subtask(
+        id="s1", provides=["shared_capability"],
+        planned_files=[PlannedFile(
+            path="checks/behavior.spec", action=FileAction.CREATE,
+            requires_capabilities=["shared_capability"],
+        )],
+    )
+    result = await validate_plan(
+        _plan([subtask, same_capability_elsewhere]), workspace_path=str(tmp_path),
+    )
+    assert result.valid is False
+    assert "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" in result.reason_codes
+    assert "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER" in result.reason_codes
+
+
+def _preserved_reference_plan(*, target_owned):
+    """PRV-11 preservation extension (2026-09-06, Production Validation
+    P2): s1's own planned artifact declares Production.java a preserved
+    reference. When target_owned is True, a second subtask also plans to
+    modify that same path - a genuine plan-authoring contradiction that
+    must be rejected, never silently resolved in favor of either claim."""
+    subtasks = [
+        _model_subtask(
+            id="s1", description="test file referencing an existing dependency",
+            planned_files=[PlannedFile(
+                path="Test.java", action=FileAction.CREATE,
+                preserved_references=["Production.java"],
+            )],
+        ),
+    ]
+    if target_owned:
+        subtasks.append(_model_subtask(
+            id="s2", description="also plans to modify the preserved target",
+            planned_files=[PlannedFile(path="Production.java", action=FileAction.CREATE)],
+        ))
+    return _plan(subtasks)
+
+
+@pytest.mark.asyncio
+async def test_preserved_reference_to_an_unowned_target_is_not_a_conflict(tmp_path):
+    plan = _preserved_reference_plan(target_owned=False)
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is True, result.errors
+    assert "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_preserved_reference_to_a_target_also_owned_for_modification_is_rejected(tmp_path):
+    plan = _preserved_reference_plan(target_owned=True)
+    result = await validate_plan(plan, workspace_path=str(tmp_path))
+    assert result.valid is False
+    assert "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP" in result.reason_codes
+
+
+def _p2_grounded_owner_merge_plan():
+    """The exact s1/s2/s3 shape from the P2 production-validation run
+    (spring-ignite-demo, 2026-09-05, run 20260905T050205Z's approved plan) -
+    s1 changes EmployeeService.giveRaise, s2 updates the existing test that
+    pins its old behavior, s3 is a dependent verification-only stage."""
+    s1 = _model_subtask(
+        id="s1", provides=["employee_service_code"],
+        planned_files=[PlannedFile(
+            path="src/main/java/com/example/ignite/service/EmployeeService.java",
+            action=FileAction.MODIFY,
+        )],
+    )
+    s2 = _model_subtask(
+        id="s2", depends_on=["s1"], requires=["employee_service_code"],
+        provides=["employee_service_tests"],
+        planned_files=[PlannedFile(
+            path="src/test/java/com/example/ignite/service/EmployeeServiceTest.java",
+            action=FileAction.MODIFY, requires_capabilities=["employee_service_code"],
+        )],
+    )
+    s3 = _model_subtask(
+        id="s3", depends_on=["s1", "s2"],
+        requires=["employee_service_code", "employee_service_tests"],
+    )
+    return _plan([s1, s2, s3])
+
+
+@pytest.mark.asyncio
+async def test_grounded_owner_merge_of_test_file_into_provider_subtask_revalidates(tmp_path):
+    """Real bug found live in the P2 production-validation run (2026-09-05):
+    s1's own full regression gate could never pass without updating s2's
+    existing pinned test, s1 had no write authority over it, and
+    revise_plan_for_grounded_scope_owner() correctly merged s2's sole
+    planned_file into s1 - but the moved PlannedFile still carried its
+    original requires_capabilities=["employee_service_code"], and the
+    merged s1.requires correctly DROPS that same capability once s1 is its
+    sole provider (revise_plan_for_grounded_scope_owner's own invariant),
+    so the OLD per-file check demanded an edge that could never exist.
+    The revised plan must validate cleanly - this is the actual gate the
+    live run hit, not just the isolated predicate above."""
+    (tmp_path / "src/main/java/com/example/ignite/service").mkdir(parents=True)
+    (tmp_path / "src/test/java/com/example/ignite/service").mkdir(parents=True)
+    (tmp_path / "src/main/java/com/example/ignite/service/EmployeeService.java").write_text(
+        "class EmployeeService {}\n"
+    )
+    (tmp_path / "src/test/java/com/example/ignite/service/EmployeeServiceTest.java").write_text(
+        "class EmployeeServiceTest {}\n"
+    )
+    plan = _p2_grounded_owner_merge_plan()
+
+    revised = revise_plan_for_grounded_scope_owner(
+        plan, "s1",
+        ["src/test/java/com/example/ignite/service/EmployeeServiceTest.java"],
+        str(tmp_path),
+    )
+
+    assert revised.subtask_by_id("s2") is None
+    s1 = revised.subtask_by_id("s1")
+    assert sorted(pf.path for pf in s1.planned_files) == [
+        "src/main/java/com/example/ignite/service/EmployeeService.java",
+        "src/test/java/com/example/ignite/service/EmployeeServiceTest.java",
+    ]
+    assert revised.subtask_by_id("s3").depends_on == ["s1"]
+
+    result = await validate_plan(revised, workspace_path=str(tmp_path))
+    assert result.valid is True, result.errors
+    assert "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED" not in result.reason_codes
 
 
 @pytest.mark.asyncio
@@ -1329,3 +1662,218 @@ async def test_canonicalize_then_validate_plan_closes_run10_incident_without_rep
     assert ledger.current(
         "plan.file.src/test/java/com/example/JsonServiceTest.java.action_consistency"
     ).status == ObligationStatus.SATISFIED
+
+
+# --- SUBTASK_SEMANTIC_CONTRACT obligation recording (PRV-17, 2026-09-07,
+# Production Validation P7) - the deterministic source layer behind the
+# repair-loop's requires/provides regression guard (workflow_controller.py's
+# _semantic_contract_must_preserve_lines / _semantic_contract_regression_
+# subtasks). validate_plan()'s own requires/provides correctness checks
+# (SUBTASK_REQUIREMENT_UNPROVIDED, SEMANTIC_DEPENDENCY_EDGE_MISSING,
+# AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER) already computed this fact every
+# round and simply never recorded it - these tests exercise the REAL
+# validate_plan() pipeline, not a hand-built ledger, the same discipline
+# test_run8_* above already established. ---
+
+def _requires_provides_plan(s3_requires):
+    s2 = _model_subtask(
+        id="s2", provides=["cap_a"],
+        planned_files=[PlannedFile(path="src/main/Producer.java", action=FileAction.CREATE)],
+    )
+    s3 = _model_subtask(
+        id="s3", depends_on=["s2"], requires=s3_requires,
+        planned_files=[PlannedFile(path="src/main/Consumer.java", action=FileAction.CREATE)],
+    )
+    return _plan([s2, s3])
+
+
+@pytest.mark.asyncio
+async def test_correctly_wired_requires_records_satisfied(tmp_path):
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        _requires_provides_plan(["cap_a"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    assert result.valid, result.errors
+    rec = ledger.current("plan.subtask.s3.requires.cap_a")
+    assert rec.status == ObligationStatus.SATISFIED
+    assert rec.evidence["relation"] == "requires"
+    assert rec.evidence["subtask_id"] == "s3"
+    assert rec.owner_subtask_id == "s3"
+
+
+@pytest.mark.asyncio
+async def test_unprovided_requirement_records_violated(tmp_path):
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        _requires_provides_plan(["cap_ghost"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    assert not result.valid
+    assert "SUBTASK_REQUIREMENT_UNPROVIDED" in result.reason_codes
+    assert ledger.current(
+        "plan.subtask.s3.requires.cap_ghost"
+    ).status == ObligationStatus.VIOLATED
+
+
+@pytest.mark.asyncio
+async def test_missing_depends_on_edge_records_violated(tmp_path):
+    s2 = _model_subtask(
+        id="s2", provides=["cap_a"],
+        planned_files=[PlannedFile(path="src/main/Producer.java", action=FileAction.CREATE)],
+    )
+    s3 = _model_subtask(
+        id="s3", requires=["cap_a"],  # no depends_on=["s2"]
+        planned_files=[PlannedFile(path="src/main/Consumer.java", action=FileAction.CREATE)],
+    )
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        _plan([s2, s3]), workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+    assert not result.valid
+    assert "SEMANTIC_DEPENDENCY_EDGE_MISSING" in result.reason_codes
+    assert ledger.current(
+        "plan.subtask.s3.requires.cap_a"
+    ).status == ObligationStatus.VIOLATED
+
+
+@pytest.mark.asyncio
+async def test_unambiguous_provides_records_satisfied(tmp_path):
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        _requires_provides_plan(["cap_a"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    assert result.valid, result.errors
+    rec = ledger.current("plan.capability.cap_a.provider")
+    assert rec.status == ObligationStatus.SATISFIED
+    assert rec.evidence["relation"] == "provides"
+    assert rec.evidence["subtask_id"] == "s2"
+    assert rec.owner_subtask_id == "s2"
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_provides_records_violated_with_no_single_owner(tmp_path):
+    s2a = _model_subtask(
+        id="s2a", provides=["cap_a"],
+        planned_files=[PlannedFile(path="src/main/ProducerA.java", action=FileAction.CREATE)],
+    )
+    s2b = _model_subtask(
+        id="s2b", provides=["cap_a"],
+        planned_files=[PlannedFile(path="src/main/ProducerB.java", action=FileAction.CREATE)],
+    )
+    ledger = ObligationLedger()
+    result = await validate_plan(
+        _plan([s2a, s2b]), workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+    assert not result.valid
+    assert "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER" in result.reason_codes
+    rec = ledger.current("plan.capability.cap_a.provider")
+    assert rec.status == ObligationStatus.VIOLATED
+    assert rec.owner_subtask_id is None
+
+
+@pytest.mark.asyncio
+async def test_requirement_silently_dropped_between_revisions_is_recorded_violated(tmp_path):
+    """The exact P7 defect: revision 0 correctly validates s3.requires=
+    ['cap_a']; revision 1's plan silently drops it to [] while fixing
+    something unrelated. The per-entry requires loop never iterates an
+    empty list, so nothing would flag this without the closing post-pass -
+    this proves that post-pass fires and produces a real regression
+    event, the same primitive ObligationLedger.record() already uses for
+    every other same-authority SATISFIED->VIOLATED transition."""
+    ledger = ObligationLedger()
+    await validate_plan(
+        _requires_provides_plan(["cap_a"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    assert ledger.current("plan.subtask.s3.requires.cap_a").status == ObligationStatus.SATISFIED
+    before = len(ledger.regressions)
+
+    await validate_plan(
+        _requires_provides_plan([]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=1,
+    )
+
+    rec = ledger.current("plan.subtask.s3.requires.cap_a")
+    assert rec.status == ObligationStatus.VIOLATED
+    assert rec.evidence.get("dropped_between_revisions") is True
+    assert rec.evidence.get("subtask_id") == "s3"
+    new_regressions = ledger.regressions[before:]
+    assert any(r.obligation_id == "plan.subtask.s3.requires.cap_a" for r in new_regressions)
+
+
+@pytest.mark.asyncio
+async def test_requirement_still_present_is_not_spuriously_flagged_as_dropped(tmp_path):
+    """Sanity counterpart to the drop test above: re-validating the SAME
+    unchanged plan across two revisions must never spuriously regress the
+    still-present requirement (the post-pass's own `pair in
+    current_requires_pairs` skip)."""
+    ledger = ObligationLedger()
+    await validate_plan(
+        _requires_provides_plan(["cap_a"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    before = len(ledger.regressions)
+    result = await validate_plan(
+        _requires_provides_plan(["cap_a"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=1,
+    )
+    assert result.valid, result.errors
+    assert ledger.current("plan.subtask.s3.requires.cap_a").status == ObligationStatus.SATISFIED
+    assert ledger.regressions[before:] == []
+
+
+@pytest.mark.asyncio
+async def test_capability_silently_dropped_from_every_provides_is_recorded_violated(tmp_path):
+    """Provides-side counterpart to the requires drop test: revision 0
+    correctly validates cap_a provided by s2; revision 1's plan drops
+    cap_a from EVERY subtask's provides entirely (not just made
+    ambiguous) - must be recorded VIOLATED, preserving the last known
+    owner (s2) in evidence/owner_subtask_id, not nulled out the way a
+    genuinely ambiguous capability correctly is."""
+    ledger = ObligationLedger()
+    await validate_plan(
+        _requires_provides_plan(["cap_a"]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=0,
+    )
+    before = len(ledger.regressions)
+
+    s2_no_longer_provides = _model_subtask(
+        id="s2", planned_files=[PlannedFile(path="src/main/Producer.java", action=FileAction.CREATE)],
+    )
+    s3_no_requires = _model_subtask(
+        id="s3", depends_on=["s2"],
+        planned_files=[PlannedFile(path="src/main/Consumer.java", action=FileAction.CREATE)],
+    )
+    await validate_plan(
+        _plan([s2_no_longer_provides, s3_no_requires]), workspace_path=str(tmp_path),
+        obligation_ledger=ledger, revision=1,
+    )
+
+    rec = ledger.current("plan.capability.cap_a.provider")
+    assert rec.status == ObligationStatus.VIOLATED
+    assert rec.evidence.get("dropped_between_revisions") is True
+    assert rec.owner_subtask_id == "s2"
+    new_regressions = ledger.regressions[before:]
+    assert any(r.obligation_id == "plan.capability.cap_a.provider" for r in new_regressions)
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_capability_error_text_names_every_provider_subtask(tmp_path):
+    """AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER's error text must explicitly
+    name every contending subtask via the `subtask(s) [...]` convention -
+    the repair loop's own _subtask_ids_mentioned() exemption (workflow_
+    controller.py) depends on this to recognize a targeted provides fix as
+    legitimately implicated, not an unrelated silent regression."""
+    s2a = _model_subtask(
+        id="s2a", provides=["cap_a"],
+        planned_files=[PlannedFile(path="src/main/ProducerA.java", action=FileAction.CREATE)],
+    )
+    s2b = _model_subtask(
+        id="s2b", provides=["cap_a"],
+        planned_files=[PlannedFile(path="src/main/ProducerB.java", action=FileAction.CREATE)],
+    )
+    result = await validate_plan(_plan([s2a, s2b]), workspace_path=str(tmp_path))
+    error_text = " ".join(result.errors)
+    assert "subtask(s) ['s2a', 's2b']" in error_text or "subtask(s) ['s2b', 's2a']" in error_text

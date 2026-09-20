@@ -109,6 +109,15 @@ class Failure:
     reported NO CHANGE NEEDED for every scoped file; its likely_files contains
     any different known file named by the same response's FIX ANALYSIS, or is
     empty to force a full-set widening without rerunning an unchanged target),
+    "test_obligation_not_preserved" (2026-09-20: a planned-but-nonexistent test
+    artifact was redirected onto an already-existing owner file - see
+    kriya/workflow/file_resolution.py::identify_redirected_test_obligations() -
+    and the Developer reported bare NO CHANGE NEEDED for that owner on an
+    attempt where it was never previously written; a file/semantic-similarity
+    redirect must never by itself discharge the acceptance obligation the
+    goal's own test-coverage intent created. Fires on every attempt mode, not
+    only targeted/fallback_targeted; see kriya/workflow/attempt.py's own
+    run_attempt() for the exact check),
     "unaddressed_error_location" (an edit applied cleanly - no anchor-match
     failure - but its own search block spanned the exact line a prior
     compile error reported, then left that line byte-identical in its

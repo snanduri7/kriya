@@ -10,6 +10,8 @@ effects and zero new dependencies beyond kriya.workflow.triage and
 kriya.workflow.process_profile's own existing domain types.
 """
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Mapping, Optional, Tuple
@@ -55,6 +57,127 @@ class ActionType(str, Enum):
     GIT_WRITE = "git_write"
 
     PUBLISH_ARTIFACT = "publish_artifact"
+
+    # TOOL-002 P1: an MCP `tools/call` - see MCPToolIdentity below for the
+    # structured identity this ActionType's own ExecutionPolicy stage binds
+    # to. Deliberately its own ActionType, never folded into RUN_COMMAND or
+    # any existing value - an MCP tool call is neither Kriya-authored
+    # (RUN_COMMAND's own implicit trust assumption for its allowlisted
+    # prefixes) nor semantically classifiable in advance the way the other
+    # ActionTypes are (see docs/assurance/KRIYA_PRODUCTION_RISK_REGISTER.md's
+    # TOOL-002/TOOL-003 investigation entry for the full "opaque schema"
+    # analysis behind this decision).
+    MCP_TOOL_CALL = "mcp_tool_call"
+
+
+@dataclass(frozen=True)
+class MCPToolIdentity:
+    """TOOL-002 P1 - the minimum Kriya-owned, structured identity needed to
+    distinguish one MCP tool from another for an authority decision. Bound
+    to at MCPTool construction time (kriya/mcp/mcp.py) and carried through
+    ExecutionPolicy.evaluate() via ActionRequest.metadata (this dataclass's
+    own instances, never a flattened string) - never re-derived from a
+    collision-prone display name.
+
+    Deliberately excludes the tool's `description` (Invariant: MCP
+    metadata may describe an operation but may not authorize it - a
+    server cannot change what it is by changing how it explains itself)
+    and excludes tool ANNOTATIONS/result text entirely (never inputs to an
+    authority decision at all). `schema_digest` participates in identity
+    specifically so a schema change - which can silently change what
+    arguments a tool actually accepts/does - invalidates whatever a prior
+    evaluation assumed about this tool, without needing any broader
+    cryptographic machinery (a plain SHA-256 over a canonicalized JSON
+    Schema is sufficient for this - the threat model here is "detect
+    drift/redirection deterministically," not "prevent a nation-state
+    forgery," so nothing stronger is warranted).
+
+    `server_identity` is the trusted `mcp.<server_name>` config key (itself
+    SEC-009 SECURITY_AUTHORITY-governed) - untrusted content (the MCP
+    server's own advertised `tool_meta['name']`/schema) can never influence
+    THIS field, only `tool_name`/`schema_digest`. Frozen and hashable by
+    construction (all three fields are plain strings) so it can be used
+    directly as a set member (see ExecutionPolicy.__init__'s
+    approved_mcp_tool_identities parameter) and as an ActionRequest.metadata
+    value without any extra wrapping."""
+
+    server_identity: str
+    tool_name: str
+    schema_digest: str
+
+
+@dataclass(frozen=True)
+class MCPCapabilityProfileIdentity:
+    """TOOL-003 P1 - a lightweight, strings-only identity carrying a
+    resolved MCP server's capability-profile digest into policy/audit
+    context (ActionRequest.metadata, telemetry), WITHOUT this module
+    importing anything from kriya/mcp/ - the actual `MCPCapabilityProfile`
+    dataclass and its digest function live in kriya/mcp/capability.py
+    (a HIGHER layer than kriya/policy/, which mcp/ already depends on -
+    see that module's own docstring); this type only carries the two
+    plain strings a policy/telemetry consumer needs, preserving the
+    existing one-directional kriya.mcp -> kriya.policy dependency exactly
+    like MCPToolIdentity above.
+
+    Deliberately DISTINCT from TOOL-002's own invocation-authority
+    decision: capability-profile identity is exposed here for AUDIT
+    CONTEXT ONLY (Task 10's "extend TOOL-002 policy metadata/telemetry
+    only enough to expose the MCP server's capability-profile identity" -
+    "Do not let TOOL-002 independently reinterpret the profile"). Nothing
+    in kriya/policy/execution.py's `_check_mcp_invocation` stage reads or
+    reasons about this identity's value at all - a capability-profile
+    approval (SEC-009, config-time) is never invocation approval (TOOL-002,
+    per-call), and this type does not blur that line. See CLAUDE.md's
+    TOOL-003 P1 section and kriya/mcp/capability.py's module docstring."""
+
+    server_identity: str
+    profile_digest: str
+
+
+@dataclass(frozen=True)
+class MCPContainmentIdentity:
+    """TOOL-002 P2 (Task 12) - audit-only containment-state facts carried
+    alongside an MCP_TOOL_CALL decision so telemetry can show whether
+    TOOL-003 containment assurance actually applies to an ALLOWed call.
+    Exactly like MCPCapabilityProfileIdentity above, this is exposed for
+    AUDIT CONTEXT ONLY - `_check_mcp_invocation` never reads or reasons
+    about these values; containment is decided entirely and independently
+    at MCPClient start time (kriya/mcp/mcp.py's TOOL-003 P2 section), long
+    before any invocation-approval decision runs. A valid invocation
+    approval can never widen this, and this can never widen an invocation
+    approval - the two stay structurally separate."""
+
+    required: bool
+    active: bool
+    backend: Optional[str]
+
+
+def compute_mcp_schema_digest(schema: Any) -> str:
+    """TOOL-002 P1 - canonicalizes an MCP tool's JSON Schema (inputSchema)
+    before hashing, so semantically-identical schemas produce the same
+    digest regardless of key order, and so no `description` text (at any
+    nesting depth - JSON Schema permits a `description` alongside
+    `properties`/`items`/etc. at any level, not just the top level)
+    contributes to the digest - Invariant: authority identity never
+    includes description text, structural shape only. A plain SHA-256 over
+    a deterministically-sorted, whitespace-free JSON serialization -
+    deliberately no broader cryptographic machinery (signatures, HMACs)
+    since the threat model this identity binding defends against is
+    accidental/adversarial IDENTITY DRIFT (Phase 4/12/13/14 of the
+    TOOL-002/003 investigation), not forgery of a digest Kriya itself
+    always computes locally from data it already received directly over
+    the same stdio connection - there is no untrusted digest input to
+    forge against."""
+
+    def _strip_descriptions(node: Any) -> Any:
+        if isinstance(node, dict):
+            return {k: _strip_descriptions(v) for k, v in node.items() if k != "description"}
+        if isinstance(node, list):
+            return [_strip_descriptions(v) for v in node]
+        return node
+
+    canonical = json.dumps(_strip_descriptions(schema), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True)

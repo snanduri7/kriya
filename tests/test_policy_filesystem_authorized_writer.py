@@ -18,7 +18,7 @@ from kriya.policy.filesystem import (
     is_within_scope,
     make_workspace_scope,
 )
-from kriya.policy.model import PolicyDecision
+from kriya.policy.model import PolicyDecision, PolicyResult
 from kriya.workflow.edit_safety import StagedFileWrite, content_revision
 
 
@@ -173,6 +173,58 @@ def test_authorize_allows_file_inside_validated_subtask_scope(workspace):
     assert result.decision != PolicyDecision.DENY
 
 
+# --- Path canonicalization (PRV-17, 2026-09-03): a live run planned
+# "customers_project/" (trailing slash) as an allowed relpath, then the
+# Developer's own generated target for the same directory came back as
+# "customers_project" (no trailing slash, as any real file report would) -
+# a raw string comparison treated the two as different targets and denied a
+# write that was, in fact, authorized. normalize_workspace_relpath() (kriya/
+# policy/filesystem.py) is the fix; these prove AuthorizedFileWriter's own
+# comparison (already normpath-based before this fix) holds for every shape
+# named in the incident, without accidentally loosening real containment. ---
+
+def test_authorize_treats_trailing_slash_allowlist_entry_as_same_identity_as_bare_name(workspace):
+    writer = AuthorizedFileWriter(
+        workspace, allowed_relpaths=["customers_project/"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    result = writer.authorize(os.path.join(workspace, "customers_project"))
+    assert result.decision != PolicyDecision.DENY
+
+
+def test_authorize_trailing_slash_allowlist_entry_does_not_grant_directory_containment(workspace):
+    """The trailing-slash normalization above is pure STRING identity, not a
+    directory-prefix grant - "customers_project/" in the allowlist still only
+    authorizes the literal "customers_project" path, never every file nested
+    under it. Confirms the fix didn't widen ALLOWLIST semantics from
+    exact-match to directory containment."""
+    writer = AuthorizedFileWriter(
+        workspace, allowed_relpaths=["customers_project/"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    result = writer.authorize(os.path.join(workspace, "customers_project", "manage.py"))
+    assert result.decision == PolicyDecision.DENY
+    assert result.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
+
+
+def test_authorize_dot_slash_prefixed_allowlist_entry_normalizes_safely(workspace):
+    writer = AuthorizedFileWriter(
+        workspace, allowed_relpaths=["./customers_project/manage.py"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    result = writer.authorize(os.path.join(workspace, "customers_project", "manage.py"))
+    assert result.decision != PolicyDecision.DENY
+
+
+def test_authorize_relative_traversal_target_cannot_collide_with_an_unrelated_allowlisted_file(workspace):
+    """Normalization must never let a target spelled with a traversal
+    segment ("a/../b.py") resolve to, and thereby collide with, a
+    completely different allowlisted path ("a.py") living beside it."""
+    writer = AuthorizedFileWriter(
+        workspace, allowed_relpaths=["a.py"], write_scope_mode=WriteScopeMode.ALLOWLIST,
+    )
+    result = writer.authorize(os.path.join(workspace, "a", "..", "b.py"))
+    assert result.decision == PolicyDecision.DENY
+    assert result.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
+
+
 def test_commit_batch_raises_and_writes_nothing_when_the_goal_source_file_is_targeted(workspace):
     writer = AuthorizedFileWriter(workspace, protected_relpaths=["goal.md"])
     target = os.path.join(workspace, "goal.md")
@@ -323,3 +375,47 @@ def test_commit_batch_raises_and_writes_nothing_when_one_target_is_denied(worksp
     with pytest.raises(PolicyDeniedError):
         writer.commit_batch(writes)
     assert not os.path.exists(good_target)
+
+
+# --- POL-001: fail-closed on REQUIRE_APPROVAL, not just DENY ---
+# No real path through authorize() can produce REQUIRE_APPROVAL today (it
+# never sets process_profile/engineering_route on the ActionRequest it
+# builds, and ExecutionPolicy._check_filesystem never emits REQUIRE_APPROVAL
+# for WRITE_FILE) - these tests force the verdict via a monkeypatched
+# evaluate() to prove _raise_if_denied's own fail-closed behavior in
+# isolation, independent of whether any real caller can reach it today.
+
+def test_raise_if_denied_fails_closed_on_require_approval(workspace):
+    writer = AuthorizedFileWriter(workspace)
+    target = os.path.join(workspace, "app.py")
+    writer._execution_policy.evaluate = lambda request: PolicyResult(
+        decision=PolicyDecision.REQUIRE_APPROVAL,
+        reason_code="TEST_FORCED_REQUIRE_APPROVAL",
+        explanation="forced for test",
+    )
+    with pytest.raises(PolicyDeniedError) as exc_info:
+        writer._raise_if_denied(target)
+    assert exc_info.value.result.decision == PolicyDecision.REQUIRE_APPROVAL
+
+
+def test_commit_file_raises_and_writes_nothing_when_forced_require_approval(workspace):
+    writer = AuthorizedFileWriter(workspace)
+    target = os.path.join(workspace, "app.py")
+    writer._execution_policy.evaluate = lambda request: PolicyResult(
+        decision=PolicyDecision.REQUIRE_APPROVAL,
+        reason_code="TEST_FORCED_REQUIRE_APPROVAL",
+        explanation="forced for test",
+    )
+    with pytest.raises(PolicyDeniedError):
+        writer.commit_file(target, "content", expected_revision=content_revision(""))
+    assert not os.path.exists(target)
+
+
+def test_raise_if_denied_still_passes_allow_and_allow_sandboxed(workspace):
+    writer = AuthorizedFileWriter(workspace)
+    target = os.path.join(workspace, "app.py")
+    for decision in (PolicyDecision.ALLOW, PolicyDecision.ALLOW_SANDBOXED):
+        writer._execution_policy.evaluate = lambda request, d=decision: PolicyResult(
+            decision=d, reason_code="X", explanation="ok",
+        )
+        writer._raise_if_denied(target)  # must not raise

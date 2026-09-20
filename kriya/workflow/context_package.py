@@ -53,7 +53,17 @@ class ContextItem:
     provenance (why it's here - section 26's own vocabulary, see
     CONTEXT_SOURCE_TYPES below) and trust metadata (kriya/policy/trust.py's
     TrustLevel, stored by its string value so this stays a plain,
-    JSON-serializable snapshot)."""
+    JSON-serializable snapshot).
+
+    CTX-001 P1 (WP3): the fields below `content_hash` are an ADDITIVE
+    extension - every one is optional/defaulted, so every pre-P1
+    construction site (context_orchestrator.py, every existing test) keeps
+    constructing a valid ContextItem completely unchanged. They let a unit
+    address a MEMBER within a file (not just the whole file), record which
+    representation tier it was rendered at, whether that representation is
+    exact or lossy, and the real source revision it was cut from - see
+    docs/assurance/CTX_001_P1_ARCHITECTURE.md section 4 for the full design
+    rationale (tier vocabulary reconciliation, etc.)."""
 
     path: str
     content: str
@@ -64,6 +74,23 @@ class ContextItem:
     score: Optional[float] = None
     content_hash: str = ""
 
+    # --- CTX-001 P1 WP3: additive, all optional/defaulted ---
+    type_id: Optional[str] = None          # e.g. "StandardInvoiceCalculator" - None for a whole-file unit
+    member_id: Optional[str] = None        # e.g. "calculate_total" - None for a type- or file-level unit
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
+    # Reuses context_budget.py's existing "full"/"skeleton"/"signatures"
+    # tier vocabulary, plus "member_exact" (a member-level unit shown in
+    # full, never elided). A bounded head+tail excerpt (context_projection.
+    # py's own FileProjection mechanism) maps onto "skeleton" with
+    # omitted_regions=True, per the architecture doc's own compatibility
+    # rule - distinguishable from a real structural skeleton only via
+    # `reason` (free text), not a dedicated tier value.
+    tier: str = "full"
+    is_exact: bool = True                  # False whenever tier != "full"/"member_exact", or the unit is a bounded excerpt
+    revision: str = ""                     # content_revision() of the file this unit was cut from, at read time
+    omitted_regions: bool = False          # True when this unit's own content is itself a bounded/degraded excerpt
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "path": self.path,
@@ -73,6 +100,14 @@ class ContextItem:
             "source_type": self.source_type,
             "trust_level": self.trust_level,
             "content_hash": self.content_hash,
+            "type_id": self.type_id,
+            "member_id": self.member_id,
+            "start_line": self.start_line,
+            "end_line": self.end_line,
+            "tier": self.tier,
+            "is_exact": self.is_exact,
+            "revision": self.revision,
+            "omitted_regions": self.omitted_regions,
         }
 
     @classmethod
@@ -81,6 +116,14 @@ class ContextItem:
             path=data["path"], content=data["content"], reason=data["reason"],
             source_type=data["source_type"], trust_level=data["trust_level"],
             score=data.get("score"), content_hash=data.get("content_hash", ""),
+            # .get(..., default) throughout: a pre-P1 serialized package (no
+            # WP3 keys at all) must still load correctly - the exact
+            # LEGACY_COMPATIBILITY requirement, not just construction-site
+            # compatibility.
+            type_id=data.get("type_id"), member_id=data.get("member_id"),
+            start_line=data.get("start_line"), end_line=data.get("end_line"),
+            tier=data.get("tier", "full"), is_exact=data.get("is_exact", True),
+            revision=data.get("revision", ""), omitted_regions=data.get("omitted_regions", False),
         )
 
 
@@ -103,23 +146,41 @@ CONTEXT_SOURCE_TYPES: Tuple[str, ...] = (
 def make_context_item(
     path: str, content: str, reason: str, source_type: str,
     trust_level: Union[str, TrustLevel], score: Optional[float] = None,
+    *,
+    type_id: Optional[str] = None, member_id: Optional[str] = None,
+    start_line: Optional[int] = None, end_line: Optional[int] = None,
+    tier: str = "full", is_exact: bool = True, revision: str = "",
+    omitted_regions: bool = False,
 ) -> ContextItem:
     """The one real constructor path - computes content_hash automatically
     so a caller can never hand-construct a ContextItem with a hash that
-    doesn't actually match its content."""
+    doesn't actually match its content. CTX-001 P1 WP3: the new fields are
+    keyword-only and all optional/defaulted, so every pre-P1 call site
+    (positional or keyword) keeps working unchanged."""
 
     return ContextItem(
         path=path, content=content, reason=reason, source_type=source_type,
         trust_level=_trust_level_str(trust_level), score=score, content_hash=_content_hash(content),
+        type_id=type_id, member_id=member_id, start_line=start_line, end_line=end_line,
+        tier=tier, is_exact=is_exact, revision=revision, omitted_regions=omitted_regions,
     )
 
 
-def make_omitted_entry(path: str, rank: int, reason: str, estimated_tokens: int) -> Dict[str, Any]:
+def make_omitted_entry(
+    path: str, rank: int, reason: str, estimated_tokens: int,
+    *, member_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """section 27: every omitted entry carries path/rank/reason/
     estimated_tokens - never a silent truncation with no record of what
-    was cut or why."""
+    was cut or why. CTX-001 P1 WP3: member_id (optional, keyword-only)
+    distinguishes a member-scoped omission from a whole-file one, mirroring
+    ContextItem's own member_id extension - omitted only when the entry is
+    for a member-level candidate, never inferred."""
 
-    return {"path": path, "rank": rank, "reason": reason, "estimated_tokens": estimated_tokens}
+    entry = {"path": path, "rank": rank, "reason": reason, "estimated_tokens": estimated_tokens}
+    if member_id is not None:
+        entry["member_id"] = member_id
+    return entry
 
 
 def contract_entry_from_record(record: ContractRecord) -> Dict[str, Any]:

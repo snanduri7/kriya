@@ -141,8 +141,96 @@ class ObligationKind(str, Enum):
     regression check either passes for real (obligation settled
     SATISFIED) or fails for real against the now-responsible owner's own
     ordinary retry loop (settled VIOLATED, recovered through the existing
-    machinery, not a new one)."""
+    machinery, not a new one).
 
+    RUNTIME_PLAN_GAP (PRV-17 Run 13, 2026-09-04): a live incident where a
+    validated 5-subtask Django plan never once declared myproject/wsgi.py,
+    because nothing in the plan schema forces a Planner to notice that a
+    file it DID plan (myproject/settings.py) inherently references a
+    sibling module by framework convention. Managed-service verification
+    (s5, write scope empty by design) failed deterministically with
+    ModuleNotFoundError: No module named 'myproject.wsgi' - real runtime
+    evidence, but of an artifact NO subtask owns, existing NOWHERE in the
+    approved plan or on disk. Every existing recovery mechanism in this
+    module family (CROSS_OWNER_ARTIFACT_REQUIREMENT, FUTURE_OWNER_
+    VERIFICATION, revise_plan_for_planned_prerequisite/revise_plan_for_
+    grounded_scope_owner in workflow_controller.py) presupposes an owner
+    that already exists somewhere in the plan or a target that already
+    exists on disk - none can legally introduce a genuinely NEW planned
+    artifact. This kind exists so that narrow gap - execution proves the
+    plan itself is incomplete, but nothing may convert that proof into new
+    write authority except a validated plan revision - is tracked exactly
+    like PLAN_STRUCTURAL_VALIDITY already tracks repair-attempt bounds:
+    at most 2 revision attempts per (failing subtask, missing logical
+    artifact) fingerprint before this obligation is recorded VIOLATED and
+    the run fails closed, never silently retried forever. The invariant
+    this kind exists to enforce, verbatim: 'Execution evidence may prove
+    that the plan is incomplete; only a validated plan revision may
+    convert that evidence into new write authority.'
+
+    PRESERVED_REFERENCE (PRV-11, 2026-09-06/07, Production Validation P2):
+    the counterpart to RUNTIME_PLAN_GAP - that kind exists because
+    execution can prove a real artifact is missing from the plan; this one
+    exists because a Planner-declared PlannedFile.preserved_references
+    entry (kriya/workflow/plan_schema.py) is itself only a claim of
+    intent, made before any subtask has executed. workflow_controller.
+    find_missing_grounded_production_artifacts records one of these,
+    SATISFIED, with the target's real pre-generation content hash as
+    evidence, the moment a declared preservation is accepted (grounded
+    structural edge, target genuinely unowned) - never when merely
+    declared, since an invented declaration naming no real edge is inert
+    and records nothing. The terminal sweep re-hashes every currently-
+    SATISFIED record of this kind against the final, fully-applied
+    workspace and re-records VIOLATED on any mismatch - a same-authority
+    (DETERMINISTIC) SATISFIED->VIOLATED transition, so it is picked up by
+    both this ledger's own regression detection AND unresolved_terminal_
+    obligations()'s generic MA8 §42/43 backstop with no new gate wired by
+    hand. Deliberately DETERMINISTIC, never GROUNDED/JUDGMENT: byte
+    identity is a hard fact, not an interpretation - a target that
+    genuinely needed changing to satisfy the goal is a PLANNED_FILE
+    ownership conflict at validation time (PRESERVED_REFERENCE_CONFLICTS_
+    WITH_OWNERSHIP in plan_validation.py), never something this kind's own
+    terminal check is asked to adjudicate.
+
+    SUBTASK_SEMANTIC_CONTRACT (PRV-17, 2026-09-07, Production Validation
+    P7): a live incident where a structured-plan repair loop oscillated
+    across all 3 attempts of a single run - attempt 0 failed on
+    PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP (s3's preserved_references,
+    nothing to do with requires/provides); attempt 1 correctly fixed that,
+    but silently dropped s3.requires from ['userServiceImpl_extended'] to
+    [], producing a NEW failure (GROUNDED_SEMANTIC_PROVIDER_MISMATCH);
+    attempt 2 restored s3.requires but silently dropped s4's own contract
+    instead, producing SUBTASK_SEMANTIC_CONTRACT_MISSING, and the repair
+    budget (2 attempts) exhausted. Each individual round's fix was correct
+    in isolation - what was missing is preservation of previously-validated
+    semantic wiring (a subtask's own requires/provides entries, already
+    proven to resolve to a real provider with a correct depends_on edge, or
+    already proven to be the sole unambiguous provider of a capability)
+    while an UNRELATED part of the plan is being repaired. This is not a
+    new validation concept - plan_validation.py's own requires/provides
+    correctness checks (SUBTASK_REQUIREMENT_UNPROVIDED,
+    SEMANTIC_DEPENDENCY_EDGE_MISSING, AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER)
+    already computed this fact every round and simply never recorded it -
+    this kind makes that existing deterministic computation ledger-visible,
+    the same way PLAN_STRUCTURAL_VALIDITY already does for planned-file
+    ownership. A currently-valid (subtask, relation, capability) fact is
+    recorded SATISFIED on every validate_plan() call that still finds it
+    present and correct; a fact that silently disappears from a subtask's
+    requires/provides between rounds (the requirement/capability string is
+    no longer declared at all, so the ordinary per-entry check never even
+    runs) is explicitly re-recorded VIOLATED against its OWN prior id,
+    which is what lets ObligationLedger.record()'s existing SATISFIED->
+    VIOLATED regression detection catch a silent drop exactly like any
+    other regression - no separate detection mechanism was built for this.
+    Deliberately DETERMINISTIC and bounded to requires/provides only (not
+    descriptions, acceptance criteria, execution methods, or planned-file
+    ordering) - see workflow_controller.py's own _semantic_contract_must_
+    preserve_lines and the regression-guard call site in
+    _run_structured_enforce for how this is surfaced to the repair prompt
+    and deterministically enforced."""
+
+    PRESERVED_REFERENCE = "preserved_reference"
+    SUBTASK_SEMANTIC_CONTRACT = "subtask_semantic_contract"
     PLAN_STRUCTURAL_VALIDITY = "plan_structural_validity"
     MIGRATION_COMPLETION = "migration_completion"
     GOAL_SPEC_REQUIREMENT = "goal_spec_requirement"
@@ -150,6 +238,7 @@ class ObligationKind(str, Enum):
     CROSS_OWNER_ARTIFACT_REQUIREMENT = "cross_owner_artifact_requirement"
     FUTURE_OWNER_VERIFICATION = "future_owner_verification"
     CROSS_SUBTASK_INTEGRATION = "cross_subtask_integration"
+    RUNTIME_PLAN_GAP = "runtime_plan_gap"
 
 
 class ObligationStatus(str, Enum):

@@ -21,7 +21,8 @@ to a single verdict, e.g. free-form behavior with no fixed expected shape)
 gets exactly today's behavior, never worse.
 """
 import re
-from typing import Any, Dict, Iterable, Optional
+from enum import Enum
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 _VERIFICATION_MARKER_RE = re.compile(
     r"^\[VERIFICATION\]\s+(PASS|FAIL)(?::\s*(.*))?\s*$", re.MULTILINE
@@ -99,3 +100,49 @@ def pass_verdict_is_grounded(files_content: Iterable[str]) -> bool:
     minority of cases is still strictly safer than zero scrutiny, not a
     guarantee of correctness."""
     return any("[VERIFICATION] FAIL" in content for content in files_content)
+
+
+class ContractVerdictState(str, Enum):
+    """VER-006 (2026-09-10): the four states a caller of this module can
+    actually be in, made explicit instead of collapsed. Before this, a
+    caller only ever saw `_extract_grounded_contract_verdict() is None` for
+    TWO structurally different situations - no marker existed at all
+    (ABSENT), or a marker existed and was deterministically rejected as
+    ungrounded (INDETERMINATE_DISTRUSTED) - and both fell through to
+    identical, fully-trusted LLM grading. The live incident this closes
+    (run `bpwsqscrg`): a bare `print("[VERIFICATION] PASS")` main.py hit
+    exactly the DISTRUSTED case, was silently treated the same as ABSENT,
+    and the grader (never told the marker was already distrusted) cited
+    that same marker as "strong, primary evidence" and passed it."""
+
+    PASS = "PASS"
+    FAIL = "FAIL"
+    INDETERMINATE_DISTRUSTED = "INDETERMINATE_DISTRUSTED"
+    ABSENT = "ABSENT"
+
+
+def classify_contract_verdict(
+    output: str, files_content: Iterable[str],
+) -> Tuple["ContractVerdictState", Optional[Dict[str, Any]]]:
+    """The single source of truth for interpreting a runtime capture against
+    the verification-marker contract - VER-006 containment. Returns
+    (state, verdict): `verdict` is the grade()-shaped
+    {"passed", "reasoning", "likely_files"} dict for PASS/FAIL/
+    INDETERMINATE_DISTRUSTED (DISTRUSTED's own verdict still carries
+    `passed: True` - the marker itself said PASS - callers must treat
+    INDETERMINATE_DISTRUSTED's `passed` as informational only, never as an
+    authoritative gate result); `verdict` is `None` only for ABSENT, where
+    there is genuinely nothing deterministic to report.
+
+    files_content must already be read (this module stays IO-free, same as
+    pass_verdict_is_grounded's own convention) - callers own reading the
+    written files from whatever path (worktree vs workspace) is correct for
+    their context."""
+    verdict = extract_contract_verdict(output)
+    if verdict is None:
+        return ContractVerdictState.ABSENT, None
+    if not verdict["passed"]:
+        return ContractVerdictState.FAIL, verdict
+    if not pass_verdict_is_grounded(files_content):
+        return ContractVerdictState.INDETERMINATE_DISTRUSTED, verdict
+    return ContractVerdictState.PASS, verdict

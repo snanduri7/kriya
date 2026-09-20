@@ -26,15 +26,30 @@ crashing or silently skipping the subtask.
 
 CALLER RESPONSIBILITY, not enforced here: a TOOL subtask's execution IS a
 real side effect (unlike a MODEL subtask, which only returns content this
-module never itself applies) - "shell"/"git" are always-registered real
-tools (plugins/core_tools) capable of arbitrary command execution / real
-git mutation, and this module consults no policy engine before running
-one. Any caller that isn't itself an authoritative, real execution path
-(e.g. an observational/shadow context whose own contract requires no
-mutation) MUST decide not to route a TOOL-tagged subtask into this
-function's real dispatch at all - see kriya/workflow/workflow_controller.py's
-_run_structured_shadow for the real precedent (hard-stops on any
-TOOL-tagged subtask rather than letting shadow mode run one for real).
+module never itself applies) - "shell"/"git"/registered MCP tools are
+capable of arbitrary command execution / real git mutation / MCP tool
+invocation, and this module DELIBERATELY consults no policy engine of its
+own before running one - `tool.execute(**subtask.tool_arguments)` calls
+the exact same `BaseTool.execute()` boundary direct CLI tool execution
+(`kriya tools execute`) already goes through, and each tool implementation
+owns its own authorization/containment (ExecutionPolicy's hard invariants
+for ShellTool/GitTool, TOOL-002's durable MCP invocation approval +
+TOOL-003's OCI capability containment for MCPTool, SEC-005's registry-
+scoped network authority for ShellTool package-manager commands) -
+duplicating any of that HERE would be a second, competing policy engine
+(Invariant: one security decision, one authoritative owner), not
+stronger security. Any caller that isn't itself an authoritative, real
+execution path (e.g. an observational/shadow context whose own contract
+requires no mutation) MUST still decide not to route a TOOL-tagged
+subtask into this function's real dispatch at all - see
+kriya/workflow/workflow_controller.py's _run_structured_shadow for the
+real precedent (hard-stops on any TOOL-tagged subtask, since shadow's own
+contract is non-mutating by design, unrelated to whether TOOL execution
+is safe). TOOL-001 (2026-09-13) made `_run_structured_enforce` - the
+real, mutating, authoritative enforce-mode path - the first caller that
+DOES route TOOL-tagged subtasks here for real, precisely because each
+tool's own governance was already sufficient by then; see that method's
+own per-subtask loop for the full account.
 """
 from __future__ import annotations
 
@@ -42,6 +57,7 @@ import logging
 from typing import Any, List, Optional
 
 from kriya.core.registry import ComponentRegistryError
+from kriya.policy.errors import PolicyDeniedError
 from kriya.tools.tool import ToolExecutionError
 from kriya.workflow.context_package import ContextPackage
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, Subtask
@@ -134,9 +150,23 @@ async def _execute_tool_subtask(subtask: Subtask, kernel: Any) -> SubtaskResult:
         output = await tool.execute(**subtask.tool_arguments)
     except ToolExecutionError as e:
         logger.info(f"SubtaskExecutor: subtask {subtask.id!r} tool {subtask.tool_name!r} failed: {e}")
+        # TOOL-001 (2026-09-13): BaseTool.execute() always wraps the REAL
+        # underlying exception into ToolExecutionError via `raise ... from
+        # e` (kriya/tools/tool.py) - when that real cause is a
+        # PolicyDeniedError (ExecutionPolicy DENY/REQUIRE_APPROVAL,
+        # including TOOL-002's MCP invocation denial), its own
+        # `result.reason_code` is surfaced here as structured evidence
+        # (Task 9: "policy/authority decision where available") rather
+        # than only living inside the free-text error string - never
+        # re-derived or re-evaluated, purely read off the exception this
+        # tool call already raised.
+        reason_codes: tuple = ()
+        if isinstance(e.__cause__, PolicyDeniedError):
+            reason_codes = (e.__cause__.result.reason_code,)
         return SubtaskResult(
             subtask_id=subtask.id, status=SubtaskStatus.FAILED,
             execution_method=ExecutionMethod.TOOL.value, error=str(e),
+            reason_codes=reason_codes,
         )
 
     return SubtaskResult(

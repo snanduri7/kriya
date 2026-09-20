@@ -18,6 +18,7 @@ from kriya.workflow.checkpoint import (
     compute_control_plane_hashes,
     compute_registry_hash,
     compute_tree_hash,
+    compute_workspace_content_hash,
     validate_resume_against_reality,
 )
 
@@ -84,10 +85,15 @@ def test_compute_registry_hash_is_stable_and_content_sensitive():
 # --- compute_control_plane_hashes ---
 
 def test_bundle_includes_git_derived_fields(git_repo):
+    """STATE-001 (2026-09-14): schema_version deliberately bumped to 2 with
+    the addition of workspace_content_hash - a deliberate, expected update
+    to this test, not a silent regression (see the risk register's own
+    "must update it deliberately" convention)."""
     bundle = compute_control_plane_hashes(git_repo)
     assert bundle["base_commit"] == compute_base_commit(git_repo)
     assert bundle["tree_hash"] == compute_tree_hash(git_repo)
-    assert bundle["schema_version"] == 1
+    assert bundle["workspace_content_hash"] == compute_workspace_content_hash(git_repo)
+    assert bundle["schema_version"] == 2
 
 
 def test_bundle_omits_none_for_arguments_not_supplied(git_repo):

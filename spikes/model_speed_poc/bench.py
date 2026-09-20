@@ -89,7 +89,24 @@ OLLAMA_URL = "http://localhost:11434/api/chat"
 # accuracy/speed comparison instead of trusting generic quantization
 # research. 32GB vs 18GB on disk - expect a real VRAM/speed cost per the
 # same memory-bandwidth-bound reasoning noted in mlx_benchmark's README.
-THINKING_MODELS = ["qwen3.6:27b", "qwen3.6:35b-a3b-q4_K_M", "qwen3.8:27b", "qwen3.8:27b-mlx"]
+#
+# qwen3.6:35b-a3b-mtp-q4_K_M (2026-09-04): the SAME base weights as
+# qwen3.6:35b-a3b-q4_K_M, but this tag's own Modelfile carries `PARAMETER
+# draft_num_predict 2` (confirmed via `ollama show qwen3.6:35b-a3b-mtp-
+# q4_K_M --modelfile`) - Ollama's speculative/multi-token-prediction draft
+# knob, absent from the plain tag's own Modelfile. Nothing in bench.py needs
+# to pass that param explicitly; it's baked into the model's own Modelfile
+# and Ollama applies it automatically whenever this tag is loaded. Added
+# here specifically to get a real generation_tps comparison against the
+# plain tag on THIS machine - a Modelfile parameter being present only
+# proves the build/runtime WILL ATTEMPT MTP draft decoding, not that it
+# produces a net speedup (a poor draft-acceptance rate can cost more than
+# it saves). Listed as thinking-capable (same qwen3.6 reasoning behavior as
+# the plain tag), not yet run - unverified until this spike runs it.
+THINKING_MODELS = [
+    "qwen3.6:27b", "qwen3.6:35b-a3b-q4_K_M", "qwen3.6:35b-a3b-mtp-q4_K_M",
+    "qwen3.8:27b", "qwen3.8:27b-mlx",
+]
 NON_THINKING_MODELS = ["qwen3-coder:30b", "qwen3-coder:30b-a3b-q8_0"]
 MODELS = THINKING_MODELS + NON_THINKING_MODELS
 # Extra token budget given to the think:true arm on top of a prompt's normal

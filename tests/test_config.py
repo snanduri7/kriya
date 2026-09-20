@@ -71,25 +71,34 @@ def test_runtime_profile_defaults_to_none_and_changes_nothing():
     assert cfg.process_profiles.enabled is False
 
 
-def test_runtime_profile_hardened_overrides_the_documented_fields(tmp_path):
-    config_file = tmp_path / "kriya.yaml"
-    with open(config_file, "w") as f:
-        yaml.dump({"runtime_profile": "hardened"}, f)
+def test_runtime_profile_hardened_overrides_the_documented_fields():
+    # SEC-009 P1: runtime_profile is PLATFORM_POLICY - a repository-sourced
+    # kriya.yaml can no longer set it through load_config() at all (see
+    # tests/test_sec009_config_authority.py for that denial coverage, which
+    # this test previously exercised unintentionally via a tmp_path config
+    # file). This test's actual subject - what the "hardened" preset expands
+    # to - is exercised directly via the extracted mapping function
+    # load_config() itself calls, independent of the authority gate.
+    from kriya.config.config import runtime_profile_preset_fields
 
-    cfg = load_config(str(config_file))
+    fields = runtime_profile_preset_fields("hardened")
 
-    assert cfg.workflow_controller.enabled is True
-    assert cfg.workflow_controller.mode == "enforce"
-    assert cfg.engineering_triage.shadow_mode is False
-    assert cfg.process_profiles.enabled is True
+    assert fields[("workflow_controller", "enabled")] is True
+    assert fields[("workflow_controller", "mode")] == "enforce"
+    assert fields[("engineering_triage", "shadow_mode")] is False
+    assert fields[("process_profiles", "enabled")] is True
 
 
 def test_runtime_profile_hardened_does_not_touch_execution_policy_mode():
-    """execution_policy.mode="enforce" has always been a distinct, separately
-    authorized decision (its own validator hard-rejects it) - this preset
-    does not silently reach around that restriction."""
-    with pytest.raises(Exception):
-        AppConfig(runtime_profile="hardened", execution_policy={"mode": "enforce"})
+    """execution_policy.mode is a distinct, separately authorized decision
+    (POL-001-P2, 2026-09-10) - the "hardened" preset does not silently
+    reach around or override whatever a project explicitly set it to,
+    in either direction."""
+    cfg_audit = AppConfig(runtime_profile="hardened")
+    assert cfg_audit.execution_policy.mode == "audit"
+
+    cfg_enforce = AppConfig(runtime_profile="hardened", execution_policy={"mode": "enforce"})
+    assert cfg_enforce.execution_policy.mode == "enforce"
 
 
 def test_runtime_profile_rejects_an_unknown_value():
@@ -115,25 +124,29 @@ def test_runtime_profile_accepts_supported_presets(profile):
 
 
 def test_load_custom_config(tmp_path):
+    # SEC-009 P1: llm.base_url is SECURITY_AUTHORITY (it redirects where
+    # Kriya sends requests) and this config_file lives outside the test's
+    # CWD/workspace, so it is no longer authorized to set it - see
+    # tests/test_sec009_config_authority.py for the dedicated coverage of
+    # that denial. This test keeps only the REPOSITORY_SAFE fields it was
+    # actually exercising (model name, log level).
     custom_yaml = {
         "llm": {
             "provider": "openai",
             "model": "mistral-7b",
-            "base_url": "http://localhost:8000/v1"
         },
         "logging": {
             "level": "DEBUG"
         }
     }
-    
+
     config_file = tmp_path / "custom_config.yaml"
     with open(config_file, "w") as f:
         yaml.dump(custom_yaml, f)
-        
+
     cfg = load_config(str(config_file))
-    
+
     assert cfg.llm.model == "mistral-7b"
-    assert cfg.llm.base_url == "http://localhost:8000/v1"
     assert cfg.logging.level == "DEBUG"
     # Fallback/default still applies to other items
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

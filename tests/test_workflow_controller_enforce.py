@@ -5,13 +5,18 @@ run_generation_workflow() once per subtask (the same real pattern
 kriya/workflow/milestones.py::run_milestones() already uses per milestone)
 rather than reimplementing edit-application/verification/approval."""
 
+import inspect
 import json
 import os
+import re
 import shutil
 from typing import Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+import kriya.workflow.plan_validation as plan_validation_module
+import kriya.workflow.workflow_controller as workflow_controller_module
 
 from kriya.control.persistence import load_approved_plan, load_control_state
 from kriya.control.state import ControlState
@@ -47,6 +52,13 @@ from kriya.workflow.obligations import (
 from kriya.workflow.workflow_controller import (
     AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
     _StructuredPlanUnavailable,
+    _is_strict_regression,
+    _preserved_reference_must_preserve_lines,
+    _preserved_reference_pairs_mentioned,
+    _preserved_reference_regressions,
+    _semantic_contract_must_preserve_lines,
+    _semantic_contract_regression_subtasks,
+    _subtask_ids_mentioned,
     ArtifactOwnerResolutionBasis,
     WorkflowController,
     _attempt_owner_recovery_self_correction,
@@ -61,9 +73,13 @@ from kriya.workflow.workflow_controller import (
     _transitive_upstream_ids,
     build_authoritative_planner_request,
     build_planning_structural_evidence,
+    enforce_preserved_reference_terminal_integrity,
     find_missing_grounded_production_artifacts,
     build_recovery_execution_plan,
+    resolve_python_module_to_candidate_artifact_path,
+    resolve_runtime_plan_gap_owner,
     revise_plan_for_planned_prerequisite,
+    revise_plan_for_runtime_plan_gap,
     build_subtask_constraint_context,
     build_subtask_goal_text,
     build_subtask_semantic_context,
@@ -85,6 +101,7 @@ from kriya.workflow.workflow import (
     _record_future_owner_verification_deferred,
     _settle_future_owner_verification_obligations,
 )
+from kriya.workflow.edit_safety import read_file_revision
 
 
 @pytest.fixture(autouse=True)
@@ -979,6 +996,173 @@ def test_planned_prerequisite_revision_wires_owner_upstream_without_moving_owner
     assert plan.subtask_by_id("s2").depends_on == []
 
 
+def _prv17_run13_shaped_plan():
+    """The exact ownership shape of the live PRV-17 Run 13 incident:
+    myproject/ owned by BOTH s1 (__init__.py, settings.py) and s3 (urls.py)
+    - the case that rules out a naive "unique owner of the parent
+    directory" rule (see resolve_runtime_plan_gap_owner's own docstring).
+    s5 (the managed-service verification subtask) has empty planned_files
+    by design and depends transitively on s1 via s2->s3->s4->s5."""
+    return EngineeringPlan(
+        plan_id="prv17-run13", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="Django project scaffold", execution_method=ExecutionMethod.MODEL,
+                planned_files=[
+                    PlannedFile(path="manage.py", action=FileAction.CREATE),
+                    PlannedFile(path="myproject/__init__.py", action=FileAction.CREATE),
+                    PlannedFile(path="myproject/settings.py", action=FileAction.CREATE),
+                ],
+            ),
+            Subtask(
+                id="s2", description="customers app scaffold", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="customers/__init__.py", action=FileAction.CREATE)],
+                depends_on=["s1"],
+            ),
+            Subtask(
+                id="s3", description="urls", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="myproject/urls.py", action=FileAction.CREATE)],
+                depends_on=["s2"],
+            ),
+            Subtask(
+                id="s4", description="tests", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="customers/tests.py", action=FileAction.CREATE)],
+                depends_on=["s3"],
+            ),
+            Subtask(
+                id="s5", description="managed-service verification", execution_method=ExecutionMethod.MODEL,
+                planned_files=[], depends_on=["s4"],
+            ),
+        ],
+    )
+
+
+def test_resolve_python_module_to_candidate_artifact_path_picks_module_file_form(tmp_path):
+    os.makedirs(tmp_path / "myproject")
+    (tmp_path / "myproject" / "__init__.py").write_text("")
+    assert resolve_python_module_to_candidate_artifact_path(
+        "myproject.wsgi", str(tmp_path),
+    ) == "myproject/wsgi.py"
+
+
+def test_resolve_python_module_to_candidate_artifact_path_refuses_bare_top_level_name(tmp_path):
+    # No established parent package to anchor against - could equally be a
+    # fresh single-file module or the start of a brand-new package.
+    assert resolve_python_module_to_candidate_artifact_path("django", str(tmp_path)) is None
+
+
+def test_resolve_python_module_to_candidate_artifact_path_refuses_when_parent_package_missing(tmp_path):
+    assert resolve_python_module_to_candidate_artifact_path(
+        "myproject.wsgi", str(tmp_path),
+    ) is None
+
+
+def test_resolve_python_module_to_candidate_artifact_path_refuses_when_module_file_already_exists(tmp_path):
+    os.makedirs(tmp_path / "myproject")
+    (tmp_path / "myproject" / "wsgi.py").write_text("existing")
+    assert resolve_python_module_to_candidate_artifact_path(
+        "myproject.wsgi", str(tmp_path),
+    ) is None
+
+
+def test_resolve_python_module_to_candidate_artifact_path_refuses_when_package_dir_already_exists(tmp_path):
+    os.makedirs(tmp_path / "myproject" / "wsgi")
+    assert resolve_python_module_to_candidate_artifact_path(
+        "myproject.wsgi", str(tmp_path),
+    ) is None
+
+
+def test_resolve_runtime_plan_gap_owner_picks_the_init_py_owner_not_any_directory_owner():
+    plan = _prv17_run13_shaped_plan()
+    s5 = plan.subtask_by_id("s5")
+    # myproject/ is owned by BOTH s1 (__init__.py) and s3 (urls.py) - only
+    # __init__.py's owner (s1) is the correct, unambiguous answer.
+    assert resolve_runtime_plan_gap_owner(plan, "myproject/wsgi.py", s5) == "s1"
+
+
+def test_resolve_runtime_plan_gap_owner_refuses_when_no_parent_directory():
+    plan = _prv17_run13_shaped_plan()
+    s5 = plan.subtask_by_id("s5")
+    assert resolve_runtime_plan_gap_owner(plan, "toplevel.py", s5) is None
+
+
+def test_resolve_runtime_plan_gap_owner_refuses_when_init_py_is_multi_owned():
+    plan = EngineeringPlan(
+        plan_id="ambiguous-init", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="a", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pkg/__init__.py", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="b", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pkg/__init__.py", action=FileAction.MODIFY)],
+                depends_on=["s1"],
+            ),
+            Subtask(
+                id="s3", description="verify", execution_method=ExecutionMethod.MODEL,
+                planned_files=[], depends_on=["s2"],
+            ),
+        ],
+    )
+    s3 = plan.subtask_by_id("s3")
+    assert resolve_runtime_plan_gap_owner(plan, "pkg/missing.py", s3) is None
+
+
+def test_resolve_runtime_plan_gap_owner_refuses_owner_not_upstream_of_failing_subtask():
+    plan = EngineeringPlan(
+        plan_id="downstream-owner", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="verify", execution_method=ExecutionMethod.MODEL,
+                planned_files=[],
+            ),
+            Subtask(
+                id="s2", description="unrelated package", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="pkg/__init__.py", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    s1 = plan.subtask_by_id("s1")
+    # s2 is not upstream of s1 (no depends_on edge either way) - FUTURE_
+    # ORDERED/UNRELATED, not PAST_ORDERED, so it must not be reopened.
+    assert resolve_runtime_plan_gap_owner(plan, "pkg/missing.py", s1) is None
+
+
+def test_revise_plan_for_runtime_plan_gap_adds_exactly_one_planned_file_to_the_owner():
+    plan = _prv17_run13_shaped_plan()
+    revised = revise_plan_for_runtime_plan_gap(
+        plan, owner_subtask_id="s1", artifact_path="myproject/wsgi.py", reason="test",
+    )
+    revised_s1_paths = [pf.path for pf in revised.subtask_by_id("s1").planned_files]
+    assert revised_s1_paths == [
+        "manage.py", "myproject/__init__.py", "myproject/settings.py", "myproject/wsgi.py",
+    ]
+    # Every other subtask's own planned_files/depends_on is untouched.
+    assert [pf.path for pf in revised.subtask_by_id("s3").planned_files] == ["myproject/urls.py"]
+    assert revised.subtask_by_id("s5").depends_on == ["s4"]
+    # The original plan object passed in is never mutated.
+    assert [pf.path for pf in plan.subtask_by_id("s1").planned_files] == [
+        "manage.py", "myproject/__init__.py", "myproject/settings.py",
+    ]
+
+
+def test_revise_plan_for_runtime_plan_gap_rejects_unknown_owner():
+    plan = _prv17_run13_shaped_plan()
+    with pytest.raises(ValueError, match="unknown owner subtask"):
+        revise_plan_for_runtime_plan_gap(
+            plan, owner_subtask_id="does-not-exist", artifact_path="myproject/wsgi.py", reason="test",
+        )
+
+
+def test_revise_plan_for_runtime_plan_gap_rejects_already_planned_path():
+    plan = _prv17_run13_shaped_plan()
+    with pytest.raises(ValueError, match="already planned"):
+        revise_plan_for_runtime_plan_gap(
+            plan, owner_subtask_id="s1", artifact_path="myproject/settings.py", reason="test",
+        )
+
+
 def test_authoritative_planner_request_forbids_unsupported_tool_stages_without_changing_goal():
     request = build_authoritative_planner_request("Build one runnable application.")
     assert "Original product request:\nBuild one runnable application." in request
@@ -1039,6 +1223,257 @@ def test_plan_repair_prompt_contains_exact_prerequisite_correction_tuple():
     assert "add s2 to s3.depends_on" in prompt
 
 
+# --- PRV-17 Run 8 diagnostic audit (2026-09-03): validator evidence ->
+# repair Planner boundary for VERIFICATION_PREREQUISITE_MANIFEST_MISSING.
+# _stack_dependent_verification_prerequisite_evidence() (plan_validation.py)
+# already reaches validate_plan()'s own `evidence` list and workflow_
+# controller.py's `validation_evidence` parameter unchanged - the gap found
+# here was that build_structured_plan_repair_prompt silently dropped it
+# (the shared `prerequisite_evidence` filter above requires a
+# `provider_subtask` key this record never has) instead of turning it into
+# an explicit correction the way every other reason_code already does.
+
+def _manifest_missing_stack_contract():
+    from kriya.workflow.static_checks import StackContract
+    return StackContract(languages=("python",), frameworks=("django",))
+
+
+def _manifest_missing_consumer_only_plan():
+    """No subtask anywhere plans a Python dependency manifest - s2's TEST
+    verification has no provisioning prerequisite at all."""
+    return EngineeringPlan(
+        plan_id="manifest-missing-repair-audit", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="scaffold the app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="manage.py", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="test the app", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="app/tests.py", action=FileAction.CREATE)],
+                verification=[VerificationMethod(
+                    type=VerificationMethodType.TOOL, description="run tests",
+                    tool_name="test", verifier_kind=VerifierKind.TEST,
+                )],
+            ),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_manifest_missing_evidence_is_actionable_and_structured(tmp_path):
+    """(1) validate_plan() produces a structured evidence record - not just
+    a reason code/free-text error - naming the consumer, the required tool,
+    and the candidate manifest filenames a repair could plan."""
+    result = await validate_plan(
+        _manifest_missing_consumer_only_plan(),
+        workspace_path=str(tmp_path), stack_contract=_manifest_missing_stack_contract(),
+    )
+
+    assert result.valid is False
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" in result.reason_codes
+    manifest_records = [e for e in result.evidence if e.get("required_tool") == "python"]
+    assert len(manifest_records) == 1
+    record = manifest_records[0]
+    assert record["consumer_subtask"] == "s2"
+    assert set(record["candidate_manifests"]) == {"pyproject.toml", "requirements.txt", "setup.py", "setup.cfg"}
+
+
+def test_manifest_missing_evidence_reaches_the_real_repair_prompt():
+    """(2) The SAME shape validate_plan() actually produces, fed straight
+    into the real build_structured_plan_repair_prompt() (no paraphrase),
+    produces a dedicated targeted-correction section - not just the
+    generic reason-code/error dump every reason code already gets."""
+    prompt = build_structured_plan_repair_prompt(
+        "Create a Django application with a customers app and tests.", "{}",
+        ["subtask 's2' runs 'python'-dependent verification, but no current/past-ordered subtask "
+         "plans (or the workspace already establishes) a dependency manifest (pyproject.toml/"
+         "requirements.txt/setup.cfg/setup.py) to provision it"],
+        ["VERIFICATION_PREREQUISITE_MANIFEST_MISSING"], 1,
+        validation_evidence=[{
+            "consumer_subtask": "s2", "required_tool": "python",
+            "candidate_manifests": ["pyproject.toml", "requirements.txt", "setup.cfg", "setup.py"],
+        }],
+    )
+
+    assert "Establish the missing dependency-provisioning prerequisite" in prompt
+
+
+def test_manifest_missing_repair_correction_preserves_consumer_identity():
+    """(3) The exact consumer subtask id survives into the correction text,
+    not a generic placeholder."""
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "{}", ["error"], ["VERIFICATION_PREREQUISITE_MANIFEST_MISSING"], 1,
+        validation_evidence=[{
+            "consumer_subtask": "s2", "required_tool": "python",
+            "candidate_manifests": ["requirements.txt"],
+        }],
+    )
+    assert "Consumer: subtask=s2 runs python-dependent verification" in prompt
+
+
+def test_manifest_missing_repair_correction_preserves_provider_requirement():
+    """(4) The exact candidate manifest filenames survive - not a vague
+    "add a dependency file" instruction."""
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "{}", ["error"], ["VERIFICATION_PREREQUISITE_MANIFEST_MISSING"], 1,
+        validation_evidence=[{
+            "consumer_subtask": "s2", "required_tool": "python",
+            "candidate_manifests": ["pyproject.toml", "requirements.txt"],
+        }],
+    )
+    assert "dependency manifest (one of: pyproject.toml/requirements.txt) must be provided" in prompt
+
+
+def test_manifest_missing_repair_correction_states_ordering_requirement():
+    """(5) The correction explicitly states BOTH independently-legal
+    satisfying relations - CURRENT (the consumer plans the manifest
+    itself) and PAST_ORDERED (a separate provider subtask ordered ahead
+    via depends_on) - not a single prescriptive "always add a separate
+    provider to depends_on" instruction, which would wrongly rule out the
+    simpler CURRENT repair classify_file_ownership() itself already
+    accepts."""
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "{}", ["error"], ["VERIFICATION_PREREQUISITE_MANIFEST_MISSING"], 1,
+        validation_evidence=[{
+            "consumer_subtask": "s2", "required_tool": "python",
+            "candidate_manifests": ["requirements.txt"],
+        }],
+    )
+    assert "provided either (1) by this consumer subtask itself" in prompt
+    assert "or (2) by a subtask ordered before s2" in prompt
+    assert "add that provider to s2.depends_on" in prompt
+
+
+@pytest.mark.asyncio
+async def test_manifest_missing_repaired_plan_current_self_provided_manifest_passes(tmp_path):
+    """(6a) CURRENT: the consumer subtask itself plans the manifest
+    alongside its own tests - no separate provider subtask, no depends_on
+    edge involved at all. classify_file_ownership() already treats this as
+    satisfying (a subtask's own planned_files are trivially CURRENT to
+    itself); the repair correction's wording must not imply this is
+    illegal by always demanding a separate provider be added to
+    depends_on."""
+    plan = EngineeringPlan(
+        plan_id="manifest-missing-current", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="scaffold the app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="manage.py", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="declare dependencies and test the app",
+                execution_method=ExecutionMethod.MODEL, depends_on=["s1"],
+                planned_files=[
+                    PlannedFile(path="requirements.txt", action=FileAction.CREATE),
+                    PlannedFile(path="app/tests.py", action=FileAction.CREATE),
+                ],
+                verification=[VerificationMethod(
+                    type=VerificationMethodType.TOOL, description="run tests",
+                    tool_name="test", verifier_kind=VerifierKind.TEST,
+                )],
+            ),
+        ],
+    )
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), stack_contract=_manifest_missing_stack_contract(),
+    )
+
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_manifest_missing_repaired_plan_with_ordered_provider_passes(tmp_path):
+    """(6b) PAST_ORDERED: a repaired plan that adds a SEPARATE manifest-
+    planning subtask ordered ahead of the verification consumer (s1
+    provides requirements.txt, s2 depends on s1) satisfies the invariant -
+    the other of the two independently-legal repairs the corrected
+    targeted-correction text now names explicitly."""
+    plan = EngineeringPlan(
+        plan_id="manifest-missing-repaired", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="scaffold and declare dependencies", execution_method=ExecutionMethod.MODEL,
+                planned_files=[
+                    PlannedFile(path="manage.py", action=FileAction.CREATE),
+                    PlannedFile(path="requirements.txt", action=FileAction.CREATE),
+                ],
+            ),
+            Subtask(
+                id="s2", description="test the app", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="app/tests.py", action=FileAction.CREATE)],
+                verification=[VerificationMethod(
+                    type=VerificationMethodType.TOOL, description="run tests",
+                    tool_name="test", verifier_kind=VerifierKind.TEST,
+                )],
+            ),
+        ],
+    )
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), stack_contract=_manifest_missing_stack_contract(),
+    )
+
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" not in result.reason_codes
+
+
+@pytest.mark.asyncio
+async def test_manifest_missing_future_ordered_provider_still_fails(tmp_path):
+    """(7) A manifest planned only by a subtask ORDERED AFTER the
+    verification consumer (s3 depends on s2, the consumer - so the
+    manifest is FUTURE_ORDERED relative to s2, not CURRENT/PAST_ORDERED)
+    must still fail - the invariant is about ordering, not mere presence
+    anywhere in the plan."""
+    plan = EngineeringPlan(
+        plan_id="manifest-missing-future-ordered", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="scaffold the app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="manage.py", action=FileAction.CREATE)],
+            ),
+            Subtask(
+                id="s2", description="test the app", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path="app/tests.py", action=FileAction.CREATE)],
+                verification=[VerificationMethod(
+                    type=VerificationMethodType.TOOL, description="run tests",
+                    tool_name="test", verifier_kind=VerifierKind.TEST,
+                )],
+            ),
+            Subtask(
+                id="s3", description="declare dependencies later", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s2"],
+                planned_files=[PlannedFile(path="requirements.txt", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    result = await validate_plan(
+        plan, workspace_path=str(tmp_path), stack_contract=_manifest_missing_stack_contract(),
+    )
+
+    assert "VERIFICATION_PREREQUISITE_MANIFEST_MISSING" in result.reason_codes
+
+
+def test_manifest_missing_correction_does_not_fire_for_unrelated_reason_codes():
+    """(8) Unrelated existing plan-repair diagnostics are unchanged: even
+    when validation_evidence happens to contain records shaped like a
+    manifest-missing record, the new correction text is gated on the
+    VERIFICATION_PREREQUISITE_MANIFEST_MISSING reason code actually being
+    present - it does not fire merely because matching-shaped evidence
+    exists, and the pre-existing prerequisite-tuple correction (a
+    DIFFERENT reason code, same function) is completely unaffected."""
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "{}", ["some unrelated error"], ["SUBTASK_REQUIREMENT_UNPROVIDED"], 1,
+        validation_evidence=[{
+            "consumer_subtask": "s2", "required_tool": "python",
+            "candidate_manifests": ["requirements.txt"],
+        }],
+    )
+    assert "Establish the missing dependency-provisioning prerequisite" not in prompt
+    assert "Replace each unprovided requires value" in prompt
+
+
 def test_authoritative_planner_system_prompt_carries_testability_and_tooling_dag_guidance():
     assert "the terminating call sits in a thin wrapper" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
     assert "any process-termination mechanism" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
@@ -1058,6 +1493,53 @@ def test_authoritative_planner_system_prompt_pairs_application_runtime_with_requ
     assert "verifier_kind=application_runtime" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
     assert "requires_runtime_execution=true TOGETHER" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
     assert "never set one without the other" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+
+
+def test_authoritative_planner_system_prompt_states_complete_application_runtime_four_field_relationship():
+    """Repair-contract audit (2026-09-03, PRV-17 Run 10): a live repair
+    attempt proved the prompt naming only verifier_kind/requires_runtime_
+    execution (without also saying type=judgment/tool_name omitted) lets
+    the model reuse the compile/test clause's own type=tool+tool_name
+    template for application_runtime too, producing an unregistered
+    tool_name that copies the verifier_kind's own value. The initial
+    planning prompt must state the complete four-field relationship as one
+    connected instruction, not separate sentences the model has to infer a
+    connection between."""
+    assert "type=judgment, omit tool_name entirely" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "verifier_kind=application_runtime and requires_runtime_execution=true TOGETHER" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "never set type=tool or any tool_name for this verifier" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+
+
+def test_repair_prompt_states_the_identical_application_runtime_four_field_relationship():
+    """The VERIFICATION_EVIDENCE_PATH_MISSING targeted-correction block
+    must state the SAME complete relationship as the initial planning
+    prompt above - initial generation and repair are the same contract,
+    not two independently-maintained descriptions of it."""
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "{}",
+        ["subtask 's3' verification requirement '...' has no executable or deterministic evidence producer"],
+        ["VERIFICATION_EVIDENCE_PATH_MISSING"], 1,
+    )
+    assert "set type=judgment, omit tool_name entirely" in prompt
+    assert "verifier_kind=application_runtime and requires_runtime_execution=true TOGETHER" in prompt
+    assert "never set type=tool or any tool_name for this case" in prompt
+
+
+def test_application_runtime_repair_correction_does_not_disturb_compile_and_test_instructions():
+    """Existing test/compile verification instructions remain unchanged -
+    this fix only closes the application_runtime gap, it doesn't touch the
+    already-explicit compile/test pairing in either prompt."""
+    assert "tool_name=compile/verifier_kind=compile for compilation" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+    assert "tool_name=test/verifier_kind=test for tests" in AUTHORITATIVE_PLANNER_SYSTEM_PROMPT
+
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "{}", ["some evidence-producer error"],
+        ["VERIFICATION_EVIDENCE_PATH_MISSING"], 1,
+    )
+    assert (
+        "set type=tool with tool_name=compile/verifier_kind=compile or "
+        "tool_name=test/verifier_kind=test instead"
+    ) in prompt
 
 
 def test_authoritative_planner_system_prompt_carries_integration_relationship_guidance():
@@ -1766,13 +2248,16 @@ def _seed_structural_customer_repo(tmp_path):
 
 
 def _structural_customer_subtask(
-    sid, path, *, depends_on=(), requires=(), provides=(),
+    sid, path, *, depends_on=(), requires=(), provides=(), preserved_references=(),
 ):
     return Subtask(
         id=sid, description=f"work on {path}", execution_method=ExecutionMethod.MODEL,
         depends_on=list(depends_on),
         requires=list(requires), provides=list(provides),
-        planned_files=[PlannedFile(path=path, action=FileAction.MODIFY)],
+        planned_files=[PlannedFile(
+            path=path, action=FileAction.MODIFY,
+            preserved_references=list(preserved_references),
+        )],
     )
 
 
@@ -1805,6 +2290,78 @@ def test_structural_evidence_is_empty_for_candidates_with_no_real_relationship()
     assert edges == {}
 
 
+# --- P7 reproduction: interface-based cross-module edge (2026-09-07) -------
+# The exact shape a live P7 preflight found: a real multi-module Maven repo
+# where the module boundary is a Java interface (a hexagonal-architecture
+# "port") - core/UserService.java (interface) declared in one module,
+# repository/UserServiceImpl.java (class, implements it) in another. Before
+# the interface-indexing fix, this edge silently failed to resolve even
+# though a class-to-class edge in the SAME candidate set (to the shared DTO)
+# resolved fine - the module boundary itself was invisible.
+
+_PORT_PATH = "core/src/main/java/com/example/core/ports/UserService.java"
+_DTO_PATH = "core/src/main/java/com/example/core/dto/User.java"
+_IMPL_PATH = "repository/src/main/java/com/example/repository/UserServiceImpl.java"
+
+_PORT_JAVA = """package com.example.core.ports;
+
+import com.example.core.dto.User;
+import java.util.Collection;
+
+public interface UserService {
+    Collection<User> getAllUsers();
+    void saveUser(User user);
+}
+"""
+
+_DTO_JAVA = """package com.example.core.dto;
+
+public class User {
+    private Long id;
+    private String name;
+}
+"""
+
+_IMPL_JAVA = """package com.example.repository;
+
+import com.example.core.dto.User;
+import com.example.core.ports.UserService;
+import java.util.Collection;
+
+public class UserServiceImpl implements UserService {
+    public Collection<User> getAllUsers() { return null; }
+    public void saveUser(User user) {}
+}
+"""
+
+
+def _seed_p7_shaped_repo(tmp_path):
+    files = {_PORT_PATH: _PORT_JAVA, _DTO_PATH: _DTO_JAVA, _IMPL_PATH: _IMPL_JAVA}
+    for relpath, content in files.items():
+        full = tmp_path / relpath
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
+    return list(files.keys())
+
+
+def test_p7_reproduction_structural_evidence_resolves_interface_module_boundary(tmp_path):
+    """The real, required P7 reproduction: an interface declared in one
+    Maven module, implemented by a class in another, must now resolve as a
+    grounded cross-module edge - the class-to-DTO edges (already working
+    before this fix) are asserted too, proving nothing regressed while the
+    interface edge was closed."""
+    candidates = _seed_p7_shaped_repo(tmp_path)
+
+    text, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+
+    assert _PORT_PATH in edges[_IMPL_PATH], (
+        "the interface module-boundary edge (impl -> port) did not resolve"
+    )
+    assert _DTO_PATH in edges[_IMPL_PATH]
+    assert _DTO_PATH in edges[_PORT_PATH]
+    assert f"{_IMPL_PATH} references -> {_PORT_PATH}" in text
+
+
 def test_missing_grounded_production_artifact_flags_the_exact_omitted_file(tmp_path):
     candidates = _seed_structural_customer_repo(tmp_path)
     _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
@@ -1822,8 +2379,353 @@ def test_missing_grounded_production_artifact_flags_the_exact_omitted_file(tmp_p
     assert gaps == [{
         "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
         "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
+        "consumer_subtask": "s3",
         "reason": "unowned",
     }]
+
+
+def test_missing_grounded_production_artifact_is_silent_when_target_declared_preserved(tmp_path):
+    """PRV-11 preservation extension (2026-09-06, Production Validation P2):
+    the exact P2 shape - a test file grounds a real edge to an unowned
+    production file the goal does not require changing. Declaring it under
+    the test's own planned_files[].preserved_references suppresses the gap
+    with no other plan change."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="preserved", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+            ),
+        ],
+    )
+
+    assert find_missing_grounded_production_artifacts(plan, edges) == []
+
+
+def test_missing_grounded_production_artifact_preservation_is_per_source_not_path(tmp_path):
+    """A preserved_references declaration on one source's PlannedFile must
+    never suppress the SAME target's gap for a DIFFERENT, undeclared
+    source - otherwise one correct preservation claim could mask an
+    unrelated genuine omitted-owner defect on another file entirely."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    # A second test file with its own real edge to the same unowned
+    # target, added directly to resolved_edges (no second on-disk fixture
+    # needed - this function only ever consults resolved_edges + the
+    # plan, never re-derives structural evidence itself).
+    second_test_path = "src/test/java/com/example/customer/CustomerControllerOtherTest.java"
+    edges_with_second_source = dict(edges)
+    edges_with_second_source[second_test_path] = [_CUSTOMER_CONTROLLER_PATH]
+    plan = EngineeringPlan(
+        plan_id="per-source-preservation", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+            ),
+            _structural_customer_subtask("s4", second_test_path, depends_on=["s2"]),
+        ],
+    )
+
+    gaps = find_missing_grounded_production_artifacts(plan, edges_with_second_source)
+
+    assert gaps == [{
+        "test_file": second_test_path,
+        "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
+        "consumer_subtask": "s4",
+        "reason": "unowned",
+    }]
+
+
+def test_missing_grounded_production_artifact_preserved_reference_to_a_nonexistent_edge_is_inert(tmp_path):
+    """A preserved_references entry naming a target with no real resolved
+    edge from that source has nothing to suppress - it is simply never
+    consulted (this function only ever iterates real resolved_edges), so
+    an invented/mistaken declaration can never hide a genuine gap on an
+    unrelated real edge from the same source."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="inert-preservation", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=["src/main/java/com/example/customer/NoSuchFile.java"],
+            ),
+        ],
+    )
+
+    gaps = find_missing_grounded_production_artifacts(plan, edges)
+
+    assert gaps == [{
+        "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
+        "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
+        "consumer_subtask": "s3",
+        "reason": "unowned",
+    }]
+
+
+def test_missing_grounded_production_artifact_acceptance_records_satisfied_preserved_reference(tmp_path):
+    """MA8 mapping (2026-09-06/07, Production Validation P2): accepting a
+    declared preservation also records ObligationKind.PRESERVED_REFERENCE,
+    SATISFIED, with the target's real pre-generation content hash as
+    evidence - the fact the terminal integrity sweep re-checks later."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="preserved-obligation", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+            ),
+        ],
+    )
+    ledger = ObligationLedger()
+
+    gaps = find_missing_grounded_production_artifacts(
+        plan, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+
+    assert gaps == []
+    obligation_id = f"plan.preserved_reference.{_CUSTOMER_CONTROLLER_TEST_PATH}->{_CUSTOMER_CONTROLLER_PATH}"
+    rec = ledger.current(obligation_id)
+    assert rec is not None
+    assert rec.kind == ObligationKind.PRESERVED_REFERENCE
+    assert rec.status == ObligationStatus.SATISFIED
+    assert rec.authority == ObligationAuthority.DETERMINISTIC
+    assert rec.terminal_required is True
+    expected_hash = read_file_revision(str(tmp_path / _CUSTOMER_CONTROLLER_PATH))
+    assert rec.evidence["baseline_hash"] == expected_hash
+
+
+def test_missing_grounded_production_artifact_no_obligation_recorded_without_ledger(tmp_path):
+    """Backward compatibility: omitting workspace_path/obligation_ledger
+    (every existing caller, and 9 pre-existing tests in this module) must
+    behave exactly as before this extension - acceptance still suppresses
+    the gap, but records nothing anywhere."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="preserved-no-ledger", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+            ),
+        ],
+    )
+
+    gaps = find_missing_grounded_production_artifacts(plan, edges)
+
+    assert gaps == []
+
+
+def _preserved_customer_plan(tmp_path, preserved_references):
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="preserved-drop", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=preserved_references,
+            ),
+        ],
+    )
+    return plan, edges
+
+
+def test_preserved_reference_silently_dropped_between_revisions_is_recorded_violated(tmp_path):
+    """PRV-17 (2026-09-08, P5 audit) closing-pass counterpart to plan_
+    validation.py's requires/provides drop test: revision 0 correctly
+    accepts and records SATISFIED preservation of _CUSTOMER_CONTROLLER_PATH;
+    revision 1's plan drops the declaration entirely while touching
+    something unrelated. The per-edge acceptance branch never re-visits a
+    (source, target) pair it doesn't see this round, so nothing would flag
+    this without the new closing post-pass - proves that post-pass fires
+    and produces a real regression event via the same
+    ObligationLedger.record() primitive every other same-authority
+    SATISFIED->VIOLATED transition already uses."""
+    plan0, edges = _preserved_customer_plan(tmp_path, [_CUSTOMER_CONTROLLER_PATH])
+    ledger = ObligationLedger()
+    gaps0 = find_missing_grounded_production_artifacts(
+        plan0, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+    assert gaps0 == []
+    obligation_id = f"plan.preserved_reference.{_CUSTOMER_CONTROLLER_TEST_PATH}->{_CUSTOMER_CONTROLLER_PATH}"
+    assert ledger.current(obligation_id).status == ObligationStatus.SATISFIED
+    before = len(ledger.regressions)
+
+    plan1, _ = _preserved_customer_plan(tmp_path, [])
+    gaps1 = find_missing_grounded_production_artifacts(
+        plan1, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=1,
+    )
+
+    assert any(g["missing_production_artifact"] == _CUSTOMER_CONTROLLER_PATH for g in gaps1)
+    rec = ledger.current(obligation_id)
+    assert rec.status == ObligationStatus.VIOLATED
+    assert rec.evidence.get("dropped_between_revisions") is True
+    assert rec.terminal_required is False
+    new_regressions = ledger.regressions[before:]
+    assert any(r.obligation_id == obligation_id for r in new_regressions)
+
+
+def test_preserved_reference_still_declared_is_not_spuriously_flagged_as_dropped(tmp_path):
+    """Sanity counterpart: re-validating the SAME unchanged preservation
+    declaration across two revisions must never spuriously regress it."""
+    plan0, edges = _preserved_customer_plan(tmp_path, [_CUSTOMER_CONTROLLER_PATH])
+    ledger = ObligationLedger()
+    find_missing_grounded_production_artifacts(
+        plan0, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+    before = len(ledger.regressions)
+
+    plan1, _ = _preserved_customer_plan(tmp_path, [_CUSTOMER_CONTROLLER_PATH])
+    gaps1 = find_missing_grounded_production_artifacts(
+        plan1, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=1,
+    )
+
+    assert gaps1 == []
+    obligation_id = f"plan.preserved_reference.{_CUSTOMER_CONTROLLER_TEST_PATH}->{_CUSTOMER_CONTROLLER_PATH}"
+    assert ledger.current(obligation_id).status == ObligationStatus.SATISFIED
+    assert ledger.regressions[before:] == []
+
+
+def test_enforce_preserved_reference_terminal_integrity_passes_when_target_unchanged(tmp_path):
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="terminal-unchanged", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+            ),
+        ],
+    )
+    ledger = ObligationLedger()
+    find_missing_grounded_production_artifacts(
+        plan, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+
+    enforce_preserved_reference_terminal_integrity(ledger, str(tmp_path))
+
+    obligation_id = f"plan.preserved_reference.{_CUSTOMER_CONTROLLER_TEST_PATH}->{_CUSTOMER_CONTROLLER_PATH}"
+    assert ledger.current(obligation_id).status == ObligationStatus.SATISFIED
+    assert ledger.unresolved_terminal_obligations() == []
+
+
+def test_enforce_preserved_reference_terminal_integrity_flags_a_mutated_target(tmp_path):
+    """The exact P2 safety invariant this whole extension exists to
+    provide: if generation touches a file declared preserved anyway, the
+    run must not be allowed to report success. A byte-identity mismatch
+    against the recorded baseline flips the SAME obligation id VIOLATED -
+    a same-authority regression the ledger's own detection also sees -
+    and unresolved_terminal_obligations() then fails the run via the
+    existing generic MA8 backstop, with no new gate wired for this kind."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    plan = EngineeringPlan(
+        plan_id="terminal-mutated", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[
+            _structural_customer_subtask("s1", _CUSTOMER_PATH),
+            _structural_customer_subtask("s2", _CUSTOMER_SERVICE_PATH, depends_on=["s1"]),
+            _structural_customer_subtask(
+                "s3", _CUSTOMER_CONTROLLER_TEST_PATH, depends_on=["s2"],
+                preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+            ),
+        ],
+    )
+    ledger = ObligationLedger()
+    find_missing_grounded_production_artifacts(
+        plan, edges, workspace_path=str(tmp_path), obligation_ledger=ledger, revision=0,
+    )
+
+    (tmp_path / _CUSTOMER_CONTROLLER_PATH).write_text("// generation touched this preserved file\n")
+    enforce_preserved_reference_terminal_integrity(ledger, str(tmp_path))
+
+    obligation_id = f"plan.preserved_reference.{_CUSTOMER_CONTROLLER_TEST_PATH}->{_CUSTOMER_CONTROLLER_PATH}"
+    rec = ledger.current(obligation_id)
+    assert rec.status == ObligationStatus.VIOLATED
+    unresolved = ledger.unresolved_terminal_obligations()
+    assert obligation_id in [r.id for r in unresolved]
+    assert any(r.obligation_id == obligation_id for r in ledger.regressions)
+
+
+_WIDGET_JAVA = (
+    "package com.example.widget;\n"
+    "public class Widget {\n"
+    "    public String label() { return \"widget\"; }\n"
+    "}\n"
+)
+_WIDGET_SERVICE_JAVA = (
+    "package com.example.widget;\n"
+    "public class WidgetService {\n"
+    "    public Widget make() { return new Widget(); }\n"
+    "}\n"
+)
+_WIDGET_PATH = "src/main/java/com/example/widget/Widget.java"
+_WIDGET_SERVICE_PATH = "src/main/java/com/example/widget/WidgetService.java"
+
+
+def _seed_single_production_dependency_repo(tmp_path):
+    files = {_WIDGET_PATH: _WIDGET_JAVA, _WIDGET_SERVICE_PATH: _WIDGET_SERVICE_JAVA}
+    for relpath, content in files.items():
+        full = tmp_path / relpath
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text(content)
+    return list(files.keys())
+
+
+def test_missing_grounded_production_artifact_is_silent_for_production_source_with_one_unplanned_dependency(tmp_path):
+    """(2026-09-04) Source-role scoping fix: a PRODUCTION source referencing
+    a single existing, unplanned production dependency (Widget.java is
+    ordinary brownfield WidgetService.java already correctly depends on) is
+    not the PRV-11 omitted-owner shape - only a test source omitting a
+    production owner is."""
+    candidates = _seed_single_production_dependency_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    assert edges[_WIDGET_SERVICE_PATH] == [_WIDGET_PATH]
+    plan = EngineeringPlan(
+        plan_id="widget-service-only", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[_structural_customer_subtask("s1", _WIDGET_SERVICE_PATH)],
+    )
+
+    assert find_missing_grounded_production_artifacts(plan, edges) == []
+
+
+def test_missing_grounded_production_artifact_is_silent_for_production_source_with_multiple_unplanned_dependencies(tmp_path):
+    """Same shape as above but with a source (CustomerController.java) that
+    structurally references TWO unplanned production files (Customer.java
+    AND CustomerService.java) - neither is flagged, since the source is
+    production, not a test."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    _, edges = build_planning_structural_evidence(str(tmp_path), candidates)
+    assert set(edges[_CUSTOMER_CONTROLLER_PATH]) == {_CUSTOMER_PATH, _CUSTOMER_SERVICE_PATH}
+    plan = EngineeringPlan(
+        plan_id="controller-only", kind=ChangeKind.ENHANCEMENT,
+        subtasks=[_structural_customer_subtask("s1", _CUSTOMER_CONTROLLER_PATH)],
+    )
+
+    assert find_missing_grounded_production_artifacts(plan, edges) == []
 
 
 def test_missing_grounded_production_artifact_is_silent_when_the_owner_is_planned(tmp_path):
@@ -1877,6 +2779,7 @@ def test_missing_grounded_production_artifact_flags_edge_miswiring_when_owner_ex
         "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
         "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
         "owning_subtask": "s3",
+        "consumer_subtask": "s4",
         "reason": "not_in_dependency_chain",
     }]
 
@@ -1911,6 +2814,7 @@ def test_grounded_edge_rejects_semantic_provider_mismatch_even_with_both_depende
         "test_file": _CUSTOMER_CONTROLLER_TEST_PATH,
         "missing_production_artifact": _CUSTOMER_CONTROLLER_PATH,
         "owning_subtask": "s3",
+        "consumer_subtask": "s4",
         "owner_provides": ["controller_cap"],
         "test_requires": ["service_cap"],
         "reason": "semantic_provider_mismatch",
@@ -4469,6 +5373,401 @@ async def test_enforce_revises_service_scope_to_grounded_controller_and_continue
 
 
 @pytest.mark.asyncio
+async def test_enforce_grounds_stale_pinned_test_scope_denial_and_merges_to_success(tmp_path):
+    """The real P2 run-1 incident (2026-09-05, spring-ignite-demo), driven
+    through the full enforce loop rather than handle_attempt_failure()
+    called directly (test_handle_attempt_failure_scope_denial_with_real_
+    existing_test_owner_is_grounded in test_workflow.py does that, proving
+    grounding itself is correct, but stops there - it never proves the
+    CONTROLLER actually completes the recovery: revise_plan_for_grounded_
+    scope_owner() merging the ownership in, revalidating, and reaching a
+    real success). A plan splits "change EmployeeService" (s1) and "update
+    the existing EmployeeServiceTest that pins its old behavior" (s2,
+    depends_on=[s1]) into two subtasks; s1's own full regression gate can
+    never pass without updating that test, and s1 has no write authority
+    over it - exactly the shape b6685cb fixed (a real, existing TEST file
+    grounds identically to a real, existing PRODUCTION file, not
+    blanket-excluded). Mirrors test_enforce_revises_service_scope_to_
+    grounded_controller_and_continues immediately above, with the grounded
+    owner being the downstream TEST subtask itself (not a third production
+    subtask), matching P2's own 2-subtask shape exactly."""
+    service = "src/main/EmployeeService.java"
+    test_file = "src/test/EmployeeServiceTest.java"
+    for path in (service, test_file):
+        full = tmp_path / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text("baseline\n")
+    plan = EngineeringPlan(
+        plan_id="p2-run1", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(id="gi1", statement="only the raise cap changes")],
+        subtasks=[
+            Subtask(
+                id="s1", description="cap the raise", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=service, action=FileAction.MODIFY)],
+                provides=["raise capped"], relevant_global_invariant_ids=["gi1"],
+            ),
+            Subtask(
+                id="s2", description="update the pinned test", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(path=test_file, action=FileAction.MODIFY)],
+                requires=["raise capped"], relevant_global_invariant_ids=["gi1"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            # s1's own full regression gate fails: the stale pinned test
+            # still asserts the OLD uncapped behavior. AuthorizedFileWriter
+            # denies s1's attempt to fix it directly (outside s1's own
+            # scope), grounding to the real, existing test file exactly as
+            # _failure_from_validated_scope_denial() does in production.
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "classification": "PLAN_SCOPE_DEFECT",
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "regression_test",
+                    "required_files": [test_file],
+                    "grounded_owner_files": [test_file],
+                    "attribution_tier": "architectural_owner",
+                    "allowed_files": [service],
+                },
+            }
+        for path in kwargs["allowed_write_relpaths"]:
+            (tmp_path / path).write_text("modified\n")
+        return {
+            "status": "success", "quality_gates_passed": True,
+            "files": kwargs["allowed_write_relpaths"],
+        }
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = await WorkflowController(we).execute(
+            "cap the raise at 150000.0, updating the existing pinned test",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert calls[0]["allowed_write_relpaths"] == [service]
+    assert calls[1]["allowed_write_relpaths"] == [service, test_file]
+    assert calls[1]["execution_scope"] == "subtask=s1 role=plan_scope_recovery"
+    assert len(calls) == 2  # s2 fully absorbed into s1 - no separate execution call
+    assert (tmp_path / test_file).read_text() == "modified\n"
+    approved = load_approved_plan(str(tmp_path), plan.plan_id)
+    approved_subtasks = approved["plan"]["subtasks"]
+    assert any(
+        item["id"] == "s1" and test_file in [pf["path"] for pf in item["planned_files"]]
+        for item in approved_subtasks
+    )
+    assert not any(item["id"] == "s2" for item in approved_subtasks)
+    assert all(item.status == SubtaskStatus.COMPLETED for item in result.subtask_results)
+
+
+@pytest.mark.asyncio
+async def test_enforce_merge_self_satisfies_per_file_requires_capabilities_via_real_validate_plan(
+    tmp_path,
+):
+    """The real P2 run-3 incident (2026-09-05, spring-ignite-demo): identical
+    merge shape to test_enforce_grounds_stale_pinned_test_scope_denial_and_
+    merges_to_success immediately above, except the grounded test file's
+    own PlannedFile ALSO declares requires_capabilities=["raise_capped"] -
+    a per-file field, distinct from subtask-level requires. Before 1b6e727,
+    validate_plan()'s per-file check demanded this capability appear in the
+    MERGED subtask's own `requires`, but revise_plan_for_grounded_scope_
+    owner()'s subtask-level reconciliation already correctly drops a
+    self-provided capability from `requires` during merge - so every
+    grounded-owner merge of exactly this shape was unvalidatable. This
+    test does NOT mock validate_plan (unlike the sibling test above) - the
+    REAL function must accept the REAL merged plan on the first pass,
+    proving the fix holds through the actual controller merge, not just
+    against a hand-built plan (test_plan_validation.py's own
+    test_planned_artifact_prerequisite_self_satisfied_by_sole_provider_
+    passes already covers that in isolation)."""
+    service = "src/main/EmployeeService.java"
+    test_file = "src/test/EmployeeServiceTest.java"
+    for path in (service, test_file):
+        full = tmp_path / path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        full.write_text("baseline\n")
+    plan = EngineeringPlan(
+        plan_id="p2-run3", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(id="gi1", statement="only the raise cap changes")],
+        subtasks=[
+            Subtask(
+                id="s1", description="cap the raise", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=service, action=FileAction.MODIFY)],
+                provides=["raise_capped"], relevant_global_invariant_ids=["gi1"],
+            ),
+            Subtask(
+                id="s2", description="update the pinned test", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"], requires=["raise_capped"],
+                planned_files=[PlannedFile(
+                    path=test_file, action=FileAction.MODIFY,
+                    requires_capabilities=["raise_capped"],
+                )],
+                relevant_global_invariant_ids=["gi1"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    # Unlike every other test in this module, validate_plan() runs for
+    # real here (see docstring) - its own internals call
+    # triage_service.recompute_from_files(), which _workflow_engine()'s
+    # bare MagicMock doesn't otherwise support awaiting.
+    we.engineering_triage.recompute_from_files = AsyncMock(return_value=_route())
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return {
+                "status": "failed", "quality_gates_passed": False, "files": [],
+                "plan_scope_conflict": {
+                    "classification": "PLAN_SCOPE_DEFECT",
+                    "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+                    "failure_type": "regression_test",
+                    "required_files": [test_file],
+                    "grounded_owner_files": [test_file],
+                    "attribution_tier": "architectural_owner",
+                    "allowed_files": [service],
+                },
+            }
+        for path in kwargs["allowed_write_relpaths"]:
+            (tmp_path / path).write_text("modified\n")
+        return {
+            "status": "success", "quality_gates_passed": True,
+            "files": kwargs["allowed_write_relpaths"],
+        }
+
+    we.run_generation_workflow = fake_run
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ):
+        result = await WorkflowController(we).execute(
+            "cap the raise at 150000.0, updating the existing pinned test",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 2  # merge validated and converged on the first real validate_plan pass
+    approved = load_approved_plan(str(tmp_path), plan.plan_id)
+    approved_subtasks = approved["plan"]["subtasks"]
+    merged_s1 = next(item for item in approved_subtasks if item["id"] == "s1")
+    assert test_file in [pf["path"] for pf in merged_s1["planned_files"]]
+    assert "raise_capped" not in merged_s1["requires"]
+
+
+@pytest.mark.asyncio
+async def test_enforce_preserved_reference_acceptance_and_terminal_integrity_gate_a_real_run(
+    tmp_path,
+):
+    """The real P2 run-8 shape (2026-09-07, spring-ignite-demo, the run that
+    finally closed the whole MISSING_GROUNDED_PRODUCTION_ARTIFACT
+    non-convergence question): CustomerControllerTest.java references
+    CustomerController.java, which no subtask owns - declared as a
+    preserved_references entry instead of a real gap. Every existing test
+    for this mechanism either calls find_missing_grounded_production_
+    artifacts() directly (proving acceptance/recording in isolation) or
+    enforce_preserved_reference_terminal_integrity() directly (proving the
+    re-hash in isolation) - neither goes through WorkflowController.
+    execute() end to end, so neither proves the declared preservation is
+    what actually lets a REAL plan pass planning-time validation AND that
+    the terminal gate is wired into the REAL run's own success
+    determination, not just callable in isolation. Uses the same real
+    structural-evidence fixture (_seed_structural_customer_repo) the
+    acceptance unit test already relies on for its genuine TEST->
+    CONTROLLER edge - not a hand-waved structural_resolved_edges dict."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    plan = EngineeringPlan(
+        plan_id="p2-run8", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(id="gi1", statement="CustomerController is untouched")],
+        subtasks=[
+            Subtask(
+                id="s1", description="update CustomerService", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=_CUSTOMER_SERVICE_PATH, action=FileAction.MODIFY)],
+                provides=["service_updated"], relevant_global_invariant_ids=["gi1"],
+            ),
+            Subtask(
+                id="s2", description="update the controller test", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"], requires=["service_updated"],
+                planned_files=[PlannedFile(
+                    path=_CUSTOMER_CONTROLLER_TEST_PATH, action=FileAction.MODIFY,
+                    preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+                )],
+                relevant_global_invariant_ids=["gi1"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    we.engineering_triage.recompute_from_files = AsyncMock(return_value=_route())
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        # Neither subtask ever writes CustomerController.java - the
+        # preservation holds for real, not just as a plan-time claim.
+        for path in kwargs["allowed_write_relpaths"]:
+            (tmp_path / path).write_text("modified\n")
+        return {
+            "status": "success", "quality_gates_passed": True,
+            "files": kwargs["allowed_write_relpaths"],
+        }
+
+    we.run_generation_workflow = fake_run
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ):
+        result = await WorkflowController(we).execute(
+            "update CustomerService without touching CustomerController",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    assert len(calls) == 2
+    assert (tmp_path / _CUSTOMER_CONTROLLER_PATH).read_text() == _STRUCTURAL_CUSTOMER_CONTROLLER_JAVA
+
+
+@pytest.mark.asyncio
+async def test_enforce_preserved_reference_terminal_integrity_fails_a_real_run_on_mutation(
+    tmp_path,
+):
+    """Negative counterpart: the exact same accepted plan, but this time
+    the Developer's own generated content for s1 (CustomerService.java)
+    ALSO rewrites CustomerController.java (a realistic mistake - a model
+    editing a related file it wasn't authorized to touch). The terminal
+    integrity re-hash must catch this and the run must NOT report
+    success, proving the gate is load-bearing in the real run, not merely
+    present."""
+    candidates = _seed_structural_customer_repo(tmp_path)
+    plan = EngineeringPlan(
+        plan_id="p2-run8-mutated", kind=ChangeKind.TASK,
+        global_invariants=[GlobalInvariant(id="gi1", statement="CustomerController is untouched")],
+        subtasks=[
+            Subtask(
+                id="s1", description="update CustomerService", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path=_CUSTOMER_SERVICE_PATH, action=FileAction.MODIFY)],
+                provides=["service_updated"], relevant_global_invariant_ids=["gi1"],
+            ),
+            Subtask(
+                id="s2", description="update the controller test", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"], requires=["service_updated"],
+                planned_files=[PlannedFile(
+                    path=_CUSTOMER_CONTROLLER_TEST_PATH, action=FileAction.MODIFY,
+                    preserved_references=[_CUSTOMER_CONTROLLER_PATH],
+                )],
+                relevant_global_invariant_ids=["gi1"],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    we.engineering_triage.recompute_from_files = AsyncMock(return_value=_route())
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs)
+        for path in kwargs["allowed_write_relpaths"]:
+            (tmp_path / path).write_text("modified\n")
+        if len(calls) == 1:
+            # Out-of-band mutation of the file declared preserved - not
+            # part of this subtask's own allowed_write_relpaths, mimicking
+            # a worktree-level side effect a real generation pass could
+            # produce (e.g. an IDE-style multi-file edit).
+            (tmp_path / _CUSTOMER_CONTROLLER_PATH).write_text("silently mutated\n")
+        return {
+            "status": "success", "quality_gates_passed": True,
+            "files": kwargs["allowed_write_relpaths"],
+        }
+
+    we.run_generation_workflow = fake_run
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ):
+        result = await WorkflowController(we).execute(
+            "update CustomerService without touching CustomerController",
+            str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] != "success"
+
+
+def _p2_run5_attempt0_plan_text():
+    """Verbatim reconstruction of the real P2 run 5 (2026-09-06, spring-
+    ignite-demo) attempt-0 payload - see test_planner_structured_output.py's
+    own test_p2_run5_attempt0_schema_shape_parses_without_a_repair_round,
+    which proves parse_planner_structured_output() self-heals this shape
+    directly. That test never drives the real repair-budget-counting loop,
+    though - this one does."""
+    payload = {
+        "subtasks": [{
+            "id": "s1", "description": "cap giveRaise salary", "execution_method": "model",
+            "planned_files": [{
+                "path": "src/main/java/com/example/ignite/service/EmployeeService.java",
+                "action": "modify",
+            }],
+            "acceptance_criteria_ids": ["ac1", "ac2"],
+        }],
+        "acceptance_criteria": [
+            {"id": "ac1", "description": "Salary cap enforced via a named constant.", "method": "judgment"},
+            {"id": "ac2", "description": "Raised salary > cap gets exactly the cap.", "method": "test"},
+        ],
+    }
+    return f"Some prose plan.\n\n```json\n{json.dumps(payload)}\n```"
+
+
+@pytest.mark.asyncio
+async def test_enforce_schema_self_heal_does_not_consume_a_real_repair_slot(tmp_path):
+    """Vertical counterpart to test_planner_structured_output.py's own
+    self-heal unit tests, which call parse_planner_structured_output()
+    directly - those prove the healed shape is schema-valid, but never
+    prove the real WorkflowController repair-budget counter (Planner-
+    convergence audit, 2026-09-06: one shared repair_attempts counter for
+    BOTH schema noise and genuine semantic failures) treats a self-healed
+    attempt as consuming zero of its 2 real semantic repair slots. Neither
+    parse_planner_structured_output nor build_engineering_plan_from_
+    planner_output is mocked here - only validate_plan (this test is about
+    the SCHEMA layer, not semantic convergence) and run_generation_
+    workflow (ordinary successful execution)."""
+    plan_text = _p2_run5_attempt0_plan_text()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(return_value=plan_text)
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": [],
+    })
+
+    with patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(return_value=PlanValidationResult(valid=True)),
+    ):
+        result = await WorkflowController(we).execute(
+            "cap the raise", str(tmp_path), migration_mode="enforce",
+        )
+
+    assert result.legacy_result["status"] == "success"
+    # Exactly one Planner call, zero repairs - the malformed method="test"/
+    # no-tool_name shape never reached validate_plan at all, let alone
+    # consumed a real semantic repair round fixing something else.
+    assert we.planner.run.await_count == 1
+    assert result.legacy_result.get("plan_repair_attempts", 0) == 0
+
+
+@pytest.mark.asyncio
 async def test_enforce_reopens_owner_with_grounded_diagnosis_and_commits_plan_atomically(
     tmp_path, monkeypatch,
 ):
@@ -5535,6 +6834,946 @@ async def test_enforce_rejects_model_subtask_without_planned_files(tmp_path):
     assert result.legacy_result["invalid_subtask_ids"] == ["s1"]
     assert we.planner.run.await_count == 3
     we.run_generation_workflow.assert_not_awaited()
+
+
+# --- Planner-convergence audit (2026-09-06, P2 production-validation run 7):
+# a semantic repair regressed an already-cleared deterministic reason code
+# (APPLICATION_RUNTIME_OWNER_MISSING) while chasing a remaining one
+# (MISSING_GROUNDED_PRODUCTION_ARTIFACT) - must_preserve is prompt text only
+# and never stopped it. _is_strict_regression() + the retained-baseline
+# bookkeeping in the structured-planning repair loop reject a candidate
+# whose reason-code set is a proper SUPERSET of the retained baseline's,
+# without adding/refunding a repair attempt or touching any validator. ---
+
+@pytest.mark.parametrize(
+    "retained, candidate, expected",
+    [
+        (frozenset({"D"}), frozenset({"A", "D"}), True),
+        (frozenset({"D"}), frozenset({"D"}), False),
+        (frozenset({"D"}), frozenset(), False),
+        (frozenset({"D"}), frozenset({"X"}), False),
+        (None, frozenset({"D"}), False),
+    ],
+)
+def test_is_strict_regression_partial_order(retained, candidate, expected):
+    assert _is_strict_regression(retained, candidate) is expected
+
+
+def _p2_run7_plan():
+    return EngineeringPlan(
+        plan_id="p2-run7", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="cap giveRaise salary", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(
+                    path="src/main/java/com/example/ignite/service/EmployeeService.java",
+                    action=FileAction.MODIFY,
+                )],
+            ),
+            Subtask(
+                id="s2", description="update the pinned test", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"],
+                planned_files=[PlannedFile(
+                    path="src/test/java/com/example/ignite/service/EmployeeServiceTest.java",
+                    action=FileAction.MODIFY,
+                )],
+            ),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_enforce_rejects_terminal_regression_and_reports_retained_baseline(tmp_path):
+    """Reproduces P2 run 7's real 3-attempt sequence: attempt 0 has 5
+    semantic reason codes, attempt 1 correctly resolves 4 of them (leaving
+    only MISSING_GROUNDED_PRODUCTION_ARTIFACT), attempt 2 - chasing that
+    one remaining code - regresses APPLICATION_RUNTIME_OWNER_MISSING back
+    while STILL not resolving MISSING_GROUNDED_PRODUCTION_ARTIFACT. With
+    the production repair budget unchanged (still exactly 3 Planner calls,
+    nothing refunded or added), the terminal report must reflect attempt
+    1's retained state, not attempt 2's strictly worse one."""
+    plan = _p2_run7_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["attempt0 text", "attempt1 text", "attempt2 text"])
+    we.run_generation_workflow = AsyncMock(
+        side_effect=AssertionError("must never reach generation - planning never converges"),
+    )
+
+    attempt0 = PlanValidationResult(
+        valid=False, errors=["five things wrong"],
+        reason_codes=[
+            "SUBTASK_SEMANTIC_CONTRACT_MISSING", "APPLICATION_RUNTIME_OWNER_MISSING",
+            "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED", "MISSING_GROUNDED_PRODUCTION_ARTIFACT",
+            "GROUNDED_SEMANTIC_PROVIDER_MISMATCH",
+        ],
+    )
+    attempt1 = PlanValidationResult(
+        valid=False, errors=["one thing wrong"],
+        reason_codes=["MISSING_GROUNDED_PRODUCTION_ARTIFACT"],
+    )
+    attempt2 = PlanValidationResult(
+        valid=False, errors=["two things wrong, one reintroduced"],
+        reason_codes=["APPLICATION_RUNTIME_OWNER_MISSING", "MISSING_GROUNDED_PRODUCTION_ARTIFACT"],
+    )
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=[attempt0, attempt1, attempt2]),
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    # The candidate that reintroduced APPLICATION_RUNTIME_OWNER_MISSING
+    # must never be reported as though it were the best reachable state.
+    assert result.legacy_result["reason_codes"] == [
+        "MISSING_GROUNDED_PRODUCTION_ARTIFACT",
+        "STRUCTURED_PLAN_REPAIR_EXHAUSTED",
+        "PLAN_REPAIR_NON_CONVERGENCE",
+    ]
+    assert "APPLICATION_RUNTIME_OWNER_MISSING" not in result.legacy_result["reason_codes"]
+    assert result.legacy_result["plan_repair_attempts"] == 2
+    # Budget is unchanged by the regression rejection - exactly 3 calls
+    # (initial + 2 repairs), nothing refunded, nothing added.
+    assert we.planner.run.await_count == 3
+    we.run_generation_workflow.assert_not_called()
+
+
+def test_repair_prompt_built_from_retained_baseline_not_regressed_candidate():
+    """Focused plumbing check: when the loop selects the RETAINED baseline's
+    plan_text/errors/reason_codes for a repair prompt (as it does whenever
+    _is_strict_regression() returns True), the resulting prompt reflects
+    that retained content, not a different, regressed candidate's own."""
+    retained_prompt = build_structured_plan_repair_prompt(
+        "goal", "attempt1 plan text", ["one thing wrong"],
+        ["MISSING_GROUNDED_PRODUCTION_ARTIFACT"], 3,
+    )
+    regressed_prompt = build_structured_plan_repair_prompt(
+        "goal", "attempt2 plan text", ["two things wrong, one reintroduced"],
+        ["APPLICATION_RUNTIME_OWNER_MISSING", "MISSING_GROUNDED_PRODUCTION_ARTIFACT"], 3,
+    )
+    assert "attempt1 plan text" in retained_prompt
+    assert "attempt2 plan text" not in retained_prompt
+    assert "attempt2 plan text" in regressed_prompt
+    assert "attempt1 plan text" not in regressed_prompt
+
+
+# --- PRESERVED_REFERENCE repair-prompt reinforcement (PRV-11 preservation
+# extension, 2026-09-07, Production Validation P5) - missing wiring, not a
+# new architectural concept: ObligationKind.PRESERVED_REFERENCE obligations
+# were already recorded SATISFIED per (source, target) pair (cd0434f/
+# 9ac8202), but build_structured_plan_repair_prompt never surfaced them the
+# way PLAN_STRUCTURAL_VALIDITY's own must_preserve block already does.
+# Live incident: P5's PetTests.java genuinely needed BOTH BaseEntity.java
+# and Visit.java preserved simultaneously - attempt 1 declared only
+# BaseEntity.java (correctly resolving that gap), attempt 2 declared only
+# Visit.java, SILENTLY DROPPING BaseEntity.java - both attempts reported
+# the identical reason-code set {MISSING_GROUNDED_PRODUCTION_ARTIFACT}, so
+# _is_strict_regression() (a deliberately reason-code-set-only guard) could
+# not see the regression - it lives inside one reason code's own evidence,
+# a resolution that guard was never meant to track. ---
+
+def _preserved_reference_obligation(source, target, revision=0):
+    return ObligationRecord(
+        id=f"plan.preserved_reference.{source}->{target}",
+        kind=ObligationKind.PRESERVED_REFERENCE,
+        status=ObligationStatus.SATISFIED,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description=f"{source} references {target} without requiring it modified - target must "
+                    "remain byte-identical to its pre-generation content",
+        source="workflow_controller.find_missing_grounded_production_artifacts",
+        revision=revision,
+        evidence={"source": source, "target": target, "baseline_hash": "deadbeef"},
+        terminal_required=True,
+    )
+
+
+def test_preserved_reference_lines_surface_a_single_satisfied_obligation():
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_obligation("TestA.java", "Foo.java"))
+
+    lines = _preserved_reference_must_preserve_lines(ledger)
+
+    assert len(lines) == 1
+    assert "TestA.java must keep declaring Foo.java" in lines[0]
+    assert "already validated" in lines[0]
+
+
+def test_preserved_reference_lines_accumulate_across_repair_rounds():
+    """The exact P5 shape: round 1 satisfies BaseEntity.java, round 2 (a
+    later revision) satisfies Visit.java for the SAME source - both must
+    appear together, not just the most recent one."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_obligation(
+        "src/test/.../PetTests.java", "src/main/.../BaseEntity.java", revision=0,
+    ))
+    after_round_1 = _preserved_reference_must_preserve_lines(ledger)
+    assert any("BaseEntity.java" in line for line in after_round_1)
+
+    ledger.record(_preserved_reference_obligation(
+        "src/test/.../PetTests.java", "src/main/.../Visit.java", revision=1,
+    ))
+    after_round_2 = _preserved_reference_must_preserve_lines(ledger)
+
+    assert any("BaseEntity.java" in line for line in after_round_2)
+    assert any("Visit.java" in line for line in after_round_2)
+    assert len(after_round_2) == 2
+
+
+def test_preserved_reference_lines_do_not_leak_across_sources():
+    """A preserved reference belonging to one source file must never be
+    attributable to a different, unrelated source - each line names its
+    own source explicitly, so this holds by construction, not by a
+    separate grouping/filtering step."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_obligation("TestA.java", "Foo.java"))
+    ledger.record(_preserved_reference_obligation("TestB.java", "Bar.java"))
+
+    lines = _preserved_reference_must_preserve_lines(ledger)
+
+    a_line = next(line for line in lines if "TestA.java" in line)
+    b_line = next(line for line in lines if "TestB.java" in line)
+    assert "Foo.java" in a_line and "Bar.java" not in a_line
+    assert "Bar.java" in b_line and "Foo.java" not in b_line
+
+
+def _p5_two_preserved_references_plan():
+    return EngineeringPlan(
+        plan_id="p5-preserved-reference-oscillation", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s3", description="PetTests", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(
+                    path="src/test/.../PetTests.java", action=FileAction.MODIFY,
+                )],
+            ),
+        ],
+    )
+
+
+def _p5_drop_case(first_target, second_target):
+    """Builds the fake_validate_plan side-effect sequence for the P5
+    oscillation shape, parameterized so the ordering can be inverted:
+    revision 0 satisfies `first_target`, missing `second_target`; revision 1
+    satisfies `second_target` but silently drops `first_target` again -
+    same single-element reason-code set both times, so only the
+    obligation-ledger-based check (not _is_strict_regression) can catch
+    it. Returns (fake_validate_plan, source_path)."""
+    source = "src/test/.../PetTests.java"
+
+    async def fake_validate_plan(plan_arg, *, obligation_ledger, revision, **kwargs):
+        if revision == 0:
+            obligation_ledger.record(_preserved_reference_obligation(
+                source, f"src/main/.../{first_target}", revision=0,
+            ))
+            return PlanValidationResult(
+                valid=False,
+                errors=[
+                    f"grounded structural evidence shows test file(s) referencing a production "
+                    f"artifact no subtask owns: PetTests.java (subtask 's3') references "
+                    f"{second_target}"
+                ],
+                reason_codes=["MISSING_GROUNDED_PRODUCTION_ARTIFACT"],
+            )
+        if revision == 2:
+            # Terminal round - the loop exhausts its 2-repair budget
+            # regardless of what this returns; content is irrelevant to
+            # this test, which only inspects the repair prompt BUILT FOR
+            # this round (await_args_list[2]), not its own outcome.
+            return PlanValidationResult(
+                valid=False,
+                errors=["irrelevant - loop exhausts after this attempt"],
+                reason_codes=["MISSING_GROUNDED_PRODUCTION_ARTIFACT"],
+            )
+        assert revision == 1
+        # second_target now declared preserved, but first_target's already-
+        # SATISFIED obligation is silently dropped this round - mirrors
+        # exactly what find_missing_grounded_production_artifacts' own
+        # closing pass records in production (same id, VIOLATED,
+        # dropped_between_revisions=True, terminal_required=False).
+        obligation_ledger.record(ObligationRecord(
+            id=f"plan.preserved_reference.{source}->src/main/.../{first_target}",
+            kind=ObligationKind.PRESERVED_REFERENCE, status=ObligationStatus.VIOLATED,
+            authority=ObligationAuthority.DETERMINISTIC,
+            description="no longer declared this round", source="test", revision=1,
+            evidence={
+                "source": source, "target": f"src/main/.../{first_target}",
+                "dropped_between_revisions": True,
+            },
+            terminal_required=False,
+        ))
+        obligation_ledger.record(_preserved_reference_obligation(
+            source, f"src/main/.../{second_target}", revision=1,
+        ))
+        return PlanValidationResult(
+            valid=False,
+            errors=[
+                f"grounded structural evidence shows test file(s) referencing a production "
+                f"artifact no subtask owns: PetTests.java (subtask 's3') references "
+                f"{first_target}"
+            ],
+            reason_codes=["MISSING_GROUNDED_PRODUCTION_ARTIFACT"],
+        )
+
+    return fake_validate_plan
+
+
+async def _run_p5_drop_case(tmp_path, first_target, second_target):
+    plan = _p5_two_preserved_references_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["attempt0 text", "attempt1 text", "attempt2 text"])
+    we.run_generation_workflow = AsyncMock(
+        side_effect=AssertionError("must never reach generation - planning never converges"),
+    )
+    fake_validate_plan = _p5_drop_case(first_target, second_target)
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=fake_validate_plan),
+    ), patch(
+        # find_missing_grounded_production_artifacts is a REAL, separate call
+        # in the enforce loop (not part of validate_plan) - its own closing
+        # pass is exercised directly by test_preserved_reference_silently_
+        # dropped_between_revisions_is_recorded_violated instead; here it
+        # would otherwise immediately "drop" every obligation
+        # fake_validate_plan records above, since this test's synthetic plan
+        # never sets real preserved_references/structural edges. Neutralized
+        # exactly like #17's own oscillation test neutralizes it implicitly
+        # (an empty structural_resolved_edges there is a natural no-op; here
+        # it must be explicit since a non-empty ledger is what's under test).
+        "kriya.workflow.workflow_controller.find_missing_grounded_production_artifacts",
+        return_value=[],
+    ):
+        controller = WorkflowController(we)
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    return we
+
+
+@pytest.mark.asyncio
+async def test_enforce_p5_preserved_reference_oscillation_is_not_silently_accepted(tmp_path):
+    """The real P5 shape, driven through the actual enforce loop rather than
+    _preserved_reference_must_preserve_lines()/_preserved_reference_
+    regressions() called directly (the unit tests above do that, proving
+    each piece is correct in isolation, but never proving the repair LOOP
+    actually rejects the drop): PetTests.java genuinely needs BOTH
+    BaseEntity.java and Visit.java preserved simultaneously. Revision 0
+    satisfies BaseEntity.java, missing Visit.java; revision 1 satisfies
+    Visit.java but SILENTLY DROPS BaseEntity.java. Both revisions report
+    the IDENTICAL single-element reason-code set
+    {MISSING_GROUNDED_PRODUCTION_ARTIFACT} - by the documented partial-order
+    rule, equal sets are never a strict regression, so
+    _is_strict_regression() alone cannot see this; only
+    _preserved_reference_regressions() (PRV-17, 2026-09-08, P5 audit) can.
+    Proven via the repair prompt built for the NEXT round (revision 2):
+    if the drop were accepted, that prompt would ask the Planner to fix
+    BaseEntity.java (revision 1's own, regressed complaint); the fix
+    requires it to instead still ask about Visit.java (revision 0's
+    retained, correct complaint) and never mention BaseEntity.java at all
+    (no longer SATISFIED in the ledger, so not even a must_preserve
+    reminder)."""
+    we = await _run_p5_drop_case(tmp_path, "BaseEntity.java", "Visit.java")
+
+    repair_prompt_for_revision_2 = we.planner.run.await_args_list[2].args[0]
+    assert "Visit.java" in repair_prompt_for_revision_2
+    assert "BaseEntity.java" not in repair_prompt_for_revision_2
+
+
+@pytest.mark.asyncio
+async def test_enforce_p5_preserved_reference_oscillation_inverse_ordering(tmp_path):
+    """Symmetric counterpart: the file that gets satisfied first and the
+    file that gets silently dropped are swapped, proving the mechanism is
+    not accidentally order-dependent (e.g. hardcoded to whichever target
+    happens to be declared first)."""
+    we = await _run_p5_drop_case(tmp_path, "Visit.java", "BaseEntity.java")
+
+    repair_prompt_for_revision_2 = we.planner.run.await_args_list[2].args[0]
+    assert "BaseEntity.java" in repair_prompt_for_revision_2
+    assert "Visit.java" not in repair_prompt_for_revision_2
+
+
+@pytest.mark.asyncio
+async def test_enforce_preserved_reference_legitimate_correction_is_not_rejected(tmp_path):
+    """The intentionally-no-longer-applicable case, at the full loop level
+    (unit coverage already exists in test_preserved_reference_regressions_
+    exempts_implicated_pair - this proves the real error-text format
+    plan_validation.py actually emits for PRESERVED_REFERENCE_CONFLICTS_
+    WITH_OWNERSHIP is correctly parsed by _preserved_reference_pairs_
+    mentioned() and correctly exempts the round that legitimately removes
+    a WRONG preservation claim). Revision 0 satisfies BaseEntity.java
+    preserved. Revision 1 correctly discovers that declaration was WRONG
+    (BaseEntity.java is actually planned for modification by this same
+    subtask) and removes it, exactly as PRESERVED_REFERENCE_CONFLICTS_WITH_
+    OWNERSHIP's own repair guidance instructs - this must converge
+    normally, never be rejected as an unrelated silent drop."""
+    source = "src/test/.../PetTests.java"
+    plan = _p5_two_preserved_references_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["attempt0 text", "attempt1 text"])
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": [],
+    })
+
+    async def fake_validate_plan(plan_arg, *, obligation_ledger, revision, **kwargs):
+        if revision == 0:
+            obligation_ledger.record(_preserved_reference_obligation(
+                source, "src/main/.../BaseEntity.java", revision=0,
+            ))
+            return PlanValidationResult(
+                valid=False,
+                errors=[
+                    f"subtask 's3' planned artifact {source!r} declares "
+                    "'src/main/.../BaseEntity.java' as a preserved reference, but "
+                    "'src/main/.../BaseEntity.java' is itself planned for modification by ['s3']"
+                ],
+                reason_codes=["PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP"],
+            )
+        assert revision == 1
+        # The wrong declaration is correctly removed - same id, VIOLATED,
+        # but THIS round's own error explicitly named this exact pair, so
+        # it must be exempted from the regression check.
+        obligation_ledger.record(ObligationRecord(
+            id=f"plan.preserved_reference.{source}->src/main/.../BaseEntity.java",
+            kind=ObligationKind.PRESERVED_REFERENCE, status=ObligationStatus.VIOLATED,
+            authority=ObligationAuthority.DETERMINISTIC,
+            description="correctly retracted - was never a legal preservation claim",
+            source="test", revision=1,
+            evidence={"source": source, "target": "src/main/.../BaseEntity.java"},
+            terminal_required=False,
+        ))
+        return PlanValidationResult(valid=True)
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=fake_validate_plan),
+    ), patch(
+        "kriya.workflow.workflow_controller.find_missing_grounded_production_artifacts",
+        return_value=[],
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 2
+
+
+def test_preserved_reference_reinforcement_does_not_override_ownership_conflict():
+    """A satisfied PRESERVED_REFERENCE obligation must never be used to
+    excuse or override a genuine PRESERVED_REFERENCE_CONFLICTS_WITH_
+    OWNERSHIP contradiction - this reinforcement is prompt-text guidance
+    only, never an authorization or validation override. validate_plan()
+    itself is untouched by this fix and must still reject the contradictory
+    state regardless of any prior obligation history."""
+    conflicting_plan = EngineeringPlan(
+        plan_id="p-conflict", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="test file", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(
+                    path="Test.java", action=FileAction.CREATE,
+                    preserved_references=["Production.java"],
+                )],
+            ),
+            Subtask(
+                id="s2", description="also plans to modify the preserved target",
+                execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="Production.java", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    ledger = ObligationLedger()
+    # A PRIOR round's ledger already recorded this exact target as a
+    # satisfied preservation (as if an earlier draft had it legitimately
+    # unowned) - the CURRENT plan's own contradiction must still be caught.
+    ledger.record(_preserved_reference_obligation("Test.java", "Production.java"))
+
+    import asyncio
+    result = asyncio.run(validate_plan(conflicting_plan, workspace_path="/tmp"))
+
+    assert result.valid is False
+    assert "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP" in result.reason_codes
+
+
+def test_preserved_reference_lines_absent_leaves_structural_validity_block_unchanged():
+    """When no PRESERVED_REFERENCE obligations exist yet (the common case -
+    every P1-P4 run before this extension, and any run whose test files
+    reference no unowned production artifact), the reinforcement helper
+    contributes nothing and the existing PLAN_STRUCTURAL_VALIDITY
+    must_preserve block's own prompt text is completely unaffected -
+    proving this addition is additive, not a replacement."""
+    ledger = ObligationLedger()
+    ledger.record(ObligationRecord(
+        id="plan.refactor_baseline.non_blank", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC,
+        description="refactor_baseline is set to a real subtask id",
+        source="plan_validation.validate_plan", evidence={}, terminal_required=True,
+    ))
+
+    structural_lines = [
+        f"{rec.description} (evidence: {json.dumps(rec.evidence, default=str)})"
+        for rec in ledger.relevant_for_preservation(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
+    ]
+    preserved_reference_lines = _preserved_reference_must_preserve_lines(ledger)
+
+    assert preserved_reference_lines == []
+    assert len(structural_lines) == 1
+    assert "refactor_baseline" in structural_lines[0]
+
+
+def test_p5_reproduction_repair_prompt_retains_prior_preserved_reference():
+    """The exact required reproduction: attempt 1 satisfies BaseEntity.java;
+    building the NEXT repair prompt (reporting the remaining Visit.java
+    gap) must explicitly instruct the Planner to retain BaseEntity.java
+    while adding Visit.java - not silently let it drop, which is exactly
+    what happened live (attempt 2 declared only Visit.java)."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_obligation(
+        "src/test/java/org/springframework/samples/petclinic/model/PetTests.java",
+        "src/main/java/org/springframework/samples/petclinic/model/BaseEntity.java",
+    ))
+    must_preserve = _preserved_reference_must_preserve_lines(ledger)
+
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "attempt1 plan text",
+        [
+            "grounded structural evidence shows test file(s) referencing a production artifact "
+            "no subtask owns: src/test/java/org/springframework/samples/petclinic/model/"
+            "PetTests.java references src/main/java/org/springframework/samples/petclinic/model/"
+            "Visit.java"
+        ],
+        ["MISSING_GROUNDED_PRODUCTION_ARTIFACT"], 2,
+        must_preserve=must_preserve,
+    )
+
+    assert "BaseEntity.java" in prompt
+    assert "must keep declaring" in prompt
+    assert "Visit.java" in prompt
+    # The retained instruction and the newly-reported gap are both visible
+    # in the same prompt - the Planner has everything it needs to produce
+    # preserved_references containing both entries at once.
+    must_preserve_section = prompt.split("MUST FIX")[0]
+    assert "BaseEntity.java" in must_preserve_section
+
+
+def test_preserved_reference_conflict_repair_guidance_names_the_conflict():
+    """PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP must produce real
+    targeted-correction guidance, not just the bare reason code + generic
+    error text - the exact P6 gap: this code previously had zero dedicated
+    guidance in build_structured_plan_repair_prompt, unlike every sibling
+    grounded-evidence code (MISSING_GROUNDED_PRODUCTION_ARTIFACT,
+    MISWIRED_GROUNDED_DEPENDENCY_EDGE) right next to it."""
+    prompt_with_guidance = build_structured_plan_repair_prompt(
+        "goal", "plan text",
+        ["subtask 's2' planned artifact 'Test.java' declares 'Production.java' as a preserved "
+         "reference, but 'Production.java' is itself planned for modification by ['s1']"],
+        ["PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP"], 1,
+    )
+    prompt_without_guidance = build_structured_plan_repair_prompt(
+        "goal", "plan text", ["some other unrelated error"], ["SOME_UNKNOWN_CODE_WITH_NO_BLOCK"], 1,
+    )
+
+    assert "remove ONLY that specific conflicting target" in prompt_with_guidance
+    assert "depends_on instead of declaring the file preserved" in prompt_with_guidance
+    assert "remove ONLY that specific conflicting target" not in prompt_without_guidance
+
+
+def test_p6_reproduction_repair_prompt_instructs_removing_only_the_owned_target():
+    """The exact required P6 reproduction: s1 owns ClinicServiceImpl.java
+    (a real grounded target); s2 (the ordering test) wrongly declares
+    preserved_references=[BaseEntity.java, Person.java, Vet.java,
+    ClinicServiceImpl.java] - the first three are genuinely unowned and
+    already validated (SATISFIED in the ledger from a prior round), the
+    fourth is the live conflict. The repair prompt must instruct removing
+    ONLY ClinicServiceImpl.java while every other, already-validated entry
+    is reinforced as MUST PRESERVE - production code names no P6-specific
+    file; this test alone carries the real names, for reproduction
+    fidelity."""
+    test_file = (
+        "src/test/java/org/springframework/samples/petclinic/service/VetServiceOrderingTests.java"
+    )
+    ledger = ObligationLedger()
+    for target in (
+        "src/main/java/org/springframework/samples/petclinic/model/BaseEntity.java",
+        "src/main/java/org/springframework/samples/petclinic/model/Person.java",
+        "src/main/java/org/springframework/samples/petclinic/model/Vet.java",
+    ):
+        ledger.record(_preserved_reference_obligation(test_file, target))
+    must_preserve = _preserved_reference_must_preserve_lines(ledger)
+    assert len(must_preserve) == 3
+
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "attempt1 plan text",
+        [
+            f"subtask 's2' planned artifact {test_file!r} declares "
+            "'src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java' "
+            "as a preserved reference, but "
+            "'src/main/java/org/springframework/samples/petclinic/service/ClinicServiceImpl.java' "
+            "is itself planned for modification by ['s1']"
+        ],
+        ["PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP"], 2,
+        must_preserve=must_preserve,
+    )
+
+    # The three genuinely unowned entries are reinforced, unconditionally.
+    assert "BaseEntity.java" in prompt
+    assert "Person.java" in prompt
+    assert "Vet.java" in prompt
+    # The corrective instruction is present and does not itself name the
+    # conflicting file - the Planner must read that from the error text,
+    # exactly like MISWIRED_GROUNDED_DEPENDENCY_EDGE's own established
+    # pattern above.
+    assert "remove ONLY that specific conflicting target" in prompt
+    assert "ClinicServiceImpl.java" in prompt  # present via the error text itself
+
+
+# --- Repair-guidance completeness check (P6 follow-up, 2026-09-07) --------
+# P2 (missing preservation representation), P5 (missing projection of
+# already-satisfied obligations back into the repair prompt), and P6
+# (PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP firing with zero targeted
+# correction at all) were three independent live instances of the same
+# systemic gap: the structured-plan validation side emits rich, per-code
+# evidence, but the repair-prompt side that consumes it is a hand-maintained
+# if/elif chain with no completeness check - a reason code can be added to
+# validate_plan()/find_missing_grounded_production_artifacts() with no
+# matching repair guidance, and nothing notices until a live run burns real
+# wall-clock time discovering it (P6: one full attempt, ~9 minutes). This is
+# NOT the full "Repair Guidance Registry" architecture (reason_code ->
+# evidence extractor + repair directive builder) the user scoped as a
+# separate, later piece of work, nor the full audit of every code's
+# repairability status - both stay deferred. This is the narrow, test-only
+# piece: a completeness test enumerating every reason code the structured-
+# plan loop can actually emit (scanned from source, so the enumeration
+# itself cannot silently drift from the real code - the exact bug class this
+# exists to catch) and asserting each one falls into exactly one of three
+# explicit buckets, with the "has guidance" bucket verified BEHAVIORALLY
+# (by actually calling build_structured_plan_repair_prompt), not merely
+# declared in a second, independently-drifting list.
+
+_REASON_CODE_APPEND_RE = re.compile(r'reason_codes\.append\("([A-Z][A-Z0-9_]*)"\)')
+
+
+def _scan_structured_plan_reason_codes():
+    """Every literal reason code the structured-plan validation/repair loop
+    can emit, scanned directly out of validate_plan()'s own source
+    (plan_validation.py) and the enforce loop's own source
+    (workflow_controller.py) - not a hand-maintained list, so this
+    enumeration cannot drift from the real code the way the guidance gap it
+    exists to catch did."""
+    codes = set()
+    for module in (plan_validation_module, workflow_controller_module):
+        codes.update(_REASON_CODE_APPEND_RE.findall(inspect.getsource(module)))
+    return codes
+
+
+# Bucket 1: codes with real targeted repair guidance in
+# build_structured_plan_repair_prompt - verified BEHAVIORALLY below, not
+# just declared here. Repair Guidance audit (2026-09-07, before P7): the
+# twelve entries below the P1-P6 baseline are this audit's own findings -
+# real gaps proven necessary (DUPLICATE_SUBTASK_ID/SUBTASK_DEPENDS_ON_
+# UNKNOWN_ID/SUBTASK_DEPENDENCY_CYCLE are reason codes that did not exist
+# before this audit at all - three structural checks in plan_validation.py
+# had error text but genuinely no reason code, invisible to this entire
+# completeness mechanism until now). TOOL-001 (2026-09-13):
+# TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE removed from this set - TOOL-tagged
+# subtasks are no longer unsupported in enforce mode (see
+# workflow_controller.py's own per-subtask loop), so this reason code is
+# no longer ever emitted; TOOL_SUBTASK_MISSING_TOOL_NAME remains (a
+# TOOL-execution-method subtask with no tool_name is still invalid).
+_CODES_WITH_TARGETED_GUIDANCE = {
+    "TOOL_SUBTASK_MISSING_TOOL_NAME",
+    # PLANNER-ROBUST-001 P2/P9 (2026-09-19): a real reason code where
+    # before there was none - plan_validation.py's tool-capability
+    # membership check (now delegated to kriya/workflow/
+    # planner_validation.py::validate_tool_capability_membership) used to
+    # only append to `errors`, falling through to the PLAN_VALIDATION_
+    # FAILED catch-all. Shares TOOL_SUBTASK_MISSING_TOOL_NAME's own
+    # targeted_correction block (build_structured_plan_repair_prompt) -
+    # same corrective action (point at the real tool catalog).
+    "UNREGISTERED_TOOL_NAME",
+    "MODEL_SUBTASK_MISSING_PLANNED_FILES",
+    "STRUCTURED_PLAN_SCHEMA_INVALID",
+    "SUBTASK_REQUIREMENT_UNPROVIDED",
+    "AMBIGUOUS_PLANNED_FILE_OWNERSHIP",
+    "EXTENSION_POINT_REQUIRED",
+    "REFACTOR_BASELINE_MISSING",
+    "PLANNED_FILE_ACTION_MISMATCH",
+    "VERIFICATION_EVIDENCE_PATH_MISSING",
+    "MISSING_GROUNDED_PRODUCTION_ARTIFACT",
+    "MISWIRED_GROUNDED_DEPENDENCY_EDGE",
+    "GROUNDED_SEMANTIC_PROVIDER_MISMATCH",
+    "VERIFICATION_PREREQUISITE_MANIFEST_MISSING",
+    "UNKNOWN_GLOBAL_INVARIANT",
+    "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP",
+    "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED",
+    "SEMANTIC_DEPENDENCY_EDGE_MISSING",
+    "SUBTASK_SEMANTIC_CONTRACT_MISSING",
+    "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER",
+    "APPLICATION_RUNTIME_OWNER_MISSING",
+    "AUTHORITATIVE_STACK_SUBSTITUTION",
+    "INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK",
+    "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM",
+    "PLANNED_ARTIFACT_PREREQUISITE_INVALID",
+    "DUPLICATE_SUBTASK_ID",
+    "SUBTASK_DEPENDS_ON_UNKNOWN_ID",
+    "SUBTASK_DEPENDENCY_CYCLE",
+}
+
+# Bucket 2: codes structurally incapable of ever reaching build_structured_
+# plan_repair_prompt again, so "repair guidance" does not apply to them by
+# construction, not by omission. Most only ever appear in the TERMINAL
+# branch after the repair loop has already exhausted its bounded attempts
+# and is about to raise. SEMANTIC_CONTRACT_REGRESSION_REJECTED (PRV-17,
+# 2026-09-07, P7) reaches the same guarantee by a different mechanism: it is
+# appended mid-loop, but its presence unconditionally sets treat_as_
+# regression=True, which ALWAYS redirects prompt_reason_codes to the
+# retained baseline (excluding this synthetic code) before build_
+# structured_plan_repair_prompt is ever called - it is visible only in
+# forensic logging/diagnostics, never in a live repair prompt or (since
+# treat_as_regression also drives the terminal report's own retained-vs-
+# candidate choice) the terminal reason-code list.
+_CODES_TERMINAL_NON_REPAIRABLE = {
+    "STRUCTURED_PLAN_REPAIR_EXHAUSTED",
+    "PLAN_REPAIR_OSCILLATION",
+    "PLAN_REPAIR_NON_CONVERGENCE",
+    "SEMANTIC_CONTRACT_REGRESSION_REJECTED",
+    # PRV-17 (2026-09-08, P5 audit): same reasoning as SEMANTIC_CONTRACT_
+    # REGRESSION_REJECTED above - appended mid-loop by _preserved_reference_
+    # regressions' own caller, not something a dedicated targeted_correction
+    # block could usefully add to; the retained-baseline redirect (not more
+    # repair guidance) is what actually resolves it, matching that sibling
+    # code's own precedent exactly.
+    "PRESERVED_REFERENCE_REGRESSION_REJECTED",
+}
+
+# Bucket 3 (Repair Guidance audit, 2026-09-07): codes deliberately left
+# with NO dedicated targeted_correction block because the ALWAYS-PRESENT
+# generic correction rules (the fixed text every call to build_structured_
+# plan_repair_prompt emits regardless of reason_codes - "Preserve or add
+# goal-derived global_invariants...", "Return only one complete JSON
+# object...", etc.) already give the model everything it needs, confirmed
+# directly per code below, not assumed:
+# - PLAN_GLOBAL_INVARIANTS_MISSING / SUBTASK_GLOBAL_INVARIANTS_MISSING: the
+#   generic rules explicitly require goal-derived global_invariants AND
+#   per-subtask relevant_global_invariant_ids.
+# - STRUCTURED_PLAN_PARSE_FAILED: the generic preamble already states the
+#   exact output-format contract ("one complete JSON object", "no
+#   Markdown/code fences"), and the raw parse_issue text is always
+#   included verbatim in the errors list.
+# - STRUCTURED_PLAN_EMPTY: the generic rules require "a complete corrected
+#   plan, preserving every valid subtask" and the error text itself
+#   already says plainly "produced zero subtasks" - unambiguous.
+# - PLAN_VALIDATION_FAILED: a pure catch-all by construction (validate_plan
+#   only appends it when `errors and not reason_codes` - i.e. some future,
+#   not-yet-classified check produced an error with no dedicated code of
+#   its own) - it cannot be specialized without becoming a dedicated code,
+#   which defeats its purpose as a defensive fallback. The three
+#   structural checks that used to fall through to this catch-all
+#   silently (DUPLICATE_SUBTASK_ID/SUBTASK_DEPENDS_ON_UNKNOWN_ID/
+#   SUBTASK_DEPENDENCY_CYCLE) were given real reason codes of their own by
+#   this same audit, so this catch-all's real exposure is now much
+#   smaller than before - the residual risk is accepted, not unmeasured.
+_CODES_ADEQUATE_VIA_GENERIC_CORRECTION_RULES = {
+    "PLAN_GLOBAL_INVARIANTS_MISSING",
+    "SUBTASK_GLOBAL_INVARIANTS_MISSING",
+    "STRUCTURED_PLAN_PARSE_FAILED",
+    "STRUCTURED_PLAN_EMPTY",
+    "PLAN_VALIDATION_FAILED",
+}
+
+# Bucket 4: real gaps not yet fixed, discovered after this audit. Kept
+# deliberately empty right now - the audit resolved every code found in
+# it (see the three buckets above) rather than leaving anything here. Not
+# deleted: this is the landing zone the completeness test routes a
+# genuinely new, not-yet-triaged reason code to, so removing this set
+# would just make test_every_structured_plan_reason_code_is_classified
+# fail for the wrong reason (KeyError instead of a clear assertion) the
+# next time one appears.
+_CODES_KNOWN_UNWIRED_PENDING_AUDIT = set()
+
+# A handful of guided codes gate their text on evidence SHAPE, not a bare
+# reason-code string match (the function's own top prerequisite_evidence
+# block, and VERIFICATION_PREREQUISITE_MANIFEST_MISSING's own evidence
+# filter) - real validate_plan() runs always attach matching evidence
+# alongside these codes, but a bare reason-code-only call needs a
+# representative fixture to actually exercise that path.
+_EVIDENCE_GATED_CODE_FIXTURES = {
+    "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED": [{
+        "consumer_subtask": "s2", "consumer_file": "Foo.java",
+        "prerequisite_capability": "cap", "provider_subtask": "s1",
+        "provider_file": "Bar.java", "missing_requires_edge": True,
+        "missing_depends_on_edge": True,
+    }],
+    "VERIFICATION_PREREQUISITE_MANIFEST_MISSING": [{
+        "consumer_subtask": "s3", "required_tool": "npm",
+        "candidate_manifests": ["package.json"],
+    }],
+}
+
+# The two fixed, static strings build_structured_plan_repair_prompt always
+# emits immediately before and after its targeted_correction block - used
+# to isolate exactly the reason-code-driven portion of the prompt from
+# everything else (goal text, error text, reason-code JSON dump) that would
+# otherwise differ between calls for reasons having nothing to do with
+# guidance. If these markers are ever edited, isolation raises loudly
+# (ValueError) rather than silently passing.
+_TARGETED_CORRECTION_START_MARKER = (
+    "never a fake planned_files path invented just to pass validation.\n"
+)
+_TARGETED_CORRECTION_END_MARKER = (
+    # PLANNER-ROBUST-001 P6 (2026-09-19): replaces the obsolete "Do not
+    # emit TOOL subtasks: authoritative enforce mode has no policy-
+    # mediated TOOL router yet" claim - false since TOOL-001 closed. A
+    # test must protect correct production behavior, not preserve
+    # historical wording known to be false; this marker is updated to the
+    # new, truthful, always-present trailer line verbatim.
+    "- A TOOL-execution-method subtask is valid only when it is directly dispatched to a "
+    "real, currently registered Kriya tool named in its own top-level tool_name (never "
+    "invented) - never confuse this with a verification[] entry's own tool_name, a separate "
+    "field naming a deterministic check. Ordinary verification-only work should normally use "
+    "execution_method=model with a concrete verification[] entry instead.\n"
+)
+
+
+def _extract_targeted_correction(prompt: str) -> str:
+    start = prompt.index(_TARGETED_CORRECTION_START_MARKER) + len(_TARGETED_CORRECTION_START_MARKER)
+    end = prompt.index(_TARGETED_CORRECTION_END_MARKER)
+    return prompt[start:end]
+
+
+def test_structured_plan_reason_code_enumeration_is_non_empty():
+    """Sanity check on the scanner itself - if this ever returns an empty or
+    suspiciously small set, the regex stopped matching real code (e.g. after
+    a refactor) and every other test in this section would pass vacuously
+    without it."""
+    codes = _scan_structured_plan_reason_codes()
+    assert len(codes) >= 30
+    assert "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP" in codes
+
+
+_ALL_CLASSIFICATION_BUCKETS = (
+    _CODES_WITH_TARGETED_GUIDANCE,
+    _CODES_TERMINAL_NON_REPAIRABLE,
+    _CODES_ADEQUATE_VIA_GENERIC_CORRECTION_RULES,
+    _CODES_KNOWN_UNWIRED_PENDING_AUDIT,
+)
+
+
+def test_every_structured_plan_reason_code_is_classified():
+    """The completeness check itself: every reason code the structured-plan
+    loop can actually emit today must fall into exactly one of the four
+    buckets above. A new, unclassified reason code fails this immediately -
+    this is the test that would have caught P6's gap before the live run,
+    per the user's own diagnosis, and is now the standing stopping condition
+    the Repair Guidance audit (2026-09-07) exists to maintain: every reason
+    code that can legally trigger another repair attempt must have an
+    explicit, testable repair contract - either dedicated guidance, a
+    documented reliance on the always-present generic rules, or an honest
+    "not yet triaged" landing zone, never silence."""
+    codes = _scan_structured_plan_reason_codes()
+    classified = set().union(*_ALL_CLASSIFICATION_BUCKETS)
+    unclassified = codes - classified
+    assert unclassified == set(), (
+        f"reason code(s) {sorted(unclassified)} appear in the structured-plan "
+        "loop's real source but are not classified into any of "
+        "_CODES_WITH_TARGETED_GUIDANCE / _CODES_TERMINAL_NON_REPAIRABLE / "
+        "_CODES_ADEQUATE_VIA_GENERIC_CORRECTION_RULES / "
+        "_CODES_KNOWN_UNWIRED_PENDING_AUDIT - classify it before merging"
+    )
+    for i, bucket_a in enumerate(_ALL_CLASSIFICATION_BUCKETS):
+        for bucket_b in _ALL_CLASSIFICATION_BUCKETS[i + 1:]:
+            assert bucket_a.isdisjoint(bucket_b), f"a code appears in two buckets at once: {bucket_a & bucket_b}"
+
+
+def test_every_code_with_targeted_guidance_actually_produces_guidance():
+    """Behavioral verification, not a parallel declaration: for every code in
+    _CODES_WITH_TARGETED_GUIDANCE, actually CALL build_structured_plan_
+    repair_prompt with that code (plus its evidence fixture, if it needs
+    one) and assert the isolated targeted_correction section is non-empty.
+    A hand-maintained set alone could drift from the real if/elif chain (a
+    code added to the set without a matching block, or a block deleted
+    without touching the set) - this closes that gap by exercising the real
+    code path every time the suite runs."""
+    for code in sorted(_CODES_WITH_TARGETED_GUIDANCE):
+        evidence = _EVIDENCE_GATED_CODE_FIXTURES.get(code)
+        prompt = build_structured_plan_repair_prompt(
+            "goal", "plan text", ["some error"], [code], 1,
+            validation_evidence=evidence,
+        )
+        correction = _extract_targeted_correction(prompt)
+        assert correction.strip() != "", (
+            f"{code} is declared in _CODES_WITH_TARGETED_GUIDANCE but calling "
+            "build_structured_plan_repair_prompt with it alone produced no "
+            "targeted_correction text - the guidance block for this code is "
+            "missing, gated on evidence this test's fixture doesn't supply, "
+            "or was removed"
+        )
+
+
+def test_unguided_baseline_code_produces_no_targeted_correction():
+    """Control for the behavioral check above: an unrelated code with no
+    guidance block must produce an EMPTY targeted_correction section -
+    proving _extract_targeted_correction actually isolates the right
+    portion of the prompt, rather than something that's always non-empty
+    regardless of guidance."""
+    prompt = build_structured_plan_repair_prompt(
+        "goal", "plan text", ["some error"],
+        ["SOME_UNGUIDED_CODE_WITH_NO_BLOCK"], 1,
+    )
+    assert _extract_targeted_correction(prompt).strip() == ""
+
+
+# --- Generic-adequate coverage (Repair Guidance audit, 2026-09-07) --------
+
+_GENERIC_CORRECTION_RULES_MARKERS = (
+    "Preserve or add goal-derived global_invariants",
+    "relevant_global_invariant_ids",
+    "Return only one complete JSON object",
+    "Return a complete corrected plan, preserving every valid subtask",
+)
+
+
+def test_generic_adequate_codes_produce_no_dedicated_block_but_generic_rules_survive():
+    """Behavioral verification for Bucket 3: each code in _CODES_ADEQUATE_
+    VIA_GENERIC_CORRECTION_RULES must produce an EMPTY targeted_correction
+    (proving no dedicated block was silently left behind, which would make
+    the "adequate via generic rules" classification a stale claim) AND the
+    always-present generic correction-rules text this bucket's whole
+    argument depends on must actually be present in the same prompt - the
+    behavioral proof that the deliberate non-specialization is safe, not
+    an assumption."""
+    for code in sorted(_CODES_ADEQUATE_VIA_GENERIC_CORRECTION_RULES):
+        prompt = build_structured_plan_repair_prompt(
+            "goal", "plan text", ["some error"], [code], 1,
+        )
+        assert _extract_targeted_correction(prompt).strip() == "", (
+            f"{code} is classified as adequate-via-generic-rules (no dedicated block "
+            "expected) but calling build_structured_plan_repair_prompt with it alone "
+            "produced non-empty targeted_correction text - a dedicated block exists "
+            "now and this code should move to _CODES_WITH_TARGETED_GUIDANCE instead"
+        )
+        for marker in _GENERIC_CORRECTION_RULES_MARKERS:
+            assert marker in prompt, (
+                f"expected always-present generic correction-rules text {marker!r} "
+                f"missing from the prompt for {code!r} - the bucket's own premise "
+                "(generic rules are always present) no longer holds"
+            )
 
 
 # --- MA8.1 (PRV-06, 2026-08-29): Cross-Owner Requirement-Preserving Recovery
@@ -6920,3 +9159,776 @@ def test_evaluate_integration_obligations_noop_for_unrelated_subtask_completion(
     # s3 is the PRODUCER, not a consumer of r1 - evaluating its own
     # completion must not touch the relationship at all.
     assert ledger.current("plan.integration.r1").status == ObligationStatus.PENDING
+
+
+# --- SUBTASK_SEMANTIC_CONTRACT regression guard (PRV-17, 2026-09-07,
+# Production Validation P7) - MISSING WIRING, not a new MA8/MA9 concept: a
+# live 3-attempt oscillation where the structured-plan repair loop fixed
+# one reported problem while silently dropping an unrelated, already-
+# validated requires/provides fact - first on s3 (attempt 0 -> 1), then on
+# a DIFFERENT subtask s4 one round later (attempt 1 -> 2), exhausting the
+# repair budget without ever reaching a state where both held together.
+# Two layers: _semantic_contract_must_preserve_lines (prompt reinforcement,
+# same pattern as _preserved_reference_must_preserve_lines) and
+# _semantic_contract_regression_subtasks (deterministic rejection, reusing
+# ObligationLedger.record()'s existing SATISFIED->VIOLATED regression
+# detection and the SAME retained-baseline redirect _is_strict_regression
+# already drives - never a second rejection path, never a broadened
+# _is_strict_regression). ---
+
+def _requires_obligation(subtask_id, requirement, status, revision=0, providers=None, dropped=False):
+    """dropped=True models plan_validation.py's own "silently vanished"
+    post-pass, which deliberately records terminal_required=False (unlike
+    the live per-round SATISFIED/VIOLATED recording, terminal_required=
+    True) - this exact id's own requirement string may have been
+    legitimately renamed/retired, so nothing may ever re-satisfy THIS id
+    again; the final unresolved_terminal_obligations() gate must not be
+    permanently poisoned by an obligation no longer live in the final plan.
+    Found live in this session's own direct verification (not pytest):
+    a legitimately renamed requirement left the OLD id VIOLATED+terminal_
+    required forever, failing an otherwise-successful run."""
+    return ObligationRecord(
+        id=f"plan.subtask.{subtask_id}.requires.{requirement}",
+        kind=ObligationKind.SUBTASK_SEMANTIC_CONTRACT,
+        status=status,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description=f"subtask {subtask_id!r} requires {requirement!r} with a real provider "
+                    "correctly declared in depends_on",
+        source="plan_validation.validate_plan", revision=revision,
+        evidence={
+            "relation": "requires", "subtask_id": subtask_id, "requirement": requirement,
+            "providers": providers if providers is not None else [],
+        },
+        owner_subtask_id=subtask_id, terminal_required=not dropped,
+    )
+
+
+def _provides_obligation(subtask_id, capability, status, revision=0, dropped=False):
+    """dropped=True models plan_validation.py's own "capability vanished
+    entirely" post-pass: it spreads the PRIOR SATISFIED record's own
+    evidence forward (carrying its subtask_id along, unlike a genuinely
+    AMBIGUOUS 2+ provider VIOLATED record, which has no single subtask_id -
+    `dropped=False` with status=VIOLATED models that case instead) AND
+    records terminal_required=False, since this id's own capability string
+    may have been legitimately renamed/retired and nothing may ever
+    re-satisfy THIS id again (see _requires_obligation's own docstring for
+    the live bug this mirrors, found via this session's direct
+    verification)."""
+    known_owner = subtask_id if (status == ObligationStatus.SATISFIED or dropped) else None
+    return ObligationRecord(
+        id=f"plan.capability.{capability}.provider",
+        kind=ObligationKind.SUBTASK_SEMANTIC_CONTRACT,
+        status=status,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description=f"capability {capability!r} must be provided by exactly one subtask",
+        source="plan_validation.validate_plan", revision=revision,
+        evidence={
+            "relation": "provides", "capability": capability,
+            "providers": [subtask_id] if status == ObligationStatus.SATISFIED else [],
+            "subtask_id": known_owner,
+        },
+        owner_subtask_id=known_owner,
+        terminal_required=not dropped,
+    )
+
+
+def test_semantic_contract_lines_surface_satisfied_requires_and_provides():
+    ledger = ObligationLedger()
+    ledger.record(_requires_obligation("s3", "userServiceImpl_extended", ObligationStatus.SATISFIED))
+    ledger.record(_provides_obligation("s2", "userServiceImpl_extended", ObligationStatus.SATISFIED))
+
+    lines = _semantic_contract_must_preserve_lines(ledger)
+
+    assert any("s3" in line and "userServiceImpl_extended" in line and "requires" in line for line in lines)
+    assert any("s2" in line and "userServiceImpl_extended" in line and "provides" in line for line in lines)
+    assert len(lines) == 2
+
+
+def test_semantic_contract_lines_absent_for_violated_facts():
+    ledger = ObligationLedger()
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.VIOLATED))
+    assert _semantic_contract_must_preserve_lines(ledger) == []
+
+
+def test_subtask_ids_mentioned_filters_to_requires_provides_keywords():
+    """The exact P7 discriminator: attempt 0's own reported error names s3
+    but is about preserved_references, not requires/provides - it must
+    never be read as implicating s3's semantic contract."""
+    preserved_reference_error = (
+        "subtask 's3' planned artifact 'UserServiceImplTest.java' declares "
+        "'Preserved.java' as a preserved reference, but 'Preserved.java' is itself "
+        "planned for modification by ['s3']"
+    )
+    assert _subtask_ids_mentioned([preserved_reference_error]) == set()
+
+    requires_error = "subtask 's3' requires 'x' but no subtask provides it"
+    assert _subtask_ids_mentioned([requires_error]) == {"s3"}
+
+
+def test_subtask_ids_mentioned_extracts_list_form_and_grounded_consumer():
+    contract_missing_error = (
+        "subtask(s) ['s4'] declare neither provides nor requires; authoritative "
+        "multi-stage plans require explicit semantic contracts"
+    )
+    assert _subtask_ids_mentioned([contract_missing_error]) == {"s4"}
+
+    ambiguous_error = (
+        "semantic capabilities must have exactly one provider: 'userServiceImpl_extended' "
+        "is provided by subtask(s) ['s2', 's5']"
+    )
+    assert _subtask_ids_mentioned([ambiguous_error]) == {"s2", "s5"}
+
+    grounded_error = (
+        "grounded structural evidence shows test file(s) whose requires do not resolve to "
+        "the subtask owning the referenced production artifact: UserServiceImplTest.java "
+        "(subtask 's3') references UserServiceImpl.java (owned by subtask 's2', "
+        "provides=['userServiceImpl_extended'], test requires=[])"
+    )
+    assert _subtask_ids_mentioned([grounded_error]) == {"s2", "s3"}
+
+
+def test_semantic_contract_regression_subtasks_rejects_unimplicated_drop():
+    ledger = ObligationLedger()
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.SATISFIED, revision=0))
+    before = len(ledger.regressions)
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.VIOLATED, revision=1))
+
+    offending = _semantic_contract_regression_subtasks(ledger, before, implicated_subtask_ids=set())
+    assert offending == ["s3"]
+
+
+def test_semantic_contract_regression_subtasks_exempts_implicated_subtask():
+    ledger = ObligationLedger()
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.SATISFIED, revision=0))
+    before = len(ledger.regressions)
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.VIOLATED, revision=1))
+
+    offending = _semantic_contract_regression_subtasks(ledger, before, implicated_subtask_ids={"s3"})
+    assert offending == []
+
+
+def test_semantic_contract_regression_subtasks_multiple_subtasks_mixed():
+    """The exact required shape: one subtask's contract change is
+    legitimate (implicated this round), an UNRELATED subtask's silent drop
+    in the same round is not."""
+    ledger = ObligationLedger()
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.SATISFIED, revision=0))
+    ledger.record(_provides_obligation("s4", "y", ObligationStatus.SATISFIED, revision=0))
+    before = len(ledger.regressions)
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.VIOLATED, revision=1))
+    ledger.record(_provides_obligation("s4", "y", ObligationStatus.VIOLATED, revision=1, dropped=True))
+
+    offending = _semantic_contract_regression_subtasks(ledger, before, implicated_subtask_ids={"s3"})
+    assert offending == ["s4"]
+
+
+def test_semantic_contract_regression_subtasks_ignores_other_obligation_kinds():
+    """Only SUBTASK_SEMANTIC_CONTRACT regressions are in scope here -
+    PRESERVED_REFERENCE has its own, separate regression-rejection
+    mechanism (_preserved_reference_regressions, PRV-17 2026-09-08, P5
+    audit - see that function's own docstring) keyed by (source, target)
+    file pair rather than subtask id, and must never be double-counted by
+    this guard."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_obligation("Test.java", "Foo.java", revision=0))
+    before = len(ledger.regressions)
+    ledger.record(ObligationRecord(
+        id="plan.preserved_reference.Test.java->Foo.java",
+        kind=ObligationKind.PRESERVED_REFERENCE, status=ObligationStatus.VIOLATED,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description="regressed", source="test", revision=1,
+        evidence={"source": "Test.java", "target": "Foo.java"}, terminal_required=True,
+    ))
+    assert len(ledger.regressions) == before + 1  # sanity: a regression WAS recorded
+    assert _semantic_contract_regression_subtasks(ledger, before, implicated_subtask_ids=set()) == []
+
+
+def _preserved_reference_regression_record(source, target, status, revision=0):
+    return ObligationRecord(
+        id=f"plan.preserved_reference.{source}->{target}",
+        kind=ObligationKind.PRESERVED_REFERENCE, status=status,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description="test", source="test", revision=revision,
+        evidence={"source": source, "target": target}, terminal_required=(status == ObligationStatus.SATISFIED),
+    )
+
+
+def test_preserved_reference_pairs_mentioned_extracts_source_and_target():
+    conflict_error = (
+        "subtask 's3' planned artifact 'PetTests.java' declares "
+        "'BaseEntity.java' as a preserved reference, but 'BaseEntity.java' "
+        "is itself planned for modification by ['s3']"
+    )
+    assert _preserved_reference_pairs_mentioned([conflict_error]) == {
+        ("PetTests.java", "BaseEntity.java"),
+    }
+
+
+def test_preserved_reference_pairs_mentioned_ignores_unrelated_errors():
+    unrelated_error = "grounded structural evidence shows test file(s) referencing an unowned artifact"
+    assert _preserved_reference_pairs_mentioned([unrelated_error]) == set()
+
+
+def test_preserved_reference_regressions_rejects_unimplicated_drop():
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.SATISFIED, revision=0,
+    ))
+    before = len(ledger.regressions)
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.VIOLATED, revision=1,
+    ))
+
+    offending = _preserved_reference_regressions(ledger, before, implicated_pairs=set())
+    assert offending == [("PetTests.java", "BaseEntity.java")]
+
+
+def test_preserved_reference_regressions_exempts_implicated_pair():
+    """The intentionally-no-longer-applicable case: a round that legitimately
+    corrects a WRONG preservation claim (e.g. resolving a
+    PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP naming this exact pair)
+    must never have that correction itself flagged as a silent drop - this
+    is what prevents the mechanism from over-freezing stale state."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.SATISFIED, revision=0,
+    ))
+    before = len(ledger.regressions)
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.VIOLATED, revision=1,
+    ))
+
+    offending = _preserved_reference_regressions(
+        ledger, before, implicated_pairs={("PetTests.java", "BaseEntity.java")},
+    )
+    assert offending == []
+
+
+def test_preserved_reference_regressions_multiple_pairs_mixed():
+    """One pair's drop is legitimate (implicated this round); a DIFFERENT,
+    unrelated pair's silent drop in the same round is not."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.SATISFIED, revision=0,
+    ))
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "Visit.java", ObligationStatus.SATISFIED, revision=0,
+    ))
+    before = len(ledger.regressions)
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.VIOLATED, revision=1,
+    ))
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "Visit.java", ObligationStatus.VIOLATED, revision=1,
+    ))
+
+    offending = _preserved_reference_regressions(
+        ledger, before, implicated_pairs={("PetTests.java", "BaseEntity.java")},
+    )
+    assert offending == [("PetTests.java", "Visit.java")]
+
+
+def test_preserved_reference_regressions_ignores_other_obligation_kinds():
+    """Only PRESERVED_REFERENCE regressions are in scope here -
+    SUBTASK_SEMANTIC_CONTRACT has its own, separate mechanism
+    (_semantic_contract_regression_subtasks) and must never be
+    double-counted by this guard."""
+    ledger = ObligationLedger()
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.SATISFIED, revision=0))
+    before = len(ledger.regressions)
+    ledger.record(_requires_obligation("s3", "x", ObligationStatus.VIOLATED, revision=1))
+    assert len(ledger.regressions) == before + 1  # sanity: a regression WAS recorded
+    assert _preserved_reference_regressions(ledger, before, implicated_pairs=set()) == []
+
+
+def test_preserved_reference_regressions_a_still_unresolved_pair_is_not_a_regression():
+    """Multiple preserved references where one legitimately remains
+    unresolved (never SATISFIED to begin with) while another is repaired -
+    the never-satisfied pair must not itself be reported as a regression
+    (there is nothing to regress FROM); only an actual SATISFIED->VIOLATED
+    transition counts, which ObligationLedger.record() already restricts
+    this to by construction."""
+    ledger = ObligationLedger()
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.SATISFIED, revision=0,
+    ))
+    before = len(ledger.regressions)
+    # Visit.java was never SATISFIED - only BaseEntity.java's own repair
+    # round is recorded here.
+    ledger.record(_preserved_reference_regression_record(
+        "PetTests.java", "BaseEntity.java", ObligationStatus.SATISFIED, revision=1,
+    ))
+
+    assert ledger.regressions[before:] == []
+    assert _preserved_reference_regressions(ledger, before, implicated_pairs=set()) == []
+
+
+def _p7_oscillation_plan():
+    return EngineeringPlan(
+        plan_id="p7-oscillation", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s2", description="UserService port", execution_method=ExecutionMethod.MODEL,
+                provides=["userServiceImpl_extended"],
+                planned_files=[PlannedFile(path="core/UserService.java", action=FileAction.MODIFY)],
+            ),
+            Subtask(
+                id="s3", description="UserServiceImpl", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s2"], requires=["userServiceImpl_extended"],
+                planned_files=[PlannedFile(path="repository/UserServiceImpl.java", action=FileAction.MODIFY)],
+            ),
+            Subtask(
+                id="s4", description="UserServiceImplTest", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s3"], provides=["userServiceImpl_extended_tested"],
+                planned_files=[PlannedFile(
+                    path="repository/UserServiceImplTest.java", action=FileAction.MODIFY,
+                )],
+            ),
+        ],
+    )
+
+
+def _single_subtask_plan():
+    return EngineeringPlan(
+        plan_id="p10-runtime-wiring", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="cap the raise", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="EmployeeService.java", action=FileAction.MODIFY)],
+            ),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_enforce_wires_goal_text_runtime_negation_to_validate_plan_as_false(tmp_path):
+    """Vertical counterpart to test_acceptance.py's goal_requires_runtime_
+    behavior unit tests, which call that pure function directly with a
+    literal string - those prove the regex predicate is correct, but not
+    that _run_structured_enforce (kriya/workflow/workflow_controller.py,
+    the real P2/P3 caller) actually forwards its result into
+    validate_plan()'s runtime_verification_required kwarg for a real goal
+    string flowing through the real enforce loop. Uses P3's own real,
+    frozen goal sentence verbatim (the one that previously false-positived
+    BECAUSE it explicitly denies runtime verification)."""
+    goal = (
+        "Cap the raise at 150000.0. No live application run is required "
+        "to verify this change; the existing unit tests are sufficient."
+    )
+    plan = _single_subtask_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(return_value="plan text")
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": [],
+    })
+    captured_kwargs = {}
+
+    async def fake_validate_plan(plan_arg, **kwargs):
+        captured_kwargs.update(kwargs)
+        return PlanValidationResult(valid=True)
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=fake_validate_plan),
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute(goal, str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert captured_kwargs["runtime_verification_required"] is False
+
+
+@pytest.mark.asyncio
+async def test_enforce_reproduces_p7_oscillation_and_rejects_both_silent_drops(tmp_path):
+    """The exact required reproduction (categories 1 and 2 together, since
+    this is how the incident actually unfolded as one 3-attempt sequence):
+    attempt 0 fails on PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP (s3,
+    unrelated to requires/provides); attempt 1 "fixes" that but silently
+    drops s3's already-validated requires; attempt 2 restores s3 but
+    silently drops s4's already-validated provides instead. Neither silent
+    drop may be accepted as the new retained baseline, and the terminal
+    report must reflect attempt 0's original state, not either regressed
+    candidate's."""
+    plan = _p7_oscillation_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["attempt0 text", "attempt1 text", "attempt2 text"])
+    we.run_generation_workflow = AsyncMock(
+        side_effect=AssertionError("must never reach generation - planning never converges"),
+    )
+
+    async def fake_validate_plan(plan_arg, *, obligation_ledger, revision, **kwargs):
+        if revision == 0:
+            obligation_ledger.record(_requires_obligation(
+                "s3", "userServiceImpl_extended", ObligationStatus.SATISFIED,
+                revision=0, providers=["s2"],
+            ))
+            obligation_ledger.record(_provides_obligation(
+                "s4", "userServiceImpl_extended_tested", ObligationStatus.SATISFIED, revision=0,
+            ))
+            return PlanValidationResult(
+                valid=False,
+                errors=[
+                    "subtask 's3' planned artifact 'UserServiceImplTest.java' declares "
+                    "'Preserved.java' as a preserved reference, but 'Preserved.java' is "
+                    "itself planned for modification by ['s3']"
+                ],
+                reason_codes=["PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP"],
+            )
+        if revision == 1:
+            # s3.requires silently dropped while fixing the round-0 issue.
+            obligation_ledger.record(_requires_obligation(
+                "s3", "userServiceImpl_extended", ObligationStatus.VIOLATED, revision=1,
+                dropped=True,
+            ))
+            obligation_ledger.record(_provides_obligation(
+                "s4", "userServiceImpl_extended_tested", ObligationStatus.SATISFIED, revision=1,
+            ))
+            return PlanValidationResult(
+                valid=False,
+                errors=[
+                    "grounded structural evidence shows test file(s) whose requires do not "
+                    "resolve to the subtask owning the referenced production artifact: "
+                    "UserServiceImplTest.java (subtask 's4') references UserServiceImpl.java "
+                    "(owned by subtask 's2', provides=['userServiceImpl_extended'], "
+                    "test requires=[])"
+                ],
+                reason_codes=["GROUNDED_SEMANTIC_PROVIDER_MISMATCH"],
+            )
+        assert revision == 2
+        # s3.requires restored, but s4.provides silently dropped instead.
+        obligation_ledger.record(_requires_obligation(
+            "s3", "userServiceImpl_extended", ObligationStatus.SATISFIED,
+            revision=2, providers=["s2"],
+        ))
+        obligation_ledger.record(_provides_obligation(
+            "s4", "userServiceImpl_extended_tested", ObligationStatus.VIOLATED, revision=2,
+            dropped=True,
+        ))
+        return PlanValidationResult(
+            valid=False,
+            errors=[
+                "subtask(s) ['s4'] declare neither provides nor requires; authoritative "
+                "multi-stage plans require explicit semantic contracts"
+            ],
+            reason_codes=["SUBTASK_SEMANTIC_CONTRACT_MISSING"],
+        )
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=fake_validate_plan),
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    # Neither silent drop (attempt 1's s3 regression, attempt 2's s4
+    # regression) may be reported as though it were the best reachable
+    # state - the terminal report reflects attempt 0's original, unrelated
+    # problem.
+    assert result.legacy_result["reason_codes"] == [
+        "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP",
+        "STRUCTURED_PLAN_REPAIR_EXHAUSTED",
+        "PLAN_REPAIR_NON_CONVERGENCE",
+    ]
+    assert "GROUNDED_SEMANTIC_PROVIDER_MISMATCH" not in result.legacy_result["reason_codes"]
+    assert "SUBTASK_SEMANTIC_CONTRACT_MISSING" not in result.legacy_result["reason_codes"]
+    assert result.legacy_result["plan_repair_attempts"] == 2
+    # Budget is unchanged - exactly 3 Planner calls, nothing refunded or
+    # added because of the rejected regressions.
+    assert we.planner.run.await_count == 3
+    we.run_generation_workflow.assert_not_called()
+
+    # Both repair prompts (for attempt 1 and attempt 2) were built from the
+    # RETAINED (attempt 0) state, never from a regressed candidate's own.
+    repair_prompt_for_attempt_1 = we.planner.run.await_args_list[1].args[0]
+    repair_prompt_for_attempt_2 = we.planner.run.await_args_list[2].args[0]
+    assert "Preserved.java" in repair_prompt_for_attempt_1
+    assert "Preserved.java" in repair_prompt_for_attempt_2
+
+
+@pytest.mark.asyncio
+async def test_enforce_accepts_targeted_requires_change_for_implicated_subtask(tmp_path):
+    """The required counter-case to the regression test above: a
+    GROUNDED_SEMANTIC_PROVIDER_MISMATCH naming s3 (via the grounded-edge
+    error's own consumer_subtask attribution) legitimately changes s3's
+    requires the very next round - this must converge normally, never be
+    rejected as a regression."""
+    plan = _p7_oscillation_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["attempt0 text", "attempt1 text"])
+    # "files": [] sidesteps the (unrelated) per-subtask declared-scope check
+    # in the real subtask-execution loop below planning - this test is only
+    # about the PLANNING loop's own acceptance of a legitimate, implicated
+    # requires change, not full multi-subtask execution fidelity.
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": [],
+    })
+
+    async def fake_validate_plan(plan_arg, *, obligation_ledger, revision, **kwargs):
+        if revision == 0:
+            obligation_ledger.record(_requires_obligation(
+                "s3", "userServiceImpl_extended", ObligationStatus.SATISFIED,
+                revision=0, providers=["s2"],
+            ))
+            return PlanValidationResult(
+                valid=False,
+                errors=[
+                    "grounded structural evidence shows test file(s) whose requires do not "
+                    "resolve to the subtask owning the referenced production artifact: "
+                    "UserServiceImplTest.java (subtask 's3') references UserServiceImpl.java "
+                    "(owned by subtask 's2', provides=['userServiceImpl_extended'], "
+                    "test requires=['userServiceImpl_extended_v2'])"
+                ],
+                reason_codes=["GROUNDED_SEMANTIC_PROVIDER_MISMATCH"],
+            )
+        assert revision == 1
+        # s3's own requires legitimately CHANGED (not just re-asserted) in
+        # direct response to the error that named it: the old fact really
+        # is dropped (VIOLATED, same as any other silent drop would be),
+        # but because s3 is implicated by attempt 0's own error text, this
+        # must converge normally rather than being rejected as a
+        # regression - the new value is validated separately.
+        obligation_ledger.record(_requires_obligation(
+            "s3", "userServiceImpl_extended", ObligationStatus.VIOLATED, revision=1,
+            dropped=True,
+        ))
+        obligation_ledger.record(_requires_obligation(
+            "s3", "userServiceImpl_extended_v2", ObligationStatus.SATISFIED,
+            revision=1, providers=["s2"],
+        ))
+        return PlanValidationResult(valid=True)
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=fake_validate_plan),
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 2
+
+
+# --- R1 Deliverable 5 correction (2026-09-08): plan_repair_attempts ---
+#
+# _run_structured_enforce's own `repair_attempts` local (PLAN VALIDATION
+# loop above) is now also copied into the aggregated result dict on every
+# non-exception exit (kriya/workflow/workflow_controller.py, right where
+# `aggregated: Dict[str, Any] = {...}` is built) under the SAME key the
+# _UnsafeStructuredPlan except-handler already used for the repair-
+# exhausted failure case. These tests prove the copied value exactly
+# matches the real loop's own convergence point - counted independently
+# via we.planner.run's own await_count (one initial call + one call per
+# repair round) - and that adding this read changes nothing about the
+# real outcome (status/files still come from the same mocked
+# run_generation_workflow calls as every other enforce test in this file).
+
+def _repair_probe_plan():
+    return EngineeringPlan(
+        plan_id="repair-probe-run", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+        )],
+    )
+
+
+async def _successful_generation(**kwargs):
+    with open(os.path.join(kwargs["workspace_path"], "a.py"), "w", encoding="utf-8") as f:
+        f.write("# generated\n")
+    return {"status": "success", "quality_gates_passed": True, "files": ["a.py"]}
+
+
+@pytest.mark.asyncio
+async def test_plan_repair_attempts_is_zero_when_the_first_plan_validates(tmp_path):
+    """PT-planner-01: no repair round ever runs (validate_plan passes on
+    attempt 0) -> the real loop never increments repair_attempts, and
+    planner.run is called exactly once (the initial plan, no repair)."""
+    plan = _repair_probe_plan()
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(side_effect=_successful_generation)
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(return_value=PlanValidationResult(valid=True)),
+    ):
+        result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert result.legacy_result["files"] == ["a.py"]
+    assert we.planner.run.await_count == 1
+    assert result.legacy_result["plan_repair_attempts"] == we.planner.run.await_count - 1
+    assert result.legacy_result["plan_repair_attempts"] == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_repair_attempts_is_one_after_a_single_repair_round(tmp_path):
+    """PT-planner-02: validate_plan fails once (attempt 0), then passes on
+    the repaired redraft (attempt 1) -> the real loop's repair_attempts
+    converges at exactly 1, matching one extra planner.run call beyond the
+    initial plan."""
+    plan = _repair_probe_plan()
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(side_effect=_successful_generation)
+    validate_results = [
+        PlanValidationResult(valid=False, errors=["missing acceptance mapping"], reason_codes=["PLAN_VALIDATION_FAILED"]),
+        PlanValidationResult(valid=True),
+    ]
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=validate_results),
+    ):
+        result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 2
+    assert result.legacy_result["plan_repair_attempts"] == we.planner.run.await_count - 1
+    assert result.legacy_result["plan_repair_attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_plan_repair_attempts_is_two_after_the_maximum_allowed_repair_rounds(tmp_path):
+    """PT-planner-03: validate_plan fails on attempt 0 AND attempt 1 (the
+    current fixed repair bound), then passes on attempt 2 -> repair_attempts
+    converges at exactly 2, the highest value reachable without exhausting
+    the bound (a 3rd failure would instead raise _UnsafeStructuredPlan,
+    already covered by this file's own STRUCTURED_PLAN_REPAIR_EXHAUSTED
+    tests)."""
+    plan = _repair_probe_plan()
+    we = _workflow_engine()
+    we.run_generation_workflow = AsyncMock(side_effect=_successful_generation)
+    validate_results = [
+        PlanValidationResult(valid=False, errors=["missing acceptance mapping"], reason_codes=["PLAN_VALIDATION_FAILED"]),
+        PlanValidationResult(valid=False, errors=["still missing acceptance mapping"], reason_codes=["PLAN_VALIDATION_FAILED"]),
+        PlanValidationResult(valid=True),
+    ]
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=validate_results),
+    ):
+        result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 3
+    assert result.legacy_result["plan_repair_attempts"] == we.planner.run.await_count - 1
+    assert result.legacy_result["plan_repair_attempts"] == 2
+
+
+@pytest.mark.asyncio
+async def test_plan_repair_attempts_on_repair_exhaustion_matches_the_except_handler_value(tmp_path):
+    """Cross-check against the PRE-EXISTING _UnsafeStructuredPlan except-
+    handler path (kriya/workflow/workflow_controller.py, caller of
+    _run_structured_enforce) - both the exception path's `plan_repair_
+    attempts` (already existed before this correction) and this task's new
+    success-path copy read the exact same `repair_attempts` local, so a
+    plan that never converges must report 2 either way."""
+    we = _workflow_engine()
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(None, "structured plan JSON block failed schema validation: invalid verification"),
+    ):
+        result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "needs_review"
+    assert "STRUCTURED_PLAN_REPAIR_EXHAUSTED" in result.legacy_result["reason_codes"]
+    assert result.legacy_result["plan_repair_attempts"] == 2
+
+
+@pytest.mark.asyncio
+async def test_enforce_accepts_targeted_provides_change_for_implicated_subtask(tmp_path):
+    """Provides-side counterpart: a GROUNDED_SEMANTIC_PROVIDER_MISMATCH
+    naming the PRODUCER subtask (via the grounded-edge error's own
+    `owning_subtask` attribution, already present before this fix)
+    legitimately renames that subtask's provides the very next round -
+    never rejected as an unrelated regression. Symmetric to the requires-
+    side test above, which exercises the CONSUMER attribution
+    (`consumer_subtask`) instead."""
+    plan = _p7_oscillation_plan()
+    we = _workflow_engine()
+    we.planner.run = AsyncMock(side_effect=["attempt0 text", "attempt1 text"])
+    # "files": [] sidesteps the (unrelated) per-subtask declared-scope check
+    # in the real subtask-execution loop - this test is only about the
+    # PLANNING loop's own acceptance of a legitimate, implicated provides
+    # change.
+    we.run_generation_workflow = AsyncMock(return_value={
+        "status": "success", "quality_gates_passed": True, "files": [],
+    })
+
+    async def fake_validate_plan(plan_arg, *, obligation_ledger, revision, **kwargs):
+        if revision == 0:
+            obligation_ledger.record(_provides_obligation(
+                "s2", "userServiceImpl_extended_v1", ObligationStatus.SATISFIED, revision=0,
+            ))
+            return PlanValidationResult(
+                valid=False,
+                errors=[
+                    "grounded structural evidence shows test file(s) whose requires do not "
+                    "resolve to the subtask owning the referenced production artifact: "
+                    "UserServiceImplTest.java references UserServiceImpl.java (owned by "
+                    "subtask 's2', provides=['userServiceImpl_extended_v1'], "
+                    "test requires=['userServiceImpl_extended_v2'])"
+                ],
+                reason_codes=["GROUNDED_SEMANTIC_PROVIDER_MISMATCH"],
+            )
+        assert revision == 1
+        # s2's own provides legitimately CHANGED (old value really dropped,
+        # new value added) in direct response to the error that named it
+        # (via owning_subtask) as the producer - must converge normally.
+        obligation_ledger.record(_provides_obligation(
+            "s2", "userServiceImpl_extended_v1", ObligationStatus.VIOLATED, revision=1,
+            dropped=True,
+        ))
+        obligation_ledger.record(_provides_obligation(
+            "s2", "userServiceImpl_extended_v2", ObligationStatus.SATISFIED, revision=1,
+        ))
+        return PlanValidationResult(valid=True)
+
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        return_value=plan,
+    ), patch(
+        "kriya.workflow.workflow_controller.validate_plan",
+        new=AsyncMock(side_effect=fake_validate_plan),
+    ):
+        controller = WorkflowController(we)
+        result = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["status"] == "success"
+    assert we.planner.run.await_count == 2

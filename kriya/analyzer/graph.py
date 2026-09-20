@@ -121,7 +121,21 @@ class DependencyGraph:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target)")
-        
+        # CTX-001 P0 (S1/S5 probes) found clear_file()'s own
+        # "DELETE FROM relations WHERE source_file = ?" doing a full table
+        # scan on every single file re-index, because source_file (added
+        # above via ALTER TABLE, after the table already existed) never got
+        # an index of its own - superimposing an extra O(N) scan onto every
+        # file indexed, i.e. O(N^2) total for a full cold index. This is the
+        # single highest-leverage fix P0 identified (root-caused via
+        # EXPLAIN QUERY PLAN). CREATE INDEX IF NOT EXISTS is itself safe to
+        # run against a pre-existing database that already has rows (and
+        # possibly NULL source_file values from before the ALTER TABLE
+        # above) - SQLite indexes NULL values like any other value, and
+        # clear_file()'s own OR-fallback clause for NULL rows is unaffected
+        # by whether source_file is indexed.
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_source_file ON relations(source_file)")
+
         self.conn.commit()
 
     def has_indexed_files(self) -> bool:
@@ -252,6 +266,34 @@ class DependencyGraph:
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
 
+    def find_symbol_locations(self, name: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """DEV-INV-001: exact, indexed point lookup on the `symbols` table's
+        own `idx_symbols_name` index - name -> every {filepath, type,
+        start_line, end_line} this repository's own parse produced for that
+        exact string. Backs the `find_symbol` investigation verb.
+
+        Deliberately an EXACT match only, never a LIKE/substring scan - a
+        symbol name search must stay a cheap, indexed point lookup regardless
+        of repository size (see this module's own performance discipline:
+        get_callers/get_callees already only ever do exact-match lookups
+        against idx_relations_source/idx_relations_target). _parse_java()
+        stores QUALIFIED names (package_prefix + class name) for class-level
+        symbols, so an exact match on a bare simple name will legitimately
+        find nothing for those - this is an honest MVP limitation (the
+        caller should be told to try the fully-qualified name), never
+        silently widened into a `LIKE '%.' || ? ` scan, which would defeat
+        the whole point of an indexed lookup."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT filepath, name, type, start_line, end_line FROM symbols "
+            "WHERE name = ? LIMIT ?",
+            (name, limit),
+        )
+        return [
+            {"filepath": r[0], "name": r[1], "type": r[2], "start_line": r[3], "end_line": r[4]}
+            for r in cursor.fetchall()
+        ]
+
     def get_imports(self, filepath: str) -> List[str]:
         """Fetch all dependency import files or packages for a specific file path."""
         cursor = self.conn.cursor()
@@ -302,9 +344,16 @@ class DependencyGraph:
         any polyglot repo (a frontend `User` and a backend `User` are
         typically different concepts, not a duplicate). extract_class_names()
         below produces keys in this same "ext:name" format so the two never
-        drift apart."""
+        drift apart.
+
+        type IN ('class', 'interface') (2026-09-07, P7 preflight): an
+        interface declaration is exactly as real a type symbol for this
+        index's own purpose (a duplicate/collision hazard, and a resolvable
+        target for a cross-file reference) as a class - see _parse_java()'s
+        own docstring comment at its class_regex definition for the live
+        incident this closes."""
         cursor = self.conn.cursor()
-        cursor.execute("SELECT DISTINCT name, filepath FROM symbols WHERE type = 'class'")
+        cursor.execute("SELECT DISTINCT name, filepath FROM symbols WHERE type IN ('class', 'interface')")
         index: Dict[str, List[str]] = {}
         for name, filepath in cursor.fetchall():
             if not name:
@@ -352,7 +401,7 @@ class DependencyGraph:
         names = {
             sym["name"].rsplit(".", 1)[-1]
             for sym in symbols
-            if sym.get("type") == "class" and sym.get("name")
+            if sym.get("type") in ("class", "interface") and sym.get("name")
         }
         return sorted(f"{ext}:{n}" for n in names if n)
 
@@ -495,6 +544,28 @@ class DependencyGraph:
             self.conn.close()
 
 
+    @staticmethod
+    def _python_base_name(node: ast.expr) -> Optional[str]:
+        """Best-effort deterministic dotted name for a class base expression,
+        for CTX-001 P1 WP2 (Python inheritance relations). Only resolves
+        statically nameable forms:
+          - `Base` (ast.Name)
+          - `pkg.Base` / `pkg.sub.Base` (ast.Attribute chain rooted in a Name)
+        Returns None for anything else (a call - `get_base()`, a subscript -
+        `Generic[T]`, a conditional expression, ...) - deliberately
+        conservative, mirroring extract_class_names()'s own established
+        "degrade gracefully, never fabricate" precedent: an unsupported/
+        dynamic base must never invent a relationship (CTX-001 P1 WP2
+        requirement)."""
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            prefix = DependencyGraph._python_base_name(node.value)
+            if prefix is None:
+                return None
+            return f"{prefix}.{node.attr}"
+        return None
+
     def _parse_python(self, filepath: str, content: str) -> tuple:
         # Deliberately does not catch parse errors here - let them propagate to
         # index_file's except block, which already logs them properly. Swallowing
@@ -511,6 +582,26 @@ class DependencyGraph:
                     "start_line": node.lineno,
                     "end_line": getattr(node, "end_lineno", node.lineno)
                 })
+                # CTX-001 P1 WP2: inheritance relations, source-keyed by the
+                # class's own (bare) name - the same convention _parse_java()
+                # already established for its "inherits"/"implements"
+                # relations (source=class_name, target=base/interface name),
+                # so a class's base is a genuine Graph RAG neighbor exactly
+                # like a Java subclass's own superclass/interface already is.
+                # Only ast.ClassDef.bases is walked - metaclass=/keyword
+                # bases are never a base class and are correctly ignored by
+                # only iterating node.bases. No runtime import resolution,
+                # no general type inference: a base that isn't statically
+                # nameable (_python_base_name returns None) produces no
+                # relation at all, never a guessed one.
+                for base in node.bases:
+                    base_name = self._python_base_name(base)
+                    if base_name:
+                        relations.append({
+                            "source": node.name,
+                            "target": base_name,
+                            "type": "inherits",
+                        })
             # 2. Capture Functions
             elif isinstance(node, ast.FunctionDef):
                 symbols.append({
@@ -563,8 +654,23 @@ class DependencyGraph:
         package_prefix = pkg_match.group(1) + "." if pkg_match else ""
         
         # Regex mappings for Java classes, methods and fields
+        # Java symbol indexing (2026-09-07, P7 preflight): interface
+        # declarations were previously invisible to this parser entirely -
+        # `class_regex` matched only the literal `class` keyword, so
+        # get_class_symbol_locations()/extract_class_names() (both filter
+        # on type == "class") never saw a hexagonal-architecture "port"
+        # (interface UserService {...}) as a resolvable symbol at all, even
+        # though a real `implements`/`import` relation to it was correctly
+        # recorded - confirmed live: build_planning_structural_evidence()
+        # resolved every OTHER cross-module edge in a real multi-module
+        # repo except the one that WAS the module boundary, because it was
+        # interface-based. The keyword itself is now captured (group 1:
+        # "class" or "interface") so both symbol types share the exact same
+        # extends/implements handling below - existing class behavior is
+        # completely unchanged (same groups, same order, same relation
+        # types), interfaces are simply no longer skipped.
         class_regex = re.compile(
-            r"(?:public|protected|private|static|\s)*class\s+(\w+)"
+            r"(?:public|protected|private|static|\s)*(class|interface)\s+(\w+)"
             r"(?:\s+extends\s+(\w+))?"
             r"(?:\s+implements\s+([\w\s,]+))?"
         )
@@ -596,17 +702,18 @@ class DependencyGraph:
                 })
                 continue
                 
-            # Class definitions
+            # Class/interface definitions
             class_match = class_regex.match(line_strip)
             if class_match:
-                class_name = package_prefix + class_match.group(1)
+                keyword = class_match.group(1)
+                class_name = package_prefix + class_match.group(2)
                 symbols.append({
                     "name": class_name,
-                    "type": "class",
+                    "type": keyword,
                     "start_line": idx,
                     "end_line": idx + 5
                 })
-                
+
                 # Add class annotation relations
                 for anno in pending_annotations:
                     relations.append({
@@ -615,18 +722,18 @@ class DependencyGraph:
                         "type": "annotated_with"
                     })
                 pending_annotations = []
-                
+
                 # Handle extends
-                base_class = class_match.group(2)
+                base_class = class_match.group(3)
                 if base_class:
                     relations.append({
                         "source": class_name,
                         "target": base_class,
                         "type": "inherits"
                     })
-                    
+
                 # Handle implements
-                impl_interfaces = class_match.group(3)
+                impl_interfaces = class_match.group(4)
                 if impl_interfaces:
                     for interface in impl_interfaces.split(","):
                         interface = interface.strip()

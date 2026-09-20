@@ -132,6 +132,87 @@ def test_authoritative_django_stack_contract_is_scoped_to_changed_artifacts():
     assert validate_stack_contract_artifacts(contract, ["customers/views.py"]) is None
 
 
+# ============================================================
+# Negation-aware family/framework detection - PRV-17 (2026-09-03): a real
+# goal shape ("Use Python/Django. Do not use Java, Spring, Maven, Gradle,
+# Node.js.") used to match THREE competing families with equal weight
+# (positive python, plus java and node from the PROHIBITION clause),
+# tripping _goal_declared_family's "two-plus families = ambiguous" rule on
+# a goal that was never actually ambiguous. Fixed at clause granularity in
+# derive_stack_contract/_goal_declared_family themselves (kriya/workflow/
+# static_checks.py) - not a PRV-17-specific parser, so find_goal_stack_
+# mismatch above (which calls derive_stack_contract internally) inherits
+# the fix for free, unchanged.
+# ============================================================
+
+def test_negation_aware_simple_positive_goal_still_resolves():
+    contract = derive_stack_contract("Use Python and Django")
+    assert contract is not None
+    assert contract.languages == ("python",)
+    assert contract.frameworks == ("django",)
+
+
+def test_negation_aware_prohibition_clause_does_not_create_ambiguity():
+    """The exact PRV-17 goal shape: a positive requirement clause plus a
+    separate, explicit prohibition clause naming several competing
+    technologies - must resolve to the ONE positively requested stack, not
+    bail out to None as if all four+ families were equally declared."""
+    contract = derive_stack_contract(
+        "Use Python/Django. Do not use Java, Spring, Maven, Gradle, Node.js."
+    )
+    assert contract is not None
+    assert contract.languages == ("python",)
+    assert contract.frameworks == ("django",)
+
+
+def test_negation_aware_full_prv17_goal_text_resolves():
+    """The REAL PRV-17 scenario goal.md text verbatim (bullet-list
+    requirements, trailing prohibition sentence) - not a paraphrase."""
+    goal = (
+        "Create a Python 3.12 Django application.\n\n"
+        "Requirements:\n"
+        "- Use Django.\n"
+        "- Use Python packaging conventions.\n"
+        "- Provide one Django project and one application named `customers`.\n"
+        "- Expose a `/customers/health` HTTP endpoint returning JSON:\n"
+        '  {"status": "ok"}\n'
+        "- Add an automated test for the endpoint.\n"
+        "- Do not use Java, Spring, Maven, Gradle, Node.js, or another web framework.\n"
+    )
+    contract = derive_stack_contract(goal)
+    assert contract is not None
+    assert contract.languages == ("python",)
+    assert contract.frameworks == ("django",)
+
+
+def test_negation_aware_prohibition_alone_does_not_infer_the_opposite_stack():
+    """"Do not use Java" alone must not be read as "so use Python" - a
+    prohibition is a constraint on substitution, never a positive request
+    for whatever the checker happens to think the alternative is."""
+    assert derive_stack_contract("Do not use Java") is None
+
+
+def test_negation_aware_genuine_conflict_between_two_positive_requests_still_ambiguous():
+    """Two families named in POSITIVE clauses (no prohibition language at
+    all) is still genuinely ambiguous - the existing, deliberate "not this
+    check's business to referee" behavior is unchanged by the negation fix."""
+    assert derive_stack_contract("Use Django and Spring") is None
+
+
+def test_negation_aware_prohibited_java_spring_candidate_still_fails_validation():
+    goal = "Use Python/Django. Do not use Java, Spring, Maven, Gradle, Node.js."
+    contract = derive_stack_contract(goal)
+    assert contract is not None
+    violation = validate_stack_contract_artifacts(
+        contract, ["pom.xml", "src/main/java/com/example/App.java"],
+    )
+    assert violation is not None
+    violation2 = validate_stack_contract_artifacts(
+        contract, ["build.gradle", "src/main/java/com/example/App.java"],
+    )
+    assert violation2 is not None
+
+
 def test_goal_mismatch_reverse_direction_also_fires():
     """Confirms this is truly generic, no hardcoded direction - mirrors
     find_established_stack_drift's own equivalent test."""

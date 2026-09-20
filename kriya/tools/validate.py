@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 import re
@@ -6,15 +7,31 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from kriya.config.config import AutonomyConfig
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy, extract_install_package_target
+from kriya.policy.filesystem import is_within_scope, make_workspace_scope
 from kriya.policy.model import ActionRequest, ActionType
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 from kriya.tools.process import ProcessController
+from kriya.tools.containment import (
+    ContainmentBackend,
+    ContainmentProfile,
+    ContainmentSetupError,
+    NetworkAuthority,
+    TrustClass,
+    resolve_containment_backend,
+)
+from kriya.tools.containment_oci import MAVEN_CACHE_MOUNT, finalize_registry_acquisition_result
+from kriya.tools.dependency_execution import (
+    OfflineFailureKind,
+    classify_maven_offline_failure_text,
+    log_acquisition_outcome,
+    maven_missing_artifact_signature,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +60,44 @@ def get_pom_dependencies(pom_path: str) -> List[str]:
         return deps
     except Exception as e:
         logger.warning(f"Failed to parse POM dependencies at {pom_path}: {e}")
+        return []
+
+
+def get_pom_reactor_modules(pom_path: str) -> List[str]:
+    """Parses a pom.xml's <modules><module>...</module></modules> entries -
+    the declared child modules of a Maven reactor aggregator. Module-level
+    (not a PolymorphicValidator method), same style/namespace-handling as
+    get_pom_dependencies() above, so a caller needing this before/without a
+    validator instance can reuse it identically.
+
+    A genuine multi-module reactor's ROOT pom.xml (packaging=pom) has no
+    compiled output of its own - each declared module compiles into its
+    OWN <module>/target/classes, not <workspace_root>/target/classes (P7
+    production-validation, 2026-09-07: confirmed live - Maven correctly
+    reported BUILD SUCCESS for a real 3-module reactor while the compile-
+    check gate's own workspace-root-only target/classes check rejected
+    every single attempt, 16 times, regardless of code correctness, because
+    it was written assuming a single-module layout). Degrades to an empty
+    list (never raises) on any parse failure or a genuinely single-module
+    project with no <modules> block at all - callers must treat an empty
+    result as "not a reactor," not as "reactor with zero modules."""
+    if not os.path.exists(pom_path):
+        return []
+    try:
+        tree = ET.parse(pom_path)
+        root = tree.getroot()
+        ns = ""
+        if root.tag.startswith("{"):
+            ns = root.tag.split("}")[0] + "}"
+        modules_elem = root.find(f"{ns}modules")
+        if modules_elem is None:
+            return []
+        return [
+            m.text.strip() for m in modules_elem.findall(f"{ns}module")
+            if m.text and m.text.strip()
+        ]
+    except Exception as e:
+        logger.warning(f"Failed to parse POM reactor modules at {pom_path}: {e}")
         return []
 
 
@@ -87,6 +142,43 @@ def _has_real_requirements(requirements_path: str) -> bool:
     except Exception:
         pass
     return False
+
+
+def _pyproject_dependencies(pyproject_path: str) -> List[str]:
+    """Extracts PEP 621's [project.dependencies] array - plain requirement
+    strings, the same shape a requirements.txt line already is - so a
+    Python goal using "Python packaging conventions" (pyproject.toml, no
+    requirements.txt) gets the same isolated, dependency-installed
+    interpreter _resolve_python_interpreter() already gives a requirements.
+    txt project. PRV-17 (2026-09-03) root cause: this project-marker was
+    already recognized for STACK DETECTION (_detect_stack below already
+    treats pyproject.toml as a Python marker) but never consulted for
+    DEPENDENCY INSTALLATION - a goal declaring Django only in pyproject.toml
+    got a bare interpreter with nothing installed, so `python -m pytest`
+    failed with `ModuleNotFoundError: No module named 'django'` on every
+    attempt regardless of how many times the Developer regenerated source.
+
+    Degrades to an empty list (never raises) on any parse failure or a
+    missing/malformed [project.dependencies] - matching _has_real_
+    requirements' own "not worth the cost" posture and _ensure_project_venv's
+    "infrastructure problem, not a code retry's job" posture for venv
+    resolution: a caller that gets [] here falls through to sys.executable
+    exactly as it did before this function existed, never a hard failure.
+    tomllib is stdlib-only from Python 3.11 - on an older interpreter this
+    always returns [], the same as no pyproject.toml existing at all."""
+    try:
+        import tomllib
+    except ImportError:
+        return []
+    try:
+        with open(pyproject_path, "rb") as fh:
+            data = tomllib.load(fh)
+    except Exception:
+        return []
+    dependencies = data.get("project", {}).get("dependencies")
+    if not isinstance(dependencies, list):
+        return []
+    return [dep for dep in dependencies if isinstance(dep, str) and dep.strip()]
 
 
 class PolymorphicValidator:
@@ -137,19 +229,131 @@ class PolymorphicValidator:
         # MA4.4 (control-plane implementation plan) - audit-only. See
         # _run_cmd_with_timeout below; never consulted for enforcement.
         self.execution_policy = ExecutionPolicy()
+        # PERF/DEPENDENCY-001 (2026-09-19): one instance of PolymorphicValidator
+        # is constructed ONCE per attempt and reused across compile_check/
+        # run_tests/run_app_sequence (kriya/workflow/attempt.py's own real
+        # construction sites - e.g. line ~6914's `validator`, threaded through
+        # every gate in that one attempt) - each of which independently calls
+        # _resolve_python_interpreter() -> _ensure_project_venv(), which
+        # unconditionally re-ran `pip install` every single call even when
+        # nothing changed. This cache is scoped to THIS INSTANCE's own
+        # lifetime only (never a module-level/global cache - a fresh
+        # PolymorphicValidator, e.g. the next attempt or a different
+        # workspace, always starts with an empty cache and performs its own
+        # real acquisition) - see _venv_install_signature()'s own docstring
+        # for how the key stays correctly invalidated on a real dependency-
+        # manifest content change within that lifetime, not merely on
+        # `install_args`' own (path-only, content-blind) shape.
+        self._venv_install_cache: Dict[Tuple[Any, ...], Tuple[Optional[str], Optional[str]]] = {}
+        # Observability counter (task's own "record before/after acquisition
+        # count deterministically") - incremented ONLY on a real cache MISS,
+        # i.e. only when the expensive pip install subprocess actually ran.
+        self.venv_install_attempts = 0
 
     def _get_pom_dependencies(self, pom_path: str) -> List[str]:
         return get_pom_dependencies(pom_path)
 
-    def _ensure_project_venv(self, requirements_path: str) -> Tuple[Optional[str], Optional[str]]:
+    def _java_reactor_modules_missing_compiled_output(
+        self, files: List[str], reactor_modules: List[str],
+    ) -> List[str]:
+        """P7 production-validation (2026-09-07): for a genuine Maven
+        multi-module reactor, returns the distinct OWNING module names among
+        `files`' real .java candidates whose own <module>/target/classes
+        contains no .class file - the modules that actually needed to
+        compile something for THIS candidate set, and didn't.
+
+        Deliberately does NOT require every declared reactor module to
+        contain .class files - a module can legitimately be interfaces-
+        only, resources-only, packaging=pom, or otherwise produce no
+        bytecode for this specific candidate set (confirmed live in the
+        very repo this fix was built against - modular-app's own `app`
+        aggregator module has no src/ at all). Only modules that actually
+        OWN one of the given candidate .java files are checked - a stronger,
+        more precise proof than "some declared module produced some class
+        somewhere," and one that can never be satisfied by stale output left
+        over in an unrelated module."""
+        owning_modules = set()
+        for f in files:
+            if not f.endswith(".java"):
+                continue
+            for module in reactor_modules:
+                prefix = module.rstrip("/") + "/"
+                if f.startswith(prefix):
+                    owning_modules.add(module)
+                    break
+        missing = []
+        for module in sorted(owning_modules):
+            classes_dir = os.path.join(self.workspace_path, module, "target", "classes")
+            compiled_anything = False
+            if os.path.isdir(classes_dir):
+                for _dirpath, _dirnames, filenames in os.walk(classes_dir):
+                    if any(fn.endswith(".class") for fn in filenames):
+                        compiled_anything = True
+                        break
+            if not compiled_anything:
+                missing.append(module)
+        return missing
+
+    def _venv_install_signature(self, install_args: List[str]) -> Tuple[Any, ...]:
+        """PERF/DEPENDENCY-001: a cache key that correctly invalidates when
+        the underlying dependency MANIFEST'S REAL CONTENT changes, not
+        merely when `install_args`' own shape stays the same. The
+        requirements.txt branch's install_args is `["-r", <path>]` - a
+        PATH, which does not itself change on a content edit (a retry that
+        just edited requirements.txt would otherwise get a stale cache hit)
+        - so this hashes that file's current bytes instead. The
+        pyproject.toml branch's install_args IS already a flat list of
+        dependency specifiers freshly re-parsed from the file on every
+        _resolve_python_interpreter() call (_pyproject_dependencies), so
+        its own tuple form is already a correct, content-derived key with
+        no extra hashing needed."""
+        if len(install_args) == 2 and install_args[0] == "-r":
+            req_path = install_args[1]
+            full = req_path if os.path.isabs(req_path) else os.path.join(self.workspace_path, req_path)
+            try:
+                with open(full, "rb") as fh:
+                    digest = hashlib.sha256(fh.read()).hexdigest()
+            except OSError:
+                digest = "unreadable"
+            return ("-r", digest)
+        return tuple(install_args)
+
+    def _ensure_project_venv(self, install_args: List[str]) -> Tuple[Optional[str], Optional[str]]:
+        """PERF/DEPENDENCY-001 (2026-09-19): instance-scoped memoization
+        wrapper over _ensure_project_venv_impl() (the real, unmodified
+        implementation below) - see this class's own __init__ docstring
+        comment for why instance scope (never global/cross-workspace) is
+        the correct, safe boundary. Caches the EXACT (venv_python,
+        install_error) tuple _ensure_project_venv_impl() returned,
+        including a genuine failure - the alternative (re-running a 300s-
+        timeout-bounded `pip install` a second/third time in the SAME
+        attempt against byte-identical manifest content, which pip would
+        resolve identically) burns real wall-clock time for a
+        deterministically identical outcome, never a "failure silently
+        becomes success" risk (the cached value IS the real, already-
+        observed outcome, verbatim - not re-derived or reinterpreted)."""
+        signature = self._venv_install_signature(install_args)
+        if signature in self._venv_install_cache:
+            return self._venv_install_cache[signature]
+        result = self._ensure_project_venv_impl(install_args)
+        self._venv_install_cache[signature] = result
+        return result
+
+    def _ensure_project_venv_impl(self, install_args: List[str]) -> Tuple[Optional[str], Optional[str]]:
         """Creates (if not already present) a project-local virtual environment
-        under .kriya/venv and installs requirements.txt into it, so a Python
+        under .kriya/venv and pip-installs `install_args` into it, so a Python
         goal needing a real third-party package can actually be tested -
         PolymorphicValidator otherwise runs tests via sys.executable (KRIYA'S
         OWN interpreter), which only has whatever Kriya itself depends on
         installed. The same class of gap Ruby's `bundle install` fix closed for
         that stack (2026-08-04) - a structurally unwinnable quality gate the
         model's own code correctness can never fix.
+
+        `install_args` is whatever should follow `pip install -q` - either
+        `["-r", requirements_path]` (requirements.txt) or a flat list of PEP
+        621 dependency specifiers (pyproject.toml, see _pyproject_dependencies)
+        - both are just argv fragments to the SAME pip invocation, so this
+        method doesn't need to know or care which manifest shape produced them.
 
         Deliberately installs into an ISOLATED venv, not sys.executable
         directly: pip-installing an arbitrary generated project's dependencies
@@ -169,36 +373,85 @@ class PolymorphicValidator:
         dependency problem (e.g. a nonexistent package/version the model
         wrote), which the caller fails the gate on so the retry loop sees it,
         mirroring the Ruby bundle-install precedent exactly."""
-        venv_dir = os.path.join(self.workspace_path, ".kriya", "venv")
-        venv_python = os.path.join(venv_dir, "bin", "python")
-        if not os.path.exists(venv_python):
+        # SEC-001-P6 Stage 3 (2026-09-11): execution-environment-aware venv
+        # creation/reference - the ONE thing this needed to NOT be is a
+        # host-path-translation hack (this stage's own explicit
+        # instruction). Kriya's own `sys.executable` is a host macOS/ARM64
+        # binary that does not exist inside a Linux container at all; a
+        # host-ABSOLUTE venv_dir handed to a container's own `venv`
+        # invocation would be created under that literal path INSIDE the
+        # container's ephemeral rootfs (no /Users tree exists there) - NOT
+        # under the persisted workspace bind mount - since the container
+        # has no knowledge of what that host path even means. The fix is
+        # not translation, it's using paths that are ALREADY correct in
+        # both modes: `venv_dir_host` (used for every `os.path.exists`
+        # check - Kriya itself always inspects the real, shared host
+        # directory, contained or not) versus a workspace-RELATIVE path
+        # (used as the actual command argv, resolved by whichever `cwd`/
+        # `-w` the command already runs under - `self.workspace_path` on
+        # the host, the OCI backend's own fixed container workdir when
+        # contained - exactly the same mechanism `cwd=self.workspace_path`
+        # already relies on for every other command this class runs).
+        contained = self.autonomy_cfg.contained_execution_required
+        venv_dir_host = os.path.join(self.workspace_path, ".kriya", "venv")
+        venv_python_host = os.path.join(venv_dir_host, "bin", "python")
+        venv_relative = os.path.join(".kriya", "venv")
+        venv_python_relative = os.path.join(venv_relative, "bin", "python")
+        create_interpreter = "python3" if contained else sys.executable
+        create_target = venv_relative if contained else venv_dir_host
+        venv_python = venv_python_relative if contained else venv_python_host
+
+        if not os.path.exists(venv_python_host):
             try:
                 create_res = self._run_cmd_with_timeout(
-                    [sys.executable, "-m", "venv", venv_dir], cwd=self.workspace_path, timeout=60,
+                    [create_interpreter, "-m", "venv", create_target], cwd=self.workspace_path, timeout=60,
                 )
-                if create_res["returncode"] != 0 or not os.path.exists(venv_python):
+                if create_res["returncode"] != 0 or not os.path.exists(venv_python_host):
                     logger.warning(
-                        f"Failed to create project-local venv at {venv_dir} - falling back to "
-                        f"Kriya's own interpreter for this test run: {create_res['stderr']}"
+                        f"Failed to create project-local venv at {venv_dir_host} - falling back to "
+                        f"the default interpreter for this test run: {create_res['stderr']}"
                     )
                     return None, None
             except Exception as e:
                 logger.warning(
-                    f"Failed to create project-local venv at {venv_dir} - falling back to "
-                    f"Kriya's own interpreter for this test run: {e}"
+                    f"Failed to create project-local venv at {venv_dir_host} - falling back to "
+                    f"the default interpreter for this test run: {e}"
                 )
                 return None, None
 
-        # Re-run on every call, even when the venv already existed - a retry
-        # may have just edited requirements.txt, and pip itself is a fast
-        # no-op when nothing actually changed since the last install.
+        # PERF/DEPENDENCY-001 (2026-09-19): this method (the real
+        # implementation, only ever reached through _ensure_project_venv()'s
+        # own caching wrapper above on a genuine cache MISS) still re-runs on
+        # every call whose manifest content actually differs from the last
+        # one this instance observed - a retry that just edited requirements.
+        # txt/pyproject.toml correctly reaches here again (a different cache
+        # key), and pip itself is a fast no-op when its OWN dependency
+        # resolution finds nothing to do. What no longer happens is
+        # re-running this exact subprocess for byte-identical manifest
+        # content within the same instance's lifetime (e.g. compile_check
+        # then run_tests then run_app_sequence, all in one attempt).
+        # network=UNRESTRICTED (SEC-001-P6 Stage 2): this is the ACQUISITION
+        # step - a no-op under contained_execution_required=False (default
+        # network stays irrelevant there), and under containment this is
+        # the one call in this method that genuinely needs to reach a
+        # package registry; still fully filesystem/process-contained.
+        # acquisition=True (SEC-007, 2026-09-12): pip resolving/building a
+        # real dependency tree gets the separate, more generous acquisition
+        # resource authority - never the (possibly deliberately very
+        # tight) target-code cap this same run may be using to bound a
+        # suspected-hostile application.
+        self.venv_install_attempts += 1
         install_res = self._run_cmd_with_timeout(
-            [venv_python, "-m", "pip", "install", "-q", "-r", requirements_path, "pytest"],
-            cwd=self.workspace_path, timeout=300,
+            [venv_python, "-m", "pip", "install", "-q", *install_args, "pytest"],
+            cwd=self.workspace_path, timeout=300, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
+        )
+        log_acquisition_outcome(
+            "python", f"pip install {' '.join(install_args)}",
+            returncode=install_res["returncode"], timed_out=install_res.get("timeout", False),
         )
         if install_res["returncode"] != 0:
             return None, (
-                f"'pip install -r requirements.txt' failed:\n{install_res['stdout']}\n{install_res['stderr']}"
+                f"'pip install {' '.join(install_args)}' failed:\n{install_res['stdout']}\n{install_res['stderr']}"
             )
         return venv_python, None
 
@@ -216,23 +469,65 @@ class PolymorphicValidator:
         'No module named django' failure one gate later.
 
         Returns (interpreter_path, install_error). interpreter_path is
-        sys.executable when there's no requirements.txt, or when venv
-        CREATION itself failed (an infrastructure problem, not something a
-        retry can fix - degrades silently, same reasoning as
-        _ensure_project_venv()'s own docstring). install_error is set ONLY
-        when `pip install` of THIS project's own requirements.txt genuinely
-        failed (a real, potentially code-fixable dependency problem, e.g. a
-        bad package pin) - the caller should treat that as a hard failure
-        rather than silently proceeding with an interpreter missing the
-        dependencies the goal actually needs."""
+        sys.executable when there's no requirements.txt/pyproject.toml
+        dependency declaration, or when venv CREATION itself failed (an
+        infrastructure problem, not something a retry can fix - degrades
+        silently, same reasoning as _ensure_project_venv()'s own docstring).
+        install_error is set ONLY when `pip install` of THIS project's own
+        declared dependencies genuinely failed (a real, potentially
+        code-fixable dependency problem, e.g. a bad package pin) - the
+        caller should treat that as a hard failure rather than silently
+        proceeding with an interpreter missing the dependencies the goal
+        actually needs.
+
+        requirements.txt takes priority when both exist (today's
+        pre-existing behavior, unchanged); pyproject.toml (PRV-17,
+        2026-09-03) is the fallback for a "Python packaging conventions"
+        goal that declares dependencies there instead - see
+        _pyproject_dependencies' own docstring for the live incident this
+        closes: a goal declaring Django only in pyproject.toml got a bare
+        sys.executable with nothing installed, so every attempt's test gate
+        failed with `ModuleNotFoundError: No module named 'django'`
+        regardless of source-file correctness."""
+        # SEC-001-P6 Stage 3: the "no project-local venv" fallback must
+        # also be execution-environment aware - Kriya's own `sys.executable`
+        # (host mode) versus a generic "python3" token resolved by the
+        # container image's own PATH (contained mode). This is the one
+        # path a project with literally no requirements.txt/pyproject.toml
+        # dependency declaration falls back to - it will not have `pytest`
+        # preinstalled under containment the way Kriya's own host
+        # environment happens to (a real, smaller, documented residual
+        # limitation distinct from the venv case above, which always
+        # installs pytest explicitly regardless of mode).
+        contained = self.autonomy_cfg.contained_execution_required
+        default_interpreter = "python3" if contained else sys.executable
         requirements_path = os.path.join(self.workspace_path, "requirements.txt")
         if os.path.exists(requirements_path) and _has_real_requirements(requirements_path):
-            venv_python, install_error = self._ensure_project_venv(requirements_path)
+            # SEC-001-P6 Stage 3: the host-absolute requirements_path (used
+            # for the existence/content check just above, which is always a
+            # real Kriya-side/host filesystem read regardless of mode) is
+            # meaningless as a PIP ARGUMENT inside the container - only
+            # switched to a workspace-relative "requirements.txt" when
+            # contained; host mode keeps passing the exact absolute path
+            # unchanged (existing test coverage pins this exact argv shape,
+            # and there is no reason to touch behavior that already works).
+            pip_requirements_arg = "requirements.txt" if contained else requirements_path
+            venv_python, install_error = self._ensure_project_venv(["-r", pip_requirements_arg])
             if install_error:
-                return sys.executable, install_error
+                return default_interpreter, install_error
             if venv_python:
                 return venv_python, None
-        return sys.executable, None
+            return default_interpreter, None
+        pyproject_path = os.path.join(self.workspace_path, "pyproject.toml")
+        if os.path.exists(pyproject_path):
+            dependencies = _pyproject_dependencies(pyproject_path)
+            if dependencies:
+                venv_python, install_error = self._ensure_project_venv(dependencies)
+                if install_error:
+                    return default_interpreter, install_error
+                if venv_python:
+                    return venv_python, None
+        return default_interpreter, None
 
     def _detect_stack(self) -> str:
         """Determines if the workspace uses Python, Java, or Ruby - or "unknown"
@@ -368,10 +663,19 @@ class PolymorphicValidator:
         except Exception as e:
             logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
-    def _run_cmd_with_timeout(
-        self, cmd: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        self._audit_run_command(cmd, cwd)
+    def build_subprocess_env_and_preexec(self) -> Tuple[Optional[Dict[str, str]], Optional[Callable[[], None]]]:
+        """Shared sandbox-env + JAVA_HOME-override construction for every
+        subprocess this validator launches - factored out of
+        _run_cmd_with_timeout (2026-09-11) so a second caller (finite_command
+        runtime-artifact preparation, kriya/workflow/attempt.py, reusing
+        kriya/tools/service_runtime.py's _prepare_required_artifact for its
+        own `mvn package` call) gets the IDENTICAL policy instead of
+        reimplementing it - an `mvn package` that silently ran under a
+        different JDK than the one the compile gate just validated against
+        would be a real, confusing mismatch, not a hypothetical one. Pure
+        extraction: _run_cmd_with_timeout's own behavior is unchanged by
+        this refactor - no leading underscore, since it's now a shared
+        cross-module policy accessor, not a validator-internal detail."""
         env = None
         preexec_fn = None
         if self.autonomy_cfg.sandbox_execution:
@@ -392,9 +696,284 @@ class PolymorphicValidator:
             env = dict(env) if env is not None else dict(os.environ)
             env["JAVA_HOME"] = self.java_home_override
             env["PATH"] = os.path.join(self.java_home_override, "bin") + os.pathsep + env.get("PATH", "")
+        return env, preexec_fn
+
+    def build_containment_profile_and_backend(
+        self, *, network: NetworkAuthority = NetworkAuthority.DENIED,
+        dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
+        acquisition: bool = False,
+    ) -> Tuple[Optional[ContainmentProfile], Optional[ContainmentBackend]]:
+        """SEC-001-P6 (2026-09-11): the real-containment counterpart to
+        `build_subprocess_env_and_preexec`, gated by
+        `autonomy_cfg.contained_execution_required` (default False -
+        "existing behavior must remain compatible when containment is not
+        required" is preserved exactly by staying on the raw env/preexec_fn
+        path below until this is explicitly opted into).
+
+        Residual limitation, stated honestly rather than silently dropped:
+        `self.java_home_override` (a specific JDK version this validator
+        detected/selected on the HOST to match the compile gate) is NOT
+        threaded into the contained path - a containerized compile/test
+        run uses whichever JDK ships in the OCI backend's own toolchain
+        image, not the host-detected one. Reproducing per-repo JDK
+        selection INSIDE a container would need either a matrix of
+        version-pinned images or installing a JDK into the container at
+        run time, neither of which this package implements. Compile/test
+        results under `contained_execution_required=True` are therefore
+        validated against the container image's fixed JDK, not
+        necessarily the same version the rest of Kriya's JDK-detection
+        logic would pick on the host - a real, named gap (see this
+        package's own RETURN, not a silent behavior change: any caller
+        that sets BOTH `contained_execution_required=True` and relies on
+        `java_home_override` is getting the container's JDK, and that is
+        what this docstring documents).
+
+        SECOND residual limitation, CLOSED this pass (SEC-001-P6 Stage 3,
+        2026-09-11): `_ensure_project_venv`/`_resolve_python_interpreter`
+        are now execution-environment aware - contained mode creates the
+        venv with the container's own "python3" (never Kriya's host
+        `sys.executable`, which does not exist inside a Linux container)
+        and references it by a workspace-relative path
+        (`.kriya/venv/bin/python`), resolved by whichever cwd/workdir the
+        command already runs under - the SAME mechanism already used for
+        every other contained command, not a host-path-translation hack.
+        Proven end-to-end through the real `run_tests()` entry point, see
+        tests/test_validate_oci.py.
+
+        `network` (SEC-001-P6 Stage 2, 2026-09-11): defaults to DENIED
+        (the execution-phase posture every OTHER contained command in this
+        class uses) - `_ensure_project_venv`'s own `pip install` call is
+        the one exception, passing UNRESTRICTED explicitly (it is a real
+        dependency-ACQUISITION step, not execution of already-resolved
+        code, matching kriya/tools/dependency_execution.py's own
+        acquisition/execution split - still fully filesystem/process-
+        contained throughout, only network differs).
+
+        `acquisition` (SEC-007, 2026-09-12): explicit resource-authority
+        selector - True routes cpu_seconds/memory_mb from
+        `autonomy_cfg.acquisition_cpu_seconds`/`acquisition_memory_mb`
+        instead of `sandbox_cpu_seconds`/`sandbox_memory_mb`. Deliberately
+        a caller-supplied flag, never inferred from `network`/goals/command
+        text (Invariant: do not infer acquisition trust merely from
+        command text) - every call site that constructs an acquisition
+        request already knows it's doing so structurally (it's calling a
+        dedicated acquisition helper, not guessing from what the command
+        looks like). Filesystem/environment/network containment and the
+        containment MECHANISM itself are completely unchanged either way -
+        only which resource-limit numbers land on the same
+        `ContainmentProfile.cpu_seconds`/`memory_mb` fields that already
+        existed; no parallel containment/execution code path is
+        introduced (Invariant: do not duplicate containment execution
+        code)."""
+        if not self.autonomy_cfg.contained_execution_required:
+            return None, None
+        if acquisition:
+            cpu_seconds = self.autonomy_cfg.acquisition_cpu_seconds
+            memory_mb = self.autonomy_cfg.acquisition_memory_mb
+        else:
+            cpu_seconds = self.autonomy_cfg.sandbox_cpu_seconds
+            memory_mb = self.autonomy_cfg.sandbox_memory_mb
+        # SEC-006 (2026-09-12): the ONLY place destination authority enters
+        # a real ContainmentProfile for this validator - always
+        # AutonomyConfig.acquisition_registry_hosts (already normalized/
+        # validated by its own field_validator), NEVER derived from the
+        # command/goal/repository content about to run. A caller cannot
+        # widen this by passing its own host list; there is no parameter
+        # for that.
+        network_destinations: Tuple[str, ...] = (
+            tuple(self.autonomy_cfg.acquisition_registry_hosts)
+            if network is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY else ()
+        )
+        profile = ContainmentProfile(
+            trust_class=TrustClass.UNTRUSTED_EXECUTION,
+            workspace_path=self.workspace_path,
+            network=network,
+            network_destinations=network_destinations,
+            env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
+            cpu_seconds=cpu_seconds,
+            memory_mb=memory_mb,
+            dependency_cache_paths=[dependency_cache_path] if dependency_cache_path else [],
+            dependency_cache_writable=dependency_cache_writable,
+        )
+        backend = resolve_containment_backend(self.autonomy_cfg.containment_backend)
+        return profile, backend
+
+    def _run_cmd_with_timeout(
+        self, cmd: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
+        network: NetworkAuthority = NetworkAuthority.DENIED,
+        dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
+        acquisition: bool = False,
+    ) -> Dict[str, Any]:
+        self._audit_run_command(cmd, cwd)
+        profile, backend = self.build_containment_profile_and_backend(
+            network=network, dependency_cache_path=dependency_cache_path,
+            dependency_cache_writable=dependency_cache_writable, acquisition=acquisition,
+        )
+        if profile is not None:
+            result = ProcessController().run(
+                cmd, cwd=cwd, timeout=timeout, stdin_payload=stdin_payload,
+                containment_profile=profile, containment_backend=backend,
+            )
+            if network is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY:
+                # SEC-006: raises RegistryAcquisitionSetupError (a
+                # ContainmentSetupError) rather than returning if the
+                # acquisition container's own trusted setup script
+                # (firewall/IPv6/privilege-drop) failed - never let that
+                # failure be misread as an ordinary mvn/pip result.
+                finalize_registry_acquisition_result(result)
+            return result.to_dict()
+        env, preexec_fn = self.build_subprocess_env_and_preexec()
         return ProcessController().run(
             cmd, cwd=cwd, timeout=timeout, env=env, preexec_fn=preexec_fn, stdin_payload=stdin_payload,
         ).to_dict()
+
+    def _maven_cache_dir(self) -> str:
+        """A persistent, per-workspace Maven local-repository cache
+        (SEC-001-P6 Stage 2) - lives under the same already-git-untracked,
+        worktree-scoped `.kriya/` directory `_ensure_project_venv` already
+        uses for the Python venv, reused across retries/gate calls within
+        the same run the same way. Created on demand - `OCIContainmentBackend`
+        refuses to mount a `dependency_cache_paths` entry that does not
+        already exist as a real directory."""
+        cache_dir = os.path.join(self.workspace_path, ".kriya", "m2_cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        return cache_dir
+
+    _MAVEN_ACQUISITION_INCOMPLETE_MARKER = "MAVEN_ACQUISITION_INCOMPLETE:"
+
+    def _run_maven_cmd(self, goals: List[str], cwd: str, timeout: int = 300) -> Dict[str, Any]:
+        """The `contained_execution_required`-aware replacement for a
+        direct `_run_cmd_with_timeout(["mvn"] + goals, ...)` call - SEC-001
+        live-validation follow-up (2026-09-11): the ORIGINAL version of
+        this method warmed the cache via a single, fixed `dependency:
+        go-offline` call - a real live run found this insufficient:
+        `dependency:go-offline` resolves declared `<dependencies>` but
+        does NOT reliably resolve build-LIFECYCLE PLUGIN artifacts
+        (confirmed live - `maven-resources-plugin`, a DEFAULT lifecycle
+        plugin the goal never even declared, and `maven-surefire-plugin`,
+        both failed the identical way `dependency:go-offline` had
+        supposedly already run for). Fixed by deriving acquisition from
+        the REAL goal about to run, not a static goal/plugin list:
+        whatever `mvn <goals>` actually needs - declared dependencies,
+        transitive plugin dependencies, anything the real lifecycle
+        resolves - gets cached, because acquisition runs THE SAME goals,
+        just with network permitted, instead of a narrower proxy goal.
+
+        Host mode: byte-for-byte pass-through, unchanged, no flags added.
+
+        Contained mode: tries OFFLINE first (network=DENIED, whatever is
+        already cached from a prior gate call in this same run). Only on
+        a genuine `OfflineFailureKind.MISSING_DEPENDENCY` (not just any
+        nonzero exit) does it run ONE bounded acquisition - `mvn <goals>`
+        again, network=UNRESTRICTED, still fully filesystem/process-
+        contained - then ONE more offline retry. The acquisition run's
+        own result/side effects are always discarded (logged, never
+        returned) - it is PREPARATION ONLY and must never be mistaken for
+        compile/test/runtime PASS evidence; only an offline attempt's
+        result is ever returned from this method. If the retry still
+        shows materially identical missing-artifact evidence (compared
+        via `maven_missing_artifact_signature`, falling back to "still
+        MISSING_DEPENDENCY" if the specific coordinate can't be
+        extracted from either message), this terminates deterministically
+        - the retry's own result is returned with a distinguishing
+        `MAVEN_ACQUISITION_INCOMPLETE:` marker prefixed onto stderr, so a
+        caller can tell "acquisition could not complete" apart from an
+        ordinary code-level test/compile failure - never a third
+        acquisition, never a loop, never a fallback to unrestricted
+        networking for the goals themselves."""
+        if not self.autonomy_cfg.contained_execution_required:
+            return self._run_cmd_with_timeout(["mvn"] + goals, cwd=cwd, timeout=timeout)
+
+        cache_dir = self._maven_cache_dir()
+
+        def _offline_attempt() -> Dict[str, Any]:
+            return self._run_cmd_with_timeout(
+                ["mvn", "-B", "-o", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}"] + goals,
+                cwd=cwd, timeout=timeout, network=NetworkAuthority.DENIED,
+                dependency_cache_path=cache_dir, dependency_cache_writable=True,
+            )
+
+        goal_desc = f"mvn {' '.join(goals)}"
+
+        def _acquire_for_this_goal() -> None:
+            # PREPARATION/ACQUISITION ONLY - network=DEPENDENCY_REGISTRY_ONLY
+            # (SEC-006: registry-scoped, not unrestricted), same goals as
+            # the authoritative offline run, result discarded. Never
+            # contributes Quality Gate PASS evidence: the caller never sees
+            # this call's own return value (OBS-005: its OUTCOME - exit
+            # code/timeout/likely-resource-termination - is still always
+            # recorded via _log_acquisition_outcome, just never its
+            # content).
+            try:
+                result = self._run_cmd_with_timeout(
+                    ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}"] + goals,
+                    cwd=cwd, timeout=timeout, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
+                    dependency_cache_path=cache_dir, dependency_cache_writable=True,
+                )
+            except ContainmentSetupError:
+                # SEC-006 (Invariant: containment/resource setup failure
+                # must block execution, never degrade silently): a
+                # RegistryAcquisitionSetupError (firewall/proxy/IPv6/
+                # privilege-drop failure) must propagate as the distinct
+                # containment-setup failure it is - NEVER get folded into
+                # the generic "acquisition failed to invoke" warning below,
+                # which would let a real security-mechanism failure look
+                # like an ordinary, retryable missing-dependency outcome.
+                raise
+            except Exception as e:
+                logger.warning(f"Maven acquisition (goal={goal_desc!r}) failed to invoke: {e}")
+                return
+            log_acquisition_outcome("maven", goal_desc, returncode=result["returncode"], timed_out=result.get("timeout", False))
+
+        first = _offline_attempt()
+        if first["returncode"] == 0:
+            return first
+        first_output = first.get("stdout", "") + first.get("stderr", "")
+        if classify_maven_offline_failure_text(first_output) != OfflineFailureKind.MISSING_DEPENDENCY:
+            return first
+
+        logger.info(
+            "mvn %s failed offline with a missing-dependency signature - running ONE bounded "
+            "acquisition (network-enabled, preparation only, goals=%s) then one more offline "
+            "attempt.", " ".join(goals), goals,
+        )
+        _acquire_for_this_goal()
+        second = _offline_attempt()
+        if second["returncode"] == 0:
+            logger.info(f"Acquisition (maven, goal={goal_desc!r}): authoritative offline retry followed and succeeded.")
+            return second
+        logger.info(f"Acquisition (maven, goal={goal_desc!r}): authoritative offline retry followed but still failed.")
+        second_output = second.get("stdout", "") + second.get("stderr", "")
+        if classify_maven_offline_failure_text(second_output) != OfflineFailureKind.MISSING_DEPENDENCY:
+            return second
+
+        first_artifact = maven_missing_artifact_signature(first_output)
+        second_artifact = maven_missing_artifact_signature(second_output)
+        if first_artifact is not None and second_artifact is not None:
+            # Both messages named a specific artifact/plugin coordinate -
+            # compare them directly.
+            materially_identical = first_artifact == second_artifact
+        else:
+            # Couldn't extract a specific coordinate from at least one
+            # message - both are already confirmed MISSING_DEPENDENCY-
+            # classified at this point, so treat that shared classification
+            # as sufficient evidence of the same failure class rather than
+            # attempting a third acquisition on an unclear signal.
+            materially_identical = True
+        if materially_identical:
+            logger.warning(
+                "mvn %s still reports a missing dependency/plugin after one bounded "
+                "reacquisition - terminating deterministically as acquisition-incomplete, "
+                "not retrying further.", " ".join(goals),
+            )
+            second = dict(second)
+            second["stderr"] = (
+                f"{self._MAVEN_ACQUISITION_INCOMPLETE_MARKER} offline execution for goals "
+                f"{goals!r} still reports a missing dependency/plugin after one bounded, "
+                f"network-enabled reacquisition attempt - this is a dependency-acquisition "
+                f"gap, not necessarily a defect in the generated code.\n{second['stderr']}"
+            )
+        return second
 
     def run_pom_validate(self) -> Dict[str, Any]:
         """Cheap, semantic-level pre-check for a Maven pom.xml - catches a
@@ -429,7 +1008,7 @@ class PolymorphicValidator:
         if not os.path.exists(pom_path):
             return {"success": True, "output": "No pom.xml to validate."}
         try:
-            res = self._run_cmd_with_timeout(["mvn", "validate"], cwd=self.workspace_path, timeout=120)
+            res = self._run_maven_cmd(["validate"], cwd=self.workspace_path, timeout=120)
             if res["returncode"] == 0:
                 return {"success": True, "output": "Maven POM validation succeeded."}
             return {"success": False, "output": f"Maven POM validation failed:\n{res['stdout']}\n{res['stderr']}"}
@@ -439,6 +1018,18 @@ class PolymorphicValidator:
             # must be returned, not silently swallowed, or a real toolchain
             # gap gets misread as a code-content bug.
             return {"success": False, "output": f"Failed to invoke mvn validate: {e}"}
+        except ContainmentSetupError:
+            # SEC-002 (2026-09-12): a containment/resource setup failure
+            # (docker daemon unreachable, NET_ADMIN unavailable, proxy/
+            # firewall setup failure, etc.) must never be treated as an
+            # ordinary "mvn validate could not be run, skip it" toolchain
+            # gap - unlike FileNotFoundError above, this is not a benign
+            # "tool missing" case, it is a security-significant setup
+            # failure that must propagate to the same containment-failure
+            # classification every other contained call site uses
+            # (kriya/workflow/retry_strategy.py's handle_attempt_failure),
+            # never silently reported as gate PASS.
+            raise
         except Exception as e:
             logger.warning(f"Failed to invoke mvn validate: {e}")
             return {"success": True, "output": f"mvn validate could not be run ({e}) - skipped, not confirmed valid."}
@@ -460,6 +1051,17 @@ class PolymorphicValidator:
         unresolvable dependencies, timeout) - never raises, since this is
         used from an optional recovery tool call, not a Quality Gate."""
         if self.stack != "java" or not os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
+            return None
+        if self.autonomy_cfg.contained_execution_required:
+            # SEC-001-P6 Stage 2: NOT wired onto the contained path this
+            # pass - `-Dmdep.outputFile` needs a path OUTSIDE the workspace
+            # mount (tempfile.mkstemp's own system temp dir), which a
+            # container cannot see or write to; this method's own contract
+            # ("never raises, returns None on any failure") already covers
+            # this cleanly - an optional recovery-tool lookup returning
+            # nothing is a correct, honest degrade, not a silent bypass of
+            # anything security-relevant (this reads dependency classpath
+            # info, it doesn't execute untrusted code any differently).
             return None
         fd, cp_file = tempfile.mkstemp(suffix=".kriya-classpath.txt")
         os.close(fd)
@@ -574,13 +1176,13 @@ class PolymorphicValidator:
                     # error) now shows up as an explicit, precisely-located "rawtypes"
                     # warning alongside the hard error, rather than the model having
                     # to infer the root cause from the type-mismatch message alone.
-                    res = self._run_cmd_with_timeout(
+                    res = self._run_maven_cmd(
                         [
-                            "mvn", "clean", "compile",
+                            "clean", "compile",
                             "-Dmaven.compiler.showWarnings=true",
                             "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked",
                         ],
-                        cwd=self.workspace_path,
+                        cwd=self.workspace_path, timeout=300,
                     )
                     if res["returncode"] == 0:
                         # Found live, 2026-08-22 (ignite_qpid_protocol): a
@@ -594,27 +1196,68 @@ class PolymorphicValidator:
                         # "Could not find or load main class" - a build-layout
                         # gap this gate should have caught immediately instead
                         # of ever claiming compilation "succeeded".
+                        #
+                        # Multi-module reactor branch added (2026-09-07, P7
+                        # production-validation): a genuine Maven reactor's
+                        # ROOT pom.xml (packaging=pom, real <modules>) has no
+                        # compiled output of its own - each declared module
+                        # compiles into its OWN <module>/target/classes, not
+                        # <workspace>/target/classes. The single-module check
+                        # below unconditionally checking the workspace root
+                        # was a structural, universal false-positive for ANY
+                        # multi-module reactor, confirmed live: 16/16 rejected
+                        # attempts, all with correct generated code, all
+                        # identical "zero .class files" message. get_pom_
+                        # reactor_modules() returning [] (a genuinely single-
+                        # module project - the overwhelmingly common case)
+                        # leaves this exact single-module check completely
+                        # unchanged.
                         if any(f.endswith(".java") for f in files):
-                            classes_dir = os.path.join(self.workspace_path, "target", "classes")
-                            compiled_anything = False
-                            if os.path.isdir(classes_dir):
-                                for _dirpath, _dirnames, filenames in os.walk(classes_dir):
-                                    if any(fn.endswith(".class") for fn in filenames):
-                                        compiled_anything = True
-                                        break
-                            if not compiled_anything:
-                                return {
-                                    "success": False,
-                                    "output": (
-                                        "Maven reported compilation success, but zero .class files "
-                                        "were actually produced under target/classes. Maven's default "
-                                        "sourceDirectory (src/main/java) most likely doesn't cover "
-                                        "where this project's .java files actually live - add an "
-                                        "explicit <sourceDirectory> to pom.xml's <build> section "
-                                        "pointing at their real location, rather than assuming the "
-                                        "conventional src/main/java layout."
-                                    ),
-                                }
+                            reactor_modules = get_pom_reactor_modules(
+                                os.path.join(self.workspace_path, "pom.xml"),
+                            )
+                            if reactor_modules:
+                                missing_modules = self._java_reactor_modules_missing_compiled_output(
+                                    files, reactor_modules,
+                                )
+                                if missing_modules:
+                                    return {
+                                        "success": False,
+                                        "output": (
+                                            "Maven reported compilation success, but the reactor "
+                                            f"module(s) {', '.join(missing_modules)} produced zero "
+                                            ".class files under their own target/classes, despite "
+                                            "owning a candidate .java file in this change set. This "
+                                            f"is a Maven reactor (root pom.xml declares modules: "
+                                            f"{', '.join(reactor_modules)}) - each module compiles "
+                                            "into its own <module>/target/classes, never the "
+                                            "aggregator root's. Check the affected module's own "
+                                            "<sourceDirectory> if one is set, or whether the .java "
+                                            "file is actually under that module's conventional "
+                                            "src/main/java layout."
+                                        ),
+                                    }
+                            else:
+                                classes_dir = os.path.join(self.workspace_path, "target", "classes")
+                                compiled_anything = False
+                                if os.path.isdir(classes_dir):
+                                    for _dirpath, _dirnames, filenames in os.walk(classes_dir):
+                                        if any(fn.endswith(".class") for fn in filenames):
+                                            compiled_anything = True
+                                            break
+                                if not compiled_anything:
+                                    return {
+                                        "success": False,
+                                        "output": (
+                                            "Maven reported compilation success, but zero .class files "
+                                            "were actually produced under target/classes. Maven's default "
+                                            "sourceDirectory (src/main/java) most likely doesn't cover "
+                                            "where this project's .java files actually live - add an "
+                                            "explicit <sourceDirectory> to pom.xml's <build> section "
+                                            "pointing at their real location, rather than assuming the "
+                                            "conventional src/main/java layout."
+                                        ),
+                                    }
                         return {"success": True, "output": "Maven compilation succeeded."}
                     error_output = f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"
                     try:
@@ -639,6 +1282,16 @@ class PolymorphicValidator:
                     # exactly like a code/import bug, sending the retry loop
                     # hunting for something that was never there.
                     return {"success": False, "output": f"Failed to invoke mvn compile: {e}"}
+                except ContainmentSetupError:
+                    # SEC-002 (2026-09-12): a containment/resource setup
+                    # failure must never be swallowed into the generic
+                    # warning-and-fall-through below - that would let
+                    # execution continue on to the Gradle check, then the
+                    # raw javac fallback, which (when `files` contains no
+                    # .java entries) reaches "No Java files to compile" ->
+                    # success:True, silently reporting a real security-
+                    # significant setup failure as gate PASS.
+                    raise
                 except Exception as e:
                     logger.warning(f"Failed to invoke mvn compile: {e}")
 
@@ -654,9 +1307,15 @@ class PolymorphicValidator:
                     # Same reasoning as the mvn case above - don't silently fall
                     # through to the misleading raw javac fallback.
                     return {"success": False, "output": f"Failed to invoke {gradle_cmd} compileJava: {e}"}
+                except ContainmentSetupError:
+                    # SEC-002 (2026-09-12): same reasoning as the mvn case
+                    # above - must not silently fall through to the javac
+                    # fallback, which can report success:True for a real
+                    # containment/setup failure.
+                    raise
                 except Exception as e:
                     logger.warning(f"Failed to invoke gradle compileJava: {e}")
-            
+
             # 3. Fallback to raw javac syntax check (for simple single-class projects)
             # `files` can include controller-provided established-file context
             # used to inform planning and runtime judgment. Only pass sources
@@ -693,6 +1352,14 @@ class PolymorphicValidator:
                         logger.warning(f"Resolver failed to run: {ree}")
                     return {"success": False, "output": error_output}
                 return {"success": True, "output": "Java classes compiled successfully."}
+            except ContainmentSetupError:
+                # SEC-002 (2026-09-12): must propagate as the distinct
+                # containment-setup failure it is, not be reported as an
+                # ordinary "javac tool invocation failed" toolchain problem -
+                # that framing hides the real root cause and never reaches
+                # handle_attempt_failure's containment_setup_failed
+                # classification.
+                raise
             except Exception as e:
                 return {"success": False, "output": f"Javac compilation tool invocation failed: {e}"}
 
@@ -706,6 +1373,11 @@ class PolymorphicValidator:
                             res = self._run_cmd_with_timeout(["ruby", "-c", full], cwd=self.workspace_path)
                             if res["returncode"] != 0:
                                 errors.append(f"Ruby syntax error in {f}:\n{res['stderr']}")
+                        except ContainmentSetupError:
+                            # SEC-002 (2026-09-12): must propagate, not be
+                            # reported as an ordinary "Ruby runtime
+                            # execution failed" toolchain/code problem.
+                            raise
                         except Exception as e:
                             return {"success": False, "output": f"Ruby runtime execution failed: {e}"}
             if errors:
@@ -724,8 +1396,25 @@ class PolymorphicValidator:
             ),
         }
 
-    def run_tests(self, target_test: Optional[str] = None) -> Dict[str, Any]:
-        """Runs tech-stack specific test execution suite."""
+    def run_tests(self, target_test: Optional[Union[str, Sequence[str]]] = None) -> Dict[str, Any]:
+        """Runs tech-stack specific test execution suite.
+
+        `target_test` accepts either a single string (unchanged, existing
+        contract - every pre-existing caller keeps working identically) or
+        an ordered sequence of strings (VAL-001 G1-R3: brownfield PRE/POST
+        baseline comparison needs to select several specific test files at
+        once - e.g. the calibrated `tests/test_csharp_type_resolution.py` +
+        `tests/test_csharp_member_calls.py` pair). A sequence is NEVER
+        joined into one string and NEVER shell-interpreted - each element
+        becomes its own separate argv entry to the underlying test-runner
+        subprocess, structurally, the same way a real shell would word-split
+        several unquoted paths - see the Python-stack branch below for the
+        one place this actually matters today (a single opaque argv token
+        containing a space is not multiple paths to pytest's own arg
+        parser - proven empirically during G1-R3 PREPARE, not assumed)."""
+        target_test_list: Optional[List[str]] = None
+        if target_test is not None:
+            target_test_list = [target_test] if isinstance(target_test, str) else list(target_test)
         try:
             if self.stack == "python":
                 # Explicitly (re-)add the workspace root and, if present, its src/ layout
@@ -791,11 +1480,15 @@ class PolymorphicValidator:
                     "import pytest; sys.exit(pytest.main(sys.argv[1:]))",
                     "--"
                 ]
-                if target_test:
-                    cmd.append(target_test)
+                if target_test_list:
+                    # Each target its OWN argv entry - never joined into one
+                    # string (see this method's own docstring: a single
+                    # space-joined token is not multiple paths to pytest,
+                    # empirically confirmed, not assumed).
+                    cmd.extend(target_test_list)
                 res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 return {"success": res["returncode"] in (0, 5), "output": res["stdout"] + "\n" + res["stderr"]}
- 
+
             elif self.stack == "java":
                 # target_test comes from extract_target_test() as a raw file path
                 # (e.g. "src/test/java/com/example/ProtocolTest.java") - Maven's
@@ -814,14 +1507,18 @@ class PolymorphicValidator:
                 # src-root convention (which isn't always the same layout - see
                 # the src/main/python vs flat layout drift documented elsewhere
                 # in this project).
+                # Multi-target selection is a Python-stack (pytest) concept
+                # only today (VAL-001 G1-R3) - Java honors just the first
+                # target, unchanged single-target behavior for the common
+                # (and, so far, only real) case of one string being passed.
                 java_test_class = (
-                    os.path.splitext(os.path.basename(target_test))[0] if target_test else None
+                    os.path.splitext(os.path.basename(target_test_list[0]))[0] if target_test_list else None
                 )
                 if os.path.exists(os.path.join(self.workspace_path, "pom.xml")):
-                    cmd = ["mvn", "test"]
+                    goals = ["test"]
                     if java_test_class:
-                        cmd.append(f"-Dtest={java_test_class}")
-                    res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                        goals.append(f"-Dtest={java_test_class}")
+                    res = self._run_maven_cmd(goals, cwd=self.workspace_path, timeout=300)
                     return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
                 elif os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
                     gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
@@ -859,16 +1556,29 @@ class PolymorphicValidator:
                             "success": False,
                             "output": f"'bundle install' failed:\n{install_res['stdout']}\n{install_res['stderr']}",
                         }
+                # Multi-target selection is a Python-stack (pytest) concept
+                # only today - Ruby honors every target given (rspec accepts
+                # multiple path args natively), same structural argv-extend
+                # treatment as the Python branch above.
                 cmd = ["bundle", "exec", "rspec"]
-                if target_test:
-                    cmd.append(target_test)
+                if target_test_list:
+                    cmd.extend(target_test_list)
                 try:
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+                except ContainmentSetupError:
+                    # SEC-002 (2026-09-12): a containment/resource setup
+                    # failure is not the ordinary "bundle exec rspec isn't
+                    # set up right, try plain rspec" case this fallback
+                    # exists for - falling through here would only ever
+                    # re-hit the same unavailable backend via the plain
+                    # rspec invocation below, wasting an attempt while
+                    # hiding the real cause; must propagate immediately.
+                    raise
                 except Exception as e:
                     logger.debug(f"'bundle exec rspec' failed, falling back to plain 'rspec': {e}")
                     cmd = ["rspec"]
-                    if target_test:
-                        cmd.append(target_test)
+                    if target_test_list:
+                        cmd.extend(target_test_list)
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
                 return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
 
@@ -883,6 +1593,14 @@ class PolymorphicValidator:
                 ),
             }
 
+        except ContainmentSetupError:
+            # SEC-002 (2026-09-12): must propagate to the existing
+            # containment-failure classification (handle_attempt_failure),
+            # never be reported as an ordinary "failed to execute local
+            # test suite" gate failure - that framing would feed a real
+            # infrastructure problem back into the model-repair retry loop
+            # as if it were a fixable test/code defect.
+            raise
         except Exception as e:
             return {"success": False, "output": f"Failed to execute local test suite: {e}"}
 
@@ -919,8 +1637,16 @@ class PolymorphicValidator:
         interpreter, install_error = self._resolve_python_interpreter()
         if install_error:
             return None, install_error
+        # "python3" added to the match set (SEC-001-P6 Stage 3, 2026-09-11):
+        # a model-authored command can just as easily say "python3" as
+        # "python" - without this, a command already spelled "python3"
+        # would silently skip substitution and run against the container's
+        # bare interpreter even when a project-local venv exists to use
+        # instead (pre-existing gap, not contained-mode-specific, but only
+        # actually noticed once "python3" itself became a real return value
+        # of _resolve_python_interpreter's own default-interpreter case).
         rewritten = [
-            ([interpreter] + cmd[1:]) if cmd and cmd[0] in ("python", sys.executable) else cmd
+            ([interpreter] + cmd[1:]) if cmd and cmd[0] in ("python", "python3", sys.executable) else cmd
             for cmd in commands
         ]
         return rewritten, None
@@ -940,6 +1666,11 @@ class PolymorphicValidator:
         command = commands[0]
         try:
             res = self._run_cmd_with_timeout(command, cwd=self.workspace_path, timeout=timeout)
+        except ContainmentSetupError:
+            # SEC-002 (2026-09-12): must propagate to the existing
+            # containment-failure classification, not be reported as an
+            # ordinary "failed to execute run command" runtime failure.
+            raise
         except Exception as e:
             return {"success": False, "timed_out": False, "returncode": None, "output": f"Failed to execute run command: {e}"}
         return {
@@ -1001,11 +1732,14 @@ class PolymorphicValidator:
                 if destination_index < len(command):
                     destination = command[destination_index]
                     if not os.path.isabs(destination):
-                        destination_path = os.path.abspath(
-                            os.path.join(self.workspace_path, destination)
-                        )
-                        workspace_root = os.path.abspath(self.workspace_path)
-                        if os.path.commonpath([workspace_root, destination_path]) == workspace_root:
+                        destination_path = os.path.join(self.workspace_path, destination)
+                        # Symlink-safe containment (kriya/policy/filesystem.py's
+                        # is_within_scope) - a bare os.path.abspath/commonpath
+                        # check has no symlink resolution and reopens exactly
+                        # the sibling-prefix/symlink bypass that primitive was
+                        # built to close.
+                        scope = make_workspace_scope(self.workspace_path)
+                        if is_within_scope(scope, destination_path):
                             os.makedirs(destination_path, exist_ok=True)
             step_label = f"=== Step {i}/{len(commands)}: {' '.join(command)} ==="
             try:

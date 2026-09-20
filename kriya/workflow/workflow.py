@@ -25,6 +25,7 @@ from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.workflow.checkpoint import (
     compute_config_fingerprint,
+    compute_workspace_content_hash,
     compute_workspace_fingerprint,
     delete_checkpoint,
     find_latest_checkpoint,
@@ -34,6 +35,14 @@ from kriya.workflow.checkpoint import (
 )
 from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.validation_baseline import (
+    build_validation_outcome,
+    capture_brownfield_baselines,
+    classify_baseline_delta,
+    render_blocking_regression_evidence,
+    parse_pytest_structured_outcomes,
+    DeltaClassification,
+)
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_reporting import build_failure_report_entry
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
@@ -43,6 +52,7 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.migration import MigrationResolution, resolve_migration_resolution
+from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
 from kriya.workflow.obligations import (
     ObligationAuthority,
     ObligationKind,
@@ -90,6 +100,9 @@ from kriya.workflow.attribution import (
     find_whole_response_no_op,
     resolve_future_owner_verification_deferral,
 )
+from kriya.workflow.contract_authority import derive_direct_contract_authorizations
+from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
+from kriya.workflow.semantic_scope_derivation import derive_semantic_authority_for_run
 from kriya.workflow.file_resolution import (
     EXPECTED_FILE_EXTENSIONS,
     IncompleteGenerationError,
@@ -101,6 +114,7 @@ from kriya.workflow.file_resolution import (
     _resolve_run_command,
     prefer_existing_artifact_owners,
     check_plan_completeness,
+    classify_plan_completeness,
     downgrade_ungrounded_goal_explicit_commands,
     extract_expected_files,
     extract_planner_code_blocks,
@@ -108,6 +122,7 @@ from kriya.workflow.file_resolution import (
     find_brownfield_test_redirections,
     find_brownfield_public_api_changes,
     find_missing_expected_files,
+    identify_redirected_test_obligations,
     include_response_construction_owners,
     normalize_written_filepath,
 )
@@ -183,9 +198,14 @@ from kriya.workflow.retry_prompts import (
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.retry_strategy import handle_attempt_failure
-from kriya.workflow.review_context import build_review_batches, build_reviewer_verified_evidence
+from kriya.workflow.review_context import build_candidate_diff_context, build_review_batches, build_reviewer_verified_evidence
 from kriya.workflow.state import GenerationState, RecoveryPhaseAdvanced
 from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS, EngineeringPlan
+from kriya.workflow.planner_repair import (
+    STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
+    build_structured_plan_repair_prompt,
+    classify_structured_plan_parse_issue,
+)
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 
 logger = logging.getLogger(__name__)
@@ -271,7 +291,38 @@ def _build_required_verification_evidence(
             and requirement.get("requires_runtime_execution") is True
             and outcomes_supplied
         ):
-            item["passed"] = _outcome_passed(_latest_outcome({"run_verification"}))
+            # A run-verification pass whose concrete command happens to be
+            # a test-runner invocation (kriya/workflow/attempt.py's own
+            # `gate_type = "test" if command_verification_kind == "test"
+            # else "run_verification"`) is deliberately tagged type="test",
+            # not "run_verification" - so the SAME outcome also satisfies
+            # an ordinary tool_name="test" requirement via the branch
+            # above. Searching only {"run_verification"} here made a
+            # genuine, already-PASSING runtime-verification outcome
+            # produced by exactly that path invisible to this lookup.
+            # Found live, P2 production-validation run 4 (2026-09-06,
+            # spring-ignite-demo): the auto-approved command was `mvn
+            # test`, it ran via run_app_sequence() and passed, and Kriya's
+            # own generated success criteria ("Running `mvn test` exits
+            # with code 0 ... confirming the salary cap logic and save
+            # invariant are correctly implemented") already declared that
+            # sufficient - yet this requirement still reported REQUIRED
+            # VERIFICATION UNRESOLVED. Widened to also accept a "test"/
+            # "targeted_test"/"regression_test"-typed outcome, but ONLY
+            # when it carries the "commands" key - set exclusively by
+            # run_app_sequence()'s own two success-path appends (attempt.py)
+            # and never by an ordinary compile/test Quality Gate outcome -
+            # so a ordinary test run that never went through real runtime
+            # verification can never satisfy a runtime-execution
+            # requirement it was never produced to prove.
+            item["passed"] = _outcome_passed(next(
+                (
+                    outcome for outcome in reversed(outcomes)
+                    if outcome.get("type") in {"run_verification", "test", "targeted_test", "regression_test"}
+                    and outcome.get("commands")
+                ),
+                None,
+            ))
             item["source"] = (
                 "authoritative_runtime_verification"
                 if item["passed"] is not None else "unresolved"
@@ -481,7 +532,29 @@ class WorkflowEngine:
         # Developer deliberately isn't here - it stays on the top-level llm/llm_chain,
         # escalated by the existing quality-gate retry loop below, not this mechanism.
         roles = kernel.config.agent_llms
-        self.planner = PlannerAgent("planner", llm_client, roles.planner.llm, roles.planner.llm_chain)
+        # Planner max-token residual (2026-09-19): BaseAgent.max_output_tokens
+        # (unset here previously) is exactly the existing "stage-specific
+        # configured budget" mechanism - passing it once, at construction,
+        # fixes every self.planner.run(...) call site at once (this class's
+        # own plain/Legacy call below AND WorkflowController's structured-
+        # planning calls, kriya/workflow/workflow_controller.py, which
+        # already separately derive and pass config.llm.planner_max_tokens
+        # as an explicit per-call max_tokens_override - that explicit
+        # override still takes precedence unchanged, per BaseAgent.run()'s
+        # own `max_tokens_override if max_tokens_override is not None else
+        # self.max_output_tokens` precedence). Without this, an ordinary
+        # (non-WorkflowController) Planner call fell through to LLMClient.
+        # complete()'s own general config.llm.max_tokens instead of the
+        # Planner-specific budget - a real, silent mismatch between the
+        # configured stage-specific value and what actually reached the
+        # model. MilestonePlannerAgent below deliberately keeps its own
+        # existing, separately-documented "no dedicated agent_llms entry,
+        # falls back to LLMClient's own default" behavior unchanged - it is
+        # a distinct agent, not the ordinary Planner path this fixes.
+        self.planner = PlannerAgent(
+            "planner", llm_client, roles.planner.llm, roles.planner.llm_chain,
+            max_output_tokens=kernel.config.llm.planner_max_tokens,
+        )
         # No dedicated agent_llms entry (unlike the roles above) - this agent is
         # new (kriya/workflow/milestones.py's orchestrator), and adding a config
         # schema field is out of scope for this feature; falls back to
@@ -711,6 +784,7 @@ class WorkflowEngine:
         predetermined_architect_files: Optional[List[str]] = None,
         protected_source_file: Optional[str] = None,
         allowed_write_relpaths: Optional[List[str]] = None,
+        authorized_semantic_regions: Optional[List["AuthorizedSemanticRegion"]] = None,
         write_scope_mode: Optional[WriteScopeMode] = None,
         required_verification: Optional[List[Dict[str, Any]]] = None,
         runtime_verification_required: Optional[bool] = None,
@@ -725,6 +799,7 @@ class WorkflowEngine:
         current_subtask_id: Optional[str] = None,
         obligation_ledger: Optional["ObligationLedger"] = None,
         completed_subtask_ids: Optional[FrozenSet[str]] = None,
+        deterministic_failure_diagnostics: Optional["DeterministicFailureDiagnosticStore"] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
@@ -872,6 +947,26 @@ class WorkflowEngine:
                 "predetermined_plan/predetermined_design/predetermined_architect_files must be "
                 "supplied together or not at all - got a partial combination."
             )
+        # CORR-018 general-case closure (2026-09-13): auto-derive
+        # authorized_semantic_regions for ordinary generate/fix and
+        # structured-plan MODEL-subtask calls, ONLY when the caller did not
+        # already supply its own list (`is None` - A3's proposal-promotion
+        # path always passes a real, non-empty list here and is therefore
+        # completely untouched by this branch, preserving Invariant 13
+        # exactly) AND the opt-in flag is set (default False - zero
+        # behavior change for every existing deployment). Deliberately
+        # BEFORE the resume-checkpoint drift check below, so a resumed run
+        # under strict mode always re-derives fresh from the current
+        # grounding_goal/structured_plan/workspace content rather than
+        # trusting anything checkpoint-carried (mirrors TOOL-001's own
+        # "always revalidate fresh on resume" precedent).
+        if (
+            self.kernel.config.autonomy.semantic_region_enforcement_required
+            and authorized_semantic_regions is None
+        ):
+            authorized_semantic_regions = derive_semantic_authority_for_run(
+                grounding_goal, structured_plan, workspace_path,
+            )
         # Deliberately BEFORE state is constructed below - state.generation_
         # started_monotonic (kriya/workflow/state.py) defaults to time.monotonic()
         # AT CONSTRUCTION, and that's the real clock generation_time_budget_seconds
@@ -985,10 +1080,58 @@ class WorkflowEngine:
                         drift_reasons.append("workspace is not a git repository, so drift can't be verified")
                     elif candidate.get("workspace_fingerprint") != current_ws_fp:
                         drift_reasons.append("workspace has changed (git HEAD/dirty-state differs)")
+                    # STATE-001 (2026-09-14): workspace_fingerprint above is
+                    # HEAD+dirty-BOOLEAN - it cannot distinguish two
+                    # different dirty working-tree contents at the same HEAD
+                    # (reproduced and permanently characterized by
+                    # test_checkpoint_workspace_fingerprint_cannot_
+                    # distinguish_two_different_dirty_states). This is the
+                    # REAL, content-sensitive check - required unconditionally
+                    # whenever workspace_fingerprint itself is present at all
+                    # (i.e. this is a real, non-legacy checkpoint); its own
+                    # absence means the checkpoint predates this fix and is
+                    # never silently treated as equivalent to a real match
+                    # (Task 10's own explicit instruction).
+                    if candidate.get("workspace_fingerprint") is not None:
+                        current_content_hash = compute_workspace_content_hash(workspace_path)
+                        stored_content_hash = candidate.get("workspace_content_hash")
+                        if stored_content_hash is None:
+                            drift_reasons.append(
+                                "checkpoint predates the working-tree-content identity check "
+                                "(legacy checkpoint) and is not safely resumable"
+                            )
+                        elif current_content_hash is None:
+                            drift_reasons.append(
+                                "workspace content identity could not be computed - failing closed"
+                            )
+                        elif current_content_hash != stored_content_hash:
+                            drift_reasons.append(
+                                "workspace content has changed (tracked/untracked content differs "
+                                "from the checkpoint)"
+                            )
                     if candidate.get("config_fingerprint") != current_cfg_fp:
                         drift_reasons.append("config has changed")
                     if candidate.get("goal_fingerprint") != current_goal_fp:
                         drift_reasons.append("goal/error text differs")
+                    # A3-P2: authorized_semantic_regions is NOT itself written
+                    # into or restored from a checkpoint (no field for it below)
+                    # - a checkpoint saved by a proposal-promoted run therefore
+                    # carries no evidence of the region boundary it was
+                    # executing under. Resuming it under a call that supplies
+                    # no regions (e.g. plain `generate --resume`, which knows
+                    # nothing about the proposal that started it) would
+                    # silently drop that boundary rather than honor or refuse
+                    # it - fail closed via the SAME drift-reasons/fresh-run
+                    # fallback already used for workspace/config/goal drift,
+                    # rather than inventing new resume semantics. See
+                    # proposal_promotion.py's own module docstring for the
+                    # complementary half (execute_approved_proposal() never
+                    # passes resume/resume_id at all).
+                    if candidate.get("had_authorized_semantic_regions") and not authorized_semantic_regions:
+                        drift_reasons.append(
+                            "checkpoint was saved with an authorized-semantic-region boundary "
+                            "that this resume call did not supply"
+                        )
                     if drift_reasons:
                         logger.warning(
                             f"Refusing to resume checkpoint '{target_id}': {'; '.join(drift_reasons)}. "
@@ -1470,6 +1613,19 @@ class WorkflowEngine:
         matched_files = []
         related_files = []
         graph_rag_context = ""
+        # CTX-001 P1 C2 production integration: path -> candidate member/
+        # class NAMES parsed from this run's own vector hits, before
+        # workflow.py's own file-level collapse below - see
+        # AttemptContext.retrieval_member_hints' own docstring (attempt.py)
+        # for why these are candidates only, validated later, never trusted
+        # here.
+        retrieval_member_hints: Dict[str, List[str]] = {}
+        # PRE-PLAN GROUNDING (2026-09-19): declared here (not only inside the
+        # try block below) so both degrade safely to {} - never populated,
+        # never referenced as fact - whenever Graph RAG retrieval itself is
+        # unavailable/fails, exactly like every other variable in this stage.
+        verified_grounding: Dict[str, List[str]] = {}
+        hypothesis_candidates: Dict[str, List[str]] = {}
         try:
             vector_index_path = os.path.join(self.kernel.config.paths.memory, "vector_index.db")
             db_path = os.path.join(self.kernel.config.paths.memory, "dependency_graph.db")
@@ -1500,13 +1656,80 @@ class WorkflowEngine:
                 query_emb = await embed_client.get_embedding(goal, is_query=True)
                 matches = vector_store.query_hybrid(goal, query_emb, top_k=retrieval_limits.top_k, model_name=self.kernel.config.embedding.model)
                 good_matches = [m for m in matches if m.get("score", 0.0) > 0.0]
+                from kriya.workflow.context_source import (
+                    CurrentSourceResolver, parse_controlled_chunk_header_name,
+                    resolve_verified_grounding_member_id,
+                )
+                # PRE-PLAN GROUNDING (2026-09-19, VAL-001 G1 follow-up): the
+                # real, live-run root cause this closes - the Planner
+                # fabricated a specific function name
+                # (`_csharp_walk_invocation_expression`) that never existed
+                # anywhere in the corpus, and nothing checked that BEFORE the
+                # plan was accepted. retrieval_member_hints below (CTX-001 P1
+                # C2, unchanged) already parses a candidate name from each
+                # hit's own controlled chunk header, but only ever VALIDATES
+                # it against current structure later, in run_attempt() - and
+                # only for a path that already made it into known_target_
+                # files, i.e. only after the Planner already committed to a
+                # target. This block does that SAME validation (reusing
+                # member_boundaries_for/member_ids_matching_name - the exact
+                # primitives resolve_member_hints_from_chunk_header itself
+                # uses - not a new resolver) for EVERY retrieved candidate,
+                # right here, BEFORE the Planner ever runs, and explicitly
+                # separates the result into two buckets the Planner prompt
+                # renders distinctly below:
+                #   verified_grounding: the name resolves to exactly ONE real,
+                #     current member - "Planning specificity must not exceed
+                #     repository evidence specificity" - this is the ONLY
+                #     bucket the Planner may treat as fact.
+                #   hypothesis_candidates: a header name was parsed but did
+                #     NOT resolve to exactly one real current member (zero
+                #     matches - stale since indexing, or an unsupported
+                #     language; more than one - a genuinely ambiguous name,
+                #     e.g. an overloaded method) - surfaced as an explicit,
+                #     labeled "unconfirmed" lead, never silently dropped and
+                #     never presented as though it were verified.
+                # No previously-named target file is required for either
+                # bucket - this runs over the full retrieved candidate set,
+                # not merely files the Planner/Architect already chose.
+                _grounding_resolver = CurrentSourceResolver(workspace_path, None)
                 for m in good_matches:
                     retrieved_chunks.append({
                         "filepath": m.get("filepath", "unknown"),
                         "score": m.get("score", 0.0),
                         "text": m.get("text", "")[:300] + "..." if len(m.get("text", "")) > 300 else m.get("text", "")
                     })
-                
+                    # CTX-001 P1 C2: parse (never trust) a candidate member/
+                    # class name from this hit's own chunk text - the exact
+                    # "Method: X"/"Class: X" controlled header format
+                    # chunk_file_with_metadata_headers() already writes at
+                    # index time. Real validation against CURRENT structural
+                    # boundaries also happens later, in run_attempt() (for a
+                    # known target file only) - retrieval_member_hints itself
+                    # is unchanged, still candidate-only, still consumed the
+                    # same way there.
+                    fp = m.get("filepath")
+                    if fp:
+                        candidate_name = parse_controlled_chunk_header_name(m.get("text", ""))
+                        if candidate_name:
+                            names = retrieval_member_hints.setdefault(fp, [])
+                            if candidate_name not in names:
+                                names.append(candidate_name)
+
+                            resolved = _grounding_resolver.resolve(fp)
+                            verified_member_id = (
+                                resolve_verified_grounding_member_id(fp, resolved.content, candidate_name)
+                                if resolved.exists else None
+                            )
+                            if verified_member_id is not None:
+                                verified_list = verified_grounding.setdefault(fp, [])
+                                if verified_member_id not in verified_list:
+                                    verified_list.append(verified_member_id)
+                            else:
+                                hyp_list = hypothesis_candidates.setdefault(fp, [])
+                                if candidate_name not in hyp_list:
+                                    hyp_list.append(candidate_name)
+
                 if good_matches:
                     matched_files_list = list(dict.fromkeys([m["filepath"] for m in good_matches if "filepath" in m]))
                     related_files_set = set()
@@ -1599,7 +1822,18 @@ class WorkflowEngine:
 
         # Fingerprints for any checkpoint saved during this run - computed once,
         # goal/workspace/config are all fixed for the remainder of the call.
+        # Safe to compute once (not per-checkpoint-save): every checkpoint
+        # this method saves happens BEFORE the real workspace is ever
+        # touched by this run (candidate writes stay confined to
+        # worktree_path until the final, post-checkpoint apply step) -
+        # traced explicitly for this fix (STATE-001) rather than assumed.
         checkpoint_ws_fp = compute_workspace_fingerprint(workspace_path)
+        # STATE-001 (2026-09-14): the real, working-tree-content-sensitive
+        # identity - see compute_workspace_content_hash()'s own docstring
+        # (kriya/workflow/checkpoint.py) for the full mechanism and why
+        # checkpoint_ws_fp above cannot distinguish two different dirty
+        # contents at the same HEAD.
+        checkpoint_content_hash = compute_workspace_content_hash(workspace_path)
         checkpoint_cfg_fp = compute_config_fingerprint(self.kernel.config.model_dump())
         checkpoint_goal_fp = hashlib.sha256(f"{goal}\x00{state.error_context or ''}".encode("utf-8")).hexdigest()
 
@@ -1607,10 +1841,32 @@ class WorkflowEngine:
             save_checkpoint(workspace_path, run_id, {
                 "stage": stage,
                 "workspace_fingerprint": checkpoint_ws_fp,
+                "workspace_content_hash": checkpoint_content_hash,
                 "config_fingerprint": checkpoint_cfg_fp,
                 "goal_fingerprint": checkpoint_goal_fp,
                 "milestone_group_id": milestone_group_id,
                 "milestone_index": milestone_index,
+                # A3-P2 resume-safety marker - see the matching drift check
+                # above. A bare boolean, not the regions themselves: nothing
+                # resumes FROM this value, it only ever blocks an unsafe
+                # resume attempt that supplies none.
+                "had_authorized_semantic_regions": bool(authorized_semantic_regions),
+                # VAL-001 brownfield validation baselining - None for any
+                # checkpoint saved before baseline capture runs (the "plan"/
+                # "design" stage checkpoints above) or for any run that
+                # never configured baselining at all; a real dict once
+                # capture_brownfield_baselines() has run, letting a later
+                # resume reuse it (see capture_brownfield_baselines' own
+                # resume_baseline_targeted/resume_baseline_full_regression
+                # parameters).
+                "validation_baseline_targeted": (
+                    state.validation_baseline_targeted.to_dict()
+                    if state.validation_baseline_targeted is not None else None
+                ),
+                "validation_baseline_full_regression": (
+                    state.validation_baseline_full_regression.to_dict()
+                    if state.validation_baseline_full_regression is not None else None
+                ),
                 **extra,
             })
 
@@ -1634,6 +1890,67 @@ class WorkflowEngine:
                 "exact stack. Your plan must not contradict any Rule listed there."
             )
 
+        # PLANNER-ROBUST-001 (2026-09-19): the same real, already-resolved
+        # tool-registry source WorkflowController's own structured-planning
+        # loop already uses (kernel.registry.list_components("tool")) -
+        # reused as-is, never a hardcoded duplicate list, never a name this
+        # runtime doesn't actually have registered. Surfaced to the Planner
+        # here (never invented in the system prompt itself, which has no
+        # per-run context) so a subtask that genuinely needs execution_
+        # method="tool" can name a real Subtask.tool_name instead of
+        # guessing - see kriya/agents/agent.py::PlannerAgent.system_prompt
+        # for the schema-level distinction this pairs with (Subtask.
+        # tool_name vs. a verification[] entry's own, differently-
+        # vocabularied tool_name).
+        try:
+            available_tool_names = sorted(self.kernel.registry.list_components("tool"))
+        except Exception as e:
+            available_tool_names = []
+            logger.debug(f"Could not list registered tools for the Planner prompt: {e}")
+        if available_tool_names:
+            plan_prompt += (
+                "\n\nRegistered Kriya tools available for a subtask's own execution_method=\"tool\" "
+                f"(Subtask.tool_name must be exactly one of these, never invented): "
+                f"{', '.join(available_tool_names)}."
+            )
+
+        # PRE-PLAN GROUNDING (2026-09-19, VAL-001 G1 follow-up): the real,
+        # live incident this closes - the Planner named a specific function
+        # (`_csharp_walk_invocation_expression`) that never existed anywhere
+        # in the corpus, then everything downstream (Architect, Developer)
+        # treated that fabrication as fact for 8 attempts before it was
+        # caught. verified_grounding/hypothesis_candidates (built above,
+        # same retrieval pass, reusing member_boundaries_for/member_ids_
+        # matching_name - no new resolver) are rendered as two EXPLICITLY
+        # separate, labeled sections, never merged into one "here is the
+        # code" blob: the Planner may treat only the first as fact.
+        if verified_grounding or hypothesis_candidates:
+            grounding_block = "\n\n=== Repository Grounding (from retrieval, before this plan) ===\n"
+            if verified_grounding:
+                grounding_block += (
+                    "VERIFIED (confirmed to exist right now, by name, in the current repository "
+                    "- safe to reference by this exact name):\n"
+                )
+                for path, member_ids in verified_grounding.items():
+                    grounding_block += f"  {path}: {', '.join(sorted(member_ids))}\n"
+            if hypothesis_candidates:
+                grounding_block += (
+                    "UNCONFIRMED CANDIDATES (retrieval matched this file for the goal, but this "
+                    "exact name could not be confirmed against current repository structure - "
+                    "stale, ambiguous, or an unsupported language for name verification; treat as "
+                    "a lead to investigate, never as a fact):\n"
+                )
+                for path, names in hypothesis_candidates.items():
+                    grounding_block += f"  {path}: {', '.join(sorted(names))}\n"
+            grounding_block += (
+                "Planning specificity must not exceed repository evidence specificity: only name a "
+                "specific function/method/class in your plan if it appears in the VERIFIED list "
+                "above. For anything else - including every UNCONFIRMED CANDIDATE - describe the "
+                "target descriptively (e.g. \"the C# call-site handler\") rather than inventing a "
+                "specific name; Kriya will investigate further before mutating."
+            )
+            plan_prompt += grounding_block
+
         if predetermined_plan is not None:
             plan = predetermined_plan
             logger.info("Using predetermined plan (bounded subtask execution) - skipping Planner Agent call.")
@@ -1644,10 +1961,16 @@ class WorkflowEngine:
             _log_phase_banner("PLANNING")
             logger.info("Planner Agent drafting execution steps...")
             plan_stream = (lambda token: stream_callback("Planning", token)) if stream_callback else None
+            _planner_started = time.monotonic()
             plan = await self.planner.run(
                 plan_prompt,
                 stream_callback=plan_stream
             )
+            # R1 Deliverable 5 - observational only, same posture as
+            # attempt.py's Developer-call wrapper: read after the await
+            # already returned, never influences plan/control flow.
+            state.planner_calls += 1
+            state.planner_llm_seconds += time.monotonic() - _planner_started
             _save_stage_checkpoint("plan", plan=plan)
 
             # MA6.3 Stage A - parse only, never act on the result yet (MA6
@@ -1680,11 +2003,143 @@ class WorkflowEngine:
         # used above for the KnowledgeGuard gap check, not a raised
         # exception - this is a real, expected-to-happen outcome the caller
         # should be able to handle/retry, not a crash.
-        plan_issue = check_plan_completeness(plan)
-        if plan_issue:
-            logger.warning(f"Planner output looks incomplete, stopping before Architect: {plan_issue}")
+        #
+        # VAL-001 G1-R3 (2026-09-18): classify_plan_completeness() replaces
+        # the old bare count("```") % 2 check with structural, evidence-
+        # based classification - see that function's own docstring
+        # (kriya/workflow/file_resolution.py) for the real live incident and
+        # full design rationale. Three distinct fail-closed outcomes now
+        # exist, each with its own accurate status/reason - a genuinely
+        # complete, schema-valid structured plan is never blocked merely for
+        # a cosmetic surrounding-fence mismatch, and an unauthorized/
+        # semantically invalid one is never silently waved through just
+        # because Stage A is elsewhere advisory-only (this check is NOT
+        # Stage A - it is authoritative here, gating whether Architect is
+        # ever reached at all). No Planner retry is added here - each
+        # branch below returns exactly once, the same single-attempt
+        # contract the old check already had.
+        #
+        # available_tool_names is passed through here too (PLANNER-
+        # ROBUST-001 P2/P3, 2026-09-19) - the EXACT SAME snapshot already
+        # captured above for the prompt (never a second, independently-
+        # timed registry read): the catalog advertised to the Planner and
+        # the catalog its response is validated against must always be
+        # the same one, or a tool registered/unregistered between the two
+        # reads could silently authorize (or reject) something the
+        # Planner was never actually shown. This is also what makes the
+        # legacy path share WorkflowController's own tool-capability
+        # membership semantics (kriya/workflow/planner_validation.py) for
+        # the first time - previously this path had no such check at all.
+        plan_completeness = classify_plan_completeness(plan, available_tool_names=available_tool_names)
+        # PLANNER-ROBUST-001 (2026-09-19): bounded structured-plan repair,
+        # reusing WorkflowController's own existing PLAN_REPAIR primitives
+        # (kriya/workflow/planner_repair.py) rather than a second,
+        # independently-maintained repair mechanism - see that module's own
+        # docstring for the full extraction rationale and the live G1
+        # incident this closes (a single schema-invalid subtask - e.g. a
+        # TOOL-execution-method subtask missing its required tool_name -
+        # discarded an otherwise-correct Planner response and terminated
+        # the whole run before Architect, with zero repair opportunity).
+        #
+        # Only ever attempted for "schema_invalid" - a structurally
+        # parseable, COMPLETE response whose structured JSON block failed
+        # PlannerStructuredOutput's own schema validation. Deliberately
+        # NEVER attempted for "unauthorized_path" (an authority/security
+        # classification - repairing it would convert a security rejection
+        # into an opportunity to resubmit a differently-worded but still-
+        # illegitimate plan) or "incomplete_truncated" (a genuinely
+        # different failure shape - a truncated/empty response gives a
+        # repair prompt nothing real to correct; unlike unauthorized_path,
+        # this is not an authority concern, simply not this mechanism's
+        # job). Bounded at the SAME STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS
+        # WorkflowController's own loop already uses - never increased,
+        # never a second policy.
+        #
+        # The legacy path has no ObligationLedger of its own, so
+        # must_preserve/validation_evidence/route_kind/extension_candidates/
+        # repository_candidates are simply never passed (every one already
+        # defaults to None/empty in build_structured_plan_repair_prompt,
+        # producing the identical core, reason-code-driven correction text).
+        # On success, the repaired response becomes the new `plan` used for
+        # Architect below, exactly as the original would have been had it
+        # been schema-valid the first time. On repeated failure (or a
+        # repaired response that is itself unauthorized_path/still
+        # schema_invalid/truncated), execution falls through to the SAME
+        # terminal-rejection block immediately below, completely
+        # unmodified - a repaired plan is revalidated through the EXACT
+        # same classify_plan_completeness() call as any other plan, never a
+        # relaxed or bypassed check.
+        legacy_plan_repair_attempts = 0
+        while (
+            plan_completeness.classification == "schema_invalid"
+            and legacy_plan_repair_attempts < STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS
+        ):
+            repair_reason_codes = classify_structured_plan_parse_issue(
+                plan_completeness.reason, plan_completeness.reason_codes,
+            )
+            state.record_event(RunEvent(
+                kind="structured_plan_validation", attempt=0, source="workflow.legacy_planner_repair",
+                authority=EventAuthority.ADVISORY,
+                message=(
+                    "Legacy Planner output failed structured-plan schema validation "
+                    f"(repair_attempts_so_far={legacy_plan_repair_attempts})."
+                ),
+                details={
+                    "valid": False, "repair_attempts": legacy_plan_repair_attempts,
+                    "reason_codes": repair_reason_codes,
+                },
+            ))
+            repair_prompt = build_structured_plan_repair_prompt(
+                goal, plan,
+                [plan_completeness.reason or "structured plan schema validation failed"],
+                repair_reason_codes, legacy_plan_repair_attempts + 1,
+                available_tool_names=available_tool_names,
+            )
+            legacy_plan_repair_attempts += 1
+            state.record_event(RunEvent(
+                kind="structured_plan_repair_requested", attempt=0, source="workflow.legacy_planner_repair",
+                authority=EventAuthority.ADVISORY,
+                message=(
+                    f"Requesting bounded Planner repair (attempt "
+                    f"{legacy_plan_repair_attempts}/{STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS})."
+                ),
+                details={"repair_attempt": legacy_plan_repair_attempts, "reason_codes": repair_reason_codes},
+            ))
+            _repair_started = time.monotonic()
+            # No max_tokens_override passed: self.planner already carries
+            # max_output_tokens=config.llm.planner_max_tokens from its own
+            # construction (WorkflowEngine.__init__, R3 fix) - the exact
+            # same Planner-stage budget the initial call above used, never
+            # a silent fallback to the general llm.max_tokens default.
+            plan = await self.planner.run(repair_prompt)
+            state.planner_calls += 1
+            state.planner_llm_seconds += time.monotonic() - _repair_started
+            _save_stage_checkpoint("plan", plan=plan)
+            # Same captured available_tool_names snapshot as the initial
+            # classification above - a repaired response is revalidated
+            # against the identical catalog, never a re-read that could
+            # have drifted mid-operation (P5: no weaker validation path
+            # for a repaired plan than for the initial one).
+            plan_completeness = classify_plan_completeness(plan, available_tool_names=available_tool_names)
+            state.record_event(RunEvent(
+                kind="structured_plan_repair_result", attempt=0, source="workflow.legacy_planner_repair",
+                authority=EventAuthority.ADVISORY,
+                message=f"Repair attempt {legacy_plan_repair_attempts} result: {plan_completeness.classification}.",
+                details={
+                    "repair_attempt": legacy_plan_repair_attempts,
+                    "classification": plan_completeness.classification,
+                    "accepted": plan_completeness.classification == "complete",
+                },
+            ))
+        if plan_completeness.classification != "complete":
+            plan_issue = plan_completeness.reason or "plan failed completeness/authority classification"
+            status = {
+                "unauthorized_path": "planner_output_unauthorized_path",
+                "schema_invalid": "planner_output_schema_invalid",
+            }.get(plan_completeness.classification, "planner_output_incomplete")
+            logger.warning(f"Planner output rejected before Architect ({status}): {plan_issue}")
             if step_callback:
-                step_callback("planner_output_incomplete", plan_issue)
+                step_callback(status, plan_issue)
             try:
                 from kriya.core.trace import TraceLogger
                 trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
@@ -1694,9 +2149,9 @@ class WorkflowEngine:
                     goal=goal,
                     duration_sec=time.time() - start_time,
                     attempts=0,
-                    status="planner_output_incomplete",
+                    status=status,
                     files_modified=[],
-                    failure_category="planner_output_incomplete",
+                    failure_category=status,
                     milestone_group_id=milestone_group_id,
                     milestone_index=milestone_index,
                     milestone_total=milestone_total,
@@ -1704,7 +2159,7 @@ class WorkflowEngine:
             except Exception as trace_ex:
                 logger.warning(f"Failed to write run trace: {trace_ex}")
             return {
-                "status": "planner_output_incomplete",
+                "status": status,
                 "reason": plan_issue,
                 "plan": plan,
                 "goal": goal,
@@ -1739,10 +2194,15 @@ class WorkflowEngine:
             _log_phase_banner("ARCHITECTURE")
             logger.info("Architect Agent defining interface designs...")
             architect_stream = (lambda token: stream_callback("Architect Design", token)) if stream_callback else None
+            _architect_started = time.monotonic()
             design, architect_files = await self.architect.run_with_file_list(
                 design_prompt,
                 stream_callback=architect_stream
             )
+            # R1 Deliverable 5 - observational only, same posture as the
+            # Planner wrapper immediately above.
+            state.architect_calls += 1
+            state.architect_llm_seconds += time.monotonic() - _architect_started
             _save_stage_checkpoint("design", plan=plan, design=design, architect_files=architect_files)
         # predetermined_architect_files=[] (an EMPTY list, not None) is a
         # deliberate zero-file plan, not a broken one - a bounded subtask
@@ -1780,8 +2240,23 @@ class WorkflowEngine:
             engineering_route is not None
             and engineering_route.kind in (ChangeKind.TASK, ChangeKind.ENHANCEMENT)
         ):
+            _pre_redirect_architect_files = list(architect_files)
             architect_files = prefer_existing_artifact_owners(
                 architect_files, goal, workspace_path,
+            )
+            # Test-obligation preservation (2026-09-20): captured HERE,
+            # before include_response_construction_owners() below can add
+            # further entries unrelated to this specific redirect - a
+            # planned-but-nonexistent test artifact silently mapped onto an
+            # existing owner must not let that redirect alone discharge the
+            # acceptance obligation the goal's own test-coverage intent
+            # created (see identify_redirected_test_obligations()'s own
+            # docstring and kriya/workflow/attempt.py's own consumer for the
+            # live incident this closes).
+            state.redirected_test_obligations.update(
+                identify_redirected_test_obligations(
+                    _pre_redirect_architect_files, architect_files, workspace_path,
+                )
             )
             # Full synchronous tree-walk + per-file read; offload so it
             # doesn't block the event loop inside this async workflow.
@@ -1850,13 +2325,28 @@ class WorkflowEngine:
                 # than parsed from a command string via
                 # extract_install_package_target.
                 # MA4.15 - `enforce` is read from config rather than left at
-                # _authorize_action's Python-level default, and PolicyDeniedError
-                # is deliberately let through (not swallowed by the broad
-                # except below) - it can never actually be raised while the
-                # config validator keeps mode pinned to "audit", but a future
-                # milestone lifting that restriction shouldn't ALSO have to
-                # remember to fix this try/except to stop silently eating a
-                # real denial.
+                # _authorize_action's Python-level default, and a genuine
+                # DENY is deliberately let through (not swallowed by the
+                # broad except below) - it can never actually be raised
+                # while the config validator keeps mode pinned to "audit",
+                # but a future milestone lifting that restriction shouldn't
+                # ALSO have to remember to fix this try/except to stop
+                # silently eating a real denial.
+                #
+                # POL-001: a REQUIRE_APPROVAL verdict here is deliberately
+                # NOT re-raised and no approval_callback is passed into
+                # _authorize_action for it - _check_package_supply_chain
+                # returns REQUIRE_APPROVAL for every non-URL-source package
+                # (never a bare ALLOW), so under enforce=True this loop
+                # would otherwise ask once per library in new_gaps AND THEN
+                # hit the existing single aggregate prompt built from the
+                # very same new_gaps a few lines below (`desc`/`reason_str`,
+                # "Do you want to proceed with these dependencies?") -
+                # doubling (N+1) an approval flow that already covers this
+                # exact batch once. DENY (e.g. an install source classified
+                # as untrusted) still hard-stops immediately, unconditional
+                # on any human answer - that's the real, new protection this
+                # gate adds once enforce=True is reachable.
                 execution_policy_cfg = self.kernel.config.execution_policy
                 if execution_policy_cfg.enabled:
                     for g in new_gaps:
@@ -1868,8 +2358,11 @@ class WorkflowEngine:
                                 ),
                                 enforce=(execution_policy_cfg.mode == "enforce"),
                             )
-                        except PolicyDeniedError:
-                            raise
+                        except PolicyDeniedError as e:
+                            if e.result.decision == PolicyDecision.DENY:
+                                raise
+                            # REQUIRE_APPROVAL: defer to the aggregate
+                            # approval_callback prompt below, don't double-ask.
                         except Exception as e:
                             logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
                 desc = "\n".join([
@@ -2157,6 +2650,79 @@ class WorkflowEngine:
                     "qpid-jms-client dependency alone - the addition was both wrong and unnecessary."
                 )
 
+        # VAL-001 brownfield validation baselining (2026-09-18,
+        # kriya/workflow/validation_baseline.py) - deliberately BEFORE the
+        # sandbox worktree is created a few lines below and before any
+        # Developer call anywhere in this method: the ONE point in this
+        # method where `workspace_path` is still guaranteed pristine
+        # (candidate writes only ever reach `worktree_path`, confirmed
+        # untouched at this line - see this same ordering guarantee already
+        # documented a few hundred lines above for checkpoint fingerprinting).
+        # Opt-in only (autonomy.brownfield_baseline_target_test /
+        # brownfield_full_regression_baseline_policy, both default to a
+        # complete no-op) - a run that doesn't configure either behaves
+        # byte-identically to before this package existed (proven by
+        # capture_brownfield_baselines() itself invoking neither injected
+        # callable at all when both are unset). brownfield_baseline_
+        # target_test may be a single string or an ordered list (VAL-001
+        # G1-R3: several specific targets at once) - capture_brownfield_
+        # baselines() normalizes it once; this call site passes it straight
+        # through unmodified either way.
+        autonomy_baseline_cfg = self.kernel.config.autonomy
+        baseline_capture = capture_brownfield_baselines(
+            run_id=run_id,
+            target_test=autonomy_baseline_cfg.brownfield_baseline_target_test,
+            full_regression_policy=autonomy_baseline_cfg.brownfield_full_regression_baseline_policy,
+            run_validator=lambda target_test: PolymorphicValidator(
+                workspace_path, original_workspace_path=workspace_path,
+                autonomy_cfg=autonomy_baseline_cfg,
+            ).run_tests(target_test=target_test),
+            compute_revision=lambda: compute_workspace_content_hash(workspace_path),
+            resume_baseline_targeted=(resume_state or {}).get("validation_baseline_targeted"),
+            resume_baseline_full_regression=(resume_state or {}).get("validation_baseline_full_regression"),
+        )
+        state.validation_baseline_targeted = baseline_capture.targeted
+        state.validation_baseline_full_regression = baseline_capture.full_regression
+        if baseline_capture.targeted is not None:
+            if baseline_capture.targeted.status == "captured":
+                logger.info(
+                    "Brownfield PRE-mutation targeted validation baseline captured "
+                    f"(success={baseline_capture.targeted.outcome.success})."
+                )
+            else:
+                logger.warning(
+                    "Brownfield PRE-mutation targeted validation baseline is INDETERMINATE: "
+                    f"{baseline_capture.targeted.indeterminate_reason}"
+                )
+        if baseline_capture.hard_stop_reason is not None:
+            # FAILURE_BEHAVIOR: never silently proceed assuming a green
+            # baseline - an explicit, distinct terminal status, same shape
+            # as the existing knowledge_gap/planner_output_incomplete early
+            # returns just above in this same method.
+            logger.error(f"Brownfield validation baseline REQUIRED but indeterminate: {baseline_capture.hard_stop_reason}")
+            try:
+                from kriya.core.trace import TraceLogger
+                trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+                TraceLogger(trace_db).log_run(
+                    run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
+                    attempts=0, status="baseline_indeterminate", files_modified=[],
+                    failure_category="baseline_indeterminate",
+                    milestone_group_id=milestone_group_id, milestone_index=milestone_index,
+                    milestone_total=milestone_total,
+                )
+            except Exception as trace_ex:
+                logger.warning(f"Failed to write run trace: {trace_ex}")
+            return {
+                "status": "baseline_indeterminate",
+                "reason": baseline_capture.hard_stop_reason,
+                "plan": plan,
+                "design": design,
+                "goal": goal,
+                "workspace_path": workspace_path,
+                "run_id": trace_id,
+                "quality_gates_passed": False,
+            }
+
         # Create isolated git worktree sandbox
         worktree_path = workspace_path
         try:
@@ -2192,6 +2758,16 @@ class WorkflowEngine:
         # Legacy call gets its own fresh one, mirroring migration_resolution's
         # own "resolved once, reused, or created fresh for this call" pattern.
         resolved_obligation_ledger = obligation_ledger if obligation_ledger is not None else ObligationLedger()
+        # PRV-17 (2026-09-08, P7 efficiency finding) - kriya/workflow/
+        # deterministic_failure_diagnostic.py. Same "resolved once, reused
+        # across every bounded-subtask call, or created fresh for a plain
+        # Legacy call" pattern as resolved_obligation_ledger immediately
+        # above - deliberately a separate store, not folded into the
+        # ObligationLedger itself (see that module's own docstring for why).
+        resolved_deterministic_failure_diagnostics = (
+            deterministic_failure_diagnostics if deterministic_failure_diagnostics is not None
+            else DeterministicFailureDiagnosticStore()
+        )
 
         # Loop-invariant - nothing in this object is reassigned across retry
         # attempts, so it's built once here rather than reconstructed per
@@ -2237,8 +2813,10 @@ class WorkflowEngine:
                 for entry in generation_manifest.entries
             },
             established_files=established_files or [],
+            retrieval_member_hints=retrieval_member_hints,
             protected_relpath=protected_relpath,
             allowed_write_relpaths=list(allowed_write_relpaths or []),
+            authorized_semantic_regions=list(authorized_semantic_regions or []),
             required_verification=list(required_verification or []),
             # Resolved ONCE, here, mirroring AuthorizedFileWriter's own
             # backward-compatible inference (kriya/policy/filesystem.py) so
@@ -2267,6 +2845,7 @@ class WorkflowEngine:
             current_subtask_id=current_subtask_id,
             obligation_ledger=resolved_obligation_ledger,
             completed_subtask_ids=completed_subtask_ids or frozenset(),
+            deterministic_failure_diagnostics=resolved_deterministic_failure_diagnostics,
         )
 
         from kriya.workflow.retry_policy import decide_for_state
@@ -2486,10 +3065,17 @@ class WorkflowEngine:
                         for i, batch in enumerate(review_batches, 1):
                             batch_prompt = f"Goal: {goal}\n{verified_evidence}\nFiles generated:\n{batch}"
                             label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
-                            review_parts.append(label + await self.reviewer.run(
+                            _reviewer_started = time.monotonic()
+                            review_text = await self.reviewer.run(
                                 batch_prompt, stream_callback=None,
                                 temperature_override=self.kernel.config.llm.reviewer_temperature,
-                            ))
+                            )
+                            # R1 Deliverable 5 - observational only, one
+                            # entry per review batch (a multi-batch review
+                            # makes more than one real LLM call).
+                            state.reviewer_calls += 1
+                            state.reviewer_llm_seconds += time.monotonic() - _reviewer_started
+                            review_parts.append(label + review_text)
                         state.pre_approval_review = "\n".join(review_parts)
                         escalation_reason += f"\n\n=== Automated Code Review ===\n{state.pre_approval_review}"
                     except Exception as ex:
@@ -2499,7 +3085,27 @@ class WorkflowEngine:
                     """Shared cleanup for both 'a human said no' and 'approval was
                     required but there was no way to even ask' - never applies
                     worktree changes to the real workspace, restoring/removing
-                    exactly as the original human-rejection path already did."""
+                    exactly as the original human-rejection path already did.
+
+                    Trace-persistence contract (2026-09-18, VAL-001 G1-R2
+                    post-mortem): this path runs strictly AFTER the full
+                    Developer + Quality Gates loop has already populated
+                    `state` with real gate_outcomes/model_hops/run_events/
+                    evidence_records - unlike the knowledge_gap/planner_
+                    output_incomplete early-abort paths above (which
+                    correctly log the sparse shape, since nothing has
+                    happened yet at that point in the workflow). A real
+                    G1-R2 run (trace 8cc2018a) proved this distinction
+                    matters: the previous, sparse log_run() call here
+                    persisted `model_hops=[]`/`attempts=0 events`/zero gate
+                    outcomes for a run that had made 9 real Developer calls,
+                    making the whole approval-diff incident forensically
+                    unreconstructable after the fact. This call site now
+                    mirrors the SAME full contract the terminal success/
+                    failure path uses (this method's own trailing
+                    trace_logger.log_run() call) - not a blind duplication,
+                    the exact fields that call already treats as the
+                    canonical "a real Developer loop ran" shape."""
                     if worktree_path != workspace_path:
                         remove_git_worktree(workspace_path, worktree_path)
                     else:
@@ -2529,6 +3135,17 @@ class WorkflowEngine:
                         from kriya.core.trace import TraceLogger
                         trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
                         trace_logger = TraceLogger(trace_db)
+                        # Same derivation the terminal success/failure path uses below
+                        # (this method's own trailing trace_logger.log_run() call) -
+                        # not re-implemented independently, so the two can never drift.
+                        abort_failure_report = [
+                            build_failure_report_entry(outcome.get("type", ""), outcome.get("attribution_tier"))
+                            for outcome in state.gate_outcomes
+                        ]
+                        abort_failure_report_dicts = [
+                            {"failure_type": e.failure_type, "category": e.category.value, "attribution_tier": e.attribution_tier}
+                            for e in abort_failure_report
+                        ]
                         trace_logger.log_run(
                             run_id=trace_id,
                             goal=goal,
@@ -2539,11 +3156,26 @@ class WorkflowEngine:
                             # each fresh candidate - see kriya/workflow/best_of_n.py).
                             attempts=state.budgets.retry_count + state.budgets.best_of_n_candidates_tried,
                             status=status,
-                            files_modified=[],
+                            # Sandbox candidate files touched this run - the SAME meaning
+                            # this field carries at the terminal success/failure call site
+                            # below (list(state.all_files_written), never "applied to the
+                            # real workspace", which this path by definition never did).
+                            files_modified=list(state.all_files_written),
+                            retrieved_chunks=retrieved_chunks,
+                            active_skills=active_skills,
+                            prompt_rendered=plan_prompt,
+                            gate_outcomes=state.gate_outcomes,
+                            model_hops=state.model_hops,
                             failure_category=status,
+                            failure_report=abort_failure_report_dicts,
                             milestone_group_id=milestone_group_id,
                             milestone_index=milestone_index,
                             milestone_total=milestone_total,
+                            run_events=[event.to_dict() for event in state.run_events],
+                            evidence_records=[record.to_dict() for record in state.evidence_records],
+                            generation_metrics=state.generation_metrics(
+                                total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
+                            ),
                         )
                     except Exception as trace_ex:
                         logger.warning(f"Failed to write run trace: {trace_ex}")
@@ -2751,7 +3383,214 @@ class WorkflowEngine:
                 validator.java_home_override = state.java_home_override
 
                 full_test_res = validator.run_tests()
-                if not full_test_res["success"]:
+
+                # VAL-001 brownfield validation baselining - ONLY changes
+                # the blocking decision when a full-regression baseline was
+                # actually captured (autonomy.brownfield_full_regression_
+                # baseline_policy == "required"); otherwise
+                # `_regression_should_block` is byte-identical to the
+                # pre-existing `not full_test_res["success"]` check, so a
+                # run that never opted in behaves exactly as before this
+                # package existed. A captured baseline lets a genuinely
+                # PRE-EXISTING failure (present before Kriya ever touched
+                # this brownfield repository) pass through without
+                # blocking candidate acceptance - invariant 4 - while
+                # NEW_FAILURE/CHANGED_FAILURE/an unexplained disappearance
+                # of previously-executed validation still blocks exactly
+                # as strictly as before (invariants 5/"fail conservatively").
+                _regression_should_block = not full_test_res["success"]
+                _baseline_delta_result = None
+                if (
+                    state.validation_baseline_full_regression is not None
+                    and state.validation_baseline_full_regression.status == "captured"
+                ):
+                    _post_regression_outcome = build_validation_outcome(full_test_res)
+                    _baseline_delta_result = classify_baseline_delta(
+                        state.validation_baseline_full_regression, _post_regression_outcome,
+                    )
+                    _regression_should_block = _baseline_delta_result.blocking
+                    state.record_event(RunEvent(
+                        kind="validation_baseline.full_regression_delta",
+                        attempt=state.attempt_number,
+                        source="workflow.run_generation_workflow",
+                        authority=EventAuthority.ADVISORY,
+                        message=(
+                            f"Full-regression PRE/POST delta: level1={_baseline_delta_result.level1.classification.value} "
+                            f"blocking={_regression_should_block}"
+                        ),
+                        details={
+                            "level1_classification": _baseline_delta_result.level1.classification.value,
+                            "level2": {k: v.value for k, v in _baseline_delta_result.level2.items()},
+                            "aggregate_drop_detected": _baseline_delta_result.aggregate_drop_detected,
+                            "blocking": _baseline_delta_result.blocking,
+                            "blocking_reasons": list(_baseline_delta_result.blocking_reasons),
+                        },
+                    ))
+                    if not _regression_should_block and not full_test_res["success"]:
+                        logger.info(
+                            "Full-regression suite failed, but every failure is classified "
+                            "PRE_EXISTING_FAILURE relative to the captured PRE-mutation baseline - "
+                            "not attributed to this candidate, not blocking."
+                        )
+
+                # VAL-001 G1-R3 (2026-09-18): the targeted baseline's own
+                # POST comparison - separate from, and additive to, the
+                # full-regression one immediately above. A no-op (zero extra
+                # subprocess calls, _targeted_regression_should_block stays
+                # False) whenever brownfield_baseline_target_test was never
+                # set, matching this package's own established "opt-in,
+                # complete no-op otherwise" precedent exactly.
+                #
+                # POST_REPLAY invariant: the target(s) re-run here are read
+                # from `state.validation_baseline_targeted.invocation.
+                # target_test` - the frozen, structural selection PRE
+                # capture itself used - NEVER re-read from
+                # `self.kernel.config.autonomy.brownfield_baseline_target_
+                # test` fresh. The two are the same value for an ordinary,
+                # non-resumed run, but a resumed run could in principle carry
+                # a checkpointed PRE baseline captured under a DIFFERENT
+                # config than the one active now - replaying the frozen
+                # invocation, not re-deriving from current config/workspace
+                # state, is what makes "PRE and POST validation command/
+                # selection identities are frozen and equivalent" true by
+                # construction rather than by coincidence.
+                _targeted_test_res = None
+                _targeted_regression_should_block = False
+                _targeted_baseline_delta_result = None
+                if (
+                    state.validation_baseline_targeted is not None
+                    and state.validation_baseline_targeted.status == "captured"
+                ):
+                    _frozen_targets = state.validation_baseline_targeted.invocation.target_test
+                    _targeted_test_res = validator.run_tests(target_test=_frozen_targets)
+                    _post_targeted_outcome = build_validation_outcome(_targeted_test_res)
+                    _targeted_baseline_delta_result = classify_baseline_delta(
+                        state.validation_baseline_targeted, _post_targeted_outcome,
+                    )
+                    _targeted_regression_should_block = _targeted_baseline_delta_result.blocking
+                    state.record_event(RunEvent(
+                        kind="validation_baseline.targeted_delta",
+                        attempt=state.attempt_number,
+                        source="workflow.run_generation_workflow",
+                        authority=EventAuthority.ADVISORY,
+                        message=(
+                            f"Targeted PRE/POST delta ({_frozen_targets}): "
+                            f"level1={_targeted_baseline_delta_result.level1.classification.value} "
+                            f"blocking={_targeted_regression_should_block}"
+                        ),
+                        details={
+                            "target_test": list(_frozen_targets) if _frozen_targets else None,
+                            "level1_classification": _targeted_baseline_delta_result.level1.classification.value,
+                            "level2": {k: v.value for k, v in _targeted_baseline_delta_result.level2.items()},
+                            "aggregate_drop_detected": _targeted_baseline_delta_result.aggregate_drop_detected,
+                            "blocking": _targeted_regression_should_block,
+                            "blocking_reasons": list(_targeted_baseline_delta_result.blocking_reasons),
+                        },
+                    ))
+                    if not _targeted_regression_should_block and not _targeted_test_res["success"]:
+                        logger.info(
+                            "Targeted baseline suite failed, but every failure is classified "
+                            "PRE_EXISTING_FAILURE relative to the captured PRE-mutation baseline - "
+                            "not attributed to this candidate, not blocking."
+                        )
+
+                _regression_should_block = _regression_should_block or _targeted_regression_should_block
+
+                # Combined failure evidence: the full-regression output is
+                # always included (unchanged from before this package
+                # existed); the targeted suite's own output is appended,
+                # clearly labeled, whenever it was actually run AND is
+                # itself a genuine cause (failed outright, or its own delta
+                # blocked) - never omitted when it's the reason blocking
+                # fired, never included as noise when it isn't.
+                _regression_failure_output = full_test_res.get("output", "")
+                if _targeted_test_res is not None and (
+                    not _targeted_test_res["success"] or _targeted_regression_should_block
+                ):
+                    _regression_failure_output = (
+                        f"{_regression_failure_output}\n\n"
+                        f"=== TARGETED BASELINE SUITE ({state.validation_baseline_targeted.invocation.target_test}) ===\n"
+                        f"{_targeted_test_res.get('output', '')}"
+                    )
+
+                # VAL-001 G1-DEVINV2 (2026-09-20): a captured full-regression
+                # baseline means classify_baseline_delta() already computed,
+                # per test, whether each failure is PRE_EXISTING_FAILURE
+                # (never candidate-caused) or NEW_FAILURE/CHANGED_FAILURE
+                # (blocking, and attributable). Before this fix, the
+                # Developer-facing failure text above ignored that structure
+                # entirely and used the RAW full-suite output - in a real
+                # brownfield repo with substantial pre-existing test debt
+                # (live-confirmed: 140 pre-existing failures alongside 0-1
+                # genuinely new ones), that floods the repair prompt with
+                # noise the classification above already had the information
+                # to exclude, and was the proximate cause of a real G1 run
+                # (qwen3.8:27b, 2026-09-19/20) discarding an independently-
+                # verified CORRECT Attempt-1 candidate after 6 further
+                # attempts of cascading malformed repair responses across
+                # both the primary and fallback model. This ONLY changes
+                # what evidence is shown for an ALREADY-blocking regression -
+                # `_regression_should_block` above (the actual accept/reject
+                # decision) is completely untouched, preserving "full
+                # regression remains the final acceptance gate" exactly.
+                # Byte-identical to before this fix whenever a full-
+                # regression baseline was never captured at all (the
+                # overwhelming majority of runs, which never opted into
+                # `brownfield_full_regression_baseline_policy: "required"`).
+                _confirmed_regression_ids: List[str] = []
+                # True only when NOTHING attributable was found anywhere -
+                # neither the full baseline (after ambiguous-entry replay
+                # resolution) nor the targeted baseline (a small, already-
+                # trustworthy 76-test signal with no flooding concern, whose
+                # own independent block is never second-guessed here). When
+                # the targeted baseline itself blocks, this stays False and
+                # the pre-existing raw-output-plus-targeted-section text
+                # built above is used completely unchanged - this fix only
+                # ever narrows what's shown for the FULL-suite signal, never
+                # touches the targeted one.
+                _full_regression_unattributed = False
+                if _regression_should_block and _baseline_delta_result is not None:
+                    from kriya.workflow.regression_attribution import confirm_ambiguous_regressions
+                    _resolved_level2, _replay_evidence = confirm_ambiguous_regressions(
+                        _baseline_delta_result.level2,
+                        pristine_workspace_path=workspace_path,
+                        candidate_workspace_path=worktree_path,
+                        autonomy_cfg=self.kernel.config.autonomy,
+                    )
+                    if _replay_evidence:
+                        state.record_event(RunEvent(
+                            kind="validation_baseline.ambiguous_regression_replay",
+                            attempt=state.attempt_number,
+                            source="workflow.run_generation_workflow",
+                            authority=EventAuthority.ADVISORY,
+                            message=(
+                                f"Isolated-pristine replay resolved {len(_replay_evidence)} "
+                                "ambiguous (NOT_COMPARABLE) full-regression test(s)."
+                            ),
+                            details={"replay_evidence": _replay_evidence},
+                        ))
+                    _confirmed_regression_ids = sorted(
+                        test_id for test_id, cls in _resolved_level2.items()
+                        if cls in (DeltaClassification.NEW_FAILURE, DeltaClassification.CHANGED_FAILURE)
+                    )
+                    if _confirmed_regression_ids:
+                        _regression_failure_output = render_blocking_regression_evidence(
+                            baseline=state.validation_baseline_full_regression,
+                            confirmed_test_ids=_confirmed_regression_ids,
+                            raw_output=full_test_res.get("output", ""),
+                        )
+                        if _targeted_test_res is not None and (
+                            not _targeted_test_res["success"] or _targeted_regression_should_block
+                        ):
+                            _regression_failure_output = (
+                                f"{_regression_failure_output}\n\n"
+                                f"=== TARGETED BASELINE SUITE ({state.validation_baseline_targeted.invocation.target_test}) ===\n"
+                                f"{_targeted_test_res.get('output', '')}"
+                            )
+                    elif not _targeted_regression_should_block:
+                        _full_regression_unattributed = True
+
+                if _regression_should_block:
                     # PRV-11 (2026-08-30): before treating this as an ordinary
                     # regression failure for the CURRENTLY executing subtask,
                     # check whether the approved plan's own provides/requires
@@ -2785,11 +3624,55 @@ class WorkflowEngine:
                             _settle_future_owner_verification_obligations(
                                 obligation_ledger, current_subtask_id, satisfied=False,
                             )
-                        failure = _build_quality_gate_failure(
-                            "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{full_test_res['output']}",
-                            full_test_res.get("output", ""), worktree_path,
-                            state.all_files_written, state.attempt_number,
-                        )
+                        if _full_regression_unattributed:
+                            # VAL-001 G1-DEVINV2 (2026-09-20): the full-
+                            # regression gate still BLOCKS (safety unchanged
+                            # - `_regression_should_block` above is never
+                            # weakened by this branch), but nothing could be
+                            # confirmed candidate-attributable even after
+                            # isolated-pristine replay of every ambiguous
+                            # entry - only a LEVEL1-only aggregate delta with
+                            # zero attributable per-test evidence. Feeding
+                            # this into the ordinary Developer repair retry
+                            # loop (either the raw full-suite dump, or an
+                            # empty/uninformative filtered context) is
+                            # exactly what produced a cascading malformed-
+                            # response failure across both the primary and
+                            # fallback model in a real live G1 run - not
+                            # developer-fixable, so this reuses the SAME
+                            # state.environment_failure/STOP_ENVIRONMENT
+                            # mechanism containment_setup_failed/internal_
+                            # framework_error/time_budget_exhausted already
+                            # use for "no amount of Developer regeneration
+                            # can fix this" (kriya/workflow/retry_strategy.py),
+                            # rather than a bare "regression_test" failure
+                            # that would re-enter the ordinary repair loop.
+                            failure = Failure(
+                                type="regression_unattributed",
+                                message=(
+                                    "REGRESSION_UNATTRIBUTED: the full-regression suite's "
+                                    "aggregate outcome changed relative to the captured "
+                                    f"PRE-mutation baseline (level1="
+                                    f"{_baseline_delta_result.level1.classification.value}), but no "
+                                    "specific test could be confirmed as caused by this candidate - "
+                                    "every per-test failure either matches the PRE-mutation baseline "
+                                    "exactly, or was independently replayed (in isolation) against "
+                                    "both a pristine and a candidate copy and could not be confirmed "
+                                    "either way (an indeterminate/non-reproducible result is never "
+                                    "treated as a known pre-existing failure, only as unattributable). "
+                                    "This is not a code-fixable defect signal; further Developer "
+                                    "regeneration cannot resolve an aggregate-level delta with no "
+                                    "attributable test."
+                                ),
+                                raw_output=full_test_res.get("output", ""),
+                                source="orchestrator", attempt=state.attempt_number,
+                            )
+                        else:
+                            failure = _build_quality_gate_failure(
+                                "regression_test", f"REGRESSION TEST SUITE FAILURE:\n{_regression_failure_output}",
+                                _regression_failure_output, worktree_path,
+                                state.all_files_written, state.attempt_number,
+                            )
                         state.gate_outcomes.append(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)
                     _record_future_owner_verification_deferred(
@@ -2875,11 +3758,26 @@ class WorkflowEngine:
                         failure.diagnostics = {**(failure.diagnostics or {}), **diagnostics}
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
+                # CORR-016 (P9/PRV-08, 2026-09-08, DIRECT-only) - same
+                # authorization the per-attempt pre-write gate in
+                # run_attempt() already applies (kriya/workflow/attempt.py),
+                # computed identically here so a candidate that passed that
+                # gate is never re-rejected at this terminal regression
+                # check. [] for every plain Legacy run (structured_plan is
+                # None there).
+                terminal_direct_authorizations = [
+                    authorization
+                    for authorization in derive_direct_contract_authorizations(
+                        grounding_goal, structured_plan,
+                    )
+                    if authorization.legal_scope.get("subtask_id") == current_subtask_id
+                ]
                 api_violations = find_brownfield_public_api_changes(
                     workspace_path,
                     state.all_original_contents,
                     final_candidate_contents,
                     goal,
+                    terminal_direct_authorizations,
                 )
                 if api_violations:
                     evidence = "; ".join(
@@ -2905,6 +3803,46 @@ class WorkflowEngine:
                         likely_files=sorted({item["owner"] for item in api_violations}),
                         diagnostics={
                             "api_contract_recovery": {"violations": api_violations},
+                        },
+                        attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+                # CORR-018-P1 (A3-bound slice, 2026-09-09) - same terminal
+                # re-check discipline as the brownfield-API gate immediately
+                # above (never re-rejects a candidate that already passed the
+                # per-attempt gate in attempt.py, computed identically here),
+                # applied to a SEPARATE, deterministic question - see
+                # semantic_region_authority.py's own module docstring and
+                # attempt.py's early gate for the full rationale. No-op unless
+                # a caller actually populated authorized_semantic_regions.
+                terminal_semantic_violations = find_unauthorized_semantic_changes(
+                    state.all_original_contents, final_candidate_contents, authorized_semantic_regions or [],
+                    strict_existing_java_files=self.kernel.config.autonomy.semantic_region_enforcement_required,
+                )
+                if terminal_semantic_violations:
+                    evidence = "; ".join(
+                        f"file={v.relpath}, member={v.member_key}, reason={v.reason_code}: {v.detail}"
+                        for v in terminal_semantic_violations
+                    )
+                    failure = Failure(
+                        type="semantic_region_unauthorized",
+                        message=(
+                            "SEMANTIC REGION REJECTED: the candidate changes source outside the "
+                            "explicitly authorized region(s) for this run."
+                        ),
+                        raw_output=evidence,
+                        source="semantic_authority_gate", authority="deterministic",
+                        file_locations=[FileLocation(filepath=v.relpath) for v in terminal_semantic_violations],
+                        likely_files=sorted({v.relpath for v in terminal_semantic_violations}),
+                        diagnostics={
+                            "semantic_region_authority": {
+                                "violations": [
+                                    {"relpath": v.relpath, "member_key": v.member_key,
+                                     "reason_code": v.reason_code, "detail": v.detail}
+                                    for v in terminal_semantic_violations
+                                ],
+                            },
                         },
                         attempt=state.attempt_number,
                     )
@@ -3120,7 +4058,9 @@ class WorkflowEngine:
                 milestone_total=milestone_total,
                 run_events=[event.to_dict() for event in state.run_events],
                 evidence_records=[record.to_dict() for record in state.evidence_records],
-                generation_metrics=state.generation_metrics(),
+                generation_metrics=state.generation_metrics(
+                    total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
+                ),
             )
         except Exception as trace_ex:
             logger.warning(f"Failed to write intermediate trace checkpoint (pre-Reviewer): {trace_ex}")
@@ -3165,6 +4105,26 @@ class WorkflowEngine:
                 except Exception as e:
                     logger.debug(f"Failed to read '{full_path}' for reviewer prompt: {e}")
 
+            # Reviewer mutation-evidence priority (2026-09-20): a real live
+            # incident - a large brownfield file's own candidate diff sat
+            # deep past where build_review_batches's own from-the-front
+            # token-budget truncation reached, so the Reviewer was shown
+            # thousands of lines of untouched code and never the actual
+            # changed region, then correctly (but unhelpfully) rejected the
+            # candidate for "insufficient evidence." Prepended to goal_header
+            # so it reaches the Reviewer in EVERY batch, ahead of the
+            # (possibly-truncated) full-file content - see build_candidate_
+            # diff_context()'s own docstring for the full incident and why
+            # this is additive, never a replacement for the existing
+            # full-file block. "" (no candidate files changed relative to
+            # their own original content - e.g. every written file is
+            # brand new) is a complete no-op, byte-identical to before this
+            # fix.
+            candidate_diff_context = build_candidate_diff_context(
+                state.all_original_contents, dict(file_contents_for_review),
+            )
+            goal_header = candidate_diff_context + goal_header
+
             # Stage 6 SME review, Finding 2: previously concatenated every file's full
             # raw content with no token-budget check at all - the exact silent-
             # truncation-from-the-front failure mode the standalone `kriya review` CLI
@@ -3172,15 +4132,62 @@ class WorkflowEngine:
             review_batches, _ = build_review_batches(
                 file_contents_for_review, int(self.kernel.config.llm.context_window * 0.75),
             )
-            reviewer_stream = (lambda token: stream_callback("Review", token)) if stream_callback else None
+            # Demo-01 Finding 3 follow-up (2026-09-11): a rejected/unapplied
+            # candidate's review must never stream raw, unfiltered LLM
+            # tokens live to the user - extract_rejected_candidate_
+            # diagnostic() below only ever filters the FINAL joined text
+            # (review_text), so leaving live streaming on here would still
+            # leak the exact unfiltered "How to Run"/success-language
+            # content Finding 3 already closed for the final output, just
+            # earlier, token by token. Suppressed entirely for this case
+            # (not filtered after the fact - the raw tokens are simply
+            # never sent to stream_callback at all); the accepted-candidate
+            # path is completely unaffected.
+            reviewer_stream = (
+                (lambda token: stream_callback("Review", token))
+                if stream_callback and not state.final_attempt_contents else None
+            )
+            # Authoritative disposition override (2026-09-11, Demo-01 Run A
+            # finding): state.final_attempt_contents is populated ONLY on the
+            # terminal-failure paths (retry_strategy.py's scope-conflict and
+            # budget-exhausted branches) where this run will not succeed -
+            # the exact same, already-established signal goal_header above
+            # keys off of. Passing a disposition-aware system_prompt_override
+            # here, rather than relying solely on the plain-text NOTE already
+            # in goal_header, is what stops the Reviewer from writing "How to
+            # Run" instructions for a candidate that was never applied.
+            reviewer_system_prompt_override = (
+                self.reviewer.rejected_candidate_system_prompt(
+                    state.error_context or "Quality gates did not pass within the retry budget."
+                )
+                if state.final_attempt_contents else None
+            )
             review_parts = []
             for i, batch in enumerate(review_batches, 1):
                 batch_prompt = goal_header + batch
                 label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
-                review_parts.append(label + await self.reviewer.run(
+                _reviewer_started = time.monotonic()
+                review_text = await self.reviewer.run(
                     batch_prompt, stream_callback=reviewer_stream,
                     temperature_override=self.kernel.config.llm.reviewer_temperature,
-                ))
+                    system_prompt_override=reviewer_system_prompt_override,
+                )
+                # Demo-01 Finding 3 (2026-09-11): the structural enforcement
+                # boundary itself - applied per-batch (not to the joined
+                # final text) so one batch's non-compliance with the marker
+                # contract doesn't discard another batch's compliant
+                # diagnostic content. Streamed tokens above (reviewer_stream)
+                # are real-time progress display and are not retroactively
+                # filtered - this governs the FINAL text that reaches
+                # res["review"]/the CLI, which is what Finding 3 is actually
+                # about.
+                if state.final_attempt_contents:
+                    review_text = self.reviewer.extract_rejected_candidate_diagnostic(review_text)
+                # R1 Deliverable 5 - observational only, same posture as the
+                # pre-approval reviewer wrapper above.
+                state.reviewer_calls += 1
+                state.reviewer_llm_seconds += time.monotonic() - _reviewer_started
+                review_parts.append(label + review_text)
             review = "\n".join(review_parts)
         if step_callback:
             step_callback("Review", review)
@@ -3201,8 +4208,81 @@ class WorkflowEngine:
         # log their own failure_category directly at their own return site.
         failure_category: Optional[str] = None
         if not quality_passed:
+            # PRV-17 preflight correction (2026-09-03), extended for recovery
+            # admission (2026-09-03): checked BEFORE the generic
+            # "environment_failure" branch below, even though both cases also
+            # set state.environment_failure to reuse its STOP_ENVIRONMENT
+            # mechanism (see retry_strategy.py's own comments on that reuse) -
+            # an unauthorized/unrecoverable generation target, or a grounded
+            # failure with no authorized repair target, is a plan/scope
+            # defect, never a real machine/toolchain problem, and must not be
+            # reported or traced as one (kriya/cli.py prints the generic
+            # branch below as "[ENVIRONMENT/TOOLCHAIN ISSUE]" with
+            # toolchain-fix advice). Checked by message prefix, not a single
+            # counter, since two distinct retry_strategy.py call sites now
+            # produce this same category (state.unrecoverable_scope_
+            # denial_count's write-time PolicyDeniedError case, and the
+            # pre-call "NO_AUTHORIZED_REPAIR_TARGET" recovery-admission case)
+            # - both are scope defects, never environment ones.
+            is_scope_defect_stop = bool(state.environment_failure) and state.environment_failure.startswith((
+                "UNAUTHORIZED_GENERATION_TARGET:", "NO_AUTHORIZED_REPAIR_TARGET:",
+            ))
+            # PRV-17 (2026-09-08, P7 efficiency finding): same message-prefix
+            # convention as is_scope_defect_stop above - a candidate-
+            # independent deterministic validator/build-configuration defect
+            # (kriya/workflow/deterministic_failure_diagnostic.py) is neither
+            # a machine/toolchain environment problem nor a plan/scope
+            # defect, and must not be reported or traced as either.
+            is_candidate_independent_deterministic_failure = (
+                bool(state.environment_failure)
+                and state.environment_failure.startswith("CANDIDATE_INDEPENDENT_DETERMINISTIC_FAILURE:")
+            )
+            # Demo-01 Finding 4 (2026-09-11): GENERATION TIME BUDGET EXHAUSTED
+            # (kriya/workflow/attempt.py::_ensure_generation_time_budget)
+            # reuses state.environment_failure/STOP_ENVIRONMENT purely as its
+            # stop mechanism, same as the two categories above - but it is a
+            # TERMINAL STOP CONDITION (the retry loop itself ran out of
+            # configured time), never an ENVIRONMENT/TOOLCHAIN failure, and
+            # must not be reported or traced as one (kriya/cli.py's generic
+            # branch prints "[ENVIRONMENT/TOOLCHAIN ISSUE]" with `kriya
+            # doctor` advice, which cannot help a budget problem). Checked by
+            # the exact message prefix _ensure_generation_time_budget's own
+            # Failure.message always starts with, same convention as the two
+            # categories above - no new state field, no retry/budget
+            # behavior change.
+            is_generation_budget_exhausted_stop = (
+                bool(state.environment_failure)
+                and state.environment_failure.startswith("GENERATION TIME BUDGET EXHAUSTED:")
+            )
+            # SEC-001 (2026-09-11): same message-prefix convention as the
+            # three categories above - kriya/tools/containment.py's
+            # ContainmentSetupError means ProcessController refused to run
+            # a command uncontained, which is neither an environment/
+            # toolchain problem (kriya doctor cannot fix a missing/
+            # misconfigured containment backend the same way it diagnoses
+            # Java/Maven) nor an ordinary retryable code defect.
+            is_containment_setup_failed_stop = (
+                bool(state.environment_failure)
+                and state.environment_failure.startswith("CONTAINMENT_SETUP_FAILED:")
+            )
+            # VAL-001 G1-DEVINV2 (2026-09-20): same message-prefix convention
+            # as the four categories above - a full-regression block with no
+            # candidate-attributable evidence (kriya/workflow/workflow.py's
+            # own _full_regression_unattributed branch) is neither an
+            # environment/toolchain problem nor an ordinary retryable code
+            # defect; `kriya doctor` cannot fix an aggregate-level test-suite
+            # delta with no attributable test.
+            is_regression_unattributed_stop = (
+                bool(state.environment_failure)
+                and state.environment_failure.startswith("REGRESSION_UNATTRIBUTED:")
+            )
             failure_category = (
                 "plan_scope_revision_required" if state.plan_scope_conflict
+                else "unauthorized_generation_target" if is_scope_defect_stop
+                else "candidate_independent_deterministic_failure" if is_candidate_independent_deterministic_failure
+                else "generation_budget_exhausted" if is_generation_budget_exhausted_stop
+                else "containment_setup_failed" if is_containment_setup_failed_stop
+                else "regression_unattributed" if is_regression_unattributed_stop
                 else "environment_failure" if state.environment_failure
                 else "quality_gates_exhausted"
             )
@@ -3255,7 +4335,9 @@ class WorkflowEngine:
                 milestone_total=milestone_total,
                 run_events=[event.to_dict() for event in state.run_events],
                 evidence_records=[record.to_dict() for record in state.evidence_records],
-                generation_metrics=state.generation_metrics(),
+                generation_metrics=state.generation_metrics(
+                    total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
+                ),
             )
             logger.info(f"Persistent run trace recorded: {trace_id}")
         except Exception as trace_ex:
@@ -3307,7 +4389,9 @@ class WorkflowEngine:
             "unresolved_skill_gaps": sorted(set(unresolved_skill_gap_names)) or None,
             "skill_staleness_warnings": sorted(set(skill_staleness_warnings)) or None,
             "active_skill_manifest": active_skill_manifest,
-            "generation_metrics": state.generation_metrics(),
+            "generation_metrics": state.generation_metrics(
+                    total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
+                ),
             "review": review,
             "review_included_in_approval": state.pre_approval_review is not None,
             "run_id": run_id,

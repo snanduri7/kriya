@@ -18,6 +18,7 @@ from kriya.workflow.edit_safety import content_revision
 from kriya.workflow.triage import EngineeringRoute
 from kriya.workflow.process_profile import ProcessProfile
 from kriya.workflow.repair_contract import RepairContract
+from kriya.workflow.context_package import ContextItem
 
 
 class APIContractRecoveryPhase(str, Enum):
@@ -217,6 +218,24 @@ class RetryBudgets:
     # mismatch, the next attempt changes only the edit protocol—never the file
     # scope—to a full-file repair, avoiding repeated skeleton/anchor failures.
     anchor_failure_counts: Dict[str, int] = field(default_factory=dict)
+    # VAL-001 G1-R3 (run 0c18ac70) no-progress gate: the retry-evidence
+    # fingerprint (see attempt.py's _compute_retry_evidence_fingerprint) that
+    # the immediately-preceding targeted/fallback_targeted/full_set attempt
+    # actually presented to the Developer - mode, active model, and, per
+    # implicated target path, the real known_target_context_items provenance
+    # (revision/tier/is_exact/member_id/omitted_regions) plus any newly
+    # grounded member hint. Compared, not merged, against each new attempt's
+    # own freshly-computed fingerprint in _prepare_retry_context() - an exact
+    # match means Kriya is about to show the model literally the same
+    # evidence it already failed against in the same mode/model, so that
+    # attempt is turned into an immediate (zero-LLM-cost) Failure instead of
+    # a real Developer call, reusing retry_strategy.py's own existing
+    # consecutive-no-progress/strategy-forcing/termination machinery for
+    # everything downstream of that Failure. None before the first retry
+    # (attempt 1 never compares) and left unset (not cleared) when a no-
+    # progress Failure is raised, so a same-mode repeat is still detected
+    # against the last REAL attempt's evidence, not the skipped one's.
+    last_retry_evidence_fingerprint: Optional[Tuple[Any, ...]] = None
 
 
 @dataclass
@@ -233,7 +252,58 @@ class GenerationState:
     generation_started_monotonic: float = field(default_factory=time.monotonic)
     # Completed/failed Developer calls used to refine the conservative configured
     # per-file estimate without persisting prompt or proprietary source content.
+    # R1 Deliverable 5 (2026-09-08): each dict also carries prompt_tokens/
+    # completion_tokens/tokens_estimated when the Developer's own LLM call
+    # exposed them (see _run_developer_generation's own capture site,
+    # kriya/workflow/attempt.py) - additive keys, nothing existing removed or
+    # renamed, so any prior reader of this list (there were none outside
+    # generation_metrics() itself) is unaffected.
     generation_timings: List[Dict[str, Any]] = field(default_factory=list)
+    # R1 Deliverable 5 - observational only, never read by the retry loop
+    # itself (same posture as generation_timings above). One entry per
+    # deterministic validator/build/test invocation this run
+    # (PolymorphicValidator.run_compile_check/run_tests/run_app_sequence),
+    # captured by the same try/finally timing pattern _run_developer_
+    # generation already uses for Developer calls - kind ("compile"/"test"/
+    # "run_verification"/"managed_service_verification"), duration_seconds,
+    # success - never the raw compiler/test output blob (that already lives
+    # in gate_outcomes/logs); this list exists purely for timing/count
+    # aggregation. Covers only the PRIMARY compile gate and the two main
+    # runtime-verification call sites in attempt.py - see docs/assurance/
+    # KRIYA_PERFORMANCE_TELEMETRY.md for the exact coverage boundary
+    # (several secondary/fallback validator call sites are not separately
+    # timed, a documented limitation rather than a silent gap).
+    validator_timings: List[Dict[str, Any]] = field(default_factory=list)
+    # R1 Deliverable 5 - Planner/Architect/Reviewer LLM-call telemetry.
+    # These three stages run their own single-shot agent calls (not the
+    # Developer retry loop's own per-attempt generation_timings above).
+    # GenerationState is constructed BEFORE the Planner/Architect calls in
+    # run_generation_workflow (state = GenerationState(...) precedes both),
+    # so these fields are simply incremented directly at each call site -
+    # no local-variable-then-backfill indirection needed. Never read or
+    # branched on by the retry loop itself - observational only, same
+    # posture as every other field in this comment block.
+    planner_llm_seconds: float = 0.0
+    planner_calls: int = 0
+    architect_llm_seconds: float = 0.0
+    architect_calls: int = 0
+    reviewer_llm_seconds: float = 0.0
+    reviewer_calls: int = 0
+    # R1 Deliverable 5 - retry-amplification observability (the P7 attempt-1
+    # efficiency-finding class of question). Incremented at the exact call
+    # site in handle_attempt_failure() (kriya/workflow/retry_strategy.py)
+    # that consults evaluate_candidate_independent_failure() -
+    # candidate_independent_diagnostic_invocations counts every consultation
+    # (cache hit or not); baseline_replay_count counts only the subset that
+    # actually reached a real baseline replay subprocess call (proven, not
+    # assumed: every code path in evaluate_candidate_independent_failure()
+    # that calls store.record() necessarily called replay_deterministic_
+    # verification_against_baseline() first, and every path that does NOT
+    # call replay returns before ever calling store.record() - so comparing
+    # the store's own record count before/after each call is an exact count,
+    # not a heuristic).
+    candidate_independent_diagnostic_invocations: int = 0
+    baseline_replay_count: int = 0
     error_context: str = ""
     # MA1.3/MA1.4 of the control-plane implementation plan (kriya/workflow/
     # triage.py) - the shadow-mode classification computed once, before this
@@ -263,6 +333,81 @@ class GenerationState:
     files_written: List[Dict[str, str]] = field(default_factory=list)
     all_files_written: Set[str] = field(default_factory=set)
     all_original_contents: Dict[str, str] = field(default_factory=dict)
+    # Test-obligation preservation (2026-09-20): populated once, in
+    # workflow.py's own Architect-stage prefer_existing_artifact_owners()
+    # call, whenever a PLANNED-BUT-NONEXISTENT test file (is_runnable_
+    # test_file()==True, no prior file at that path) gets redirected onto
+    # an already-existing owner file - keyed by the RESOLVED owner path,
+    # valued by the ORIGINAL planned path the Planner/Architect actually
+    # intended to satisfy the goal's own test-coverage intent with.
+    # kriya/workflow/attempt.py's own run_attempt() consults this on every
+    # attempt (not just the first) to refuse a bare NO CHANGE NEEDED
+    # response for that owner - a redirect may relocate the acceptance
+    # obligation the goal's test-coverage intent created, but must never
+    # let file/semantic similarity alone discharge it. Generic across every
+    # language is_runnable_test_file() already recognizes - no G1/C#-
+    # specific logic anywhere in this mechanism.
+    redirected_test_obligations: Dict[str, str] = field(default_factory=dict)
+    # P9-R1 (P9/PRV-08, 2026-09-08): the most recent content `files` (this
+    # attempt's own Developer/deterministic-restore response) carried for
+    # each path, updated on EVERY attempt regardless of that attempt's own
+    # gate outcome - a real, legitimate edit to one file must survive even
+    # when the SAME batch is rejected for an unrelated reason in a
+    # different file. Consumed only while state.api_contract_recovery is
+    # active (kriya/workflow/attempt.py's own run_attempt(), just before the
+    # brownfield ownership check) to fold an untouched-this-round expected
+    # file's own last real content back into a recovery attempt's narrowed
+    # `files` list, so the generic completeness check doesn't mistake a
+    # deliberately narrowed recovery round for the Developer silently
+    # under-delivering. Never read to fabricate content for a file that was
+    # never actually generated in any attempt (get() returns None; the
+    # caller does not fall back to baseline).
+    last_candidate_contents: Dict[str, str] = field(default_factory=dict)
+    # VAL-001 G1 D1 (2026-09-18): path -> the ContextItem actually shown to the
+    # Developer for that file THIS attempt, whenever it was built through
+    # build_known_target_context() (attempt.py's own known_target_package/
+    # retry_member_package call sites - see each site's own comment for why
+    # the OTHER known-target producer, API_CONTRACT_RECOVERY's baseline_owners
+    # text block, is a separate, non-ContextItem mechanism and does not
+    # populate this dict). Consulted only by _completeness_gated_operation()
+    # (attempt.py) to decide whether a whole-file replacement of an EXISTING
+    # file is authorized: real evidence of what representation (tier/
+    # is_exact/member_id/revision) the model actually saw, never inferred
+    # from file size. Absence of an entry for a path is not evidence of
+    # exactness - see that function's own docstring for the fail-closed
+    # default. Reset is unnecessary (a fresh GenerationState is built per
+    # run start, not reused across `generate` invocations; a later attempt's
+    # own build_known_target_context() call overwrites/adds entries as it
+    # goes, so a prior attempt's now-stale item for the same path is always
+    # replaced before it could be re-read for a later attempt on that file).
+    known_target_context_items: Dict[str, "ContextItem"] = field(default_factory=dict)
+    # DEV-INV-001 (2026-09-19): attempt_number -> investigation turns already
+    # consumed THIS attempt, across every _run_developer_generation call
+    # within it - a coordinated-repair attempt calls that function once per
+    # contract participant (kriya/workflow/attempt.py's own
+    # _run_coordinated_repair_generation), and this dict is what stops each
+    # participant getting its own full autonomy.developer_investigation_
+    # max_turns budget (see attempt.py's own _maybe_run_developer_
+    # investigation). Keyed by attempt_number rather than a single running
+    # counter so a later attempt always starts fresh without needing an
+    # explicit reset call anywhere.
+    investigation_turns_used_by_attempt: Dict[int, int] = field(default_factory=dict)
+    # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/
+    # validation_baseline.py) - the PRE-candidate authoritative record(s),
+    # captured against workspace_path (never worktree_path/sandbox) before
+    # the first Developer call, when configured
+    # (autonomy.brownfield_baseline_target_test / brownfield_full_
+    # regression_baseline_policy). Two independent fields, not one, since
+    # the targeted (relevant-test) and full-regression baselines are
+    # captured under independently-configured policies and compared at two
+    # different gate points. None for every run that doesn't opt in - zero
+    # behavior change by default. Plain Any (not the dataclass type itself)
+    # to avoid this module importing validation_baseline.py at class-
+    # definition time - same "avoid an import cycle for a cross-module type
+    # used only by reference" pattern already used elsewhere in this file
+    # (e.g. "ContextItem" as a forward-ref string).
+    validation_baseline_targeted: Optional[Any] = None
+    validation_baseline_full_regression: Optional[Any] = None
     # Revisions that passed the real compile gate. A later candidate invalidates
     # only changed files and their manifest dependents; unrelated validated files
     # remain stable across targeted/dependency-scoped retries.
@@ -317,6 +462,22 @@ class GenerationState:
     # whole run - never read or branched on by the retry loop itself, same
     # posture as planner_reuse_used_attempt1 above.
     rejected_generation_targets: List[str] = field(default_factory=list)
+    # PRV-17 (2026-09-03): counts attempts aborted by a PolicyDeniedError
+    # (FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE) that
+    # _failure_from_validated_scope_denial() (kriya/workflow/retry_strategy.py)
+    # could NOT convert into a plan_scope_conflict, because the target names
+    # no real existing production owner to hand recovery off to (a
+    # hallucinated new path, or a test file) - unlike
+    # rejected_generation_targets above, this one IS read and branched on:
+    # a live incident burned 4 full generation cycles because each such
+    # denial was treated as an ordinary retryable failure and the Developer
+    # was simply asked to try again, proposing a DIFFERENT illegal target
+    # each time. handle_attempt_failure() gives the first occurrence a
+    # normal retry chance, then stops the subtask deterministically
+    # (state.environment_failure) the second time - there is no legitimate
+    # owner for retrying to discover, so continuing cannot produce a
+    # different, legal outcome.
+    unrecoverable_scope_denial_count: int = 0
     # The file(s) the completeness check (extract_expected_files vs. what got
     # written) found missing after the MOST RECENT attempt. Mutually exclusive
     # with last_implicated_files - an IncompleteGenerationError sets this and
@@ -460,17 +621,58 @@ class GenerationState:
             and self.api_contract_recovery is None
         )
 
-    def generation_metrics(self) -> Dict[str, Any]:
-        """Content-free operational telemetry safe to persist in local traces."""
+    def generation_metrics(self, total_wall_seconds: Optional[float] = None) -> Dict[str, Any]:
+        """Content-free operational telemetry safe to persist in local traces.
+
+        total_wall_seconds (R1 Deliverable 5, 2026-09-08): the caller's own
+        time.monotonic() - self.generation_started_monotonic measurement,
+        threaded in rather than computed here - this method must stay a pure
+        read of already-recorded fields (called more than once per run in
+        some paths, e.g. mid-run checkpoint logging), never a fresh "now"
+        sample of its own that would disagree between two calls.
+
+        See docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md for the full field
+        reference, units, and inclusive/exclusive timing semantics - the
+        summary here: llm_wall_seconds/validator_wall_seconds/
+        total_wall_seconds are INCLUSIVE of each other (a validator call can
+        happen while wall-clock time that also counts toward total_wall_
+        seconds elapses) - they do not sum exactly to total_wall_seconds,
+        and must never be presented as though they do.
+        """
+        # timing.get(key, 0) would NOT catch a present key whose value is
+        # None (dict.get's default only ever applies to a MISSING key) -
+        # prompt_tokens/completion_tokens are deliberately set to None (not
+        # omitted) when unavailable (see _run_developer_generation's own
+        # capture site), so `or 0` is required here, not a defensive
+        # nicety. developer_tokens_available reports how many attempts
+        # actually had real data, so a low/zero sum is never misread as
+        # "no tokens used" when it may really mean "not measured".
+        developer_prompt_tokens = sum(
+            int(timing.get("prompt_tokens") or 0) for timing in self.generation_timings
+        )
+        developer_completion_tokens = sum(
+            int(timing.get("completion_tokens") or 0) for timing in self.generation_timings
+        )
+        developer_tokens_available = sum(
+            1 for timing in self.generation_timings if timing.get("prompt_tokens") is not None
+        )
+        developer_llm_seconds = sum(
+            float(timing.get("duration_seconds") or 0) for timing in self.generation_timings
+        )
+        llm_calls = (
+            len(self.generation_timings) + self.planner_calls
+            + self.architect_calls + self.reviewer_calls
+        )
+        llm_wall_seconds = (
+            developer_llm_seconds + self.planner_llm_seconds
+            + self.architect_llm_seconds + self.reviewer_llm_seconds
+        )
         metrics: Dict[str, Any] = {
             "calls": len(self.generation_timings),
             "successful_calls": sum(
                 1 for timing in self.generation_timings if timing.get("succeeded")
             ),
-            "duration_seconds": sum(
-                float(timing.get("duration_seconds", 0))
-                for timing in self.generation_timings
-            ),
+            "duration_seconds": developer_llm_seconds,
             "files_requested": sum(
                 int(timing.get("file_count", 0)) for timing in self.generation_timings
             ),
@@ -481,6 +683,47 @@ class GenerationState:
                 1 for event in self.run_events if event.kind == "validation.invalidated"
             ),
             "validated_files": len(self.validated_file_revisions),
+            # --- R1 Deliverable 5 additions below - all additive, nothing
+            # above this line changed in name, meaning, or value. ---
+            "total_wall_seconds": total_wall_seconds,
+            "terminal_status": (
+                "success" if self.final_workflow_quality_passed()
+                else ("environment_failure" if self.environment_failure else "failed")
+            ),
+            "llm": {
+                "calls": llm_calls,
+                "wall_seconds": llm_wall_seconds,
+                "developer_calls": len(self.generation_timings),
+                "developer_wall_seconds": developer_llm_seconds,
+                "developer_prompt_tokens": developer_prompt_tokens,
+                "developer_completion_tokens": developer_completion_tokens,
+                "developer_tokens_available_for": developer_tokens_available,
+                "planner_calls": self.planner_calls,
+                "planner_wall_seconds": self.planner_llm_seconds,
+                "architect_calls": self.architect_calls,
+                "architect_wall_seconds": self.architect_llm_seconds,
+                "reviewer_calls": self.reviewer_calls,
+                "reviewer_wall_seconds": self.reviewer_llm_seconds,
+            },
+            "validators": {
+                "invocations": len(self.validator_timings),
+                "wall_seconds": sum(
+                    float(t.get("duration_seconds", 0)) for t in self.validator_timings
+                ),
+                "by_kind": {
+                    kind: sum(1 for t in self.validator_timings if t.get("kind") == kind)
+                    for kind in sorted({t.get("kind") for t in self.validator_timings if t.get("kind")})
+                },
+            },
+            "retry": {
+                "full_set_attempts": self.budgets.retry_count,
+                "targeted_attempts": self.budgets.targeted_retry_count,
+                "unrecoverable_scope_denials": self.unrecoverable_scope_denial_count,
+                "candidate_independent_diagnostic_invocations": (
+                    self.candidate_independent_diagnostic_invocations
+                ),
+                "baseline_replay_count": self.baseline_replay_count,
+            },
         }
         if self.engineering_route is not None:
             # MA1.4 - fold the shadow classification into the SAME dict

@@ -171,3 +171,123 @@ async def test_stage_2a_wiring_never_affects_the_real_gap_approval_decision(tmp_
     install_package_requests = [r for r in captured if r.action_type == ActionType.INSTALL_PACKAGE]
     assert len(install_package_requests) == 1
     assert install_package_requests[0].target == "newlib"
+
+
+# --- POL-001: enforce=True Stage 2A wiring - DENY hard-stops, REQUIRE_APPROVAL
+# defers to the existing single aggregate approval_callback prompt instead of
+# also prompting once per new_gaps entry (N+1 prompts) or raising before that
+# prompt is ever reached. ---
+
+@pytest.mark.asyncio
+async def test_stage_2a_enforce_true_deny_raises_before_the_aggregate_prompt(tmp_path):
+    from kriya.tools.knowledge import GapReport
+
+    cfg = AppConfig()
+    cfg.execution_policy.enabled = True
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    engine = WorkflowEngine(kernel, llm)
+    kernel.config.execution_policy.mode = "enforce"  # bypasses the config-load validator directly
+
+    initial_report = GapReport()
+    post_report = GapReport()
+    post_report.add_gap("badlib", "1.0.0", None, "high", "introduced by the architect design")
+
+    engine.execution_policy.evaluate = MagicMock(
+        return_value=_result(PolicyDecision.DENY, "PACKAGE_SOURCE_UNTRUSTED")
+    )
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Use badlib for the new feature",
+    ])
+    approval_callback = MagicMock(return_value=True)
+
+    with patch("kriya.tools.knowledge.KnowledgeGuard.check_goal", side_effect=[initial_report, post_report]):
+        with pytest.raises(PolicyDeniedError) as exc_info:
+            await engine.run_generation_workflow(
+                goal="Build a feature", workspace_path=str(tmp_path), approval_callback=approval_callback,
+            )
+    assert exc_info.value.result.decision == PolicyDecision.DENY
+    approval_callback.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_stage_2a_enforce_true_require_approval_asks_once_not_per_library(tmp_path):
+    from kriya.tools.knowledge import GapReport
+
+    cfg = AppConfig()
+    cfg.execution_policy.enabled = True
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    engine = WorkflowEngine(kernel, llm)
+    kernel.config.execution_policy.mode = "enforce"
+
+    initial_report = GapReport()
+    post_report = GapReport()
+    post_report.add_gap("libone", "1.0.0", None, "medium", "reason one")
+    post_report.add_gap("libtwo", "2.0.0", None, "medium", "reason two")
+
+    def evaluate_side_effect(request):
+        if request.action_type == ActionType.INSTALL_PACKAGE:
+            return _result(PolicyDecision.REQUIRE_APPROVAL, "PACKAGE_REQUIRES_APPROVAL")
+        return _result(PolicyDecision.ALLOW)
+
+    engine.execution_policy.evaluate = MagicMock(side_effect=evaluate_side_effect)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Use libone and libtwo for the new feature",
+        '[{"filepath": "app.py", "content": "print(1)"}]',
+        "Review: Approved",  # pre-approval reviewer pass
+        "Review: Approved",  # final reviewer pass
+    ])
+    approval_callback = MagicMock(return_value=True)
+
+    with patch("kriya.tools.knowledge.KnowledgeGuard.check_goal", side_effect=[initial_report, post_report]):
+        result = await engine.run_generation_workflow(
+            goal="Build a feature", workspace_path=str(tmp_path), approval_callback=approval_callback,
+        )
+
+    assert result is not None
+    # Exactly the pre-existing single aggregate prompt - not one per library,
+    # and not raised-away before ever reaching it.
+    stage_2a_calls = [
+        c for c in approval_callback.call_args_list
+        if "proceed with these dependencies" in c.args[1]
+    ]
+    assert len(stage_2a_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_stage_2a_enforce_true_require_approval_rejected_aborts_via_existing_path(tmp_path):
+    from kriya.tools.knowledge import GapReport
+
+    cfg = AppConfig()
+    cfg.execution_policy.enabled = True
+    kernel = Kernel(config=cfg)
+    llm = LLMClient(cfg)
+    engine = WorkflowEngine(kernel, llm)
+    kernel.config.execution_policy.mode = "enforce"
+
+    initial_report = GapReport()
+    post_report = GapReport()
+    post_report.add_gap("libone", "1.0.0", None, "medium", "reason one")
+
+    def evaluate_side_effect(request):
+        if request.action_type == ActionType.INSTALL_PACKAGE:
+            return _result(PolicyDecision.REQUIRE_APPROVAL, "PACKAGE_REQUIRES_APPROVAL")
+        return _result(PolicyDecision.ALLOW)
+
+    engine.execution_policy.evaluate = MagicMock(side_effect=evaluate_side_effect)
+
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Use libone for the new feature",
+    ])
+    approval_callback = MagicMock(return_value=False)  # human declines the aggregate prompt
+
+    with patch("kriya.tools.knowledge.KnowledgeGuard.check_goal", side_effect=[initial_report, post_report]):
+        with pytest.raises(ValueError, match="Workflow aborted"):
+            await engine.run_generation_workflow(
+                goal="Build a feature", workspace_path=str(tmp_path), approval_callback=approval_callback,
+            )

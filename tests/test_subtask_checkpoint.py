@@ -8,6 +8,7 @@ import tempfile
 
 import pytest
 
+from kriya.workflow.checkpoint import compute_workspace_content_hash
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, Subtask
 from kriya.workflow.subtask_checkpoint import (
     ResumePointStatus,
@@ -127,7 +128,9 @@ def test_resume_point_resumes_at_next_incomplete_subtask(git_repo):
         {"plan_hash": plan.content_hash()},
         SubtaskCheckpoint(
             subtask_id="s1", status=SubtaskStatus.COMPLETED,
-            base_commit=commit, tree_hash=tree, plan_hash=plan.content_hash(),
+            base_commit=commit, tree_hash=tree,
+            workspace_content_hash=compute_workspace_content_hash(git_repo),
+            plan_hash=plan.content_hash(),
         ),
     )
 
@@ -145,13 +148,59 @@ def test_resume_point_already_complete_when_every_subtask_done(git_repo):
         {"plan_hash": plan.content_hash()},
         SubtaskCheckpoint(
             subtask_id="s1", status=SubtaskStatus.COMPLETED,
-            base_commit=commit, tree_hash=tree, plan_hash=plan.content_hash(),
+            base_commit=commit, tree_hash=tree,
+            workspace_content_hash=compute_workspace_content_hash(git_repo),
+            plan_hash=plan.content_hash(),
         ),
     )
 
     result = resolve_subtask_resume_point(plan, checkpoint_data, git_repo)
 
     assert result.status == ResumePointStatus.ALREADY_COMPLETE
+
+
+def test_resume_point_needs_review_when_legacy_record_lacks_content_hash(git_repo):
+    """STATE-001 (2026-09-14): a record with a real, matching tree_hash but
+    NO workspace_content_hash at all (pre-fix schema) must not be treated
+    as safely resumable - Task 10's own explicit instruction."""
+    plan = _plan(_subtask("s1"), _subtask("s2", ["s1"]))
+    commit, tree = _real_hashes(git_repo)
+    checkpoint_data = record_subtask_checkpoint(
+        {"plan_hash": plan.content_hash()},
+        SubtaskCheckpoint(
+            subtask_id="s1", status=SubtaskStatus.COMPLETED,
+            base_commit=commit, tree_hash=tree, plan_hash=plan.content_hash(),
+        ),
+    )
+
+    result = resolve_subtask_resume_point(plan, checkpoint_data, git_repo)
+
+    assert result.status == ResumePointStatus.NEEDS_REVIEW
+    assert any("predates" in m for m in result.mismatches)
+
+
+def test_resume_point_needs_review_when_content_hash_drifted(git_repo):
+    """STATE-001 (2026-09-14): tree_hash still matches (nothing committed),
+    but the real on-disk content changed since the checkpoint was saved -
+    exactly the reproduced gap this fix closes."""
+    plan = _plan(_subtask("s1"), _subtask("s2", ["s1"]))
+    commit, tree = _real_hashes(git_repo)
+    checkpoint_data = record_subtask_checkpoint(
+        {"plan_hash": plan.content_hash()},
+        SubtaskCheckpoint(
+            subtask_id="s1", status=SubtaskStatus.COMPLETED,
+            base_commit=commit, tree_hash=tree,
+            workspace_content_hash=compute_workspace_content_hash(git_repo),
+            plan_hash=plan.content_hash(),
+        ),
+    )
+    with open(f"{git_repo}/a.py", "w") as f:
+        f.write("print(999)")  # uncommitted - tree_hash (HEAD^{tree}) is blind to this
+
+    result = resolve_subtask_resume_point(plan, checkpoint_data, git_repo)
+
+    assert result.status == ResumePointStatus.NEEDS_REVIEW
+    assert any("workspace_content_hash" in m for m in result.mismatches)
 
 
 def test_resume_point_tree_hash_mismatch_is_needs_review(git_repo):
@@ -177,7 +226,10 @@ def test_resume_point_stops_at_first_non_completed_subtask(git_repo):
     checkpoint_data = {"plan_hash": plan.content_hash()}
     checkpoint_data = record_subtask_checkpoint(
         checkpoint_data,
-        SubtaskCheckpoint(subtask_id="s1", status=SubtaskStatus.COMPLETED, base_commit=commit, tree_hash=tree, plan_hash=plan.content_hash()),
+        SubtaskCheckpoint(
+            subtask_id="s1", status=SubtaskStatus.COMPLETED, base_commit=commit, tree_hash=tree,
+            workspace_content_hash=compute_workspace_content_hash(git_repo), plan_hash=plan.content_hash(),
+        ),
     )
     checkpoint_data = record_subtask_checkpoint(
         checkpoint_data,

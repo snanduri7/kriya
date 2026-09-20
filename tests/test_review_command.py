@@ -5,6 +5,27 @@ from click.testing import CliRunner
 
 from kriya.cli import main
 
+_A1_JAVA_SOURCE = (
+    "public class Target implements TargetInterface {\n"
+    "    public Target(Collaborator c) {\n"
+    "    }\n"
+    "\n"
+    "    public void doWork() {\n"
+    "    }\n"
+    "}\n"
+)
+
+# A1-E2: `kriya review`'s single-Java-file path now calls ReviewerAgent.
+# run_structured_review() (json_mode=True), so every test that exercises that
+# path needs a valid structured JSON response instead of the free-form
+# "Looks fine." string the pre-A1-E2 tests used - an unparseable response now
+# fails the command clearly by design (see test_review_single_java_file_
+# malformed_structured_response_fails_clearly_below).
+_STRUCTURED_OK_RESPONSE = (
+    '{"summary": "Looks fine.", "member_reviews": [], "findings": [], '
+    '"recommendations": [], "run_guidance": {"statements": [], "not_determinable": []}}'
+)
+
 
 def _init_git_repo(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
@@ -272,3 +293,251 @@ def test_review_stdout_contains_only_the_review_text(tmp_path):
     assert "Code Review Report" not in res.stdout
     assert "Reviewing 1 file(s)" in res.stderr
     assert "Code Review Report" in res.stderr
+
+
+def test_review_single_java_file_includes_repository_aware_contract_sections(tmp_path):
+    """A1-P1/A1-E2: reviewing exactly one .java file must assemble the four
+    labeled sections (TARGET SOURCE / Deterministic Symbol Inventory /
+    Repository Evidence / REVIEW TASK) deterministically, BEFORE the model
+    call - the model must not be expected to rediscover the member
+    inventory or repository relationships itself. Each member/relation now
+    also carries a Kriya-generated evidence id (M#/R#)."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "Target.java").write_text(_A1_JAVA_SOURCE)
+    (tmp_path / "TargetInterface.java").write_text("public interface TargetInterface {\n}\n")
+    (tmp_path / "Collaborator.java").write_text("public class Collaborator {\n}\n")
+    (tmp_path / "TargetTest.java").write_text("public class TargetTest {\n}\n")
+
+    mock_complete = AsyncMock(return_value=_STRUCTURED_OK_RESPONSE)
+    runner = CliRunner()
+
+    with patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
+        res = runner.invoke(main, ["review", str(tmp_path / "Target.java")])
+
+    assert res.exit_code == 0, res.output
+    prompt = mock_complete.call_args[0][1]
+    assert "=== TARGET SOURCE ===" in prompt
+    assert "Deterministic Symbol Inventory" in prompt
+    assert "M1" in prompt
+    assert "Target(Collaborator)" in prompt
+    assert "doWork()" in prompt
+    assert "Repository Evidence" in prompt
+    assert "R1" in prompt
+    assert "TargetInterface.java" in prompt
+    assert "Collaborator.java" in prompt
+    assert "TargetTest.java" in prompt
+    assert "=== REVIEW TASK ===" in prompt
+    assert mock_complete.call_args.kwargs.get("json_mode") is True
+
+
+def test_review_non_java_single_file_has_no_java_contract_sections(tmp_path):
+    """The repository-aware contract is Java-only (A1 scope) - a Python file
+    must go through the exact same path as before, with no member-inventory
+    or repository-evidence sections attached."""
+    (tmp_path / "app.py").write_text("def add(a, b):\n    return a + b\n")
+
+    mock_complete = AsyncMock(return_value="Looks fine.")
+    runner = CliRunner()
+
+    with patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
+        res = runner.invoke(main, ["review", str(tmp_path / "app.py")])
+
+    assert res.exit_code == 0, res.output
+    prompt = mock_complete.call_args[0][1]
+    assert "Deterministic Symbol Inventory" not in prompt
+    assert "Repository Evidence" not in prompt
+
+
+def test_review_single_java_file_related_artifact_content_never_leaks_into_prompt(tmp_path):
+    """A1-R1 regression fixture (2026-09-09): reproduces the exact shape of
+    the first live A1 run's evidence-leakage failure - a target method that
+    self-invokes another @Transactional method in the same class (DEFECT 2's
+    pattern), plus a related, constructor-injected collaborator file (DEFECT
+    1's DriverController shape: a real repository-context relation, its
+    CONTENT never supplied - the same "caller/collaborator named, contents
+    withheld" shape, using the collaborator relation since it is the
+    deterministic relation type this synthetic two-file fixture reliably
+    produces). Asserts the constructed prompt/context contains enough
+    evidence-boundary information to prohibit both observed failure modes -
+    not that a model will obey it (that's what the next live run is for),
+    but that Kriya itself never leaks the collaborator's content and that
+    the contract text reaches the actual assembled prompt used by the
+    review command. Per explicit instruction: do NOT fix this by supplying
+    every related file's content - the fix must be Reviewer-contract-only,
+    and this test would fail that instruction if it ever found
+    CALLER_BODY_MARKER_TOKEN leaking into the prompt via a repository-
+    context expansion instead."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "Target.java").write_text(
+        "public class Target {\n"
+        "    private final Caller caller;\n"
+        "\n"
+        "    public Target(Caller caller) {\n"
+        "        this.caller = caller;\n"
+        "    }\n"
+        "\n"
+        "    @Transactional\n"
+        "    public void outer() {\n"
+        "        inner();\n"
+        "    }\n"
+        "\n"
+        "    @Transactional\n"
+        "    public void inner() {\n"
+        "    }\n"
+        "}\n"
+    )
+    (tmp_path / "Caller.java").write_text(
+        "public class Caller {\n"
+        "    public void run() {\n"
+        "        // CALLER_BODY_MARKER_TOKEN - must never reach the review prompt\n"
+        "    }\n"
+        "}\n"
+    )
+
+    mock_complete = AsyncMock(return_value=_STRUCTURED_OK_RESPONSE)
+    runner = CliRunner()
+
+    with patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
+        res = runner.invoke(main, ["review", str(tmp_path / "Target.java")])
+
+    assert res.exit_code == 0, res.output
+    system_prompt = mock_complete.call_args[0][0]
+    user_prompt = mock_complete.call_args[0][1]
+
+    # DEFECT 1 regression: Caller.java is correctly identified as a related
+    # artifact (by name/relation only) but its actual body is never supplied
+    # anywhere in what's actually sent to the model (system OR user prompt).
+    assert "Caller.java" in user_prompt
+    assert "CALLER_BODY_MARKER_TOKEN" not in system_prompt and "CALLER_BODY_MARKER_TOKEN" not in user_prompt
+    assert "public void run()" not in system_prompt and "public void run()" not in user_prompt
+
+    # A1-E2: this path now uses the STRUCTURED system prompt (not the
+    # free-form one) - the boundary rule and requested-vs-final-confidence
+    # framing must reach the real system prompt used for this exact call.
+    assert "never that related file's unseen contents" in system_prompt
+    assert "Never invent an id" in system_prompt
+    assert "advisory only" in system_prompt
+
+    # The self-invocation pattern itself is still visible in the target
+    # source, as it always was - only the CONFIDENCE contract changed.
+    assert "inner();" in user_prompt
+
+
+def test_review_command_never_touches_write_or_generation_machinery(tmp_path):
+    """Zero-write regression test: `kriya review` (including the new A1-P1
+    single-Java-file repository-context path) must never construct
+    AuthorizedFileWriter, never construct DeveloperAgent, and never call
+    run_generation_workflow - the read-only review path has no legitimate
+    reason to reach any of them. Patched to raise if touched, rather than
+    merely asserting call counts, so this fails loudly on any new code path
+    that reaches them, not just the ones anticipated today."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "Target.java").write_text(_A1_JAVA_SOURCE)
+    (tmp_path / "TargetInterface.java").write_text("public interface TargetInterface {\n}\n")
+
+    mock_complete = AsyncMock(return_value=_STRUCTURED_OK_RESPONSE)
+    runner = CliRunner()
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("review command must never construct/call write or generation machinery")
+
+    with patch("kriya.core.llm.LLMClient.complete", new=mock_complete), \
+         patch("kriya.policy.filesystem.AuthorizedFileWriter.__init__", side_effect=_boom), \
+         patch("kriya.agents.agent.DeveloperAgent.__init__", side_effect=_boom), \
+         patch("kriya.workflow.workflow.WorkflowEngine.run_generation_workflow", side_effect=_boom):
+        res = runner.invoke(main, ["review", str(tmp_path / "Target.java")])
+
+    assert res.exit_code == 0, res.output
+
+
+def test_review_single_java_file_raw_json_never_streamed_or_printed(tmp_path):
+    """A1-E2 explicit requirement: raw structured JSON must never reach the
+    user - stdout must contain the rendered Markdown report, never the raw
+    JSON keys, and the model call itself must not be given a stream
+    callback (nothing to stream meaningfully mid-generation for a
+    single-shot JSON response)."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "Target.java").write_text(_A1_JAVA_SOURCE)
+
+    mock_complete = AsyncMock(return_value=_STRUCTURED_OK_RESPONSE)
+    runner = CliRunner()
+
+    with patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
+        res = runner.invoke(main, ["review", str(tmp_path / "Target.java")])
+
+    assert res.exit_code == 0, res.output
+    assert '"summary"' not in res.stdout
+    assert '"findings"' not in res.stdout
+    assert "### Findings" in res.stdout
+    assert "## How to Run the Application" in res.stdout
+    assert mock_complete.call_args.kwargs.get("stream_callback") is None
+
+
+def test_review_single_java_file_malformed_structured_response_fails_clearly(tmp_path):
+    """A1-E2 explicit requirement: a malformed structured response must not
+    silently fall back to unvalidated free-form Markdown - the command must
+    exit non-zero with a clear error, not print anything that looks like a
+    review."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "Target.java").write_text(_A1_JAVA_SOURCE)
+
+    mock_complete = AsyncMock(return_value="not JSON at all")
+    runner = CliRunner()
+
+    with patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
+        res = runner.invoke(main, ["review", str(tmp_path / "Target.java")])
+
+    assert res.exit_code != 0
+    assert "Structured review failed" in res.stderr
+    assert "### Findings" not in res.stdout
+
+
+def test_review_single_java_file_reports_confidence_downgrade_end_to_end(tmp_path):
+    """End-to-end proof (no live model) that a Reviewer-requested PROVEN_ISSUE
+    with real condition evidence but no consequence evidence is rendered to
+    the user as a Kriya-downgraded STRONG STATIC INDICATION, exactly the
+    shape both historical A1 over-classifications had."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "Target.java").write_text(_A1_JAVA_SOURCE)
+
+    raw = (
+        '{"summary": "ok", "member_reviews": [{"member_id": "M1", "status": "finding"}], '
+        '"findings": [{"finding_id": "F1", "title": "Overclaimed issue", "member_id": "M1", '
+        '"requested_confidence": "PROVEN_ISSUE", "condition_evidence_ids": ["M1"], '
+        '"consequence_evidence_ids": [], "runtime_dependency_declared": false, '
+        '"explanation": "a pattern is present"}], "recommendations": [], '
+        '"run_guidance": {"statements": [], "not_determinable": []}}'
+    )
+    mock_complete = AsyncMock(return_value=raw)
+    runner = CliRunner()
+
+    with patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
+        res = runner.invoke(main, ["review", str(tmp_path / "Target.java")])
+
+    assert res.exit_code == 0, res.output
+    assert "STRONG STATIC INDICATION" in res.stdout
+    assert "Reviewer requested: PROVEN ISSUE" in res.stdout
+    assert "Kriya downgraded" in res.stdout
+
+
+def test_review_single_java_file_member_coverage_rendered(tmp_path):
+    """Member coverage (missing/invented ids) must be explicit in the
+    rendered report, via exact id-set comparison against the deterministic
+    inventory - not name-presence text scanning."""
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "Target.java").write_text(_A1_JAVA_SOURCE)
+
+    raw = (
+        '{"summary": "ok", "member_reviews": [{"member_id": "M1", "status": "no_issue"}], '
+        '"findings": [], "recommendations": [], '
+        '"run_guidance": {"statements": [], "not_determinable": []}}'
+    )
+    mock_complete = AsyncMock(return_value=raw)
+    runner = CliRunner()
+
+    with patch("kriya.core.llm.LLMClient.complete", new=mock_complete):
+        res = runner.invoke(main, ["review", str(tmp_path / "Target.java")])
+
+    assert res.exit_code == 0, res.output
+    assert "1/2 deterministic member(s) accounted for" in res.stdout
+    assert "M2" in res.stdout  # the missing member (doWork()) is called out by id

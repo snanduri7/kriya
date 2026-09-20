@@ -32,7 +32,7 @@ attempt.py), so it costs nothing when disabled."""
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from kriya.core.llm import LLMClient
 from kriya.policy.errors import PolicyDeniedError
@@ -42,6 +42,10 @@ from kriya.tools.validate import PolymorphicValidator, get_pom_dependencies
 from kriya.workflow.edit_safety import (
     FileRevisionConflict, apply_anchored_edits,
     content_revision,
+)
+from kriya.workflow.semantic_region_authority import (
+    AuthorizedSemanticRegion,
+    find_unauthorized_semantic_changes,
 )
 
 logger = logging.getLogger(__name__)
@@ -310,6 +314,9 @@ def _dispatch_tool_call(
     scope_conflict_files: Set[str],
     validation_tool_name: str = "recompile",
     target_test: Optional[str] = None,
+    authorized_semantic_regions: Sequence[AuthorizedSemanticRegion] = (),
+    strict_existing_java_files: bool = False,
+    baseline_contents: Optional[Dict[str, str]] = None,
 ) -> str:
     """Executes one tool call and returns the string fed back to the model as
     the tool result. Every branch is small-argument-in, small-string-out -
@@ -493,6 +500,37 @@ def _dispatch_tool_call(
             # turn budget before attempt.py's own terminal QualityGateFailure.
             return f"ERROR: patch did not apply to '{filepath}': {anchor_ex}"
 
+        # CORR-018 general-case closure (2026-09-13, Task 15): self-
+        # correction is the one write path in the generation pipeline that
+        # previously reached AuthorizedFileWriter.commit_file() below
+        # WITHOUT ever passing through attempt.py's own pre-write semantic
+        # gate - preferred remediation over relying solely on the terminal
+        # recheck (which still runs regardless, see attempt.py's own call
+        # sites). Compared against the TRUE workspace baseline
+        # (`baseline_contents`, e.g. state.all_original_contents - the
+        # content BEFORE this entire generation run, never `orig_text`,
+        # which may already reflect this SAME attempt's own earlier
+        # developer-written candidate or an earlier self-correction turn) -
+        # `baseline_contents` is None for any caller that has not opted in
+        # (both attempt.py call sites now do), which keeps this a complete
+        # no-op unless explicitly wired, mirroring every other additive gate
+        # in this module.
+        if baseline_contents is not None:
+            baseline_for_check = baseline_contents.get(filepath, orig_text)
+            semantic_violations = find_unauthorized_semantic_changes(
+                {filepath: baseline_for_check}, {filepath: new_content},
+                authorized_semantic_regions, strict_existing_java_files=strict_existing_java_files,
+            )
+            if semantic_violations:
+                detail = "; ".join(f"{v.reason_code}: {v.detail}" for v in semantic_violations)
+                # Fed back to the model as this tool call's result, same
+                # pattern as an anchor-match failure above - lets the model
+                # retry within its own turn budget rather than crashing the
+                # whole loop; a model that cannot converge on an authorized
+                # fix still falls through to attempt.py's own terminal
+                # QualityGateFailure path exactly as before this change.
+                return f"ERROR: patch to '{filepath}' rejected - outside authorized semantic scope: {detail}"
+
         full_path = os.path.join(worktree_path, filepath)
         try:
             # MA4.16 - AuthorizedFileWriter really enforces (raises
@@ -544,6 +582,9 @@ async def run_self_correction_loop(
     extra_body_override: Optional[Dict[str, Any]] = None,
     failure_type: str = "compile",
     target_test: Optional[str] = None,
+    authorized_semantic_regions: Sequence[AuthorizedSemanticRegion] = (),
+    strict_existing_java_files: bool = False,
+    baseline_contents: Optional[Dict[str, str]] = None,
 ) -> SelfCorrectionResult:
     """Runs up to max_turns of native tool-calling against the given llm,
     trying to fix a real failure using small-argument tools: the original 4
@@ -693,6 +734,9 @@ async def run_self_correction_loop(
                 active_code_context, modified_files, read_files, observed_revisions,
                 scope_conflict_files,
                 validation_tool_name=validation_tool_name, target_test=target_test,
+                authorized_semantic_regions=authorized_semantic_regions,
+                strict_existing_java_files=strict_existing_java_files,
+                baseline_contents=baseline_contents,
             )
             transcript.append(
                 {"turn": turn, "tool": call["name"], "arguments": call["arguments"], "result": tool_result_text}

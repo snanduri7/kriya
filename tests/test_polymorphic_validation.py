@@ -8,7 +8,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from kriya.config import AppConfig
-from kriya.tools.validate import PolymorphicValidator, get_pom_dependencies, get_pom_own_coordinate
+from kriya.tools.validate import (
+    PolymorphicValidator,
+    get_pom_dependencies,
+    get_pom_own_coordinate,
+    get_pom_reactor_modules,
+)
 from kriya.workflow.verification_authority import (
     deterministic_sequence_kind,
     deterministic_verification_kind,
@@ -835,6 +840,153 @@ def test_java_run_tests_no_target_test_omits_dtest_flag(tmp_path):
     cmd = mock_popen.call_args_list[0].args[0]
     assert cmd == ["mvn", "test"]
 
+
+# ---------------------------------------------------------------------------
+# VAL-001 G1-R3: multi-target selection (ordered sequence -> separate argv
+# entries, never a shell-joined string)
+# ---------------------------------------------------------------------------
+
+def test_python_run_tests_multi_target_uses_separate_argv_entries_never_joined_string(tmp_path):
+    """Structural proof: a tuple of two targets becomes TWO separate argv
+    entries at the end of the real command list, never one space/newline-
+    joined string. This is the exact shape G1-R3 PREPARE proved was
+    required - a single opaque token containing a space is NOT multiple
+    paths to pytest's own arg parser (empirically confirmed against a real
+    Graphify worktree during PREPARE: 0 collected, "file or directory not
+    found" for the joined-string form)."""
+    (tmp_path / "app.py").write_text("pass\n")
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "python"
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("2 passed", "")
+        mock_popen.return_value = process
+
+        validator.run_tests(target_test=("tests/a.py", "tests/b.py"))
+
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert cmd[-2:] == ["tests/a.py", "tests/b.py"], (
+        f"expected the two targets as separate trailing argv entries, got {cmd}"
+    )
+    assert "tests/a.py tests/b.py" not in cmd, "must never be joined into one string"
+    assert not any(" " in arg and "tests/a.py" in arg and "tests/b.py" in arg for arg in cmd)
+
+
+def test_python_run_tests_multi_target_list_form_equivalent_to_tuple(tmp_path):
+    """A plain list (the shape a YAML-loaded config field actually produces)
+    behaves identically to a tuple - both are just "an ordered sequence of
+    strings" to run_tests()."""
+    (tmp_path / "app.py").write_text("pass\n")
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("2 passed", "")
+        mock_popen.return_value = process
+
+        validator.run_tests(target_test=["tests/a.py", "tests/b.py"])
+
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert cmd[-2:] == ["tests/a.py", "tests/b.py"]
+
+
+def test_python_run_tests_single_string_target_unchanged_single_argv_entry(tmp_path):
+    """Existing single-target behavior remains compatible: a bare string
+    still produces exactly one trailing argv entry, identical to before
+    multi-target support existed."""
+    (tmp_path / "app.py").write_text("pass\n")
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("1 passed", "")
+        mock_popen.return_value = process
+
+        validator.run_tests(target_test="tests/a.py")
+
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert cmd[-1] == "tests/a.py"
+    assert cmd.count("tests/a.py") == 1
+
+
+def test_python_run_tests_multi_target_real_execution_selects_exactly_both_files(tmp_path):
+    """End-to-end, unmocked proof (mirrors this file's own existing
+    src-layout tests, which run real pytest rather than mocking Popen):
+    two real test files, selected together via a tuple, both actually run -
+    reproduces the exact 38+38=76 shape G1-R3 PREPARE calibrated against
+    the real Graphify worktree, at a scale that doesn't depend on any
+    specific real file's content."""
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_a.py").write_text(
+        "def test_one():\n    assert 1 + 1 == 2\n\ndef test_two():\n    assert 2 + 2 == 4\n"
+    )
+    (tests_dir / "test_b.py").write_text(
+        "def test_three():\n    assert 3 + 3 == 6\n"
+    )
+    (tests_dir / "test_unselected.py").write_text(
+        "def test_never_runs():\n    assert False\n"
+    )
+    validator = PolymorphicValidator(str(tmp_path))
+
+    res = validator.run_tests(target_test=("tests/test_a.py", "tests/test_b.py"))
+
+    assert res["success"] is True, res["output"]
+    assert "3 passed" in res["output"], res["output"]
+    assert "test_never_runs" not in res["output"]
+
+
+def test_java_run_tests_multi_target_honors_only_first_target(tmp_path):
+    """Disclosed, minimal-scope limitation: multi-target selection is a
+    Python-stack (pytest) concept today - Java honors only the first target,
+    unchanged single-target behavior for the (so far only real) case of one
+    string being passed. Never crashes on a multi-element input."""
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    validator = PolymorphicValidator(str(tmp_path))
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("Tests run: 1", "")
+        mock_popen.return_value = process
+
+        res = validator.run_tests(target_test=(
+            "src/test/java/com/example/ProtocolTest.java",
+            "src/test/java/com/example/OtherTest.java",
+        ))
+
+    assert res["success"] is True
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert "-Dtest=ProtocolTest" in cmd
+    assert not any("OtherTest" in arg for arg in cmd)
+
+
+def test_ruby_run_tests_multi_target_extends_argv(tmp_path):
+    """rspec accepts multiple positional path args natively - same
+    structural argv-extend treatment as the Python branch, not limited to
+    the first target the way Java's -Dtest=/--tests single-class-name
+    convention is."""
+    (tmp_path / "Rakefile").write_text("")
+    validator = PolymorphicValidator(str(tmp_path))
+    assert validator.stack == "ruby"
+
+    with patch("subprocess.Popen") as mock_popen:
+        process = MagicMock()
+        process.returncode = 0
+        process.communicate.return_value = ("2 examples, 0 failures", "")
+        mock_popen.return_value = process
+
+        res = validator.run_tests(target_test=["spec/a_spec.rb", "spec/b_spec.rb"])
+
+    assert res["success"] is True
+    cmd = mock_popen.call_args_list[0].args[0]
+    assert cmd[-2:] == ["spec/a_spec.rb", "spec/b_spec.rb"]
+
+
 def test_ruby_run_tests_reports_bundle_install_failure_without_running_rspec(tmp_path):
     (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'\ngem 'rspec'\n")
 
@@ -1014,6 +1166,181 @@ def test_java_compile_check_trusts_maven_success_when_something_really_compiled(
         res = validator.run_compile_check(["App.java"])
 
     assert res["success"] is True
+
+
+# --- Maven multi-module reactor compile-check (P7 production-validation, 2026-09-07) -----
+# Live incident: a genuine Maven reactor (root pom.xml packaging=pom,
+# <modules>core, repository, api</modules>) had Maven correctly report BUILD
+# SUCCESS while the single-module check above rejected every one of 16
+# attempts identically - it always looked for <workspace>/target/classes,
+# which a pom-packaged aggregator root never produces (each module compiles
+# into its OWN <module>/target/classes). Bounded audit of the rest of this
+# file's Java/Maven path (run_tests, run_pom_validate, resolve_maven_
+# classpath, _has_any_java_file, stack detection) found no other root-
+# relative single-module assumption - this was the only one.
+
+_REACTOR_POM = """<project>
+  <packaging>pom</packaging>
+  <modules>
+    <module>core</module>
+    <module>repository</module>
+    <module>api</module>
+  </modules>
+</project>"""
+
+
+def _mock_mvn_success():
+    mock_process = MagicMock(returncode=0)
+    mock_process.communicate.return_value = ("BUILD SUCCESS", "")
+    return mock_process
+
+
+def _mock_mvn_failure():
+    mock_process = MagicMock(returncode=1)
+    mock_process.communicate.return_value = ("", "COMPILATION ERROR")
+    return mock_process
+
+
+def test_get_pom_reactor_modules_parses_real_declared_modules(tmp_path):
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+    assert get_pom_reactor_modules(str(tmp_path / "pom.xml")) == ["core", "repository", "api"]
+
+
+def test_get_pom_reactor_modules_empty_for_genuinely_single_module_pom(tmp_path):
+    """The exact minimal pom.xml the sibling single-module tests above
+    already use - ties this fix's own "single-module is completely
+    unaffected" claim directly to the pre-existing regression coverage."""
+    (tmp_path / "pom.xml").write_text("<project></project>")
+    assert get_pom_reactor_modules(str(tmp_path / "pom.xml")) == []
+
+
+def test_reactor_compile_check_succeeds_when_owning_modules_have_real_classes(tmp_path):
+    """(1) The exact P7 reproduction shape: root pom.xml declares a real
+    reactor; both candidate .java files' owning modules (core, repository)
+    have real .class output in their OWN target/classes; the aggregator
+    root's own target/classes never exists at all (packaging=pom - a real
+    Maven aggregator produces nothing there) - must succeed."""
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+    (tmp_path / "core" / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "core" / "target" / "classes" / "UserService.class").write_bytes(b"")
+    (tmp_path / "repository" / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "repository" / "target" / "classes" / "UserServiceImpl.class").write_bytes(b"")
+    assert not (tmp_path / "target").exists()  # (7) aggregator root has none - still valid
+
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
+        res = validator.run_compile_check([
+            "core/src/main/java/com/narendra/app/core/ports/UserService.java",
+            "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
+        ])
+
+    assert res["success"] is True
+
+
+def test_reactor_compile_check_fails_when_owning_module_produced_no_classes(tmp_path):
+    """(3) Maven reports success, but the module that actually owns the
+    candidate .java file produced zero .class files - the real live
+    failure this fix exists to correctly diagnose (rather than falsely
+    accept OR falsely reject) - must fail, and name the real module."""
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+    # repository/target/classes deliberately does not exist at all.
+
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
+        res = validator.run_compile_check([
+            "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
+        ])
+
+    assert res["success"] is False
+    assert "repository" in res["output"]
+    assert "target/classes" in res["output"]
+
+
+def test_reactor_compile_check_scans_every_owning_module_not_just_the_first(tmp_path):
+    """Candidates span TWO reactor modules (the real P7 shape - it modifies
+    Java in both core and repository): core produced real output,
+    repository did not. Must not stop after finding the first owning
+    module's bytecode - the loop has to keep checking every distinct
+    owning module and report exactly the one that's actually missing, not
+    just whichever it happens to see first, and not the one that's fine."""
+    (tmp_path / "core" / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "core" / "target" / "classes" / "A.class").write_bytes(b"")
+    # repository/target/classes deliberately does not exist.
+
+    validator = PolymorphicValidator(str(tmp_path))
+    missing = validator._java_reactor_modules_missing_compiled_output(
+        [
+            "core/src/main/java/com/narendra/app/core/A.java",
+            "repository/src/main/java/com/narendra/app/serviceImpl/B.java",
+        ],
+        ["core", "repository", "api"],
+    )
+
+    assert missing == ["repository"]
+
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
+        res = validator.run_compile_check([
+            "core/src/main/java/com/narendra/app/core/A.java",
+            "repository/src/main/java/com/narendra/app/serviceImpl/B.java",
+        ])
+    assert res["success"] is False
+    assert "repository" in res["output"]
+
+
+def test_reactor_compile_check_stale_unrelated_module_classes_do_not_grant_false_success(tmp_path):
+    """(4) core has real, stale .class output; repository (the module that
+    actually owns the ONLY candidate file) has none - the fix must not be
+    satisfiable by ANY declared module having classes, only the module(s)
+    that genuinely own a candidate in this change set."""
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+    (tmp_path / "core" / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "core" / "target" / "classes" / "Unrelated.class").write_bytes(b"")
+    # repository/target/classes deliberately does not exist.
+
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
+        res = validator.run_compile_check([
+            "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
+        ])
+
+    assert res["success"] is False
+    assert "repository" in res["output"]
+
+
+def test_reactor_compile_check_does_not_require_every_module_to_produce_classes(tmp_path):
+    """(2)/(7) A module (api) that owns NO candidate file in this change
+    set must never be required to have compiled output - api has no
+    target/classes at all here, and is correctly never mentioned, because
+    only core (which owns the one real candidate) is checked."""
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+    (tmp_path / "core" / "target" / "classes").mkdir(parents=True)
+    (tmp_path / "core" / "target" / "classes" / "Foo.class").write_bytes(b"")
+    # repository/ and api/ have no target/classes at all, and own no candidate.
+
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch("subprocess.Popen", return_value=_mock_mvn_success()):
+        res = validator.run_compile_check(["core/src/main/java/com/narendra/app/core/Foo.java"])
+
+    assert res["success"] is True
+
+
+def test_reactor_compile_check_maven_failure_still_fails(tmp_path):
+    """(5) A genuine Maven compile failure (non-zero exit) must still be a
+    failure for a reactor exactly as it already is for a single-module
+    project - the reactor-awareness only changes how a returncode==0
+    result is double-checked, never bypasses a real Maven-reported error."""
+    (tmp_path / "pom.xml").write_text(_REACTOR_POM)
+
+    validator = PolymorphicValidator(str(tmp_path))
+    with patch("subprocess.Popen", return_value=_mock_mvn_failure()):
+        res = validator.run_compile_check([
+            "repository/src/main/java/com/narendra/app/serviceImpl/UserServiceImpl.java",
+        ])
+
+    assert res["success"] is False
+    assert "COMPILATION ERROR" in res["output"]
+
 
 def test_java_compile_check_reports_missing_mvn_without_javac_fallback(tmp_path):
     # Regression test: previously a missing 'mvn' binary was silently logged at
@@ -1370,3 +1697,75 @@ def test_java_home_override_also_applies_under_sandbox_execution(tmp_path):
         _, kwargs = mock_popen.call_args
         assert kwargs["env"]["JAVA_HOME"] == "/opt/jdk-17"
         assert kwargs["preexec_fn"] is not None  # sandboxing still applied too
+
+
+def test_run_app_sequence_multi_package_test_file_target_hits_module_not_found(tmp_path):
+    """Deterministic reproducer for a real live-evidence incident (VER-005/
+    RECV-002 E4 campaign, 2026-09-13, see docs/assurance/
+    KRIYA_VER005_RECV002_LIVE_EVIDENCE.md, run_id 20260913T230532-ea0f24f7):
+    a correct, real multi-package Python candidate (real sibling top-level
+    packages, no CLI/service entrypoint) failed terminal verification twice
+    live, on two different goals, because RunVerifierAgent's own judgment
+    (contrary to its own system prompt's explicit "do NOT return ... a test
+    command as proof of observable runtime behavior" instruction) selected a
+    test file as the runtime-verification target, and Kriya's execution
+    layer then ran it via a bare `python <relative-path>` subprocess - which
+    only puts the script's OWN containing directory on sys.path[0], never
+    the process cwd/repository root, so any test file importing a sibling
+    top-level package fails with ModuleNotFoundError regardless of whether
+    that package's own content is correct.
+
+    This test exercises the REAL, non-mocked PolymorphicValidator.
+    run_app_sequence() (no model involved - the judge's own selection isn't
+    deterministically reproducible; what's pinned here is that WHEN this
+    exact command shape occurs against a real multi-package layout, it (a)
+    genuinely reproduces the failure and (b) is still correctly classified
+    as a verifier-infrastructure failure, not an application-logic defect -
+    exactly as observed live, so a real correct candidate is never
+    misattributed to the Developer.
+
+    VER-005 implementation (2026-09-13): prevention of this exact incident
+    now lives UPSTREAM of run_app_sequence() - see kriya/workflow/
+    file_resolution.py::ground_python_runtime_target() and kriya/workflow/
+    attempt.py's own two call sites, which deterministically reject a
+    test-shaped verifier target before it ever reaches here (proven in
+    tests/test_ver005_python_runtime_target_grounding.py). This test is kept
+    UNCHANGED and still passes - it documents that IF this exact bad command
+    is ever handed to run_app_sequence() directly (e.g. a future bypass of
+    the upstream grounding), the underlying OS-level failure mode and its
+    correct infrastructure classification are still exactly as described
+    above; it is no longer the only thing standing between a bad target and
+    a spurious candidate failure."""
+    (tmp_path / "validation").mkdir()
+    (tmp_path / "validation" / "__init__.py").write_text("")
+    (tmp_path / "validation" / "email_rules.py").write_text(
+        "def is_valid_email(email):\n"
+        "    return bool(email) and '@' in email\n"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "__init__.py").write_text("")
+    (tmp_path / "tests" / "test_email_rules.py").write_text(
+        "from validation.email_rules import is_valid_email\n"
+        "\n"
+        "def test_valid_email():\n"
+        "    assert is_valid_email('user@example.com')\n"
+    )
+
+    validator = PolymorphicValidator(str(tmp_path))
+    result = validator.run_app_sequence(
+        [[sys.executable, "tests/test_email_rules.py"]], timeout=10
+    )
+
+    assert result["success"] is False
+    assert "ModuleNotFoundError" in result["output"]
+    assert "No module named" in result["output"]
+    assert "validation" in result["output"]
+
+    reason = runtime_verification_infrastructure_reason(result)
+    assert reason is not None, (
+        "a sibling-package ModuleNotFoundError from a direct-script-executed "
+        "test file must classify as verifier infrastructure, not application "
+        "logic - misclassifying this would wrongly attribute a real "
+        "verifier-invocation defect to the Developer's own candidate code"
+    )
+    assert runtime_application_step_started(result) is False

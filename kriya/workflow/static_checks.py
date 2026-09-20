@@ -48,6 +48,8 @@ this class of check (see kriya/workflow/failure_grounding.py's
 extract_implicated_files() docstring): a false positive is low-cost since it's
 just one more retry cycle, not a hard block.
 """
+import json
+import logging
 import os
 import re
 import ast
@@ -55,9 +57,11 @@ import io
 import tokenize
 from dataclasses import dataclass
 import xml.etree.ElementTree as ET
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from kriya.workflow.edit_safety import _strip_java_comments_and_strings
+
+logger = logging.getLogger(__name__)
 
 
 class StaticCheck:
@@ -422,6 +426,21 @@ class MarkdownInlineCodeLeakCheck(StaticCheck):
 
     name = "markdown_inline_code_leak"
 
+    # Python 3.12+'s PEP 701 tokenizer emits FSTRING_START/MIDDLE/END for an
+    # f-string's own literal text instead of a single STRING token - without
+    # these, an f-string's literal content (which can legitimately contain a
+    # backtick-like substring) is never blanked and falsely trips this check
+    # on valid Python source. getattr() with a None default keeps this
+    # working on Python 3.10/3.11, where these constants don't exist.
+    _BLANKABLE_TOKEN_TYPES = tuple(
+        token_type for token_type in (
+            tokenize.STRING, tokenize.COMMENT,
+            getattr(tokenize, "FSTRING_START", None),
+            getattr(tokenize, "FSTRING_MIDDLE", None),
+            getattr(tokenize, "FSTRING_END", None),
+        ) if token_type is not None
+    )
+
     @staticmethod
     def _python_executable_regions(content: str) -> Optional[str]:
         """Return Python with strings/comments blanked, or None if invalid.
@@ -435,7 +454,7 @@ class MarkdownInlineCodeLeakCheck(StaticCheck):
             tokens = tokenize.generate_tokens(io.StringIO(content).readline)
             lines = content.splitlines(keepends=True)
             for token in tokens:
-                if token.type not in (tokenize.STRING, tokenize.COMMENT):
+                if token.type not in MarkdownInlineCodeLeakCheck._BLANKABLE_TOKEN_TYPES:
                     continue
                 (start_line, start_col), (end_line, end_col) = token.start, token.end
                 for line_index in range(start_line - 1, end_line):
@@ -760,23 +779,103 @@ class StackContract:
     authority: str = "USER_GOAL"
 
 
+# PRV-17 (2026-09-03): the family/framework detection above used to be
+# negation-blind - a goal like "Use Python/Django. Do not use Java, Spring,
+# Maven, Gradle, Node.js." matched THREE families (python, java, node) with
+# equal weight, so _goal_declared_family's own "two-plus families = genuinely
+# ambiguous" rule fired on a goal that was never actually ambiguous - it
+# POSITIVELY requested exactly one stack and explicitly PROHIBITED several
+# competing ones, which is the opposite of ambiguity. Fixed at clause
+# granularity rather than a whole-goal negation flag, since a goal can
+# legitimately mix a positive requirement and a prohibition in the same
+# text (as this exact scenario does) - a single global "is this goal
+# negated" bit can't represent that. Small, closed-vocabulary cue set,
+# deliberately NOT a general negation/NLP detector - the same posture
+# kriya/workflow/attribution.py's own _REMOVAL_PHRASE_RE documents for its
+# analogous "problem being moved away from, not the fix" goal parse, here
+# applied to goal text's own "requested vs. prohibited technology" shape.
+_NEGATION_CUE_RE = re.compile(
+    r"\b(?:do not|don't|does not|doesn't|never|avoid|must not|should not|no longer)\s+use\b",
+    re.IGNORECASE,
+)
+
+
+def _goal_clauses(goal: str) -> List[str]:
+    """Splits goal text into sentence/line-level clauses - the granularity
+    a negation cue's scope stays bounded to (a period, newline, or
+    exclamation/question mark ends it; a comma-separated technology list
+    inside ONE clause, e.g. "Do not use Java, Spring, Maven", stays
+    together, which is exactly the shape real goal text uses)."""
+    return re.split(r"[.\n!?]+", goal or "")
+
+
+def _classify_goal_families(goal: str) -> Tuple[Set[str], Set[str]]:
+    """Returns (positively_requested_families, explicitly_prohibited_families) -
+    each family classified per the CLAUSE it appears in, not the whole goal,
+    so a goal that both positively requests one stack and explicitly
+    prohibits others in separate clauses/sentences classifies each correctly
+    instead of registering every mention as one undifferentiated pile of
+    "families this goal talks about"."""
+    positive: Set[str] = set()
+    prohibited: Set[str] = set()
+    for clause in _goal_clauses(goal):
+        if not clause.strip():
+            continue
+        bucket = prohibited if _NEGATION_CUE_RE.search(clause) else positive
+        for family, pattern in _GOAL_FAMILY_PATTERNS.items():
+            if pattern.search(clause):
+                bucket.add(family)
+    return positive, prohibited
+
+
 def _goal_declared_family(goal: str) -> Optional[str]:
-    """The single, unambiguous language family the goal text names - None
-    if the goal names zero families (nothing to check against) OR two-plus
-    DIFFERENT families (an intentionally mixed-stack goal, e.g. "a Python
-    service called from a Java client" - ambiguous on purpose, not this
-    check's business to referee)."""
-    matched = {family for family, pattern in _GOAL_FAMILY_PATTERNS.items() if pattern.search(goal or "")}
-    return next(iter(matched)) if len(matched) == 1 else None
+    """The single, unambiguous language family the goal text POSITIVELY
+    requests - None if the goal positively requests zero families (nothing
+    to check against) OR two-plus DIFFERENT families (a genuinely mixed-
+    stack goal, e.g. "a Python service called from a Java client" -
+    ambiguous on purpose, not this check's business to referee). A family
+    named only inside an explicitly prohibited/negated clause never counts
+    toward this ambiguity check - see _classify_goal_families above."""
+    positive, _prohibited = _classify_goal_families(goal)
+    return next(iter(positive)) if len(positive) == 1 else None
+
+
+def _positively_requested_frameworks(goal: str, names: Tuple[str, ...]) -> Tuple[str, ...]:
+    """Same positive/prohibited clause split as _classify_goal_families,
+    applied to framework NAMES rather than family keywords - a framework
+    named only in a prohibition clause (e.g. "Spring" in "Do not use ...
+    Spring ...") must not be reported as part of the requested contract."""
+    positive_text = " ".join(
+        clause for clause in _goal_clauses(goal)
+        if clause.strip() and not _NEGATION_CUE_RE.search(clause)
+    ).lower()
+    return tuple(name for name in names if name in positive_text)
 
 
 def derive_stack_contract(goal: str) -> Optional[StackContract]:
     family = _goal_declared_family(goal)
     if family is None:
         return None
-    lowered = (goal or "").lower()
-    frameworks = tuple(name for name in ("django", "spring") if name in lowered)
+    frameworks = _positively_requested_frameworks(goal, ("django", "spring"))
     return StackContract(languages=(family,), frameworks=frameworks)
+
+
+def log_stack_contract_boundary(
+    boundary: str, contract: Optional[StackContract], violation: Optional[str],
+) -> None:
+    """Structured STACK_CONTRACT_BOUNDARY log line, shared by every call site
+    that runs validate_stack_contract_artifacts (candidate/plan/terminal
+    boundaries) - was duplicated verbatim at each site, risking drift
+    between them on a future schema change."""
+    logger.info(
+        "STACK_CONTRACT_BOUNDARY %s",
+        json.dumps({
+            "boundary": boundary,
+            "languages": list(getattr(contract, "languages", ())),
+            "frameworks": list(getattr(contract, "frameworks", ())),
+            "decision": "REJECT" if violation else "PASS",
+        }, sort_keys=True),
+    )
 
 
 def validate_stack_contract_artifacts(

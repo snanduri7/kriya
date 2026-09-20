@@ -112,6 +112,17 @@ def _load_json_document(path: str, workspace_path: Optional[str] = None) -> Opti
 
 
 def save_control_state(workspace_path: str, state: ControlState) -> None:
+    # Pure save - persists exactly the ControlState it is given, never
+    # silently mutates a field first (a real caller-visible round-trip
+    # invariant several existing tests rely on directly: save(x); reload();
+    # assert reloaded == x). STATE-001's own workspace_content_hash
+    # freshness requirement is the CALLER's responsibility - see
+    # kriya/workflow/workflow_controller.py's own _save_control_state_
+    # with_fresh_content_hash() for the one real caller that actually needs
+    # per-save freshness (structured/enforce-mode's per-subtask loop,
+    # where real content changes between saves within the SAME run) -
+    # deliberately NOT centralized here, where it would silently diverge
+    # what every OTHER caller persists from what it explicitly passed in.
     _save_json_document(workspace_path, control_state_path(workspace_path), state.to_dict())
 
 

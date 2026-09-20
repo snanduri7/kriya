@@ -14,10 +14,10 @@ import tokenize
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
-from kriya.workflow.edit_safety import _strip_java_comments_and_strings
+from kriya.workflow.edit_safety import _strip_java_comments_and_strings, content_revision
 from kriya.workflow.process_profile import ContextDepth
 
 logger = logging.getLogger(__name__)
@@ -631,36 +631,39 @@ def _reserve_sibling_content_budget(model_context_window: int) -> int:
 _TIER_STEPS = ("full", "skeleton", "signatures")
 
 
-def build_code_context(matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int, file_scores: Optional[Dict[str, float]] = None) -> str:
-    matched_contents = {}
-    for f in matched_files:
-        full_p = os.path.join(workspace_path, f)
-        if os.path.exists(full_p):
-            try:
-                with open(full_p, "r", encoding="utf-8", errors="replace") as fh:
-                    matched_contents[f] = fh.read()
-            except Exception as e:
-                logger.debug(f"Failed to read matched file '{full_p}' for RAG context: {e}")
+# --- CTX-001 P1 WP6: omission reason vocabulary -----------------------------
+# docs/assurance/CTX_001_P1_ARCHITECTURE.md section 8 - extends, never
+# replaces, today's implicit reasons. Every material degradation/omission
+# this module's shared allocator produces uses one of these, never a bare
+# unexplained drop.
+REASON_BUDGET_EXHAUSTED = "budget_exhausted"
+REASON_BODY_ELIDED = "body_elided"
+REASON_UNSUPPORTED_STRUCTURAL_EXTRACTION = "unsupported_structural_extraction"
+REASON_STALE_REVISION_REJECTED = "stale_revision_rejected"
+REASON_LOWER_RELEVANCE = "lower_relevance"
+REASON_SOURCE_UNAVAILABLE = "source_unavailable"
 
-    related_contents = {}
-    for f in related_files:
-        full_p = os.path.join(workspace_path, f)
-        if os.path.exists(full_p):
-            try:
-                with open(full_p, "r", encoding="utf-8", errors="replace") as fh:
-                    related_contents[f] = fh.read()
-            except Exception as e:
-                logger.debug(f"Failed to read related file '{full_p}' for RAG context: {e}")
+# CTX-001 P1 WP7/A5 (architecture doc section 10): a known-target file's
+# EFFECTIVE score is max(retrieval_score, KNOWN_TARGET_FLOOR) - high enough
+# that a known target degrades only after every non-target candidate has
+# already degraded to its own floor, but not so high that many known
+# targets can each claim the whole budget regardless of size. Matches the
+# upper end of DependencyGraph._RELATION_WEIGHTS' own hop-1 scale (graph.py)
+# - a real hop-1 "imports"/"inherits" hit scores exactly 1.0 there, so 0.75
+# stays a real, principled ceiling below the strongest possible organic
+# signal, not an arbitrary magic number.
+KNOWN_TARGET_FLOOR = 0.75
 
-    # Introduce cache for skeletonized content to optimize performance
-    skel_cache = {}
 
-    def get_skeletonized(content: str, filepath: str, tier: str) -> str:
-        key = (filepath, tier)
-        if key not in skel_cache:
-            skel_cache[key] = skeletonize_code(content, filepath, tier)
-        return skel_cache[key]
-
+def _build_file_tiers(
+    matched_contents: Dict[str, str], related_contents: Dict[str, str],
+    budget_limit: int, file_scores: Optional[Dict[str, float]],
+    get_skeletonized: Callable[[str, str, str], str],
+) -> Dict[str, str]:
+    """The exact tier-assignment algorithm build_code_context() has always
+    used (extracted verbatim, not rewritten) - the one place this decision
+    is made, shared by both the legacy string renderer and the WP6
+    ContextPackage-producing renderer below, so they can never drift apart."""
     if file_scores is None:
         # Original categorical degradation: every related file degrades one
         # tier before any matched file loses its own next tier - no signal
@@ -688,18 +691,9 @@ def build_code_context(matched_files: List[str], related_files: List[str], works
             else:
                 break
 
-        graph_rag_context = "\n\n=== Codebase Semantic Reference Context ===\n"
-        for filepath, content in matched_contents.items():
-            skel = get_skeletonized(content, filepath, matched_tier)
-            graph_rag_context += f"\nFile: {filepath} (Tier: {matched_tier})\n{skel}\n"
-
-        if related_contents:
-            graph_rag_context += "\n\n=== Bounded Neighborhood Dependency Context ===\n"
-            for filepath, content in related_contents.items():
-                skel = get_skeletonized(content, filepath, related_tier)
-                graph_rag_context += f"\nFile: {filepath} (Tier: {related_tier})\n{skel}\n"
-
-        return graph_rag_context
+        file_tiers = {f: matched_tier for f in matched_contents}
+        file_tiers.update({f: related_tier for f in related_contents})
+        return file_tiers
 
     # Score-aware degradation (2026-08-12 SME review, re-ranking retrieval):
     # each file (matched or related alike) has its own tier, degraded one
@@ -727,11 +721,122 @@ def build_code_context(matched_files: List[str], related_files: List[str], works
         next_tier = _TIER_STEPS[_TIER_STEPS.index(file_tiers[lowest]) + 1]
         file_tiers[lowest] = next_tier
 
+    return file_tiers
+
+
+def build_code_context_package(
+    matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int,
+    file_scores: Optional[Dict[str, float]] = None,
+    cache: "Optional[SourceDerivationCache]" = None,
+) -> Tuple[str, Any]:
+    """CTX-001 P1 WP6: the real implementation build_code_context() (below)
+    is now a thin wrapper around - becomes the one unit-producing AND
+    rendering path for the default pipeline's Graph RAG matched/related
+    context (architecture doc section 5a's own hard constraint). Internal
+    difference only: alongside the identical rendered string, this also
+    builds a real ContextPackage (relevant_files + an honest, reason-
+    labeled omitted[] list) - closing C6 (the default pipeline previously
+    had no structured provenance/omission tracking at all) without any
+    caller-visible signature/output change for build_code_context()'s own
+    existing callers.
+
+    Returns (rendered_string, ContextPackage) - rendered_string is
+    BYTE-IDENTICAL to what the pre-P1 build_code_context() produced for the
+    same inputs (see _build_file_tiers()'s own docstring: the tier-
+    assignment algorithm is reused verbatim, not reimplemented, and the
+    render loop below reproduces the exact same block format/order)."""
+    # Local imports: context_package.py has no dependency on this module
+    # today, and this keeps that direction one-way (avoids a new
+    # module-level import cycle risk for the common case where a caller
+    # only wants the plain-string build_code_context() below).
+    from kriya.policy.trust import TrustLevel
+    from kriya.workflow.context_package import build_context_package, make_context_item, make_omitted_entry
+
+    def _read(full_p: str, f: str) -> Optional[str]:
+        # CTX-001 P1 WP9: cache is None for every existing caller (default) -
+        # byte-identical fresh-read behavior, unchanged. A caller that wants
+        # attempt-lifetime reuse passes its own SourceDerivationCache
+        # (context_source.py) - shared with CurrentSourceResolver's own
+        # content_cache, so a file already read via either path this
+        # attempt is never re-read via the other.
+        if cache is not None:
+            read = cache.read(workspace_path, f)
+            return read[0] if read is not None else None
+        try:
+            with open(full_p, "r", encoding="utf-8", errors="replace") as fh:
+                return fh.read()
+        except Exception as e:
+            logger.debug(f"Failed to read '{full_p}' for RAG context: {e}")
+            return None
+
+    matched_contents = {}
+    for f in matched_files:
+        full_p = os.path.join(workspace_path, f)
+        if os.path.exists(full_p):
+            content = _read(full_p, f)
+            if content is not None:
+                matched_contents[f] = content
+
+    related_contents = {}
+    for f in related_files:
+        full_p = os.path.join(workspace_path, f)
+        if os.path.exists(full_p):
+            content = _read(full_p, f)
+            if content is not None:
+                related_contents[f] = content
+
+    # Per-call memo (unchanged from pre-WP9 behavior) PLUS, when `cache` is
+    # given, the attempt-lifetime SourceDerivationCache - the per-call dict
+    # still avoids a second dict lookup for the ~3-5 repeat calls each file
+    # gets within ONE _build_file_tiers() budget search; `cache` is what
+    # actually survives across separate build_code_context_package() calls
+    # (different retries in the same attempt).
+    skel_cache = {}
+
+    def get_skeletonized(content: str, filepath: str, tier: str) -> str:
+        key = (filepath, tier)
+        if key not in skel_cache:
+            if cache is not None:
+                revision = content_revision(content)
+                rendered, _tokens = cache.get_or_compute_derivation(
+                    filepath, None, tier, revision,
+                    lambda: skeletonize_code(content, filepath, tier),
+                )
+                skel_cache[key] = rendered
+            else:
+                skel_cache[key] = skeletonize_code(content, filepath, tier)
+        return skel_cache[key]
+
+    omitted: List[Dict[str, Any]] = []
+    # source_unavailable (P0's own finding: today this is a SILENT
+    # `except Exception: logger.debug(...)` swallow, context_budget.py's
+    # pre-P1 lines 642-643) - now also a real, recorded omission entry,
+    # alongside the unchanged debug log.
+    for f in matched_files:
+        if f not in matched_contents:
+            omitted.append(make_omitted_entry(path=f, rank=0, reason=REASON_SOURCE_UNAVAILABLE, estimated_tokens=0))
+    for f in related_files:
+        if f not in related_contents:
+            omitted.append(make_omitted_entry(path=f, rank=0, reason=REASON_SOURCE_UNAVAILABLE, estimated_tokens=0))
+
+    file_tiers = _build_file_tiers(matched_contents, related_contents, budget_limit, file_scores, get_skeletonized)
+
     graph_rag_context = "\n\n=== Codebase Semantic Reference Context ===\n"
+    items = []
     for filepath, content in matched_contents.items():
         tier = file_tiers[filepath]
         skel = get_skeletonized(content, filepath, tier)
         graph_rag_context += f"\nFile: {filepath} (Tier: {tier})\n{skel}\n"
+        items.append(make_context_item(
+            path=filepath, content=skel, reason="graph_rag_matched_file", source_type="semantic_hit",
+            trust_level=TrustLevel.REPOSITORY, score=(file_scores or {}).get(filepath),
+            tier=tier, is_exact=(tier == "full"), revision=content_revision(content),
+            omitted_regions=(tier != "full"),
+        ))
+        if tier != "full":
+            omitted.append(make_omitted_entry(
+                path=filepath, rank=0, reason=REASON_BODY_ELIDED, estimated_tokens=estimate_tokens(skel),
+            ))
 
     if related_contents:
         graph_rag_context += "\n\n=== Bounded Neighborhood Dependency Context ===\n"
@@ -739,5 +844,332 @@ def build_code_context(matched_files: List[str], related_files: List[str], works
             tier = file_tiers[filepath]
             skel = get_skeletonized(content, filepath, tier)
             graph_rag_context += f"\nFile: {filepath} (Tier: {tier})\n{skel}\n"
+            items.append(make_context_item(
+                path=filepath, content=skel, reason="graph_rag_related_file", source_type="graph_dependency",
+                trust_level=TrustLevel.REPOSITORY, score=(file_scores or {}).get(filepath),
+                tier=tier, is_exact=(tier == "full"), revision=content_revision(content),
+                omitted_regions=(tier != "full"),
+            ))
+            if tier != "full":
+                omitted.append(make_omitted_entry(
+                    path=filepath, rank=0, reason=REASON_BODY_ELIDED, estimated_tokens=estimate_tokens(skel),
+                ))
 
-    return graph_rag_context
+    package = build_context_package(
+        relevant_files=tuple(items),
+        omitted=tuple(omitted),
+        token_count=sum(estimate_tokens(item.content) for item in items),
+    )
+    return graph_rag_context, package
+
+
+def build_code_context(
+    matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int,
+    file_scores: Optional[Dict[str, float]] = None, cache: "Optional[SourceDerivationCache]" = None,
+) -> str:
+    return build_code_context_package(matched_files, related_files, workspace_path, budget_limit, file_scores, cache)[0]
+
+
+def _fit_whole_file(content: str, remaining_tokens: int) -> Optional[Tuple[str, str, str, bool]]:
+    """Whole-file (no member hint, or member extraction unavailable/
+    over-budget) fallback for build_known_target_context() below. Unlike
+    build_code_context()'s own skeleton/signatures structural tiers, a
+    known-target file's worst case is a BOUNDED, revision-marked head+tail
+    EXCERPT of its real body (project_implementation_source, already used
+    by RetryPackage) - architecture doc section 9's own explicit "converges
+    onto RetryPackage's pattern rather than reinventing" instruction: for a
+    "repair this exact file" instruction, real (if truncated) implementation
+    beats a structural skeleton with every body already replaced by "...".
+
+    Returns (tier, rendered_content, reason, omitted_regions), or None only
+    when remaining_tokens <= 0 (nothing at all can fit - the caller must
+    record an explicit budget_exhausted omission instead; every other case
+    always returns real content, since project_implementation_source always
+    fits within the given character budget by construction).
+
+    CTX-001 P1 WP9 (deliberately NOT cache-routed): unlike skeletonize_code()/
+    extract_member_body() (pure functions of content+tier/line-range alone,
+    safe to cache by (path, tier-or-member_id, revision)), this function's
+    own bounded-excerpt output is a function of `remaining_tokens` too - the
+    SAME file's cached excerpt from an earlier call (when a different
+    amount of budget happened to be left) would be WRONG-SIZED for a later
+    call with a different remaining_tokens, silently violating cached-vs-
+    uncached semantic equivalence. Caching this would require folding the
+    budget into the cache key, defeating cross-call reuse for exactly the
+    case (budget genuinely differs run to run) real reuse would matter
+    least. Left uncached; the FULL-content branch just above needs no
+    caching benefit anyway (no real computation beyond estimate_tokens)."""
+    if remaining_tokens <= 0:
+        return None
+    full_cost = estimate_tokens(content)
+    if full_cost <= remaining_tokens:
+        return ("full", content, "known_target_full_source", False)
+    from kriya.workflow.context_projection import project_implementation_source
+
+    max_chars = remaining_tokens * 4  # inverse of estimate_tokens' own len//4 heuristic
+    projection = project_implementation_source(
+        content, "known_target", max_chars, reason="known_target_bounded_excerpt",
+    )
+    # CTX_001_P1_ARCHITECTURE.md section 4's own compatibility mapping:
+    # IMPLEMENTATION_EXCERPT -> tier "skeleton", omitted_regions=True -
+    # distinguishable from a real STRUCTURAL skeleton only via `reason`
+    # (free text), not a dedicated tier value.
+    return ("skeleton", projection.content, "known_target_bounded_excerpt", True)
+
+
+def _render_known_target_block(items: List[Any], omitted: List[Dict[str, Any]]) -> str:
+    """Mirrors RetryPackage.render_context()'s own established pattern
+    (retry_package.py's "=== Additional files omitted from retry evidence
+    budget ===" block) - generalized here rather than reinvented. Renders a
+    BOUNDED summary line for any omission, so "modification-critical exact
+    target evidence could not be represented" is never silent from the
+    model's own side (WP7's own critical invariant) - the full, reason-
+    labeled detail lives on the returned ContextPackage/run trace, never
+    dumped in full into the prompt itself (observability requirement: don't
+    flood the prompt with internal metadata)."""
+    if not items and not omitted:
+        return ""
+    blocks = []
+    for item in items:
+        label = f"member {item.member_id}" if item.member_id else "full source"
+        blocks.append(f"=== EXISTING OWNER ({label}, tier={item.tier}): {item.path} ===\n{item.content}")
+    if omitted:
+        omitted_paths = sorted({str(o["path"]) for o in omitted})
+        blocks.append(
+            "=== Additional known-target evidence omitted from this context budget "
+            "(see run trace for reason/path detail - do not assume it matches the code above) ===\n"
+            + ", ".join(omitted_paths)
+        )
+    return (
+        "\n\n=== AUTHORITATIVE BROWNFIELD OWNER CONTRACT: EXISTING SOURCE ===\n"
+        + "\n\n".join(blocks)
+    )
+
+
+def build_known_target_context(
+    known_target_files: List[str],
+    workspace_path: str,
+    worktree_path: Optional[str],
+    budget_limit: int,
+    *,
+    file_scores: Optional[Dict[str, float]] = None,
+    member_hints: Optional[Dict[str, Union[str, Sequence[str]]]] = None,
+    known_revisions: Optional[Dict[str, str]] = None,
+    exclude: Optional[Iterable[str]] = None,
+    cache: "Optional[SourceDerivationCache]" = None,
+) -> Tuple[str, Any]:
+    """CTX-001 P1 WP7 (A3+A5): replaces attempt.py's own
+    _brownfield_owner_contract_block()'s SOURCE-CONTENT responsibility (its
+    instruction-text responsibility is unchanged, stays in task_desc - see
+    that function's own updated docstring). Retires the naive 24,000-char
+    combined prefix cap entirely (never raised - architecture doc section 9's
+    explicit "do NOT solve by making the cap larger" instruction) in favor
+    of: current-source resolution (WP4, worktree-authoritative), member-aware
+    exact source where a caller supplies a member_hints entry and the
+    language supports it (WP5), a priority floor rather than unconditional/
+    unlimited inclusion (A5, KNOWN_TARGET_FLOOR above), and explicit,
+    reason-labeled omission for anything that genuinely cannot fit - never a
+    silent `break`.
+
+    `exclude` lets a caller skip paths already represented through a
+    DIFFERENT context producer (e.g. build_code_context_package()'s own
+    Graph-RAG matched/related output) - the DUPLICATE_SOURCE_CONTEXT_PATHS=0
+    requirement's own mechanism: known-target evidence always wins for
+    EXACTNESS over a possibly-degraded Graph-RAG hit for the same path, so
+    the correct precedence is "exclude a known-target path from the lower-
+    fidelity producer", never the reverse - callers are expected to already
+    apply that precedence before calling this function (see attempt.py's own
+    integration).
+
+    Returns (rendered_string, ContextPackage) - the rendered string is meant
+    to be appended to active_code_context (source content), never task_desc
+    (instructions) - see the module-level split this function implements."""
+    from kriya.policy.trust import TrustLevel
+    from kriya.workflow.context_package import build_context_package, make_context_item, make_omitted_entry
+    from kriya.workflow.context_source import (
+        CurrentSourceResolver, boundaries_matching_member_id, extract_member_body, member_boundaries_for,
+    )
+
+    exclude_set = set(exclude or ())
+    # CTX-001 P1 WP9: cache is None for every existing caller (default) -
+    # a fresh, private content_cache dict, byte-identical to pre-WP9
+    # behavior. A caller wanting attempt-lifetime reuse passes its own
+    # SourceDerivationCache - shared with build_code_context_package()'s
+    # own reads, so no file is ever read twice via two different producers
+    # in the same attempt.
+    resolver = CurrentSourceResolver(
+        workspace_path, worktree_path, known_revisions,
+        content_cache=(cache.content_cache if cache is not None else None),
+    )
+
+    def effective_score(path: str) -> float:
+        return max((file_scores or {}).get(path, 0.0), KNOWN_TARGET_FLOOR)
+
+    # De-dup while preserving first-seen order (dict.fromkeys), then
+    # priority-floor-then-score sort (stable - ties keep that first-seen/
+    # Architect-list order, never an arbitrary one) - "allocation order
+    # becomes a function of (floor, score), never list position" (A5).
+    ordered_paths = [p for p in dict.fromkeys(known_target_files) if p not in exclude_set]
+    ordered_paths.sort(key=effective_score, reverse=True)
+
+    items: List[Any] = []
+    omitted: List[Dict[str, Any]] = []
+    consumed = 0
+
+    for rank, path in enumerate(ordered_paths, start=1):
+        resolved = resolver.resolve(path)
+        if not resolved.exists:
+            omitted.append(make_omitted_entry(path=path, rank=rank, reason=REASON_SOURCE_UNAVAILABLE, estimated_tokens=0))
+            continue
+        if resolved.stale_hint:
+            # Not fatal - resolved.content/revision are already the REAL,
+            # freshly-read values (the resolver never trusts a stale hint
+            # silently); recorded so a caller can see a supplied
+            # known_revisions hint didn't match reality.
+            omitted.append(make_omitted_entry(path=path, rank=rank, reason=REASON_STALE_REVISION_REJECTED, estimated_tokens=0))
+
+        remaining = budget_limit - consumed
+        if remaining <= 0:
+            omitted.append(make_omitted_entry(
+                path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
+                estimated_tokens=estimate_tokens(resolved.content),
+            ))
+            continue
+
+        # CTX-001 P1 C2 production integration: member_hints[path] may be a
+        # bare string (Package 2's original, single-member shape - still
+        # fully supported) or a list/tuple of member_ids (multiple grounded
+        # candidates for the same file - e.g. two Java overloads a bare
+        # name alone could not uniquely distinguish; see
+        # context_source.py::member_ids_matching_name's own docstring).
+        # Never a new type, never a redesign of the call boundary - just an
+        # additive Union on the existing dict's VALUE shape.
+        raw_hint = (member_hints or {}).get(path)
+        if isinstance(raw_hint, str):
+            member_id_candidates = [raw_hint]
+        elif raw_hint:
+            member_id_candidates = list(raw_hint)
+        else:
+            member_id_candidates = []
+
+        member_produced = False
+        if member_id_candidates:
+            boundaries = member_boundaries_for(path, resolved.content)
+            if boundaries is None:
+                for member_id in member_id_candidates:
+                    omitted.append(make_omitted_entry(
+                        path=path, rank=rank, reason=REASON_UNSUPPORTED_STRUCTURAL_EXTRACTION,
+                        estimated_tokens=0, member_id=member_id,
+                    ))
+            else:
+                for member_id in member_id_candidates:
+                    # An ambiguous (overloaded) member_id expands to EVERY
+                    # real boundary sharing it - never an arbitrary "first
+                    # match" pick (context_source.py::
+                    # boundaries_matching_member_id's own docstring).
+                    matching_boundaries = boundaries_matching_member_id(boundaries, member_id)
+                    if not matching_boundaries:
+                        omitted.append(make_omitted_entry(
+                            path=path, rank=rank, reason=REASON_UNSUPPORTED_STRUCTURAL_EXTRACTION,
+                            estimated_tokens=0, member_id=member_id,
+                        ))
+                        continue
+                    for boundary in matching_boundaries:
+                        member_remaining = budget_limit - consumed
+                        if member_remaining <= 0:
+                            omitted.append(make_omitted_entry(
+                                path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
+                                estimated_tokens=0, member_id=member_id,
+                            ))
+                            continue
+                        if cache is not None:
+                            # Cache-key discriminator includes the boundary's
+                            # own line range, not just member_id - an
+                            # ambiguous (overloaded) name can resolve to
+                            # SEVERAL distinct boundaries sharing one
+                            # member_id (see boundaries_matching_member_id's
+                            # own docstring); using member_id alone here
+                            # would collide two real, DIFFERENT bodies into
+                            # one cache entry. The ContextItem's own
+                            # member_id (below) stays the clean, real value -
+                            # this discriminator is a cache-key-only detail.
+                            cache_member_id = f"{member_id}:{boundary.start_line}-{boundary.end_line}"
+                            member_content, member_cost = cache.get_or_compute_derivation(
+                                path, cache_member_id, "member_exact", resolved.revision,
+                                lambda b=boundary: extract_member_body(resolved.content, b.start_line, b.end_line),
+                            )
+                        else:
+                            member_content = extract_member_body(resolved.content, boundary.start_line, boundary.end_line)
+                            member_cost = estimate_tokens(member_content)
+                        if member_cost <= member_remaining:
+                            items.append(make_context_item(
+                                path=path, content=member_content, reason="known_target_member_exact",
+                                source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
+                                score=effective_score(path), member_id=member_id,
+                                start_line=boundary.start_line, end_line=boundary.end_line,
+                                tier="member_exact", is_exact=True, revision=resolved.revision,
+                                omitted_regions=False,
+                            ))
+                            consumed += member_cost
+                            member_produced = True
+                        else:
+                            omitted.append(make_omitted_entry(
+                                path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=member_cost,
+                                member_id=member_id,
+                            ))
+
+            if member_produced:
+                sibling_remaining = budget_limit - consumed
+                if sibling_remaining > 0:
+                    if cache is not None:
+                        sibling_text, sib_cost = cache.get_or_compute_derivation(
+                            path, None, "signatures", resolved.revision,
+                            lambda: skeletonize_code(resolved.content, path, "signatures"),
+                        )
+                    else:
+                        sibling_text = skeletonize_code(resolved.content, path, "signatures")
+                        sib_cost = estimate_tokens(sibling_text) if sibling_text else 0
+                    if sibling_text:
+                        if sib_cost <= sibling_remaining:
+                            items.append(make_context_item(
+                                path=path, content=sibling_text, reason="known_target_sibling_signatures",
+                                source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
+                                score=effective_score(path), tier="signatures", is_exact=False,
+                                revision=resolved.revision, omitted_regions=True,
+                            ))
+                            consumed += sib_cost
+                        else:
+                            omitted.append(make_omitted_entry(
+                                path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=sib_cost,
+                            ))
+
+        if member_produced:
+            continue
+
+        remaining = budget_limit - consumed
+        fit = _fit_whole_file(resolved.content, remaining)
+        if fit is None:
+            omitted.append(make_omitted_entry(
+                path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
+                estimated_tokens=estimate_tokens(resolved.content),
+            ))
+            continue
+        tier, rendered_content, reason, omitted_regions = fit
+        items.append(make_context_item(
+            path=path, content=rendered_content, reason=reason, source_type="named_in_request",
+            trust_level=TrustLevel.REPOSITORY, score=effective_score(path), tier=tier,
+            is_exact=(tier == "full"), revision=resolved.revision, omitted_regions=omitted_regions,
+        ))
+        consumed += estimate_tokens(rendered_content)
+        if omitted_regions:
+            omitted.append(make_omitted_entry(
+                path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=estimate_tokens(rendered_content),
+            ))
+
+    package = build_context_package(
+        relevant_files=tuple(items),
+        omitted=tuple(omitted),
+        token_count=sum(estimate_tokens(item.content) for item in items),
+    )
+    rendered = _render_known_target_block(items, omitted)
+    return rendered, package

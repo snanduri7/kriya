@@ -110,6 +110,17 @@ class ControlState:
 
     base_commit: Optional[str] = None
     tree_hash: Optional[str] = None
+    # STATE-001 (2026-09-14): tree_hash above is `HEAD^{tree}` - the
+    # COMMITTED tree only (kriya/workflow/checkpoint.py::compute_tree_hash)
+    # - it cannot see uncommitted subtask writes at all, since structured/
+    # enforce-mode subtasks apply real content changes to workspace_path as
+    # plain file writes, never a git commit between subtasks. This field
+    # (compute_workspace_content_hash(), the same STATE-001 fix reused here
+    # rather than duplicated) is what workflow_controller.py's own subtask-
+    # resume drift check (validate_resume_against_reality) actually gates
+    # on for real content correctness; tree_hash is kept only for its own
+    # narrower, already-tested, honest meaning (unrelated to this fix).
+    workspace_content_hash: Optional[str] = None
     patch_hash: Optional[str] = None
 
     last_verified_checkpoint: Optional[str] = None
@@ -151,6 +162,7 @@ class ControlState:
             "current_artifact_registry_hash": self.current_artifact_registry_hash,
             "base_commit": self.base_commit,
             "tree_hash": self.tree_hash,
+            "workspace_content_hash": self.workspace_content_hash,
             "patch_hash": self.patch_hash,
             "last_verified_checkpoint": self.last_verified_checkpoint,
             "created_at": self.created_at,
@@ -181,6 +193,7 @@ class ControlState:
             current_artifact_registry_hash=data.get("current_artifact_registry_hash"),
             base_commit=data.get("base_commit"),
             tree_hash=data.get("tree_hash"),
+            workspace_content_hash=data.get("workspace_content_hash"),
             patch_hash=data.get("patch_hash"),
             last_verified_checkpoint=data.get("last_verified_checkpoint"),
             created_at=data.get("created_at", _now_iso()),

@@ -25,8 +25,13 @@ from typing import Optional
 
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
+from kriya.tools.containment import ContainmentSetupError
 from kriya.workflow.attribution import AttributionResult, DETERMINISTIC_ATTRIBUTION_TIERS, _detect_missing_build_manifest, attribute_failure, read_worktree_file
 from kriya.workflow.banners import log_gate_banner
+from kriya.workflow.deterministic_failure_diagnostic import (
+    DeterministicFailureCorrectability,
+    evaluate_candidate_independent_failure,
+)
 from kriya.workflow.failure import (
     Failure,
     FailureAttributionKind,
@@ -94,7 +99,7 @@ def _abandon_active_repair_contract_if_any(state: GenerationState, *, reason: st
 def _failure_from_validated_scope_denial(
     error: Exception, ctx,
 ) -> Optional[Failure]:
-    """Turn an exact denied existing production target into plan evidence."""
+    """Turn an exact denied existing target into plan evidence."""
     if not isinstance(error, PolicyDeniedError):
         return None
     if error.result.reason_code != "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE":
@@ -110,12 +115,28 @@ def _failure_from_validated_scope_denial(
     if relative == ".." or relative.startswith(f"..{os.sep}"):
         return None
     # Automatic authority expansion is only justified for a real existing
-    # production owner. A hallucinated new path or test target remains a
-    # denied policy error and cannot mutate the approved plan.
-    if not os.path.isfile(target) or is_runnable_test_file(relative):
+    # owner - a hallucinated new path cannot mutate the approved plan. A
+    # test file that genuinely exists on disk is NOT excluded here: a
+    # dependent, not-yet-run subtask can legitimately own it (a downstream
+    # test-update stage the current stage's own regression gate needs
+    # before it can pass), and workflow_controller.py's
+    # revise_plan_for_grounded_scope_owner() already handles a downstream
+    # owner correctly (merges it forward, drops the now-redundant
+    # dependency edge). Confirmed live, P2 production-validation run
+    # (2026-09-05): a plan split "change EmployeeService.giveRaise" (s1)
+    # and "update the existing EmployeeServiceTest that pins its old
+    # behavior" (s2, depends_on=[s1]) into two subtasks; s1's own full
+    # regression gate could never pass without updating that test, s1 has
+    # no authority to write it, and the blanket exclusion below used to
+    # send this straight to the unrecoverable-scope-denial circuit breaker
+    # (see test_handle_attempt_failure_stops_immediately_on_first_
+    # unrecoverable_scope_denial) instead of the plan-surgery path this
+    # exact shape was built for - killing the whole run on a legitimate,
+    # already-planned cross-subtask dependency.
+    if not os.path.isfile(target):
         return None
     message = (
-        "PLAN_SCOPE_DEFECT: generated repair targeted an existing production "
+        "PLAN_SCOPE_DEFECT: generated repair targeted an existing "
         f"owner outside validated subtask scope: {relative}"
     )
     return Failure(
@@ -291,18 +312,54 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # §11.3's own "Future hardening note" for the fuller rationale.
     attached_failure = getattr(e, "failure", None)
     scope_denial_failure = attached_failure is None and _failure_from_validated_scope_denial(e, ctx)
+    # PRV-17 (2026-09-03): a PolicyDeniedError whose target
+    # _failure_from_validated_scope_denial() could NOT ground into a
+    # plan_scope_conflict (no real existing production owner to hand
+    # recovery off to - see that function's own "hallucinated new path"
+    # comment) used to fall straight through to ordinary general_error
+    # retry handling: the Developer was simply asked to try again, and
+    # live evidence shows it proposes a DIFFERENT illegal target each time
+    # rather than converging. See GenerationState.unrecoverable_scope_
+    # denial_count's own docstring for the full incident this closes.
+    is_unrecoverable_scope_denial = (
+        attached_failure is None
+        and not scope_denial_failure
+        and isinstance(e, PolicyDeniedError)
+        and e.result.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
+    )
+    if is_unrecoverable_scope_denial:
+        state.unrecoverable_scope_denial_count += 1
     is_internal_framework_bug = (
         attached_failure is None
         and not scope_denial_failure
         and isinstance(e, (UnboundLocalError, TypeError, KeyError, AssertionError))
     )
+    # SEC-001 (2026-09-11): a ContainmentSetupError means ProcessController
+    # refused to run a command uncontained rather than silently degrading -
+    # this is exactly as unfixable-by-retrying as time_budget_exhausted/
+    # verification_infrastructure_failure/internal_framework_error above
+    # (no amount of Developer regeneration changes whether a containment
+    # backend is available), and must never be fed back to the Developer as
+    # diagnosis/repair evidence or misreported as an ordinary command/
+    # compile/test/environment failure - see kriya/tools/containment.py's
+    # own docstring.
+    is_containment_setup_failure = (
+        attached_failure is None
+        and not scope_denial_failure
+        and isinstance(e, ContainmentSetupError)
+    )
     failure: Failure = (
         attached_failure
         or scope_denial_failure
         or Failure(
-            type="internal_framework_error" if is_internal_framework_bug else "general_error",
+            type=(
+                "containment_setup_failed" if is_containment_setup_failure
+                else "internal_framework_error" if is_internal_framework_bug
+                else "general_error"
+            ),
             message=(
-                f"INTERNAL KRIYA ERROR (not a generated-application defect): {raw_error_context}"
+                f"CONTAINMENT_SETUP_FAILED: {raw_error_context}" if is_containment_setup_failure
+                else f"INTERNAL KRIYA ERROR (not a generated-application defect): {raw_error_context}"
                 if is_internal_framework_bug else raw_error_context
             ),
             raw_output=raw_error_context, source="orchestrator",
@@ -417,9 +474,60 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             # which were never designed to recognize an arbitrary internal
             # traceback.
             "internal_framework_error",
+            # SEC-001 (2026-09-11): same reasoning - see the
+            # is_containment_setup_failure comment above.
+            "containment_setup_failed",
+            # VAL-001 G1-DEVINV2 (2026-09-20): a full-regression block with
+            # zero candidate-attributable evidence (kriya/workflow/
+            # workflow.py's own _full_regression_unattributed branch, after
+            # isolated-pristine replay of every ambiguous entry) is exactly
+            # as unfixable-by-retrying as the three types above - no amount
+            # of Developer regeneration can resolve an aggregate-level delta
+            # that names no specific test.
+            "regression_unattributed",
         }
-        else classify_environment_failure(raw_error_context)
+        else classify_environment_failure(
+            raw_error_context,
+            worktree_path=ctx.worktree_path,
+            known_files=set(state.all_files_written) | set(ctx.established_files) | set(ctx.expected_files_upfront),
+        )
     )
+    if is_unrecoverable_scope_denial and state.unrecoverable_scope_denial_count >= 1:
+        # PRV-17 preflight correction (2026-09-03): stop on the FIRST
+        # deterministically unrecoverable denial, not the second - once
+        # _failure_from_validated_scope_denial() has already established
+        # there is no real existing file to hand recovery off to, a retry
+        # cannot discover a legal target that doesn't exist. No further
+        # Developer/LLM call is made for this subtask after this point.
+        #
+        # Reuses state.environment_failure/RetryAction.STOP_ENVIRONMENT
+        # purely as the STOP MECHANISM - decide_retry_action() itself
+        # (kriya/workflow/retry_policy.py) only checks whether this field
+        # is truthy, never its content, so that part genuinely is a
+        # generic deterministic stop. Verified before reusing it, per
+        # this fix's own review requirement, that its two DOWNSTREAM
+        # consumers (kriya/cli.py's user-facing message, kriya/workflow/
+        # workflow.py's failure_category trace classification) hard-code
+        # an environment/toolchain-specific MEANING onto it - both are
+        # updated alongside this change so this case is never reported to
+        # a user or trace as a JVM/toolchain problem it is not.
+        #
+        # The one existing "scope/plan" terminal classification
+        # (state.plan_scope_conflict) was considered and rejected: it
+        # feeds workflow_controller.py's revise_plan_for_grounded_scope_
+        # owner(), which unconditionally raises ValueError for any
+        # grounded path that isn't a real file already on disk
+        # (kriya/workflow/workflow_controller.py ~line 2326) - exactly
+        # this case's target. Reusing it here would trade one confirmed
+        # incident for a new, worse one (an uncaught crash), and would
+        # pull an unowned/hallucinated path into MA8 owner-recovery
+        # machinery designed for a real, discoverable owner. Not reused.
+        state.environment_failure = (
+            "UNAUTHORIZED_GENERATION_TARGET: the Developer proposed a write outside "
+            "this subtask's validated scope, and the target names no existing file "
+            "with a real owner to hand recovery off to - retrying cannot discover a "
+            "legal target that doesn't exist."
+        )
 
     # Read fresh from the worktree's CURRENT pom.xml each attempt,
     # not cached once before the loop - the project's own
@@ -492,6 +600,67 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         ctx.worktree_path,
         set(state.all_files_written) | set(ctx.established_files),
     )
+    # Candidate-independent deterministic failure detection (PRV-17,
+    # 2026-09-08, P7 efficiency finding) - read-only reuse of state BEFORE
+    # record_workspace_progress overwrites state.last_failed_workspace_hash
+    # below; this block never writes to GenerationState.budgets or to any
+    # field record_workspace_progress itself reads/writes, and never calls
+    # it. See kriya/workflow/deterministic_failure_diagnostic.py's own
+    # module docstring for the full incident and why this is deliberately a
+    # separate mechanism from record_workspace_progress, MA8, and MA9's
+    # cross-owner RECOVERY_NO_PROGRESS.
+    if (
+        ctx.deterministic_failure_diagnostics is not None
+        and not state.environment_failure
+    ):
+        # R1 Deliverable 5 - observational only, does not read the store's
+        # own conclusions or influence anything below. records_before/after
+        # is a cheap, non-invasive proxy for "did this call actually record
+        # a new (subtask, signature) conclusion" (which only happens on the
+        # trigger-conditions-met + baseline-replay-attempted path inside
+        # evaluate_candidate_independent_failure - see that function's own
+        # docstring) without needing that function's own return contract to
+        # change or a second, parallel replay-counting mechanism.
+        state.candidate_independent_diagnostic_invocations += 1
+        _diagnostics_records_before = len(ctx.deterministic_failure_diagnostics._records)
+        diagnostic = evaluate_candidate_independent_failure(
+            store=ctx.deterministic_failure_diagnostics,
+            fail_type=fail_type,
+            current_failure_signature=current_failure_signature,
+            current_error_text=raw_error_context,
+            previous_failure_signature=previous_failure_signature,
+            workspace_changed=current_workspace_hash != state.last_failed_workspace_hash,
+            has_implicated_files=bool(getattr(failure, "likely_files", None)),
+            authoritative_workspace_path=ctx.workspace_path,
+            known_files=ctx.established_files,
+            autonomy_cfg=ctx.kernel.config.autonomy,
+            subtask_id=ctx.current_subtask_id,
+        )
+        if len(ctx.deterministic_failure_diagnostics._records) > _diagnostics_records_before:
+            state.baseline_replay_count += 1
+        if diagnostic is not None and diagnostic.correctability == DeterministicFailureCorrectability.NON_CANDIDATE_CORRECTABLE:
+            # Reuses the EXISTING state.environment_failure/STOP_ENVIRONMENT
+            # mechanism as the stop signal (same reuse pattern already used
+            # for UNAUTHORIZED_GENERATION_TARGET/NO_AUTHORIZED_REPAIR_TARGET
+            # just above in this module) - no new retry_policy.py branch, no
+            # budget change. workflow.py's own failure_category classifier
+            # recognizes this exact prefix so it is reported as a validator
+            # defect, never mislabeled "[ENVIRONMENT/TOOLCHAIN ISSUE]".
+            state.environment_failure = (
+                "CANDIDATE_INDEPENDENT_DETERMINISTIC_FAILURE: the same normalized "
+                f"{fail_type} failure recurred after a materially different candidate, "
+                "named no credible repair target, and was independently reproduced by "
+                "replaying the same deterministic check against an isolated copy of the "
+                "pre-candidate baseline - this is a validator/build-configuration/"
+                "environment defect, not something further Developer regeneration can "
+                f"resolve.\n\nBaseline replay output:\n{diagnostic.baseline_output}"
+            )
+            logger.error(
+                "CANDIDATE_INDEPENDENT_DETERMINISTIC_FAILURE: baseline replay reproduced "
+                "the identical %s failure signature - stopping further Developer "
+                "regeneration for this subtask.",
+                fail_type,
+            )
     # The runtime contract allows two recovery actions and stops on the third
     # consecutive no-progress result. Older configurations commonly used 2
     # for the former failure-family-churn counter; do not reinterpret that as
@@ -633,6 +802,46 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                     "targets outside the validated subtask scope."
                 ),
             )
+        elif fail_type == "managed_service_runtime_plan_gap":
+            # Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04): this
+            # failure already carries deterministic evidence (a captured
+            # ModuleNotFoundError traceback, pattern-matched in attempt.py -
+            # see kriya.workflow.attempt._execute_managed_service_
+            # verification) that a project-local Python module has no
+            # current owner. Routing it through attribute_failure()'s
+            # LLM-based self-diagnosis pipeline below would both waste a
+            # call and risk downgrading DETERMINISTIC evidence to a JUDGMENT
+            # verdict. No physical file path or owner subtask is resolved
+            # here - required_files stays empty on purpose. Only
+            # kriya/workflow/workflow_controller.py's dedicated RUNTIME_PLAN_
+            # GAP branch (the control plane, never this attempt-scoped
+            # function) may resolve a candidate artifact path/owner and
+            # mutate the plan - see ObligationKind.RUNTIME_PLAN_GAP's own
+            # docstring for the invariant this split preserves. tier=
+            # "full_set" (not a DETERMINISTIC_ATTRIBUTION_TIERS member)
+            # deliberately keeps scope_conflict_is_grounded False below, so
+            # the generic PLAN_SCOPE_DEFECT machinery further down never
+            # overwrites this dict - the same precedent VERIFICATION_
+            # CONTRACT_DEFECT already established just below.
+            attribution = AttributionResult(
+                tier="full_set", files=[], confidence="high",
+                reasoning=(
+                    "Managed-service runtime verification captured deterministic evidence "
+                    "of a missing project-local artifact; ownership/scope resolution is "
+                    "reserved for the control plane's own Runtime-Evidence Plan Repair path."
+                ),
+            )
+            diagnostics = failure.diagnostics or {}
+            state.plan_scope_conflict = {
+                "classification": "runtime_plan_gap",
+                "reason_code": "RUNTIME_PLAN_GAP",
+                "failure_type": fail_type,
+                "reason": attribution.reasoning,
+                "missing_logical_artifact": diagnostics.get("missing_python_module"),
+                "artifact_kind": "python_module",
+                "managed_service_outcome": diagnostics.get("managed_service_outcome"),
+                "required_files": [],
+            }
         elif attribution_kind in (
             FailureAttributionKind.VERIFICATION_CONTRACT_DEFECT,
             FailureAttributionKind.INFRASTRUCTURE_DEFECT,
@@ -658,13 +867,25 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             "process_terminating_behavior_tested_in_process",
             "test_verification_infrastructure_failure",
         ):
+            # is_runnable_test_file()'s filename regex is narrower than the
+            # classify_file_role() directory-based check that can populate
+            # likely_files upstream (failure_grounding.py's
+            # _crashed_test_artifacts, which matches on an exact simple
+            # class-name equality against the crashed test class - already
+            # precise evidence). A Failsafe integration test (AppIT.java)
+            # or Spock spec (FooSpec.groovy) is real attribution this
+            # stricter regex just doesn't recognize by name - never drop
+            # real evidence to an empty list solely because of that naming
+            # gap; fall back to the unfiltered evidence instead.
+            runnable_likely_files = [
+                path for path in failure.likely_files
+                if is_runnable_test_file(path)
+            ]
+            attribution_files = runnable_likely_files or failure.likely_files
             attribution = AttributionResult(
                 tier="deterministic",
-                files=[
-                    path for path in failure.likely_files
-                    if is_runnable_test_file(path)
-                ],
-                confidence="high",
+                files=attribution_files,
+                confidence="high" if attribution_files else "low",
                 reasoning=(
                     "Deterministic verification-safety evidence identified the test "
                     "artifact whose in-process strategy is incompatible with required "
@@ -680,6 +901,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                 ctx.developer.llm,
                 lambda fp: read_worktree_file(ctx.worktree_path, fp),
                 self_diagnosed_files=self_diagnosed_files,
+                original_contents=state.all_original_contents,
             )
         implicated = attribution.files
         if (
@@ -933,6 +1155,59 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                 narrowed_implicated = []
             state.last_implicated_files = narrowed_implicated if narrowed_implicated else None
             state.last_missing_files = None
+            # Recovery admission (PRV-17, 2026-09-03): a GROUNDED failure
+            # (attribution actually implicated real file(s), not a blind
+            # guess) whose implication is ENTIRELY outside this subtask's
+            # ALLOWLIST scope must not fall through to an ordinary FULL_SET
+            # retry - decide_retry_action() (kriya/workflow/retry_policy.py)
+            # has no visibility into WHY has_implicated_files became False
+            # here, so without this it silently re-derives "attribution
+            # found nothing" and asks the Developer to regenerate this
+            # subtask's own (already-correct, irrelevant) authorized files
+            # anyway - a full generation cycle that cannot possibly address
+            # a failure whose real cause lives in a file this subtask can
+            # never legally write. Distinct from "attribution found nothing
+            # at all" (implicated empty from the start), which still
+            # legitimately deserves an ordinary FULL_SET attempt. Reuses
+            # state.environment_failure/STOP_ENVIRONMENT purely as the stop
+            # MECHANISM, the same reuse already established (and reviewed)
+            # for the write-time unrecoverable-scope-denial case above in
+            # this same function - never overwrites an already-decided
+            # classification.
+            #
+            # ALLOWLIST-only, deliberately NOT DENY_ALL: a DENY_ALL subtask
+            # never calls the Developer for real generation regardless of
+            # this retry decision (see run_attempt's own verification-only
+            # branch/its dedicated test) - continuing its loop just retries
+            # verification itself, never an unwinnable FULL_SET generation
+            # cycle, so this admission gate has nothing to prevent there and
+            # must not change its existing should_break=False behavior
+            # (test_handle_attempt_failure_never_offers_a_deny_all_target_
+            # even_at_low_confidence).
+            #
+            # state.plan_scope_conflict is None: mutually exclusive with the
+            # EXISTING architectural-owner escalation above in this same
+            # function (a DETERMINISTIC_ATTRIBUTION_TIERS-grounded implication
+            # naming a real, existing file already routes there - owner-
+            # recovery, not a stop) - never layer this admission gate on top
+            # of a conflict that's already correctly routing to a real owner
+            # (test_handle_attempt_failure_scope_denial_with_real_existing_
+            # owner_is_unaffected).
+            if (
+                implicated and not narrowed_implicated
+                and getattr(ctx, "write_scope_mode", None) == WriteScopeMode.ALLOWLIST
+                and state.environment_failure is None
+                and state.plan_scope_conflict is None
+            ):
+                state.environment_failure = (
+                    f"NO_AUTHORIZED_REPAIR_TARGET: this failure is grounded to "
+                    f"{sorted(set(implicated))!r}, entirely outside this subtask's "
+                    f"authorized write scope ({sorted(set(ctx.allowed_write_relpaths))!r}) - "
+                    "no generation against this subtask's own authorized files can fix a "
+                    "failure whose real cause lives elsewhere; stopping before another "
+                    "Developer call rather than paying for a full-set retry that cannot "
+                    "possibly address it."
+                )
 
     # MA9 (2026-08-29): the ONE place attribution's own output ordinarily
     # already narrows to "which file(s) does THIS failure implicate" - reused

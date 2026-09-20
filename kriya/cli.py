@@ -14,6 +14,7 @@ from kriya import __version__
 from kriya.agents import ReviewerAgent
 from kriya.analyzer import RepositoryAnalyzer
 from kriya.config import AppConfig, load_config
+from kriya.control.run_ownership import WorkspaceLockHeldError, acquire_run_lock
 from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
 from kriya.plugins.plugin import PluginManager
@@ -105,13 +106,28 @@ def configure_logging(cfg: AppConfig) -> None:
 
 @click.group(invoke_without_command=True)
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to Kriya configuration YAML file.')
+@click.option('--trust-file', type=click.Path(), default=None,
+              help="SEC-009 P2: path to an operator/CI-supplied approval artifact "
+              "(see `kriya authority approve --out`), for non-interactive authorization "
+              "of security-authority configuration. Must resolve outside the workspace - "
+              "an in-repository path is refused, never silently ignored. Defaults to the "
+              "KRIYA_TRUST_FILE environment variable when not passed.")
 @click.pass_context
-def main(ctx: click.Context, config: Optional[str]) -> None:
+def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -> None:
     """Kriya - Production-Grade AI Engineering Platform CLI."""
     ctx.ensure_object(dict)
     ctx.obj['config_path'] = config
+    ctx.obj['trust_file'] = trust_file
+    # SEC-009 P2: `kriya authority inspect/approve/revoke` must stay reachable
+    # even when the CURRENT configuration has pending/denied security-authority
+    # fields - otherwise a user could never run the one command that lets them
+    # see and resolve exactly the problem being reported. Every other
+    # subcommand still goes through the normal, potentially-denying
+    # load_config() below, unchanged.
+    if ctx.invoked_subcommand == 'authority':
+        return
     try:
-        ctx.obj['config'] = load_config(config)
+        ctx.obj['config'] = load_config(config, trust_file=trust_file)
     except Exception as e:
         click.secho(f"Error loading configuration: {e}", fg="red", err=True)
         sys.exit(1)
@@ -661,6 +677,268 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
     except Exception as e:
         click.secho(f"Execution failed: {e}", fg="red")
         sys.exit(1)
+
+@main.group(name="mcp")
+def mcp_group() -> None:
+    """TOOL-002 P2: inspect MCP tool identities and explicitly, durably
+    approve or revoke invocation authority for them. Approval is never
+    granted implicitly during `tools execute` (and `-y` never creates
+    it) - it must be requested here, once, and it persists across
+    processes until revoked or invalidated by drift."""
+    pass
+
+
+def _mcp_workspace_root() -> str:
+    """The one workspace-identity source every TOOL-002 P2 command/resolver
+    in this file derives from - identical to MCPManager.__init__'s own
+    default-resolver construction (kriya/mcp/mcp.py) and to
+    MCPManager.start_all()'s capability-profile resolution, so an approval
+    granted here always binds to the exact workspace the real invocation-
+    time resolver will check against."""
+    return os.path.realpath(os.getcwd())
+
+
+async def _discover_mcp_tools(cfg: AppConfig):
+    """Starts a real Kernel - spawning every configured MCP server exactly
+    like `tools list`/`tools execute` do - and returns (kernel, pairs)
+    where pairs are the LIVE (flattened_name, MCPTool) entries currently
+    held by the kernel's own tool registry. This is the ONLY way any `mcp`
+    subcommand resolves an operator-supplied name to a structured
+    identity: by looking up the SAME registry entry `tools execute` itself
+    would dispatch to, never by parsing/splitting the flattened name
+    string (Invariant 14) - so even under a flattened-name collision
+    between two servers, whichever MCPTool object the registry actually
+    holds under that name is exactly the one approval binds to, matching
+    whichever object real execution would actually invoke."""
+    from kriya.mcp.mcp import MCPTool
+
+    kernel = Kernel(config=cfg)
+    await kernel.start()
+    pairs = []
+    for name in kernel.registry.list_components("tool"):
+        tool = kernel.registry.get("tool", name)
+        if isinstance(tool, MCPTool):
+            pairs.append((name, tool))
+    return kernel, pairs
+
+
+def _print_mcp_identity(flattened_name: str, tool: Any, approved: bool) -> None:
+    """TASK 5 - authority information sufficient for a meaningful approval
+    decision, with the server's own untrusted description clearly
+    separated (labeled) from authority facts rather than presented as one
+    of them."""
+    profile = tool.client.capability_profile
+    click.secho(f"\n  - {flattened_name}", bold=True, fg="cyan")
+    click.echo(f"      server identity:       {tool.identity.server_identity}")
+    click.echo(f"      tool name:             {tool.identity.tool_name}")
+    click.echo(f"      schema digest:         {tool.identity.schema_digest[:16]}...")
+    click.echo(
+        f"      capability profile:    {tool.capability_profile_identity.profile_digest[:16]}... "
+        f"(workspace_read={profile.workspace_read}, workspace_write={profile.workspace_write}, "
+        f"network={profile.network.value})"
+    )
+    click.echo(f"      containment required:  {tool.client.containment_required}")
+    click.echo(
+        f"      containment active:    {tool.client.containment_active} "
+        f"(backend={tool.client.containment_backend_name})"
+    )
+    click.echo(f"      description (untrusted, informational only): {tool.description!r}")
+    status = click.style("APPROVED (current)", fg="green") if approved else click.style("NOT APPROVED", fg="yellow")
+    click.echo(f"      invocation approval:   {status}")
+
+
+@mcp_group.command(name="inspect")
+@click.pass_context
+def mcp_inspect(ctx: click.Context) -> None:
+    """Discover every configured MCP server's tools and show their exact
+    identity, TOOL-003 capability profile, containment state, and current
+    invocation-approval status. Read-only - starts configured MCP servers
+    to discover their real schema/identity but never writes an approval."""
+    cfg: AppConfig = ctx.obj['config']
+    if not cfg.mcp:
+        click.echo("No MCP servers configured.")
+        return
+
+    from kriya.control.workspace_identity import workspace_identity
+    from kriya.mcp.invocation_approval import (
+        default_local_approval_path, is_tool_approved, load_approval_artifact,
+    )
+
+    workspace_root = _mcp_workspace_root()
+
+    async def run() -> None:
+        kernel, pairs = await _discover_mcp_tools(cfg)
+        try:
+            if not pairs:
+                click.echo("No MCP tools discovered.")
+                return
+            path = default_local_approval_path(workspace_root)
+            try:
+                artifact = load_approval_artifact(path)
+            except Exception as e:
+                click.secho(
+                    f"Warning: local invocation-approval store at {path} is present but "
+                    f"invalid ({e}) - treating as no approvals (fail closed).", fg="yellow",
+                )
+                artifact = None
+            click.secho(f"=== MCP tools ({len(pairs)}) ===", bold=True)
+            for flattened_name, tool in pairs:
+                approved = artifact is not None and is_tool_approved(
+                    artifact, workspace_identity(workspace_root),
+                    tool.identity, tool.capability_profile_identity.profile_digest,
+                )
+                _print_mcp_identity(flattened_name, tool, approved)
+        finally:
+            await kernel.stop()
+
+    try:
+        asyncio.run(run())
+    except Exception as e:
+        click.secho(f"Error: {e}", fg="red")
+        sys.exit(1)
+
+
+@mcp_group.command(name="approve")
+@click.argument('tool_name')
+@click.option('--confirm', is_flag=True, default=False,
+              help="Skip the interactive confirmation prompt.")
+@click.pass_context
+def mcp_approve(ctx: click.Context, tool_name: str, confirm: bool) -> None:
+    """Explicitly, durably approve invocation of TOOL_NAME - the exact
+    flattened name shown by `kriya mcp inspect` / `kriya tools list`
+    (e.g. `myserver_mytool`).
+
+    Always re-discovers TOOL_NAME fresh from a real, currently-running MCP
+    connection - never reuses a prior `inspect` call's output - and binds
+    the approval to its EXACT (workspace, server identity, tool name,
+    schema digest, capability-profile digest) at the moment of approval,
+    closing the TOCTOU window by construction."""
+    cfg: AppConfig = ctx.obj['config']
+    if not cfg.mcp:
+        click.secho("No MCP servers configured - nothing to approve.", fg="yellow")
+        return
+
+    from kriya.control.workspace_identity import workspace_identity
+    from kriya.mcp.invocation_approval import (
+        add_approval, default_local_approval_path, empty_artifact, load_approval_artifact,
+        save_approval_artifact,
+    )
+
+    workspace_root = _mcp_workspace_root()
+
+    async def run() -> None:
+        kernel, pairs = await _discover_mcp_tools(cfg)
+        try:
+            match = next((tool for name, tool in pairs if name == tool_name), None)
+            if match is None:
+                click.secho(
+                    f"MCP tool '{tool_name}' was not discovered among currently configured/"
+                    "reachable servers - run 'kriya mcp inspect' to see exact available names.",
+                    fg="red",
+                )
+                sys.exit(1)
+
+            _print_mcp_identity(tool_name, match, approved=False)
+
+            if not confirm:
+                if not sys.stdin.isatty():
+                    click.secho(
+                        "\nError: Non-TTY (piped) input detected. You must pass --confirm to "
+                        "approve non-interactively.", fg="red",
+                    )
+                    sys.exit(1)
+                if not click.confirm(
+                    "\nGrant explicit, durable invocation approval to exactly this tool "
+                    "identity/capability binding shown above?"
+                ):
+                    click.echo("Not approved - no artifact written.")
+                    sys.exit(1)
+
+            path = default_local_approval_path(workspace_root)
+            try:
+                existing = load_approval_artifact(path)
+            except Exception:
+                existing = None
+            base = existing if existing is not None else empty_artifact(workspace_identity(workspace_root))
+            updated = add_approval(base, match.identity, match.capability_profile_identity.profile_digest)
+            save_approval_artifact(path, updated)
+            click.secho(f"\nApproved. Durable invocation approval written to {path}.", fg="green", bold=True)
+        finally:
+            await kernel.stop()
+
+    try:
+        asyncio.run(run())
+    except SystemExit:
+        raise
+    except Exception as e:
+        click.secho(f"Error: {e}", fg="red")
+        sys.exit(1)
+
+
+@mcp_group.command(name="revoke")
+@click.argument('tool_name')
+@click.pass_context
+def mcp_revoke(ctx: click.Context, tool_name: str) -> None:
+    """Immediately revoke any durable invocation approval for TOOL_NAME
+    (matches on exact server identity + tool name, even if its schema or
+    capability profile has since drifted from what was originally
+    approved - an operator must be able to revoke a stale approval too).
+    Idempotent, and takes effect on the very next invocation - no restart
+    of Kriya required."""
+    cfg: AppConfig = ctx.obj['config']
+    if not cfg.mcp:
+        click.secho("No MCP servers configured - nothing to revoke.", fg="yellow")
+        return
+
+    from kriya.mcp.invocation_approval import (
+        default_local_approval_path, load_approval_artifact, remove_approvals_for_identity,
+        save_approval_artifact,
+    )
+
+    workspace_root = _mcp_workspace_root()
+
+    async def run() -> None:
+        kernel, pairs = await _discover_mcp_tools(cfg)
+        try:
+            match = next((tool for name, tool in pairs if name == tool_name), None)
+            if match is None:
+                click.secho(
+                    f"MCP tool '{tool_name}' was not discovered among currently configured/"
+                    "reachable servers - run 'kriya mcp inspect' to see exact available names.",
+                    fg="red",
+                )
+                sys.exit(1)
+
+            path = default_local_approval_path(workspace_root)
+            try:
+                artifact = load_approval_artifact(path)
+            except Exception as e:
+                click.secho(
+                    f"Local invocation-approval store at {path} is present but invalid "
+                    f"({e}) - nothing to revoke.", fg="yellow",
+                )
+                return
+            if artifact is None:
+                click.echo(f"No local invocation-approval store at {path} - nothing to revoke.")
+                return
+
+            updated, removed = remove_approvals_for_identity(artifact, match.identity)
+            save_approval_artifact(path, updated)
+            if removed:
+                click.secho(f"Revoked {removed} approval record(s) for '{tool_name}'.", fg="yellow", bold=True)
+            else:
+                click.echo(f"No existing approval on file for '{tool_name}' - nothing to revoke.")
+        finally:
+            await kernel.stop()
+
+    try:
+        asyncio.run(run())
+    except SystemExit:
+        raise
+    except Exception as e:
+        click.secho(f"Error: {e}", fg="red")
+        sys.exit(1)
+
 
 @main.command()
 @click.argument('path', type=click.Path(exists=True))
@@ -1432,7 +1710,14 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             return result
 
         try:
-            milestone_result = asyncio.run(run_milestone_sequence())
+            with acquire_run_lock(os.getcwd()):
+                milestone_result = asyncio.run(run_milestone_sequence())
+        except WorkspaceLockHeldError as e:
+            click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
+            if json_output:
+                sys.stdout = real_stdout
+                click.echo(json.dumps({"error": str(e)}, indent=2))
+            sys.exit(1)
         except Exception as e:
             click.secho(f"Milestone sequence error: {e}", fg="red")
             if json_output:
@@ -1640,12 +1925,103 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 )
                 if res.get("failure_category"):
                     click.echo(f"Failure category: {res['failure_category']}")
-                if res.get("environment_failure"):
+                # PRV-17 preflight correction (2026-09-03): an unauthorized/
+                # unrecoverable generation target reuses environment_failure
+                # purely as its STOP mechanism (see retry_strategy.py's own
+                # comment) but is a plan/scope defect, not a machine/toolchain
+                # problem - failure_category already distinguishes the two
+                # (set in kriya/workflow/workflow.py), so this toolchain-
+                # specific message and its "check your Java/Maven toolchain"
+                # advice must not fire for it.
+                if res.get("environment_failure") and res.get("failure_category") not in (
+                    "unauthorized_generation_target", "candidate_independent_deterministic_failure",
+                    "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
+                ):
                     click.secho(
                         f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
                         "Kriya stopped retrying early rather than burning its retry budget "
                         "re-generating code that could never fix this - run `kriya doctor` "
-                        "to check your Java/Maven toolchain resolution.",
+                        "to check your language toolchain resolution.",
+                        fg="yellow", bold=True
+                    )
+                # VAL-001 G1-DEVINV2 (2026-09-20): a full-regression block
+                # with no candidate-attributable evidence is neither an
+                # environment/toolchain problem nor an ordinary retryable
+                # code defect - see kriya/workflow/workflow.py's own
+                # _full_regression_unattributed branch.
+                if res.get("failure_category") == "regression_unattributed":
+                    click.secho(
+                        f"\n[REGRESSION UNATTRIBUTED] {res['environment_failure']}\n"
+                        "Kriya stopped retrying early: the full-regression suite's aggregate "
+                        "outcome changed relative to the captured PRE-mutation baseline, but "
+                        "no specific test could be confirmed as caused by this candidate - "
+                        "every per-test failure either matches the baseline exactly, or was "
+                        "independently replayed (in isolation, against both a pristine and a "
+                        "candidate copy) and could not be confirmed either way - an "
+                        "indeterminate/non-reproducible result is never treated as a known "
+                        "pre-existing failure, only as unattributable. "
+                        "Investigate the full-regression output directly; further Developer "
+                        "regeneration cannot resolve this.",
+                        fg="yellow", bold=True
+                    )
+                # PRV-17 (2026-09-08, P7 efficiency finding): a candidate-
+                # independent deterministic failure (kriya/workflow/
+                # deterministic_failure_diagnostic.py) is neither an
+                # environment/toolchain problem nor a plan/scope defect - an
+                # isolated baseline replay already proved no candidate change
+                # could have resolved it, so the advice must point at the
+                # validator/build configuration, not the toolchain.
+                if res.get("failure_category") == "candidate_independent_deterministic_failure":
+                    click.secho(
+                        f"\n[DETERMINISTIC VALIDATOR DEFECT] {res['environment_failure']}\n"
+                        "Kriya stopped retrying early: replaying the same deterministic check "
+                        "against an isolated copy of the pre-candidate baseline reproduced the "
+                        "identical failure, proving no further Developer regeneration could "
+                        "have fixed it - the defect is in the validator or build configuration "
+                        "itself, not the generated code.",
+                        fg="yellow", bold=True
+                    )
+                # Demo-01 Finding 4 (2026-09-11): GENERATION TIME BUDGET
+                # EXHAUSTED was previously funneled into the same
+                # state.environment_failure field the genuine toolchain
+                # cases above use (retry_strategy.py reuses that field/the
+                # STOP_ENVIRONMENT mechanism deliberately for any stop
+                # reason no further retry can fix), so it inherited the
+                # SAME "[ENVIRONMENT/TOOLCHAIN ISSUE]"/`kriya doctor`
+                # message even though running `kriya doctor` cannot help a
+                # run that simply ran out of configured time - a terminal
+                # STOP CONDITION, not a root ENVIRONMENT/TOOLCHAIN failure.
+                # This is a distinct, dedicated message, not toolchain
+                # advice repurposed.
+                if res.get("failure_category") == "generation_budget_exhausted":
+                    click.secho(
+                        f"\n[GENERATION BUDGET EXHAUSTED] {res['environment_failure']}\n"
+                        "Kriya stopped retrying because the configured generation time budget "
+                        "ran out before another repair attempt could safely begin - this is a "
+                        "terminal stop condition, not an environment/toolchain problem; running "
+                        "`kriya doctor` will not help. Increase autonomy."
+                        "generation_time_budget_seconds if this goal genuinely needs more time, "
+                        "or reduce the plan's file scope. Any earlier, still-unresolved "
+                        "engineering failure from a prior attempt (if one occurred) remains in "
+                        "this run's own persisted gate_outcomes/trace record, distinct from this "
+                        "stop reason.",
+                        fg="yellow", bold=True
+                    )
+                # SEC-001 (2026-09-11): a required containment backend was
+                # unavailable/misconfigured/failed to prepare - Kriya
+                # refused to run the command uncontained rather than
+                # silently degrading. Not an environment/toolchain problem
+                # `kriya doctor` can diagnose, and not something further
+                # Developer retries can fix.
+                if res.get("failure_category") == "containment_setup_failed":
+                    click.secho(
+                        f"\n[CONTAINMENT SETUP FAILED] {res['environment_failure']}\n"
+                        "Kriya stopped retrying because a required execution-containment "
+                        "backend could not be established for a command that needed one - "
+                        "this is a configuration/environment problem with the containment "
+                        "backend itself (not the generated code), and `kriya doctor` will not "
+                        "help. Check autonomy.containment_backend and the backend's own "
+                        "availability.",
                         fg="yellow", bold=True
                     )
                 if res.get("run_id"):
@@ -1656,7 +2032,20 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         fg="yellow"
                     )
             if res.get("review") and not res.get("review_included_in_approval"):
-                click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+                # Demo-01 Run A finding (2026-09-11): this used to print the
+                # same "Reviewer Report & Run Instructions" header regardless
+                # of quality_gates_passed - a rejected, unapplied candidate's
+                # review (already told not to include run instructions, see
+                # ReviewerAgent.rejected_candidate_system_prompt) still needs
+                # its own header, so the diagnostic-only nature is visually
+                # unambiguous even if the model imperfectly complies.
+                if res.get("quality_gates_passed"):
+                    click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+                else:
+                    click.secho(
+                        "\n=== Rejected Candidate Review (diagnostic only - NOT applied to workspace) ===",
+                        bold=True, fg="red",
+                    )
                 click.echo(res.get("review"))
         else:
             click.secho("No files written (either rejected or empty changes).", fg="yellow")
@@ -1675,10 +2064,76 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     click.secho(f"Subtask '{sr.get('subtask_id')}' failed: {sr['error']}", fg="red")
                     break
 
+        # R1 Deliverable 5 (2026-09-08) - concise Performance summary from
+        # the same generation_metrics dict already threaded into JSON output
+        # and traces.db (see docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md).
+        # High-value totals only - detailed per-call data belongs in the
+        # structured artifact (traces.db/`kriya traces`), never flooded into
+        # this terminal summary. Printed for the legacy/single-run path only
+        # (the same scope generation_metrics itself is threaded through
+        # here) - the milestone path has its own separate summary above.
+        gm = res.get("generation_metrics") or {}
+        # R1 Deliverable 5 correction (2026-09-08): plan_repair_attempts is a
+        # sibling top-level key on `res`, not part of `gm` - it comes from
+        # WorkflowController._run_structured_enforce's own repair_attempts
+        # counter (kriya/workflow/workflow_controller.py), a structured-plan
+        # concept that only exists when workflow_controller.enabled=True
+        # (not the packaged default). Read unconditionally so it still shows
+        # for an enforce-mode run even though enforce mode's own aggregated
+        # result never populates generation_metrics (a separate, accepted
+        # R1 limitation - see docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md).
+        # None (the packaged-default legacy/single-run path has no repair-
+        # round concept at all) is printed as "unavailable", never guessed.
+        plan_repair_attempts = res.get("plan_repair_attempts")
+        if gm or plan_repair_attempts is not None:
+            llm = gm.get("llm") or {}
+            validators = gm.get("validators") or {}
+            retry = gm.get("retry") or {}
+
+            def _fmt_duration(seconds: Optional[float]) -> str:
+                if seconds is None:
+                    return "n/a"
+                minutes, secs = divmod(int(seconds), 60)
+                return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+
+            click.secho("\nPerformance", bold=True)
+            click.echo("-----------")
+            if gm:
+                click.echo(f"Total wall:             {_fmt_duration(gm.get('total_wall_seconds'))}")
+                click.echo(f"LLM calls:              {llm.get('calls', 0)}")
+                click.echo(f"LLM wall:               {_fmt_duration(llm.get('wall_seconds'))}")
+                click.echo(f"Validator wall:         {_fmt_duration(validators.get('wall_seconds'))}")
+                click.echo(f"Developer attempts:     {llm.get('developer_calls', 0)}")
+                # Was mislabeled "Planner repair rounds" prior to this
+                # correction - full_set_attempts is GenerationState.budgets.
+                # retry_count, the Developer's own full-file-set retry
+                # counter, unrelated to structured-plan Planner repair.
+                click.echo(f"Developer full-set retries: {retry.get('full_set_attempts', 0)}")
+                click.echo(f"Baseline replays:       {retry.get('baseline_replay_count', 0)}")
+            if plan_repair_attempts is not None:
+                click.echo(f"Planner repair rounds:  {plan_repair_attempts}")
+            else:
+                click.echo("Planner repair rounds:  unavailable (structured-plan repair not active for this run)")
+            # Categories above overlap by design (a validator call happens
+            # WHILE wall-clock time toward total_wall also elapses) - never
+            # presented as though they sum exactly to total wall.
+            if gm:
+                click.secho(
+                    "(LLM/validator wall overlap with total wall - they are not additive)",
+                    dim=True,
+                )
+
         return res
 
     try:
-        final_res = asyncio.run(run_workflow())
+        with acquire_run_lock(os.getcwd()):
+            final_res = asyncio.run(run_workflow())
+    except WorkspaceLockHeldError as e:
+        click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
+        if json_output:
+            sys.stdout = real_stdout
+            click.echo(json.dumps({"error": str(e)}, indent=2))
+        sys.exit(1)
     except Exception as e:
         click.secho(f"Workflow error: {e}", fg="red")
         click.secho(
@@ -1782,8 +2237,18 @@ def plan_milestones_cmd(ctx: click.Context, goal: Optional[str], file: Optional[
 
 @main.command()
 @click.argument('file_path', type=click.Path(exists=True))
+@click.option('--propose', 'propose_finding_id', default=None, metavar='FINDING_ID',
+              help="A2: after the review, build an advisory (not-yet-approved) proposed "
+              "modification from finding FINDING_ID (e.g. F2) in THIS review's own output - "
+              "invocation-local, single-Java-file repository-aware review path only. Never "
+              "modifies files, never invokes generation - see the printed proposal's own "
+              "Authority/Approval fields.")
+@click.option('--save', 'save_proposal', is_flag=True, default=False,
+              help="A3-P1: with --propose, also persist the proposal to .kriya/proposals/<id>.json "
+              "as PENDING_APPROVAL (see `kriya proposal show/approve/reject`). Without --save, "
+              "the proposal is printed only, exactly as before - nothing is written.")
 @click.pass_context
-def review(ctx: click.Context, file_path: str) -> None:
+def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str], save_proposal: bool) -> None:
     """Run code review agent on a file or a folder."""
     cfg: AppConfig = ctx.obj['config']
 
@@ -1927,22 +2392,461 @@ def review(ctx: click.Context, file_path: str) -> None:
             "partial file set.\n\n"
         )
 
+        # Repository-aware Java review contract (A1-P1/A1-E2): only for the narrow,
+        # unambiguous case of reviewing exactly one .java file whose content fit
+        # in a single batch (untruncated/unsplit) - a deterministic member
+        # inventory and bounded repository context are assembled BEFORE the
+        # model call (no model-directed reads/tools), each item given a
+        # Kriya-generated evidence id (M#/R#), and the model's own structured
+        # response is deterministically adjudicated against those ids before
+        # any confidence label reaches the user (A1-E2 - Kriya, not the
+        # Reviewer, is authoritative for final finding confidence). Every
+        # other case (directories, non-Java files, multi-batch splits) is
+        # completely unchanged from before - still the free-form path.
+        structured_evidence = None
+        if (
+            len(files_to_review) == 1
+            and len(batches) == 1
+            and files_to_review[0][0].endswith(".java")
+        ):
+            from kriya.analyzer.java_members import extract_java_members
+            from kriya.workflow.review_context import (
+                build_member_evidence_ids,
+                build_relation_evidence_ids,
+                build_review_repository_context,
+                find_java_repo_root,
+                format_member_evidence_registry,
+                format_relation_evidence_registry,
+            )
+
+            target_rel, target_full = files_to_review[0]
+            target_content = dict(file_contents)[target_rel]
+            members = extract_java_members(target_content)
+            repo_root = find_java_repo_root(target_full)
+            target_relpath_in_root = os.path.relpath(target_full, repo_root)
+            repo_ctx = build_review_repository_context(
+                repo_root, target_relpath_in_root, target_content, members,
+            )
+            member_ids = build_member_evidence_ids(members)
+            relation_ids = build_relation_evidence_ids(repo_ctx.related_files)
+            evidence_prefix = format_member_evidence_registry(member_ids) + format_relation_evidence_registry(repo_ctx, relation_ids)
+            structured_evidence = (member_ids, relation_ids, evidence_prefix, target_relpath_in_root, repo_root)
+
+        if propose_finding_id and not structured_evidence:
+            click.secho(
+                "--propose is only supported for the single-Java-file repository-aware review "
+                "path (exactly one .java file, whose content fits in a single batch).",
+                fg="red", err=True,
+            )
+            sys.exit(1)
+
         import sys
         def on_stream(token: str):
             click.echo(token, nl=False)
             sys.stdout.flush()
 
         async def run_review():
+            if structured_evidence:
+                from kriya.workflow.review_context import (
+                    adjudicate_findings,
+                    build_proposed_modification,
+                    build_structured_review_report,
+                    format_proposed_modification,
+                    parse_structured_findings,
+                )
+
+                member_ids, relation_ids, evidence_prefix, target_relpath_in_root, repo_root = structured_evidence
+                click.secho("\n=== Code Review Report ===", bold=True, fg="cyan", err=True)
+                prompt = "=== TARGET SOURCE ===\n" + batches[0] + evidence_prefix + "\n=== REVIEW TASK ===\n" + review_context_header
+                raw = await reviewer.run_structured_review(prompt)
+                if "_error" in raw:
+                    click.secho(f"Structured review failed: {raw['_error']}", fg="red", err=True)
+                    sys.exit(1)
+                report = build_structured_review_report(raw, member_ids, relation_ids)
+                click.echo(report)
+
+                if propose_finding_id:
+                    # A2: same adjudicated findings this exact call already computed inside
+                    # build_structured_review_report() above - recomputed here (cheap, pure,
+                    # no second model call) since that function doesn't expose them. Never
+                    # touches DeveloperAgent/AuthorizedFileWriter/the generation workflow -
+                    # see review_context.py's own A2 section docstring for the zero-write
+                    # invariant this whole path is built to preserve.
+                    findings = parse_structured_findings(raw.get("findings"))
+                    adjudicated = adjudicate_findings(findings, member_ids, relation_ids)
+                    try:
+                        proposal = build_proposed_modification(
+                            propose_finding_id, adjudicated, member_ids, relation_ids, target_relpath_in_root,
+                            workspace_root=repo_root,
+                        )
+                    except ValueError as e:
+                        click.secho(f"\nCannot build proposal: {e}", fg="red", err=True)
+                        sys.exit(1)
+                    click.echo("\n" + format_proposed_modification(proposal))
+                    if save_proposal:
+                        from kriya.workflow.proposal_store import persist_proposal
+                        try:
+                            persisted = persist_proposal(proposal, repo_root)
+                        except ValueError as e:
+                            click.secho(f"\nCannot save proposal: {e}", fg="red", err=True)
+                            sys.exit(1)
+                        click.secho(
+                            f"\nSaved: .kriya/proposals/{persisted.proposal_id}.json "
+                            f"(state={persisted.approval_state}, digest={persisted.proposal_digest[:12]}...)",
+                            fg="cyan",
+                        )
+                        click.echo(
+                            f"Review it, then run `kriya proposal approve {persisted.proposal_id}` "
+                            "to explicitly approve it (nothing is executed automatically)."
+                        )
+                return
+
             for i, batch in enumerate(batches, 1):
                 label = "=== Code Review Report ===" if len(batches) == 1 else f"=== Code Review Report (batch {i}/{len(batches)}) ==="
                 click.secho(f"\n{label}", bold=True, fg="cyan", err=True)
-                await reviewer.run(review_context_header + batch, stream_callback=on_stream)
+                prompt = review_context_header + batch
+                await reviewer.run(prompt, stream_callback=on_stream)
                 click.echo()
 
         asyncio.run(run_review())
     except Exception as e:
         click.secho(f"Review failed: {e}", fg="red", err=True)
         sys.exit(1)
+
+@main.group(name="authority")
+def authority_group() -> None:
+    """SEC-009 P2: inspect and explicitly, durably approve security-authority
+    configuration (mcp.*, plugins.*, execution_policy.*, runtime_profile, and
+    similar fields kriya/config/authority.py classifies SECURITY_AUTHORITY/
+    PLATFORM_POLICY) that a repository-equivalent source (auto-discovered
+    kriya.yaml, an explicit --config) cannot grant itself. Approval is bound
+    to the EXACT current effective security configuration (a digest over the
+    complete set, not a blanket "trust this repo" bit) and is stored outside
+    the workspace, never inside it - see kriya/config/authority_approval.py's
+    module docstring for why. Reachable even when the current configuration
+    has pending/denied security fields, so this is always the way out of a
+    "Configuration-authority denied" error."""
+    pass
+
+
+def _authority_state(ctx: click.Context):
+    from kriya.config.config import resolve_config_state
+    return resolve_config_state(ctx.obj.get('config_path'))
+
+
+def _print_pending(pending) -> None:
+    if not pending:
+        click.echo("No pending security-authority fields - current configuration is fully authorized.")
+        return
+    click.secho(f"{len(pending)} security-authority field(s) pending approval:", bold=True)
+    for p in pending:
+        click.echo(f"  - {p.field_path}")
+        click.echo(f"      classification: {p.classification}")
+        click.echo(f"      source:         {p.source}")
+        click.echo(f"      value:          {json.dumps(p.redacted_value, default=str)}")
+
+
+@authority_group.command(name="inspect")
+@click.pass_context
+def authority_inspect(ctx: click.Context) -> None:
+    """Display the CURRENT effective configuration's pending security-authority
+    fields (field path, classification, provenance, and a secret-redacted
+    value) and whether an existing local approval currently covers them.
+    Read-only - never writes anything, never itself approves."""
+    from kriya.config.authority import compute_violations
+    from kriya.config.authority_approval import (
+        default_local_approval_path,
+        describe_pending,
+        is_approval_current_for,
+        load_approval_artifact,
+    )
+
+    state = _authority_state(ctx)
+    pending = describe_pending(state.violations, state.config_dict)
+    _print_pending(pending)
+
+    if not state.violations:
+        return
+
+    path = default_local_approval_path(state.workspace_root)
+    try:
+        artifact = load_approval_artifact(path)
+    except Exception as e:
+        click.secho(f"\nLocal approval store at {path}: present but invalid ({e}).", fg="yellow")
+        return
+
+    if artifact is None:
+        click.echo(f"\nNo local approval on file at {path}.")
+        click.echo("Run 'kriya authority approve' to grant it.")
+        return
+
+    if is_approval_current_for(artifact, state.violations, state.config_dict, state.workspace_root):
+        click.secho(f"\nLocal approval at {path} is CURRENT and covers all pending fields.", fg="green")
+    else:
+        click.secho(
+            f"\nLocal approval at {path} exists but does NOT cover the current configuration "
+            "(it is stale, tampered, or was granted for a different security-field set) - "
+            "the fields above remain denied. Run 'kriya authority approve' again.",
+            fg="yellow",
+        )
+
+
+@authority_group.command(name="approve")
+@click.option('--out', type=click.Path(), default=None,
+              help="Write the approval artifact to this path instead of the default local "
+              "per-workspace store (~/.kriya/authority/ by default, override via "
+              "KRIYA_AUTHORITY_HOME) - for producing a portable artifact to ship to CI via "
+              "your own external channel. Must resolve outside the workspace, same rule as "
+              "--trust-file; refused otherwise.")
+@click.option('--confirm', is_flag=True, default=False,
+              help="Skip the interactive confirmation prompt (for scripted/operator use). "
+              "This is a dedicated flag for this command only - it has no relationship to "
+              "and is never satisfied by generate/fix's -y flag.")
+@click.pass_context
+def authority_approve(ctx: click.Context, out: Optional[str], confirm: bool) -> None:
+    """Explicitly approve the CURRENT effective security-authority configuration.
+
+    Always re-resolves the configuration fresh (never reuses a prior `inspect`
+    call's output - closes the TOCTOU window by construction: what you approve
+    is recomputed at the moment of approval, not shown once and trusted
+    later). Approval binds to the EXACT set of security-relevant fields and
+    their current values - adding, removing, or changing ANY of them
+    afterward invalidates this approval entirely; it is not a blanket grant
+    to the repository, the config file, or any future field."""
+    from kriya.config.authority_approval import (
+        build_approval_artifact,
+        default_local_approval_path,
+        describe_pending,
+        save_approval_artifact,
+        validate_trust_path_outside_workspace,
+    )
+
+    state = _authority_state(ctx)
+    pending = describe_pending(state.violations, state.config_dict)
+    _print_pending(pending)
+
+    if not state.violations:
+        click.echo("Nothing to approve.")
+        return
+
+    out_path = out or default_local_approval_path(state.workspace_root)
+    if out:
+        validate_trust_path_outside_workspace(out_path, state.workspace_root)
+
+    if not confirm:
+        if not click.confirm(
+            "\nGrant explicit approval to exactly the security-authority field(s) listed above? "
+            "Any later change to any of them will require re-approval."
+        ):
+            click.echo("Not approved - no artifact written.")
+            sys.exit(1)
+
+    artifact = build_approval_artifact(state.violations, state.config_dict, state.workspace_root)
+    save_approval_artifact(out_path, artifact)
+    click.secho(
+        f"\nApproved. Artifact written to {out_path} (set digest {artifact.set_digest[:16]}...).",
+        fg="green", bold=True,
+    )
+    if not out:
+        click.echo(
+            "This is the default local store for this workspace - ordinary `kriya generate`/`fix`/etc. "
+            "will now honor it automatically. For CI, copy this file via your own external channel and "
+            "pass it with --trust-file (or set KRIYA_TRUST_FILE) - Kriya never ships or auto-provisions it."
+        )
+
+
+@authority_group.command(name="revoke")
+@click.pass_context
+def authority_revoke(ctx: click.Context) -> None:
+    """Immediately revoke this workspace's local approval, if any - future
+    `load_config()` calls fall back to P1 fail-closed denial for every
+    security-authority field, with no need to touch the config itself.
+    Idempotent: revoking when nothing is approved is not an error."""
+    from kriya.config.authority_approval import default_local_approval_path, revoke_local_approval
+
+    state = _authority_state(ctx)
+    removed = revoke_local_approval(state.workspace_root)
+    path = default_local_approval_path(state.workspace_root)
+    if removed:
+        click.secho(f"Revoked local approval at {path}.", fg="yellow", bold=True)
+    else:
+        click.echo(f"No local approval on file at {path} - nothing to revoke.")
+
+
+@main.group(name="proposal")
+def proposal_group() -> None:
+    """A3-P1: inspect/approve/reject persisted advisory proposals
+    (.kriya/proposals/, created via `kriya review <file> --propose <id> --save`).
+    Read-only + explicit approval-state changes only - never invokes generation,
+    never writes to the target repository, never applies any change."""
+    pass
+
+@proposal_group.command(name="show")
+@click.argument('proposal_id')
+@click.pass_context
+def proposal_show(ctx: click.Context, proposal_id: str) -> None:
+    """Display a persisted proposal's state, digest, and current binding/staleness status."""
+    from kriya.workflow.proposal_store import ProposalStoreError, load_proposal, verify_persisted_proposal
+
+    workspace_root = os.getcwd()
+    try:
+        persisted = load_proposal(proposal_id, workspace_root)
+    except ProposalStoreError as e:
+        click.secho(f"Cannot show proposal: [{e.reason_code}] {e.message}", fg="red", err=True)
+        sys.exit(1)
+
+    result = verify_persisted_proposal(persisted, workspace_root)
+    p = persisted.proposal
+    click.secho(f"Proposal ID: {persisted.proposal_id}", bold=True)
+    click.echo(f"State: {persisted.approval_state}")
+    click.echo(f"Authority: {p.authority}")
+    click.echo(f"Target: {p.target_file}")
+    click.echo(f"Member: {p.target_member}")
+    click.echo(f"Proposed Change: {p.proposed_change}")
+    click.echo("Must Preserve:")
+    for item in p.must_preserve:
+        click.echo(f"  - {item}")
+    click.echo("Verification:")
+    for item in p.verification:
+        click.echo(f"  - {item}")
+    click.echo(f"Proposal digest: {persisted.proposal_digest[:16]}...")
+    if persisted.approved_digest:
+        click.echo(f"Approved digest: {persisted.approved_digest[:16]}...")
+    click.echo(f"Created: {persisted.created_at}")
+    click.echo(f"Updated: {persisted.updated_at}")
+
+    if result.tampered:
+        click.secho("\nINTEGRITY: TAMPERED - stored digest does not match recomputed content.", fg="red", bold=True)
+    elif not result.ok:
+        click.secho(f"\nINTEGRITY: INVALID - {'; '.join(result.details)}", fg="red", bold=True)
+    elif persisted.approval_state == "APPROVED" and not result.approved_and_valid:
+        click.secho(f"\nINTEGRITY: APPROVED BUT STALE - {'; '.join(result.details)}", fg="yellow", bold=True)
+    elif persisted.approval_state == "APPROVED":
+        click.secho("\nINTEGRITY: APPROVED AND CURRENTLY VALID", fg="green", bold=True)
+    else:
+        click.secho("\nINTEGRITY: valid (untampered, repository/evidence still match)", fg="green")
+
+@proposal_group.command(name="approve")
+@click.argument('proposal_id')
+@click.pass_context
+def proposal_approve(ctx: click.Context, proposal_id: str) -> None:
+    """Explicitly approve a PENDING_APPROVAL proposal - requires the exact
+    persisted artifact to still be untampered and currently valid against
+    the real repository/evidence. Never re-runs review or rebuilds the
+    proposal. Never invokes generation."""
+    from kriya.workflow.proposal_store import ProposalStoreError, approve_proposal
+
+    workspace_root = os.getcwd()
+    try:
+        result = approve_proposal(proposal_id, workspace_root)
+    except ProposalStoreError as e:
+        click.secho(f"Cannot approve proposal: [{e.reason_code}] {e.message}", fg="red", err=True)
+        sys.exit(1)
+
+    if not result.ok:
+        click.secho(f"Approval refused: {', '.join(result.reason_codes)}", fg="red", err=True)
+        for d in result.details:
+            click.echo(f"  - {d}", err=True)
+        sys.exit(1)
+
+    click.secho(f"Approved: {proposal_id} (digest {result.persisted.approved_digest[:16]}...)", fg="green", bold=True)
+    click.echo("This records approval only - no source files were modified and no generation was invoked.")
+
+@proposal_group.command(name="reject")
+@click.argument('proposal_id')
+@click.pass_context
+def proposal_reject(ctx: click.Context, proposal_id: str) -> None:
+    """Mark a proposal REJECTED - permanent; a rejected proposal can never
+    be approved (create a new proposal instead)."""
+    from kriya.workflow.proposal_store import ProposalStoreError, reject_proposal
+
+    workspace_root = os.getcwd()
+    try:
+        persisted = reject_proposal(proposal_id, workspace_root)
+    except ProposalStoreError as e:
+        click.secho(f"Cannot reject proposal: [{e.reason_code}] {e.message}", fg="red", err=True)
+        sys.exit(1)
+    click.secho(f"Rejected: {persisted.proposal_id}", fg="yellow")
+
+@proposal_group.command(name="execute")
+@click.argument('proposal_id')
+@click.option('--yes', '-y', is_flag=True, default=False,
+              help="Auto-approve the generation workflow's own write-approval gate "
+              "(and any knowledge-guard risk it surfaces) once this ALREADY-APPROVED "
+              "proposal is confirmed still valid - does not and cannot approve the "
+              "proposal itself, that only ever happens via `kriya proposal approve`.")
+@click.pass_context
+def proposal_execute(ctx: click.Context, proposal_id: str, yes: bool) -> None:
+    """A3-P2: promote an APPROVED, currently-valid persisted proposal into a real
+    generation run via Kriya's existing generation workflow.
+
+    Refuses BEFORE invoking any generation if the proposal is PENDING_APPROVAL,
+    REJECTED, tampered, or has drifted stale (target/evidence file changed, wrong
+    workspace) since approval - `-y` here can never substitute for `kriya proposal
+    approve <id>`, it only controls the generation run's own internal write-approval
+    prompt once promotion has already been validated."""
+    from kriya.workflow.proposal_promotion import ProposalPromotionError, execute_approved_proposal
+    from kriya.workflow.proposal_store import ProposalStoreError
+
+    cfg: AppConfig = ctx.obj['config']
+    workspace_root = os.getcwd()
+
+    llm = LLMClient(cfg)
+    kernel = Kernel(config=cfg)
+    we = WorkflowEngine(kernel, llm)
+
+    def on_stream(step_name: str, token: str) -> None:
+        click.echo(token, nl=False)
+        sys.stdout.flush()
+
+    def on_approval(files: List[Dict[str, str]], reason: str) -> bool:
+        if yes:
+            click.secho(f"\n[Auto-Approving] Reason: {reason}", bold=True, fg="green")
+            return True
+        click.secho(f"\n[Escalation Review Needed] Reason: {reason}", bold=True, fg="yellow")
+        for f in files:
+            filepath = f.get("filepath", "")
+            content = f.get("content", "")
+            click.secho(f"\n--- Proposed changes for: {filepath} ---", bold=True, fg="cyan")
+            lines = content.splitlines()
+            click.echo("\n".join(lines[:15]))
+            if len(lines) > 15:
+                click.echo(f"... and {len(lines) - 15} more lines.")
+        return click.confirm("\nDo you approve applying these changes to the codebase?")
+
+    async def run_execution() -> Dict[str, Any]:
+        await kernel.start()
+        try:
+            return await execute_approved_proposal(
+                proposal_id, workspace_root, we,
+                knowledge_risk_confirmed=yes,
+                stream_callback=on_stream,
+                approval_callback=on_approval,
+            )
+        finally:
+            await kernel.stop()
+
+    try:
+        with acquire_run_lock(workspace_root):
+            res = asyncio.run(run_execution())
+    except WorkspaceLockHeldError as e:
+        click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red", err=True)
+        sys.exit(1)
+    except (ProposalPromotionError, ProposalStoreError) as e:
+        reason_code = getattr(e, "reason_code", None) or ", ".join(getattr(e, "reason_codes", ()))
+        click.secho(f"\nCannot execute proposal '{proposal_id}': [{reason_code}] {e}", fg="red", err=True)
+        sys.exit(1)
+
+    click.secho("\n=== Proposal Execution Completed ===", bold=True)
+    if res.get("status") == "knowledge_gap":
+        click.secho(
+            "Blocked by a knowledge-guard gap - re-run with -y to accept the risk "
+            "for this promoted goal (see `kriya generate --knowledge-policy` for the "
+            "equivalent manual-goal behavior).", fg="yellow",
+        )
+        sys.exit(3)
+    click.echo(json.dumps(res, indent=2, default=str))
+    sys.exit(0 if res.get("quality_gates_passed") else 1)
 
 @main.command(name="ask")
 @click.argument('question')
@@ -2274,12 +3178,78 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             click.secho("\n[FAILURE] Repair attempts completed but compilation/tests still fail.", fg="red", bold=True)
             if res.get("failure_category"):
                 click.echo(f"Failure category: {res['failure_category']}")
-            if res.get("environment_failure"):
+            # PRV-17 preflight correction (2026-09-03): see the matching guard
+            # above in this file's other quality-gates-failure branch - an
+            # unauthorized/unrecoverable generation target reuses environment_
+            # failure purely as its STOP mechanism, not as a real toolchain
+            # problem, and must not print this Java/Maven-specific advice.
+            if res.get("environment_failure") and res.get("failure_category") not in (
+                "unauthorized_generation_target", "candidate_independent_deterministic_failure",
+                "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
+            ):
                 click.secho(
                     f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
                     "Kriya stopped retrying early rather than burning its retry budget "
                     "re-generating code that could never fix this - run `kriya doctor` "
                     "to check your Java/Maven toolchain resolution.",
+                    fg="yellow", bold=True
+                )
+            # VAL-001 G1-DEVINV2 (2026-09-20): see the matching branch above
+            # in this file's other quality-gates-failure branch.
+            if res.get("failure_category") == "regression_unattributed":
+                click.secho(
+                    f"\n[REGRESSION UNATTRIBUTED] {res['environment_failure']}\n"
+                    "Kriya stopped retrying early: the full-regression suite's aggregate "
+                    "outcome changed relative to the captured PRE-mutation baseline, but "
+                    "no specific test could be confirmed as caused by this candidate - "
+                    "every per-test failure either matches the baseline exactly, or was "
+                    "independently replayed (in isolation, against both a pristine and a "
+                    "candidate copy) and could not be confirmed either way - an "
+                    "indeterminate/non-reproducible result is never treated as a known "
+                    "pre-existing failure, only as unattributable. "
+                    "Investigate the full-regression output directly; further Developer "
+                    "regeneration cannot resolve this.",
+                    fg="yellow", bold=True
+                )
+            # PRV-17 (2026-09-08, P7 efficiency finding): see the matching
+            # branch above in this file's other quality-gates-failure branch.
+            if res.get("failure_category") == "candidate_independent_deterministic_failure":
+                click.secho(
+                    f"\n[DETERMINISTIC VALIDATOR DEFECT] {res['environment_failure']}\n"
+                    "Kriya stopped retrying early: replaying the same deterministic check "
+                    "against an isolated copy of the pre-candidate baseline reproduced the "
+                    "identical failure, proving no further Developer regeneration could "
+                    "have fixed it - the defect is in the validator or build configuration "
+                    "itself, not the generated code.",
+                    fg="yellow", bold=True
+                )
+            # Demo-01 Finding 4 (2026-09-11): see the matching branch above
+            # in this file's other quality-gates-failure branch.
+            if res.get("failure_category") == "generation_budget_exhausted":
+                click.secho(
+                    f"\n[GENERATION BUDGET EXHAUSTED] {res['environment_failure']}\n"
+                    "Kriya stopped retrying because the configured generation time budget "
+                    "ran out before another repair attempt could safely begin - this is a "
+                    "terminal stop condition, not an environment/toolchain problem; running "
+                    "`kriya doctor` will not help. Increase autonomy."
+                    "generation_time_budget_seconds if this goal genuinely needs more time, "
+                    "or reduce the plan's file scope. Any earlier, still-unresolved "
+                    "engineering failure from a prior attempt (if one occurred) remains in "
+                    "this run's own persisted gate_outcomes/trace record, distinct from this "
+                    "stop reason.",
+                    fg="yellow", bold=True
+                )
+            # SEC-001 (2026-09-11): see the matching branch above in this
+            # file's other quality-gates-failure branch.
+            if res.get("failure_category") == "containment_setup_failed":
+                click.secho(
+                    f"\n[CONTAINMENT SETUP FAILED] {res['environment_failure']}\n"
+                    "Kriya stopped retrying because a required execution-containment "
+                    "backend could not be established for a command that needed one - "
+                    "this is a configuration/environment problem with the containment "
+                    "backend itself (not the generated code), and `kriya doctor` will not "
+                    "help. Check autonomy.containment_backend and the backend's own "
+                    "availability.",
                     fg="yellow", bold=True
                 )
             if res.get("run_id"):
@@ -2303,11 +3273,26 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             res.get("files") and res.get("review")
             and not res.get("review_included_in_approval")
         ):
-            click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+            # Demo-01 Run A finding (2026-09-11) - same fix as `generate`
+            # above: header must reflect accepted vs rejected disposition,
+            # not just presence of a review. `fix` shares run_generation_
+            # workflow() with `generate`, so ReviewerAgent.rejected_candidate_
+            # system_prompt is already applied upstream for this case too.
+            if res.get("quality_gates_passed"):
+                click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+            else:
+                click.secho(
+                    "\n=== Rejected Candidate Review (diagnostic only - NOT applied to workspace) ===",
+                    bold=True, fg="red",
+                )
             click.echo(res.get("review"))
 
     try:
-        asyncio.run(run_fix())
+        with acquire_run_lock(os.path.abspath(workspace)):
+            asyncio.run(run_fix())
+    except WorkspaceLockHeldError as e:
+        click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
+        sys.exit(1)
     except Exception as e:
         click.secho(f"Error executing fix workflow: {e}", fg="red")
         click.secho(

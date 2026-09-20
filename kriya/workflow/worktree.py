@@ -19,6 +19,24 @@ from kriya.policy.model import ActionRequest, ActionType
 
 logger = logging.getLogger(__name__)
 
+# SEC-001-P1 (2026-09-11): every Kriya-internal git invocation that can
+# trigger a repository-defined hook (checkout, worktree add - which
+# implicitly checks out - and commit) gets this prepended. A target repo
+# (adversarial or merely pre-existing) can define .git/hooks/post-checkout,
+# pre-commit, post-commit, etc. - none of Kriya's own control-plane git
+# operations are supposed to execute repository-controlled code as a side
+# effect of managing the sandbox worktree, and none did intentionally, but
+# nothing previously suppressed them either (SEC-001 execution-surface
+# inventory finding). `core.hooksPath=/dev/null` is a real git mechanism
+# (not a Kriya invention) - git looks up hooks under this path and finds
+# nothing, so every hook type is suppressed uniformly rather than
+# enumerating one --no-verify-style flag per hook type (--no-verify only
+# covers pre-commit/commit-msg, not post-checkout/post-commit). Read-only
+# plumbing (status/rev-parse/worktree list/worktree prune) is untouched -
+# it cannot trigger a hook and this stays a minimal, targeted diff.
+_HOOKS_DISABLED = ["-c", "core.hooksPath=/dev/null"]
+
+
 # MA4.8 (control-plane implementation plan) - audit-only, module-level since
 # this file has no class/instance to hold it (same pattern as
 # kriya/workflow/edit_safety.py's MA4.5 integration and kriya/tools/web.py's
@@ -167,7 +185,7 @@ def _bootstrap_greenfield_repository(workspace_path: str) -> None:
     Command-local identity avoids mutating repository/global configuration.
     Any failure propagates so sandboxed generation fails closed.
     """
-    init_command = ["git", "init"]
+    init_command = ["git", *_HOOKS_DISABLED, "init"]
     _audit_git_write(init_command, workspace_path)
     initialized = subprocess.run(
         init_command, cwd=workspace_path, capture_output=True, text=True,
@@ -193,7 +211,7 @@ def _bootstrap_greenfield_repository(workspace_path: str) -> None:
             handle.write(".kriya/\n")
 
     commit_command = [
-        "git", "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
+        "git", *_HOOKS_DISABLED, "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
         "commit", "--allow-empty", "-m", "Kriya: initial commit to enable isolation",
     ]
     _audit_git_write(commit_command, workspace_path)
@@ -322,7 +340,7 @@ def create_git_worktree(repo_path: str) -> str:
     if _resolve_repo_head(repo_path) is None:
         try:
             bootstrap_commit_command = [
-                "git", "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
+                "git", *_HOOKS_DISABLED, "-c", "user.name=Kriya", "-c", "user.email=kriya@local",
                 "commit", "--allow-empty", "-m", "Kriya: initial commit (empty) to enable worktree isolation",
             ]
             _audit_git_write(bootstrap_commit_command, repo_path)
@@ -356,7 +374,7 @@ def create_git_worktree(repo_path: str) -> str:
     if not worktree_registered:
         if os.path.exists(worktree_path):
             shutil.rmtree(worktree_path, ignore_errors=True)
-        subprocess.run(["git", "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
+        subprocess.run(["git", *_HOOKS_DISABLED, "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
     else:
         # Recreate the directory physically if it was deleted but still registered
         if not os.path.exists(worktree_path):
@@ -364,13 +382,13 @@ def create_git_worktree(repo_path: str) -> str:
                 subprocess.run(["git", "worktree", "prune"], cwd=repo_path, capture_output=True)
             except Exception as e:
                 logger.debug(f"git worktree prune failed (non-fatal): {e}")
-            subprocess.run(["git", "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
+            subprocess.run(["git", *_HOOKS_DISABLED, "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
         else:
             # Reset but preserve target/ and other build directories. "HEAD" here
             # must be resolved against repo_path, not checked out literally inside
             # the worktree - see _resolve_repo_head for why.
             target = _resolve_repo_head(repo_path)
-            subprocess.run(["git", "checkout", "-f", target or "HEAD"], cwd=worktree_path, check=True, capture_output=True)
+            subprocess.run(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"], cwd=worktree_path, check=True, capture_output=True)
             subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, check=True, capture_output=True)
 
     # A worktree only ever reflects git HEAD - it knows nothing about uncommitted
@@ -530,7 +548,7 @@ def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
     if os.path.exists(worktree_path):
         try:
             target = _resolve_repo_head(repo_path)
-            subprocess.run(["git", "checkout", "-f", target or "HEAD"], cwd=worktree_path, capture_output=True)
+            subprocess.run(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"], cwd=worktree_path, capture_output=True)
             subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, capture_output=True)
         except Exception as e:
             logger.debug(f"Failed to clean up worktree at '{worktree_path}' (non-fatal): {e}")

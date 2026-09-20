@@ -1,16 +1,27 @@
 import ast
-import asyncio
 import fnmatch
 import logging
 import os
 import re
-from typing import Any, Optional, Type
+import shlex
+from typing import Any, Optional, Tuple, Type
 
 from pydantic import BaseModel, Field
 
-from kriya.config.config import AutonomyConfig
+from kriya.config.config import AutonomyConfig, ExecutionPolicyConfig
 from kriya.plugins.plugin import BasePlugin
-from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
+from kriya.policy.enforcement import enforce_hard_invariants
+from kriya.policy.errors import PolicyDeniedError
+from kriya.policy.execution import ExecutionPolicy, classify_shell_acquisition_command
+from kriya.policy.model import ActionRequest, ActionType, PolicyDecision
+from kriya.tools.containment import (
+    ContainmentProfile,
+    ContainmentSetupError,
+    NetworkAuthority,
+    TrustClass,
+    resolve_containment_backend,
+)
+from kriya.tools.process import ProcessController
 from kriya.tools.tool import BaseTool, ToolExecutionError
 
 logger = logging.getLogger(__name__)
@@ -110,8 +121,24 @@ class FilesystemTool(BaseTool):
 
 
 class ShellTool(BaseTool):
-    def __init__(self, autonomy_cfg: Optional[AutonomyConfig] = None) -> None:
+    def __init__(
+        self, autonomy_cfg: Optional[AutonomyConfig] = None,
+        execution_policy_cfg: Optional[ExecutionPolicyConfig] = None,
+    ) -> None:
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
+        self._execution_policy_cfg = execution_policy_cfg
+        # POL-001: this tool previously executed args.command with zero
+        # ExecutionPolicy consultation - unlike kriya/tools/validate.py's
+        # own Kriya-constructed compile/test commands, this string is
+        # caller/model-supplied and can contain `sudo`, a force-push, a
+        # protected-ref mutation, etc. Reuses the same always-on, 5-reason-
+        # code hard stop kriya/tools/validate.py::_audit_run_command already
+        # applies (kriya/policy/enforcement.py::enforce_hard_invariants) -
+        # not a new authority, the same one, applied to a call site that
+        # was missing it. A bare `ExecutionPolicy()` with no override
+        # matches every other real caller that doesn't have config access
+        # in scope (see execution.py's own comment on this default).
+        self._execution_policy = ExecutionPolicy()
 
     @property
     def name(self) -> str:
@@ -130,33 +157,179 @@ class ShellTool(BaseTool):
         return True
 
     async def _run(self, args: ShellArgs) -> Any:
-        env = None
-        preexec_fn = None
-        if self.autonomy_cfg.sandbox_execution:
-            env = build_restricted_env(self.autonomy_cfg.sandbox_env_allowlist)
-            preexec_fn = posix_resource_limits_preexec_fn(
-                self.autonomy_cfg.sandbox_cpu_seconds, self.autonomy_cfg.sandbox_memory_mb
-            )
+        # POL-001: parsed best-effort the same way a real argv-based caller
+        # would be; an unparseable string (mismatched quoting) is passed
+        # through as a single opaque token rather than blocking execution -
+        # this stage only ever adds a hard stop for a small, precise set of
+        # reason codes (sudo/force-push/protected-ref/config-mutate/remote-
+        # mutate), it never grants permission, so failing to parse just
+        # means this particular check has no opinion, matching
+        # _authorize_action's own "a broken check never blocks the caller"
+        # precedent - it does not weaken any other enforcement.
+        #
+        # Mirrors kriya/tools/validate.py::_audit_run_command's own
+        # try/except shape exactly: PolicyDeniedError propagates (a real
+        # denial must actually stop execution), any OTHER exception from a
+        # broken/misconfigured policy engine (e.g. a bad regex in a user's
+        # autonomy.sensitive_paths) is logged and swallowed rather than
+        # newly breaking a shell command that worked before this check
+        # existed.
         try:
-            process = await asyncio.create_subprocess_shell(
-                args.command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env,
-                preexec_fn=preexec_fn,
+            parsed_command = tuple(shlex.split(args.command))
+        except ValueError:
+            parsed_command = (args.command,)
+        if parsed_command:
+            request = ActionRequest(
+                action_type=ActionType.RUN_COMMAND,
+                command=parsed_command,
+                workspace_path=os.getcwd(),
             )
-            stdout, stderr = await process.communicate()
+            # Unconditional (mode-independent) hard-invariant check - unchanged
+            # from P1, must keep blocking sudo etc. even under mode="audit".
+            try:
+                enforce_hard_invariants(self._execution_policy, request)
+            except PolicyDeniedError:
+                raise
+            except Exception as e:
+                logger.debug("POL-001 policy check failed (ignored, fails open on a broken check only): %s", e)
 
-            return {
-                "exit_code": process.returncode,
-                "stdout": stdout.decode("utf-8", errors="replace"),
-                "stderr": stderr.decode("utf-8", errors="replace")
-            }
+            # POL-001-P2: enforce_hard_invariants only ever escalates 5
+            # specific hard-DENY codes - it deliberately never acts on
+            # REQUIRE_APPROVAL (kriya/policy/enforcement.py's own
+            # docstring). A raw shell-wrapper invocation (`bash -c "..."`,
+            # `sh -c "..."`, etc.) typed through this tool genuinely reaches
+            # `_check_command_allowlist`'s COMMAND_SHELL_WRAPPER_REQUIRES_APPROVAL
+            # rule, which the check above silently let through - found via
+            # this task's own Step 4 re-audit, not by the P1 report. No
+            # approval_callback is reachable at this plugin-tool boundary
+            # (same as GitTool's own commit gate), so this mirrors that
+            # exact mode-gated fail-closed pattern rather than inventing new
+            # plumbing: audit-only under mode="audit" (today's default,
+            # preserves existing behavior), fails closed under mode="enforce".
+            #
+            # Deliberately scoped to REQUIRE_APPROVAL only, NOT every
+            # non-ALLOW decision - COMMAND_NOT_ALLOWLISTED DENY stays
+            # excluded here exactly as it is in enforce_hard_invariants
+            # itself (narrow starter allowlist, real risk of blocking
+            # legitimate commands never on that list yet). Broadening that
+            # is explicitly out of scope for this pass.
+            enforce = bool(self._execution_policy_cfg and self._execution_policy_cfg.mode == "enforce")
+            if enforce:
+                try:
+                    result = self._execution_policy.evaluate(request)
+                except Exception as e:
+                    logger.debug("POL-001 policy evaluation failed (ignored, audit-only): %s", e)
+                    result = None
+                if result is not None and result.decision == PolicyDecision.REQUIRE_APPROVAL:
+                    raise PolicyDeniedError(request=request, result=result)
+
+        # SEC-001 (2026-09-11): migrated off a raw asyncio.create_subprocess_shell
+        # call with no timeout and no process-group isolation (the single
+        # most dangerous, least-contained primitive found by the SEC-001
+        # execution-surface inventory - see
+        # docs/architecture/SEC001_HOSTILE_CODE_CONTAINMENT_DESIGN.md §1)
+        # onto ProcessController.run_async(), the same common execution
+        # boundary PolymorphicValidator/service_runtime already use.
+        # `["/bin/sh", "-c", args.command]` reproduces
+        # asyncio.create_subprocess_shell's own exact POSIX invocation
+        # shape, so shell-metacharacter/pipe/redirect semantics are
+        # unchanged - only the execution PRIMITIVE moved, not what the
+        # command string is allowed to contain.
+        #
+        # A ContainmentProfile is always constructed (this tool's content
+        # is caller/model-supplied, never Kriya-authored - TrustClass is
+        # UNTRUSTED_EXECUTION, never inferred from the command text
+        # itself), but the packaged default containment_backend ("none" -
+        # NullContainmentBackend) reproduces sandbox_execution's exact
+        # prior env-allowlist/rlimit-only behavior, so nothing about
+        # ordinary shell-command results changes until a real backend is
+        # configured. Backend/resource setup failure now genuinely blocks
+        # the command (ContainmentSetupError propagates below) rather than
+        # being silently caught by the generic ToolExecutionError wrap -
+        # a caller needs to be able to tell "the shell command itself
+        # failed" from "Kriya refused to run it uncontained".
+        #
+        # SEC-005 O5 (2026-09-13): network is UNRESTRICTED unconditionally
+        # UNLESS BOTH (a) `contained_execution_required=True` (the same
+        # opt-in gate PolymorphicValidator's own acquisition path already
+        # uses - "preserve current documented behavior when containment is
+        # intentionally disabled", never redesigning that global decision)
+        # AND (b) this exact invocation is recognized as package-manager-
+        # acquisition-shaped (classify_shell_acquisition_command, reusing
+        # SEC-006's own AutonomyConfig.acquisition_registry_hosts for the
+        # two ecosystems it already authorizes - never a new, independently
+        # maintained host list). A near-miss / unrecognized command is
+        # UNCHANGED (still UNRESTRICTED) - this only ever NARROWS authority
+        # for a positively-recognized acquisition shape, never widens
+        # anything relative to today's behavior. An unmapped-but-recognized
+        # package manager (npm/Bundler/RubyGems/Cargo/Gradle - no
+        # registry-host authority declared for these today) fails CLOSED to
+        # DENIED, never UNRESTRICTED.
+        network = NetworkAuthority.UNRESTRICTED
+        network_destinations: Tuple[str, ...] = ()
+        if self.autonomy_cfg.contained_execution_required:
+            acquisition_kind = classify_shell_acquisition_command(parsed_command) if parsed_command else None
+            if acquisition_kind == "registry_scoped":
+                network = NetworkAuthority.DEPENDENCY_REGISTRY_ONLY
+                network_destinations = tuple(sorted(set(self.autonomy_cfg.acquisition_registry_hosts)))
+            elif acquisition_kind == "unmapped":
+                network = NetworkAuthority.DENIED
+        profile = None
+        backend = None
+        if self.autonomy_cfg.sandbox_execution:
+            profile = ContainmentProfile(
+                trust_class=TrustClass.UNTRUSTED_EXECUTION,
+                workspace_path=os.getcwd(),
+                network=network,
+                network_destinations=network_destinations,
+                env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
+                cpu_seconds=self.autonomy_cfg.sandbox_cpu_seconds,
+                memory_mb=self.autonomy_cfg.sandbox_memory_mb,
+            )
+            backend = resolve_containment_backend(self.autonomy_cfg.containment_backend)
+        controller = ProcessController()
+        try:
+            result = await controller.run_async(
+                ["/bin/sh", "-c", args.command],
+                cwd=os.getcwd(),
+                timeout=self.autonomy_cfg.shell_command_timeout_seconds,
+                containment_profile=profile,
+                containment_backend=backend,
+            )
+        except ContainmentSetupError:
+            raise
         except Exception as e:
             raise ToolExecutionError(f"Shell command execution failed: {e}") from e
 
+        return {
+            "exit_code": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
+
 
 class GitTool(BaseTool):
+    # POL-001-P2: status/diff/log/branch(list)/blame are GIT_READ-shaped -
+    # never gated as GIT_WRITE, matching ExecutionPolicy's own
+    # default-allow-for-reads backstop (MA4.2). commit is the only
+    # currently-supported mutating subcommand this tool exposes - no
+    # push/reset/ref-delete capability exists here to gate.
+    _MUTATING_SUBCOMMANDS = frozenset({"commit"})
+    # SEC-001-P6: this tool had no wall-clock timeout at all before its
+    # ProcessController migration - every subcommand here is a fast,
+    # finite, local git operation, so a generous-but-bounded ceiling
+    # (matching ShellTool's own default) is a strict improvement with no
+    # real-world behavior change for a healthy repo.
+    _GIT_COMMAND_TIMEOUT_SECONDS = 60
+
+    def __init__(self, execution_policy_cfg: Optional[ExecutionPolicyConfig] = None) -> None:
+        self._execution_policy_cfg = execution_policy_cfg
+        # A bare ExecutionPolicy() with no override, matching every other
+        # real caller without config-derived sensitive-path patterns in
+        # scope (see kriya/policy/execution.py's own comment on this
+        # default) - same convention ShellTool's own POL-001 wiring uses.
+        self._execution_policy = ExecutionPolicy()
+
     @property
     def name(self) -> str:
         return "git"
@@ -168,6 +341,44 @@ class GitTool(BaseTool):
     @property
     def arguments_schema(self) -> Type[BaseModel]:
         return GitArgs
+
+    def _authorize_git_write(self, cmd: list) -> None:
+        """POL-001-P2: `_check_git_destructive`'s own catch-all rule
+        (kriya/policy/execution.py) returns REQUIRE_APPROVAL, never a bare
+        ALLOW, for an ordinary `git commit` - none of the 5
+        enforce_hard_invariants hard-DENY codes apply to a plain commit
+        (those are force-push/protected-ref/config/remote-mutation
+        specific), so P1's enforce_hard_invariants-only wiring would have
+        left this REQUIRE_APPROVAL completely unconsulted. Mirrors
+        WorkflowEngine._authorize_action's own established, already-tested
+        semantics exactly (same module cannot be called directly - this is
+        a plugin tool, not a WorkflowEngine method - so the same decision
+        shape is replicated inline rather than inventing a different one):
+        under mode="audit" (today's default), evaluate and let the caller
+        decide/log, but never raise - audit-only, preserves today's actual
+        behavior byte for byte. Under mode="enforce", DENY raises
+        immediately; REQUIRE_APPROVAL has no approval_callback reachable at
+        this boundary (a plugin tool, unlike run_generation_workflow, is
+        never handed one) - Invariant 5 forbids adding callback plumbing
+        for this, so it fails closed instead, exactly as this task's own
+        Step 2 instructs ("otherwise document the current semantic and
+        fail closed rather than inventing new architecture")."""
+        request = ActionRequest(action_type=ActionType.GIT_WRITE, command=tuple(cmd), workspace_path=os.getcwd())
+        try:
+            result = self._execution_policy.evaluate(request)
+        except Exception as e:
+            logger.debug("POL-001 policy evaluation failed (ignored, audit-only): %s", e)
+            return
+
+        enforce = bool(self._execution_policy_cfg and self._execution_policy_cfg.mode == "enforce")
+        if not enforce:
+            return
+
+        if result.decision in (PolicyDecision.ALLOW, PolicyDecision.ALLOW_SANDBOXED):
+            return
+
+        # DENY, or REQUIRE_APPROVAL with no reachable approval path: fail closed.
+        raise PolicyDeniedError(request=request, result=result)
 
     async def _run(self, args: GitArgs) -> Any:
         sub = args.subcommand.lower()
@@ -184,7 +395,12 @@ class GitTool(BaseTool):
         elif sub == "commit":
             if not args.message:
                 raise ToolExecutionError("Commit message is required for git commit.")
-            cmd.extend(["commit", "-m", args.message])
+            # SEC-001-P1 (2026-09-11): suppresses any repository-defined
+            # pre-commit/commit-msg/post-commit hook - this call can commit
+            # into a real, possibly-adversarial target repository, and
+            # nothing about this tool's job is "also run whatever hook that
+            # repository happens to define".
+            cmd.extend(["-c", "core.hooksPath=/dev/null", "commit", "-m", args.message])
         elif sub == "blame":
             if not args.file_path:
                 raise ToolExecutionError("file_path is required for git blame.")
@@ -192,20 +408,42 @@ class GitTool(BaseTool):
         else:
             raise ToolExecutionError(f"Unsupported git subcommand: {args.subcommand}")
 
+        if sub in self._MUTATING_SUBCOMMANDS:
+            self._authorize_git_write(cmd)
+
+        # SEC-001-P6 (2026-09-11): migrated off a raw asyncio.create_subprocess_exec
+        # call with no timeout and no process-group isolation onto the common
+        # execution boundary - this tool's own execution-surface inventory
+        # entry (deferred in the earlier foundation package) is now closed.
+        # TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE, not UNTRUSTED_EXECUTION:
+        # `cmd` is always ONE of this method's own fixed-shape git
+        # invocations (status/diff/log/branch/commit/blame) - `args.message`/
+        # `args.file_path` land as inert argv DATA (a `-m <message>` value,
+        # a path git reads), never as executed content, the same reasoning
+        # worktree.py's own bootstrap commands already rely on for their
+        # ALLOW classification (kriya/policy/execution.py's
+        # _is_kriya_internal_bootstrap_commit). backend_required is False
+        # for this trust class, so no containment backend is needed here -
+        # this migration is purely about gaining a real timeout and
+        # process-tree cleanup, which this tool had neither of before.
+        profile = ContainmentProfile(
+            trust_class=TrustClass.TRUSTED_KRIYA_INFRASTRUCTURE,
+            workspace_path=os.getcwd(),
+        )
         try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+            result = await ProcessController().run_async(
+                cmd, cwd=os.getcwd(), timeout=self._GIT_COMMAND_TIMEOUT_SECONDS,
+                containment_profile=profile, containment_backend=resolve_containment_backend("none"),
             )
-            stdout, stderr = await process.communicate()
-            
-            if process.returncode != 0:
+            if result.timeout:
                 raise ToolExecutionError(
-                    f"Git command failed with exit code {process.returncode}: {stderr.decode('utf-8')}"
+                    f"Git command timed out after {self._GIT_COMMAND_TIMEOUT_SECONDS} seconds: {' '.join(cmd)}"
                 )
-                
-            return stdout.decode("utf-8")
+            if result.returncode != 0:
+                raise ToolExecutionError(
+                    f"Git command failed with exit code {result.returncode}: {result.stderr}"
+                )
+            return result.stdout
         except Exception as e:
             if isinstance(e, ToolExecutionError):
                 raise e
@@ -374,9 +612,12 @@ class CoreToolsPlugin(BasePlugin):
     async def initialize(self) -> None:
         from .validation_tool import ValidationTool
         autonomy_cfg = getattr(self.kernel.config, "autonomy", None) if self.kernel.config else None
+        execution_policy_cfg = getattr(self.kernel.config, "execution_policy", None) if self.kernel.config else None
         self.kernel.registry.register("tool", "filesystem", FilesystemTool())
-        self.kernel.registry.register("tool", "shell", ShellTool(autonomy_cfg=autonomy_cfg))
-        self.kernel.registry.register("tool", "git", GitTool())
+        self.kernel.registry.register(
+            "tool", "shell", ShellTool(autonomy_cfg=autonomy_cfg, execution_policy_cfg=execution_policy_cfg),
+        )
+        self.kernel.registry.register("tool", "git", GitTool(execution_policy_cfg=execution_policy_cfg))
         self.kernel.registry.register("tool", "search", SearchTool())
         self.kernel.registry.register("tool", "ast", ASTTool())
         self.kernel.registry.register("tool", "validate_refactor", ValidationTool())

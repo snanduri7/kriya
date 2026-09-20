@@ -96,8 +96,14 @@ def git_commit_if_tracked(path: str, message: str) -> None:
         if check.returncode != 0 or check.stdout.strip() != "true":
             return
         subprocess.run(["git", "add", path], cwd=directory, capture_output=True)
+        # SEC-001-P1 (2026-09-11): suppresses any repository-defined
+        # pre-commit/commit-msg/post-commit hook in whatever git work tree
+        # the skill directory happens to live in - this commit is
+        # Kriya-internal bookkeeping, never meant to trigger arbitrary
+        # repository-controlled code as a side effect.
         res = subprocess.run(
-            ["git", "commit", "-m", message], cwd=directory, capture_output=True, text=True
+            ["git", "-c", "core.hooksPath=/dev/null", "commit", "-m", message],
+            cwd=directory, capture_output=True, text=True,
         )
         if res.returncode == 0:
             logger.info(f"Committed skill change: {message}")

@@ -8,6 +8,7 @@ from kriya.agents.agent import (
     ArchitectAgent,
     DeveloperAgent,
     PlannerAgent,
+    ReviewerAgent,
     RunVerifierAgent,
     SkillGapAgent,
     SpecComplianceAgent,
@@ -944,6 +945,348 @@ async def test_fill_missing_content_no_fix_analysis_instruction_without_prior_er
     assert "FIX ANALYSIS" not in file_prompt
     assert files[0]["content"] == "public class App {}"
 
+def test_planner_agent_system_prompt_documents_execution_role_verification():
+    """P9-P1 (P9/PRV-08, 2026-09-08): the Planner's own prompt never
+    mentioned execution_role/ExecutionRole.VERIFICATION at all, even though
+    the schema already supports it (plan_schema.py's own model_validator
+    requires empty planned_files + a real verifier for that role, and
+    plan_validation.py already exempts it from the MODEL_SUBTASK_MISSING_
+    PLANNED_FILES check) - so the Planner had no way to know a genuinely
+    non-mutating "revalidate this affected consumer" step was legal,
+    defaulting every dependent subtask to execution_role=implementation
+    with a modify action instead. This asserts the prompt now documents the
+    "verification" role by name and shows its required shape (empty
+    planned_files, a real verification list entry)."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    planner = PlannerAgent("planner", llm)
+    sp = planner.system_prompt
+    assert "execution_role" in sp
+    assert '"verification"' in sp
+    assert "planned_files MUST be empty" in sp or "planned_files MUST be []" in sp
+
+
+def test_planner_agent_system_prompt_states_affectedness_does_not_imply_mutation():
+    """P9-P1 - the core semantic rule this fix exists to teach: being
+    affected by an upstream contract change is never, by itself, evidence
+    that a downstream file's own source must be modified."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    planner = PlannerAgent("planner", llm)
+    sp = planner.system_prompt
+    assert "AFFECTEDNESS DOES NOT IMPLY MUTATION" in sp
+    assert "never, by itself, evidence" in sp or "not, by itself, evidence" in sp
+
+
+def test_planner_agent_system_prompt_requires_positive_justification_for_implementation():
+    """P9-P1 - execution_role=implementation with planned_files must be
+    reserved for a subtask with POSITIVE justification (the goal itself
+    naming the change, or concrete grounded evidence of incompatibility),
+    never merely "this file depends on something that changed"."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    planner = PlannerAgent("planner", llm)
+    sp = planner.system_prompt
+    assert "positive justification" in sp
+    assert "consumes or depends on something that changed" in sp
+
+
+def test_reviewer_agent_system_prompt_related_artifact_relationship_does_not_reveal_contents():
+    """A1-R1 (2026-09-09): the first live A1 run showed the Reviewer inferring
+    a related file's UNSEEN contents (an endpoint path, an HTTP status) from
+    nothing more than that file's name/relationship being mentioned in the
+    supplied Repository Evidence. The contract must state explicitly that a
+    related artifact's existence/name/type/relationship is not itself
+    evidence about its contents."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.system_prompt
+    assert "does NOT provide evidence about that artifact's unseen contents" in sp
+
+
+def test_reviewer_agent_system_prompt_prohibits_inventing_endpoints_status_codes_from_artifact_names():
+    """A1-R1: the two concrete live failures - a fabricated REST endpoint path
+    for DriverController.java and a fabricated HTTP status for
+    ConstraintsViolationException - must be named as explicitly prohibited
+    inference categories, with the required fallback phrasing when the real
+    fact wasn't supplied."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.system_prompt
+    assert "endpoint paths, HTTP methods, request mappings" in sp
+    assert "status codes, exception mappings" in sp
+    assert "not determinable from the supplied repository evidence" in sp
+
+
+def test_reviewer_agent_system_prompt_applies_evidence_discipline_to_every_section():
+    """A1-R1: the first live run's two hallucinations both landed in the
+    mandatory 'How to Run the Application' section, which had no evidence-
+    discipline instruction applied to it at all - only the findings table
+    did. The contract must now say explicitly that every section is
+    evidence-governed, naming 'How to Run' among them, not just the table."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.system_prompt
+    assert "applies to the ENTIRE response, not just a findings table" in sp
+    assert "How to Run" in sp
+    assert "This section is not exempt from guideline 6" in sp
+
+
+# --- rejected_candidate_system_prompt (Demo-01 Run A finding, 2026-09-11) ---
+
+def test_reviewer_rejected_candidate_prompt_forbids_run_instructions_and_success_language():
+    """Live finding: a real terminal Quality-Gates FAILURE with nothing
+    applied to the workspace was followed by a Reviewer report reading "the
+    application successfully..." with a 'How to Run the Application'
+    section and an expected runtime output - directly contradicting the
+    FAILED banner. system_prompt's own guideline 3 unconditionally demands a
+    How-to-Run section; this override must explicitly cancel it for a
+    rejected candidate."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.rejected_candidate_system_prompt("GENERATION TIME BUDGET EXHAUSTED")
+
+    assert "quality_gates_passed: false" in sp
+    assert "candidate_status: REJECTED" in sp
+    assert "workspace_applied: false" in sp
+    assert "GENERATION TIME BUDGET EXHAUSTED" in sp
+    assert "Do not write a 'How to Run the Application' section" in sp
+    assert "works, succeeded, is runnable, is complete, was accepted" in sp
+    assert "overrides guideline 3 above" in sp
+
+
+def test_reviewer_rejected_candidate_prompt_preserves_base_evidence_discipline():
+    """The override must not be a full prompt replacement - every existing
+    evidence-discipline guideline (hallucination/evidence-boundary rules)
+    must still be present, only guideline 3's mandate is cancelled."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.rejected_candidate_system_prompt("some failure")
+
+    assert reviewer.system_prompt in sp
+    assert "does NOT provide evidence about that artifact's unseen contents" in sp
+
+
+def test_reviewer_normal_system_prompt_unaffected_by_rejected_override_method_existing():
+    """Non-regression: adding the new method must not change the existing
+    (accepted-candidate) system_prompt property at all."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    assert "AUTHORITATIVE RUN DISPOSITION" not in reviewer.system_prompt
+    assert "always include a section '## How to Run the Application'" in reviewer.system_prompt
+
+
+def test_reviewer_agent_system_prompt_requires_condition_and_consequence_for_proven_issue():
+    """A1-R1: the live run classified Spring same-class @Transactional
+    self-invocation as PROVEN ISSUE purely because the syntactic pattern was
+    present - but the outer caller was itself transactional with compatible
+    propagation, so the claimed consequence (broken transaction boundary)
+    was never actually established. PROVEN ISSUE must require both the
+    condition AND the material adverse consequence to be evidenced, not a
+    pattern match alone."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.system_prompt
+    assert "both the relevant condition AND the material adverse consequence are deterministically established" in sp
+    assert "a syntactic pattern match is not itself a proven consequence" in sp
+    assert "what exact condition is proven" in sp
+    assert "what exact adverse consequence is proven" in sp
+
+
+# --- extract_rejected_candidate_diagnostic (Demo-01 Finding 3, 2026-09-11) ---
+# Structural, marker-based enforcement - the fix after a real live run
+# proved system-prompt compliance alone is not a guarantee: the model
+# still wrote a hedged "How to Run the Application (Speculative)" section
+# with an expected-output block despite being told not to. These tests
+# prove the ENFORCEMENT (deterministic extraction), not just the prompt
+# wording - and deliberately do NOT test via a growing phrase/regex
+# blacklist (explicitly rejected as fragile) - only marker position.
+
+def test_reviewer_extract_rejected_candidate_diagnostic_excludes_content_outside_markers():
+    """The exact live-observed failure mode reproduced: a compliant
+    diagnostic section AND a hedged 'How to Run' section with an expected-
+    output block outside it. Extraction must discard the latter regardless
+    of its own wording."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    raw = (
+        "## Review Summary\nThis was rejected.\n\n"
+        "=== DIAGNOSTIC FINDINGS ===\n"
+        "The generated App.java is missing required --add-opens JVM flags for Ignite's "
+        "Unsafe-based initialization; this would crash at runtime with InaccessibleObjectException.\n"
+        "=== END DIAGNOSTIC FINDINGS ===\n\n"
+        "### How to Run the Application (Speculative)\n"
+        "1. mvn clean compile\n2. mvn exec:java\n\n"
+        "Expected output:\n```\n[VERIFICATION] PASS\n```\n"
+    )
+    result = reviewer.extract_rejected_candidate_diagnostic(raw)
+    assert "InaccessibleObjectException" in result
+    assert "How to Run" not in result
+    assert "[VERIFICATION] PASS" not in result
+    assert "mvn exec:java" not in result
+
+
+def test_reviewer_extract_rejected_candidate_diagnostic_fails_closed_when_markers_missing():
+    """Do not rely on prompt compliance: if the model used no markers at
+    all, the entire raw text is withheld, never partially trusted."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    raw = "The application successfully starts and prints the expected value. How to run: mvn exec:java"
+    result = reviewer.extract_rejected_candidate_diagnostic(raw)
+    assert "successfully" not in result
+    assert "mvn exec:java" not in result
+    assert "did not follow the required" in result
+
+
+def test_reviewer_extract_rejected_candidate_diagnostic_fails_closed_when_markers_misordered():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    raw = f"{ReviewerAgent.REJECTED_DIAGNOSTIC_END}\nsome text\n{ReviewerAgent.REJECTED_DIAGNOSTIC_START}"
+    result = reviewer.extract_rejected_candidate_diagnostic(raw)
+    assert "did not follow the required" in result
+
+
+def test_reviewer_rejected_candidate_prompt_requires_structural_markers():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.rejected_candidate_system_prompt("some failure")
+    assert ReviewerAgent.REJECTED_DIAGNOSTIC_START in sp
+    assert ReviewerAgent.REJECTED_DIAGNOSTIC_END in sp
+    assert "entire response is discarded unless it" in sp
+
+
+def test_reviewer_agent_system_prompt_requires_runtime_evidence_downgrade():
+    """A1-R1: a concern whose actual impact depends on runtime
+    characteristics (cardinality, load, latency, I/O) must be downgraded to
+    REQUIRES PROFILING OR RUNTIME EVIDENCE rather than asserted with
+    unqualified confidence - this is deliberately phrased generically (no
+    specific method name), per instruction not to encode any one file's
+    findings into the prompt."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.system_prompt
+    assert "REQUIRES PROFILING OR RUNTIME EVIDENCE" in sp
+    assert "database cardinality" in sp
+    assert "DefaultDriverService" not in sp
+    assert "updateLocation" not in sp
+    assert "findAll" not in sp
+
+
+def test_reviewer_agent_structured_system_prompt_forbids_inventing_evidence_ids():
+    """A1-E2: the structured contract must tell the model it can only cite
+    ids Kriya actually supplied (M#/R#) and that an invented id is simply
+    discarded, not that it will fool anything."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.structured_system_prompt
+    assert "Never invent an id" in sp
+    assert "M1" in sp and "R1" in sp
+
+
+def test_reviewer_agent_structured_system_prompt_separates_condition_from_consequence():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.structured_system_prompt
+    assert "CONDITION" in sp and "CONSEQUENCE" in sp
+    assert "different questions" in sp
+
+
+def test_reviewer_agent_structured_system_prompt_states_confidence_is_advisory():
+    """A1-E2's core authority rule: the model may request a confidence
+    level, but Kriya - not the model - computes the final one."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.structured_system_prompt
+    assert "advisory only" in sp
+    assert "Kriya independently" in sp
+
+
+def test_reviewer_agent_structured_system_prompt_preserves_related_artifact_boundary():
+    """A1-R1's boundary rule must survive into structured mode: a relation
+    id proves only its own printed relation/detail text, never a related
+    file's unseen contents."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.structured_system_prompt
+    assert "never that related file's unseen contents" in sp
+
+
+def test_reviewer_agent_structured_system_prompt_requires_honest_runtime_declaration():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    sp = reviewer.structured_system_prompt
+    assert "runtime_dependency_declared: true" in sp
+
+
+@pytest.mark.asyncio
+async def test_reviewer_agent_run_structured_review_returns_parsed_dict_on_success():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value='{"summary": "ok", "findings": []}')
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+
+    result = await reviewer.run_structured_review("=== TARGET SOURCE ===\n...")
+
+    assert result == {"summary": "ok", "findings": []}
+    assert llm.complete.await_args.kwargs.get("json_mode") is True
+
+
+@pytest.mark.asyncio
+async def test_reviewer_agent_run_structured_review_fails_clearly_on_unparseable_json():
+    """A1-E2 explicit requirement: a malformed structured response must
+    never silently fall back to unvalidated free-form Markdown - it must
+    surface as a clear, checkable error instead."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="not JSON at all")
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+
+    result = await reviewer.run_structured_review("=== TARGET SOURCE ===\n...")
+
+    assert "_error" in result
+
+
+@pytest.mark.asyncio
+async def test_reviewer_agent_run_structured_review_fails_clearly_when_call_raises():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=ConnectionError("down"))
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+
+    result = await reviewer.run_structured_review("=== TARGET SOURCE ===\n...")
+
+    assert "_error" in result
+
+
+@pytest.mark.asyncio
+async def test_reviewer_agent_run_structured_review_fails_clearly_when_response_not_a_json_object():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value="[1, 2, 3]")  # valid JSON, but not an object
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+
+    result = await reviewer.run_structured_review("=== TARGET SOURCE ===\n...")
+
+    assert "_error" in result
+
+
 def test_developer_agent_system_prompt_documents_authority_sections():
     """PRV-11 authority-isolation fix (2026-08-30, follow-up): the batch/
     full-generation path (self.system_prompt) must also know how to
@@ -954,6 +1297,25 @@ def test_developer_agent_system_prompt_documents_authority_sections():
     sp = dev.system_prompt
     assert AUTHORITATIVE_GOAL_SECTION_HEADER in sp
     assert PLANNED_IMPLEMENTATION_SECTION_HEADER in sp
+
+
+def test_developer_agent_system_prompt_carries_repository_precedent_guidance():
+    """VAL-001 G1 follow-up (2026-09-19): the generic "search for an
+    existing repository mechanism before inventing new logic" instruction
+    (kriya/agents/contracts.py::REPOSITORY_PRECEDENT_REUSE_GUIDANCE) must
+    reach the Developer's own generation-call prompt, and must remain
+    strategy guidance only - no reference to any specific repository,
+    language construct, or helper name it was motivated by."""
+    from kriya.agents.contracts import REPOSITORY_PRECEDENT_REUSE_GUIDANCE
+
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    dev = DeveloperAgent("developer", llm)
+    sp = dev.system_prompt
+    assert REPOSITORY_PRECEDENT_REUSE_GUIDANCE in sp
+    for forbidden in ("Graphify", "generic_name", "_read_csharp_type_name", "C#", "tree-sitter"):
+        assert forbidden not in sp
+        assert forbidden not in REPOSITORY_PRECEDENT_REUSE_GUIDANCE
 
 
 @pytest.mark.asyncio
@@ -1305,6 +1667,73 @@ def test_split_fix_analysis_edit_does_not_corrupt_ordinary_indented_code():
         "public class App {\n"
         "  public static void main(String[] args) {"
     )
+
+
+def test_split_fix_analysis_edit_fenced_indented_search_replace_survives_exact():
+    """Regression test (2026-09-19, VAL-001 G1 qwen3.6:35b-a3b comparison):
+    the real, live failure mode this closes end-to-end - a model wraps its
+    SEARCH/REPLACE bodies in markdown fences (```python ... ```) whose
+    first content line is itself deeply indented, exactly as a real edit
+    fragment quoting the inside of a function always is. Before the
+    _strip_markdown_fences fix, the SEARCH block's leading indentation was
+    silently destroyed here, producing a search string that could never
+    exact-match the real file and, when it DID splice in via the
+    whitespace-tolerant fallback, corrupted the REPLACE side into invalid
+    Python. Both SEARCH and REPLACE must survive with EXACT source bytes
+    (indentation included) intact through the full _split_fix_analysis_edit
+    -> sanitize_generated_content -> _strip_markdown_fences pipeline."""
+    text = (
+        "FIX ANALYSIS: strip generic type arguments before comparing callee names.\n"
+        "SEARCH:\n"
+        "```python\n"
+        "                    if mname is not None:\n"
+        "                        callee_name = _read_text(mname, source)\n"
+        "```\n"
+        "REPLACE:\n"
+        "```python\n"
+        "                    if mname is not None:\n"
+        "                        if mname.type == \"generic_name\":\n"
+        "                            callee_name = _strip_generic(mname, source)\n"
+        "                        else:\n"
+        "                            callee_name = _read_text(mname, source)\n"
+        "```"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert len(edits) == 1
+    assert edits[0]["search"] == (
+        "                    if mname is not None:\n"
+        "                        callee_name = _read_text(mname, source)"
+    )
+    assert edits[0]["replace"] == (
+        "                    if mname is not None:\n"
+        "                        if mname.type == \"generic_name\":\n"
+        "                            callee_name = _strip_generic(mname, source)\n"
+        "                        else:\n"
+        "                            callee_name = _read_text(mname, source)"
+    )
+
+
+def test_split_fix_analysis_edit_unclosed_fence_falls_back_safely():
+    """A malformed/unclosed fence (an opening ```python with no matching
+    closing ``` anywhere in the block) must never crash the parser or
+    silently fabricate a plausible-looking edit. _strip_markdown_fences'
+    own opening-fence removal fires unconditionally on a recognized
+    opening marker regardless of whether a matching close exists - it is
+    the closing-fence removal that is conditional (only strips a LAST
+    line that itself starts with ```) - so an unclosed fence degrades
+    safely to "fence marker removed, real content (indentation intact)
+    kept exactly", never a crash and never a leftover fence artifact
+    misread as real code."""
+    text = (
+        "SEARCH:\n"
+        "```python\n"
+        "    old_code()\n"
+        "REPLACE:\n"
+        "    new_code()"
+    )
+    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
+    assert edits == [{"search": "    old_code()", "replace": "    new_code()"}]
+
 
 def test_split_fix_analysis_edit_strips_same_line_marker_separator():
     """Regression test for a real bug found live, 2026-08-17
@@ -1948,6 +2377,16 @@ async def test_fill_missing_content_prefers_anchored_edit_when_source_context_kn
 @pytest.mark.asyncio
 async def test_developer_explicit_patch_operation_overrides_locator_heuristic():
     cfg = AppConfig()
+    # MODEL-001 P1: an unconfigured model's capability profile now defaults to
+    # the conservative preferred_edit_protocol="full_file" (never silently
+    # trusting an unverified model with precise small-native-tools patches) -
+    # this test is specifically about the REPAIR_WITH_PATCH override itself,
+    # so give it an explicit binding confirming patch-style edits are
+    # supported, matching the bare default's own preferred_edit_protocol
+    # value ("small_native_tools") but making it a real, explicit override
+    # (max_tool_argument_chars diverges from its own class default) rather
+    # than an untouched, unverified default.
+    cfg.llm.capabilities.max_tool_argument_chars = 16384
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=(
         "FIX ANALYSIS: update the stale value.\n"
@@ -2417,6 +2856,70 @@ def test_strip_markdown_fences_picks_largest_of_multiple_fences():
     )
     assert DeveloperAgent._strip_markdown_fences(text) == "def add(a, b):\n    return a + b"
 
+
+def test_strip_markdown_fences_preserves_indented_first_line():
+    """Regression test (2026-09-19, VAL-001 G1 qwen3.6:35b-a3b comparison):
+    a real anchored-edit response reproduced live had its SEARCH block's
+    leading indentation entirely eaten by this function's own former bare
+    `.strip()` call, corrupting an otherwise-correct apply_anchored_edits()
+    splice into invalid Python. Every prior existing test for this function
+    happened to use a zero-indent first line (`def add(...)`), which never
+    exercised this path - this is the case that actually matters, since a
+    real edit fragment quoting the inside of a function almost always has
+    an indented first line."""
+    text = "```python\n                    if mname is not None:\n                        callee_name = _read_text(mname, source)\n```"
+    assert DeveloperAgent._strip_markdown_fences(text) == (
+        "                    if mname is not None:\n                        callee_name = _read_text(mname, source)"
+    )
+
+
+def test_strip_markdown_fences_preserves_all_indentation_in_nested_block():
+    text = (
+        "```python\n"
+        "    if outer:\n"
+        "        if inner:\n"
+        "            do_something()\n"
+        "        else:\n"
+        "            do_other()\n"
+        "```"
+    )
+    assert DeveloperAgent._strip_markdown_fences(text) == (
+        "    if outer:\n"
+        "        if inner:\n"
+        "            do_something()\n"
+        "        else:\n"
+        "            do_other()"
+    )
+
+
+def test_strip_markdown_fences_indented_first_line_in_prose_wrapped_fence():
+    """Same fix, exercised through the SECOND extraction path (prose
+    preamble/postamble around the fence, not a leading fence) - both
+    return paths had the identical bare-.strip() defect."""
+    text = (
+        "Here is the fix:\n\n"
+        "```python\n"
+        "    for child in mname.children:\n"
+        "        if child.type == \"identifier\":\n"
+        "            callee_name = _read_text(child, source)\n"
+        "```\n\n"
+        "That should resolve it."
+    )
+    assert DeveloperAgent._strip_markdown_fences(text) == (
+        "    for child in mname.children:\n"
+        "        if child.type == \"identifier\":\n"
+        "            callee_name = _read_text(child, source)"
+    )
+
+
+def test_strip_markdown_fences_still_removes_genuine_blank_fence_padding():
+    """A blank line immediately after the opening fence and immediately
+    before the closing fence is still removed - only a REAL line's own
+    leading space/tab is protected, not blank-line padding around the
+    fence itself."""
+    text = "```python\n\n    real_code()\n\n```"
+    assert DeveloperAgent._strip_markdown_fences(text) == "    real_code()"
+
 def test_extract_json_value_direct_parse():
     assert DeveloperAgent._extract_json_value('["a.txt", "b.txt"]') == ["a.txt", "b.txt"]
 
@@ -2636,6 +3139,54 @@ async def test_run_verifier_judge_string_true_is_honored():
     assert judgment["should_run"] is True
 
 @pytest.mark.asyncio
+async def test_run_verifier_judge_missing_execution_mode_defaults_to_finite_command():
+    """Backward compatibility (Managed Runtime Verification, 2026-09-03):
+    an old-shaped response with no execution_mode key at all must default
+    to finite_command, exactly like before this field existed."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True,
+        "run_commands": [["python", "app.py"]],
+        "command_source": "inferred",
+        "success_criteria": "Something",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=[])
+
+    assert judgment["execution_mode"] == "finite_command"
+    assert judgment["managed_service"] is None
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_judge_preserves_an_explicitly_invalid_execution_mode():
+    """External review, 2026-09-03 (P2): an execution_mode value that IS
+    present but not one of the two supported modes (e.g. a model returning
+    "service" instead of "managed_service") must survive unchanged into the
+    returned judgment - NOT be silently rewritten to "finite_command" the
+    way a genuinely absent field is. Silently coercing it here would make
+    kriya/workflow/attempt.py::_resolve_execution_mode's own deterministic
+    rejection of an unsupported execution_mode unreachable, since by the
+    time that check runs it would only ever see "finite_command"."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({
+        "should_run": True,
+        "execution_mode": "service",
+        "run_commands": None,
+        "managed_service": {"service_command": ["python", "manage.py", "runserver"]},
+        "command_source": "inferred",
+        "success_criteria": "Something",
+    }))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    judgment = await verifier.judge(goal="Goal", design="", files_written=[])
+
+    assert judgment["execution_mode"] == "service"
+
+
+@pytest.mark.asyncio
 async def test_run_verifier_judge_unrecognized_should_run_value_defaults_false():
     cfg = AppConfig()
     llm = LLMClient(cfg)
@@ -2755,6 +3306,64 @@ async def test_run_verifier_grade_prompt_prefers_program_self_check_over_recompu
     system_prompt_sent = llm.complete.call_args_list[0][0][0]
     assert "OWN explicit self-" in system_prompt_sent
     assert "Do NOT independently recompute" in system_prompt_sent
+
+
+# --- VER-006 (2026-09-10): distrust_notice defense-in-depth at the prompt layer ---
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_without_distrust_notice_unchanged():
+    """Legacy behavior: no distrust_notice supplied -> no Deterministic
+    Distrust Notice section appears anywhere in the prompt."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({"passed": True, "reasoning": "ok"}))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    await verifier.grade(goal="Goal", success_criteria="Criteria", output="output", returncode=0)
+
+    user_prompt_sent = llm.complete.call_args_list[0][0][1]
+    assert "Deterministic Distrust Notice" not in user_prompt_sent
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_distrust_notice_included_as_trusted_section():
+    """The caller-supplied distrust_notice must reach the prompt as its own
+    clearly-labeled, TRUSTED section - never folded into the untrusted
+    captured-output fence, and never silently dropped."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({"passed": False, "reasoning": "insufficient evidence"}))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    notice = "A deterministic check already rejected the '[VERIFICATION] PASS' marker as ungrounded."
+    await verifier.grade(
+        goal="Goal", success_criteria="Criteria", output="[VERIFICATION] PASS", returncode=0,
+        distrust_notice=notice,
+    )
+
+    user_prompt_sent = llm.complete.call_args_list[0][0][1]
+    assert "Deterministic Distrust Notice (TRUSTED, from Kriya)" in user_prompt_sent
+    assert notice in user_prompt_sent
+    # The notice must appear BEFORE the untrusted-output fence, not inside it.
+    assert user_prompt_sent.index("Deterministic Distrust Notice") < user_prompt_sent.index("Begin Untrusted Captured Output")
+
+
+@pytest.mark.asyncio
+async def test_run_verifier_grade_system_prompt_qualifies_marker_trust_rule():
+    """Required rule (VER-006 Task 3): a self-reported marker is positive
+    evidence only when it has not been deterministically rejected."""
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=json.dumps({"passed": True, "reasoning": "ok"}))
+
+    verifier = RunVerifierAgent("run_verifier", llm)
+    await verifier.grade(goal="Goal", success_criteria="Criteria", output="output", returncode=0)
+
+    system_prompt_sent = llm.complete.call_args_list[0][0][0]
+    assert "Deterministic Distrust Notice" in system_prompt_sent
+    assert "NOT evidence" in system_prompt_sent
+    assert "return passed: false" in system_prompt_sent
+
 
 @pytest.mark.asyncio
 async def test_run_verifier_grade_unparseable_response_defaults_to_failure():

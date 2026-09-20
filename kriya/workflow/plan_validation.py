@@ -56,14 +56,15 @@ from kriya.workflow.obligations import (
     ObligationStatus,
 )
 from kriya.workflow.plan_schema import (
-    BUILTIN_QUALITY_GATE_VERIFIERS,
     EngineeringPlan,
     ExecutionMethod,
     ExecutionRole,
     FileAction,
+    FileOwnershipRelation,
     Subtask,
-    VerificationMethodType,
+    VerifierKind,
 )
+from kriya.workflow.planner_validation import validate_tool_capability_membership
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService, _workspace_appears_empty
 from kriya.workflow.static_checks import StackContract, validate_stack_contract_artifacts
 
@@ -151,6 +152,83 @@ def _planned_artifact_prerequisite_evidence(subtasks: List[Subtask]) -> List[Dic
                     "missing_requires_edge": capability not in consumer.requires,
                     "missing_depends_on_edge": owner.id not in consumer.depends_on,
                 })
+    return records
+
+
+def _stack_dependent_verification_prerequisite_evidence(
+    plan: EngineeringPlan, workspace_path: str, stack_contract: Optional[StackContract],
+) -> List[Dict[str, Any]]:
+    """Reuses this module's own _AMBIENT_TOOL_REQUIREMENTS/_TOOL_MANIFEST_
+    BASENAMES tables and EngineeringPlan.classify_file_ownership() - the
+    SAME machinery _planned_artifact_prerequisite_evidence() above already
+    uses for a PlannedFile's own environment_requirements - to close the
+    one case that machinery cannot reach: PRV-17 (2026-09-03), a live
+    incident where a validated plan scheduled `python manage.py test
+    customers.tests` (a TEST-kind VerificationMethod, an action, not a
+    generated file) with NO current/past-ordered subtask planning a Python
+    dependency manifest - because _planned_artifact_prerequisite_evidence()
+    only ever fires when a PLANNED FILE explicitly declares environment_
+    requirements, and nothing here forces (or even prompts) a Planner to
+    attach that declaration to a VERIFICATION action rather than a file.
+    The Planner's own system prompt already tells it to name ambient tools
+    in environment_requirements (kriya/agents/agent.py) - this is a
+    deterministic backstop for when that declaration doesn't happen,
+    mirroring VerificationMethod's own existing self-heal precedent
+    (requires_runtime_execution auto-corrects from verifier_kind=
+    APPLICATION_RUNTIME rather than trusting the prompt alone).
+
+    Fires only when stack_contract names a real, external FRAMEWORK
+    (stack_contract.frameworks non-empty - a bare language with no named
+    framework, e.g. "write a Python script", never needs an external
+    dependency manifest at all) whose language resolves to a known ambient
+    tool with known manifest basenames. Java is deliberately excluded by
+    construction here (not a _TOOL_MANIFEST_BASENAMES key under the bare
+    "java" language name - only "maven"/"mvn"/"gradle" are) - Java's own
+    build-manifest gap already has a separate, established mechanism
+    (_detect_missing_build_manifest, kriya/workflow/attribution.py); this
+    function must never duplicate or race that one.
+
+    A prerequisite counts as satisfied when the manifest either already
+    exists in the real workspace (an established, brownfield environment -
+    requirement 1 of the invariant) or is planned by a subtask CURRENT or
+    PAST_ORDERED relative to the verification-owning consumer (requirement
+    2 - "provided by the current/past ordered plan"), via classify_file_
+    ownership()'s existing DAG reasoning. A manifest planned only by a
+    FUTURE_ORDERED or UNRELATED subtask does not satisfy it - the Planner
+    must establish the manifest before the verification consumer, or order
+    its owner ahead of it, exactly the invariant's own required behavior."""
+    if stack_contract is None or not stack_contract.frameworks or not stack_contract.languages:
+        return []
+    tool = stack_contract.languages[0].lower()
+    manifests = _TOOL_MANIFEST_BASENAMES.get(tool, set())
+    if not manifests:
+        return []
+    if any(os.path.exists(os.path.join(workspace_path, m)) for m in manifests):
+        return []
+    manifest_paths = [
+        pf.path for st in plan.subtasks for pf in st.planned_files
+        if os.path.basename(pf.path).lower() in manifests
+    ]
+    records: List[Dict[str, Any]] = []
+    for consumer in plan.subtasks:
+        needs_stack_runtime = any(
+            vm.verifier_kind in (VerifierKind.TEST, VerifierKind.APPLICATION_RUNTIME)
+            for vm in consumer.verification
+        )
+        if not needs_stack_runtime:
+            continue
+        satisfied = any(
+            plan.classify_file_ownership(consumer.id, manifest_path)
+            in (FileOwnershipRelation.CURRENT, FileOwnershipRelation.PAST_ORDERED)
+            for manifest_path in manifest_paths
+        )
+        if satisfied:
+            continue
+        records.append({
+            "consumer_subtask": consumer.id,
+            "required_tool": tool,
+            "candidate_manifests": sorted(manifests),
+        })
     return records
 
 
@@ -385,20 +463,35 @@ async def validate_plan(
         errors.append(stack_violation)
         reason_codes.append("AUTHORITATIVE_STACK_SUBSTITUTION")
 
+    # Repair Guidance audit (2026-09-07, before P7): these three structural
+    # checks had NO reason code at all - not merely unwired, genuinely
+    # invisible to the entire reason-code-based repair-guidance system.
+    # Any errors.append() below with no matching reason_codes.append()
+    # silently falls through to the generic PLAN_VALIDATION_FAILED
+    # catch-all at this function's own return (only when no OTHER check
+    # also fired a real code, which happens to have been true every time
+    # this exact path has fired live so far - but that was luck, not a
+    # guarantee). Found by direct code reading during the bounded audit,
+    # not a live incident - fixed here to close the gap before it becomes
+    # one, the same "explicit, testable repair contract for every code"
+    # bar every other check in this function already meets.
     ids = [st.id for st in plan.subtasks]
     duplicate_ids = sorted({sid for sid in ids if ids.count(sid) > 1})
     if duplicate_ids:
         errors.append(f"duplicate subtask ids: {duplicate_ids}")
+        reason_codes.append("DUPLICATE_SUBTASK_ID")
     id_set = set(ids)
 
     for st in plan.subtasks:
         for dep in st.depends_on:
             if dep not in id_set:
                 errors.append(f"subtask {st.id!r} depends_on unknown subtask id {dep!r}")
+                reason_codes.append("SUBTASK_DEPENDS_ON_UNKNOWN_ID")
 
     graph_is_acyclic = _acyclic(plan.subtasks)
     if not graph_is_acyclic:
         errors.append("subtask dependency graph contains a cycle")
+        reason_codes.append("SUBTASK_DEPENDENCY_CYCLE")
 
     file_owners: Dict[str, List[str]] = {}
     capability_providers: Dict[str, List[str]] = {}
@@ -447,8 +540,41 @@ async def validate_plan(
         if len(providers) != 1
     }
     if ambiguous_capabilities:
-        errors.append(f"semantic capabilities must have exactly one provider: {ambiguous_capabilities}")
+        errors.append(
+            "semantic capabilities must have exactly one provider: " + "; ".join(
+                f"{capability!r} is provided by subtask(s) {providers!r}"
+                for capability, providers in ambiguous_capabilities.items()
+            )
+        )
         reason_codes.append("AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER")
+    if obligation_ledger is not None:
+        # PRV-17 (2026-09-07, P7): records the SAME ambiguity check above as
+        # a per-capability SUBTASK_SEMANTIC_CONTRACT fact - see that kind's
+        # own docstring (obligations.py) for the live oscillation this
+        # closes. A capability that silently vanishes from every subtask's
+        # `provides` between repair rounds (rather than staying ambiguous or
+        # unambiguous) is caught below, after the main subtask loop, by
+        # re-recording VIOLATED against this same id when the capability key
+        # is absent from `capability_providers` entirely.
+        for capability, providers in capability_providers.items():
+            obligation_ledger.record(ObligationRecord(
+                id=f"plan.capability.{capability}.provider",
+                kind=ObligationKind.SUBTASK_SEMANTIC_CONTRACT,
+                status=(
+                    ObligationStatus.VIOLATED if capability in ambiguous_capabilities
+                    else ObligationStatus.SATISFIED
+                ),
+                authority=ObligationAuthority.DETERMINISTIC,
+                description=f"capability {capability!r} must be provided by exactly one subtask",
+                source="plan_validation.validate_plan", revision=revision,
+                evidence={
+                    "relation": "provides", "capability": capability,
+                    "providers": list(providers),
+                    "subtask_id": providers[0] if len(providers) == 1 else None,
+                },
+                owner_subtask_id=providers[0] if len(providers) == 1 else None,
+                terminal_required=True,
+            ))
 
     # PRV-06 (2026-08-28): checked by id, never by re-matching free text -
     # see GlobalInvariant's own docstring (plan_schema.py) for why a
@@ -492,17 +618,46 @@ async def validate_plan(
                 ))
         for requirement in st.requires:
             providers = capability_providers.get(requirement, [])
+            requirement_violated = False
             if not providers:
                 errors.append(
                     f"subtask {st.id!r} requires {requirement!r} but no subtask provides it"
                 )
                 reason_codes.append("SUBTASK_REQUIREMENT_UNPROVIDED")
+                requirement_violated = True
             elif len(providers) == 1 and providers[0] not in st.depends_on:
                 errors.append(
                     f"subtask {st.id!r} requires {requirement!r} from {providers[0]!r} "
                     "but does not declare that provider in depends_on"
                 )
                 reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_MISSING")
+                requirement_violated = True
+            if obligation_ledger is not None:
+                # PRV-17 (2026-09-07, P7): same SUBTASK_SEMANTIC_CONTRACT
+                # kind as the provides recording above, for the `requires`
+                # side - see obligations.py's own docstring for the live
+                # incident. Recorded only for requirement strings PRESENT
+                # this round; a requirement that silently disappears from
+                # st.requires entirely (rather than staying present-but-
+                # unresolved) is caught by the post-pass below, since this
+                # per-entry loop never iterates over what isn't there.
+                obligation_ledger.record(ObligationRecord(
+                    id=f"plan.subtask.{st.id}.requires.{requirement}",
+                    kind=ObligationKind.SUBTASK_SEMANTIC_CONTRACT,
+                    status=(
+                        ObligationStatus.VIOLATED if requirement_violated else ObligationStatus.SATISFIED
+                    ),
+                    authority=ObligationAuthority.DETERMINISTIC,
+                    description=f"subtask {st.id!r} requires {requirement!r} with a real "
+                                "provider correctly declared in depends_on",
+                    source="plan_validation.validate_plan", revision=revision,
+                    evidence={
+                        "relation": "requires", "subtask_id": st.id,
+                        "requirement": requirement, "providers": list(providers),
+                    },
+                    owner_subtask_id=st.id,
+                    terminal_required=True,
+                ))
 
         # PRV-12: artifact prerequisites are enforced only when the planned
         # artifact explicitly declares them. This deliberately does not infer
@@ -510,6 +665,24 @@ async def validate_plan(
         # from a filename). The artifact's structured semantics establish the
         # need; the subtask-level requires/provides DAG remains execution
         # authority.
+        #
+        # A requirement satisfied by THIS SAME subtask's own `provides` (it
+        # is the sole provider - the same predicate revise_plan_for_grounded_
+        # scope_owner()'s own requires/provides merge already uses at
+        # workflow_controller.py, "if item not in failed.provides") needs no
+        # `requires` edge: nothing to sequence, the capability and its
+        # consumer execute together in the same subtask. `capability_
+        # providers` (built once above) - not a bare `st.provides` membership
+        # check - so an AMBIGUOUS multi-provider capability (already its own
+        # separate AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER error) is never
+        # silently treated as self-satisfied here. Found live, P2 production-
+        # validation run 3 (2026-09-05, spring-ignite-demo): a grounded-owner
+        # merge folded a downstream test subtask's sole planned_file (whose
+        # own requires_capabilities still named the now-absorbing subtask's
+        # OWN capability) into the absorbing subtask - whose merged
+        # `requires` correctly DROPS that same capability once it's self-
+        # provided, making every merge of this exact (and common) shape
+        # unvalidatable before this fix.
         for planned_file in st.planned_files:
             for requirement in planned_file.requires_capabilities:
                 if requirement.lower() in _AMBIENT_TOOL_REQUIREMENTS:
@@ -521,13 +694,101 @@ async def validate_plan(
                     )
                     reason_codes.append("PLANNED_ARTIFACT_PREREQUISITE_INVALID")
                     continue
-                if requirement not in st.requires:
+                if requirement not in st.requires and capability_providers.get(requirement) != [st.id]:
                     errors.append(
                         f"subtask {st.id!r} planned artifact {planned_file.path!r} requires "
                         f"capability {requirement!r}, but the consumer subtask does not declare "
                         "that capability in requires"
                     )
                     reason_codes.append("PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED")
+            # PRV-11 preservation extension (2026-09-06, Production
+            # Validation P2): a preserved_references target is only ever
+            # legal when NO subtask actually plans to modify it - a target
+            # that is both declared preserved AND owned for modification
+            # (by this same subtask or any other) is a genuine plan-
+            # authoring contradiction, not something one interpretation can
+            # silently win. Checked here (every planned file, against the
+            # already-computed file_owners map) rather than in find_missing_
+            # grounded_production_artifacts, because that function's own
+            # UNOWNED branch only ever sees `target not in owned_paths` -
+            # an owned target never reaches it, so the conflict would be
+            # invisible if checked there instead.
+            for preserved_target in planned_file.preserved_references:
+                if preserved_target in file_owners:
+                    errors.append(
+                        f"subtask {st.id!r} planned artifact {planned_file.path!r} declares "
+                        f"{preserved_target!r} as a preserved reference, but {preserved_target!r} "
+                        f"is itself planned for modification by {file_owners[preserved_target]!r}"
+                    )
+                    reason_codes.append("PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP")
+
+    if obligation_ledger is not None:
+        # PRV-17 (2026-09-07, P7): the per-entry requires/provides recording
+        # above only ever records an id for a requirement/capability that is
+        # PRESENT this round - a requirement string silently dropped from
+        # st.requires entirely (not replaced, not left-but-unresolved, just
+        # gone) never reaches that loop at all, so its previously-SATISFIED
+        # record would otherwise sit unchanged and stale, hiding the exact
+        # regression obligations.py's SUBTASK_SEMANTIC_CONTRACT kind exists
+        # to catch. This closing pass explicitly re-records VIOLATED against
+        # each such id, which is what makes ObligationLedger.record()'s
+        # existing SATISFIED->VIOLATED regression detection fire for a
+        # silent drop exactly like it already does for any other same-
+        # authority regression - no new detection mechanism, only ensuring
+        # every previously-tracked id gets a fresh record every round.
+        current_requires_pairs = {
+            (st.id, requirement) for st in plan.subtasks for requirement in st.requires
+        }
+        for oid in obligation_ledger.ids_by_kind(ObligationKind.SUBTASK_SEMANTIC_CONTRACT):
+            rec = obligation_ledger.current(oid)
+            if rec is None or rec.status != ObligationStatus.SATISFIED:
+                continue
+            relation = rec.evidence.get("relation")
+            if relation == "requires":
+                pair = (rec.evidence.get("subtask_id"), rec.evidence.get("requirement"))
+                if pair in current_requires_pairs:
+                    continue
+                obligation_ledger.record(ObligationRecord(
+                    id=oid, kind=ObligationKind.SUBTASK_SEMANTIC_CONTRACT,
+                    status=ObligationStatus.VIOLATED,
+                    authority=ObligationAuthority.DETERMINISTIC,
+                    description=f"subtask {pair[0]!r} previously validated requires "
+                                f"{pair[1]!r} is no longer declared by that subtask",
+                    source="plan_validation.validate_plan", revision=revision,
+                    evidence={**rec.evidence, "dropped_between_revisions": True},
+                    owner_subtask_id=pair[0],
+                    # terminal_required=False (unlike the live per-round
+                    # recording above): this id's own requirement string may
+                    # have been legitimately renamed/retired, in which case
+                    # nothing will ever re-satisfy THIS exact id again - the
+                    # unconditional final-gate check this drives
+                    # (ObligationLedger.unresolved_terminal_obligations())
+                    # must not permanently fail a run over an obligation that
+                    # is no longer a live requirement of the final plan.
+                    # record()'s SATISFIED->VIOLATED regression detection
+                    # (this record's actual purpose) fires regardless of
+                    # terminal_required - only the final aggregation gate
+                    # reads that flag.
+                    terminal_required=False,
+                ))
+            elif relation == "provides":
+                capability = rec.evidence.get("capability")
+                if capability in capability_providers:
+                    continue
+                obligation_ledger.record(ObligationRecord(
+                    id=oid, kind=ObligationKind.SUBTASK_SEMANTIC_CONTRACT,
+                    status=ObligationStatus.VIOLATED,
+                    authority=ObligationAuthority.DETERMINISTIC,
+                    description=f"capability {capability!r} previously validated as provided "
+                                f"by {rec.owner_subtask_id!r} is no longer provided by any subtask",
+                    source="plan_validation.validate_plan", revision=revision,
+                    evidence={**rec.evidence, "dropped_between_revisions": True},
+                    owner_subtask_id=rec.owner_subtask_id,
+                    # See the requires-side comment above: a legitimately
+                    # renamed/retired capability must not permanently fail
+                    # the final terminal-obligations gate.
+                    terminal_required=False,
+                ))
 
     prerequisite_records = _planned_artifact_prerequisite_evidence(plan.subtasks)
     evidence.extend(prerequisite_records)
@@ -547,6 +808,28 @@ async def validate_plan(
                 f"from {record['provider_file']!r}"
             )
             reason_codes.append("SEMANTIC_DEPENDENCY_EDGE_MISSING")
+
+    # PRV-17 (2026-09-03): a stack-dependent (Django/Spring/... - any named
+    # framework, never language/ecosystem-specific by construction) TEST or
+    # APPLICATION_RUNTIME verification consumer needs its language's real
+    # dependency manifest established or ordered ahead of it - the same
+    # "planned prerequisite" question _planned_artifact_prerequisite_
+    # evidence() above answers for a PlannedFile's own declared environment_
+    # requirements, generalized to a VERIFICATION action, which structurally
+    # cannot declare environment_requirements today (that field lives on
+    # PlannedFile, not VerificationMethod) and so had no deterministic
+    # backstop at all before this fix.
+    for record in _stack_dependent_verification_prerequisite_evidence(
+        plan, workspace_path, stack_contract,
+    ):
+        evidence.append(record)
+        errors.append(
+            f"subtask {record['consumer_subtask']!r} runs {record['required_tool']!r}-dependent "
+            f"verification, but no current/past-ordered subtask plans (or the workspace already "
+            f"establishes) a dependency manifest ({'/'.join(record['candidate_manifests'])}) to "
+            "provision it"
+        )
+        reason_codes.append("VERIFICATION_PREREQUISITE_MANIFEST_MISSING")
 
     # Correctness Continuity Part C (PRV-06, 2026-08-29) - see
     # IntegrationRelationship's own docstring (plan_schema.py). Checked by
@@ -780,27 +1063,28 @@ async def validate_plan(
                 terminal_required=True,
             ))
 
-    if available_tool_names is not None:
-        available = set(available_tool_names)
-        for st in plan.subtasks:
-            if st.execution_method == ExecutionMethod.TOOL and st.tool_name not in available:
-                errors.append(f"subtask {st.id!r} references unregistered tool_name {st.tool_name!r}")
-            for vm in st.verification:
-                if (
-                    vm.type == VerificationMethodType.TOOL
-                    and vm.tool_name not in available
-                    and vm.tool_name not in BUILTIN_QUALITY_GATE_VERIFIERS
-                ):
-                    errors.append(
-                        f"subtask {st.id!r} verification references unregistered tool_name {vm.tool_name!r}"
-                    )
-        for ac in plan.acceptance_criteria:
-            if (
-                ac.method == VerificationMethodType.TOOL
-                and ac.tool_name not in available
-                and ac.tool_name not in BUILTIN_QUALITY_GATE_VERIFIERS
-            ):
-                errors.append(f"acceptance criterion {ac.id!r} references unregistered tool_name {ac.tool_name!r}")
+    # PLANNER-ROBUST-001 P2 (2026-09-19): delegates to the ONE shared
+    # tool-capability membership check (kriya/workflow/planner_validation.py)
+    # the legacy run_generation_workflow() path's own classify_plan_
+    # completeness() also calls - "ONE PLAN CONTRACT -> ONE VALIDATION
+    # SEMANTICS -> MULTIPLE ORCHESTRATORS". Previously this block appended
+    # only to `errors`, with no dedicated reason code at all - a real
+    # unregistered tool_name fell through to the PLAN_VALIDATION_FAILED
+    # catch-all, indistinguishable from any other not-yet-classified
+    # validation defect. UNREGISTERED_TOOL_NAME is a new, real reason code
+    # this pass adds (see _CODES_WITH_TARGETED_GUIDANCE in
+    # tests/test_workflow_controller_enforce.py).
+    capability_result = validate_tool_capability_membership(plan, available_tool_names=available_tool_names)
+    errors.extend(capability_result.errors)
+    if not capability_result.valid:
+        # Literal `reason_codes.append("...")` kept HERE (not merely
+        # `.extend(capability_result.reason_codes)`) deliberately -
+        # tests/test_workflow_controller_enforce.py's own
+        # _scan_structured_plan_reason_codes() regex-scans this module's
+        # source text directly for exactly this call shape; extracting the
+        # membership CHECK to planner_validation.py must never also make
+        # the reason code invisible to that completeness tripwire.
+        reason_codes.append("UNREGISTERED_TOOL_NAME")
 
     if context_files is not None:
         context_set = set(context_files)

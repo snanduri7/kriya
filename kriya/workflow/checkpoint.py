@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import subprocess
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass
@@ -59,6 +60,108 @@ def compute_workspace_fingerprint(workspace_path: str) -> Optional[str]:
     except Exception as e:
         logger.debug(f"Failed to compute workspace fingerprint for '{workspace_path}': {e}")
         return None
+
+
+def compute_workspace_content_hash(workspace_path: str) -> Optional[str]:
+    """STATE-001 (2026-09-14) fix: a checkpoint-compatibility identity bound
+    to the RELEVANT WORKING-TREE CONTENT actually present, not merely
+    `compute_workspace_fingerprint()`'s HEAD+dirty-boolean (which cannot
+    distinguish two different dirty contents at the same HEAD - reproduced
+    and permanently characterized by `tests/test_workflow.py::
+    test_checkpoint_workspace_fingerprint_cannot_distinguish_two_different_
+    dirty_states`) nor `compute_tree_hash()`'s `HEAD^{tree}` (the COMMITTED
+    tree only - independently reproduced to share the exact same blind spot
+    for anything uncommitted). Neither of those two functions is modified by
+    this fix - both keep their own honest, narrower, still-tested meaning
+    (HEAD/dirty display; the literal committed tree object) - this is a
+    THIRD, additive, stronger primitive, composed alongside them rather than
+    conflated into either (Task 1's own "prefer composition over
+    conflation").
+
+    Mechanism: a SCRATCH git index (`GIT_INDEX_FILE` redirected to a private
+    temp file for these subprocess calls only - the real repository index/
+    HEAD/working tree are never touched, confirmed by direct reproduction:
+    `git status`/`git add`/`git commit` run by a human or a concurrent
+    process against the REAL index are structurally unaffected, since git's
+    own index locking is per-index-file, not global), seeded from HEAD
+    (`git read-tree HEAD`), then `git add -A -- . ':!.kriya'` stages the
+    CURRENT on-disk content of every tracked-or-untracked-and-not-ignored
+    path (deliberately excluding `.kriya/` - see the module docstring's own
+    "checkpoint write must not self-invalidate" requirement; reusing the
+    workspace's own real `.gitignore` semantics for everything else, rather
+    than inventing a second ignore policy - target/build/dist/node_modules/
+    venvs/caches already excluded by any real project's own `.gitignore`,
+    exactly the existing exclusion this function reuses, never
+    re-implements). `git write-tree` then produces a real, canonical,
+    content-addressed git tree object hash of that scratch index - stable
+    under whitespace-only path reformatting, immune to mtime (git blobs are
+    pure content hashes), correct for renames/deletions (a real git tree
+    diff, not a path-based heuristic), and correct for symlinks BY
+    CONSTRUCTION (git tree entries encode file mode: `120000` for a symlink,
+    with the blob holding the RAW TARGET STRING never a dereferenced/
+    followed path - a symlink's target changing, or a symlink being
+    replaced by a regular file, is therefore always a real tree-content
+    difference; git never follows a symlink out of the workspace to hash
+    whatever it points to, so this can never widen the read boundary beyond
+    what git already scopes to the repository).
+
+    Combined with `compute_base_commit()` (both folded into one sha256, so
+    Invariant 1 - "same HEAD + different content = different identity" -
+    holds unambiguously even in the vanishingly rare case two different
+    HEAD commits happen to produce coincidentally identical scratch trees).
+
+    Deliberate scope choice (Task 14): Kriya's OWN generation/validation
+    code always reads WORKING-TREE bytes directly (`open(path).read()` -
+    `edit_safety.py`'s `atomic_write_file`, `AuthorizedFileWriter`, every
+    compile/test call in `kriya/tools/validate.py`) - it never reads from
+    the git INDEX for anything content-relevant. `git add -A`'s own staging
+    step above always stages CURRENT on-disk bytes regardless of prior
+    staged/unstaged status, so this identity is staged-vs-unstaged
+    AGNOSTIC by design: two workspaces with the same on-disk bytes but
+    different index staging state get the IDENTICAL identity (matching what
+    Kriya would actually read next), never a spurious mismatch over a
+    distinction Kriya's own execution semantics do not observe.
+
+    None (fail closed downstream, matching `compute_workspace_fingerprint`/
+    `compute_tree_hash`'s own established shape) if not a git repository, if
+    HEAD does not resolve (e.g. a repo with zero commits), or any step
+    fails for any reason - the scratch index file is always removed in a
+    `finally` block regardless of outcome."""
+    tmp_index_path = os.path.join(
+        tempfile.gettempdir(), f".kriya-scratch-index-{uuid.uuid4().hex}",
+    )
+    try:
+        env = {**os.environ, "GIT_INDEX_FILE": tmp_index_path}
+        seed = subprocess.run(
+            ["git", "read-tree", "HEAD"], cwd=workspace_path, env=env, capture_output=True, text=True,
+        )
+        if seed.returncode != 0:
+            return None
+        add = subprocess.run(
+            ["git", "add", "-A", "--", ".", ":!.kriya"],
+            cwd=workspace_path, env=env, capture_output=True, text=True,
+        )
+        if add.returncode != 0:
+            return None
+        write = subprocess.run(
+            ["git", "write-tree"], cwd=workspace_path, env=env, capture_output=True, text=True,
+        )
+        if write.returncode != 0:
+            return None
+        working_tree_hash = write.stdout.strip()
+        base_commit = compute_base_commit(workspace_path)
+        if base_commit is None:
+            return None
+        return hashlib.sha256(f"{base_commit}\x00{working_tree_hash}".encode("utf-8")).hexdigest()
+    except Exception as e:
+        logger.debug(f"Failed to compute workspace content hash for '{workspace_path}': {e}")
+        return None
+    finally:
+        try:
+            if os.path.exists(tmp_index_path):
+                os.remove(tmp_index_path)
+        except OSError:
+            pass
 
 
 def compute_config_fingerprint(config_dict: Dict[str, Any]) -> str:
@@ -143,7 +246,14 @@ def find_latest_checkpoint(workspace_path: str) -> Optional[str]:
 # SEPARATE, additional validation layer a caller opts into, not a
 # replacement of the one that already exists and is already load-bearing.
 
-CONTROL_PLANE_CHECKPOINT_SCHEMA_VERSION = 1
+CONTROL_PLANE_CHECKPOINT_SCHEMA_VERSION = 2
+# v1 -> v2 (STATE-001, 2026-09-14): added workspace_content_hash - a
+# checkpoint saved under schema_version < 2 (or, equivalently, missing this
+# key entirely) never had its working-tree content bound at all, only
+# tree_hash's own HEAD^{tree} (committed-only) blind spot - such a
+# checkpoint is deliberately treated as NOT safely resumable by
+# validate_resume_against_reality() below, never silently accepted under
+# the older, weaker guarantee (Task 10's own explicit instruction).
 
 
 def compute_tree_hash(workspace_path: str) -> Optional[str]:
@@ -214,6 +324,13 @@ def compute_control_plane_hashes(
         "schema_version": CONTROL_PLANE_CHECKPOINT_SCHEMA_VERSION,
         "base_commit": compute_base_commit(workspace_path),
         "tree_hash": compute_tree_hash(workspace_path),
+        # STATE-001 (2026-09-14): the real, working-tree-content-sensitive
+        # identity - see compute_workspace_content_hash()'s own docstring.
+        # Always computed (never conditionally, unlike the caller-supplied-
+        # object fields below) - its own absence from a loaded checkpoint is
+        # therefore always a legacy-schema signal, never "the caller didn't
+        # have it yet this time".
+        "workspace_content_hash": compute_workspace_content_hash(workspace_path),
         "patch_hash": patch_hash,
         "verification_hash": verification_hash,
         "plan_hash": plan_hash,
@@ -255,7 +372,19 @@ def validate_resume_against_reality(
     hash AND the caller supplied the matching live object to compare
     against - "do not require all fields for legacy checkpoints" (section
     29) means an old checkpoint or a caller that doesn't have, say, a
-    ContractRegistry yet simply skips that one check, not a mismatch."""
+    ContractRegistry yet simply skips that one check, not a mismatch.
+
+    ONE DELIBERATE EXCEPTION to that "skip if absent" shape (STATE-001,
+    2026-09-14): `workspace_content_hash` is always computable whenever
+    `base_commit`/`tree_hash` are (same `workspace_path`, no extra
+    caller-supplied live object needed) - its absence from a checkpoint
+    therefore never means "the caller didn't have it yet", it means the
+    checkpoint was saved under `schema_version < 2`, before this identity
+    existed at all, with only `tree_hash`'s own now-known-incomplete
+    (committed-tree-only) drift signal. Task 10's own explicit instruction:
+    such a checkpoint is not safely resumable and must fail closed with an
+    explicit reason, never silently accepted under the weaker guarantee
+    it was actually saved with."""
 
     mismatches: List[str] = []
 
@@ -270,6 +399,33 @@ def validate_resume_against_reality(
         current = compute_tree_hash(workspace_path)
         if current != stored_tree_hash:
             mismatches.append(f"tree_hash: checkpoint={stored_tree_hash!r} current={current!r}")
+
+    # Only meaningful to require when the checkpoint is otherwise a real
+    # control-plane checkpoint at all (i.e. it actually stored a
+    # base_commit) - a caller with no git-derived fields whatsoever (an
+    # unrelated dict shape reusing this same validator) has nothing to be
+    # "legacy" about here; matches the pre-existing base_commit/tree_hash
+    # gating pattern of only firing when the checkpoint clearly opted into
+    # this control-plane hash bundle at all.
+    if stored_base_commit is not None:
+        stored_content_hash = checkpoint_data.get("workspace_content_hash")
+        if stored_content_hash is None:
+            mismatches.append(
+                "workspace_content_hash missing - checkpoint predates the "
+                "working-tree-content identity check (schema_version < 2) "
+                "and is not safely resumable"
+            )
+        else:
+            current = compute_workspace_content_hash(workspace_path)
+            if current is None:
+                mismatches.append(
+                    "workspace_content_hash could not be recomputed for the current "
+                    "workspace - failing closed rather than assuming unchanged"
+                )
+            elif current != stored_content_hash:
+                mismatches.append(
+                    f"workspace_content_hash: checkpoint={stored_content_hash!r} current={current!r}"
+                )
 
     stored_control_hash = checkpoint_data.get("control_state_hash")
     if stored_control_hash is not None and control_state is not None:

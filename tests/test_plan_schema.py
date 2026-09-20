@@ -15,6 +15,7 @@ from kriya.workflow.plan_schema import (
     GlobalInvariant,
     PlannedFile,
     PlannerStructuredOutput,
+    RequirementOwnershipRelation,
     Subtask,
     VerificationMethod,
     VerificationMethodType,
@@ -79,6 +80,36 @@ def test_planned_file_rejects_single_star_wildcard_path():
 def test_planned_file_rejects_bracket_glob_path():
     with pytest.raises(ValidationError):
         PlannedFile(path="src/main/[A-Z]*.java", action=FileAction.MODIFY)
+
+
+def test_planned_file_rejects_directory_path():
+    """Regression test for a real live bug, PRV-17 (2026-09-03): the Planner
+    returned "customers_project/" (a directory, trailing slash) as a
+    planned_files[].path alongside real files nested under it. Nothing
+    rejected it, so it flowed straight into allowed_write_relpaths as a
+    literal generation target the Developer was asked to "write" - it never
+    produced real content for a directory, and the later authorized-write
+    comparison then rejected the Developer's own (correctly file-shaped)
+    target as outside scope, since the plan's entry and the generated entry
+    were never the same string. A PlannedFile names exactly ONE concrete
+    file, the same reasoning as the glob-wildcard rejection above; parent
+    directories are created deterministically as a side effect of writing
+    the files under them."""
+    with pytest.raises(ValidationError):
+        PlannedFile(path="customers_project/", action=FileAction.CREATE)
+
+
+def test_planned_file_rejects_directory_path_with_backslash_separator():
+    with pytest.raises(ValidationError):
+        PlannedFile(path="customers_project\\", action=FileAction.CREATE)
+
+
+def test_planned_file_accepts_a_real_file_nested_under_a_would_be_directory_name():
+    """The directory rejection above must not reject an ordinary file just
+    because a sibling planned_files entry names its parent directory - only
+    the bare, trailing-slash directory entry itself is a shape defect."""
+    pf = PlannedFile(path="customers_project/manage.py", action=FileAction.CREATE)
+    assert pf.path == "customers_project/manage.py"
 
 
 # --- VerificationMethod ---
@@ -213,6 +244,42 @@ def test_has_evidence_producer_true_after_application_runtime_self_heal():
     )
     assert vm.requires_runtime_execution is True
     assert vm.has_evidence_producer is True
+
+
+def test_has_evidence_producer_false_for_type_tool_application_runtime():
+    """Repair-contract audit (2026-09-03, PRV-17 Run 10): the exact shape a
+    live repair attempt actually produced when the old repair instruction
+    named verifier_kind/requires_runtime_execution but never said type must
+    be judgment - the model reused the compile/test clause's own
+    type=tool+tool_name template, setting tool_name to the literal string
+    "application_runtime" (a plausible-looking but unregistered tool name).
+    type=tool is schema-valid here (tool_name is present), but has no real
+    evidence producer: it isn't in BUILTIN_QUALITY_GATE_VERIFIERS and isn't
+    type=judgment, so neither producer branch matches."""
+    vm = VerificationMethod(
+        type=VerificationMethodType.TOOL,
+        description="Start the application and verify /customers/health returns ok",
+        tool_name="application_runtime",
+        verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+        requires_runtime_execution=True,
+    )
+    assert vm.has_evidence_producer is False
+
+
+def test_judgment_verification_with_tool_name_is_rejected_at_construction():
+    """type=judgment must not carry a tool_name at all - nothing deterministic
+    ever runs it, so a tool_name there is meaningless, not just redundant.
+    Enforced by the model_validator itself (a schema-level rejection, not a
+    plan_validation.py-level has_evidence_producer check) - this shape can
+    never even be constructed, let alone reach validate_plan()."""
+    with pytest.raises(Exception):
+        VerificationMethod(
+            type=VerificationMethodType.JUDGMENT,
+            description="run the application and verify output",
+            tool_name="application_runtime",
+            verifier_kind=VerifierKind.APPLICATION_RUNTIME,
+            requires_runtime_execution=True,
+        )
 
 
 # --- AcceptanceCriterion ---
@@ -499,3 +566,75 @@ def test_classify_file_ownership_unrelated_for_parallel_unordered_owners():
     b = _model_subtask(id="b", depends_on=[], planned_files=[PlannedFile(path="b.py", action=FileAction.MODIFY)])
     plan = EngineeringPlan(plan_id="p1", kind=ChangeKind.TASK, subtasks=[a, b])
     assert plan.classify_file_ownership("a", "b.py") == FileOwnershipRelation.UNRELATED
+
+
+# --- EngineeringPlan.classify_requirement_ownership / RequirementOwnershipRelation
+# (PRV-17, 2026-09-03) ---
+
+def _stage_ownership_plan():
+    """s1 -> s2 -> s3 -> s4 (linear chain), plus s5 with no dependency
+    relationship to any of them - the same DAG shape _prv05_plan() above
+    uses for file ownership, minus the co-owner branch (a requirement's
+    OWN claimant list, not planned_files, drives ownership here)."""
+    s1 = _model_subtask(id="s1", depends_on=[])
+    s2 = _model_subtask(id="s2", depends_on=["s1"])
+    s3 = _model_subtask(id="s3", depends_on=["s2"])
+    s4 = _model_subtask(id="s4", depends_on=["s3"])
+    s5 = _model_subtask(id="s5", depends_on=[])
+    return EngineeringPlan(plan_id="stage-ownership", kind=ChangeKind.TASK, subtasks=[s1, s2, s3, s4, s5])
+
+
+def test_classify_requirement_ownership_current_when_sole_claimant():
+    plan = _stage_ownership_plan()
+    assert plan.classify_requirement_ownership("s1", ["s1"]) == RequirementOwnershipRelation.CURRENT
+
+
+def test_classify_requirement_ownership_future_ordered_for_a_real_downstream_claimant():
+    """The real live shape this fix targets: a Planner marks the SAME
+    requirement relevant to both an earlier subtask AND a genuinely later,
+    dependency-ordered one - the later, not-yet-run claimant proves the
+    plan still schedules it, so the earlier subtask's own claim must defer
+    to it, not be treated as already due."""
+    plan = _stage_ownership_plan()
+    assert plan.classify_requirement_ownership("s1", ["s1", "s4"]) == RequirementOwnershipRelation.FUTURE_ORDERED
+    # current need not claim it at all for this to hold - a downstream-only
+    # claim is still proof enough that current isn't the (or a) due owner.
+    assert plan.classify_requirement_ownership("s1", ["s4"]) == RequirementOwnershipRelation.FUTURE_ORDERED
+
+
+def test_classify_requirement_ownership_unrelated_duplicate_does_not_defer():
+    """The exact case a prior, now-replaced heuristic got wrong: bare
+    duplicate occurrence (the requirement ALSO claimed by s5, which has no
+    dependency-ordering relationship to s1 at all) is not proof of FUTURE
+    ownership - an accidental/lazy Planner assignment onto an unrelated
+    sibling must not silently defer a requirement that is, in fact, due
+    for the subtask asking."""
+    plan = _stage_ownership_plan()
+    assert plan.classify_requirement_ownership("s1", ["s1", "s5"]) == RequirementOwnershipRelation.CURRENT
+
+
+def test_classify_requirement_ownership_accidental_duplicate_on_past_owner_does_not_change_ownership():
+    """A duplicate claim shared with an ALREADY-PAST subtask (s1, upstream
+    of s4) is the legitimate "validated sequential ownership chain" shape
+    classify_file_ownership() already treats as fine for files - must not
+    disqualify s4 (the later, still-current claimant) from CURRENT."""
+    plan = _stage_ownership_plan()
+    assert plan.classify_requirement_ownership("s4", ["s1", "s4"]) == RequirementOwnershipRelation.CURRENT
+
+
+def test_classify_requirement_ownership_past_ordered_when_only_an_earlier_subtask_claims_it():
+    plan = _stage_ownership_plan()
+    assert plan.classify_requirement_ownership("s4", ["s1"]) == RequirementOwnershipRelation.PAST_ORDERED
+
+
+def test_classify_requirement_ownership_unowned_when_nothing_claims_it():
+    plan = _stage_ownership_plan()
+    assert plan.classify_requirement_ownership("s1", []) == RequirementOwnershipRelation.UNOWNED
+
+
+def test_classify_requirement_ownership_unrelated_when_current_is_not_a_claimant_either():
+    """Symmetric with classify_file_ownership's own UNRELATED case: current
+    doesn't claim it at all, and the one subtask that does (s5) has no
+    dependency-ordering relationship to current (s1) either way."""
+    plan = _stage_ownership_plan()
+    assert plan.classify_requirement_ownership("s1", ["s5"]) == RequirementOwnershipRelation.UNRELATED

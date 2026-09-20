@@ -78,7 +78,7 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
@@ -116,6 +116,7 @@ from kriya.workflow.checkpoint import (
     compute_base_commit,
     compute_registry_hash,
     compute_tree_hash,
+    compute_workspace_content_hash,
     new_run_id,
     validate_resume_against_reality,
     list_checkpoints,
@@ -135,6 +136,7 @@ from kriya.workflow.migration import (
     MigrationResolution, MigrationResolutionStatus, MigrationValidationScope,
     find_migration_incomplete, resolve_migration_resolution,
 )
+from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
 from kriya.workflow.obligations import (
     ObligationAuthority,
     ObligationKind,
@@ -168,7 +170,7 @@ from kriya.workflow.edit_safety import (
 )
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
-from kriya.workflow.static_checks import derive_stack_contract, validate_stack_contract_artifacts
+from kriya.workflow.static_checks import derive_stack_contract, log_stack_contract_boundary, validate_stack_contract_artifacts
 from kriya.workflow.planning_diagnostics import (
     bounded_repository_evidence,
     persist_planning_attempt_diagnostic,
@@ -180,6 +182,11 @@ from kriya.workflow.subtask_telemetry import (
     record_plan_created,
     record_subtask_attempt,
     record_undeclared_file_touch,
+)
+from kriya.workflow.planner_repair import (
+    STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
+    build_structured_plan_repair_prompt,
+    classify_structured_plan_parse_issue,
 )
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.verification_report import build_verification_report
@@ -466,7 +473,8 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     '{"global_invariants": [{"id": "gi1", "statement": "..."}], "subtasks": [{"id": "s1", '
     '"description": "...", "execution_method": "model", "execution_role": "implementation", '
     '"depends_on": [], "planned_files": [{"path": "...", "action": "create|modify|delete", '
-    '"environment_requirements": ["..."], "requires_capabilities": ["..."]}], '
+    '"environment_requirements": ["..."], "requires_capabilities": ["..."], '
+    '"preserved_references": ["..."]}], '
     '"provides": ["..."], "requires": [], "relevant_global_invariant_ids": ["gi1"], "verification": '
     '[{"type": "tool", "description": "...", "tool_name": "compile", '
     '"verifier_kind": "compile", '
@@ -490,10 +498,12 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "analysis before editing its owned file. A verification entry must always be an object, never "
     "a string. A judgment verification must omit tool_name. A tool verification must name a real "
     "registered tool; use tool_name=compile/verifier_kind=compile for compilation and "
-    "tool_name=test/verifier_kind=test for tests. Use verifier_kind=application_runtime "
-    "and requires_runtime_execution=true TOGETHER, only "
-    "when the plan explicitly requires executing the application - never set one without "
-    "the other; a verifier claiming application_runtime kind without requires_runtime_"
+    "tool_name=test/verifier_kind=test for tests. An application_runtime verification is a "
+    "JUDGMENT verification, not a tool verification: set type=judgment, omit tool_name entirely, "
+    "and set verifier_kind=application_runtime and requires_runtime_execution=true TOGETHER - all "
+    "four together, only when the plan explicitly requires executing the application - never set "
+    "one without the other, and never set type=tool or any tool_name for this verifier; a verifier "
+    "claiming application_runtime kind without requires_runtime_"
     "execution=true will never actually be executed. Do not use verifier_kind=judgment for "
     "behavior that can only be established by executing the application - observable output, "
     "exit behavior, processing sample input, runtime side effects, etc.; a judgment "
@@ -512,6 +522,10 @@ AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
     "planned_files[].environment_requirements, never in subtask requires/provides. "
     "planned_files[].requires_capabilities names only an exact capability supplied by another "
     "planned subtask. "
+    "If a test or other planned artifact references a real, pre-existing production file that "
+    "the goal does not require changing, do not invent a subtask to own it - list its exact "
+    "existing path in that artifact's own planned_files[].preserved_references instead, to "
+    "declare the reference is intentional and the file stays unchanged. "
     "If a stage's entrypoint may terminate the running process (an explicit exit/return-code "
     "path, not just falling off the end of a function) and another stage's tests are expected to "
     "exercise that entrypoint directly, plan them so the process-terminating behavior stays "
@@ -576,232 +590,249 @@ def _authoritative_planner_extension_candidates(
     return candidates[:max_files]
 
 
-def build_structured_plan_repair_prompt(
-    goal: str,
-    previous_plan_text: str,
-    errors: List[str],
-    reason_codes: List[str],
-    repair_attempt: int,
-    *,
-    route_kind: Optional[ChangeKind] = None,
-    extension_candidates: Optional[List[str]] = None,
-    repository_candidates: Optional[List[str]] = None,
-    must_preserve: Optional[List[str]] = None,
-    validation_evidence: Optional[List[Dict[str, Any]]] = None,
-) -> str:
-    """Build a bounded local-only correction request for the complete plan.
+def _is_strict_regression(
+    retained_reason_codes: Optional[frozenset], candidate_reason_codes: frozenset,
+) -> bool:
+    """Planner-convergence audit (2026-09-06, P2 production-validation run
+    7): reason-code sets across repair attempts form a PARTIAL order, not a
+    total one - {D} -> {X} is incomparable (a different problem, possibly a
+    legitimate trade-off), never itself evidence of regression, while
+    {D} -> {A, D} is unambiguous: every previously-unresolved problem in
+    the retained baseline is STILL unresolved, and a problem already
+    cleared as of the retained baseline has reappeared. Only that second,
+    strict-superset shape is safe to reject deterministically - anything
+    else (unchanged, empty/success, or a genuinely different set) must
+    fall through to the existing repair-loop behavior unchanged. No
+    cardinality/heuristic scoring: `retained_reason_codes < candidate_
+    reason_codes` is Python's own frozenset "proper subset" operator, not
+    a size comparison (a smaller candidate set could still fail this check
+    if it isn't a superset at all, and a same-size candidate never can).
 
-    must_preserve (PRV-05 run #8, MA8 - kriya/workflow/obligations.py):
-    human-readable descriptions of PLAN_STRUCTURAL_VALIDITY obligations the
-    PREVIOUS draft already satisfied (computed by the caller from the
-    ObligationLedger, not re-derived here) - found live, run #8: the
-    Planner fixed refactor_baseline on repair attempt 2 but silently
-    regressed an already-fixed planned-file action, because the repair
-    prompt only ever showed the CURRENT attempt's error list, with nothing
-    telling the model that both constraints had to hold simultaneously.
-    This is a best-effort PROMPT instruction, not an enforcement mechanism
-    - the ledger's own regression detection (surfaced by the caller as
-    PLAN_REPAIR_OSCILLATION/PLAN_REPAIR_NON_CONVERGENCE) is what actually
-    catches it if the model ignores this anyway."""
-    targeted_correction = ""
-    prerequisite_evidence = [
-        item for item in (validation_evidence or [])
-        if item.get("consumer_subtask") and item.get("provider_subtask")
-        and (item.get("missing_requires_edge") or item.get("missing_depends_on_edge"))
+    Found live: P2 run 7's attempt 1 correctly resolved 4 of 5 semantic
+    reason codes, leaving only MISSING_GROUNDED_PRODUCTION_ARTIFACT -
+    attempt 2, chasing that one remaining code, silently reintroduced
+    APPLICATION_RUNTIME_OWNER_MISSING (already-cleared) while STILL not
+    resolving MISSING_GROUNDED_PRODUCTION_ARTIFACT. must_preserve (prompt
+    text only, no structural enforcement) did not stop this - this
+    function backs a REAL, deterministic rejection instead."""
+    if retained_reason_codes is None:
+        return False
+    return retained_reason_codes < candidate_reason_codes
+
+
+def _preserved_reference_must_preserve_lines(obligation_ledger: ObligationLedger) -> List[str]:
+    """MUST-PRESERVE reinforcement lines for currently-SATISFIED
+    PRESERVED_REFERENCE obligations (PRV-11 preservation extension,
+    2026-09-07, Production Validation P5) - see build_structured_plan_
+    repair_prompt's own docstring for the live incident this closes.
+    Each line self-attributes its own (source, target) pair explicitly, so
+    one source's already-validated preservation can never be misread as
+    applying to a different source - no grouping/scoping structure needed
+    beyond that. Surfaces validated ObligationLedger state only, never the
+    previous draft's raw JSON directly - the same discipline
+    PLAN_STRUCTURAL_VALIDITY's own must_preserve block already follows."""
+    return [
+        f"{rec.evidence.get('source')} must keep declaring "
+        f"{rec.evidence.get('target')} in its own "
+        "planned_files[].preserved_references (already validated - a real grounded "
+        "edge with no legitimate owner; do not remove this entry while fixing other "
+        "reported issues, and do not replace it with a different target)"
+        for rec in obligation_ledger.relevant_for_preservation(ObligationKind.PRESERVED_REFERENCE)
+        if rec.evidence.get("source") and rec.evidence.get("target")
     ]
-    if prerequisite_evidence:
-        targeted_correction += "- Apply these exact planned-prerequisite corrections:\n"
-        for item in prerequisite_evidence:
-            targeted_correction += (
-                f"  Consumer: subtask={item['consumer_subtask']} file={item['consumer_file']}\n"
-                f"  Required planned capability: {item['prerequisite_capability']}\n"
-                f"  Provider: subtask={item['provider_subtask']} file={item['provider_file']}\n"
-            )
-            if item.get("missing_requires_edge"):
-                targeted_correction += (
-                    f"  Required repair: add {item['prerequisite_capability']} to "
-                    f"{item['consumer_subtask']}.requires\n"
+
+
+def _semantic_contract_must_preserve_lines(obligation_ledger: ObligationLedger) -> List[str]:
+    """MUST-PRESERVE reinforcement (layer 1) for currently-SATISFIED
+    SUBTASK_SEMANTIC_CONTRACT obligations (PRV-17, 2026-09-07, Production
+    Validation P7) - see that kind's own docstring (obligations.py) for the
+    live 3-attempt oscillation this closes, and _semantic_contract_
+    regression_subtasks below for the deterministic layer-2 rejection that
+    backs this prompt-level reinforcement the same way _is_strict_
+    regression already backs must_preserve for reason-code sets. Each line
+    self-attributes its own subtask id and requirement/capability string, so
+    one subtask's already-validated contract can never be misread as
+    applying to a different one - same discipline as
+    _preserved_reference_must_preserve_lines above."""
+    lines: List[str] = []
+    for rec in obligation_ledger.relevant_for_preservation(ObligationKind.SUBTASK_SEMANTIC_CONTRACT):
+        relation = rec.evidence.get("relation")
+        subtask_id = rec.evidence.get("subtask_id")
+        if relation == "requires":
+            requirement = rec.evidence.get("requirement")
+            if subtask_id and requirement:
+                lines.append(
+                    f"subtask {subtask_id!r} must keep declaring {requirement!r} in its own "
+                    "requires (already validated - a real provider exists with a correct "
+                    "depends_on edge; do not drop this entry while fixing other reported issues)"
                 )
-            if item.get("missing_depends_on_edge"):
-                targeted_correction += (
-                    f"  Required repair: add {item['provider_subtask']} to "
-                    f"{item['consumer_subtask']}.depends_on\n"
+        elif relation == "provides":
+            capability = rec.evidence.get("capability")
+            if subtask_id and capability:
+                lines.append(
+                    f"subtask {subtask_id!r} must keep declaring {capability!r} in its own "
+                    "provides (already validated as its sole provider; do not drop this entry "
+                    "while fixing other reported issues)"
                 )
-            targeted_correction += "  Preserve unrelated valid plan edges.\n"
-    if "TOOL_SUBTASK_MISSING_TOOL_NAME" in reason_codes:
-        targeted_correction += (
-            "- A TOOL subtask with no tool_name is not executable. If it is a non-editing check, "
-            "REMOVE it from subtasks and move its acceptance_criteria_ids plus an equivalent "
-            "verification entry onto its nearest declared implementation dependency. Do not relabel "
-            "it MODEL.\n"
-        )
-    if "MODEL_SUBTASK_MISSING_PLANNED_FILES" in reason_codes:
-        targeted_correction += (
-            "- For each named unscoped MODEL subtask: if it is a non-editing build/test/run/output "
-            "check, set its execution_role to verification (keep it as its own subtask, keep its "
-            "depends_on and acceptance_criteria_ids) and give it at least one concrete verification "
-            "entry - do NOT remove it or invent a planned_files path for it. If it genuinely edits "
-            "files, retain it as execution_role=implementation with the exact real planned_files it "
-            "owns. Never invent a fake file for a check.\n"
-        )
-    if "STRUCTURED_PLAN_SCHEMA_INVALID" in reason_codes:
-        targeted_correction += (
-            "- Repair every schema-invalid field to the system contract. In particular, each "
-            "verification item must be an object with type, description, verifier_kind, and "
-            "requires_runtime_execution; never use a string verification item.\n"
-        )
-    if "SUBTASK_REQUIREMENT_UNPROVIDED" in reason_codes:
-        targeted_correction += (
-            "- Replace each unprovided requires value with the exact, character-for-character "
-            "provides value exported by its declared upstream dependency. Do not paraphrase "
-            "capability names.\n"
-        )
-    if "AMBIGUOUS_PLANNED_FILE_OWNERSHIP" in reason_codes:
-        candidates = repository_candidates or []
-        targeted_correction += (
-            "- Each planned file path must be owned by exactly one MODEL subtask. For every "
-            "duplicated path named in the validation errors, retain it only on the subtask that "
-            "actually performs that file's implementation change. REMOVE any separate MODEL "
-            "subtask whose sole purpose is to analyze, inspect, research, or explain that same "
-            "file; fold necessary analysis into the implementation subtask. Express downstream checks as "
-            "verification or acceptance criteria on an appropriate implementation subtask; do "
-            "not duplicate a path merely so another subtask can compile, test, inspect, or use "
-            "it. Preserve real dependency edges and do not rename, replace, or invent files to "
-            "avoid the ownership conflict. Existing local paths available as ownership evidence: "
-            f"{json.dumps(candidates)}. For modify/delete, use an exact relevant existing path; "
-            "do not create or rename a parallel artifact when a relevant owner exists.\n"
-        )
-    if "EXTENSION_POINT_REQUIRED" in reason_codes:
-        candidates = extension_candidates or []
-        targeted_correction += (
-            f"- The {route_kind.value if route_kind else 'current'} route requires a real "
-            "extension point. Set extension_points using only these existing relative paths: "
-            f"{json.dumps(candidates)}. Do not invent a path.\n"
-        )
-    if "REFACTOR_BASELINE_MISSING" in reason_codes:
-        targeted_correction += (
-            "- Set refactor_baseline to the exact id (a string like \"s3\") of the subtask whose "
-            "completed output the equivalence verification should be ordered against - typically "
-            "the LAST implementation subtask in dependency order, not an empty string, null, or a "
-            "prose description.\n"
-        )
-    if "PLANNED_FILE_ACTION_MISMATCH" in reason_codes:
-        targeted_correction += (
-            "- For each planned file the errors name as an action mismatch: if the file does not "
-            "yet exist in the repository evidence, its action must be \"create\"; if it already "
-            "exists, its action must be \"modify\" (or \"delete\"). Do not change which subtask "
-            "owns the file, only its action.\n"
-        )
-    if "VERIFICATION_EVIDENCE_PATH_MISSING" in reason_codes:
-        targeted_correction += (
-            "- For each verification requirement the errors name as having no evidence producer: "
-            "it cannot remain type=judgment with tool_name=null and requires_runtime_execution=false "
-            "- Kriya has no way to ever confirm it passed. If satisfying it requires actually "
-            "running the built application (observing output, exit behavior, processing sample "
-            "input, or another runtime side effect), set verifier_kind=application_runtime and "
-            "requires_runtime_execution=true. If it can be confirmed by compiling or running the "
-            "test suite, set type=tool with tool_name=compile/verifier_kind=compile or "
-            "tool_name=test/verifier_kind=test instead. Do not just restate the same "
-            "judgment-only shape.\n"
-        )
-    if "MISSING_GROUNDED_PRODUCTION_ARTIFACT" in reason_codes:
-        targeted_correction += (
-            "- For each production artifact the errors name as referenced by a test file but "
-            "owned by no subtask (grounded structural evidence - a real import, method call, or "
-            "constructor instantiation the previous draft's own repository already contains, not "
-            "a guess): account for that grounded artifact in the planned production path. If the "
-            "authoritative goal and repository evidence show that satisfying the goal requires "
-            "changing it, assign it to a MODEL implementation subtask using its existing path and "
-            "action=modify. Ensure the downstream verification subtask's depends_on and requires "
-            "route through the responsible production owner and one of that owner's provides "
-            "capabilities. Do not infer that the artifact must be modified solely because the "
-            "structural edge exists.\n"
-        )
-    if "MISWIRED_GROUNDED_DEPENDENCY_EDGE" in reason_codes:
-        targeted_correction += (
-            "- For each test file the errors name as referencing a production artifact owned by a "
-            "specific subtask that is outside its own dependency chain (the owning subtask id is "
-            "given in the error text itself): change that test subtask's own requires to the exact "
-            "provides value the NAMED owning subtask exports, and add that owning subtask's id to "
-            "the test subtask's own depends_on - do not leave requires/depends_on pointing at an "
-            "earlier producer already in the chain merely because a dependency edge exists to it. "
-            "The grounded evidence names the file the test actually references; requires/depends_on "
-            "must route through whichever subtask really owns that exact file.\n"
-        )
-    if "GROUNDED_SEMANTIC_PROVIDER_MISMATCH" in reason_codes:
-        targeted_correction += (
-            "- For each grounded test-to-production relationship whose production owner is already "
-            "in the test subtask's depends_on chain, also route semantic responsibility through "
-            "that same owner: add one of the named owner's provides capabilities to the test "
-            "subtask's requires. Remove any requires value that incorrectly routes this grounded "
-            "verification through an earlier or unrelated producer. Keep depends_on and "
-            "requires -> provides aligned with the same responsible owner.\n"
-        )
-    if "UNKNOWN_GLOBAL_INVARIANT" in reason_codes:
-        targeted_correction += (
-            "- For each subtask the errors name as referencing an unknown global invariant id: "
-            "replace that entry with one of the declared ids listed in the same error (shown as "
-            "\"declared ids are [...]\"), the one whose statement is actually relevant to this "
-            "subtask. Do not invent a new id, do not restate the invariant's statement text as the "
-            "id, and do not add a new entry to global_invariants unless the goal states a real "
-            "constraint no existing invariant covers. A subtask relevant to only part of a compound "
-            "invariant still references that invariant's existing id whole - it does not split it "
-            "into a new id or a partial statement. Existing global invariant ids from the previous "
-            "draft must be preserved unchanged (same id, same statement) unless the invariant "
-            "itself is being genuinely removed or replaced.\n"
-        )
-    must_fix_section = ""
-    if must_preserve:
-        must_fix_section = (
-            "\nMUST PRESERVE (already correct in the previous draft above - do not undo any of "
-            "these while fixing the items below; a corrected plan that changes one of these back "
-            "is itself a regression):\n"
-            + "\n".join(f"- {item}" for item in must_preserve)
-            + "\n\nMUST FIX (still wrong in the previous draft):\n"
-        )
-    return (
-        "Repair the previous structured engineering plan. This is PLAN_REPAIR, not implementation.\n"
-        "Return only one complete JSON object and nothing else. Do not use Markdown or code fences.\n\n"
-        f"Original request:\n{goal}\n\n"
-        f"Deterministic reason codes: {json.dumps(reason_codes)}\n"
-        + must_fix_section
-        + "Deterministic validation errors:\n"
-        + "\n".join(f"- {error}" for error in errors)
-        + "\n\nCorrection rules:\n"
-        "- Return a complete corrected plan, preserving every valid subtask and dependency.\n"
-        "- Correct only invalid plan structure; do not broaden scope or invent modules/entrypoints.\n"
-        "- Declare depends_on for every stage that consumes files, configuration, contracts, or "
-        "build setup produced by another stage.\n"
-        "- Preserve or add goal-derived global_invariants (each with a stable id and a statement) "
-        "and per-subtask relevant_global_invariant_ids referencing those ids, plus stable "
-        "provides/requires metadata; every requires string must exactly equal one provides string "
-        "from exactly one declared dependency, and every relevant_global_invariant_ids entry must "
-        "exactly equal one global_invariants id - never restate the statement text as the id.\n"
-        "- Every verification item must be an object with type, description, verifier_kind, and "
-        "requires_runtime_execution; use type=tool/tool_name=compile/verifier_kind=compile for compilation, "
-        "type=tool/tool_name=test/verifier_kind=test for tests, and type=judgment without tool_name only for "
-        "a genuinely non-deterministic semantic check; never emit a verification string.\n"
-        "- For verification of observable application behavior that requires executing the built "
-        "application - output, exit behavior, processing sample input, runtime side effects, etc. - "
-        "set verifier_kind=application_runtime and requires_runtime_execution=true TOGETHER on that "
-        "explicit application verifier, and false on build-only checks. Do not use verifier_kind="
-        "judgment for behavior that can only be established by executing the application; a "
-        "judgment-only requirement with no tool_name and requires_runtime_execution=false has no way "
-        "to ever be confirmed and will be rejected.\n"
-        "- Map each acceptance criterion only to a stage capable of directly proving it; runtime "
-        "output criteria belong on the runnable entrypoint stage.\n"
-        "- Every execution_role=implementation subtask MUST declare every file it may modify in "
-        "planned_files.\n"
-        "- A non-editing build/test/run/output check is its own subtask with "
-        "execution_role=verification, planned_files=[], and at least one concrete verification "
-        "entry - never a MODEL subtask with no files and no verification entry, and never a fake "
-        "planned_files path invented just to pass validation.\n"
-        + targeted_correction
-        + "- Do not emit TOOL subtasks: authoritative enforce mode has no policy-mediated TOOL router yet.\n"
-        "- Output the complete corrected JSON object, not a patch, explanation, or Markdown plan.\n\n"
-        f"Previous Planner response (repair attempt {repair_attempt}):\n"
-        + previous_plan_text[-20000:]
-    )
+    return lines
+
+
+_SUBTASK_MENTION_RE = re.compile(r"subtask\(?s?\)?\s*\[?\s*((?:'[^']+'(?:,\s*)?)+)")
+_QUOTED_TOKEN_RE = re.compile(r"'([^']+)'")
+
+
+_REQUIRES_PROVIDES_ERROR_KEYWORDS = ("requires", "provide", "capabilit")
+
+
+def _subtask_ids_mentioned(texts: List[str]) -> Set[str]:
+    """Subtask ids named in a round's own validation error text, RESTRICTED
+    to lines that are themselves about a requires/provides/capability
+    relationship (PRV-17, 2026-09-07, P7) - used only to decide which
+    subtask(s) a repair round was actually asked to fix a semantic-contract
+    problem for, feeding _semantic_contract_regression_subtasks' own
+    "unless directly implicated" exemption below. The keyword filter matters:
+    P7's own attempt 0 named s3 in its ONE reported error
+    (PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP, about s3's
+    preserved_references, containing neither "requires" nor "provide" nor
+    "capabilit") - a bare subtask-id mention, unfiltered, would have wrongly
+    exempted s3 from the very requires-drop this mechanism exists to catch.
+    Every requires/provides/capability-related error string in
+    plan_validation.py and this module (SUBTASK_REQUIREMENT_UNPROVIDED,
+    SEMANTIC_DEPENDENCY_EDGE_MISSING, AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER,
+    SUBTASK_SEMANTIC_CONTRACT_MISSING, the MISSING_GROUNDED_PRODUCTION_
+    ARTIFACT/MISWIRED_GROUNDED_DEPENDENCY_EDGE/GROUNDED_SEMANTIC_PROVIDER_
+    MISMATCH family, PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED, and this
+    module's own SEMANTIC_CONTRACT_REGRESSION_REJECTED) already contains at
+    least one of these keywords AND at least one subtask id named either as
+    `subtask 'sN'` or `subtask(s) ['sN', ...]` by construction (the grounded-
+    edge family's own errors were extended, 2026-09-07, to also name the
+    CONSUMER subtask via `gap['consumer_subtask']`, not only the producer
+    that already appeared as `owning_subtask` - the consumer's own requires
+    is exactly what a targeted repair for these codes legitimately changes).
+    Deliberately reads the SAME free-text errors already shown to the
+    Planner in the repair prompt, never a separately re-derived or reworded
+    source."""
+    ids: Set[str] = set()
+    for text in texts:
+        lowered = text.lower()
+        if not any(keyword in lowered for keyword in _REQUIRES_PROVIDES_ERROR_KEYWORDS):
+            continue
+        for mention in _SUBTASK_MENTION_RE.finditer(text):
+            ids.update(_QUOTED_TOKEN_RE.findall(mention.group(1)))
+    return ids
+
+
+def _semantic_contract_regression_subtasks(
+    obligation_ledger: ObligationLedger, regressions_before: int, implicated_subtask_ids: Set[str],
+) -> List[str]:
+    """Deterministic layer 2 (PRV-17, 2026-09-07, P7): returns the subtask
+    id(s) whose previously-SATISFIED SUBTASK_SEMANTIC_CONTRACT obligation
+    just regressed to VIOLATED THIS round (i.e. was newly appended to
+    obligation_ledger.regressions since `regressions_before`), and which
+    were NOT named by the errors that prompted this round's own repair
+    prompt (`implicated_subtask_ids`). A subtask actively being repaired for
+    an unrelated reason may still legitimately touch its own requires/
+    provides as a side effect - the exemption is scoped to the SUBTASK, not
+    the exact field, matching the granularity `implicated_subtask_ids`
+    itself can support from free text (see _subtask_ids_mentioned). Reuses
+    ObligationLedger.record()'s existing SATISFIED->VIOLATED regression
+    detection rather than a second, parallel comparison - see obligations.py
+    SUBTASK_SEMANTIC_CONTRACT's own docstring. Called from
+    _run_structured_enforce; the caller ORs a non-empty result into the
+    same retained-baseline redirect _is_strict_regression already drives,
+    rather than this function rejecting anything itself - _is_strict_
+    regression's own reason-code-set semantics stay untouched."""
+    offending: List[str] = []
+    for event in obligation_ledger.regressions[regressions_before:]:
+        if event.kind != ObligationKind.SUBTASK_SEMANTIC_CONTRACT:
+            continue
+        subtask_id = event.current.evidence.get("subtask_id") or event.current.owner_subtask_id
+        if subtask_id and subtask_id not in implicated_subtask_ids:
+            offending.append(subtask_id)
+    return list(dict.fromkeys(offending))
+
+
+_PRESERVED_REFERENCE_CONFLICT_RE = re.compile(
+    r"artifact '([^']+)' declares '([^']+)' as a preserved reference"
+)
+
+
+def _preserved_reference_pairs_mentioned(texts: List[str]) -> Set[Tuple[str, str]]:
+    """(source, target) pairs named by THIS round's own
+    PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP error text (plan_validation.
+    py's own wording: "artifact '<source>' declares '<target>' as a
+    preserved reference, but '<target>' is itself planned for modification
+    by [...]") - used only to decide which preservation pair(s) a round was
+    actually asked to correct, feeding _preserved_reference_regressions'
+    own "unless directly implicated" exemption below (PRV-17, 2026-09-08, P5
+    audit, mirrors _subtask_ids_mentioned's exact rationale for the sibling
+    requires/provides mechanism: a round legitimately asked to REMOVE a
+    wrong preservation claim (this exact conflict) must not have that
+    correction itself flagged as a silent, unrelated drop)."""
+    pairs: Set[Tuple[str, str]] = set()
+    for text in texts:
+        for match in _PRESERVED_REFERENCE_CONFLICT_RE.finditer(text):
+            pairs.add((match.group(1), match.group(2)))
+    return pairs
+
+
+def _preserved_reference_regressions(
+    obligation_ledger: ObligationLedger, regressions_before: int,
+    implicated_pairs: Set[Tuple[str, str]],
+) -> List[Tuple[str, str]]:
+    """Deterministic sibling to _semantic_contract_regression_subtasks
+    (PRV-17, 2026-09-08, P5 audit): returns the (source, target) pair(s)
+    whose previously-SATISFIED PRESERVED_REFERENCE obligation just
+    regressed to VIOLATED THIS round (newly appended to obligation_ledger.
+    regressions since `regressions_before` by find_missing_grounded_
+    production_artifacts' own closing pass), and which were NOT named by
+    the errors that prompted this round's own repair prompt
+    (`implicated_pairs`).
+
+    A separate function, not a broadened SUBTASK_SEMANTIC_CONTRACT filter,
+    deliberately - PRESERVED_REFERENCE's real identity is the (source,
+    target) FILE pair (an edge-level fact, matching preserved_references'
+    own edge-level design - see that field's own docstring), not a subtask
+    id; forcing it through subtask identity would be wrong when a single
+    subtask's PlannedFile legitimately drops one preserved target while
+    correctly retaining another on the SAME file. Reuses ObligationLedger.
+    record()'s existing SATISFIED->VIOLATED regression detection rather
+    than a second, parallel comparison - see ObligationKind.
+    PRESERVED_REFERENCE's own docstring. Called from _run_structured_
+    enforce; the caller ORs a non-empty result into the same retained-
+    baseline redirect _is_strict_regression and
+    _semantic_contract_regression_subtasks already drive, rather than this
+    function rejecting anything itself - _is_strict_regression's own
+    reason-code-set semantics stay untouched.
+
+    Live incident this closes (P5, PetTests.java): attempt 1 satisfies
+    BaseEntity.java, leaving Visit.java missing (reason_codes=
+    {MISSING_GROUNDED_PRODUCTION_ARTIFACT}); attempt 2 satisfies
+    Visit.java but silently drops BaseEntity.java, again leaving exactly
+    one file missing (reason_codes={MISSING_GROUNDED_PRODUCTION_ARTIFACT} -
+    an IDENTICAL single-element set). _is_strict_regression's reason-code-
+    set comparison requires a proper subset relationship; two equal sets
+    are never a proper subset of each other, so it cannot see this
+    oscillation - exactly the class of gap _semantic_contract_regression_
+    subtasks already closed for requires/provides, left open here until
+    now."""
+    offending: List[Tuple[str, str]] = []
+    for event in obligation_ledger.regressions[regressions_before:]:
+        if event.kind != ObligationKind.PRESERVED_REFERENCE:
+            continue
+        pair = (event.current.evidence.get("source"), event.current.evidence.get("target"))
+        if pair[0] and pair[1] and pair not in implicated_pairs:
+            offending.append(pair)
+    return list(dict.fromkeys(offending))
+
+
+# build_structured_plan_repair_prompt moved to kriya/workflow/planner_repair.py
+# (PLANNER-ROBUST-001, 2026-09-19) - a shared Planner-boundary primitive both this
+# module and the legacy kriya/workflow/workflow.py path now import, so the two
+# runtime paths can never independently drift on structured-plan repair guidance.
+# See that module's own docstring for the extraction rationale and import-direction
+# note (workflow_controller.py already imports FROM workflow.py, so the reverse
+# import would have been circular).
 
 
 def build_authoritative_planner_request(
@@ -1047,6 +1078,10 @@ def _transitive_depends_on(plan: EngineeringPlan, subtask_id: str) -> set:
 
 def find_missing_grounded_production_artifacts(
     plan: EngineeringPlan, resolved_edges: Dict[str, List[str]],
+    *,
+    workspace_path: Optional[str] = None,
+    obligation_ledger: Optional[ObligationLedger] = None,
+    revision: object = None,
 ) -> List[Dict[str, str]]:
     """Bounded plan-completeness check (PRV-11, 2026-08-30/31): a REAL,
     grounded structural edge (see build_planning_structural_evidence's own
@@ -1060,7 +1095,19 @@ def find_missing_grounded_production_artifacts(
        them (or invents an unrelated substitute test file instead of the
        real, pre-existing one - scanning EVERY candidate test file this
        function was given evidence for, not only currently-planned ones,
-       catches that shape too).
+       catches that shape too). Scoped to a runnable-test SOURCE only
+       (2026-09-04, Production Validation P1): build_planning_structural_
+       evidence only ever indexes candidates that already exist on disk, so
+       every target this function sees - real gap or not - already exists
+       in the workspace. Filesystem existence therefore can't distinguish
+       a genuine omitted owner from a production file's ordinary, correct
+       reference to an untouched brownfield dependency (found live: a
+       clean plan modifying EmployeeRepository.java was rejected for its
+       own unremarkable, unchanged import of IgniteConfig.java). What
+       distinguishes them is the SOURCE: a test's reference to an unowned
+       production file is exactly the PRV-11 omitted-producer shape; a
+       production file's reference to an unowned production file is an
+       ordinary dependency this plan was never asked to touch.
     2. MISWIRED (reason="not_in_dependency_chain", 2026-08-31): the
        referenced production file IS owned by a real subtask, but that
        subtask is not in the REFERENCING subtask's own transitive
@@ -1084,10 +1131,36 @@ def find_missing_grounded_production_artifacts(
     edge that IS already correctly wired (the referencing subtask's own
     planned_files, or any subtask already in its own depends_on closure,
     are never flagged for owning the SAME grounded target). A target
-    itself test/documentation is never flagged."""
+    itself test/documentation is never flagged.
+
+    4. PRESERVE (accepted, not a gap - 2026-09-06, Production Validation
+       P2): the referencing source's OWN PlannedFile lists the target in
+       preserved_references. Requires no further grounding check here -
+       `target` is only ever reached by iterating resolved_edges[source]
+       in the first place, so it is already a real structural edge (never
+       an invented one: an entry naming a target with no real edge from
+       that source is simply never consulted) and build_planning_
+       structural_evidence only ever indexes candidates that already
+       exist on disk (see its own docstring), so `target` already exists.
+       Declaration is per-source (this function keys the check off
+       `source`'s own PlannedFile, never a plan-wide path list), so one
+       artifact's correct preservation claim never suppresses a genuine
+       gap on a DIFFERENT source referencing the same target. A target
+       that is ALSO planned for modification elsewhere is a plan-
+       authoring contradiction rejected by plan_validation.validate_plan
+       (PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP), not silently
+       resolved here - this function only ever sees `target not in
+       owned_paths`, so an owned target never reaches this branch at all.
+       When workspace_path/obligation_ledger are supplied, an accepted
+       preservation is also recorded as a SATISFIED ObligationKind.
+       PRESERVED_REFERENCE record with the target's real pre-generation
+       content hash as evidence - see that kind's own docstring (kriya/
+       workflow/obligations.py) for how the terminal sweep uses it to
+       enforce byte identity with no new gate."""
     owned_paths = {pf.path for st in plan.subtasks for pf in st.planned_files}
     owner_by_path = {pf.path: st.id for st in plan.subtasks for pf in st.planned_files}
     source_subtask_by_path = {pf.path: st for st in plan.subtasks for pf in st.planned_files}
+    planned_file_by_path = {pf.path: pf for st in plan.subtasks for pf in st.planned_files}
     upstream_cache: Dict[str, set] = {}
     gaps: List[Dict[str, str]] = []
     seen = set()
@@ -1107,9 +1180,35 @@ def find_missing_grounded_production_artifacts(
             if key in seen:
                 continue
             if target not in owned_paths:
+                if not is_runnable_test_file(source):
+                    continue
+                source_pf = planned_file_by_path.get(source)
+                if source_pf is not None and target in source_pf.preserved_references:
+                    if obligation_ledger is not None and workspace_path is not None:
+                        obligation_ledger.record(ObligationRecord(
+                            id=f"plan.preserved_reference.{source}->{target}",
+                            kind=ObligationKind.PRESERVED_REFERENCE,
+                            status=ObligationStatus.SATISFIED,
+                            authority=ObligationAuthority.DETERMINISTIC,
+                            description=(
+                                f"{source} references {target} without requiring it modified - "
+                                "target must remain byte-identical to its pre-generation content"
+                            ),
+                            source="workflow_controller.find_missing_grounded_production_artifacts",
+                            revision=revision,
+                            evidence={
+                                "source": source, "target": target,
+                                "baseline_hash": read_file_revision(
+                                    os.path.join(workspace_path, target)
+                                ),
+                            },
+                            terminal_required=True,
+                        ))
+                    continue
                 seen.add(key)
                 gaps.append({
                     "test_file": source, "missing_production_artifact": target,
+                    "consumer_subtask": source_subtask_by_path[source].id,
                     "reason": "unowned",
                 })
                 continue
@@ -1123,7 +1222,9 @@ def find_missing_grounded_production_artifacts(
                 seen.add(key)
                 gaps.append({
                     "test_file": source, "missing_production_artifact": target,
-                    "owning_subtask": target_subtask_id, "reason": "not_in_dependency_chain",
+                    "owning_subtask": target_subtask_id,
+                    "consumer_subtask": source_subtask.id,
+                    "reason": "not_in_dependency_chain",
                 })
                 continue
             if not (
@@ -1143,11 +1244,115 @@ def find_missing_grounded_production_artifacts(
                     "test_file": source,
                     "missing_production_artifact": target,
                     "owning_subtask": target_subtask_id,
+                    "consumer_subtask": source_subtask.id,
                     "owner_provides": sorted(owner_capabilities),
                     "test_requires": sorted(source_subtask.requires),
                     "reason": "semantic_provider_mismatch",
                 })
+    if obligation_ledger is not None:
+        # PRV-17 (2026-09-08, Production Validation P5 audit): mirrors
+        # plan_validation.py's own SUBTASK_SEMANTIC_CONTRACT closing pass
+        # exactly (same rationale, same mechanism) - the SATISFIED-recording
+        # branch above only ever (re-)records an id for a (source, target)
+        # pair that is STILL a real edge with a STILL-declared
+        # preserved_references entry this round. A pair silently dropped
+        # from a later draft (the source no longer declares that target
+        # preserved - whether because the edge disappeared or the
+        # declaration was simply removed) never reaches that branch again,
+        # so its previously-SATISFIED record would otherwise sit stale,
+        # hiding the exact live incident this closes: P5's PetTests.java
+        # needed BaseEntity.java and Visit.java preserved simultaneously;
+        # one attempt satisfied only the first, the next satisfied only the
+        # second while silently dropping the first - both attempts reported
+        # the IDENTICAL single-element reason-code set
+        # {MISSING_GROUNDED_PRODUCTION_ARTIFACT}, so _is_strict_regression's
+        # reason-code-set comparison could not see it (equal sets are never
+        # a proper subset of each other). This closing pass re-records
+        # VIOLATED against each dropped id, which is what makes
+        # ObligationLedger.record()'s own SATISFIED->VIOLATED regression
+        # detection fire - no new detection mechanism, only ensuring every
+        # previously-tracked id gets a fresh record every round, exactly
+        # like the requires/provides closing pass already does.
+        current_preserved_pairs = {
+            (source, target)
+            for source, targets in resolved_edges.items()
+            for target in targets
+            if (planned_file_by_path.get(source) is not None
+                and target in planned_file_by_path[source].preserved_references)
+        }
+        for oid in obligation_ledger.ids_by_kind(ObligationKind.PRESERVED_REFERENCE):
+            rec = obligation_ledger.current(oid)
+            if rec is None or rec.status != ObligationStatus.SATISFIED:
+                continue
+            pair = (rec.evidence.get("source"), rec.evidence.get("target"))
+            if pair in current_preserved_pairs:
+                continue
+            obligation_ledger.record(ObligationRecord(
+                id=oid, kind=ObligationKind.PRESERVED_REFERENCE,
+                status=ObligationStatus.VIOLATED,
+                authority=ObligationAuthority.DETERMINISTIC,
+                description=(
+                    f"{pair[0]!r} previously validated preservation of {pair[1]!r} is no "
+                    "longer declared this round"
+                ),
+                source="workflow_controller.find_missing_grounded_production_artifacts",
+                revision=revision,
+                evidence={**rec.evidence, "dropped_between_revisions": True},
+                # terminal_required=False (unlike the live per-round
+                # recording above): the source/target pair may have been
+                # legitimately retired (e.g. the Planner correctly removed a
+                # WRONG preservation claim after a
+                # PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP correction -
+                # see _preserved_reference_regressions()'s own implicated-
+                # pair exemption for how a round that explicitly corrects
+                # this exact pair is never treated as a silent drop in the
+                # first place), in which case nothing will ever re-satisfy
+                # THIS exact id again - the unconditional final-gate check
+                # this drives (unresolved_terminal_obligations()) must not
+                # permanently fail a run over an obligation no longer live.
+                # record()'s SATISFIED->VIOLATED regression detection (this
+                # record's actual purpose) fires regardless of
+                # terminal_required - only the final aggregation gate reads
+                # that flag.
+                terminal_required=False,
+            ))
     return gaps
+
+
+def enforce_preserved_reference_terminal_integrity(
+    obligation_ledger: ObligationLedger, workspace_path: str,
+) -> None:
+    """PRV-11 preservation extension (2026-09-06/07, Production Validation
+    P2): the terminal half of ObligationKind.PRESERVED_REFERENCE - see that
+    kind's own docstring (kriya/workflow/obligations.py) for why this
+    re-hash, not a heuristic, is the enforcement mechanism.
+
+    Re-checks only currently-SATISFIED records: a record already VIOLATED
+    or PENDING for some other reason needs no further evidence to already
+    disqualify the run via unresolved_terminal_obligations(); this
+    function's only job is catching the case that check alone cannot -
+    a preservation that was genuinely honored at plan-acceptance time but
+    silently violated somewhere during generation."""
+    for rec in obligation_ledger.current_by_kind(ObligationKind.PRESERVED_REFERENCE):
+        if rec.status != ObligationStatus.SATISFIED:
+            continue
+        target = rec.evidence.get("target")
+        baseline_hash = rec.evidence.get("baseline_hash")
+        if not target or baseline_hash is None:
+            continue
+        current_hash = read_file_revision(os.path.join(workspace_path, target))
+        if current_hash != baseline_hash:
+            obligation_ledger.record(ObligationRecord(
+                id=rec.id, kind=ObligationKind.PRESERVED_REFERENCE,
+                status=ObligationStatus.VIOLATED,
+                authority=ObligationAuthority.DETERMINISTIC,
+                description=rec.description,
+                source="workflow_controller.enforce_preserved_reference_terminal_integrity",
+                revision="terminal",
+                evidence={**rec.evidence, "current_hash": current_hash},
+                owner_subtask_id=rec.owner_subtask_id,
+                terminal_required=True,
+            ))
 
 
 def build_approved_plan_document(
@@ -2490,6 +2695,182 @@ def revise_plan_for_planned_prerequisite(
     return EngineeringPlan.model_validate(revised.model_dump(mode="json"))
 
 
+def resolve_python_module_to_candidate_artifact_path(
+    module_name: str, workspace_path: str,
+) -> Optional[str]:
+    """Deterministic dotted-module -> physical-file resolution for Runtime-
+    Evidence Plan Repair (PRV-17 Run 13, 2026-09-04 - see ObligationKind.
+    RUNTIME_PLAN_GAP's own docstring for the live incident). Never guesses:
+    Python module resolution genuinely has more than one physical shape (a
+    plain module x/y.py vs. a package directory x/y/__init__.py), and this
+    function returns a path only when exactly one interpretation is safe.
+
+    Requires at least two dotted segments - a bare top-level name has no
+    established parent package on disk to anchor against, exactly the
+    "fresh single-file module OR the start of a brand-new package"
+    ambiguity this function refuses to guess through.
+
+    Requires the parent package directory to ALREADY exist on disk (real,
+    established content, not merely planned) - with no established
+    convention to resolve against, there is nothing to prefer one form
+    over the other for.
+
+    Prefers the ordinary module-file form (parent/leaf.py) over the
+    package-directory form (parent/leaf/__init__.py): the module-file form
+    never requires creating a new directory beyond what already exists -
+    the strictly more conservative reading of what the evidence proves.
+    Returns None (instead of guessing the module-file form) when EITHER
+    candidate already exists on disk - the module already exists in some
+    form, so this is a different bug, not a missing artifact this
+    mechanism is scoped to repair."""
+    parts = [p for p in module_name.split(".") if p]
+    if len(parts) < 2:
+        return None
+    parent_dir = "/".join(parts[:-1])
+    if not os.path.isdir(os.path.join(workspace_path, parent_dir)):
+        return None
+    leaf = parts[-1]
+    module_file_real_path = os.path.join(workspace_path, parent_dir, f"{leaf}.py")
+    package_dir_real_path = os.path.join(workspace_path, parent_dir, leaf)
+    if os.path.exists(module_file_real_path) or os.path.exists(package_dir_real_path):
+        return None
+    return f"{parent_dir}/{leaf}.py"
+
+
+def resolve_runtime_plan_gap_owner(
+    plan: EngineeringPlan, candidate_path: str, failed_subtask: Subtask,
+) -> Optional[str]:
+    """Package-establisher ownership rule for Runtime-Evidence Plan Repair
+    (PRV-17 Run 13, 2026-09-04): the subtask that owns candidate_path's
+    parent package's own __init__.py is the one deterministic, language-
+    convention (not framework-specific) signal for "who should own a new
+    member of this package." Deliberately narrower than "any subtask
+    owning any file under this directory" - PRV-17 Run 13's own audit
+    found myproject/ owned by BOTH s1 (myproject/__init__.py,
+    myproject/settings.py) and s3 (myproject/urls.py) in the live incident
+    this closes; only __init__.py's owner is unambiguous.
+
+    Returns None (never guesses) when: candidate_path has no parent
+    directory (a root-level new module has no package-establisher to
+    anchor to); __init__.py has no unique plan-declared owner
+    (EngineeringPlan.file_owner() itself already returns None for a
+    multi-declared path - see revise_plan_for_planned_prerequisite's own
+    precedent, above); the owner IS the failing subtask itself (nothing to
+    reopen); or the owner is not upstream (PAST_ORDERED) of the failing
+    subtask - a downstream or unrelated "owner" is not a legal reopen
+    target."""
+    parent_dir = os.path.dirname(candidate_path)
+    if not parent_dir:
+        return None
+    init_path = f"{parent_dir}/__init__.py"
+    owner = plan.file_owner(init_path)
+    if owner is None or owner.id == failed_subtask.id:
+        return None
+    if plan.classify_file_ownership(failed_subtask.id, init_path) != FileOwnershipRelation.PAST_ORDERED:
+        return None
+    return owner.id
+
+
+def revise_plan_for_runtime_plan_gap(
+    plan: EngineeringPlan, *, owner_subtask_id: str, artifact_path: str, reason: str,
+) -> EngineeringPlan:
+    """Mints exactly one new PlannedFile(action=CREATE) on an EXISTING,
+    already-validated owner subtask - the one new kind of plan mutation
+    Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04) performs.
+    Deliberately as small an edit as revise_plan_for_planned_prerequisite's
+    own: no new subtask, no reordering, no touching any other subtask's
+    planned_files/requires/depends_on. The caller's own validate_plan()
+    call on the returned plan is what proves this bounded edit is safe -
+    never this function's own judgment, matching the north-star invariant
+    this whole mechanism exists to preserve: runtime evidence may prove
+    the plan is incomplete, but only a validated plan revision may convert
+    that evidence into new write authority."""
+    revised = plan.model_copy(deep=True)
+    owner = revised.subtask_by_id(owner_subtask_id)
+    if owner is None:
+        raise ValueError(f"runtime plan gap revision references unknown owner subtask {owner_subtask_id!r}")
+    if any(pf.path == artifact_path for pf in owner.planned_files):
+        raise ValueError(f"{artifact_path!r} is already planned by {owner_subtask_id!r}")
+    owner.planned_files = owner.planned_files + [
+        PlannedFile(path=artifact_path, action=FileAction.CREATE, reason=reason)
+    ]
+    return EngineeringPlan.model_validate(revised.model_dump(mode="json"))
+
+
+def exclude_tool_subtasks_from_resume(
+    plan: EngineeringPlan, resumed_subtask_states: Dict[str, str],
+) -> Tuple[Dict[str, str], List[str]]:
+    """TOOL-001 (2026-09-13), Invariant 18 ("resume/checkpoint cannot
+    bypass revalidation"): pure computation, separated out for direct unit
+    testing (mirrors compute_abandoned_plan_files's own "pure/testable,
+    real call site wires it in" split just above).
+
+    A MODEL subtask's "completed" resume record is self-verifying via the
+    caller's own git tree_hash/base_commit match - the written file
+    content IS the artifact, and it's still on disk exactly as recorded.
+    A TOOL subtask's "completed" record has no such self-verifying
+    property: the side effect (an MCP tools/call, a Maven build, ...) left
+    no git-visible trace that check can confirm is still current, and
+    TOOL-002/TOOL-003's own authority state (durable approval, capability
+    profile) can drift independently of the git workspace entirely.
+    Rather than inventing new idempotency/staleness semantics for tool
+    side effects (explicitly out of scope), a TOOL-tagged subtask is never
+    treated as resume-completed - removed from the returned dict
+    unconditionally, so the caller's own per-subtask loop always
+    re-executes it through the full governed path, which always
+    re-consults current TOOL-002/TOOL-003/SEC-005/ExecutionPolicy
+    authority fresh. This is a disclosed behavior CHOICE, not a
+    side-effect-free compromise: a non-idempotent tool re-invoked on
+    resume is a plan-design hazard the existing governance layer surfaces
+    the same way it would on any fresh second run of the same plan,
+    whereas silently skipping TOOL-002 revalidation would be a
+    security-contract violation - the two are not symmetric risks, so
+    this does not split the difference.
+
+    Only ever REMOVES entries (never adds/completes one) - a subtask id
+    from `resumed_subtask_states` that is no longer present in the
+    (possibly freshly re-planned) `plan` is left exactly as the caller
+    passed it; this function has no opinion on plan-drift handling, only
+    on which currently-plan-present, currently-"completed" entries are
+    safe to treat as resume-skippable."""
+    tool_subtask_ids = {
+        st.id for st in plan.subtasks if st.execution_method == ExecutionMethod.TOOL
+    }
+    excluded = sorted(
+        subtask_id for subtask_id, status in resumed_subtask_states.items()
+        if status == "completed" and subtask_id in tool_subtask_ids
+    )
+    if not excluded:
+        return resumed_subtask_states, excluded
+    filtered = {k: v for k, v in resumed_subtask_states.items() if k not in excluded}
+    return filtered, excluded
+
+
+def all_subtasks_completed(
+    current_plan_subtask_ids: Set[str], latest_status_by_subtask: Dict[str, SubtaskStatus],
+) -> bool:
+    """Terminal-correctness gate (TOOL-001, 2026-09-13; Invariant 20: a
+    Subtask's own execution status only ever means "the attempt itself
+    didn't error" - never "the workflow overall may terminate successful"
+    on its own). Pure computation, separated out for direct unit testing:
+    a plain AND-reduction over every CURRENT plan subtask's latest
+    status - a single TOOL subtask reporting COMPLETED (even if its own
+    `tool_output` happens to contain text like "PASS") cannot make this
+    True while any OTHER subtask (MODEL or TOOL) in the same plan is not
+    itself COMPLETED; nothing here ever inspects `tool_output`/`files`
+    content at all, only the structural `SubtaskStatus` each subtask's own
+    real execution produced. Scope recovery can merge/remove a subtask
+    mid-run, leaving a stale COMPLETED entry in the results dict even
+    though it's no longer part of the current plan - measured against the
+    current plan's ids only, never bare dict/set equality, so a
+    successfully executed revised plan is never falsely reported failed
+    solely because it now has fewer stages."""
+    return all(
+        latest_status_by_subtask.get(subtask_id) == SubtaskStatus.COMPLETED
+        for subtask_id in current_plan_subtask_ids
+    )
+
+
 def compute_abandoned_plan_files(
     prior_subtask_states: Dict[str, str],
     prior_subtask_written_files: Dict[str, List[str]],
@@ -3091,9 +3472,16 @@ class WorkflowController:
     def _attach_refactor_baseline(self, control_state: ControlState, workspace_path: str) -> ControlState:
         base_commit = compute_base_commit(workspace_path)
         tree_hash = compute_tree_hash(workspace_path)
-        if base_commit is None and tree_hash is None:
+        # STATE-001 (2026-09-14): the real working-tree-content-sensitive
+        # identity, computed alongside tree_hash's own narrower committed-
+        # tree meaning - see ControlState.workspace_content_hash's own
+        # field docstring.
+        workspace_content_hash = compute_workspace_content_hash(workspace_path)
+        if base_commit is None and tree_hash is None and workspace_content_hash is None:
             return control_state
-        return control_state.with_updates(base_commit=base_commit, tree_hash=tree_hash)
+        return control_state.with_updates(
+            base_commit=base_commit, tree_hash=tree_hash, workspace_content_hash=workspace_content_hash,
+        )
 
     async def _run_structured_shadow(
         self, goal: str, workspace_path: str, route: Any, run_id: str,
@@ -3167,21 +3555,15 @@ class WorkflowController:
             except Exception as e:
                 logger.debug(f"WorkflowController shadow run {run_id!r}: could not list registered tools: {e}")
 
+        shadow_stack_contract = derive_stack_contract(goal)
         validation = await validate_plan(
             plan, workspace_path=workspace_path, available_tool_names=available_tool_names,
             route=route, triage_service=self.workflow_engine.engineering_triage,
             runtime_verification_required=goal_requires_runtime_behavior(goal),
-            stack_contract=derive_stack_contract(goal),
+            stack_contract=shadow_stack_contract,
         )
-        shadow_stack_contract = derive_stack_contract(goal)
-        logger.info(
-            "STACK_CONTRACT_BOUNDARY %s",
-            json.dumps({
-                "boundary": "plan",
-                "languages": list(getattr(shadow_stack_contract, "languages", ())),
-                "frameworks": list(getattr(shadow_stack_contract, "frameworks", ())),
-                "decision": "PASS" if validation.valid else "REJECT",
-            }, sort_keys=True),
+        log_stack_contract_boundary(
+            "plan", shadow_stack_contract, None if validation.valid else "REJECT",
         )
         if not validation.valid:
             notes.append(f"plan failed validation: {validation.errors}")
@@ -3311,12 +3693,18 @@ class WorkflowController:
 
         Known, honest scope boundaries for this first real cut (not silent
         gaps - each is a deliberate, separate decision):
-        - TOOL-tagged subtasks are refused outright (see below) - the same
-          reasoning as _run_structured_shadow's own hard stop:
-          SubtaskExecutor's TOOL dispatch has zero policy gate a raw shell
-          string can't trivially defeat. Enforcing SAFELY requires either a
-          real per-tool policy mapping or accepting a materially weaker
-          guarantee - a separate, later decision, not bundled into this one.
+        - TOOL-1 (2026-09-13): TOOL-tagged subtasks are now executed for
+          real (see the per-subtask loop below) - by the time this landed,
+          "zero policy gate a raw shell string can't trivially defeat" was
+          no longer accurate: TOOL-002/TOOL-003 (MCP invocation/capability
+          authority) and SEC-005 (ShellTool package-manager network
+          authority) had both since closed, and every real TOOL dispatch
+          converges on the exact same governed `BaseTool.execute()`
+          boundary `kriya tools execute` already uses - no new or weaker
+          policy mapping was introduced for this. `_run_structured_shadow`'s
+          own hard stop (above) is unchanged and unrelated - that
+          restriction is specific to shadow's own non-mutating contract,
+          not a security gap this pass closed.
         - Subtask-spanning resume (2026-08-24): when the CALLER passes
           resume=True or resume_id=<id> (the same flags each subtask's own
           run_generation_workflow() call already accepted), this method now
@@ -3365,7 +3753,8 @@ class WorkflowController:
           context-quality gap.
 
 A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
-        failed validation, a TOOL-tagged subtask present) enters a bounded
+        failed validation - a TOOL-tagged subtask present is no longer one
+        of these, see TOOL-001 above) enters a bounded
         local PLAN_REPAIR loop. Two unsuccessful corrections raise
         _UnsafeStructuredPlan and fail closed without a legacy fallback,
         preserving the authoritative write-scope boundary. A
@@ -3377,6 +3766,38 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         fallback, since real side effects may already exist in the
         workspace by that point. Only a genuine bug in this method's own
         code propagates as a real (uncaught) exception."""
+
+        def _persist_control_state(cs: ControlState) -> ControlState:
+            """STATE-001 (2026-09-14): every real save of ControlState
+            WITHIN this method's own per-subtask loop must reflect CURRENT
+            workspace content, never a value computed once, early, before
+            the loop began. Unlike base_commit/tree_hash (safe to compute
+            once - neither is sensitive to an uncommitted write), subtasks
+            in THIS execution mode apply real content changes to
+            workspace_path as plain file writes, incrementally, as each one
+            completes - a workspace_content_hash carried unchanged from the
+            pre-loop computation through every later save would persist
+            STALE pre-run content for every state actually saved after any
+            subtask completed, silently reintroducing the exact drift-
+            blindness this fix exists to close (found live via the real
+            test_workflow_controller_enforce.py resume tests: a genuinely
+            zero-drift resume was incorrectly refused).
+
+            Deliberately a LOCAL closure, not a change to
+            save_control_state() itself (kriya/control/persistence.py) -
+            that function's own contract is "persist exactly what you're
+            given," relied on directly by callers doing a plain save-then-
+            reload round-trip (test_control_plane_end_to_end.py's own
+            control_state.content_hash() == reloaded_state.content_hash()
+            check) elsewhere in this codebase; centralizing the refresh
+            there would silently diverge what gets persisted from what the
+            caller explicitly passed, breaking that real invariant. This
+            closure is the correct, narrow place: the ONE method whose own
+            control flow actually needs per-save freshness."""
+            cs = cs.with_updates(workspace_content_hash=compute_workspace_content_hash(workspace_path))
+            save_control_state(workspace_path, cs)
+            return cs
+
         ledger = DecisionLedger()
 
         kernel = getattr(self.workflow_engine, "kernel", None)
@@ -3494,6 +3915,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # everywhere in one run. See this module's own docstring for the two
         # concrete run #8 defects this closes.
         obligation_ledger = ObligationLedger()
+        # PRV-17 (2026-09-08, P7 efficiency finding) - kriya/workflow/
+        # deterministic_failure_diagnostic.py. One store for the whole run,
+        # deliberately separate from obligation_ledger above (see that
+        # module's own docstring for why) - threaded unchanged into every
+        # subtask's run_generation_workflow() call below so a plan-scope-
+        # recovery re-invocation of the SAME subtask (a brand new
+        # GenerationState) never loses a conclusion already proven here.
+        deterministic_failure_diagnostics = DeterministicFailureDiagnosticStore()
         # raw_plan is the Planner's own asserted output, before
         # canonicalize_planned_file_actions() derives create/modify from
         # real repository state - kept only so the resume-hash comparison
@@ -3506,22 +3935,50 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # wrongly refusing an otherwise-valid resume (found via this
         # session's own regression sweep, not a live incident).
         raw_plan: Optional[EngineeringPlan] = None
+        # Planner-convergence audit (2026-09-06, P2 run 7): the retained
+        # semantic-repair baseline - the most recent FAILED attempt that was
+        # never itself a strict regression against what came before it (see
+        # _is_strict_regression's own docstring for the live incident this
+        # closes). Seeded on the first failure, updated on every subsequent
+        # non-regressed failure, and deliberately NEVER updated by a
+        # strict-regression candidate - the next repair prompt, and the
+        # terminal exhaustion report, are built from this retained state
+        # instead of a regressed candidate's own worse one. This does not
+        # change the repair_attempts bound (still fixed at 2) or refund a
+        # slot spent on a rejected regression - it only changes which
+        # state seeds the NEXT prompt/report.
+        retained_plan_text: Optional[str] = None
+        retained_errors: List[str] = []
+        retained_reason_codes: Optional[frozenset] = None
+        retained_validation_evidence: List[Dict[str, Any]] = []
+        retained_invalid_subtask_ids: List[str] = []
+        # PRV-17 (2026-09-07, P7): the errors that prompted the CURRENT
+        # round's own candidate plan - i.e. what prompt_errors held on the
+        # PREVIOUS loop iteration, right before this one's plan was
+        # generated. Used only by _semantic_contract_regression_subtasks'
+        # "unless directly implicated" exemption below; empty on the first
+        # iteration (nothing prompted the initial plan), which correctly
+        # exempts nothing.
+        prior_prompt_errors: List[str] = []
         while True:
             errors: List[str] = []
             reason_codes: List[str] = []
             validation_evidence: List[Dict[str, Any]] = []
             invalid_subtask_ids: List[str] = []
             plan: Optional[EngineeringPlan] = None
+            regressions_before = len(obligation_ledger.regressions)
 
             structured_output, parse_issue = parse_planner_structured_output(plan_text)
             if structured_output is None:
                 errors.append(f"structured plan parse failed: {parse_issue}")
-                if parse_issue and "execution_method=tool but no tool_name" in parse_issue:
-                    reason_codes.append("TOOL_SUBTASK_MISSING_TOOL_NAME")
-                elif parse_issue and "failed schema validation" in parse_issue:
-                    reason_codes.append("STRUCTURED_PLAN_SCHEMA_INVALID")
-                else:
-                    reason_codes.append("STRUCTURED_PLAN_PARSE_FAILED")
+                # PLANNER-ROBUST-001 (2026-09-19): shared classifier - see
+                # kriya/workflow/planner_repair.py's own docstring. Behavior
+                # unchanged; this is the same three-way string match that
+                # was previously inlined here, now the single source both
+                # this loop and the legacy run_generation_workflow() path
+                # call, so identical parse_issue text can never classify
+                # differently between the two.
+                reason_codes.extend(classify_structured_plan_parse_issue(parse_issue))
             else:
                 raw_plan = build_engineering_plan_from_planner_output(
                     structured_output, plan_id=run_id, kind=route.kind,
@@ -3531,16 +3988,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     reason_codes.append("STRUCTURED_PLAN_EMPTY")
                 else:
                     plan, _ = canonicalize_planned_file_actions(raw_plan, workspace_path)
-                    tool_subtasks = [
-                        st.id for st in plan.subtasks
-                        if st.execution_method == ExecutionMethod.TOOL
-                    ]
-                    if tool_subtasks:
-                        invalid_subtask_ids.extend(tool_subtasks)
-                        errors.append(
-                            f"TOOL-tagged subtask(s) {tool_subtasks!r} are unsupported in enforce mode"
-                        )
-                        reason_codes.append("TOOL_SUBTASK_UNSUPPORTED_IN_ENFORCE")
+                    # TOOL-001 (2026-09-13): TOOL-tagged subtasks are no
+                    # longer refused here - they now execute through the
+                    # governed path in the per-subtask loop below (real
+                    # kernel.registry lookup -> BaseTool.execute() -> the
+                    # SAME ExecutionPolicy/TOOL-002/TOOL-003/SEC-005
+                    # controls direct CLI tool execution already goes
+                    # through). validate_plan() below still requires
+                    # tool_name to resolve to a REGISTERED tool
+                    # (available_tool_names) - an unknown tool_name is
+                    # still rejected here, at plan-validation time, not
+                    # silently deferred to execution.
 
                     validation = await validate_plan(
                         plan, workspace_path=workspace_path,
@@ -3579,6 +4037,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     # possibly-disagreeing source of truth.
                     missing_artifacts = find_missing_grounded_production_artifacts(
                         plan, structural_resolved_edges,
+                        workspace_path=workspace_path, obligation_ledger=obligation_ledger,
+                        revision=repair_attempts,
                     )
                     unowned_gaps = [g for g in missing_artifacts if g["reason"] == "unowned"]
                     miswired_gaps = [g for g in missing_artifacts if g["reason"] == "not_in_dependency_chain"]
@@ -3590,7 +4050,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         errors.append(
                             "grounded structural evidence shows test file(s) referencing a "
                             "production artifact no subtask owns: " + "; ".join(
-                                f"{gap['test_file']} references {gap['missing_production_artifact']}"
+                                f"{gap['test_file']} (subtask {gap['consumer_subtask']!r}) "
+                                f"references {gap['missing_production_artifact']}"
                                 for gap in unowned_gaps
                             )
                         )
@@ -3599,9 +4060,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         errors.append(
                             "grounded structural evidence shows test file(s) whose own requires/"
                             "depends_on skip past the real intermediate producer: " + "; ".join(
-                                f"{gap['test_file']} references {gap['missing_production_artifact']} "
-                                f"(owned by subtask {gap['owning_subtask']!r}, which is not in this "
-                                "test's own depends_on chain)"
+                                f"{gap['test_file']} (subtask {gap['consumer_subtask']!r}) "
+                                f"references {gap['missing_production_artifact']} (owned by "
+                                f"subtask {gap['owning_subtask']!r}, which is not in this test's "
+                                "own depends_on chain)"
                                 for gap in miswired_gaps
                             )
                         )
@@ -3611,8 +4073,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "grounded structural evidence shows test file(s) whose requires do "
                             "not resolve to the subtask owning the referenced production artifact: "
                             + "; ".join(
-                                f"{gap['test_file']} references "
-                                f"{gap['missing_production_artifact']} (owned by subtask "
+                                f"{gap['test_file']} (subtask {gap['consumer_subtask']!r}) "
+                                f"references {gap['missing_production_artifact']} (owned by subtask "
                                 f"{gap['owning_subtask']!r}, provides={gap['owner_provides']!r}, "
                                 f"test requires={gap['test_requires']!r})"
                                 for gap in semantic_gaps
@@ -3622,17 +4084,56 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
             reason_codes = list(dict.fromkeys(reason_codes))
             invalid_subtask_ids = list(dict.fromkeys(invalid_subtask_ids))
+            # PRV-17 (2026-09-07, P7): which subtask(s), if any, this round's
+            # own candidate plan silently regressed a previously-validated
+            # requires/provides fact for, unrelated to what this round was
+            # actually asked to fix - see _semantic_contract_regression_
+            # subtasks' own docstring. Computed unconditionally (harmless
+            # when plan is None or nothing regressed - both yield an empty
+            # list) so it's available below regardless of which branch set
+            # errors/reason_codes.
+            semantic_contract_regression_subtasks = _semantic_contract_regression_subtasks(
+                obligation_ledger, regressions_before, _subtask_ids_mentioned(prior_prompt_errors),
+            )
+            if semantic_contract_regression_subtasks:
+                # PRV-17 (2026-09-07, P7): folded into errors/reason_codes
+                # (rather than a separate accept/reject branch) so every
+                # existing downstream mechanism this loop already has - the
+                # "plan is not None and not errors" acceptance gate right
+                # below, is_strict_regression's own reason-code-set
+                # comparison, the next repair prompt's targeted_correction
+                # text, the terminal exhaustion report - uniformly treats
+                # this candidate as still-invalid, with no separate
+                # accept/reject path to keep in sync.
+                errors.append(
+                    "plan repair silently regressed previously-validated requires/provides "
+                    f"for unrelated subtask(s) {semantic_contract_regression_subtasks!r} while "
+                    "fixing something else - restore their previously-validated requires/"
+                    "provides entries exactly as declared before this repair round"
+                )
+                reason_codes.append("SEMANTIC_CONTRACT_REGRESSION_REJECTED")
+                reason_codes = list(dict.fromkeys(reason_codes))
+            # PRV-17 (2026-09-08, P5 audit): sibling check to the requires/
+            # provides one above, same rationale, different identity (a
+            # (source, target) file pair rather than a subtask id) - see
+            # _preserved_reference_regressions' own docstring for the P5
+            # oscillation this closes.
+            preserved_reference_regressions = _preserved_reference_regressions(
+                obligation_ledger, regressions_before,
+                _preserved_reference_pairs_mentioned(prior_prompt_errors),
+            )
+            if preserved_reference_regressions:
+                errors.append(
+                    "plan repair silently regressed previously-validated preserved "
+                    f"reference(s) {preserved_reference_regressions!r} while fixing something "
+                    "else - restore these preserved_references declarations exactly as declared "
+                    "before this repair round"
+                )
+                reason_codes.append("PRESERVED_REFERENCE_REGRESSION_REJECTED")
+                reason_codes = list(dict.fromkeys(reason_codes))
             if plan is not None and not errors:
                 approved_stack_contract = derive_stack_contract(goal)
-                logger.info(
-                    "STACK_CONTRACT_BOUNDARY %s",
-                    json.dumps({
-                        "boundary": "plan",
-                        "languages": list(getattr(approved_stack_contract, "languages", ())),
-                        "frameworks": list(getattr(approved_stack_contract, "frameworks", ())),
-                        "decision": "PASS",
-                    }, sort_keys=True),
-                )
+                log_stack_contract_boundary("plan", approved_stack_contract, None)
                 try:
                     persist_planning_attempt_diagnostic(
                         workspace_path, run_id,
@@ -3658,7 +4159,49 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 break
 
             repair_prompt = None
-            if repair_attempts < 2:
+            # Planner-convergence audit (2026-09-06, P2 run 7): classify
+            # THIS attempt against the retained baseline before deciding
+            # what seeds the next repair prompt (and, on exhaustion, the
+            # terminal report) - see _is_strict_regression's own docstring.
+            # Per-attempt forensic logging below (ledger.record_and_persist/
+            # logger.warning/persist_planning_attempt_diagnostic) still
+            # records what THIS attempt actually produced, unmodified -
+            # only the forward-looking prompt state and the terminal
+            # exception are redirected to the retained baseline.
+            current_reason_code_set = frozenset(reason_codes)
+            is_strict_regression = _is_strict_regression(retained_reason_codes, current_reason_code_set)
+            # PRV-17 (2026-09-07, P7): a candidate that silently regressed an
+            # unimplicated subtask's requires/provides is rejected the same
+            # way a strict reason-code-set regression already is - reusing
+            # the identical retained-baseline redirect below, never a second
+            # rejection path. _is_strict_regression's own semantics (and the
+            # `is_strict_regression` value fed to it) are untouched by this
+            # OR - see _semantic_contract_regression_subtasks' own docstring.
+            treat_as_regression = (
+                is_strict_regression
+                or bool(semantic_contract_regression_subtasks)
+                or bool(preserved_reference_regressions)
+            )
+            if treat_as_regression:
+                prompt_plan_text = retained_plan_text
+                prompt_errors = retained_errors
+                prompt_reason_codes = list(retained_reason_codes)
+                prompt_validation_evidence = retained_validation_evidence
+            else:
+                prompt_plan_text = plan_text
+                prompt_errors = errors
+                prompt_reason_codes = reason_codes
+                prompt_validation_evidence = validation_evidence
+                retained_plan_text = plan_text
+                retained_errors = errors
+                retained_reason_codes = current_reason_code_set
+                retained_validation_evidence = validation_evidence
+                retained_invalid_subtask_ids = invalid_subtask_ids
+            # PRV-17 (2026-09-07, P7): captured for the NEXT loop iteration's
+            # own _subtask_ids_mentioned(prior_prompt_errors) call - see that
+            # variable's own initialization comment above the while loop.
+            prior_prompt_errors = prompt_errors
+            if repair_attempts < STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS:
                 # MA8: everything PLAN_STRUCTURAL_VALIDITY currently reports
                 # SATISFIED (as of the validate_plan() call just above) must
                 # survive the next draft - see build_structured_plan_repair_
@@ -3666,19 +4209,43 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # and relevant_for_preservation's own docstring for why this
                 # is unconditional on `kind` rather than correlated to what
                 # else is currently violated (PRV-11, 2026-08-31).
-                must_preserve = [
-                    f"{rec.description} (evidence: {json.dumps(rec.evidence, default=str)})"
-                    for rec in obligation_ledger.relevant_for_preservation(
-                        ObligationKind.PLAN_STRUCTURAL_VALIDITY,
-                    )
-                ]
+                #
+                # PRESERVED_REFERENCE (PRV-11 preservation extension,
+                # 2026-09-07, Production Validation P5): the identical
+                # reinforcement need at a finer resolution than reason codes
+                # can see - MISSING_GROUNDED_PRODUCTION_ARTIFACT stays the
+                # same reason code whether ONE grounded target is still
+                # unowned or a DIFFERENT one is, so _is_strict_regression's
+                # own reason-code-set comparison cannot detect a repair that
+                # silently drops one already-correct preserved_references
+                # entry while adding another (found live: P5's PetTests.java
+                # needed both BaseEntity.java and Visit.java preserved
+                # simultaneously - two rounds each declared only one,
+                # alternating, never both together). Each line below
+                # self-attributes its own (source, target) pair explicitly,
+                # so one source's already-validated preservation can never
+                # be misread as applying to a different source - no new
+                # ledger, no new prompt section, this is the exact same
+                # must_preserve mechanism PLAN_STRUCTURAL_VALIDITY already
+                # uses, just also fed from this obligation kind.
+                must_preserve = (
+                    [
+                        f"{rec.description} (evidence: {json.dumps(rec.evidence, default=str)})"
+                        for rec in obligation_ledger.relevant_for_preservation(
+                            ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+                        )
+                    ]
+                    + _preserved_reference_must_preserve_lines(obligation_ledger)
+                    + _semantic_contract_must_preserve_lines(obligation_ledger)
+                )
                 repair_prompt = build_structured_plan_repair_prompt(
-                    goal, plan_text, errors, reason_codes, repair_attempts + 1,
+                    goal, prompt_plan_text, prompt_errors, prompt_reason_codes, repair_attempts + 1,
                     route_kind=route.kind,
                     extension_candidates=planning_repository_candidates,
                     repository_candidates=planning_repository_candidates,
                     must_preserve=must_preserve,
-                    validation_evidence=validation_evidence,
+                    validation_evidence=prompt_validation_evidence,
+                    available_tool_names=available_tool_names,
                 )
             try:
                 persist_planning_attempt_diagnostic(
@@ -3710,15 +4277,28 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 "(attempt=%d, reason_codes=%s, invalid_subtask_ids=%s)",
                 run_id, repair_attempts, reason_codes, invalid_subtask_ids,
             )
-            if repair_attempts >= 2:
-                reason_codes.append("STRUCTURED_PLAN_REPAIR_EXHAUSTED")
+            if repair_attempts >= STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS:
+                # Planner-convergence audit (2026-09-06, P2 run 7): the
+                # TERMINAL report must reflect the retained (non-regressed)
+                # baseline, not a final attempt that was itself rejected as
+                # a strict regression - reporting the worse candidate's
+                # state here would misrepresent APPLICATION_RUNTIME_OWNER_
+                # MISSING as though it were part of the best reachable
+                # state, when the retained baseline already resolved it.
+                final_reason_codes = (
+                    list(retained_reason_codes) if treat_as_regression else list(reason_codes)
+                )
+                final_invalid_subtask_ids = (
+                    retained_invalid_subtask_ids if treat_as_regression else invalid_subtask_ids
+                )
+                final_reason_codes.append("STRUCTURED_PLAN_REPAIR_EXHAUSTED")
                 # MA8 (PRV-05 run #8): distinguish "kept oscillating between
                 # constraints" from "just never converged" - both are
                 # reported, never used to raise the repair-attempt bound
                 # itself (that stays fixed at 2, per this fix's own scope).
                 oscillating = obligation_ledger.oscillating_ids(ObligationKind.PLAN_STRUCTURAL_VALIDITY)
                 if oscillating:
-                    reason_codes.append("PLAN_REPAIR_OSCILLATION")
+                    final_reason_codes.append("PLAN_REPAIR_OSCILLATION")
                     logger.error(
                         "WorkflowController enforce run %r: plan repair OSCILLATED on "
                         "obligation(s) %s - full revision history: %s",
@@ -3727,11 +4307,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                          for oid in oscillating},
                     )
                 else:
-                    reason_codes.append("PLAN_REPAIR_NON_CONVERGENCE")
+                    final_reason_codes.append("PLAN_REPAIR_NON_CONVERGENCE")
                 raise _UnsafeStructuredPlan(
                     "structured plan remained unsafe after two bounded repair attempts",
-                    reason_codes=list(dict.fromkeys(reason_codes)),
-                    invalid_subtask_ids=invalid_subtask_ids,
+                    reason_codes=list(dict.fromkeys(final_reason_codes)),
+                    invalid_subtask_ids=final_invalid_subtask_ids,
                     repair_attempts=repair_attempts,
                 )
 
@@ -3781,6 +4361,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     checkpoint_data={
                         "base_commit": prior_control_state.base_commit,
                         "tree_hash": prior_control_state.tree_hash,
+                        # STATE-001 (2026-09-14): required for a real
+                        # content-drift signal - tree_hash alone cannot see
+                        # any of THIS run's own uncommitted subtask writes,
+                        # since subtask writes are plain file writes, never
+                        # a git commit between subtasks.
+                        "workspace_content_hash": prior_control_state.workspace_content_hash,
                     },
                     workspace_path=workspace_path,
                 )
@@ -3791,7 +4377,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         "Starting the plan fresh."
                     )
                 else:
-                    resumed_subtask_states = dict(prior_control_state.subtask_states)
+                    resumed_subtask_states, skipped_tool_subtasks = exclude_tool_subtasks_from_resume(
+                        plan, dict(prior_control_state.subtask_states),
+                    )
+                    if skipped_tool_subtasks:
+                        logger.warning(
+                            f"WorkflowController enforce run {run_id!r}: TOOL-tagged subtask(s) "
+                            f"{skipped_tool_subtasks!r} were recorded completed by an earlier "
+                            "interrupted run, but TOOL subtasks are never resume-skipped "
+                            "(authority must always revalidate - see exclude_tool_subtasks_from_"
+                            "resume's own docstring) - they will re-execute for real."
+                        )
                     logger.info(
                         f"WorkflowController enforce run {run_id!r}: resuming - "
                         f"{sum(1 for v in resumed_subtask_states.values() if v == 'completed')} "
@@ -3840,6 +4436,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         control_state = control_state.with_updates(
             current_plan_hash=current_plan_hash, subtask_states=dict(resumed_subtask_states),
             base_commit=compute_base_commit(workspace_path), tree_hash=compute_tree_hash(workspace_path),
+            workspace_content_hash=compute_workspace_content_hash(workspace_path),
         )
 
         order = topological_subtask_order(plan)
@@ -3862,7 +4459,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 stage_states=approved_stage_states, lifecycle_state="approved",
             ),
         )
-        save_control_state(workspace_path, control_state)
+        control_state = _persist_control_state(control_state)
         # The authoritative plan is one transaction. Individual subtask
         # workflows may apply only into this plan-level sandbox; the user
         # workspace remains unchanged until every subtask and any bounded
@@ -3876,7 +4473,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             path: read_file_revision(os.path.join(workspace_path, path))
             for path in planned_paths
         }
-        plan_workspace_path = create_git_worktree(workspace_path)
+        # Happens before any subtask has run - zero real side effects exist
+        # yet, so a bootstrap failure here (git missing, read-only FS, disk
+        # quota) fits _StructuredPlanUnavailable's own established "pre-
+        # execution, safe to fail closed" contract exactly (see that class's
+        # docstring) - reused here rather than letting create_git_worktree's
+        # RuntimeError/ValueError propagate uncaught and crash the whole
+        # enforce run; the caller already converts it into a clean
+        # needs_review WorkflowResult.
+        try:
+            plan_workspace_path = create_git_worktree(workspace_path)
+        except Exception as e:
+            raise _StructuredPlanUnavailable(
+                f"failed to create isolated plan-level worktree sandbox: {e}"
+            ) from e
         # Resolved ONCE, here, against workspace_path - the real, immutable
         # PRE-mutation baseline, before plan_workspace_path accumulates any
         # subtask's committed writes - and reused unchanged by every bounded
@@ -4018,6 +4628,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # during this subtask's own attempt accumulate into the
                 # SAME per-run ledger, not a fresh one per subtask.
                 obligation_ledger=obligation_ledger,
+                deterministic_failure_diagnostics=deterministic_failure_diagnostics,
                 completed_subtask_ids=completed_subtask_ids,
                 # DENY_ALL for a verification-role subtask - enforced at the
                 # real write gate (AuthorizedFileWriter), not merely implied
@@ -4086,7 +4697,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     stage_states=approved_stage_states, lifecycle_state="in_progress",
                 ),
             )
-            save_control_state(workspace_path, control_state)
+            control_state = _persist_control_state(control_state)
 
             _log_phase_banner(f"SUBTASK '{subtask.id}' ({position}/{total}): {subtask.description[:40]}")
             logger.info(
@@ -4094,6 +4705,62 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 position, total, subtask.id, [pf.path for pf in subtask.planned_files],
                 subtask.depends_on, subtask.relevant_global_invariant_ids,
             )
+
+            if subtask.execution_method == ExecutionMethod.TOOL:
+                # TOOL-001 (2026-09-13): governed execution, converging on
+                # the SAME kernel.registry -> BaseTool.execute() boundary
+                # `kriya tools execute` (direct CLI) already uses, via the
+                # existing subtask_executor.execute() - unchanged, and
+                # already the exact function _run_structured_shadow calls
+                # for MODEL subtasks above; TOOL was the one
+                # execution_method it (deliberately) never dispatched for
+                # real. No retry/recovery/obligation-ledger/scope-conflict
+                # machinery applies here - all of that is MODEL-generation-
+                # specific (a Quality-Gates retry loop over LLM output); a
+                # TOOL subtask is one deterministic call through a tool the
+                # tool's OWN implementation is responsible for authorizing/
+                # containing (ExecutionPolicy, TOOL-002/TOOL-003 durable
+                # approval + OCI containment for MCP tools, SEC-005
+                # registry-scoped network authority for ShellTool
+                # package-manager commands - none of it duplicated or
+                # reimplemented here). subtask.tool_arguments passes
+                # straight through as validated kwargs
+                # (BaseTool.execute()'s own arguments_schema validation);
+                # nothing here inspects or trusts subtask.description,
+                # planner rationale, or any other free-form field as an
+                # authority signal.
+                tool_context = project_for_subtask(execution_context, subtask)
+                result = await subtask_executor.execute(
+                    subtask=subtask, plan=plan, context=tool_context, kernel=kernel,
+                )
+                subtask_results.append(result)
+                record_subtask_attempt(ledger, plan, result, attempt=1)
+                control_state = control_state.with_updates(
+                    subtask_states={**control_state.subtask_states, subtask.id: result.status.value},
+                )
+                approved_stage_states[subtask.id] = result.status.value
+                tool_lifecycle_state = (
+                    "in_progress" if result.status == SubtaskStatus.COMPLETED
+                    else "needs_review" if result.status == SubtaskStatus.NEEDS_REVIEW
+                    else "failed"
+                )
+                save_approved_plan(
+                    workspace_path, plan.plan_id,
+                    build_approved_plan_document(
+                        plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                        stage_states=approved_stage_states, lifecycle_state=tool_lifecycle_state,
+                    ),
+                )
+                control_state = _persist_control_state(control_state)
+                if result.status != SubtaskStatus.COMPLETED:
+                    logger.warning(
+                        f"WorkflowController enforce run {run_id!r}: stopped at subtask {subtask_id!r} "
+                        f"({position}/{total}) - TOOL execution did not complete (status="
+                        f"{result.status.value})." + (f" Reason: {result.error}" if result.error else "")
+                    )
+                    break
+                continue
+
             # MA7-C1 (2026-08-25 external review): the validated Subtask is
             # now authoritative - predetermined_plan/predetermined_design/
             # predetermined_architect_files (kriya/workflow/workflow.py)
@@ -4171,6 +4838,188 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "reason": "planned prerequisite wiring failed revalidation: "
                             + "; ".join(prerequisite_validation.errors),
                         }
+            elif scope_conflict.get("reason_code") == "RUNTIME_PLAN_GAP":
+                # Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04) -
+                # see ObligationKind.RUNTIME_PLAN_GAP's own docstring for the
+                # live incident (myproject.wsgi never planned by any
+                # subtask) and kriya/workflow/attempt.py's own _execute_
+                # managed_service_verification for where this evidence
+                # originates. Structurally parallel to the
+                # PLANNED_PREREQUISITE_OWNER_REQUIRED branch just above -
+                # revise, revalidate, swap in - but for the case that branch
+                # cannot handle: no owner exists yet for the missing
+                # artifact at all. Positioned BEFORE grounded_scope_files is
+                # computed below deliberately: resolve_effective_scope_
+                # conflict_owners() (used further down) can only find an
+                # owner for a file the plan ALREADY declares - this block's
+                # entire job is to make that true first, never to reuse the
+                # generic PLAN_SCOPE_DEFECT merge path's own "genuinely
+                # unowned -> assign to the FAILING subtask" fallback
+                # (revise_plan_for_grounded_scope_owner), which would
+                # silently hand a managed-service verification subtask
+                # (empty write scope by design) a new artifact it was never
+                # meant to own - exactly what PRV-17 Run 13's own audit
+                # explicitly ruled out.
+                missing_artifact = scope_conflict.get("missing_logical_artifact")
+                obligation_id = f"runtime_plan_gap.{subtask.id}.{missing_artifact}"
+                prior_attempts = len(obligation_ledger.history(obligation_id)) if obligation_ledger else 0
+                if not isinstance(missing_artifact, str) or not missing_artifact:
+                    logger.error(
+                        "RUNTIME_PLAN_GAP_UNRESOLVED subtask=%s reason=missing_logical_artifact_absent_or_invalid",
+                        subtask.id,
+                    )
+                elif prior_attempts >= 2:
+                    if obligation_ledger:
+                        obligation_ledger.record(ObligationRecord(
+                            id=obligation_id, kind=ObligationKind.RUNTIME_PLAN_GAP,
+                            status=ObligationStatus.VIOLATED, authority=ObligationAuthority.DETERMINISTIC,
+                            description=(
+                                f"Runtime evidence repeatedly proved {missing_artifact!r} missing "
+                                "with no resolvable owner/path."
+                            ),
+                            source="managed_service_verification", revision=subtask.id,
+                            evidence={"missing_logical_artifact": missing_artifact, "attempts": prior_attempts},
+                            owner_subtask_id=None, terminal_required=True,
+                        ))
+                    logger.error(
+                        "RUNTIME_PLAN_REPAIR_NO_PROGRESS subtask=%s missing_logical_artifact=%s attempts=%d",
+                        subtask.id, missing_artifact, prior_attempts,
+                    )
+                else:
+                    candidate_path = resolve_python_module_to_candidate_artifact_path(
+                        missing_artifact, plan_workspace_path,
+                    )
+                    owner_id = (
+                        resolve_runtime_plan_gap_owner(plan, candidate_path, subtask)
+                        if candidate_path else None
+                    )
+                    if candidate_path is None or owner_id is None:
+                        if obligation_ledger:
+                            obligation_ledger.record(ObligationRecord(
+                                id=obligation_id, kind=ObligationKind.RUNTIME_PLAN_GAP,
+                                status=ObligationStatus.INDETERMINATE, authority=ObligationAuthority.DETERMINISTIC,
+                                description=(
+                                    f"Runtime evidence proved {missing_artifact!r} missing, but no "
+                                    "single safe physical path/owner could be resolved deterministically."
+                                ),
+                                source="managed_service_verification", revision=subtask.id,
+                                evidence={
+                                    "missing_logical_artifact": missing_artifact,
+                                    "candidate_path": candidate_path,
+                                    "owner_subtask_id": owner_id,
+                                },
+                                owner_subtask_id=None, terminal_required=True,
+                            ))
+                        logger.error(
+                            "RUNTIME_PLAN_GAP_UNRESOLVED subtask=%s missing_logical_artifact=%s "
+                            "candidate_path=%s owner_subtask_id=%s - ambiguous or no compatible "
+                            "owner; refusing to guess.",
+                            subtask.id, missing_artifact, candidate_path, owner_id,
+                        )
+                    else:
+                        gap_revision = revise_plan_for_runtime_plan_gap(
+                            plan, owner_subtask_id=owner_id, artifact_path=candidate_path,
+                            reason=(
+                                f"Runtime-Evidence Plan Repair: {subtask.id}'s managed-service "
+                                f"verification deterministically proved Python module "
+                                f"{missing_artifact!r} is imported but never planned."
+                            ),
+                        )
+                        gap_validation = await validate_plan(
+                            gap_revision,
+                            workspace_path=plan_workspace_path,
+                            available_tool_names=available_tool_names,
+                            route=route,
+                            triage_service=self.workflow_engine.engineering_triage,
+                            resuming_own_established_progress=True,
+                            require_model_planned_files=True,
+                            require_semantic_contracts=True,
+                            runtime_verification_required=goal_requires_runtime_behavior(goal),
+                            stack_contract=derive_stack_contract(goal),
+                        )
+                        if obligation_ledger:
+                            obligation_ledger.record(ObligationRecord(
+                                id=obligation_id, kind=ObligationKind.RUNTIME_PLAN_GAP,
+                                status=(
+                                    ObligationStatus.PENDING if gap_validation.valid
+                                    else ObligationStatus.VIOLATED
+                                ),
+                                authority=ObligationAuthority.DETERMINISTIC,
+                                description=(
+                                    f"Runtime-Evidence Plan Repair adds {candidate_path!r} to "
+                                    f"{owner_id!r}'s planned files."
+                                ),
+                                source="managed_service_verification", revision=subtask.id,
+                                evidence={
+                                    "missing_logical_artifact": missing_artifact,
+                                    "candidate_path": candidate_path,
+                                    "validation_errors": gap_validation.errors,
+                                },
+                                owner_subtask_id=owner_id, terminal_required=True,
+                                repair_scope=(candidate_path,),
+                            ))
+                        if gap_validation.valid:
+                            prior_hash = current_plan_hash
+                            plan = gap_revision
+                            current_plan_hash = plan.content_hash()
+                            order = topological_subtask_order(plan)
+                            execution_context = await self._build_context(
+                                goal, plan, plan_workspace_path, route, control_context, control_state,
+                            )
+                            subtask = plan.subtask_by_id(subtask_id)
+                            assert subtask is not None
+                            save_approved_plan(
+                                workspace_path, plan.plan_id,
+                                build_approved_plan_document(
+                                    plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                                    stage_states=approved_stage_states,
+                                    lifecycle_state="runtime_plan_gap_revised",
+                                ),
+                            )
+                            plan_recovery_events.append({
+                                "failed_subtask": subtask.id,
+                                "classification": "RUNTIME_PLAN_GAP",
+                                "reason_code": "RUNTIME_PLAN_GAP",
+                                "missing_logical_artifact": missing_artifact,
+                                "new_artifact_path": candidate_path,
+                                "new_artifact_owner": owner_id,
+                                "prior_plan_hash": prior_hash,
+                                "revised_plan_hash": current_plan_hash,
+                                "ownership_preserved": False,
+                            })
+                            logger.warning(
+                                "RUNTIME_PLAN_GAP_REPAIRED subtask=%s missing_logical_artifact=%s "
+                                "new_artifact=%s owner=%s - owner reopens for the added artifact "
+                                "before %s resumes.",
+                                subtask.id, missing_artifact, candidate_path, owner_id, subtask.id,
+                            )
+                            # Reshape scope_conflict into the ordinary
+                            # PLAN_SCOPE_DEFECT contract so every downstream
+                            # mechanism (resolve_effective_scope_conflict_
+                            # owners, build_recovery_execution_plan, the
+                            # existing reopen/regenerate/resume machinery)
+                            # runs completely unmodified - the owner it now
+                            # resolves to is correct because gap_revision
+                            # already made it true, not because this dict
+                            # says so.
+                            scope_conflict = {
+                                "classification": "PLAN_SCOPE_DEFECT",
+                                "reason_code": "RUNTIME_PLAN_GAP",
+                                "failure_type": scope_conflict.get("failure_type"),
+                                "reason": (
+                                    f"Runtime-Evidence Plan Repair: {candidate_path!r} was added to "
+                                    f"{owner_id!r}'s planned files after deterministic runtime "
+                                    "evidence proved it missing."
+                                ),
+                                "required_files": [candidate_path],
+                                "attribution_tier": "architectural_owner",
+                            }
+                        else:
+                            logger.error(
+                                "RUNTIME_PLAN_GAP_REVISION_REJECTED subtask=%s candidate_path=%s "
+                                "owner=%s validation_errors=%s",
+                                subtask.id, candidate_path, owner_id, gap_validation.errors,
+                            )
             grounded_scope_files = _plan_scope_conflict_files(scope_conflict)
             # MA8 (spec §30): a DETERMINISTIC-authority obligation
             # (currently only the migration gate's authoritative_files,
@@ -4325,7 +5174,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             lifecycle_state="scope_revised",
                         ),
                     )
-                    save_control_state(workspace_path, control_state)
+                    control_state = _persist_control_state(control_state)
                     plan_recovery_events.append({
                         "failed_subtask": subtask.id,
                         "classification": "PLAN_SCOPE_DEFECT",
@@ -4532,7 +5381,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             stage_states=approved_stage_states, lifecycle_state="recovering",
                         ),
                     )
-                    save_control_state(workspace_path, control_state)
+                    control_state = _persist_control_state(control_state)
                     owner_position = order.index(owner_id) + 1
                     # MA8.1 (PRV-06, 2026-08-29): the grounded reason this
                     # owner is being reopened is promoted into a durable
@@ -4767,7 +5616,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                                 stage_states=approved_stage_states, lifecycle_state="in_progress",
                             ),
                         )
-                        save_control_state(workspace_path, control_state)
+                        control_state = _persist_control_state(control_state)
                         owners_repaired = ", ".join(g.owner_subtask_id for g in exec_plan.groups)
                         logger.info(
                             "CONSUMER_RETRY_STARTED subtask=%s plan_id=%s owners=%s",
@@ -4881,7 +5730,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             lifecycle_state="in_progress" if plan_recovery_accepted else "needs_review",
                         ),
                     )
-                    save_control_state(workspace_path, control_state)
+                    control_state = _persist_control_state(control_state)
                     # Matches the original single-owner code's own
                     # distinction exactly: the FINAL reported
                     # subtask_results list is only ever downgraded to
@@ -5018,7 +5867,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     stage_states=approved_stage_states, lifecycle_state=plan_lifecycle_state,
                 ),
             )
-            save_control_state(workspace_path, control_state)
+            control_state = _persist_control_state(control_state)
 
             if not passed:
                 logger.warning(
@@ -5084,16 +5933,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         latest_status_by_subtask = {
             result.subtask_id: result.status for result in subtask_results
         }
-        # Scope recovery can merge/remove a subtask mid-run, leaving its
-        # stale COMPLETED entry in subtask_results even though it's no
-        # longer part of the current plan. Measure completion against the
-        # current plan's ids only - a set-equality check against the
-        # (append-only, never-pruned) subtask_results keys would falsely
-        # report a fully successful revised plan as failed.
-        all_completed = all(
-            latest_status_by_subtask.get(subtask_id) == SubtaskStatus.COMPLETED
-            for subtask_id in current_plan_subtask_ids
-        )
+        all_completed = all_subtasks_completed(current_plan_subtask_ids, latest_status_by_subtask)
         try:
             if all_completed and plan_workspace_path != workspace_path:
                 terminal_writes: List[StagedFileWrite] = []
@@ -5167,7 +6007,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     },
                     subtask_written_files={},
                 )
-                save_control_state(workspace_path, control_state)
+                control_state = _persist_control_state(control_state)
         finally:
             if plan_workspace_path != workspace_path:
                 remove_git_worktree(workspace_path, plan_workspace_path)
@@ -5272,17 +6112,22 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 terminal_stack_contract,
                 (pf.path for st in plan.subtasks for pf in st.planned_files),
             )
-            logger.info(
-                "STACK_CONTRACT_BOUNDARY %s",
-                json.dumps({
-                    "boundary": "terminal",
-                    "languages": list(getattr(terminal_stack_contract, "languages", ())),
-                    "frameworks": list(getattr(terminal_stack_contract, "frameworks", ())),
-                    "decision": "REJECT" if global_stack_contract_gap else "PASS",
-                }, sort_keys=True),
-            )
+            log_stack_contract_boundary("terminal", terminal_stack_contract, global_stack_contract_gap)
             if global_stack_contract_gap:
                 all_completed = False
+
+        # PRV-11 preservation extension (2026-09-06/07, Production
+        # Validation P2): re-hash every currently-SATISFIED PRESERVED_
+        # REFERENCE obligation's target against its recorded pre-
+        # generation baseline, now that every subtask has finished and its
+        # output is already committed to the real workspace_path (the same
+        # "authoritative terminal state" the migration gate above re-checks
+        # against). A mismatch re-records the SAME id VIOLATED - a same-
+        # authority (DETERMINISTIC) SATISFIED->VIOLATED transition, so the
+        # ledger's own regression detection sees it too, and the generic
+        # MA8 §42/43 backstop just below fails the run with no new gate.
+        if all_completed:
+            enforce_preserved_reference_terminal_integrity(obligation_ledger, workspace_path)
 
         # MA8 (spec §42/43) - a generic backstop layered ALONGSIDE the
         # migration-specific gate above, not a replacement for it (§43's
@@ -5324,6 +6169,18 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             "run_id": run_id,
             "subtask_results": [r.to_dict() for r in subtask_results],
             "files": sorted(established_file_context.keys()),
+            # R1 Deliverable 5 correction (2026-09-08): the same
+            # `repair_attempts` local this function already threads into
+            # every save_approved_plan()/build_approved_plan_document() call
+            # above (the authoritative structured-plan repair-round count -
+            # see PLAN VALIDATION near this function's start) - the
+            # _UnsafeStructuredPlan except-handler around this function's
+            # caller already surfaces it under this exact key
+            # (`plan_repair_attempts`) for the plan-repair-exhausted failure
+            # case; this is the same value, same key, for every OTHER
+            # outcome (success/needs_review/failed-in-subtask-loop). A pure
+            # read of an existing local, not a new counter.
+            "plan_repair_attempts": repair_attempts,
         }
         if global_migration_gap:
             aggregated["global_migration_gap"] = global_migration_gap

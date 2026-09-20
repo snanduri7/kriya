@@ -13,8 +13,9 @@ import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
-from kriya.workflow.failure import Failure
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
+from kriya.workflow.failure import Failure, FileLocation
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,28 @@ def prefer_existing_artifact_owners(
     vocabulary provide the semantic score.
     An existing owner replaces a nonexistent planned path only when that
     evidence is unique and the request does not explicitly ask for a new artifact.
+
+    PRV-17 Run 12 fix (2026-09-04): a bare basename match is NOT sufficient
+    identity evidence on its own for a directory-scoped artifact whose own
+    name carries no distinguishing content - "__init__.py" identifies a
+    package only via which DIRECTORY it's in, unlike "CustomerService.java"
+    (a proper name that stays meaningful anywhere in the tree). Confirmed
+    live: a Django app subtask's own approved `customers/__init__.py` was
+    silently redirected to an unrelated, already-owned
+    `customers_project/__init__.py` purely because both share the basename
+    "__init__.py" - two genuinely different, both-legitimate package
+    markers in a real Django project, not a Developer-invented duplicate.
+    The exact-basename tier below now requires the basename (stripped of
+    extension) to tokenize into at least 2 meaningful tokens before it may
+    fire at all - the SAME threshold the containment tier immediately below
+    it already requires for its own match (`len(planned_tokens) >= 2`), not
+    a new one invented for this fix. A thin/generic name (one token or
+    fewer) is exactly the case where path context is semantically
+    significant and basename equality alone must not decide identity; it
+    falls through to the containment/scored tiers below (which themselves
+    already guard on multi-token names) and, finding no match there either,
+    is correctly left as its own genuinely new path rather than merged into
+    an unrelated existing file that happens to share a generic name.
     """
     planned = list(planned_files)
 
@@ -223,7 +246,7 @@ def prefer_existing_artifact_owners(
             and os.path.splitext(candidate)[1].lower() == extension
             and is_runnable_test_file(candidate) == planned_is_test
             and os.path.basename(candidate) == os.path.basename(path)
-        ]
+        ] if len(planned_tokens) >= 2 else []
         if len(exact_name_candidates) == 1:
             owner = exact_name_candidates[0]
             resolved.append(owner)
@@ -283,10 +306,169 @@ def prefer_existing_artifact_owners(
     return resolved
 
 
-_RESPONSE_SHAPE_GOAL_RE = re.compile(
-    r"\b(?:endpoint|response|payload|json|serializ\w*|present\w*|render\w*)\b",
+def identify_redirected_test_obligations(
+    planned_files: List[str], resolved_files: List[str], workspace_path: str,
+) -> Dict[str, str]:
+    """Given a planned file list (as originally requested, e.g. the
+    Architect's own file list) and its resolved counterpart (after
+    prefer_existing_artifact_owners() has run over it), returns a mapping
+    {resolved_owner_path: original_planned_path} for every entry where a
+    genuinely NEW test artifact (is_runnable_test_file()==True, no file at
+    that path in the pristine workspace) was redirected onto an
+    ALREADY-EXISTING owner instead. Generic - no language/framework/
+    G1-specific hardcoding beyond is_runnable_test_file()'s own
+    already-established recognition of what counts as a test file.
+
+    Callers (kriya/workflow/attempt.py's own run_attempt()) use this to
+    refuse a bare NO CHANGE NEEDED response for the resolved owner - a
+    file/semantic-similarity redirect may RELOCATE the acceptance
+    obligation the goal's own test-coverage intent created, but must never
+    let that redirect alone DISCHARGE it. `planned_files`/`resolved_files`
+    must be the same length and order (as prefer_existing_artifact_owners()
+    itself always returns) - a length mismatch is a caller bug, not
+    something this function silently tolerates by zipping to the shorter
+    one, so it raises rather than returning a partial/misleading mapping."""
+    if len(planned_files) != len(resolved_files):
+        raise ValueError(
+            "identify_redirected_test_obligations: planned_files and resolved_files "
+            f"must be the same length ({len(planned_files)} != {len(resolved_files)})"
+        )
+    obligations: Dict[str, str] = {}
+    for original, resolved_path in zip(planned_files, resolved_files):
+        if original == resolved_path:
+            continue
+        if not is_runnable_test_file(original):
+            continue
+        if os.path.exists(os.path.join(workspace_path, original)):
+            continue
+        obligations[resolved_path] = original
+    return obligations
+
+
+def find_unpreserved_test_obligation(
+    files: List[Dict[str, Any]],
+    redirected_test_obligations: Dict[str, str],
+    all_files_written: Iterable[str],
+    attempt_number: int,
+) -> Optional[Failure]:
+    """Pure check, called from kriya/workflow/attempt.py's own run_attempt()
+    on EVERY attempt (not only targeted/fallback_targeted retries): does
+    this batch of Developer file responses (`files`, the same per-file
+    {"filepath", "content", "edits", "analysis", ...} shape agent.py's own
+    DeveloperAgent.run_generation() returns) discharge a redirected test
+    obligation (identify_redirected_test_obligations()'s own output) with a
+    bare NO CHANGE NEEDED response - `content is None` and no `edits` - for
+    a file that has never been genuinely written in this run before?
+
+    Returns the first such violation as a Failure ready for
+    QualityGateFailure (never raises itself, and never partially mutates
+    caller state - the caller decides what to do with the result). Returns
+    None when every redirected obligation either isn't present in this
+    batch, was already discharged by a real write on an earlier attempt
+    (`filepath in all_files_written`), or received real content/edits this
+    attempt. Generic - no language/framework/G1-specific hardcoding; the
+    only inputs are structural (redirect map, per-file response shape,
+    already-written set)."""
+    all_files_written = set(all_files_written)
+    for file_obj in files:
+        filepath = file_obj.get("filepath", "")
+        original_planned = redirected_test_obligations.get(filepath)
+        if original_planned is None or filepath in all_files_written:
+            continue
+        if file_obj.get("content") is not None or file_obj.get("edits"):
+            continue
+        return Failure(
+            type="test_obligation_not_preserved",
+            message=(
+                f"TEST OBLIGATION NOT PRESERVED: '{filepath}' was substituted for the "
+                f"originally planned new test artifact '{original_planned}' (a file/name-"
+                "similarity redirect - see kriya/workflow/file_resolution.py::"
+                "prefer_existing_artifact_owners), but the Developer reported NO CHANGE "
+                f"NEEDED for it. {file_obj.get('analysis') or 'No FIX ANALYSIS was supplied.'} "
+                "A redirect may relocate the acceptance obligation the goal's own "
+                "test-coverage intent created; it must never discharge it. Add equivalent "
+                f"regression coverage to '{filepath}' for the goal's own described "
+                "behavior - a claim that existing tests already cover it is not "
+                "sufficient without an actual corresponding change to this file."
+            ),
+            raw_output=file_obj.get("analysis") or "",
+            source="developer",
+            likely_files=[filepath],
+            file_locations=[FileLocation(filepath=filepath)],
+            attempt=attempt_number,
+        )
+    return None
+
+
+# Bounded deterministic positive-intent gate (Production Validation P4,
+# 2026-09-07). The previous entry check (_RESPONSE_SHAPE_GOAL_RE, a bare
+# `response|payload|endpoint|json|...` match anywhere in the goal) fired on
+# ANY mention of "response," including a goal explicitly PRESERVING one -
+# found live: P4's own goal.md said "the response type... must not
+# change"/"response shape must remain unchanged" to protect an existing
+# HTTP contract, and that preservation language alone was enough to trigger
+# a repo-wide scan that pulled in BindingErrorsResponse.java (an unrelated
+# validation-error wrapper matching on path + a construction-call-shaped
+# method + the shared token "response") as an authorized target - the
+# Developer regenerated it, got its real API wrong, and Kriya's own
+# brownfield-API safety net correctly rejected the write, but only after
+# real damage (a wrongly-widened PLAN_SCOPE_DEFECT on one subtask, a
+# NO_AUTHORIZED_REPAIR_TARGET stop on another).
+#
+# Redesigned as positive-intent-first, not negation-first: ordinary
+# preservation prose ("response type," "response shape," "HTTP response
+# contract") must be safe WITHOUT needing to match any negation pattern at
+# all - it simply never contains a mutation verb adjacent to a response
+# noun, so it never reaches the preservation check in the first place. Only
+# text pairing an explicit mutation verb (change/modify/update/alter/add/
+# extend/include/construct/build/create/introduce/enhance) with a response-
+# shape noun (response/payload/endpoint/json) within a short span, in
+# either order, counts as positive intent - and an explicit preservation/
+# negation statement anywhere in the goal (checked whole-text, not locally
+# scoped to the matched clause - same deliberate simplification
+# goal_requires_runtime_behavior's own negation check uses, kriya/workflow/
+# acceptance.py, for the same reason: this bounded detector cannot safely
+# attribute which specific mutation a negation elsewhere in the goal refers
+# to) suppresses it. A goal that both preserves one response surface and
+# genuinely mutates a different one (e.g. "keep the success response
+# unchanged, but change the error response to include errorCode") is a
+# known, accepted limitation of this whole-text scoping - conservatively
+# treated as no expansion rather than guessing which surface the negation
+# was about; inventing authorization here would be worse than under-
+# triggering.
+_RESPONSE_MUTATION_INTENT_RE = re.compile(
+    r"\b(?:change|modify|update|alter|add|extend|include|construct|build|create|introduce|enhance)\w*\b"
+    r"(?:\s+\S+){0,6}?\s+\b(?:response|payload|endpoint|json)\b"
+    r"|\b(?:response|payload|endpoint|json)\b(?:\s+\S+){0,6}?"
+    r"\s+\b(?:change|modify|update|alter|add|extend|include|construct|build|create|introduce|enhance)\w*\b",
     re.IGNORECASE,
 )
+_RESPONSE_PRESERVATION_RE = re.compile(
+    r"\b(?:do\s+not|does\s+not|don'?t|doesn'?t|never|must\s+not|should\s+not|need\s+not)\b"
+    r"(?:\s+\S+){0,4}?\s+(?:change|modify|update|alter)\w*\b"
+    r"|\b(?:change|modify|update|alter)\w*\b(?:\s+\S+){0,4}?\s+(?:is|are)\s+not\s+(?:required|needed|necessary)\b"
+    r"|\bno\b(?:\s+\S+){0,6}?\s+(?:change|modification|update)s?\b(?:\s+\S+){0,4}?"
+    r"\s+(?:is|are)\s+(?:required|needed|necessary)\b"
+    r"|\b(?:must|should)\s+(?:remain|stay)\s+unchanged\b"
+    r"|\bunchanged\b",
+    re.IGNORECASE,
+)
+
+
+def _goal_expresses_positive_response_mutation_intent(goal: str) -> bool:
+    """True only when the goal pairs an explicit mutation verb with a
+    response-shape noun, with no preservation/negation statement anywhere
+    in the goal - see the comment above these two patterns for the exact
+    live false positive (P4) this replaces and the documented mixed-
+    polarity limitation."""
+    text = goal or ""
+    if not _RESPONSE_MUTATION_INTENT_RE.search(text):
+        return False
+    if _RESPONSE_PRESERVATION_RE.search(text):
+        return False
+    return True
+
+
 _RESPONSE_OWNER_PATH_RE = re.compile(
     r"(?:controller|handler|resource|presenter|serializer|view|response|endpoint)",
     re.IGNORECASE,
@@ -312,7 +494,7 @@ def discover_response_construction_owners(
     must have both an architectural owner signal and response-construction
     syntax; goal/planned-file vocabulary then grounds them to this request.
     """
-    if not _RESPONSE_SHAPE_GOAL_RE.search(goal or ""):
+    if not _goal_expresses_positive_response_mutation_intent(goal):
         return []
     vocabulary = _semantic_tokens(goal or "")
     for path in planned_files:
@@ -449,8 +631,97 @@ _JAVA_PUBLIC_METHOD_RE = re.compile(
     r"([A-Za-z_$][\w$]*)\s*\(([^)]*)\)",
 )
 _PYTHON_PUBLIC_FUNCTION_RE = re.compile(
-    r"^[ \t]*(?:async\s+)?def\s+([A-Za-z][A-Za-z0-9]*)\s*\(([^)]*)\)", re.MULTILINE,
+    # VAL-001 G1 D3-part-1 (2026-09-18): the name group was `[A-Za-z][A-Za-z0-9]*`
+    # - no underscore anywhere in the name, not even mid-word - which silently
+    # missed essentially every real snake_case Python function (public or
+    # private) rather than just filtering leading-underscore ones the way the
+    # separate `name.startswith("_")` check right after every use of this
+    # pattern clearly intends. Widened to allow underscores throughout the
+    # name (still requires an alphabetic first character); this only WIDENS
+    # which real signatures get tracked - the separate leading-underscore
+    # filter, unchanged, is still what decides public vs. private.
+    r"^[ \t]*(?:async\s+)?def\s+([A-Za-z][A-Za-z0-9_]*)\s*\(([^)]*)\)", re.MULTILINE,
 )
+
+
+def _python_module_and_class_level_signatures(content: str) -> Dict[str, str]:
+    """VAL-001 G1 D3-part-1 (2026-09-18): scope-correct replacement for the
+    indentation-blind regex this function used to use directly. A function
+    NESTED inside another function or method is lexically private - Python
+    scoping makes it uncallable from any other module - and must never be
+    treated as public API regardless of its name. Demonstrated live in run
+    8b6ee803: `bind`/`visit`/`walk`, all function-nested closures never
+    returned or otherwise exposed by their enclosing function, were flagged
+    as "removed public signatures" purely because a regex over indentation
+    can't tell a closure from a module-level function.
+
+    Scope rule (exactly two levels, matching this function's own prior,
+    intended behavior for the cases that were never actually buggy):
+    - `tree.body` (module-level) functions - the primary case.
+    - Each module-level class's own direct body - a class's methods are
+      externally reachable via attribute access even though they're not a
+      bare module-level name, so they keep being captured (bare method
+      name, same key shape as a module-level function - `find_brownfield_
+      public_api_changes()`'s evidence_files search already only ever
+      matched on the bare callable name, never a class-qualified one, so
+      this preserves that existing contract exactly rather than changing
+      it).
+    - Anything nested inside a function OR a method (a closure, a nested
+      def, a method defined inside another method) is excluded outright -
+      never captured, regardless of name. This is the actual fix.
+
+    A class nested inside another class, or a function/class defined
+    inside a function, is intentionally NOT walked into beyond these two
+    levels - out of scope for this fix (neither is the shape G1 or any
+    known adjacent case demonstrated), and going further would risk
+    capturing MORE than the established two-level contract rather than
+    correcting the one real gap.
+
+    Falls back to the empty dict (never raises) on a syntax error - the
+    caller's existing contract already tolerates a signature-free file
+    (see the regex-based version's own implicit behavior: `.findall()`
+    against unparseable text just finds nothing, never raises either).
+
+    Parameter text is read back from the SOURCE via ast.get_source_segment()
+    (Python's own exact-span slice, not a reconstruction from `ast.arguments`
+    field names) and run through the exact same `_PYTHON_PUBLIC_FUNCTION_RE`
+    the old whole-file regex used - applied here to one node's own source
+    segment instead of the whole file. This is deliberate, not incidental:
+    reconstructing the parameter list from AST fields alone would silently
+    DROP type annotations and default values (`bind(name: str | None,
+    type_name: str | None, scope_node)` would become `bind(name, type_name,
+    scope_node)`), which would break every EXISTING exact-signature-string
+    comparison this module's callers already rely on - not just for nested
+    closures, for every function in every file. AST supplies the scope
+    decision (which defs even count); the original regex still supplies the
+    exact text, unchanged, only ever applied to a definition already known
+    to be at module or class level."""
+    signatures: Dict[str, str] = {}
+    try:
+        tree = ast.parse(content or "")
+    except (SyntaxError, ValueError):
+        return signatures
+
+    def _record(node) -> None:
+        if node.name.startswith("_"):
+            return
+        segment = ast.get_source_segment(content, node)
+        if not segment:
+            return
+        match = _PYTHON_PUBLIC_FUNCTION_RE.match(segment.lstrip("\n"))
+        if not match or match.group(1) != node.name:
+            return
+        normalized_parameters = re.sub(r"\s+", " ", match.group(2).strip())
+        signatures[f"{node.name}({normalized_parameters})"] = node.name
+
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _record(node)
+        elif isinstance(node, ast.ClassDef):
+            for member in node.body:
+                if isinstance(member, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    _record(member)
+    return signatures
 # A public Java/Kotlin/Groovy record's own canonical constructor component
 # list - its real, established data contract, distinct from any method it
 # declares. _JAVA_PUBLIC_METHOD_RE explicitly excludes `record` declarations
@@ -513,11 +784,11 @@ def _normalized_public_signatures(path: str, content: str) -> Dict[str, str]:
             normalized_components = _normalize_java_type_list(components)
             signatures[f"record {record_name}({normalized_components})"] = record_name
     elif extension == ".py":
-        for name, parameters in _PYTHON_PUBLIC_FUNCTION_RE.findall(content or ""):
-            if name.startswith("_"):
-                continue
-            normalized_parameters = re.sub(r"\s+", " ", parameters.strip())
-            signatures[f"{name}({normalized_parameters})"] = name
+        # VAL-001 G1 D3-part-1: scope-aware (module-level + class-method only,
+        # never a function-nested closure) - see _python_module_and_class_
+        # level_signatures's own docstring for why this replaced the prior
+        # indentation-blind regex-over-the-whole-file approach.
+        signatures.update(_python_module_and_class_level_signatures(content or ""))
     return signatures
 
 
@@ -534,11 +805,43 @@ def find_brownfield_public_api_changes(
     original_contents: Dict[str, str],
     final_contents: Dict[str, str],
     goal: str,
+    active_authorizations: Optional[List[Any]] = None,
 ) -> List[Dict[str, Any]]:
     """Reject model-preferred API renames during an ordinary brownfield repair.
 
     A removed signature is blocking only when existing tests or call sites name
     that API. Explicit API-migration requests are outside this repair guard.
+
+    CORR-016 (P9/PRV-08, 2026-09-08): a real P9 production run found this
+    function had no way to distinguish an incidental, unrequested public-API
+    mutation from one the raw, authoritative user goal itself explicitly
+    requests. A first authorization channel, keyed off the current subtask's
+    entire legal write scope, was built, caught authorizing an unrelated
+    incidental rename, and was reverted (see git history / the Risk
+    Register's CORR-016 row). A revised architecture design
+    (docs/architecture/CORR016_AUTHORIZED_CONTRACT_EVOLUTION_DESIGN.md,
+    Revision 2) then found the real PRV-08 defect was not a missing
+    authorization at all: the frozen authoritative goal never asked for
+    CustomerSummary's own contract to change, so this function's original
+    rejection was CORRECT. Only the narrow DIRECT slice of that design is
+    implemented here (kriya/workflow/contract_authority.py) - a
+    ContractEvolutionAuthorization exists only when the raw grounding_goal
+    text itself, in one clause, independently names the owner, the symbol,
+    and the change category. DERIVED authorization (permitting a downstream
+    file to change because an upstream one did) remains designed but
+    deliberately NOT implemented - no production scenario has yet
+    demonstrated the need, and the general case is not soundly decidable
+    from repository evidence alone (see the design doc's own §3/§19).
+
+    active_authorizations is a caller-filtered, caller-scoped list of
+    ContractEvolutionAuthorization records (kriya/workflow/contract_authority.py)
+    - the caller is responsible for including only records whose legal_scope
+    already matches the current subtask; this function does not re-derive
+    subtask ownership itself. A match is per EXACT (owner, symbol) pair,
+    never a whole-owner or whole-batch grant (a second, unrelated violation
+    in the same file or the same candidate batch is entirely unaffected by
+    an unrelated authorization) - see SAME_FILE_OVERREACH/UNRELATED_OWNER
+    tests in tests/test_workflow.py.
     """
     if _goal_explicitly_requests_api_change(goal):
         return []
@@ -553,6 +856,19 @@ def find_brownfield_public_api_changes(
                     evidence_contents[evidence_path] = fh.read()
             except OSError:
                 continue
+    # Candidate overlay (Step 6, CORR-016 investigation - independently
+    # correct, kept unmodified across every CORR-016 revision): a consumer
+    # file already updated in this SAME candidate batch must be evaluated on
+    # its own new content, not stale on-disk text - otherwise a compatible
+    # co-update looks like outstanding evidence of continued old-API usage
+    # forever.
+    evidence_contents.update(final_contents)
+
+    authorizations_by_owner_symbol: Dict[tuple, Any] = {}
+    for authorization in active_authorizations or []:
+        authorizations_by_owner_symbol[
+            (authorization.affected_owner, authorization.affected_symbol)
+        ] = authorization
 
     violations = []
     for path, final_content in final_contents.items():
@@ -561,6 +877,7 @@ def find_brownfield_public_api_changes(
             continue
         original_signatures = _normalized_public_signatures(path, original_content)
         final_signatures = _normalized_public_signatures(path, final_content)
+        final_api_names = set(final_signatures.values())
         for signature, api_name in sorted(original_signatures.items()):
             if signature in final_signatures:
                 continue
@@ -569,12 +886,28 @@ def find_brownfield_public_api_changes(
                 if evidence_path != path
                 and re.search(rf"(?<![\w$]){re.escape(api_name)}\s*\(", evidence_content)
             )
-            if evidence_files:
-                violations.append({
-                    "owner": path,
-                    "removed_signature": signature,
-                    "evidence_files": evidence_files,
-                })
+            if not evidence_files:
+                continue
+            authorization = authorizations_by_owner_symbol.get((path, api_name))
+            if authorization is not None:
+                # Rule 6: category must agree, not just identity. api_name
+                # still present in final_signatures (just reshaped) means
+                # this is an ADD/MODIFY, not a REMOVE - matched against
+                # whichever category the authorization actually grants.
+                symbol_still_present = api_name in final_api_names
+                category_ok = (
+                    authorization.allowed_change_category.value in ("add", "modify")
+                    if symbol_still_present
+                    else authorization.allowed_change_category.value == "remove"
+                )
+                if category_ok:
+                    continue  # authorized: this one violation is dropped
+            violations.append({
+                "owner": path,
+                "removed_signature": signature,
+                "evidence_files": evidence_files,
+            })
+    violations.sort(key=lambda v: (v["owner"], v["removed_signature"]))
     return violations
 
 
@@ -1413,6 +1746,14 @@ def ground_java_entrypoint_in_no_build_file_projects(
     arguments follow it."""
     if (build_file_content and not prefer_grounded_runtime) or command_source == "goal_explicit":
         return run_commands
+    def _verification_production_java_file(filepath: str) -> bool:
+        normalized = filepath.replace("\\", "/").lstrip("./")
+        return not (
+            normalized.startswith(("src/test/", "test/", "tests/"))
+            or "/src/test/" in normalized
+            or is_runnable_test_file(filepath)
+        )
+
     if len(java_main_classes) == 0:
         if any(cmd and cmd[0] == "java" for cmd in (run_commands or [])):
             return None
@@ -1427,7 +1768,12 @@ def ground_java_entrypoint_in_no_build_file_projects(
         # the real live bug this closes.
         corrected = _correct_java_entrypoint_qualification(run_commands, java_main_classes)
         runtime_classes_dir = ".kriya/runtime-verification/classes"
-        compile_files = sorted(f for f in files_written if f.endswith(".java"))
+        compile_files = sorted(
+            f for f in files_written
+            if f.endswith(".java") and not (
+                prefer_grounded_runtime and not _verification_production_java_file(f)
+            )
+        )
         known_fqcns = set(java_main_classes.values())
         invocations: List[List[str]] = []
         for command in corrected or []:
@@ -1444,14 +1790,6 @@ def ground_java_entrypoint_in_no_build_file_projects(
             return [["javac", "-d", runtime_classes_dir] + compile_files] + invocations
         return corrected
     entrypoint_class = next(iter(java_main_classes.values()))
-    def _verification_production_java_file(filepath: str) -> bool:
-        normalized = filepath.replace("\\", "/").lstrip("./")
-        return not (
-            normalized.startswith(("src/test/", "test/", "tests/"))
-            or "/src/test/" in normalized
-            or is_runnable_test_file(filepath)
-        )
-
     compile_files = sorted(
         f for f in files_written
         if f.endswith(".java") and not (
@@ -1521,6 +1859,332 @@ def build_grounded_java_launch_command(
         "java", "-cp", classes_dir,
         *(jvm_module_flags or []), entrypoint_class, *argv,
     ]
+
+
+_PYTHON_INTERPRETER_BASENAME_RE = re.compile(r"^python[23]?(?:\.\d+)?$")
+
+
+def _is_python_interpreter_token(token: str) -> bool:
+    """True for a bare 'python'/'python3'/'python3.11' token OR Kriya's own
+    sys.executable - the same interpreter-token shapes _substitute_python_
+    interpreter() (kriya/tools/validate.py) already recognizes, matched by
+    BASENAME rather than an exact-string set so a venv-qualified interpreter
+    (.venv/bin/python, /usr/bin/python3) is recognized too - an exact-match
+    set would silently skip grounding for any interpreter spelled slightly
+    differently than the three literal strings, leaving the bare-script bug
+    fully reachable through them."""
+    basename = os.path.basename(token)
+    return bool(_PYTHON_INTERPRETER_BASENAME_RE.match(basename)) or token == sys.executable
+
+
+def python_file_is_runnable_script(content: str) -> bool:
+    """Deterministically detects whether a Python file has REAL, observable
+    behavior when executed directly via `python <path>` - the Python sibling
+    of DependencyGraph.find_java_main_class()'s own real-main()-method
+    detection for Java, but grounded in Python's own semantics rather than a
+    literal transliteration of Java's: unlike Java, Python has no required
+    entrypoint construct at all - ANY top-level statement runs when the file
+    is executed directly, with or without an `if __name__ == "__main__":`
+    guard (that guard only matters for distinguishing "also importable as a
+    library" from "runs unconditionally," never for "is runnable" itself).
+
+    An EARLIER version of this function required the literal guard text -
+    wrong, found live by this repository's own independent pytest run
+    (2026-09-14): 20 real test failures, every one against a fixture whose
+    generated app.py was a single bare `print(...)` statement with no guard
+    at all - an extremely common, completely legitimate Python script shape
+    that the guard-only check incorrectly classified as "no entrypoint,"
+    silently forcing should_run=False and skipping runtime verification
+    entirely for a goal that explicitly needed it run.
+
+    Parses the file's AST and returns True iff `tree.body` (top-level
+    statements only, never nested inside a function/class) contains any
+    statement that is NOT a definition/import/module-docstring/simple
+    constant-assignment - i.e. any statement that would actually DO
+    something observable when the module runs (a bare expression/call
+    like `print(...)`, an `if`/`for`/`while`/`with`/`try`, or the
+    `__main__` guard itself, which is just a specific `if` statement and
+    needs no separate detection path). A file containing ONLY def/class/
+    import statements (plus an optional leading docstring and simple
+    dunder/constant assignments) is genuinely a pure library - running it
+    directly produces no observable behavior at all, which IS "no runnable
+    entrypoint," not merely "no guard." Any parse failure degrades to
+    False - never guess a broken/unparseable file is runnable."""
+    try:
+        tree = ast.parse(content)
+    except (SyntaxError, ValueError):
+        return False
+    for index, node in enumerate(tree.body):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)):
+            continue
+        if (
+            index == 0 and isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)
+        ):
+            continue  # module docstring
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue  # a plain constant/variable definition - still library-shaped, no side effect
+        return True
+    return False
+
+
+def python_target_path_is_test_shaped(rel_path: str) -> bool:
+    """VER-005 implementation (2026-09-13): beyond is_runnable_test_file()'s
+    own filename-convention regex, a file living anywhere under a real
+    tests/test directory segment is verifier-test-shaped even when its own
+    basename doesn't match the naming convention (e.g. tests/fixtures.py,
+    tests/helpers.py) - Task 3's "consider the tests/ hierarchy, not only
+    filename regexes." Neither signal alone is a complete test-artifact
+    detector; this function is the single, reused place both signals are
+    combined, so every caller that needs to know "is this a test artifact,
+    never a runtime application target" asks the same question the same
+    way."""
+    norm = (rel_path or "").replace("\\", "/").lstrip("./")
+    if is_runnable_test_file(norm):
+        return True
+    parent_dirs = norm.split("/")[:-1]
+    return any(part.lower() in ("test", "tests") for part in parent_dirs)
+
+
+def _python_dotted_module_to_path(module: str) -> str:
+    return module.replace(".", "/") + ".py"
+
+
+def _extract_python_command_target(cmd: List[str]) -> Optional[Tuple[int, str, bool]]:
+    """Structural-only: locates the argv token (or, for a `-m` invocation,
+    the dotted module name converted to its file-path shape) that WOULD be
+    the target of a python-interpreter command - independent of whether it
+    corresponds to a real repository file. Returns
+    (index_of_that_token, workspace-relative-path-shaped string, is_module_
+    form) or None when cmd isn't a python-interpreter invocation at all, or
+    names nothing file-shaped (`python -c "..."` inline code, or a bare
+    `python`/`python -m` with no argument).
+
+    Deliberately handles the bare-script (`["python", "tests/test_x.py"]`)
+    and module (`["python", "-m", "tests.test_x"]`) shapes identically -
+    RunVerifierAgent.judge()'s own system prompt never asks it to use `-m`
+    today, but nothing prevents a future/creative model response from doing
+    so, and a test MODULE run this way is exactly the same invariant
+    violation as a test FILE run as a bare script. Whether the resolved
+    path/module actually exists as a real repository file is a SEPARATE
+    question this function does not answer (see ground_python_runtime_
+    target()'s own grounding check below) - `python -m http.server` or
+    `python -m some_installed_package` name a real, legitimate stdlib/
+    third-party module that is never a repository file at all, and this
+    function alone cannot and must not distinguish that case from a
+    genuine (broken) repository-module reference; callers needing that
+    distinction check the returned path against real repository facts."""
+    if not cmd or not _is_python_interpreter_token(cmd[0]):
+        return None
+    i = 1
+    while i < len(cmd):
+        tok = cmd[i]
+        if tok == "-m":
+            if i + 1 >= len(cmd) or not cmd[i + 1]:
+                return None
+            return i + 1, _python_dotted_module_to_path(cmd[i + 1]), True
+        if tok == "-c":
+            return None
+        if tok.startswith("-"):
+            i += 1
+            continue
+        return i, tok.replace("\\", "/").lstrip("./"), False
+    return None
+
+
+def python_command_targets_test_path(cmd: List[str]) -> bool:
+    """True when a python-interpreter command's own target (bare-script or
+    `-m` form, existing or not) is test-shaped - used to reject a test
+    artifact from ever being launched as a MANAGED_SERVICE (a long-running
+    application/daemon), where no deterministic substitute target exists to
+    fall back to (unlike the FINITE_COMMAND path's own ground_python_
+    runtime_target(), a service has no safe "run this other real file
+    instead" substitution - the only safe action is refusing to start it at
+    all, at the same pre-process-launch admission-check boundary
+    _validate_and_convert_managed_service_contract already enforces every
+    other managed_service field at, kriya/workflow/attempt.py)."""
+    extraction = _extract_python_command_target(cmd)
+    if extraction is None:
+        return False
+    return python_target_path_is_test_shaped(extraction[1])
+
+
+def _grounded_python_invocation(
+    rel_path: str,
+    package_dirs: FrozenSet[str],
+    leading_args: List[str],
+    trailing_args: List[str],
+    interpreter: str,
+) -> List[str]:
+    """Deterministic Python invocation-POLICY decision (Task 4): a grounded
+    target is run as a MODULE (`python -m pkg.sub.mod`) rather than a bare
+    script (`python pkg/sub/mod.py`) whenever every directory from the
+    workspace root down to (but not including) the target file is a real
+    Python package (contains __init__.py) - exactly the condition under
+    which Python's own `-m` machinery puts the CURRENT WORKING DIRECTORY on
+    sys.path[0] instead of the script's own containing directory, which is
+    the root-cause mechanism the VER-005 E4 campaign traced
+    (docs/assurance/KRIYA_VER005_RECV002_LIVE_EVIDENCE.md): a bare `python
+    <path>` invocation only ever puts the SCRIPT's own directory on
+    sys.path[0], never the repository root, so a script that imports a
+    sibling top-level package fails with ModuleNotFoundError regardless of
+    candidate correctness. cwd is already always the workspace root
+    (PolymorphicValidator.run_app_sequence/run_app both hardcode
+    cwd=self.workspace_path) - this function relies on that existing,
+    unchanged invariant rather than introducing a second one.
+
+    A workspace-root script (no directory component) or a script under a
+    directory with no __init__.py anywhere in its chain is NOT converted -
+    bare `python <path>` from the workspace root is already correct for
+    that shape and must not change (zero behavior change for the common
+    flat-script/single-package case)."""
+    if "/" in rel_path:
+        dirs = rel_path.rsplit("/", 1)[0].split("/")
+        module_name = rel_path.rsplit("/", 1)[1]
+        if module_name.endswith(".py"):
+            module_name = module_name[:-3]
+        if module_name and all(
+            "/".join(dirs[:i]) in package_dirs for i in range(1, len(dirs) + 1)
+        ):
+            module = ".".join(dirs + [module_name])
+            return [interpreter] + leading_args + ["-m", module] + trailing_args
+    return [interpreter] + leading_args + [rel_path] + trailing_args
+
+
+def ground_python_runtime_target(
+    run_commands: Optional[List[List[str]]],
+    command_source: str,
+    all_python_files: FrozenSet[str],
+    package_dirs: FrozenSet[str],
+    entrypoint_files: List[str],
+) -> Optional[List[List[str]]]:
+    """VER-005 implementation (2026-09-13) - the Python sibling of
+    ground_java_entrypoint_in_no_build_file_projects() above: deterministically
+    validates and, where possible, corrects RunVerifierAgent.judge()'s own
+    Python run-command guess against REAL repository evidence, instead of
+    trusting it. Built for the exact E4 live defect this risk's own campaign
+    reproduced twice (docs/assurance/KRIYA_VER005_RECV002_LIVE_EVIDENCE.md):
+    judge() selected a test file (tests/test_email_rules.py) as a
+    finite_command runtime-verification target for a pure-library goal with
+    no runnable entrypoint at all - contrary to its own system prompt's
+    explicit instruction - and Kriya executed it as a bare `python
+    <test-file-path>` application command, which fails with
+    ModuleNotFoundError against a sibling top-level package regardless of
+    whether the candidate itself is correct. The prompt already told the
+    model not to do this; that did not prevent the defect (Task 6) - this
+    is the deterministic, POST-model-output enforcement layer the
+    architectural rule requires (LLM verification intent -> deterministic
+    target validation -> deterministic invocation policy -> controlled
+    execution), applied the same way Java's own entrypoint grounding already
+    is: a free-form LLM guess is never directly executed unchecked.
+
+    all_python_files/package_dirs/entrypoint_files are REAL, REPOSITORY-WIDE
+    facts the caller resolves fresh from disk every attempt (kriya/workflow/
+    attempt.py's _build_python_runtime_grounding) - deliberately NOT scoped
+    to this run's own state.all_files_written the way Java's java_main_
+    classes map is, because Python entrypoint/package structure routinely
+    PREDATES the current run entirely in a brownfield repository (a
+    pre-existing top-level main.py never touched this attempt, a
+    pre-existing validation/__init__.py from before Kriya ever ran) - VER-005
+    is scoped to exactly this brownfield case, so scoping repository facts
+    to run-local writes would silently reintroduce a false-negative version
+    of the same defect (a genuinely valid, real, untouched entrypoint
+    rejected as "nonexistent" because it wasn't written this attempt).
+
+    Returns run_commands UNCHANGED for every case this correctly leaves
+    alone:
+    - command_source == "goal_explicit" - a goal-stated command is
+      authoritative and must never be silently replaced (same rule Java's
+      own grounding function applies).
+    - A command whose target already resolves to a REAL, non-test,
+      main()-guarded repository file - Kriya still applies the deterministic
+      module-vs-script invocation-POLICY correction to it (Task 4), which is
+      itself a no-op unless the bare-script form actually needs converting
+      to `-m` form for correct sys.path resolution.
+    - A command with no python-interpreter target at all (a Maven/`java`
+      command, `python -c "..."` inline code, an already-`-m`-invoked
+      stdlib/third-party module that doesn't correspond to any repository
+      file - e.g. `python -m http.server` - out of scope: there is no
+      repository file to validate, and rejecting a legitimate stdlib/
+      third-party module invocation would be a false-positive regression).
+
+    Returns a CORRECTED run_commands (never the original object) when a
+    command's target is test-shaped, nonexistent, a directory, `__init__.py`,
+    or a real non-test file with no main() guard, AND exactly ONE real
+    grounded entrypoint exists elsewhere in the repository to substitute -
+    "target rejected and a grounded runtime target used" (matches this
+    task's own Task 8 acceptance shape).
+
+    Returns None - a distinct signal from "unchanged", meaning the caller
+    should force should_run to False (runtime verification genuinely not
+    applicable) rather than execute anything - when a command's target is
+    invalid AND there is not exactly one unambiguous real entrypoint to
+    substitute (zero: a genuine library/no-runnable-target repository,
+    exactly this campaign's own reproduced case; more than one: genuinely
+    ambiguous which application should run, and Kriya never guesses which).
+    Mirrors Java's own zero-match `None` sentinel exactly - one consistent
+    meaning across both languages."""
+    if not run_commands or command_source == "goal_explicit":
+        return run_commands
+
+    changed = False
+    corrected: List[List[str]] = []
+    for cmd in run_commands:
+        extraction = _extract_python_command_target(cmd)
+        if extraction is None:
+            corrected.append(cmd)
+            continue
+        target_idx, rel_path, is_module = extraction
+        is_test_shaped = python_target_path_is_test_shaped(rel_path)
+        exists_in_repo = rel_path in all_python_files
+        if is_module and not exists_in_repo and not is_test_shaped:
+            # `-m` naming something that isn't a repository file at all AND
+            # isn't test-shaped either (e.g. `python -m http.server`, a real
+            # stdlib module) - nothing here to validate or correct against
+            # repository facts; leave it alone (see docstring's own "out of
+            # scope" case). A genuinely hallucinated repo-relative `-m`
+            # reference (neither a real file nor test-shaped) is likewise
+            # left alone here - indistinguishable from a legitimate stdlib/
+            # third-party module without a package registry this function
+            # doesn't have - and still fails safely via the EXISTING
+            # ModuleNotFoundError infrastructure-failure classification
+            # (kriya/workflow/acceptance.py) if actually executed, unchanged
+            # from today's behavior.
+            corrected.append(cmd)
+            continue
+        grounded = (
+            not is_test_shaped
+            and exists_in_repo
+            and os.path.basename(rel_path) != "__init__.py"
+            and rel_path in entrypoint_files
+        )
+        if grounded:
+            if is_module:
+                # Already correctly using -m form and resolves to a real,
+                # non-test, main()-guarded file - nothing to correct.
+                corrected.append(cmd)
+                continue
+            leading = list(cmd[1:target_idx])
+            trailing = list(cmd[target_idx + 1:])
+            new_cmd = _grounded_python_invocation(rel_path, package_dirs, leading, trailing, cmd[0])
+            if new_cmd != cmd:
+                changed = True
+            corrected.append(new_cmd)
+            continue
+        # Invalid/rejectable target (test-shaped, nonexistent, a directory,
+        # __init__.py, or a real file with no main() guard) - never executed
+        # as-is regardless of which of those it is.
+        changed = True
+        if len(entrypoint_files) == 1:
+            trailing = list(cmd[target_idx + 1:])
+            corrected.append(
+                _grounded_python_invocation(entrypoint_files[0], package_dirs, [], trailing, cmd[0])
+            )
+        else:
+            return None
+    if not changed:
+        return run_commands
+    return corrected
 
 
 def _resolve_run_command(command: List[str], workspace_path: Optional[str] = None) -> List[str]:
@@ -1741,21 +2405,239 @@ _STANDALONE_ARTIFACT_CHECK: Dict[str, Callable[[str], bool]] = {
 # checks below are both things actually observed in a real incident (true
 # empty content; an unclosed fence from running out of budget mid-response)
 # and neither can plausibly collide with a short hand-written test string.
+#
+# VAL-001 G1-R3 (2026-09-18): a real live run proved the raw
+# `count("```") % 2` parity check alone is a FALSE-POSITIVE-PRONE proxy for
+# "truncated" - a genuinely complete Planner response (valid, schema-
+# complete structured JSON, cleanly closed) was rejected purely because the
+# model wrapped its own prose in an extra, unrequested ```markdown fence
+# without also closing it before starting the required ```json block,
+# pushing the raw marker count to 3 (odd). Two PRIOR same-goal/model/config
+# live runs (g1_rerun/g1_rerun2) both show the model's own normal,
+# correctly-paired 4-marker shape for the exact same content - this was a
+# one-off formatting lapse in THAT response, not evidence the content was
+# cut off (667 output tokens against a 16384 configured ceiling; the
+# extracted JSON parses as fully valid, complete, schema-shaped data).
+#
+# classify_plan_completeness() (below) is the real fix: STRUCTURED evidence
+# (parse_planner_structured_output(), MA6.3 Stage A's own extractor -
+# already validates JSON syntax AND schema, including PlannedFile's
+# existing path-authority rule) is now the PRIMARY signal whenever it's
+# available - a cosmetic surrounding-fence mismatch can never block a
+# response whose structured payload is genuinely complete and valid, and a
+# structured payload that's genuinely invalid (bad JSON, wrong schema, an
+# unauthorized path) is never silently waved through just because it LOOKS
+# long enough. The raw fence-parity count survives as a NARROWER fallback,
+# used only for the one case structured extraction is structurally unable
+# to disambiguate on its own: no JSON-shaped block was found/attempted at
+# all. That is also the exact shape roughly a hundred short, terse test-
+# mock Planner strings across this codebase already rely on passing (no
+# JSON block, zero fenced code, even count by construction) - preserved
+# byte-for-byte by construction, not merely by intent, since that's the
+# literal branch selected for exactly that input.
+#
+# check_plan_completeness() itself is kept, as a thin, byte-for-byte
+# backward-compatible wrapper - every existing caller (workflow.py's
+# import, tests/test_workflow.py's own direct unit tests) keeps working
+# unchanged; new code should call classify_plan_completeness() directly for
+# the additional classification detail this wrapper collapses away.
 def check_plan_completeness(plan_text: str) -> Optional[str]:
     """Returns a human-readable reason string if the Planner's raw plan text
-    looks empty or truncated, None if it looks complete enough to proceed."""
-    stripped = plan_text.strip() if plan_text else ""
-    if not stripped:
-        return (
+    looks empty, truncated, or otherwise fails PlanCompletenessResult's own
+    "complete" classification; None if it looks complete enough to proceed.
+    See classify_plan_completeness() for the real logic and its own,
+    more detailed classification."""
+    result = classify_plan_completeness(plan_text)
+    return None if result.classification == "complete" else result.reason
+
+
+# The one label _non_blank_relative_path() (kriya/workflow/plan_schema.py)
+# always uses for PlannedFile.path - unique to that single field/call site
+# (confirmed: the only `_non_blank_relative_path(..., label=...)` call
+# anywhere in this codebase), so a plain substring match against it
+# reliably identifies "this schema-validation failure is specifically a
+# path-authority violation" without needing parse_planner_structured_output()
+# to expose pydantic's own raw ValidationError object (a contract change
+# every existing caller of that function would otherwise have to absorb).
+_PLANNED_FILE_PATH_AUTHORITY_MARKER = "planned file path"
+
+
+@dataclass(frozen=True)
+class PlanCompletenessResult:
+    """VAL-001 G1-R3 (2026-09-18): structural, evidence-based replacement
+    for the old bare `Optional[str]` fence-parity result - see
+    classify_plan_completeness()'s own docstring for the full incident and
+    design rationale this exists to close.
+
+    `classification` is exactly one of:
+      "complete"             - proceed. Either a structured plan parsed AND
+                                passed PlannerStructuredOutput's own schema
+                                (the authoritative case - a cosmetic
+                                surrounding-fence mismatch never blocks
+                                this), or no structured block was
+                                found/attempted at all and the raw text's
+                                own fence count is balanced (the pre-
+                                existing behavior for a prose-only or
+                                short/terse plan, preserved unchanged).
+      "incomplete_truncated" - fail closed. Empty text; a JSON-shaped block
+                                that was FOUND but did not parse (direct
+                                evidence of a cut-off structure); or no
+                                structured block was found AND the raw
+                                text's own fence count is unbalanced (the
+                                original heuristic, now used ONLY as a
+                                corroborating signal for this one
+                                structurally-ambiguous case).
+      "unauthorized_path"    - fail closed. The structured plan parsed as
+                                JSON but failed schema validation
+                                specifically because a planned_files[].path
+                                entry violates PlannedFile's own EXISTING
+                                path-authority rule (absolute, path-
+                                traversal, directory-shaped, or glob/
+                                wildcard - kriya/workflow/plan_schema.py::
+                                _non_blank_relative_path, unchanged, reused
+                                as-is - never a second, parallel path-
+                                authority rule invented here, and never
+                                silently rewritten to something "safe").
+      "schema_invalid"       - fail closed. The structured plan parsed as
+                                JSON but failed schema validation for any
+                                OTHER reason (missing required field, wrong
+                                enum value, etc.) - genuinely invalid
+                                content is never silently accepted merely
+                                because it is long/well-formatted-looking.
+                                PLANNER-ROBUST-001 (2026-09-19): also
+                                reused for a structurally-valid plan (full
+                                Pydantic schema validation passes) that
+                                nonetheless references an unregistered
+                                tool_name - see available_tool_names below.
+                                This is a SEMANTIC failure, not a schema
+                                one (nothing in PlannerStructuredOutput's
+                                own schema can know what's registered at
+                                runtime), but it shares this classification
+                                rather than introducing a new terminal
+                                status string, since both are "structurally
+                                parseable, not yet authorized to execute as
+                                given" - never a security/authority
+                                concern like unauthorized_path, which stays
+                                separately, permanently hard-terminal.
+
+    `structured_plan` is populated only when classification=="complete" AND
+    a structured plan actually parsed (may still be None on a "complete"
+    prose-only plan with no JSON block at all) - the already-parsed,
+    already-validated object, so a caller doesn't need a second parse to
+    use it as real evidence downstream.
+
+    `reason_codes` (PLANNER-ROBUST-001, additive, default None): populated
+    ONLY for the one failure this module can classify with a real typed
+    code at the source, rather than by a caller later string-matching
+    `reason` - currently just ["UNREGISTERED_TOOL_NAME"]. None means "no
+    typed code available for this classification" - a caller (kriya/
+    workflow/planner_repair.py::classify_structured_plan_parse_issue)
+    falls back to its own existing substring inference over `reason` in
+    that case, exactly as it always has; this field never narrows or
+    replaces that fallback, only bypasses it when a typed code already
+    exists."""
+
+    classification: str
+    reason: Optional[str]
+    structured_plan: Optional[Any]
+    reason_codes: Optional[List[str]] = None
+
+
+def classify_plan_completeness(
+    plan_text: str, *, available_tool_names: Optional[Iterable[str]] = None,
+) -> PlanCompletenessResult:
+    """The real completeness/authority classification MA6.3 Stage A's own
+    parse_planner_structured_output() now feeds as PRIMARY evidence (VAL-001
+    G1-R3) - see PlanCompletenessResult's own docstring for what each
+    classification means and this module's own header comment above for the
+    live incident (a real, complete, valid Planner response rejected purely
+    for a cosmetic extra fence marker) this replaces the old bare
+    count("```") % 2 heuristic to close, without losing that heuristic's own
+    real detection power for the one case structured extraction genuinely
+    cannot disambiguate alone (no JSON-shaped block attempted at all).
+
+    available_tool_names (PLANNER-ROBUST-001, 2026-09-19, additive,
+    default None): the caller's own already-resolved
+    kernel.registry.list_components("tool") snapshot - None SKIPS the
+    tool-capability membership check entirely (mirrors plan_validation.py
+    ::validate_plan()'s own identical, pre-existing convention for the
+    same parameter), an empty collection runs the check for real and
+    correctly fails every execution_method=tool subtask (an empty
+    registry authorizes nothing - see
+    kriya/workflow/planner_validation.py's own docstring). This check
+    only ever runs AFTER parse_planner_structured_output() has already
+    fully succeeded (path authority and every other schema-level
+    invariant, enforced inside Pydantic, take precedence and are
+    unaffected by this parameter) - the SAME shared semantic validator
+    (kriya/workflow/planner_validation.py::validate_tool_capability_
+    membership) plan_validation.py::validate_plan() also calls, so the
+    legacy and WorkflowController paths can never disagree on tool
+    membership."""
+    # Deferred import: kriya.agents.contracts -> kriya.agents.agent (package
+    # __init__ side effect) does not import this module, so there is no
+    # real cycle - deferred anyway, matching this module's own existing
+    # convention of keeping its top-level import list free of the agents
+    # package (file_resolution.py is imported very early, by kriya.workflow.
+    # workflow itself, before agents are necessarily set up).
+    from kriya.agents.contracts import parse_planner_structured_output
+    from kriya.workflow.planner_validation import validate_tool_capability_membership
+
+    structured, structured_issue = parse_planner_structured_output(plan_text)
+    if structured is not None:
+        capability_result = validate_tool_capability_membership(
+            structured, available_tool_names=available_tool_names,
+        )
+        if not capability_result.valid:
+            reason = (
+                "structured plan references unregistered tool_name(s): "
+                + "; ".join(capability_result.errors)
+            )
+            return PlanCompletenessResult(
+                "schema_invalid", reason, None, reason_codes=list(capability_result.reason_codes),
+            )
+        return PlanCompletenessResult("complete", None, structured)
+
+    issue = structured_issue or ""
+    if issue == "text is empty":
+        return PlanCompletenessResult(
+            "incomplete_truncated",
             "plan is empty - the model may have run out of token budget before producing "
-            "any real content (e.g. spent it all on reasoning/thinking)"
+            "any real content (e.g. spent it all on reasoning/thinking)",
+            None,
         )
+
+    if issue.startswith("structured plan JSON block failed schema validation"):
+        classification = (
+            "unauthorized_path" if _PLANNED_FILE_PATH_AUTHORITY_MARKER in issue else "schema_invalid"
+        )
+        return PlanCompletenessResult(classification, issue, None)
+
+    if issue.startswith("structured plan JSON object did not parse"):
+        return PlanCompletenessResult(
+            "incomplete_truncated",
+            f"{issue} - a fenced JSON block was found but its content is not valid JSON, consistent "
+            "with the response being cut off mid-structure",
+            None,
+        )
+
+    # issue == "no complete structured plan JSON object found in the text" -
+    # no structured block was found or attempted at all. Structured
+    # evidence is structurally unable to disambiguate this shape (nothing
+    # to validate), so fall back to the original raw fence-parity signal,
+    # preserved EXACTLY for this one case - the common shape for every
+    # short/terse test-mock Planner string across this codebase's own test
+    # suite (zero fenced code, even count by construction) and for any
+    # genuinely prose-only real plan that never attempted the required JSON
+    # block at all.
     if plan_text.count("```") % 2 != 0:
-        return (
-            "plan contains an unclosed fenced code block (odd number of ``` markers) - "
-            "looks truncated mid-response, likely ran out of token budget"
+        return PlanCompletenessResult(
+            "incomplete_truncated",
+            "plan contains an unclosed fenced code block (odd number of ``` markers) and no "
+            "complete structured plan JSON object could be found - looks truncated mid-response, "
+            "likely ran out of token budget",
+            None,
         )
-    return None
+    return PlanCompletenessResult("complete", None, None)
 
 
 def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -> Dict[str, str]:

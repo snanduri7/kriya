@@ -53,7 +53,8 @@ from kriya.workflow.context_projection import (
 )
 from kriya.workflow.checkpoint import delete_checkpoint, list_checkpoints
 from kriya.workflow.checkpoint import compute_registry_hash
-from kriya.workflow.file_resolution import _resolve_run_command
+from kriya.workflow.attempt import _build_python_runtime_grounding
+from kriya.workflow.file_resolution import _resolve_run_command, ground_python_runtime_target
 from kriya.workflow.milestone_normalization import normalize_legacy_milestones
 from kriya.workflow.milestone_validation import (
     MilestonePlanValidator,
@@ -1123,6 +1124,38 @@ async def run_milestones(
                 files_written=result.get("files", []),
                 build_file_content=pom_content_for_judge,
             )
+            # VER-005 implementation (2026-09-13): this is a THIRD, previously
+            # ungrounded RunVerifierAgent.judge() call site - independent of
+            # both call sites kriya/workflow/attempt.py already grounds
+            # (_execute_runtime_verification_directly and the mutating-path
+            # inline block) - a raw judgment captured here for LATER REPLAY
+            # (replay_prior_milestone_verifications, below) would otherwise
+            # persist and re-execute an unvalidated Python target (e.g. a
+            # test file selected for a library milestone) on every later
+            # integration pass, exactly the E4 defect this risk closes.
+            # Python-only, matching this fix's own scope - this milestone-
+            # replay path has no live evidence of the equivalent Java defect,
+            # and _build_java_main_class_map's own signature is
+            # AttemptContext-coupled, not plumbed through here; disclosed as
+            # a known, narrower scope in the VER-005 evidence doc rather than
+            # silently expanded.
+            if judgment.get("should_run") and judgment.get("run_commands"):
+                milestone_known_files = result.get("files", [])
+                if any(f.endswith(".py") for f in milestone_known_files):
+                    all_python_files, package_dirs, entrypoint_files = _build_python_runtime_grounding(
+                        workspace_path
+                    )
+                    corrected_py_commands = ground_python_runtime_target(
+                        judgment["run_commands"], judgment["command_source"],
+                        all_python_files, package_dirs, entrypoint_files,
+                    )
+                    if corrected_py_commands is None:
+                        judgment = dict(judgment)
+                        judgment["should_run"] = False
+                        judgment["run_commands"] = None
+                    elif corrected_py_commands != judgment["run_commands"]:
+                        judgment = dict(judgment)
+                        judgment["run_commands"] = corrected_py_commands
             if judgment.get("should_run") and judgment.get("run_commands"):
                 run_state.verification_commands[milestone.id] = judgment["run_commands"]
         except Exception as e:

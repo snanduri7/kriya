@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from kriya.workflow.checkpoint import compute_base_commit, compute_tree_hash
+from kriya.workflow.checkpoint import compute_base_commit, compute_tree_hash, compute_workspace_content_hash
 from kriya.workflow.plan_schema import EngineeringPlan
 from kriya.workflow.workflow_types import SubtaskStatus
 
@@ -36,6 +36,15 @@ class SubtaskCheckpoint:
     status: SubtaskStatus
     base_commit: Optional[str] = None
     tree_hash: Optional[str] = None
+    # STATE-001 (2026-09-14): tree_hash's own HEAD^{tree} meaning cannot see
+    # any of a subtask's own uncommitted writes (plain file writes, never a
+    # git commit) - see ControlState.workspace_content_hash's own docstring
+    # for the identical reasoning, reused here rather than duplicated. Not
+    # presently reachable from any production caller (this module's own
+    # record_subtask_checkpoint/resolve_subtask_resume_point are unused -
+    # see kriya/workflow/workflow_controller.py's own live subtask-resume
+    # gate instead), kept consistent anyway rather than left stale.
+    workspace_content_hash: Optional[str] = None
     patch_hash: Optional[str] = None
     verification_hash: Optional[str] = None
     plan_hash: Optional[str] = None
@@ -48,6 +57,7 @@ class SubtaskCheckpoint:
             "status": self.status.value,
             "base_commit": self.base_commit,
             "tree_hash": self.tree_hash,
+            "workspace_content_hash": self.workspace_content_hash,
             "patch_hash": self.patch_hash,
             "verification_hash": self.verification_hash,
             "plan_hash": self.plan_hash,
@@ -62,6 +72,7 @@ class SubtaskCheckpoint:
             status=SubtaskStatus(data["status"]),
             base_commit=data.get("base_commit"),
             tree_hash=data.get("tree_hash"),
+            workspace_content_hash=data.get("workspace_content_hash"),
             patch_hash=data.get("patch_hash"),
             verification_hash=data.get("verification_hash"),
             plan_hash=data.get("plan_hash"),
@@ -202,6 +213,32 @@ def resolve_subtask_resume_point(
                     mismatches=[
                         f"workspace tree_hash does not match last completed subtask {completed[-1]!r}: "
                         f"checkpoint={last_record.tree_hash!r} current={current_tree_hash!r}"
+                    ],
+                )
+            # STATE-001 (2026-09-14): tree_hash alone cannot see this
+            # subtask's own uncommitted content - require the real
+            # content-sensitive identity too whenever this record is
+            # otherwise a real MA5.9-shaped record (has a tree_hash at
+            # all); its own absence means a legacy record predating this
+            # fix, never safely resumable from.
+            current_content_hash = compute_workspace_content_hash(workspace_path)
+            if last_record.workspace_content_hash is None:
+                return SubtaskResumeResult(
+                    status=ResumePointStatus.NEEDS_REVIEW,
+                    completed_subtask_ids=completed,
+                    mismatches=[
+                        f"subtask {completed[-1]!r} checkpoint predates the working-tree-content "
+                        "identity check and is not safely resumable"
+                    ],
+                )
+            if current_content_hash is None or current_content_hash != last_record.workspace_content_hash:
+                return SubtaskResumeResult(
+                    status=ResumePointStatus.NEEDS_REVIEW,
+                    completed_subtask_ids=completed,
+                    mismatches=[
+                        f"workspace_content_hash does not match last completed subtask "
+                        f"{completed[-1]!r}: checkpoint={last_record.workspace_content_hash!r} "
+                        f"current={current_content_hash!r}"
                     ],
                 )
         if last_record.base_commit is not None:

@@ -1122,6 +1122,58 @@ async def test_run_milestones_judge_build_file_content_none_without_pom():
 
 
 @pytest.mark.asyncio
+async def test_run_milestones_grounds_python_verification_commands_before_capture_for_replay():
+    """VER-005 implementation (2026-09-13): this milestone-replay capture
+    site (kriya/workflow/milestones.py, feeding replay_prior_milestone_
+    verifications' own later re-execution) is a THIRD, independent
+    RunVerifierAgent.judge() call site - distinct from both call sites
+    kriya/workflow/attempt.py already grounds. Without this fix, a
+    test-shaped Python target here would be persisted into run_state.
+    verification_commands and re-executed, unvalidated, on every later
+    integration pass - exactly the E4 defect (docs/assurance/
+    KRIYA_VER005_RECV002_LIVE_EVIDENCE.md) for a genuine library milestone
+    with no runnable entrypoint at all."""
+    milestones = [mkv2("M1", goal="add email validation", success_criterion="c1")]
+    with tempfile.TemporaryDirectory() as tmp:
+        os.makedirs(os.path.join(tmp, "validation"))
+        with open(os.path.join(tmp, "validation", "__init__.py"), "w") as f:
+            f.write("")
+        with open(os.path.join(tmp, "validation", "email_rules.py"), "w") as f:
+            f.write("def is_valid_email(email):\n    return bool(email) and '@' in email\n")
+        os.makedirs(os.path.join(tmp, "tests"))
+        with open(os.path.join(tmp, "tests", "__init__.py"), "w") as f:
+            f.write("")
+        with open(os.path.join(tmp, "tests", "test_email_rules.py"), "w") as f:
+            f.write(
+                "from validation.email_rules import is_valid_email\n\n"
+                "def test_valid_email():\n"
+                "    assert is_valid_email('user@example.com')\n"
+            )
+
+        state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
+        we = MagicMock()
+        we.run_generation_workflow = AsyncMock(return_value={
+            "quality_gates_passed": True, "design": "d",
+            "files": ["validation/email_rules.py"],
+        })
+        we.run_verifier = MagicMock()
+        we.run_verifier.judge = AsyncMock(return_value={
+            "should_run": True,
+            "run_commands": [["python", "tests/test_email_rules.py"]],
+            "command_source": "inferred",
+            "success_criteria": "is_valid_email validates addresses",
+        })
+
+        await run_milestones(we, state, tmp)
+
+    # The raw, ungrounded test-file command must never be persisted for
+    # later replay - this fixture is a genuine library (no __main__ guard
+    # anywhere), so grounding correctly finds runtime verification not
+    # applicable and the milestone is captured with nothing to replay.
+    assert "M1" not in state.verification_commands
+
+
+@pytest.mark.asyncio
 async def test_run_milestones_failure_defaults_to_abandon_with_no_callback():
     milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:

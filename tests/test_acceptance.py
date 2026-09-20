@@ -1,5 +1,6 @@
 from kriya.workflow.acceptance import (
     goal_explicitly_requires_tests,
+    goal_requires_runtime_behavior,
     output_confirms_nonzero_test_execution,
     subtask_owns_test_obligation,
 )
@@ -211,6 +212,85 @@ def test_explicit_test_contract_structurally_rejects_any_unqualified_singular_te
     assert goal_explicitly_requires_tests("add unit test coverage for the parser")
     assert goal_explicitly_requires_tests("include test suite for the parser")
     assert goal_explicitly_requires_tests("write tests for the parser")
+
+
+# --- goal_requires_runtime_behavior (Production Validation P3, 2026-09-07) ---
+#
+# Live incident: the previous implementation matched any bare occurrence of
+# run/start/launch/execute/print/get/put/etc ANYWHERE in the goal text, no
+# context or negation awareness. Checked directly against the real frozen
+# production-validation goal texts (not assumed): P2's own goal.md false-
+# positived on ordinary prose ("employees get their fields changed and get
+# saved"); P3's own goal.md false-positived on BOTH ordinary prose ("before
+# any location check would even run") AND, worse, its own explicit denial
+# ("No live application run is required to verify this change") - the
+# sentence REFUSING runtime verification was the literal text that
+# triggered Kriya's demand for one. P1's goal.md had zero matches and
+# passed cleanly - the only reason this went unnoticed for two runs.
+
+def test_runtime_behavior_explicit_negation_wins_over_bare_runtime_words():
+    assert goal_requires_runtime_behavior(
+        "No live application run is required to verify this change"
+    ) is False
+    assert goal_requires_runtime_behavior(
+        "Do not start the application"
+    ) is False
+    assert goal_requires_runtime_behavior(
+        "Application execution is not required"
+    ) is False
+    assert goal_requires_runtime_behavior(
+        "The unit tests are sufficient; application execution is not required."
+    ) is False
+
+
+def test_runtime_behavior_ignores_ordinary_prose_use_of_runtime_words():
+    """Bare isolated verbs (run/get/put/...) with no runtime-noun context
+    are not evidence on their own - the exact shape of both live false
+    positives found in P2's and P3's own frozen goal texts."""
+    assert goal_requires_runtime_behavior(
+        "before any location check would even run"
+    ) is False
+    assert goal_requires_runtime_behavior(
+        "The invariant is about which employees get their fields changed "
+        "and get saved, not about what the storage layer happens to "
+        "iterate over."
+    ) is False
+
+
+def test_runtime_behavior_requires_context_not_isolated_verbs():
+    assert goal_requires_runtime_behavior(
+        "Run the application and verify the result"
+    ) is True
+    assert goal_requires_runtime_behavior(
+        "Start the Spring Boot application and confirm startup"
+    ) is True
+    assert goal_requires_runtime_behavior(
+        "Launch the service and verify the endpoint"
+    ) is True
+    assert goal_requires_runtime_behavior(
+        "Execute the application and verify exit code 2"
+    ) is True
+
+
+def test_runtime_behavior_detects_known_positive_prv12_style_goal():
+    """PRV-12 (process-terminating-behavior/exit-code verification, see
+    test_prv12_share10_s1_candidate_uses_authoritative_goal_before_surefire
+    in test_workflow.py) - a genuine runtime-execution requirement stated as
+    exit-code/process-output language, not a bare verb."""
+    assert goal_requires_runtime_behavior(
+        "Execute invalid input and verify exit status is non-zero."
+    ) is True
+
+
+def test_runtime_behavior_negation_takes_precedence_in_a_mixed_goal():
+    """A goal combining ordinary runtime-word prose (already insufficient
+    evidence on its own) with an explicit no-runtime-verification statement
+    must stay False."""
+    assert goal_requires_runtime_behavior(
+        "The invariant is about which employees get their fields changed "
+        "and get saved. No live application run is required to verify "
+        "this change."
+    ) is False
 
 
 def test_test_acceptance_detects_known_zero_execution_outputs():
