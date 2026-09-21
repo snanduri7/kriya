@@ -1,0 +1,14 @@
+Pre-change command:
+python -m pytest -q tests/test_generate_json_contract.py
+
+Result: 5 failed, 4 passed in 4.43s.
+
+Failures:
+- test_strict_knowledge_gap_is_json
+- test_declined_knowledge_gap_is_json
+- test_constructor_failure_is_json
+- test_unreadable_goal_file_is_json (originally named test_missing_goal_file_is_json)
+- test_workflow_exception_is_json
+
+The failures showed missing or legacy error-only stdout rather than a single
+terminal result with the workflow contract fields.

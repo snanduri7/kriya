@@ -13,6 +13,7 @@ import click
 from kriya import __version__
 from kriya.agents import ReviewerAgent
 from kriya.analyzer import RepositoryAnalyzer
+from kriya.cli_output import GenerateOutput
 from kriya.config import AppConfig, load_config
 from kriya.control.run_ownership import WorkspaceLockHeldError, acquire_run_lock
 from kriya.core import LLMClient
@@ -1497,6 +1498,13 @@ def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> N
 @click.pass_context
 def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str]) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
+    with GenerateOutput(json_output) as output:
+        _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
+                       resume, resume_id, json_output, from_milestones, output)
+
+
+def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
+                   resume, resume_id, json_output, from_milestones, output):
     if from_milestones:
         pass  # goal text lives inside the milestone plan file - nothing to resolve here
     elif file:
@@ -1505,6 +1513,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 goal = fh.read()
         except Exception as e:
             click.secho(f"Failed to read goal file: {e}", fg="red")
+            output.fail(str(e))
             sys.exit(1)
     elif not goal:
         if not sys.stdin.isatty():
@@ -1514,20 +1523,6 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             sys.exit(1)
 
     cfg: AppConfig = ctx.obj['config']
-
-    # --json: swap sys.stdout to stderr for the rest of this command, so
-    # every one of the many existing click.echo/secho calls below (streaming
-    # tokens, approval prompts, warnings, the human-formatted final summary)
-    # is redirected with zero per-call-site changes - click resolves
-    # sys.stdout dynamically at call time (confirmed live), so this one swap
-    # covers all of them. Restored just before printing the final JSON.
-    # Subprocess output (compile/test/run commands) is unaffected -
-    # PolymorphicValidator always captures via pipes into Python strings,
-    # never lets a child process's own stdout flow directly to the terminal.
-    # Architectural add-on from a 2026-08-12 SME review.
-    real_stdout = sys.stdout
-    if json_output:
-        sys.stdout = sys.stderr
 
     llm = LLMClient(cfg)
     kernel = Kernel(config=cfg)
@@ -1714,21 +1709,15 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 milestone_result = asyncio.run(run_milestone_sequence())
         except WorkspaceLockHeldError as e:
             click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
-            if json_output:
-                sys.stdout = real_stdout
-                click.echo(json.dumps({"error": str(e)}, indent=2))
+            output.fail(str(e))
             sys.exit(1)
         except Exception as e:
             click.secho(f"Milestone sequence error: {e}", fg="red")
-            if json_output:
-                sys.stdout = real_stdout
-                click.echo(json.dumps({"error": str(e)}, indent=2))
+            output.fail(str(e))
             sys.exit(1)
 
-        if json_output:
-            sys.stdout = real_stdout
-            click.echo(json.dumps(milestone_result, indent=2, default=str))
-        else:
+        output.result = milestone_result
+        if not json_output:
             status = milestone_result.get("status")
             click.secho(
                 f"\n=== Milestone sequence: {status} ===", bold=True,
@@ -1813,6 +1802,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     version_desc = "no specific version mentioned" if g['version'] == "unspecified" else f"version {g['version']}"
                     click.secho(f"  - {g['library']} ({version_desc}): {g['reason']}", fg="red")
                 await kernel.stop()
+                output.result = dict(res, quality_gates_passed=False)
                 sys.exit(1)
             else:  # 'warn'
                 click.secho("\n⚠️  KNOWLEDGE GUARD RISK DETECTED", bold=True, fg="yellow")
@@ -1879,6 +1869,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     # Declining a required knowledge/safety decision is an
                     # unsuccessful generation, not a successful no-op. Keep it
                     # non-zero for CI and shell callers.
+                    output.result = dict(res, quality_gates_passed=False)
                     sys.exit(3)
 
         await kernel.stop()
@@ -2130,9 +2121,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             final_res = asyncio.run(run_workflow())
     except WorkspaceLockHeldError as e:
         click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
-        if json_output:
-            sys.stdout = real_stdout
-            click.echo(json.dumps({"error": str(e)}, indent=2))
+        output.fail(str(e))
         sys.exit(1)
     except Exception as e:
         click.secho(f"Workflow error: {e}", fg="red")
@@ -2141,20 +2130,10 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             "re-run the same command with --resume to pick up where it left off instead of starting over.",
             fg="yellow"
         )
-        if json_output:
-            sys.stdout = real_stdout
-            click.echo(json.dumps({"error": str(e)}, indent=2))
+        output.fail(str(e))
         sys.exit(1)
 
-    if json_output:
-        sys.stdout = real_stdout
-        click.echo(json.dumps(final_res, indent=2))
-        # Some early-exit paths inside run_workflow() (a strict-mode
-        # knowledge-gap block, or a declined-then-scaffolded one) call
-        # sys.exit() directly and never reach here at all - known,
-        # documented gap for a v1: those paths don't get JSON output,
-        # matching their pre-existing narrower, non-structured signal today.
-        sys.exit(0 if final_res and final_res.get("quality_gates_passed") else 1)
+    output.result = final_res
 
     # Click otherwise returns zero merely because the command function reached
     # its end. Workflow outcome is the process contract for both human and JSON
