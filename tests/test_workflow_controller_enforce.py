@@ -10079,11 +10079,26 @@ async def test_enforce_terminal_events_and_gate_inputs_precede_one_commit(tmp_pa
     async def capture_event(name, payload):
         events.append((name, payload))
 
+    from types import SimpleNamespace
+
     we = _workflow_engine()
     we.run_generation_workflow = fake_run
-    we.kernel = MagicMock()
+    we.kernel = SimpleNamespace(
+        registry=MagicMock(),
+        events=SimpleNamespace(emit=AsyncMock(side_effect=capture_event)),
+        config=SimpleNamespace(
+            knowledge=SimpleNamespace(
+                training_cutoff="2023-12-01", offline_mode=True,
+                release_cache_ttl_days=30,
+            ),
+            llm=SimpleNamespace(knowledge_cutoff="2023-12-01"),
+            skills=SimpleNamespace(load_global=False, load_cwd=False),
+            paths=SimpleNamespace(
+                skills=str(tmp_path / "skills"), memory=str(tmp_path / "memory"),
+            ),
+        ),
+    )
     we.kernel.registry.list_components.return_value = []
-    we.kernel.events.emit = AsyncMock(side_effect=capture_event)
 
     real_preserved_gate = workflow_controller_module.enforce_preserved_reference_terminal_integrity
     real_artifact_gate = workflow_controller_module.ArtifactRegistry.derive_from_workspace
