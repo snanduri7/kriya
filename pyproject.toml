@@ -33,7 +33,10 @@ kriya = "kriya.cli:main"
 kriya-mcp = "kriya.mcp.server:main"
 
 [tool.setuptools.packages.find]
-include = ["kriya*"]
+include = ["kriya*", "plugins.core_tools*"]
+
+[tool.setuptools.package-data]
+"kriya.config" = ["default_config.yaml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"

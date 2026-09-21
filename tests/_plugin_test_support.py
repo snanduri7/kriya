@@ -6,9 +6,9 @@ direct `import plugins.core_tools` or `from plugins.core_tools import
 
 Root cause this exists to close (PLANNER-ROBUST-001 plugin-bootstrap
 investigation, 2026-09-19): `plugins/` has no `__init__.py` (it is a
-namespace package) and is deliberately absent from pyproject.toml's own
-`[tool.setuptools.packages.find] include = ["kriya*"]` - it was never
-intended to be an installed/importable Python package at all. Every real
+namespace package). PRD-002 now includes plugins.core_tools in release
+wheels while preserving its existing top-level location and production
+loader. Every real
 production plugin-loading call site (kriya/cli.py's several `PluginManager
 (kernel=kernel, plugin_dir=cfg.plugins.directory)` constructions)
 resolves `plugins.directory` to an ABSOLUTE path and hands it to

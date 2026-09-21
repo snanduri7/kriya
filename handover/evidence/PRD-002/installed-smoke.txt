@@ -1,0 +1,261 @@
+COMMAND version: exit=0
+Kriya version: 0.1.0
+
+COMMAND config: exit=0
+{
+  "llm": {
+    "provider": "openai",
+    "model": "qwen3-coder:30b",
+    "api_key": "***REDACTED***",
+    "base_url": "http://localhost:11434/v1",
+    "temperature": 0.7,
+    "max_tokens": 16384,
+    "planner_max_tokens": 8192,
+    "extra_body": {
+      "options": {
+        "num_ctx": 32768,
+        "top_p": 0.8,
+        "top_k": 20
+      }
+    },
+    "reasoning": false,
+    "context_window": 32768,
+    "knowledge_cutoff": "2023-12-01",
+    "knowledge_cutoff_confidence": "estimated",
+    "retry_temperature": null,
+    "reviewer_temperature": 0.7,
+    "capabilities": {
+      "native_tool_calls": true,
+      "json_mode": true,
+      "reliable_multiline_json": false,
+      "streaming": true,
+      "max_tool_argument_chars": 8192,
+      "preferred_edit_protocol": "small_native_tools"
+    }
+  },
+  "llm_chain": [
+    {
+      "model": "qwen3.6:35b-a3b-q4_K_M",
+      "base_url": "http://localhost:11434/v1",
+      "api_key": "***REDACTED***",
+      "temperature": 0.2,
+      "max_tokens": 4096,
+      "capabilities": {
+        "native_tool_calls": true,
+        "json_mode": true,
+        "reliable_multiline_json": false,
+        "streaming": true,
+        "max_tool_argument_chars": 8192,
+        "preferred_edit_protocol": "small_native_tools"
+      },
+      "reasoning": false,
+      "extra_body": {},
+      "context_window": 32768,
+      "knowledge_cutoff": "2023-12-01",
+      "knowledge_cutoff_confidence": "estimated"
+    }
+  ],
+  "plugins": {
+    "directory": "/private/tmp/kriya-prd002-installed/plugins",
+    "enabled": []
+  },
+  "paths": {
+    "skills": "/private/tmp/kriya-prd002-installed/skills",
+    "memory": "/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-release-smoke-_682pwx4/memory",
+    "logs": "/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-release-smoke-_682pwx4/logs"
+  },
+  "skills": {
+    "load_global": true,
+    "load_cwd": true
+  },
+  "logging": {
+    "level": "INFO",
+    "file": null
+  },
+  "mcp": {},
+  "mcp_lifecycle": {
+    "startup_timeout_seconds": 30,
+    "request_timeout_seconds": 60,
+    "shutdown_grace_seconds": 5,
+    "force_kill_reap_seconds": 5,
+    "max_stdout_line_bytes": 4000000,
+    "max_stderr_buffer_bytes": 1000000,
+    "cpu_seconds": 3600,
+    "memory_mb": 2048,
+    "container_cleanup_timeout_seconds": 15
+  },
+  "embedding": {
+    "model": "nomic-embed-text:latest",
+    "base_url": "http://localhost:11434/v1"
+  },
+  "autonomy": {
+    "mode": "human-in-the-loop",
+    "egress_policy": "local_only",
+    "sensitive_paths": [
+      ".*\\.env$",
+      ".*secrets.*",
+      "\\.github/workflows/.*",
+      "Jenkinsfile",
+      ".*credentials.*",
+      ".*password.*"
+    ],
+    "risk_threshold_lines": 500,
+    "sandbox_execution": true,
+    "sandbox_env_allowlist": [
+      "HOME",
+      "LANG",
+      "LC_ALL",
+      "USER",
+      "SHELL",
+      "TMPDIR",
+      "TEMP",
+      "TMP",
+      "JAVA_HOME",
+      "M2_HOME",
+      "GRADLE_HOME",
+      "VIRTUAL_ENV",
+      "PYTHONPATH"
+    ],
+    "sandbox_cpu_seconds": 240,
+    "sandbox_memory_mb": 4096,
+    "acquisition_cpu_seconds": 300,
+    "acquisition_memory_mb": 2048,
+    "acquisition_registry_hosts": [
+      "files.pythonhosted.org",
+      "pypi.org",
+      "repo.maven.apache.org"
+    ],
+    "containment_backend": "none",
+    "contained_execution_required": false,
+    "mcp_contained_execution_required": false,
+    "semantic_region_enforcement_required": false,
+    "shell_command_timeout_seconds": 300,
+    "brownfield_baseline_target_test": null,
+    "brownfield_full_regression_baseline_policy": "auto",
+    "run_verification_enabled": true,
+    "run_verification_timeout_seconds": 90,
+    "spec_compliance_enabled": true,
+    "max_consecutive_no_progress_attempts": 2,
+    "web_lookup_enabled": false,
+    "web_lookup_auto_approve": false,
+    "self_correction_loop_enabled": false,
+    "self_correction_loop_max_turns": 4,
+    "developer_investigation_enabled": false,
+    "developer_investigation_max_turns": 10,
+    "best_of_n_first_attempt": 1,
+    "generation_time_budget_seconds": null,
+    "generation_gate_reserve_seconds": 120,
+    "generation_seconds_per_file_estimate": 90,
+    "auto_index_missing_dependency_graph": false
+  },
+  "knowledge": {
+    "training_cutoff": "2023-12-01",
+    "check_enabled": true,
+    "offline_mode": false,
+    "release_cache_ttl_days": 30
+  },
+  "search": {
+    "base_url": "",
+    "top_k": 3,
+    "public_terms": []
+  },
+  "agent_llms": {
+    "planner": {
+      "llm": null,
+      "llm_chain": []
+    },
+    "architect": {
+      "llm": null,
+      "llm_chain": []
+    },
+    "reviewer": {
+      "llm": null,
+      "llm_chain": []
+    },
+    "run_verifier": {
+      "llm": null,
+      "llm_chain": []
+    },
+    "skill_gap": {
+      "llm": null,
+      "llm_chain": []
+    },
+    "spec_compliance": {
+      "llm": null,
+      "llm_chain": []
+    }
+  },
+  "routing": {
+    "enabled": true,
+    "embed_model": "embeddinggemma:latest",
+    "reject_threshold": 0.3,
+    "ask_margin": 0.05
+  },
+  "engineering_triage": {
+    "enabled": true,
+    "shadow_mode": true
+  },
+  "process_profiles": {
+    "enabled": false,
+    "enforce_approval": false,
+    "enforce_context_depth": false,
+    "enforce_verification_depth": false
+  },
+  "execution_policy": {
+    "enabled": true,
+    "mode": "audit"
+  },
+  "workflow_controller": {
+    "enabled": false,
+    "mode": "shadow"
+  },
+  "runtime_profile": null
+}
+
+COMMAND plugins: exit=0
+=== Loaded Plugins (1) ===
+  - core_tools (v1.0.0) [INITIALIZED]
+
+COMMAND doctor: exit=0
+=== Kriya Doctor ===
+
+Checking directories:
+  - Plugins Directory: /private/tmp/kriya-prd002-installed/plugins [EXISTS]
+  - Skills Directory: /private/tmp/kriya-prd002-installed/skills [MISSING (will be created on run)]
+  - Memory Directory: /var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-release-smoke-_682pwx4/memory [MISSING (will be created on run)]
+  - Logs Directory: /var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-release-smoke-_682pwx4/logs [MISSING (will be created on run)]
+
+Checking workspace/control plane:
+  - Workspace identity: 034bdd091b0a [VALID]
+  - Controller: enabled=False, mode=shadow
+  - ContractRegistry: 0 record(s) [VALID]
+  - ArtifactRegistry: 0 record(s) [VALID]
+  - ControlState: not initialized
+  - LLM egress policy: local configuration [VALID]
+  - Hard policy boundaries: enabled at authorized execution/write boundaries
+
+Checking LLM provider connectivity:
+  - Provider: openai
+  - Base URL: http://localhost:11434/v1
+  - Model: qwen3-coder:30b
+  - Testing connection...
+  - [SUCCESS] Connected to local LLM server. Status code: 200
+  - Available models: qwen3-coder:30b
+  - [SUCCESS] Model 'qwen3-coder:30b' is available on the server.
+
+Checking Embedding provider connectivity:
+  - Base URL: http://localhost:11434/v1
+  - Model: nomic-embed-text:latest
+  - Testing connection...
+  - [SUCCESS] Connected and successfully generated embedding of dimension 1
+
+Checking Java/Maven toolchain:
+  - 'java' resolves to JDK 17
+  - 'mvn' will build/run against JDK 17
+  - [SUCCESS] No version mismatch detected.
+
+Checking optional LSP grounding (Java retry-loop diagnostics):
+  - [FOUND] jdtls at /opt/homebrew/bin/jdtls
+    Note: jdtls itself needs JDK 21+ to RUN - separate from whatever JDK your project targets.
+
+Release CLI smoke: PASS (doctor endpoints mocked; no live qualification claimed)

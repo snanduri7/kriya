@@ -76,6 +76,30 @@ jobs:
       - name: Run test suite against pinned versions
         run: pytest -q
 
+  release-integrity:
+    name: Source distribution and clean wheel install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install existing locked build and test dependencies
+        run: pip install -r requirements.txt setuptools
+      - name: Verify source, sdist, wheel and clean installed CLI
+        run: |
+          python -m kriya.distribution .
+          bash scripts/verify_release.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-integrity-evidence
+          path: |
+            /tmp/kriya-release.*/dist/*
+            /tmp/kriya-release.*/*.txt
+            /tmp/kriya-release.*/*.jsonl
+          retention-days: 7
+
   live-model-smoke:
     name: Primary live model regression (blocking)
     runs-on: ubuntu-latest

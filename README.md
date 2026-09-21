@@ -392,3 +392,32 @@ knowledge:
 # Per-project MCP servers - empty by default, e.g. {"my_server": {"command": "...", "args": [...]}}
 mcp: {}
 ```
+
+
+### Release integrity (PRD-002)
+
+The canonical core plugin remains at `plugins/core_tools`. Wheels include that
+namespace package and `kriya/config/default_config.yaml`; the existing loader and
+installation-relative default paths are unchanged. Source distributions also
+include the dependency lock, build manifest, CI workflow and release smoke setup.
+No Git metadata is required at runtime.
+
+Use Python 3.14 for the existing `requirements.txt` lock; the supported-version
+CI matrix continues to test declared dependency ranges. This change introduces
+no new dependency or parallel lock mechanism.
+
+After installing `requirements.txt` and setuptools, run:
+
+```bash
+python -m kriya.distribution .
+bash scripts/verify_release.sh
+```
+
+Set `KRIYA_PYTHON` to the desired interpreter if necessary. The script builds the
+wheel from the sdist, checks required contents, creates a clean venv, installs
+locked dependencies and the wheel, checks dependencies, and runs version/config/
+plugins/doctor smoke checks outside the checkout. Doctor network endpoints are
+mocked: this proves installation, not live-model readiness. Each run prints its
+disposable environment/evidence directory; retain its build and smoke logs for
+review. Dependency installation requires access to your configured package index.
+The `release-integrity` CI job executes the same command.

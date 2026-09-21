@@ -1,0 +1,7 @@
+include README.md pyproject.toml requirements.txt MANIFEST.in
+include .github/workflows/ci.yml
+recursive-include plugins/core_tools *.py
+include kriya/config/default_config.yaml
+recursive-include scripts *.py *.sh
+recursive-include tests *.py
+recursive-include skills *.md *.yaml *.yml *.json
