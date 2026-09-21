@@ -34,7 +34,7 @@ from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KRIYA_BIN = os.path.join(REPO_ROOT, ".venv", "bin", "kriya")
+KRIYA_BIN = os.path.join(os.path.dirname(sys.executable), "kriya")
 ENV_REPORT_SERVER = os.path.join(REPO_ROOT, "tests", "env_report_mcp_server.py")
 
 # Literal schema of env_report_mcp_server.py's one tool ("report_env"),
@@ -341,7 +341,7 @@ def _run_cli(args, cwd, extra_env=None, timeout=20):
     return r.returncode, r.stdout, r.stderr
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_mcp_tool_call_ambient_absent_then_explicit_present_via_durable_approval(tmp_path):
     """TOOL-002 P2 (2026-09-13) restores this test's original E4-tier
     evidence: SEC-003's decisive ambient-absent/explicit-present env

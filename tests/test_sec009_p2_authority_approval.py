@@ -27,7 +27,7 @@ from kriya.config.authority import ConfigAuthorityError
 from kriya.config import authority_approval as aa
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KRIYA_BIN = os.path.join(REPO_ROOT, ".venv", "bin", "kriya")
+KRIYA_BIN = os.path.join(os.path.dirname(sys.executable), "kriya")
 
 
 @pytest.fixture(autouse=True)
@@ -508,7 +508,7 @@ def test_27_older_approval_without_logging_file_in_security_subset_does_not_gran
     assert not outside_dir.exists()
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_logging_file_approval_reaches_configure_logging_end_to_end(tmp_path, monkeypatch):
     """Real production CLI, real approval artifact, real outside-workspace
     target: proves the SIDE_EFFECT invariant in both directions through the
@@ -596,7 +596,7 @@ def _run_cli(args, cwd, extra_env=None, timeout=15):
         return None, "", "TIMEOUT"
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_plugin_and_mcp_sentinels_absent_without_approval(tmp_path):
     home = tmp_path / "_home"
     ws = tmp_path / "repo"
@@ -625,7 +625,7 @@ def test_cli_plugin_and_mcp_sentinels_absent_without_approval(tmp_path):
     assert not mcp_sentinel.exists()
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_approval_gates_real_plugin_import_and_mcp_spawn(tmp_path):
     """P2 is proving AUTHORIZATION, not containment - once approved, the
     configuration proceeds to the normal, EXISTING plugin/MCP path exactly

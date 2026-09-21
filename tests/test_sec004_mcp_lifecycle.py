@@ -36,7 +36,7 @@ from kriya.mcp.lifecycle import (
 )
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KRIYA_BIN = os.path.join(REPO_ROOT, ".venv", "bin", "kriya")
+KRIYA_BIN = os.path.join(os.path.dirname(sys.executable), "kriya")
 FIXTURE = os.path.join(REPO_ROOT, "tests", "adversarial_mcp_server.py")
 
 
@@ -603,7 +603,7 @@ def _run_cli(args, cwd, extra_env=None, timeout=45):
     return r.returncode, r.stdout, r.stderr
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_startup_hang_bounded_end_to_end(tmp_path):
     """Real adversarial fixture A (Startup hang), through the actual
     production CLI: a real MCP child that never responds to `initialize`

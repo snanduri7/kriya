@@ -26,7 +26,7 @@ from kriya.config.config import AppConfig, load_config
 from kriya.config.authority import ConfigAuthorityError
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KRIYA_BIN = os.path.join(REPO_ROOT, ".venv", "bin", "kriya")
+KRIYA_BIN = os.path.join(os.path.dirname(sys.executable), "kriya")
 
 
 @contextlib.contextmanager
@@ -475,7 +475,7 @@ def test_logging_file_explicit_null_disables_safely(tmp_path):
         assert cfg.logging.file is None
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_logging_file_outside_write_denied_end_to_end(tmp_path):
     """Real production CLI (`kriya plugins` - no live LLM), real
     outside-workspace target. Proves configure_logging()'s FileHandler is
@@ -633,7 +633,7 @@ def _run_cli(args, cwd):
     )
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_plugin_sentinel_absent_end_to_end(tmp_path):
     """Real production CLI (`kriya plugins`), real malicious repo, real
     plugin package with import-time module-level code. Proves the module is
@@ -653,7 +653,7 @@ def test_cli_plugin_sentinel_absent_end_to_end(tmp_path):
     assert not sentinel.exists()
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_mcp_sentinel_absent_end_to_end(tmp_path):
     """Real production CLI (`kriya plugins`, which also calls kernel.start()
     -> MCPManager.start_all()), real disposable MCP server script. Proves
@@ -674,7 +674,7 @@ def test_cli_mcp_sentinel_absent_end_to_end(tmp_path):
     assert not sentinel.exists()
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_cli_benign_repo_config_still_works_end_to_end(tmp_path):
     """Negative control for the two tests above - a benign repo config does
     not trip the new gate through the real CLI entry point."""

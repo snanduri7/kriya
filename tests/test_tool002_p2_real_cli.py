@@ -28,7 +28,7 @@ import pytest
 import yaml
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KRIYA_BIN = os.path.join(REPO_ROOT, ".venv", "bin", "kriya")
+KRIYA_BIN = os.path.join(os.path.dirname(sys.executable), "kriya")
 FIXTURE = os.path.join(REPO_ROOT, "tests", "tool002_mcp_fixture.py")
 
 
@@ -64,7 +64,7 @@ def _call_log_lines(path) -> list:
         return [ln for ln in f.read().splitlines() if ln.strip()]
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_real_cli_full_lifecycle_a_through_f(tmp_path):
     """Required tests 29/30/31/32 + Task 6 (-y cannot approve) + Task 13's
     full A-F sequence, all through the real, unmodified `kriya` binary."""
@@ -144,7 +144,7 @@ def test_real_cli_full_lifecycle_a_through_f(tmp_path):
     assert _call_log_lines(call_log) == ["echo", "echo"]  # unchanged - no new call
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_real_cli_revoke_then_deny_does_not_require_restart(tmp_path):
     """Task 11: revocation must take effect on the very next invocation,
     with no restart of Kriya required - proven here by NOT restarting
@@ -172,7 +172,7 @@ def test_real_cli_revoke_then_deny_does_not_require_restart(tmp_path):
     assert _call_log_lines(call_log) == ["echo"]
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_real_cli_capability_profile_drift_invalidates_approval(tmp_path):
     """Task 8's mandatory scenario, proven end-to-end through the real CLI
     (not just at the store/digest level - see test_tool002_p2_invocation_
@@ -217,7 +217,7 @@ def test_real_cli_capability_profile_drift_invalidates_approval(tmp_path):
     assert _call_log_lines(call_log) == ["echo"]  # unchanged - no new call
 
 
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="editable install not present at .venv/bin/kriya")
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
 def test_real_cli_host_mode_explicitly_labeled_non_contained(tmp_path):
     """Required test 27 / Task 15: with containment disabled (the default),
     `kriya mcp inspect` must explicitly show containment as NOT active -
