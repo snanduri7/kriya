@@ -3733,9 +3733,9 @@ class WorkflowController:
           result (each subtask's own generation_metrics()["calls"], real
           per-subtask retry counts, never spilling into another subtask's
           count by construction) and MA7.10 adds real ArtifactRegistry
-          derivation (ArtifactRegistry.derive_from_workspace against the
-          final workspace state, only on full success, persisted alongside
-          whatever was already recorded) - see the code below for both.
+          derivation. PRD-004 derives those facts from the fully verified
+          isolated candidate before commit, then persists the exact derived
+          records after the one real-workspace batch commit succeeds.
           ContractRegistry has NO equivalent hook: EngineeringPlan/Subtask
           carry no contract-shaped metadata a real registration could key
           off, so real contract invalidation through an actual workflow
@@ -5926,76 +5926,248 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
         # Authoritative scope recovery may merge/remove a stage. Completion
         # must be measured against the revalidated CURRENT plan, not the
-        # original loop's pre-revision `total`, or a successfully executed
-        # revised plan is falsely reported as failed solely because it has
-        # fewer stages.
+        # original loop's pre-revision `total`.
         current_plan_subtask_ids = {subtask.id for subtask in plan.subtasks}
         latest_status_by_subtask = {
             result.subtask_id: result.status for result in subtask_results
         }
-        all_completed = all_subtasks_completed(current_plan_subtask_ids, latest_status_by_subtask)
+        subtasks_completed = all_subtasks_completed(
+            current_plan_subtask_ids, latest_status_by_subtask,
+        )
+        all_completed = subtasks_completed
+
+        global_migration_gap: Optional[str] = None
+        global_stack_contract_gap: Optional[str] = None
+        global_preserved_reference_gap: Optional[str] = None
+        global_terminal_obligation_gap: Optional[str] = None
+        artifact_error: Optional[str] = None
+        candidate_derived_artifacts = ()
+        terminal_observability_errors: List[Dict[str, str]] = []
+        post_commit_persistence_errors: List[Dict[str, str]] = []
+        workspace_commit_completed = False
+
+        async def _emit_terminal_event(event_name: str, **data: Any) -> None:
+            """Terminal lifecycle events are telemetry, never correctness gates."""
+            events = getattr(kernel, "events", None) if kernel is not None else None
+            if events is None:
+                return
+            payload = {"run_id": run_id, "plan_id": plan.plan_id, **data}
+            try:
+                await events.emit(event_name, payload)
+            except Exception as error:
+                terminal_observability_errors.append({
+                    "event": event_name,
+                    "error": f"{type(error).__name__}: {error}",
+                })
+                logger.error(
+                    "WorkflowController enforce run %r: terminal event %r failed: %s",
+                    run_id, event_name, error,
+                )
+
+        async def _emit_gate_outcome(
+            gate: str, status: str, reason: Optional[str] = None,
+        ) -> None:
+            payload: Dict[str, Any] = {"gate": gate, "status": status}
+            if reason:
+                payload["reason"] = reason
+            await _emit_terminal_event("terminal_gate_outcome", **payload)
+
         try:
-            if all_completed and plan_workspace_path != workspace_path:
-                terminal_writes: List[StagedFileWrite] = []
-                # plan_validation.py's AMBIGUOUS_PLANNED_FILE_OWNERSHIP check
-                # legitimately allows the same path to be owned by a
-                # dependency-ordered sequential chain of subtasks (e.g. an
-                # "identify usages" stage and a later "migrate" stage both
-                # touching pom.xml) - so plan.subtasks can list the same
-                # planned_file.path more than once. Building one StagedFileWrite
-                # per (subtask, planned_file) pair here fed
-                # commit_revision_grounded_batch's own duplicate-target-path
-                # guard a genuine duplicate and hard-crashed terminal commit
-                # for any such plan. Resolve to exactly ONE entry per unique
-                # path instead: walk subtasks in real dependency/execution
-                # order (not plan.subtasks' possibly-unordered list order) and
-                # let the last owner's declared action win - plan_workspace_path
-                # is a single worktree shared by every subtask, so its on-disk
-                # content already reflects that final, validated state.
-                subtasks_by_id = {subtask.id: subtask for subtask in plan.subtasks}
-                execution_ordered_subtasks = [
-                    subtasks_by_id[sid] for sid in topological_subtask_order(plan) if sid in subtasks_by_id
-                ]
-                final_action_by_path: Dict[str, FileAction] = {}
-                for planned_subtask in execution_ordered_subtasks:
-                    for planned_file in planned_subtask.planned_files:
-                        final_action_by_path[planned_file.path] = planned_file.action
-                for path, action in final_action_by_path.items():
-                    if action == FileAction.DELETE:
-                        candidate_path = os.path.join(plan_workspace_path, path)
-                        if os.path.exists(candidate_path):
-                            raise RuntimeError(
-                                f"Terminal plan candidate did not delete approved file {path!r}"
+            if subtasks_completed:
+                # PRD-004: every blocking terminal gate runs against the one
+                # isolated candidate. The real workspace remains immutable
+                # until this complete set has passed.
+                await _emit_terminal_event(
+                    "terminal_gates_started", candidate_workspace=plan_workspace_path,
+                )
+
+                try:
+                    if migration_resolution.status == MigrationResolutionStatus.RESOLVED:
+                        obligation = migration_resolution.obligation
+                        gap = find_migration_incomplete(
+                            obligation, plan_workspace_path,
+                            validation_scope=MigrationValidationScope.TERMINAL,
+                            obligation_ledger=obligation_ledger,
+                            revision="terminal", source="migration.terminal_gate",
+                        ) if obligation else None
+                        if gap:
+                            global_migration_gap = (
+                                "MIGRATION INCOMPLETE (global final-state check): the goal "
+                                f"explicitly requires replacing {gap['source_identity']} with "
+                                f"{gap['target_identity']}, but {', '.join(gap['reason_codes'])}."
                             )
-                        target_path = os.path.join(workspace_path, path)
-                        terminal_writes.append(StagedFileWrite(
-                            target_path=target_path,
-                            content="",
-                            base_path=target_path,
-                            expected_base_revision=original_plan_revisions[path],
-                            delete=True,
-                        ))
-                        continue
-                    candidate_path = os.path.join(plan_workspace_path, path)
-                    try:
-                        with open(candidate_path, "r", encoding="utf-8", errors="replace") as handle:
-                            candidate_content = handle.read()
-                    except OSError as error:
-                        raise RuntimeError(
-                            f"Terminal plan candidate is missing approved file {path!r}: {error}"
-                        ) from error
-                    target_path = os.path.join(workspace_path, path)
-                    terminal_writes.append(StagedFileWrite(
-                        target_path=target_path,
-                        content=candidate_content,
-                        base_path=target_path,
-                        expected_base_revision=original_plan_revisions[path],
-                    ))
-                commit_revision_grounded_batch(terminal_writes, workspace_path=workspace_path)
-            elif not all_completed and plan_workspace_path != workspace_path:
-                # No subtask output reached the user workspace. A later resume
-                # must rerun previously successful stages rather than skipping
-                # them based on sandbox-only work that has now been discarded.
+                    elif migration_resolution.status == MigrationResolutionStatus.INDETERMINATE:
+                        global_migration_gap = (
+                            "MIGRATION OBLIGATION INDETERMINATE (global final-state check): the goal "
+                            "explicitly expresses replacement intent, but source/target dependency "
+                            f"identity could not be resolved confidently ({migration_resolution.reason}). "
+                            "Refusing to report success on an unconfirmed migration obligation."
+                        )
+                        if obligation_ledger is not None:
+                            obligation_ledger.record(ObligationRecord(
+                                id="migration.identity_resolution",
+                                kind=ObligationKind.MIGRATION_COMPLETION,
+                                status=ObligationStatus.INDETERMINATE,
+                                authority=ObligationAuthority.DETERMINISTIC,
+                                description="migration source/target dependency identity could not be "
+                                            "resolved confidently from the immutable pre-mutation baseline",
+                                source="migration.terminal_gate", revision="terminal",
+                                evidence={"reason": migration_resolution.reason},
+                                terminal_required=True,
+                            ))
+                except Exception as error:
+                    global_migration_gap = (
+                        "MIGRATION FINAL-STATE CHECK INDETERMINATE: the deterministic terminal "
+                        f"migration validator itself raised ({type(error).__name__}: {error}) - refusing to "
+                        "report success on an unverifiable terminal obligation rather than silently "
+                        "trusting the per-subtask gates."
+                    )
+                await _emit_gate_outcome(
+                    "migration", "failed" if global_migration_gap else "passed",
+                    global_migration_gap,
+                )
+
+                try:
+                    terminal_stack_contract = derive_stack_contract(goal)
+                    global_stack_contract_gap = validate_stack_contract_artifacts(
+                        terminal_stack_contract,
+                        (pf.path for st in plan.subtasks for pf in st.planned_files),
+                    )
+                    log_stack_contract_boundary(
+                        "terminal", terminal_stack_contract, global_stack_contract_gap,
+                    )
+                except Exception as error:
+                    global_stack_contract_gap = (
+                        "STACK CONTRACT FINAL-STATE CHECK INDETERMINATE: "
+                        f"{type(error).__name__}: {error}"
+                    )
+                await _emit_gate_outcome(
+                    "stack_contract", "failed" if global_stack_contract_gap else "passed",
+                    global_stack_contract_gap,
+                )
+
+                try:
+                    enforce_preserved_reference_terminal_integrity(
+                        obligation_ledger, plan_workspace_path,
+                    )
+                    violated_preserved = [
+                        record for record in obligation_ledger.current_by_kind(
+                            ObligationKind.PRESERVED_REFERENCE
+                        )
+                        if record.terminal_required
+                        and record.status != ObligationStatus.SATISFIED
+                    ]
+                    if violated_preserved:
+                        global_preserved_reference_gap = (
+                            "PRESERVED REFERENCES UNSATISFIED: "
+                            + "; ".join(
+                                f"{record.id} ({record.status.value})"
+                                for record in violated_preserved
+                            )
+                        )
+                except Exception as error:
+                    global_preserved_reference_gap = (
+                        "PRESERVED REFERENCE FINAL-STATE CHECK INDETERMINATE: "
+                        f"{type(error).__name__}: {error}"
+                    )
+                await _emit_gate_outcome(
+                    "preserved_references",
+                    "failed" if global_preserved_reference_gap else "passed",
+                    global_preserved_reference_gap,
+                )
+
+                try:
+                    unresolved_terminal = obligation_ledger.unresolved_terminal_obligations()
+                    if unresolved_terminal:
+                        global_terminal_obligation_gap = (
+                            "TERMINAL OBLIGATIONS UNSATISFIED (MA8 global aggregation check): "
+                            + "; ".join(
+                                f"{rec.id} ({rec.status.value}, authority={rec.authority.value})"
+                                for rec in unresolved_terminal
+                            )
+                        )
+                except Exception as error:
+                    global_terminal_obligation_gap = (
+                        "TERMINAL OBLIGATION AGGREGATION INDETERMINATE: "
+                        f"{type(error).__name__}: {error}"
+                    )
+                await _emit_gate_outcome(
+                    "terminal_obligations",
+                    "failed" if global_terminal_obligation_gap else "passed",
+                    global_terminal_obligation_gap,
+                )
+
+                try:
+                    milestone_id = control_state.current_milestone_id or run_id
+                    artifact_registry = load_artifact_registry(workspace_path)
+                    candidate_derived_artifacts = ArtifactRegistry.derive_from_workspace(
+                        artifact_registry, plan_workspace_path, milestone_id,
+                    )
+                except Exception as error:
+                    artifact_error = str(error)
+                await _emit_gate_outcome(
+                    "artifact_registry", "failed" if artifact_error else "passed",
+                    artifact_error,
+                )
+
+                all_completed = not any((
+                    global_migration_gap,
+                    global_stack_contract_gap,
+                    global_preserved_reference_gap,
+                    global_terminal_obligation_gap,
+                    artifact_error,
+                ))
+
+                if all_completed:
+                    await _emit_terminal_event("commit_eligible")
+                    if plan_workspace_path != workspace_path:
+                        terminal_writes: List[StagedFileWrite] = []
+                        subtasks_by_id = {subtask.id: subtask for subtask in plan.subtasks}
+                        execution_ordered_subtasks = [
+                            subtasks_by_id[sid]
+                            for sid in topological_subtask_order(plan)
+                            if sid in subtasks_by_id
+                        ]
+                        final_action_by_path: Dict[str, FileAction] = {}
+                        for planned_subtask in execution_ordered_subtasks:
+                            for planned_file in planned_subtask.planned_files:
+                                final_action_by_path[planned_file.path] = planned_file.action
+                        for path, action in final_action_by_path.items():
+                            candidate_path = os.path.join(plan_workspace_path, path)
+                            target_path = os.path.join(workspace_path, path)
+                            if action == FileAction.DELETE:
+                                if os.path.exists(candidate_path):
+                                    raise RuntimeError(
+                                        f"Terminal plan candidate did not delete approved file {path!r}"
+                                    )
+                                terminal_writes.append(StagedFileWrite(
+                                    target_path=target_path, content="", base_path=target_path,
+                                    expected_base_revision=original_plan_revisions[path], delete=True,
+                                ))
+                                continue
+                            try:
+                                with open(
+                                    candidate_path, "r", encoding="utf-8", errors="replace",
+                                ) as handle:
+                                    candidate_content = handle.read()
+                            except OSError as error:
+                                raise RuntimeError(
+                                    f"Terminal plan candidate is missing approved file {path!r}: {error}"
+                                ) from error
+                            terminal_writes.append(StagedFileWrite(
+                                target_path=target_path, content=candidate_content,
+                                base_path=target_path,
+                                expected_base_revision=original_plan_revisions[path],
+                            ))
+                        commit_revision_grounded_batch(
+                            terminal_writes, workspace_path=workspace_path,
+                        )
+                    workspace_commit_completed = True
+                    await _emit_terminal_event("workspace_commit_completed")
+
+            if not all_completed and plan_workspace_path != workspace_path:
+                # Sandbox-only completion state cannot be resumed after the
+                # candidate is discarded.
                 approved_stage_states = {
                     subtask_id: ("pending" if status == "completed" else status)
                     for subtask_id, status in approved_stage_states.items()
@@ -6012,198 +6184,56 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             if plan_workspace_path != workspace_path:
                 remove_git_worktree(workspace_path, plan_workspace_path)
 
-        # Global final-state validation: every subtask can pass its own
-        # LOCAL Quality Gates while a plan-wide obligation is still globally
-        # unsatisfied in the final applied state - "s1 PASSED, s2 PASSED,
-        # s3 PASSED, s4 PASSED, therefore overall PASSED" is insufficient
-        # for a migration. Found live, PRV-05 (2026-08-28, run 5): the
-        # per-subtask migration-completion check (kriya/workflow/attempt.py)
-        # only ever sees the ONE subtask's own grounded scope; this is the
-        # same completion check re-run once, here, against the real,
-        # fully-applied workspace_path - the authoritative terminal state -
-        # after every subtask has already completed and its output has
-        # already been committed above.
-        #
-        # PRV-05 run 6 (2026-08-28): this used to RE-RESOLVE identity too
-        # (resolve_migration_obligation_for_workspace against the final,
-        # already-migrated tree) - by the time migration is done, the real
-        # SOURCE looks "unused" and the heuristic inverts itself, silently
-        # resolving None and never reaching find_migration_incomplete at
-        # all. Reuses the run's ONE `migration_resolution`, resolved once
-        # above against the immutable baseline, instead - identity is fixed;
-        # only completion is checked here, against the final tree, which is
-        # exactly what find_migration_incomplete is for.
-        #
-        # Three distinct outcomes, not two: NOT_APPLICABLE (continue -
-        # obligation satisfied or no migration intent at all), RESOLVED-and-
-        # satisfied (continue), RESOLVED-and-unsatisfied (fail). INDETERMINATE
-        # is ALSO a fail, not a silent continue: the goal explicitly expressed
-        # replacement intent but this run could never confidently establish
-        # what was being replaced with what - claiming success on an
-        # unconfirmed migration obligation is the exact false-PASS shape this
-        # gate exists to prevent, so an unresolved identity must not default
-        # to "no obligation applies." The check itself raising is handled the
-        # same way - fail closed, never silently trust the per-subtask gates.
-        # A goal with no migration intent at all can't realistically reach
-        # either failure path (_goal_expresses_replacement_intent is a cheap
-        # regex gate checked first, before any file I/O), so this only ever
-        # activates for a goal that already looks like a migration - not a
-        # broad new failure surface for ordinary tasks.
-        global_migration_gap: Optional[str] = None
-        if all_completed:
-            try:
-                if migration_resolution.status == MigrationResolutionStatus.RESOLVED:
-                    obligation = migration_resolution.obligation
-                    gap = find_migration_incomplete(
-                        obligation, workspace_path,
-                        validation_scope=MigrationValidationScope.TERMINAL,
-                        obligation_ledger=obligation_ledger,
-                        revision="terminal", source="migration.terminal_gate",
-                    ) if obligation else None
-                    if gap:
-                        global_migration_gap = (
-                            "MIGRATION INCOMPLETE (global final-state check): the goal "
-                            f"explicitly requires replacing {gap['source_identity']} with "
-                            f"{gap['target_identity']}, but {', '.join(gap['reason_codes'])}."
-                        )
-                        all_completed = False
-                elif migration_resolution.status == MigrationResolutionStatus.INDETERMINATE:
-                    global_migration_gap = (
-                        "MIGRATION OBLIGATION INDETERMINATE (global final-state check): the goal "
-                        "explicitly expresses replacement intent, but source/target dependency "
-                        f"identity could not be resolved confidently ({migration_resolution.reason}). "
-                        "Refusing to report success on an unconfirmed migration obligation."
-                    )
-                    # MA8 (spec §3.4/§9's own example: "migration identity
-                    # cannot be resolved safely: INDETERMINATE") - this was
-                    # the one status ObligationStatus already defined but no
-                    # producer ever actually recorded, so
-                    # unresolved_terminal_obligations()'s own INDETERMINATE
-                    # handling stayed dead code. No MigrationObligation
-                    # exists to derive source_identity/target_identity from
-                    # here (that's exactly WHY resolution is indeterminate),
-                    # so the id is plan-level, not per-migration-requirement.
-                    if obligation_ledger is not None:
-                        obligation_ledger.record(ObligationRecord(
-                            id="migration.identity_resolution",
-                            kind=ObligationKind.MIGRATION_COMPLETION,
-                            status=ObligationStatus.INDETERMINATE,
-                            authority=ObligationAuthority.DETERMINISTIC,
-                            description="migration source/target dependency identity could not be "
-                                        "resolved confidently from the immutable pre-mutation baseline",
-                            source="migration.terminal_gate", revision="terminal",
-                            evidence={"reason": migration_resolution.reason},
-                            terminal_required=True,
-                        ))
-                    all_completed = False
-            except Exception as e:
-                global_migration_gap = (
-                    "MIGRATION FINAL-STATE CHECK INDETERMINATE: the deterministic terminal "
-                    f"migration validator itself raised ({type(e).__name__}: {e}) - refusing to "
-                    "report success on an unverifiable terminal obligation rather than silently "
-                    "trusting the per-subtask gates."
-                )
-                all_completed = False
-
-        global_stack_contract_gap: Optional[str] = None
-        if all_completed:
-            terminal_stack_contract = derive_stack_contract(goal)
-            global_stack_contract_gap = validate_stack_contract_artifacts(
-                terminal_stack_contract,
-                (pf.path for st in plan.subtasks for pf in st.planned_files),
-            )
-            log_stack_contract_boundary("terminal", terminal_stack_contract, global_stack_contract_gap)
-            if global_stack_contract_gap:
-                all_completed = False
-
-        # PRV-11 preservation extension (2026-09-06/07, Production
-        # Validation P2): re-hash every currently-SATISFIED PRESERVED_
-        # REFERENCE obligation's target against its recorded pre-
-        # generation baseline, now that every subtask has finished and its
-        # output is already committed to the real workspace_path (the same
-        # "authoritative terminal state" the migration gate above re-checks
-        # against). A mismatch re-records the SAME id VIOLATED - a same-
-        # authority (DETERMINISTIC) SATISFIED->VIOLATED transition, so the
-        # ledger's own regression detection sees it too, and the generic
-        # MA8 §42/43 backstop just below fails the run with no new gate.
-        if all_completed:
-            enforce_preserved_reference_terminal_integrity(obligation_ledger, workspace_path)
-
-        # MA8 (spec §42/43) - a generic backstop layered ALONGSIDE the
-        # migration-specific gate above, not a replacement for it (§43's
-        # own explicit interim model: existing gates AND terminal MA8
-        # obligations, not one instead of the other). Today every
-        # terminal_required obligation kind (PLAN_STRUCTURAL_VALIDITY,
-        # MIGRATION_COMPLETION) already has its own dedicated gate earlier
-        # in this run (plan-repair loop, the migration check just above),
-        # so this rarely fires on its own - its value is generalizing:
-        # any FUTURE obligation producer that marks terminal_required=True
-        # is automatically covered here without a new gate being wired by
-        # hand, and it catches the case where a specific gate's own
-        # all_completed flip was somehow bypassed.
-        global_terminal_obligation_gap: Optional[str] = None
-        if all_completed:
-            unresolved_terminal = obligation_ledger.unresolved_terminal_obligations()
-            if unresolved_terminal:
-                global_terminal_obligation_gap = (
-                    "TERMINAL OBLIGATIONS UNSATISFIED (MA8 global aggregation check): "
-                    + "; ".join(
-                        f"{rec.id} ({rec.status.value}, authority={rec.authority.value})"
-                        for rec in unresolved_terminal
-                    )
-                )
-                all_completed = False
-
-        needs_review = any(r.status == SubtaskStatus.NEEDS_REVIEW for r in subtask_results)
-        final_plan_lifecycle = "completed" if all_completed else "needs_review" if needs_review else "failed"
-        save_approved_plan(
-            workspace_path, plan.plan_id,
-            build_approved_plan_document(
-                plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
-                stage_states=approved_stage_states, lifecycle_state=final_plan_lifecycle,
-            ),
+        needs_review = (
+            any(r.status == SubtaskStatus.NEEDS_REVIEW for r in subtask_results)
+            or artifact_error is not None
         )
+        final_plan_lifecycle = "completed" if all_completed else "needs_review" if needs_review else "failed"
+        try:
+            save_approved_plan(
+                workspace_path, plan.plan_id,
+                build_approved_plan_document(
+                    plan, plan_hash=current_plan_hash, repair_attempts=repair_attempts,
+                    stage_states=approved_stage_states, lifecycle_state=final_plan_lifecycle,
+                ),
+            )
+        except Exception as error:
+            persistence_error = {
+                "operation": "save_approved_plan",
+                "error": f"{type(error).__name__}: {error}",
+            }
+            if workspace_commit_completed:
+                post_commit_persistence_errors.append(persistence_error)
+            else:
+                logger.error(
+                    "WorkflowController enforce run %r: final plan persistence failed: %s",
+                    run_id, error,
+                )
+
         aggregated: Dict[str, Any] = {
             "status": "success" if all_completed else "needs_review" if needs_review else "failed",
             "quality_gates_passed": all_completed,
             "run_id": run_id,
             "subtask_results": [r.to_dict() for r in subtask_results],
             "files": sorted(established_file_context.keys()),
-            # R1 Deliverable 5 correction (2026-09-08): the same
-            # `repair_attempts` local this function already threads into
-            # every save_approved_plan()/build_approved_plan_document() call
-            # above (the authoritative structured-plan repair-round count -
-            # see PLAN VALIDATION near this function's start) - the
-            # _UnsafeStructuredPlan except-handler around this function's
-            # caller already surfaces it under this exact key
-            # (`plan_repair_attempts`) for the plan-repair-exhausted failure
-            # case; this is the same value, same key, for every OTHER
-            # outcome (success/needs_review/failed-in-subtask-loop). A pure
-            # read of an existing local, not a new counter.
             "plan_repair_attempts": repair_attempts,
         }
-        if global_migration_gap:
-            aggregated["global_migration_gap"] = global_migration_gap
+        for key, value in (
+            ("global_migration_gap", global_migration_gap),
+            ("global_stack_contract_gap", global_stack_contract_gap),
+            ("global_preserved_reference_gap", global_preserved_reference_gap),
+            ("global_terminal_obligation_gap", global_terminal_obligation_gap),
+        ):
+            if value:
+                aggregated[key] = value
+                logger.error("WorkflowController enforce run %r: %s", run_id, value)
+        if artifact_error:
             logger.error(
-                f"WorkflowController enforce run {run_id!r}: {global_migration_gap}"
+                "WorkflowController enforce run %r: candidate artifact derivation failed: %s",
+                run_id, artifact_error,
             )
-        if global_terminal_obligation_gap:
-            aggregated["global_terminal_obligation_gap"] = global_terminal_obligation_gap
-            logger.error(
-                f"WorkflowController enforce run {run_id!r}: {global_terminal_obligation_gap}"
-            )
-        if global_stack_contract_gap:
-            aggregated["global_stack_contract_gap"] = global_stack_contract_gap
-            logger.error(
-                f"WorkflowController enforce run {run_id!r}: {global_stack_contract_gap}"
-            )
+            aggregated["artifact_error"] = artifact_error
         if knowledge_gap_break is not None:
-            # Overrides status/run_id above (not quality_gates_passed/subtask_
-            # results/files - those stay honest) so the CLI's real, already-built
-            # knowledge_gap confirmation flow (kriya/cli.py) can engage exactly
-            # as it already does for the legacy/shadow paths, instead of a silent
-            # generic failure - see the knowledge_gap_break assignment above for
-            # the full incident this closes.
             aggregated["status"] = knowledge_gap_break["status"]
             aggregated["gap_report"] = knowledge_gap_break["gap_report"]
             aggregated["run_id"] = knowledge_gap_break["run_id"]
@@ -6221,15 +6251,6 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             aggregated["plan_recovery_events"] = plan_recovery_events
         if subtask_call_results:
             aggregated["last_subtask_result"] = subtask_call_results[-1]
-            # MA7.9 - real subtask retry-locality data, not a guess: each
-            # entry's own generation_metrics()["calls"] (workflow.py's own
-            # GenerationState.generation_metrics) is that ONE subtask's
-            # OWN run_generation_workflow() invocation's real retry count -
-            # by construction (each subtask gets its own, fully separate
-            # call), a retry can never spill into a different subtask's
-            # count. This is what makes "most failures retry one subtask,
-            # not the whole goal" (MA7's own stated validation target)
-            # actually measurable now, rather than asserted.
             aggregated["subtask_retry_locality"] = [
                 {
                     "subtask_id": r.subtask_id,
@@ -6239,36 +6260,32 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 for r, cr in zip(subtask_results, subtask_call_results, strict=False)
             ]
 
-        # MA7.10 - real ArtifactRegistry derivation through an actual
-        # workflow, not a direct constructor unit test: once every subtask
-        # has really applied its files to the real workspace (only on full
-        # success - a partial/failed run's workspace state is not a
-        # trustworthy basis for real build-artifact facts), derive
-        # whatever real artifacts now exist there and persist them
-        # alongside whatever was already recorded. ContractRegistry has no
-        # equivalent hook yet - EngineeringPlan/Subtask carry no
-        # contract-shaped metadata a real registration could key off, so
-        # real contract invalidation through an actual workflow remains a
-        # separate, unclosed gap (see this method's own module docstring
-        # for the honest scope note) rather than a shallow, invented
-        # schema addition here.
-        if all_completed:
+        # Artifact facts were derived from the verified candidate. Persist
+        # those exact facts only after the source commit succeeds. A failure
+        # here is a persistence/observability failure and cannot rewrite the
+        # already-established verification result.
+        if workspace_commit_completed and candidate_derived_artifacts:
             try:
-                milestone_id = control_state.current_milestone_id or run_id
                 artifact_registry = load_artifact_registry(workspace_path)
-                derived = ArtifactRegistry.derive_from_workspace(
-                    artifact_registry, workspace_path, milestone_id,
-                )
-                for record in derived:
+                for record in candidate_derived_artifacts:
                     artifact_registry.record(record)
-                if derived:
-                    save_artifact_registry(workspace_path, artifact_registry)
-                    aggregated["derived_artifacts"] = [r.to_dict() for r in derived]
-            except Exception as e:
-                logger.error(f"WorkflowController enforce run {run_id!r}: artifact derivation failed: {e}")
-                aggregated["status"] = "needs_review"
-                aggregated["quality_gates_passed"] = False
-                aggregated["artifact_error"] = str(e)
+                save_artifact_registry(workspace_path, artifact_registry)
+                aggregated["derived_artifacts"] = [
+                    record.to_dict() for record in candidate_derived_artifacts
+                ]
+            except Exception as error:
+                logger.error(
+                    "WorkflowController enforce run %r: post-commit artifact persistence failed: %s",
+                    run_id, error,
+                )
+                post_commit_persistence_errors.append({
+                    "operation": "save_artifact_registry",
+                    "error": f"{type(error).__name__}: {error}",
+                })
+        if terminal_observability_errors:
+            aggregated["observability_errors"] = terminal_observability_errors
+        if post_commit_persistence_errors:
+            aggregated["post_commit_persistence_errors"] = post_commit_persistence_errors
 
         report = build_verification_report(plan.acceptance_criteria)
         return aggregated, plan, tuple(subtask_results), ledger.all(), report, control_state

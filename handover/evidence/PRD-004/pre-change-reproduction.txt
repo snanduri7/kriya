@@ -1,0 +1,835 @@
+FFFFFFF                                                                  [100%]
+=================================== FAILURES ===================================
+_ test_enforce_terminal_gate_failure_discards_candidate_before_commit[migration-global_migration_gap-failed] _
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107dc6650>
+failing_gate = 'migration', expected_key = 'global_migration_gap'
+expected_status = 'failed'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("failing_gate", "expected_key", "expected_status"),
+        [
+            ("migration", "global_migration_gap", "failed"),
+            ("stack_contract", "global_stack_contract_gap", "failed"),
+            ("preserved_references", "global_preserved_reference_gap", "failed"),
+            ("terminal_obligations", "global_terminal_obligation_gap", "failed"),
+            ("artifact_registry", "artifact_error", "needs_review"),
+        ],
+    )
+    async def test_enforce_terminal_gate_failure_discards_candidate_before_commit(
+        tmp_path, monkeypatch, failing_gate, expected_key, expected_status,
+    ):
+        """Every terminal gate fails against a changed isolated candidate.
+    
+        The source bytes and commit function prove the gate cannot mutate the
+        authoritative workspace before returning its failure classification.
+        """
+        from contextlib import ExitStack
+    
+        source = tmp_path / "app.py"
+        source.write_text("original\n")
+        plan = EngineeringPlan(
+            plan_id=f"prd004-{failing_gate}", kind=ChangeKind.TASK,
+            subtasks=[Subtask(
+                id="s1", description="update app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="app.py", action=FileAction.MODIFY)],
+            )],
+        )
+        sandbox = tmp_path / "plan-sandbox"
+    
+        def create_plan_sandbox(workspace):
+            shutil.copytree(workspace, sandbox, ignore=shutil.ignore_patterns(".kriya", "plan-sandbox"))
+            return str(sandbox)
+    
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.create_git_worktree", create_plan_sandbox,
+        )
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.remove_git_worktree",
+            lambda workspace, candidate: shutil.rmtree(candidate),
+        )
+    
+        async def fake_run(**kwargs):
+            (sandbox / "app.py").write_text("candidate change\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["app.py"]}
+    
+        we = _workflow_engine()
+        we.run_generation_workflow = fake_run
+        unresolved = ObligationRecord(
+            id="terminal.test", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+            status=ObligationStatus.VIOLATED, authority=ObligationAuthority.DETERMINISTIC,
+            description="forced terminal gap", source="test", terminal_required=True,
+        )
+        commit_spy = MagicMock()
+        p1, p2, p3 = _patched(plan)
+        with ExitStack() as stack:
+            stack.enter_context(p1)
+            stack.enter_context(p2)
+            stack.enter_context(p3)
+            stack.enter_context(patch(
+                "kriya.workflow.workflow_controller.commit_revision_grounded_batch", commit_spy,
+            ))
+            if failing_gate == "migration":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.resolve_migration_resolution",
+                    return_value=workflow_controller_module.MigrationResolution(
+                        workflow_controller_module.MigrationResolutionStatus.RESOLVED,
+                        obligation=MagicMock(),
+                    ),
+                ))
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.find_migration_incomplete",
+                    return_value={
+                        "source_identity": "old", "target_identity": "new",
+                        "reason_codes": ["SOURCE_USAGE_REMAINS"],
+                    },
+                ))
+            elif failing_gate == "stack_contract":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.validate_stack_contract_artifacts",
+                    return_value="forced stack contract gap",
+                ))
+            elif failing_gate == "preserved_references":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.enforce_preserved_reference_terminal_integrity",
+                    side_effect=RuntimeError("preservation validator exploded"),
+                ))
+            elif failing_gate == "terminal_obligations":
+                stack.enter_context(patch.object(
+                    ObligationLedger, "unresolved_terminal_obligations", return_value=[unresolved],
+                ))
+            elif failing_gate == "artifact_registry":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.ArtifactRegistry.derive_from_workspace",
+                    side_effect=RuntimeError("derivation exploded"),
+                ))
+            result = await WorkflowController(we).execute(
+                "goal", str(tmp_path), migration_mode="enforce",
+            )
+    
+        assert result.legacy_result["status"] == expected_status
+        assert result.legacy_result["quality_gates_passed"] is False
+        assert expected_key in result.legacy_result
+        assert source.read_text() == "original\n"
+>       commit_spy.assert_not_called()
+
+tests/test_workflow_controller_enforce.py:10044: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock id='4426883024'>
+
+    def assert_not_called(self):
+        """assert that the mock was never called.
+        """
+        if self.call_count != 0:
+            msg = ("Expected '%s' to not have been called. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'mock' to not have been called. Called 1 times.
+E           Calls: [call([StagedFileWrite(target_path='/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai0/app.py', content='candidate change\n', base_path='/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai0/app.py', expected_base_revision='25718360e05d3c2d0963d1381e9dd4dae5fca789244ee4b9f861adcc0cc96218', delete=False)], workspace_path='/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai0')].
+
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:947: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    kriya.workflow.workflow_controller:workflow_controller.py:6187 WorkflowController enforce run '20260921T211208-afac1df6': MIGRATION INCOMPLETE (global final-state check): the goal explicitly requires replacing old with new, but SOURCE_USAGE_REMAINS.
+_ test_enforce_terminal_gate_failure_discards_candidate_before_commit[stack_contract-global_stack_contract_gap-failed] _
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai1')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1078717f0>
+failing_gate = 'stack_contract', expected_key = 'global_stack_contract_gap'
+expected_status = 'failed'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("failing_gate", "expected_key", "expected_status"),
+        [
+            ("migration", "global_migration_gap", "failed"),
+            ("stack_contract", "global_stack_contract_gap", "failed"),
+            ("preserved_references", "global_preserved_reference_gap", "failed"),
+            ("terminal_obligations", "global_terminal_obligation_gap", "failed"),
+            ("artifact_registry", "artifact_error", "needs_review"),
+        ],
+    )
+    async def test_enforce_terminal_gate_failure_discards_candidate_before_commit(
+        tmp_path, monkeypatch, failing_gate, expected_key, expected_status,
+    ):
+        """Every terminal gate fails against a changed isolated candidate.
+    
+        The source bytes and commit function prove the gate cannot mutate the
+        authoritative workspace before returning its failure classification.
+        """
+        from contextlib import ExitStack
+    
+        source = tmp_path / "app.py"
+        source.write_text("original\n")
+        plan = EngineeringPlan(
+            plan_id=f"prd004-{failing_gate}", kind=ChangeKind.TASK,
+            subtasks=[Subtask(
+                id="s1", description="update app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="app.py", action=FileAction.MODIFY)],
+            )],
+        )
+        sandbox = tmp_path / "plan-sandbox"
+    
+        def create_plan_sandbox(workspace):
+            shutil.copytree(workspace, sandbox, ignore=shutil.ignore_patterns(".kriya", "plan-sandbox"))
+            return str(sandbox)
+    
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.create_git_worktree", create_plan_sandbox,
+        )
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.remove_git_worktree",
+            lambda workspace, candidate: shutil.rmtree(candidate),
+        )
+    
+        async def fake_run(**kwargs):
+            (sandbox / "app.py").write_text("candidate change\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["app.py"]}
+    
+        we = _workflow_engine()
+        we.run_generation_workflow = fake_run
+        unresolved = ObligationRecord(
+            id="terminal.test", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+            status=ObligationStatus.VIOLATED, authority=ObligationAuthority.DETERMINISTIC,
+            description="forced terminal gap", source="test", terminal_required=True,
+        )
+        commit_spy = MagicMock()
+        p1, p2, p3 = _patched(plan)
+        with ExitStack() as stack:
+            stack.enter_context(p1)
+            stack.enter_context(p2)
+            stack.enter_context(p3)
+            stack.enter_context(patch(
+                "kriya.workflow.workflow_controller.commit_revision_grounded_batch", commit_spy,
+            ))
+            if failing_gate == "migration":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.resolve_migration_resolution",
+                    return_value=workflow_controller_module.MigrationResolution(
+                        workflow_controller_module.MigrationResolutionStatus.RESOLVED,
+                        obligation=MagicMock(),
+                    ),
+                ))
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.find_migration_incomplete",
+                    return_value={
+                        "source_identity": "old", "target_identity": "new",
+                        "reason_codes": ["SOURCE_USAGE_REMAINS"],
+                    },
+                ))
+            elif failing_gate == "stack_contract":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.validate_stack_contract_artifacts",
+                    return_value="forced stack contract gap",
+                ))
+            elif failing_gate == "preserved_references":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.enforce_preserved_reference_terminal_integrity",
+                    side_effect=RuntimeError("preservation validator exploded"),
+                ))
+            elif failing_gate == "terminal_obligations":
+                stack.enter_context(patch.object(
+                    ObligationLedger, "unresolved_terminal_obligations", return_value=[unresolved],
+                ))
+            elif failing_gate == "artifact_registry":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.ArtifactRegistry.derive_from_workspace",
+                    side_effect=RuntimeError("derivation exploded"),
+                ))
+            result = await WorkflowController(we).execute(
+                "goal", str(tmp_path), migration_mode="enforce",
+            )
+    
+        assert result.legacy_result["status"] == expected_status
+        assert result.legacy_result["quality_gates_passed"] is False
+        assert expected_key in result.legacy_result
+        assert source.read_text() == "original\n"
+>       commit_spy.assert_not_called()
+
+tests/test_workflow_controller_enforce.py:10044: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock id='4421357584'>
+
+    def assert_not_called(self):
+        """assert that the mock was never called.
+        """
+        if self.call_count != 0:
+            msg = ("Expected '%s' to not have been called. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'mock' to not have been called. Called 1 times.
+E           Calls: [call([StagedFileWrite(target_path='/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai1/app.py', content='candidate change\n', base_path='/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai1/app.py', expected_base_revision='25718360e05d3c2d0963d1381e9dd4dae5fca789244ee4b9f861adcc0cc96218', delete=False)], workspace_path='/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai1')].
+
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:947: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    kriya.workflow.workflow_controller:workflow_controller.py:6197 WorkflowController enforce run '20260921T211209-1b7d1e50': forced stack contract gap
+_ test_enforce_terminal_gate_failure_discards_candidate_before_commit[preserved_references-global_preserved_reference_gap-failed] _
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai2')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1078c9370>
+failing_gate = 'preserved_references'
+expected_key = 'global_preserved_reference_gap', expected_status = 'failed'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("failing_gate", "expected_key", "expected_status"),
+        [
+            ("migration", "global_migration_gap", "failed"),
+            ("stack_contract", "global_stack_contract_gap", "failed"),
+            ("preserved_references", "global_preserved_reference_gap", "failed"),
+            ("terminal_obligations", "global_terminal_obligation_gap", "failed"),
+            ("artifact_registry", "artifact_error", "needs_review"),
+        ],
+    )
+    async def test_enforce_terminal_gate_failure_discards_candidate_before_commit(
+        tmp_path, monkeypatch, failing_gate, expected_key, expected_status,
+    ):
+        """Every terminal gate fails against a changed isolated candidate.
+    
+        The source bytes and commit function prove the gate cannot mutate the
+        authoritative workspace before returning its failure classification.
+        """
+        from contextlib import ExitStack
+    
+        source = tmp_path / "app.py"
+        source.write_text("original\n")
+        plan = EngineeringPlan(
+            plan_id=f"prd004-{failing_gate}", kind=ChangeKind.TASK,
+            subtasks=[Subtask(
+                id="s1", description="update app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="app.py", action=FileAction.MODIFY)],
+            )],
+        )
+        sandbox = tmp_path / "plan-sandbox"
+    
+        def create_plan_sandbox(workspace):
+            shutil.copytree(workspace, sandbox, ignore=shutil.ignore_patterns(".kriya", "plan-sandbox"))
+            return str(sandbox)
+    
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.create_git_worktree", create_plan_sandbox,
+        )
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.remove_git_worktree",
+            lambda workspace, candidate: shutil.rmtree(candidate),
+        )
+    
+        async def fake_run(**kwargs):
+            (sandbox / "app.py").write_text("candidate change\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["app.py"]}
+    
+        we = _workflow_engine()
+        we.run_generation_workflow = fake_run
+        unresolved = ObligationRecord(
+            id="terminal.test", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+            status=ObligationStatus.VIOLATED, authority=ObligationAuthority.DETERMINISTIC,
+            description="forced terminal gap", source="test", terminal_required=True,
+        )
+        commit_spy = MagicMock()
+        p1, p2, p3 = _patched(plan)
+        with ExitStack() as stack:
+            stack.enter_context(p1)
+            stack.enter_context(p2)
+            stack.enter_context(p3)
+            stack.enter_context(patch(
+                "kriya.workflow.workflow_controller.commit_revision_grounded_batch", commit_spy,
+            ))
+            if failing_gate == "migration":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.resolve_migration_resolution",
+                    return_value=workflow_controller_module.MigrationResolution(
+                        workflow_controller_module.MigrationResolutionStatus.RESOLVED,
+                        obligation=MagicMock(),
+                    ),
+                ))
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.find_migration_incomplete",
+                    return_value={
+                        "source_identity": "old", "target_identity": "new",
+                        "reason_codes": ["SOURCE_USAGE_REMAINS"],
+                    },
+                ))
+            elif failing_gate == "stack_contract":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.validate_stack_contract_artifacts",
+                    return_value="forced stack contract gap",
+                ))
+            elif failing_gate == "preserved_references":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.enforce_preserved_reference_terminal_integrity",
+                    side_effect=RuntimeError("preservation validator exploded"),
+                ))
+            elif failing_gate == "terminal_obligations":
+                stack.enter_context(patch.object(
+                    ObligationLedger, "unresolved_terminal_obligations", return_value=[unresolved],
+                ))
+            elif failing_gate == "artifact_registry":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.ArtifactRegistry.derive_from_workspace",
+                    side_effect=RuntimeError("derivation exploded"),
+                ))
+>           result = await WorkflowController(we).execute(
+                "goal", str(tmp_path), migration_mode="enforce",
+            )
+
+tests/test_workflow_controller_enforce.py:10036: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+kriya/workflow/workflow_controller.py:3186: in execute
+    await self._run_structured_enforce(
+kriya/workflow/workflow_controller.py:6130: in _run_structured_enforce
+    enforce_preserved_reference_terminal_integrity(obligation_ledger, workspace_path)
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:1176: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:1180: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock name='enforce_preserved_reference_terminal_integrity' id='4421365312'>
+args = (<kriya.workflow.obligations.ObligationLedger object at 0x10a6f8550>, '/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai2')
+kwargs = {}
+
+    def _execute_mock_call(self, /, *args, **kwargs):
+        # separate from _increment_mock_call so that awaited functions are
+        # executed separately from their call, also AsyncMock overrides this method
+    
+        effect = self.side_effect
+        if effect is not None:
+            if _is_exception(effect):
+>               raise effect
+E               RuntimeError: preservation validator exploded
+
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:1241: RuntimeError
+_ test_enforce_terminal_gate_failure_discards_candidate_before_commit[terminal_obligations-global_terminal_obligation_gap-failed] _
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai3')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107d38450>
+failing_gate = 'terminal_obligations'
+expected_key = 'global_terminal_obligation_gap', expected_status = 'failed'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("failing_gate", "expected_key", "expected_status"),
+        [
+            ("migration", "global_migration_gap", "failed"),
+            ("stack_contract", "global_stack_contract_gap", "failed"),
+            ("preserved_references", "global_preserved_reference_gap", "failed"),
+            ("terminal_obligations", "global_terminal_obligation_gap", "failed"),
+            ("artifact_registry", "artifact_error", "needs_review"),
+        ],
+    )
+    async def test_enforce_terminal_gate_failure_discards_candidate_before_commit(
+        tmp_path, monkeypatch, failing_gate, expected_key, expected_status,
+    ):
+        """Every terminal gate fails against a changed isolated candidate.
+    
+        The source bytes and commit function prove the gate cannot mutate the
+        authoritative workspace before returning its failure classification.
+        """
+        from contextlib import ExitStack
+    
+        source = tmp_path / "app.py"
+        source.write_text("original\n")
+        plan = EngineeringPlan(
+            plan_id=f"prd004-{failing_gate}", kind=ChangeKind.TASK,
+            subtasks=[Subtask(
+                id="s1", description="update app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="app.py", action=FileAction.MODIFY)],
+            )],
+        )
+        sandbox = tmp_path / "plan-sandbox"
+    
+        def create_plan_sandbox(workspace):
+            shutil.copytree(workspace, sandbox, ignore=shutil.ignore_patterns(".kriya", "plan-sandbox"))
+            return str(sandbox)
+    
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.create_git_worktree", create_plan_sandbox,
+        )
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.remove_git_worktree",
+            lambda workspace, candidate: shutil.rmtree(candidate),
+        )
+    
+        async def fake_run(**kwargs):
+            (sandbox / "app.py").write_text("candidate change\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["app.py"]}
+    
+        we = _workflow_engine()
+        we.run_generation_workflow = fake_run
+        unresolved = ObligationRecord(
+            id="terminal.test", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+            status=ObligationStatus.VIOLATED, authority=ObligationAuthority.DETERMINISTIC,
+            description="forced terminal gap", source="test", terminal_required=True,
+        )
+        commit_spy = MagicMock()
+        p1, p2, p3 = _patched(plan)
+        with ExitStack() as stack:
+            stack.enter_context(p1)
+            stack.enter_context(p2)
+            stack.enter_context(p3)
+            stack.enter_context(patch(
+                "kriya.workflow.workflow_controller.commit_revision_grounded_batch", commit_spy,
+            ))
+            if failing_gate == "migration":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.resolve_migration_resolution",
+                    return_value=workflow_controller_module.MigrationResolution(
+                        workflow_controller_module.MigrationResolutionStatus.RESOLVED,
+                        obligation=MagicMock(),
+                    ),
+                ))
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.find_migration_incomplete",
+                    return_value={
+                        "source_identity": "old", "target_identity": "new",
+                        "reason_codes": ["SOURCE_USAGE_REMAINS"],
+                    },
+                ))
+            elif failing_gate == "stack_contract":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.validate_stack_contract_artifacts",
+                    return_value="forced stack contract gap",
+                ))
+            elif failing_gate == "preserved_references":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.enforce_preserved_reference_terminal_integrity",
+                    side_effect=RuntimeError("preservation validator exploded"),
+                ))
+            elif failing_gate == "terminal_obligations":
+                stack.enter_context(patch.object(
+                    ObligationLedger, "unresolved_terminal_obligations", return_value=[unresolved],
+                ))
+            elif failing_gate == "artifact_registry":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.ArtifactRegistry.derive_from_workspace",
+                    side_effect=RuntimeError("derivation exploded"),
+                ))
+            result = await WorkflowController(we).execute(
+                "goal", str(tmp_path), migration_mode="enforce",
+            )
+    
+        assert result.legacy_result["status"] == expected_status
+        assert result.legacy_result["quality_gates_passed"] is False
+        assert expected_key in result.legacy_result
+        assert source.read_text() == "original\n"
+>       commit_spy.assert_not_called()
+
+tests/test_workflow_controller_enforce.py:10044: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock id='4421369344'>
+
+    def assert_not_called(self):
+        """assert that the mock was never called.
+        """
+        if self.call_count != 0:
+            msg = ("Expected '%s' to not have been called. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'mock' to not have been called. Called 1 times.
+E           Calls: [call([StagedFileWrite(target_path='/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai3/app.py', content='candidate change\n', base_path='/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai3/app.py', expected_base_revision='25718360e05d3c2d0963d1381e9dd4dae5fca789244ee4b9f861adcc0cc96218', delete=False)], workspace_path='/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai3')].
+
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:947: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    kriya.workflow.workflow_controller:workflow_controller.py:6192 WorkflowController enforce run '20260921T211209-cf1738e5': TERMINAL OBLIGATIONS UNSATISFIED (MA8 global aggregation check): terminal.test (violated, authority=deterministic)
+_ test_enforce_terminal_gate_failure_discards_candidate_before_commit[artifact_registry-artifact_error-needs_review] _
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai4')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1078c36b0>
+failing_gate = 'artifact_registry', expected_key = 'artifact_error'
+expected_status = 'needs_review'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("failing_gate", "expected_key", "expected_status"),
+        [
+            ("migration", "global_migration_gap", "failed"),
+            ("stack_contract", "global_stack_contract_gap", "failed"),
+            ("preserved_references", "global_preserved_reference_gap", "failed"),
+            ("terminal_obligations", "global_terminal_obligation_gap", "failed"),
+            ("artifact_registry", "artifact_error", "needs_review"),
+        ],
+    )
+    async def test_enforce_terminal_gate_failure_discards_candidate_before_commit(
+        tmp_path, monkeypatch, failing_gate, expected_key, expected_status,
+    ):
+        """Every terminal gate fails against a changed isolated candidate.
+    
+        The source bytes and commit function prove the gate cannot mutate the
+        authoritative workspace before returning its failure classification.
+        """
+        from contextlib import ExitStack
+    
+        source = tmp_path / "app.py"
+        source.write_text("original\n")
+        plan = EngineeringPlan(
+            plan_id=f"prd004-{failing_gate}", kind=ChangeKind.TASK,
+            subtasks=[Subtask(
+                id="s1", description="update app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="app.py", action=FileAction.MODIFY)],
+            )],
+        )
+        sandbox = tmp_path / "plan-sandbox"
+    
+        def create_plan_sandbox(workspace):
+            shutil.copytree(workspace, sandbox, ignore=shutil.ignore_patterns(".kriya", "plan-sandbox"))
+            return str(sandbox)
+    
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.create_git_worktree", create_plan_sandbox,
+        )
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.remove_git_worktree",
+            lambda workspace, candidate: shutil.rmtree(candidate),
+        )
+    
+        async def fake_run(**kwargs):
+            (sandbox / "app.py").write_text("candidate change\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["app.py"]}
+    
+        we = _workflow_engine()
+        we.run_generation_workflow = fake_run
+        unresolved = ObligationRecord(
+            id="terminal.test", kind=ObligationKind.PLAN_STRUCTURAL_VALIDITY,
+            status=ObligationStatus.VIOLATED, authority=ObligationAuthority.DETERMINISTIC,
+            description="forced terminal gap", source="test", terminal_required=True,
+        )
+        commit_spy = MagicMock()
+        p1, p2, p3 = _patched(plan)
+        with ExitStack() as stack:
+            stack.enter_context(p1)
+            stack.enter_context(p2)
+            stack.enter_context(p3)
+            stack.enter_context(patch(
+                "kriya.workflow.workflow_controller.commit_revision_grounded_batch", commit_spy,
+            ))
+            if failing_gate == "migration":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.resolve_migration_resolution",
+                    return_value=workflow_controller_module.MigrationResolution(
+                        workflow_controller_module.MigrationResolutionStatus.RESOLVED,
+                        obligation=MagicMock(),
+                    ),
+                ))
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.find_migration_incomplete",
+                    return_value={
+                        "source_identity": "old", "target_identity": "new",
+                        "reason_codes": ["SOURCE_USAGE_REMAINS"],
+                    },
+                ))
+            elif failing_gate == "stack_contract":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.validate_stack_contract_artifacts",
+                    return_value="forced stack contract gap",
+                ))
+            elif failing_gate == "preserved_references":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.enforce_preserved_reference_terminal_integrity",
+                    side_effect=RuntimeError("preservation validator exploded"),
+                ))
+            elif failing_gate == "terminal_obligations":
+                stack.enter_context(patch.object(
+                    ObligationLedger, "unresolved_terminal_obligations", return_value=[unresolved],
+                ))
+            elif failing_gate == "artifact_registry":
+                stack.enter_context(patch(
+                    "kriya.workflow.workflow_controller.ArtifactRegistry.derive_from_workspace",
+                    side_effect=RuntimeError("derivation exploded"),
+                ))
+            result = await WorkflowController(we).execute(
+                "goal", str(tmp_path), migration_mode="enforce",
+            )
+    
+        assert result.legacy_result["status"] == expected_status
+        assert result.legacy_result["quality_gates_passed"] is False
+        assert expected_key in result.legacy_result
+        assert source.read_text() == "original\n"
+>       commit_spy.assert_not_called()
+
+tests/test_workflow_controller_enforce.py:10044: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <MagicMock id='4421362288'>
+
+    def assert_not_called(self):
+        """assert that the mock was never called.
+        """
+        if self.call_count != 0:
+            msg = ("Expected '%s' to not have been called. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'mock' to not have been called. Called 1 times.
+E           Calls: [call([StagedFileWrite(target_path='/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai4/app.py', content='candidate change\n', base_path='/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai4/app.py', expected_base_revision='25718360e05d3c2d0963d1381e9dd4dae5fca789244ee4b9f861adcc0cc96218', delete=False)], workspace_path='/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_gate_fai4')].
+
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:947: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    kriya.workflow.workflow_controller:workflow_controller.py:6268 WorkflowController enforce run '20260921T211209-5b8ccc9c': artifact derivation failed: derivation exploded
+_______ test_enforce_terminal_events_and_gate_inputs_precede_one_commit ________
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_events_a0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x107e4bbd0>
+
+    @pytest.mark.asyncio
+    async def test_enforce_terminal_events_and_gate_inputs_precede_one_commit(tmp_path, monkeypatch):
+        source = tmp_path / "app.py"
+        source.write_text("original\n")
+        plan = EngineeringPlan(
+            plan_id="prd004-events", kind=ChangeKind.TASK,
+            subtasks=[Subtask(
+                id="s1", description="update app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="app.py", action=FileAction.MODIFY)],
+            )],
+        )
+        sandbox = tmp_path / "plan-sandbox"
+    
+        def create_plan_sandbox(workspace):
+            shutil.copytree(workspace, sandbox, ignore=shutil.ignore_patterns(".kriya", "plan-sandbox"))
+            return str(sandbox)
+    
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.create_git_worktree", create_plan_sandbox,
+        )
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.remove_git_worktree",
+            lambda workspace, candidate: shutil.rmtree(candidate),
+        )
+    
+        async def fake_run(**kwargs):
+            (sandbox / "app.py").write_text("verified candidate\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["app.py"]}
+    
+        events = []
+    
+        async def capture_event(name, payload):
+            events.append((name, payload))
+    
+        we = _workflow_engine()
+        we.run_generation_workflow = fake_run
+        we.kernel = MagicMock()
+        we.kernel.registry.list_components.return_value = []
+        we.kernel.events.emit = AsyncMock(side_effect=capture_event)
+    
+        real_preserved_gate = workflow_controller_module.enforce_preserved_reference_terminal_integrity
+        real_artifact_gate = workflow_controller_module.ArtifactRegistry.derive_from_workspace
+        preserved_paths = []
+        artifact_paths = []
+    
+        def preserved_gate(ledger, workspace):
+            preserved_paths.append(workspace)
+            return real_preserved_gate(ledger, workspace)
+    
+        def artifact_gate(registry, workspace, milestone_id):
+            artifact_paths.append(workspace)
+            return real_artifact_gate(registry, workspace, milestone_id)
+    
+        commit_calls = []
+        real_commit = workflow_controller_module.commit_revision_grounded_batch
+    
+        def commit_once(writes, *, workspace_path):
+            commit_calls.append(workspace_path)
+            return real_commit(writes, workspace_path=workspace_path)
+    
+        p1, p2, p3 = _patched(plan)
+        with p1, p2, p3, patch(
+            "kriya.workflow.workflow_controller.enforce_preserved_reference_terminal_integrity",
+            side_effect=preserved_gate,
+        ), patch(
+            "kriya.workflow.workflow_controller.ArtifactRegistry.derive_from_workspace",
+            autospec=True, side_effect=artifact_gate,
+        ), patch(
+            "kriya.workflow.workflow_controller.commit_revision_grounded_batch",
+            side_effect=commit_once,
+        ):
+            result = await WorkflowController(we).execute(
+                "goal", str(tmp_path), migration_mode="enforce",
+            )
+    
+        assert result.legacy_result["status"] == "success"
+        assert source.read_text() == "verified candidate\n"
+>       assert preserved_paths == [str(sandbox)]
+E       AssertionError: assert ['/private/va...al_events_a0'] == ['/private/va...plan-sandbox']
+E         
+E         At index 0 diff: '/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_events_a0' != '/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_terminal_events_a0/plan-sandbox'
+E         Use -v to get more diff
+
+tests/test_workflow_controller_enforce.py:10125: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.tools.knowledge:knowledge.py:42 Invalid knowledge-cache TTL <MagicMock name='mock.kernel.config.knowledge.release_cache_ttl_days' id='4426880000'>; using the 30-day default.
+_ test_enforce_post_commit_registry_persistence_failure_does_not_rewrite_verification _
+
+tmp_path = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-154/test_enforce_post_commit_regis0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x10a6acd10>
+
+    @pytest.mark.asyncio
+    async def test_enforce_post_commit_registry_persistence_failure_does_not_rewrite_verification(
+        tmp_path, monkeypatch,
+    ):
+        (tmp_path / "pyproject.toml").write_text('[project]\nname = "myproj"\nversion = "1.0.0"\n')
+        plan = EngineeringPlan(
+            plan_id="prd004-persistence", kind=ChangeKind.TASK,
+            subtasks=[Subtask(
+                id="s1", description="write app", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="app.py", action=FileAction.CREATE)],
+            )],
+        )
+        sandbox = tmp_path / "plan-sandbox"
+    
+        def create_plan_sandbox(workspace):
+            shutil.copytree(workspace, sandbox, ignore=shutil.ignore_patterns(".kriya", "plan-sandbox"))
+            return str(sandbox)
+    
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.create_git_worktree", create_plan_sandbox,
+        )
+        monkeypatch.setattr(
+            "kriya.workflow.workflow_controller.remove_git_worktree",
+            lambda workspace, candidate: shutil.rmtree(candidate),
+        )
+    
+        async def fake_run(**kwargs):
+            (sandbox / "app.py").write_text("committed\n")
+            return {"status": "success", "quality_gates_passed": True, "files": ["app.py"]}
+    
+        we = _workflow_engine()
+        we.run_generation_workflow = fake_run
+        p1, p2, p3 = _patched(plan)
+        with p1, p2, p3, patch(
+            "kriya.workflow.workflow_controller.save_artifact_registry",
+            side_effect=OSError("registry disk unavailable"),
+        ):
+            result = await WorkflowController(we).execute(
+                "goal", str(tmp_path), migration_mode="enforce",
+            )
+    
+>       assert result.legacy_result["status"] == "success"
+E       AssertionError: assert 'needs_review' == 'success'
+E         
+E         - success
+E         + needs_review
+
+tests/test_workflow_controller_enforce.py:10186: AssertionError
+------------------------------ Captured log call -------------------------------
+ERROR    kriya.workflow.workflow_controller:workflow_controller.py:6268 WorkflowController enforce run '20260921T211210-b447877b': artifact derivation failed: registry disk unavailable
+=========================== short test summary info ============================
+FAILED tests/test_workflow_controller_enforce.py::test_enforce_terminal_gate_failure_discards_candidate_before_commit[migration-global_migration_gap-failed]
+FAILED tests/test_workflow_controller_enforce.py::test_enforce_terminal_gate_failure_discards_candidate_before_commit[stack_contract-global_stack_contract_gap-failed]
+FAILED tests/test_workflow_controller_enforce.py::test_enforce_terminal_gate_failure_discards_candidate_before_commit[preserved_references-global_preserved_reference_gap-failed]
+FAILED tests/test_workflow_controller_enforce.py::test_enforce_terminal_gate_failure_discards_candidate_before_commit[terminal_obligations-global_terminal_obligation_gap-failed]
+FAILED tests/test_workflow_controller_enforce.py::test_enforce_terminal_gate_failure_discards_candidate_before_commit[artifact_registry-artifact_error-needs_review]
+FAILED tests/test_workflow_controller_enforce.py::test_enforce_terminal_events_and_gate_inputs_precede_one_commit
+FAILED tests/test_workflow_controller_enforce.py::test_enforce_post_commit_registry_persistence_failure_does_not_rewrite_verification
+7 failed, 258 deselected in 2.78s
