@@ -12,7 +12,7 @@ def doctor(ctx: click.Context) -> None:
     """Check Kriya platform health, directories, and LLM connection."""
     cfg: AppConfig = ctx.obj['config']
     click.secho("=== Kriya Doctor ===", bold=True)
-    
+
     # 1. Check directories
     click.echo("\nChecking directories:")
     dirs = {
