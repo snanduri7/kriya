@@ -39,12 +39,10 @@ Identity / worktree semantics:
     protects the object/ref database they share; this module does not
     duplicate that.
 
-Architectural invariant: any future non-CLI entry point capable of
-repository/workspace mutation MUST call `acquire_run_lock()` before its first
-possible mutation, the same way `kriya/cli.py`'s generate/fix/proposal-execute
-/milestone-execution paths do. Do not add nested locking or an in-process
-registry, and do not wire this into `run_generation_workflow()` itself merely
-to cover a hypothetical future caller - out of scope for this slice.
+Architectural invariant: callers use `run_coordinator.begin_mutating_run()` or
+an API protected by `run_coordinator.coordinated_mutation`.  This module is the
+low-level POSIX primitive; it deliberately remains independent of workflow
+code.
 
 Deployment envelope: macOS + Linux CI (POSIX `fcntl.flock`, no Windows
 support), single host only - this is not a distributed lock.

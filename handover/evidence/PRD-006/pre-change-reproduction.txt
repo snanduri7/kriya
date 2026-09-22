@@ -1,0 +1,2 @@
+BYPASS_REPRODUCED: controller body reached
+The direct controller API entered its mutation workflow while another owner held the real workspace lock.

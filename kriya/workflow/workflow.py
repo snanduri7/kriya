@@ -23,6 +23,7 @@ from kriya.agents.contracts import parse_planner_structured_output
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.control.run_coordinator import coordinated_mutation
 from kriya.workflow.checkpoint import (
     compute_config_fingerprint,
     compute_workspace_content_hash,
@@ -757,6 +758,7 @@ class WorkflowEngine:
             logger.warning(f"web_lookup_query_callback failed, skipping live lookup: {ex}")
             return False
 
+    @coordinated_mutation
     async def run_generation_workflow(
         self, 
         goal: str, 

@@ -14,6 +14,7 @@ test module in the child, avoiding re-execution of every top-level test
 collection; this is a local test-harness choice, unrelated to the module
 under test, which never touches multiprocessing itself.
 """
+import asyncio
 import json
 import multiprocessing
 import os
@@ -28,9 +29,24 @@ import pytest
 from click.testing import CliRunner
 
 from kriya.cli import main
+from kriya.control.run_coordinator import (
+    InvalidRunContextError,
+    begin_mutating_run,
+    coordinated_mutation,
+    current_run_context,
+    require_mutating_run,
+)
 from kriya.control.run_ownership import WorkspaceLockHeldError, acquire_run_lock
+from kriya.workflow.workflow import WorkflowEngine
+from kriya.workflow.workflow_controller import WorkflowController
 
 MP = multiprocessing.get_context("fork")
+
+
+@coordinated_mutation
+async def _direct_mutation_probe(workspace_path, observed):
+    observed.append(current_run_context())
+    return "mutated"
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +57,89 @@ def test_acquire_and_release_roundtrip(tmp_path):
     with acquire_run_lock(str(tmp_path)) as run_id:
         assert isinstance(run_id, str) and run_id
     assert os.path.exists(tmp_path / ".kriya" / "run.lock")
+
+
+# ---------------------------------------------------------------------------
+# Layer 2: RunCoordinator and mandatory public API ownership gateway
+# ---------------------------------------------------------------------------
+
+def test_begin_mutating_run_builds_workspace_bound_context(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    (tmp_path / "tracked.txt").write_text("v1\n")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=tmp_path, check=True)
+    expected_head = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+
+    with begin_mutating_run(str(tmp_path), run_id="coordinated-run") as context:
+        assert context.run_id == "coordinated-run"
+        assert context.workspace_path == os.path.realpath(tmp_path)
+        assert context.base_revision == expected_head
+        assert context.active
+        assert current_run_context() is context
+        assert require_mutating_run(str(tmp_path)) is context
+
+    assert not context.active
+    assert current_run_context() is None
+    with pytest.raises(InvalidRunContextError, match="expired"):
+        require_mutating_run(str(tmp_path), context)
+
+
+@pytest.mark.parametrize("failure", [RuntimeError("boom"), KeyboardInterrupt()])
+def test_coordinator_releases_on_exception_and_keyboard_interrupt(tmp_path, failure):
+    with pytest.raises(type(failure)):
+        with begin_mutating_run(str(tmp_path)):
+            raise failure
+    with begin_mutating_run(str(tmp_path)):
+        pass
+
+
+def test_direct_mutation_adapter_acquires_context_and_expires_it(tmp_path):
+    observed = []
+    assert asyncio.run(_direct_mutation_probe(str(tmp_path), observed)) == "mutated"
+    assert len(observed) == 1
+    assert observed[0].workspace_path == os.path.realpath(tmp_path)
+    assert not observed[0].active
+
+
+def test_nested_mutation_boundary_reuses_one_run_context(tmp_path):
+    observed = []
+    with begin_mutating_run(str(tmp_path), run_id="outer") as outer:
+        asyncio.run(_direct_mutation_probe(str(tmp_path), observed))
+        assert observed == [outer]
+        assert outer.active
+
+
+def test_explicit_context_cannot_authorize_another_workspace(tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    with begin_mutating_run(str(tmp_path)) as context:
+        with pytest.raises(InvalidRunContextError, match="different workspace"):
+            asyncio.run(
+                _direct_mutation_probe(
+                    str(other), [], run_context=context,
+                )
+            )
+
+
+def test_direct_workflow_engine_api_cannot_bypass_held_lock(tmp_path):
+    with acquire_run_lock(str(tmp_path)):
+        with pytest.raises(WorkspaceLockHeldError):
+            asyncio.run(
+                WorkflowEngine.run_generation_workflow(
+                    MagicMock(), "goal", str(tmp_path)
+                )
+            )
+
+
+def test_direct_workflow_controller_api_cannot_bypass_held_lock(tmp_path):
+    controller = WorkflowController(MagicMock())
+    with acquire_run_lock(str(tmp_path)):
+        with pytest.raises(WorkspaceLockHeldError):
+            asyncio.run(controller.execute("goal", str(tmp_path)))
 
 
 def test_reacquire_after_release_succeeds(tmp_path):

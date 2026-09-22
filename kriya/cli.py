@@ -15,7 +15,8 @@ from kriya.agents import ReviewerAgent
 from kriya.analyzer import RepositoryAnalyzer
 from kriya.cli_output import GenerateOutput
 from kriya.config import AppConfig, load_config
-from kriya.control.run_ownership import WorkspaceLockHeldError, acquire_run_lock
+from kriya.control.run_coordinator import begin_mutating_run
+from kriya.control.run_ownership import WorkspaceLockHeldError
 from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
 from kriya.plugins.plugin import PluginManager
@@ -1705,7 +1706,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             return result
 
         try:
-            with acquire_run_lock(os.getcwd()):
+            with begin_mutating_run(os.getcwd()):
                 milestone_result = asyncio.run(run_milestone_sequence())
         except WorkspaceLockHeldError as e:
             click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
@@ -2117,7 +2118,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         return res
 
     try:
-        with acquire_run_lock(os.getcwd()):
+        with begin_mutating_run(os.getcwd()):
             final_res = asyncio.run(run_workflow())
     except WorkspaceLockHeldError as e:
         click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
@@ -2806,7 +2807,7 @@ def proposal_execute(ctx: click.Context, proposal_id: str, yes: bool) -> None:
             await kernel.stop()
 
     try:
-        with acquire_run_lock(workspace_root):
+        with begin_mutating_run(workspace_root):
             res = asyncio.run(run_execution())
     except WorkspaceLockHeldError as e:
         click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red", err=True)
@@ -3267,7 +3268,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             click.echo(res.get("review"))
 
     try:
-        with acquire_run_lock(os.path.abspath(workspace)):
+        with begin_mutating_run(os.path.abspath(workspace)):
             asyncio.run(run_fix())
     except WorkspaceLockHeldError as e:
         click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")

@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
+from kriya.control.run_coordinator import coordinated_mutation
 from kriya.control.contracts import (
     mark_capabilities_implemented,
     register_provided_capabilities,
@@ -745,6 +746,7 @@ def replay_prior_milestone_verifications(
     return failures
 
 
+@coordinated_mutation
 async def run_milestones(
     we: Any,
     run_state: MilestoneRunState,

@@ -109,6 +109,7 @@ from kriya.control.persistence import (
     save_control_state,
 )
 from kriya.control.state import ControlState
+from kriya.control.run_coordinator import coordinated_mutation
 from kriya.control.workspace_identity import json_document_is_ownerless
 from kriya.workflow import subtask_executor
 from kriya.workflow.checkpoint import (
@@ -3047,6 +3048,7 @@ class WorkflowController:
     def __init__(self, workflow_engine: Any) -> None:
         self.workflow_engine = workflow_engine
 
+    @coordinated_mutation
     async def execute(
         self,
         goal: str,
@@ -3311,6 +3313,7 @@ class WorkflowController:
             decisions=decisions, verification_report=verification_report,
         )
 
+    @coordinated_mutation
     async def execute_milestones(self, run_state: Any, workspace_path: str, **milestone_kwargs: Any) -> WorkflowResult:
         """MA7-C4 (2026-08-25 external review) - the milestone-DAG
         counterpart to execute() above: makes WorkflowController the
