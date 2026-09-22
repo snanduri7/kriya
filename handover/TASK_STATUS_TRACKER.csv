@@ -3,7 +3,7 @@ PRD-001,Bootstrap and Configuration Contract Closure,Wave 0,P0,None,NOT REQUIRED
 PRD-002,Canonical Repository and Distribution Integrity,Wave 0,P0,PRD-001,NOT REQUIRED,VERIFIED,084fe7d,PYTEST_VERIFIED,NOT_REQUIRED
 PRD-003,CLI JSON Output Contract,Wave 0,P1,PRD-001,REQUIRED,VERIFIED,42060d2,PYTEST_VERIFIED,LIVE_VERIFIED
 PRD-004,Pre-Commit Terminal Correctness Gates,Wave 1,P0,PRD-003,NOT REQUIRED,VERIFIED,ee673e0,PYTEST_VERIFIED,NOT_REQUIRED
-PRD-005,"Atomic Commit, Rollback and Crash-Safety Proof",Wave 1,P0,PRD-004,NOT REQUIRED,NOT_STARTED,,,
+PRD-005,"Atomic Commit, Rollback and Crash-Safety Proof",Wave 1,P0,PRD-004,NOT REQUIRED,READY_FOR_PYTEST_VERIFICATION,,,
 PRD-006,RunCoordinator and Mandatory Workspace Ownership Gateway,Wave 2,P0,PRD-005,NOT REQUIRED,NOT_STARTED,,,
 PRD-007,Canonical Persistent RunRecord,Wave 2,P0,PRD-006,NOT REQUIRED,NOT_STARTED,,,
 PRD-008,Resume Integrity and Deterministic Invalidation,Wave 2,P0,PRD-007,NOT REQUIRED,NOT_STARTED,,,

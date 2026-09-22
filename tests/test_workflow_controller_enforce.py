@@ -10116,9 +10116,11 @@ async def test_enforce_terminal_events_and_gate_inputs_precede_one_commit(tmp_pa
     commit_calls = []
     real_commit = workflow_controller_module.commit_revision_grounded_batch
 
-    def commit_once(writes, *, workspace_path):
+    def commit_once(writes, *, workspace_path, transaction_id=None):
         commit_calls.append(workspace_path)
-        return real_commit(writes, workspace_path=workspace_path)
+        return real_commit(
+            writes, workspace_path=workspace_path, transaction_id=transaction_id,
+        )
 
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3, patch(
@@ -10140,6 +10142,8 @@ async def test_enforce_terminal_events_and_gate_inputs_precede_one_commit(tmp_pa
     assert preserved_paths == [str(sandbox)]
     assert artifact_paths == [str(sandbox)]
     assert commit_calls == [str(tmp_path)]
+    assert result.legacy_result["commit_evidence"]["state"] == "committed"
+    assert result.legacy_result["commit_evidence"]["operations"][0]["target_path"] == "app.py"
     names = [name for name, _ in events]
     assert names == [
         "terminal_gates_started",
@@ -10202,3 +10206,29 @@ async def test_enforce_post_commit_registry_persistence_failure_does_not_rewrite
     assert result.legacy_result["quality_gates_passed"] is True
     assert (tmp_path / "app.py").read_text() == "committed\n"
     assert result.legacy_result["post_commit_persistence_errors"][0]["operation"] == "save_artifact_registry"
+
+@pytest.mark.asyncio
+async def test_enforce_refuses_to_start_when_prior_source_commit_is_uncertain(tmp_path):
+    evidence_dir = tmp_path / ".kriya" / "control" / "commits"
+    evidence_dir.mkdir(parents=True)
+    (evidence_dir / "crashed.json").write_text(json.dumps({
+        "schema_version": 1,
+        "transaction_id": "crashed",
+        "state": "in_progress",
+        "started_at_unix": 1.0,
+        "updated_at_unix": 1.0,
+        "operations": [],
+        "result_revisions": {},
+        "failure": None,
+    }))
+    we = _workflow_engine()
+
+    result = await WorkflowController(we).execute(
+        "resume goal", str(tmp_path), migration_mode="enforce", resume=True,
+    )
+
+    assert result.legacy_result["status"] == "needs_review"
+    assert result.legacy_result["quality_gates_passed"] is False
+    assert result.legacy_result["reason_codes"] == ["UNCERTAIN_COMMIT_STATE"]
+    assert result.legacy_result["uncertain_commit_ids"] == ["crashed"]
+    we.planner.run.assert_not_awaited()

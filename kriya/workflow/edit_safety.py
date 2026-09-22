@@ -1,12 +1,17 @@
 """Deterministic sanity checks applied to an anchored edit or full-file write before it reaches disk - whitespace-tolerant anchor matching and structural corruption detection. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization). The "which file does this edit concern" checks that used to live here (find_misdirected_edit_target, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line) moved to kriya/workflow/attribution.py on 2026-08-14 - see that module's own docstring taxonomy for why. What's left here is purely mechanical edit-safety: does the edit apply cleanly, and does the resulting file look structurally sound - never "which file"."""
 
-import logging
 import hashlib
+import json
+import logging
 import os
 import re
+import tempfile
+import time
+import uuid
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Tuple
+from dataclasses import asdict, dataclass
+from enum import Enum
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType
@@ -68,6 +73,46 @@ class BatchCommitError(RuntimeError):
     """A staged batch could not be committed or completely rolled back."""
 
 
+class UncertainCommitError(BatchCommitError):
+    """A prior process stopped while a source commit may have been active."""
+
+
+class CommitState(str, Enum):
+    """Durable source-commit states; absence means ``not_started``."""
+
+    NOT_STARTED = "not_started"
+    IN_PROGRESS = "in_progress"
+    COMMITTED = "committed"
+    ROLLED_BACK = "rolled_back"
+    UNCERTAIN = "uncertain"
+
+
+@dataclass(frozen=True)
+class CommitEvidence:
+    schema_version: int
+    transaction_id: str
+    state: CommitState
+    started_at_unix: float
+    updated_at_unix: float
+    operations: Tuple[Dict[str, Any], ...]
+    result_revisions: Dict[str, str]
+    failure: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload = asdict(self)
+        payload["state"] = self.state.value
+        payload["operations"] = list(self.operations)
+        return payload
+
+
+class BatchCommitResult(dict):
+    """Backward-compatible revision mapping with commit evidence attached."""
+
+    def __init__(self, revisions: Dict[str, str], evidence: CommitEvidence) -> None:
+        super().__init__(revisions)
+        self.evidence = evidence
+
+
 @dataclass(frozen=True)
 class StagedFileWrite:
     """One fully materialized candidate file and the revision it was based on.
@@ -85,6 +130,10 @@ class StagedFileWrite:
     base_path: str
     expected_base_revision: str
     delete: bool = False
+    # Optional because legacy/sandbox callers predate explicit create/modify
+    # identity. Terminal source commits set it, making an empty existing file
+    # distinguishable from a missing create target.
+    expected_base_exists: Optional[bool] = None
 
 
 def content_revision(content: str) -> str:
@@ -158,25 +207,193 @@ def _atomic_write_bytes(full_path: str, content: bytes) -> None:
     tmp_path = f"{full_path}.kriya-rollback-{os.getpid()}"
     with open(tmp_path, "wb") as fh:
         fh.write(content)
+        fh.flush()
+        os.fsync(fh.fileno())
     os.replace(tmp_path, full_path)
 
 
-def commit_revision_grounded_batch(
-    writes: Iterable[StagedFileWrite], workspace_path: Optional[str] = None,
-) -> Dict[str, str]:
-    """Commit a candidate set only after every source revision is still current.
+_COMMIT_EVIDENCE_SCHEMA_VERSION = 1
+_COMMIT_EVIDENCE_RELATIVE_DIR = os.path.join(".kriya", "control", "commits")
 
-    The function performs a full preflight before the first write, repeats each
-    guard immediately before its write to narrow race windows, and restores every
-    already-written target if a later write fails.  Callers therefore never expose
-    a deliberately half-committed model response to compilation or test gates.
-    """
-    staged = list(writes)
-    targets = [item.target_path for item in staged]
-    if len(set(targets)) != len(targets):
-        raise BatchCommitError("A candidate batch contains duplicate target paths.")
 
+def _within_workspace(workspace_path: str, path: str) -> bool:
+    root = os.path.realpath(workspace_path)
+    candidate = os.path.realpath(path)
+    try:
+        return os.path.commonpath((root, candidate)) == root and candidate != root
+    except ValueError:
+        return False
+
+
+def _fsync_directory(path: str) -> None:
+    """Best-effort metadata durability on platforms supporting directory fsync."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
+def _evidence_path(workspace_path: str, transaction_id: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", transaction_id):
+        raise BatchCommitError(f"Invalid commit transaction id: {transaction_id!r}.")
+    return os.path.join(
+        workspace_path, _COMMIT_EVIDENCE_RELATIVE_DIR, f"{transaction_id}.json",
+    )
+
+
+def _persist_commit_evidence(workspace_path: str, evidence: CommitEvidence) -> str:
+    path = _evidence_path(workspace_path, evidence.transaction_id)
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    payload = evidence.to_dict()
+    fd, temp_path = tempfile.mkstemp(prefix=".commit-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        _fsync_directory(directory)
+    finally:
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
+    return path
+
+
+def load_commit_evidence(path: str) -> CommitEvidence:
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    schema_version = int(payload["schema_version"])
+    if schema_version != _COMMIT_EVIDENCE_SCHEMA_VERSION:
+        raise ValueError(f"Unsupported commit evidence schema: {schema_version}.")
+    return CommitEvidence(
+        schema_version=schema_version,
+        transaction_id=str(payload["transaction_id"]),
+        state=CommitState(payload["state"]),
+        started_at_unix=float(payload["started_at_unix"]),
+        updated_at_unix=float(payload["updated_at_unix"]),
+        operations=tuple(payload.get("operations", ())),
+        result_revisions=dict(payload.get("result_revisions", {})),
+        failure=payload.get("failure"),
+    )
+
+
+def commit_state_for_transaction(workspace_path: str, transaction_id: str) -> CommitState:
+    """Return NOT_STARTED when no durable intent exists for this transaction."""
+    path = _evidence_path(workspace_path, transaction_id)
+    if not os.path.exists(path):
+        return CommitState.NOT_STARTED
+    return load_commit_evidence(path).state
+
+
+def find_uncertain_commit_evidence(workspace_path: str) -> Tuple[CommitEvidence, ...]:
+    """Return durable commits whose process never recorded a safe terminal state."""
+    directory = os.path.join(workspace_path, _COMMIT_EVIDENCE_RELATIVE_DIR)
+    try:
+        names = sorted(name for name in os.listdir(directory) if name.endswith(".json"))
+    except FileNotFoundError:
+        return ()
+    uncertain = []
+    for name in names:
+        try:
+            evidence = load_commit_evidence(os.path.join(directory, name))
+        except Exception as error:
+            raise UncertainCommitError(
+                f"Commit evidence {name!r} is unreadable; source state is uncertain: {error}"
+            ) from error
+        if evidence.state in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN):
+            uncertain.append(evidence)
+    return tuple(uncertain)
+
+
+def _existing_parent(path: str) -> str:
+    current = os.path.dirname(path)
+    while current and not os.path.isdir(current):
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    if not current or not os.path.isdir(current):
+        raise BatchCommitError(f"No existing parent directory for target {path!r}.")
+    return current
+
+
+def _stage_content(item: StagedFileWrite, transaction_id: str, index: int) -> str:
+    parent = _existing_parent(item.target_path)
+    fd, path = tempfile.mkstemp(
+        prefix=f".kriya-stage-{transaction_id}-{index}-", dir=parent,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(item.content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            mode = os.stat(item.target_path, follow_symlinks=False).st_mode & 0o7777
+        except FileNotFoundError:
+            # mkstemp is deliberately restrictive. Match ordinary file-create
+            # behavior for a new target while respecting the process umask.
+            current_umask = os.umask(0)
+            os.umask(current_umask)
+            mode = 0o666 & ~current_umask
+        os.chmod(path, mode)
+        return path
+    except Exception:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _preflight_batch(
+    staged: List[StagedFileWrite], workspace_path: Optional[str],
+) -> None:
+    canonical_targets = [os.path.normcase(os.path.realpath(item.target_path)) for item in staged]
+    if len(set(canonical_targets)) != len(canonical_targets):
+        raise BatchCommitError("A candidate batch contains duplicate or aliased target paths.")
     for item in staged:
+        if not item.target_path or not item.base_path or not item.expected_base_revision:
+            raise BatchCommitError("Every candidate write requires target, base, and expected revision.")
+        if workspace_path is not None and not _within_workspace(
+            workspace_path, item.target_path,
+        ):
+            raise BatchCommitError(
+                f"Candidate target escapes workspace {workspace_path!r}: "
+                f"{item.target_path!r}."
+            )
+        if os.path.isdir(item.target_path) or os.path.isdir(item.base_path):
+            raise BatchCommitError(
+                f"Candidate file operation cannot target a directory: {item.target_path!r}."
+            )
+        base_exists = os.path.exists(item.base_path)
+        target_exists = os.path.lexists(item.target_path)
+        if item.expected_base_exists is not None and base_exists != item.expected_base_exists:
+            raise FileRevisionConflict(
+                f"Refusing batch operation for {item.target_path!r}: expected base "
+                f"existence={item.expected_base_exists}, found {base_exists}."
+            )
+        if item.expected_base_exists is False and target_exists:
+            raise FileRevisionConflict(
+                f"Refusing create operation for existing target {item.target_path!r}."
+            )
+        if item.delete and item.expected_base_exists is False:
+            raise BatchCommitError(
+                f"Delete operation for {item.target_path!r} declares a missing expected base."
+            )
+        if item.delete and not target_exists:
+            raise FileRevisionConflict(
+                f"Refusing delete operation for missing target {item.target_path!r}."
+            )
         actual = read_file_revision(item.base_path)
         if actual != item.expected_base_revision:
             raise FileRevisionConflict(
@@ -185,8 +402,85 @@ def commit_revision_grounded_batch(
                 f"{item.expected_base_revision[:12]}, found {actual[:12]}."
             )
 
-    snapshots: Dict[str, Optional[bytes]] = {}
-    committed: List[str] = []
+
+def commit_revision_grounded_batch(
+    writes: Iterable[StagedFileWrite], workspace_path: Optional[str] = None,
+    *, transaction_id: Optional[str] = None,
+) -> BatchCommitResult:
+    """Apply one local source transaction with durable crash evidence.
+
+    Guarantees already present before PRD-005 were whole-batch revision
+    preflight, per-file atomic replacement, duplicate rejection, and rollback
+    of earlier successful writes after a later controlled failure. PRD-005
+    closes the remaining boundaries: canonical containment/operation preflight,
+    staging and snapshotting before mutation, mode preservation, rollback even
+    when a fault fires immediately after a filesystem operation, directory
+    durability, and a durable in-progress/committed/rolled-back record. Absence
+    of a record means not started; an in-progress record left by process death
+    is explicitly uncertain and blocks another commit.
+    """
+    staged = list(writes)
+    _preflight_batch(staged, workspace_path)
+    if workspace_path is not None:
+        uncertain = find_uncertain_commit_evidence(workspace_path)
+        if uncertain:
+            ids = ", ".join(item.transaction_id for item in uncertain)
+            raise UncertainCommitError(
+                f"Refusing source commit while prior commit intent is uncertain: {ids}."
+            )
+
+    transaction_id = transaction_id or uuid.uuid4().hex
+    started_at = time.time()
+    operations = tuple({
+        "target_path": (
+            os.path.relpath(item.target_path, workspace_path)
+            if workspace_path is not None else item.target_path
+        ),
+        "base_path": (
+            os.path.relpath(item.base_path, workspace_path)
+            if workspace_path is not None else item.base_path
+        ),
+        "operation": "delete" if item.delete else "write",
+        "expected_base_revision": item.expected_base_revision,
+        "expected_base_exists": item.expected_base_exists,
+    } for item in staged)
+    snapshots: Dict[str, Tuple[Optional[bytes], Optional[int]]] = {}
+    for item in staged:
+        try:
+            with open(item.target_path, "rb") as handle:
+                snapshots[item.target_path] = (
+                    handle.read(), os.stat(item.target_path, follow_symlinks=False).st_mode & 0o7777,
+                )
+        except FileNotFoundError:
+            snapshots[item.target_path] = (None, None)
+
+    staged_paths: Dict[str, str] = {}
+    try:
+        for index, item in enumerate(staged):
+            if not item.delete:
+                staged_paths[item.target_path] = _stage_content(item, transaction_id, index)
+    except Exception as error:
+        for path in staged_paths.values():
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+        raise BatchCommitError(f"Candidate staging failed before mutation: {error}") from error
+
+    evidence = CommitEvidence(
+        schema_version=_COMMIT_EVIDENCE_SCHEMA_VERSION,
+        transaction_id=transaction_id,
+        state=CommitState.IN_PROGRESS,
+        started_at_unix=started_at,
+        updated_at_unix=time.time(),
+        operations=operations,
+        result_revisions={},
+    )
+    if workspace_path is not None:
+        _persist_commit_evidence(workspace_path, evidence)
+
+    applied: List[str] = []
+    created_directories: List[str] = []
     try:
         for item in staged:
             actual = read_file_revision(item.base_path)
@@ -195,49 +489,109 @@ def commit_revision_grounded_batch(
                     f"Refusing stale batch write to '{item.target_path}': base "
                     f"changed during commit."
                 )
-            try:
-                with open(item.target_path, "rb") as fh:
-                    snapshots[item.target_path] = fh.read()
-            except FileNotFoundError:
-                snapshots[item.target_path] = None
-            os.makedirs(os.path.dirname(item.target_path), exist_ok=True)
+            parent = os.path.dirname(item.target_path)
+            missing = []
+            cursor = parent
+            while cursor and not os.path.exists(cursor):
+                missing.append(cursor)
+                cursor = os.path.dirname(cursor)
+            os.makedirs(parent, exist_ok=True)
+            created_directories.extend(reversed(missing))
             if item.delete:
                 _audit_write_file(item.target_path, workspace_path=workspace_path)
+                # Track conservatively before the syscall. If an injected
+                # wrapper raises after unlink/replace performed its side
+                # effect, rollback still restores this target.
+                applied.append(item.target_path)
                 try:
                     os.unlink(item.target_path)
                 except FileNotFoundError:
                     pass
-            elif workspace_path is None:
-                # Preserve the historical two-argument primitive call shape for
-                # direct callers and test/integration wrappers around it.
-                atomic_write_file(item.target_path, item.content)
             else:
-                atomic_write_file(
-                    item.target_path, item.content, workspace_path=workspace_path,
-                )
-            committed.append(item.target_path)
+                _audit_write_file(item.target_path, workspace_path=workspace_path)
+                applied.append(item.target_path)
+                staged_path = staged_paths[item.target_path]
+                os.replace(staged_path, item.target_path)
+                staged_paths.pop(item.target_path)
+            _fsync_directory(parent)
     except Exception as commit_error:
         rollback_errors = []
-        for target_path in reversed(committed):
+        for target_path in reversed(applied):
             try:
-                original = snapshots[target_path]
+                original, mode = snapshots[target_path]
                 if original is None:
-                    os.unlink(target_path)
+                    try:
+                        os.unlink(target_path)
+                    except FileNotFoundError:
+                        pass
                 else:
                     _atomic_write_bytes(target_path, original)
+                    if mode is not None:
+                        os.chmod(target_path, mode)
+                _fsync_directory(os.path.dirname(target_path))
             except Exception as rollback_error:  # pragma: no cover - rare OS failure
                 rollback_errors.append(f"{target_path}: {rollback_error}")
+        for directory in reversed(created_directories):
+            try:
+                os.rmdir(directory)
+            except OSError:
+                pass
+        terminal_state = CommitState.UNCERTAIN if rollback_errors else CommitState.ROLLED_BACK
+        terminal_evidence = CommitEvidence(
+            schema_version=_COMMIT_EVIDENCE_SCHEMA_VERSION,
+            transaction_id=transaction_id,
+            state=terminal_state,
+            started_at_unix=started_at,
+            updated_at_unix=time.time(),
+            operations=operations,
+            result_revisions={},
+            failure=f"{type(commit_error).__name__}: {commit_error}",
+        )
+        if workspace_path is not None:
+            try:
+                _persist_commit_evidence(workspace_path, terminal_evidence)
+            except Exception as evidence_error:
+                rollback_errors.append(f"commit evidence: {evidence_error}")
         if rollback_errors:
             raise BatchCommitError(
                 f"Candidate commit failed ({commit_error}); rollback also failed for: "
                 + "; ".join(rollback_errors)
             ) from commit_error
-        raise
+        raise BatchCommitError(
+            f"Candidate commit failed and was rolled back: {commit_error}"
+        ) from commit_error
+    finally:
+        for path in staged_paths.values():
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
 
-    return {
+    revisions = {
         item.target_path: content_revision("" if item.delete else item.content)
         for item in staged
     }
+    evidence_revisions = {
+        (os.path.relpath(path, workspace_path) if workspace_path is not None else path): revision
+        for path, revision in revisions.items()
+    }
+    committed_evidence = CommitEvidence(
+        schema_version=_COMMIT_EVIDENCE_SCHEMA_VERSION,
+        transaction_id=transaction_id,
+        state=CommitState.COMMITTED,
+        started_at_unix=started_at,
+        updated_at_unix=time.time(),
+        operations=operations,
+        result_revisions=evidence_revisions,
+    )
+    if workspace_path is not None:
+        try:
+            _persist_commit_evidence(workspace_path, committed_evidence)
+        except Exception as error:
+            raise UncertainCommitError(
+                f"Source changes were applied but committed evidence could not be persisted: {error}"
+            ) from error
+    return BatchCommitResult(revisions, committed_evidence)
 
 
 def normalize_whitespace(text: str) -> str:

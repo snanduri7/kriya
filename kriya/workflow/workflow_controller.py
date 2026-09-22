@@ -166,6 +166,7 @@ from kriya.workflow.recovery_plan import (
 from kriya.workflow.edit_safety import (
     StagedFileWrite,
     commit_revision_grounded_batch,
+    find_uncertain_commit_evidence,
     read_file_revision,
 )
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
@@ -3098,6 +3099,30 @@ class WorkflowController:
         verification_report: Optional[VerificationReport] = None
 
         if migration_mode == "enforce":
+            # PRD-005: an in-progress durable commit record means a prior
+            # process may have died between source-path replacements. Never
+            # start or resume model work while that source state is unknown.
+            try:
+                uncertain_commits = find_uncertain_commit_evidence(workspace_path)
+            except Exception as error:
+                uncertain_commits = ()
+                uncertain_commit_error = str(error)
+            else:
+                uncertain_commit_error = None
+            if uncertain_commits or uncertain_commit_error:
+                ids = [item.transaction_id for item in uncertain_commits]
+                return WorkflowResult(
+                    run_id=run_id, control_state=control_state, route=route,
+                    legacy_result={
+                        "status": "needs_review",
+                        "quality_gates_passed": False,
+                        "files": [],
+                        "reason_codes": ["UNCERTAIN_COMMIT_STATE"],
+                        "uncertain_commit_ids": ids,
+                        "error": uncertain_commit_error,
+                        "run_id": run_id,
+                    },
+                )
             kernel = getattr(self.workflow_engine, "kernel", None)
             if kernel is not None:
                 _log_phase_banner("KNOWLEDGE GUARD")
@@ -5945,6 +5970,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         terminal_observability_errors: List[Dict[str, str]] = []
         post_commit_persistence_errors: List[Dict[str, str]] = []
         workspace_commit_completed = False
+        workspace_commit_evidence: Optional[Dict[str, Any]] = None
 
         async def _emit_terminal_event(event_name: str, **data: Any) -> None:
             """Terminal lifecycle events are telemetry, never correctness gates."""
@@ -6143,6 +6169,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                                 terminal_writes.append(StagedFileWrite(
                                     target_path=target_path, content="", base_path=target_path,
                                     expected_base_revision=original_plan_revisions[path], delete=True,
+                                    expected_base_exists=True,
                                 ))
                                 continue
                             try:
@@ -6158,12 +6185,18 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                                 target_path=target_path, content=candidate_content,
                                 base_path=target_path,
                                 expected_base_revision=original_plan_revisions[path],
+                                expected_base_exists=(action != FileAction.CREATE),
                             ))
-                        commit_revision_grounded_batch(
+                        commit_result = commit_revision_grounded_batch(
                             terminal_writes, workspace_path=workspace_path,
+                            transaction_id=run_id,
                         )
+                        workspace_commit_evidence = commit_result.evidence.to_dict()
                     workspace_commit_completed = True
-                    await _emit_terminal_event("workspace_commit_completed")
+                    await _emit_terminal_event(
+                        "workspace_commit_completed",
+                        commit_evidence=workspace_commit_evidence,
+                    )
 
             if not all_completed and plan_workspace_path != workspace_path:
                 # Sandbox-only completion state cannot be resumed after the
@@ -6233,6 +6266,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 run_id, artifact_error,
             )
             aggregated["artifact_error"] = artifact_error
+        if workspace_commit_evidence is not None:
+            aggregated["commit_evidence"] = workspace_commit_evidence
         if knowledge_gap_break is not None:
             aggregated["status"] = knowledge_gap_break["status"]
             aggregated["gap_report"] = knowledge_gap_break["gap_report"]

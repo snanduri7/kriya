@@ -108,6 +108,7 @@ from kriya.workflow.file_resolution import (
     strip_package_declaration_matching_source_root,
 )
 from kriya.workflow.edit_safety import (
+    BatchCommitError,
     FileRevisionConflict,
     StagedFileWrite,
     commit_revision_grounded_batch,
@@ -23037,15 +23038,18 @@ def test_revision_grounded_batch_rolls_back_an_interrupted_commit(tmp_path):
             str(second), "new second", str(second), content_revision("old second"),
         ),
     ]
-    real_atomic_write = atomic_write_file
+    real_replace = os.replace
+    injected = False
 
-    def fail_second_write(path, content):
-        if path == str(second):
+    def fail_second_write(source, target):
+        nonlocal injected
+        real_replace(source, target)
+        if target == str(second) and not injected:
+            injected = True
             raise OSError("simulated disk failure")
-        real_atomic_write(path, content)
 
-    with patch("kriya.workflow.edit_safety.atomic_write_file", side_effect=fail_second_write):
-        with pytest.raises(OSError, match="simulated disk failure"):
+    with patch("kriya.workflow.edit_safety.os.replace", side_effect=fail_second_write):
+        with pytest.raises(BatchCommitError, match="rolled back"):
             commit_revision_grounded_batch(writes)
 
     assert first.read_text() == "old first"
