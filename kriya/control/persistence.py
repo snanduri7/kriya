@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.contracts import ContractRegistry
 from kriya.control.state import ControlState
+from kriya.control.run_record import RunRecord
 from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
 from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.workflow.edit_safety import read_file_revision
@@ -42,6 +43,11 @@ _CONTRACTS_FILENAME = "contracts.json"
 _ARTIFACTS_FILENAME = "artifacts.json"
 _DECISIONS_FILENAME = "decisions.jsonl"
 _APPROVED_PLANS_DIRNAME = "plans"
+_RUNS_DIRNAME = "runs"
+
+
+class StaleRunRecordError(RuntimeError):
+    """A writer attempted to replace a newer durable RunRecord revision."""
 
 
 def _control_dir(workspace_path: str) -> str:
@@ -72,6 +78,43 @@ def approved_plan_path(workspace_path: str, plan_id: str) -> str:
     return os.path.join(_control_dir(workspace_path), _APPROVED_PLANS_DIRNAME, f"{safe_plan_id}.json")
 
 
+def run_record_path(workspace_path: str, run_id: str) -> str:
+    safe_run_id = "".join(ch for ch in run_id if ch.isalnum() or ch in {"-", "_"})
+    if not safe_run_id or safe_run_id != run_id:
+        raise ValueError("run_id must contain only letters, digits, '-' or '_'")
+    return os.path.join(_control_dir(workspace_path), _RUNS_DIRNAME, f"{safe_run_id}.json")
+
+
+def load_run_record(workspace_path: str, run_id: str) -> Optional[RunRecord]:
+    data = _load_json_document(run_record_path(workspace_path, run_id), workspace_path)
+    if data is None:
+        return None
+    return RunRecord.from_dict(data)
+
+
+def save_run_record(
+    workspace_path: str, record: RunRecord, *, expected_revision: Optional[int]
+) -> None:
+    """Atomically persist a record after an optimistic revision check."""
+    current = load_run_record(workspace_path, record.run_id)
+    actual_revision = current.revision if current is not None else None
+    if actual_revision != expected_revision:
+        raise StaleRunRecordError(
+            f"RunRecord {record.run_id!r} expected revision {expected_revision!r}, "
+            f"found {actual_revision!r}"
+        )
+    expected_next = 1 if expected_revision is None else expected_revision + 1
+    if record.revision != expected_next:
+        raise StaleRunRecordError(
+            f"RunRecord {record.run_id!r} must write revision {expected_next}, "
+            f"got {record.revision}"
+        )
+    _save_json_document(
+        workspace_path, run_record_path(workspace_path, record.run_id),
+        record.to_dict(), derived_from_active_run=False,
+    )
+
+
 def save_approved_plan(workspace_path: str, plan_id: str, payload: Dict[str, Any]) -> None:
     """Atomically persist a validated plan and its execution-stage state."""
     _save_json_document(workspace_path, approved_plan_path(workspace_path, plan_id), payload)
@@ -82,10 +125,22 @@ def load_approved_plan(workspace_path: str, plan_id: str) -> Optional[Dict[str, 
     return _load_json_document(approved_plan_path(workspace_path, plan_id), workspace_path)
 
 
-def _save_json_document(workspace_path: str, path: str, payload: Dict[str, Any]) -> None:
+def _save_json_document(
+    workspace_path: str, path: str, payload: Dict[str, Any], *,
+    derived_from_active_run: bool = True,
+) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     owned_payload = dict(payload)
     owned_payload["_workspace"] = ownership_metadata(workspace_path)
+    if derived_from_active_run:
+        from kriya.control.run_coordinator import current_run_context
+        context = current_run_context()
+        if context is not None and context.record_revision is not None:
+            owned_payload["_run_record"] = {
+                "classification": "derived",
+                "run_id": context.run_id,
+                "revision": context.record_revision,
+            }
     content = json.dumps(owned_payload, indent=2, sort_keys=True)
     expected_revision = read_file_revision(path)
     AuthorizedFileWriter(workspace_path).commit_file(path, content, expected_revision=expected_revision)
@@ -151,6 +206,7 @@ def load_contract_registry(workspace_path: str) -> ContractRegistry:
     data = _load_json_document(contract_registry_path(workspace_path), workspace_path)
     if data is None:
         return ContractRegistry()
+    data.pop("_run_record", None)
     try:
         return ContractRegistry.from_dict(data)
     except Exception:
@@ -166,6 +222,7 @@ def load_artifact_registry(workspace_path: str) -> ArtifactRegistry:
     data = _load_json_document(artifact_registry_path(workspace_path), workspace_path)
     if data is None:
         return ArtifactRegistry()
+    data.pop("_run_record", None)
     try:
         return ArtifactRegistry.from_dict(data)
     except Exception:

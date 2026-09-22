@@ -9,6 +9,7 @@ context when one is not already active.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import os
 import subprocess
@@ -18,7 +19,9 @@ from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Iterator, Optional, TypeVar, cast
 
+from kriya.control.persistence import load_run_record, save_run_record
 from kriya.control.run_ownership import acquire_run_lock
+from kriya.control.run_record import RunLifecycle, RunRecord
 from kriya.control.workspace_identity import workspace_identity
 
 
@@ -29,6 +32,8 @@ class InvalidRunContextError(RuntimeError):
 @dataclass
 class _RunLease:
     active: bool = True
+    mutation_depth: int = 0
+    record: Optional[RunRecord] = None
 
 
 @dataclass(frozen=True)
@@ -39,11 +44,16 @@ class RunContext:
     workspace_path: str
     workspace_id: str
     base_revision: Optional[str]
+    base_tree_hash: Optional[str]
     _lease: _RunLease = field(repr=False, compare=False)
 
     @property
     def active(self) -> bool:
         return self._lease.active
+
+    @property
+    def record_revision(self) -> Optional[int]:
+        return self._lease.record.revision if self._lease.record is not None else None
 
 
 _ACTIVE_RUN: ContextVar[Optional[RunContext]] = ContextVar(
@@ -55,11 +65,10 @@ def _canonical_workspace(workspace_path: str) -> str:
     return os.path.normcase(os.path.realpath(os.path.abspath(workspace_path)))
 
 
-def _base_revision(workspace_path: str) -> Optional[str]:
-    """Return the git revision owned at run start, or None outside git."""
+def _git_revision(workspace_path: str, revision: str) -> Optional[str]:
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            ["git", "rev-parse", revision],
             cwd=workspace_path,
             capture_output=True,
             text=True,
@@ -68,6 +77,47 @@ def _base_revision(workspace_path: str) -> Optional[str]:
     except (OSError, ValueError):
         return None
     return result.stdout.strip() if result.returncode == 0 else None
+
+
+def transition_mutating_run(context: RunContext, state: RunLifecycle, **updates: Any) -> RunRecord:
+    """Persist one validated lifecycle transition for the active capability."""
+    require_mutating_run(context.workspace_path, context)
+    current = context._lease.record or load_run_record(context.workspace_path, context.run_id)
+    if current is None:
+        raise InvalidRunContextError("active RunContext has no durable RunRecord")
+    updated = current.transition(state, **updates)
+    save_run_record(context.workspace_path, updated, expected_revision=current.revision)
+    context._lease.record = updated
+    return updated
+
+
+def _complete_successful_run(context: RunContext, payload: dict) -> None:
+    """Persist the proven terminal sequence after the workflow returns success."""
+    transition_mutating_run(context, RunLifecycle.CANDIDATE)
+    transition_mutating_run(context, RunLifecycle.VERIFYING)
+    transition_mutating_run(context, RunLifecycle.COMMIT_ELIGIBLE)
+    files = payload.get("files") or []
+    transition_mutating_run(
+        context,
+        RunLifecycle.COMMITTED,
+        commit_intent="APPLY_VERIFIED_CANDIDATE",
+        commit_result="COMMITTED" if files else "NO_CHANGES",
+    )
+    transition_mutating_run(context, RunLifecycle.SUCCESS)
+
+
+def _fail_active_run(context: RunContext, error: Optional[BaseException] = None) -> None:
+    record = context._lease.record
+    if record is None or record.terminal:
+        return
+    uncertain = error is not None and any(
+        cls.__name__ == "UncertainCommitError" for cls in type(error).__mro__
+    )
+    transition_mutating_run(
+        context,
+        RunLifecycle.UNCERTAIN if uncertain else RunLifecycle.FAILURE,
+        commit_result="UNCERTAIN" if uncertain else (record.commit_result or "NOT_COMMITTED"),
+    )
 
 
 def current_run_context() -> Optional[RunContext]:
@@ -118,17 +168,29 @@ def begin_mutating_run(
 
     with acquire_run_lock(canonical, run_id=run_id) as acquired_run_id:
         lease = _RunLease()
+        base_revision = _git_revision(canonical, "HEAD")
+        base_tree_hash = _git_revision(canonical, "HEAD^{tree}")
         context = RunContext(
             run_id=acquired_run_id,
             workspace_path=canonical,
             workspace_id=workspace_identity(canonical),
-            base_revision=_base_revision(canonical),
+            base_revision=base_revision,
+            base_tree_hash=base_tree_hash,
             _lease=lease,
         )
+        record = RunRecord.new(
+            acquired_run_id, context.workspace_id, base_revision, base_tree_hash,
+        )
+        save_run_record(canonical, record, expected_revision=None)
+        lease.record = record
         token = _ACTIVE_RUN.set(context)
         try:
             yield context
+        except BaseException as error:
+            _fail_active_run(context, error)
+            raise
         finally:
+            _fail_active_run(context)
             lease.active = False
             _ACTIVE_RUN.reset(token)
 
@@ -173,7 +235,34 @@ def coordinated_mutation(function: F) -> F:
             raise InvalidRunContextError(
                 f"{function.__qualname__} requires a workspace_path for mutation ownership"
             )
-        with _use_or_begin(os.fspath(workspace_path), supplied):
-            return await function(*args, **kwargs)
+        with _use_or_begin(os.fspath(workspace_path), supplied) as context:
+            lease = context._lease
+            lease.mutation_depth += 1
+            outermost = lease.mutation_depth == 1
+            if outermost and lease.record is not None and lease.record.lifecycle_state == RunLifecycle.NEW:
+                goal = bound.arguments.get("goal")
+                goal_hash = (
+                    hashlib.sha256(goal.encode("utf-8")).hexdigest()
+                    if isinstance(goal, str) else None
+                )
+                transition_mutating_run(context, RunLifecycle.RUNNING, goal_hash=goal_hash)
+            try:
+                result = await function(*args, **kwargs)
+                if outermost and lease.record is not None and not lease.record.terminal:
+                    payload = result.legacy_result if hasattr(result, "legacy_result") else result
+                    if isinstance(payload, dict):
+                        status = str(payload.get("status", "")).lower()
+                        quality = payload.get("quality_gates_passed")
+                        if quality is True or status == "success":
+                            _complete_successful_run(context, payload)
+                        elif quality is False or status in {"failed", "failure", "needs_review"}:
+                            _fail_active_run(context)
+                return result
+            except BaseException as error:
+                if outermost:
+                    _fail_active_run(context, error)
+                raise
+            finally:
+                lease.mutation_depth -= 1
 
     return cast(F, wrapper)

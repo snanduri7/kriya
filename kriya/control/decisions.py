@@ -68,6 +68,7 @@ class Decision:
     def from_dict(cls, data: Dict[str, Any]) -> "Decision":
         data = dict(data)
         data.pop("_workspace_id", None)
+        data.pop("_run_record", None)
         decision_type = data.pop("type")
         timestamp = data.pop("timestamp", _now_iso())
         return cls(type=decision_type, fields=data, timestamp=timestamp)
@@ -123,6 +124,14 @@ class DecisionLedger:
                     )
         serialized = decision.to_dict()
         serialized["_workspace_id"] = workspace_identity(workspace_path)
+        from kriya.control.run_coordinator import current_run_context
+        context = current_run_context()
+        if context is not None and context.record_revision is not None:
+            serialized["_run_record"] = {
+                "classification": "derived",
+                "run_id": context.run_id,
+                "revision": context.record_revision,
+            }
         existing_lines.append(json.dumps(serialized, sort_keys=True))
         content = "\n".join(existing_lines) + "\n"
 

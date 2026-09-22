@@ -109,7 +109,7 @@ from kriya.control.persistence import (
     save_control_state,
 )
 from kriya.control.state import ControlState
-from kriya.control.run_coordinator import coordinated_mutation
+from kriya.control.run_coordinator import coordinated_mutation, current_run_context
 from kriya.control.workspace_identity import json_document_is_ownerless
 from kriya.workflow import subtask_executor
 from kriya.workflow.checkpoint import (
@@ -3067,7 +3067,12 @@ class WorkflowController:
                 f"migration_mode must be one of {_VALID_MIGRATION_MODES!r}, got {migration_mode!r}."
             )
 
-        run_id = run_id or legacy_kwargs.get("trace_id_override") or new_run_id()
+        active_run = current_run_context()
+        run_id = (
+            run_id or legacy_kwargs.get("trace_id_override")
+            or (active_run.run_id if active_run is not None else None)
+            or new_run_id()
+        )
 
         _log_phase_banner("REQUEST ANALYSIS")
         route = await self.workflow_engine.engineering_triage.classify(

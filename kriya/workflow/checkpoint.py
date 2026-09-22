@@ -179,6 +179,14 @@ def save_checkpoint(workspace_path: str, run_id: str, data: Dict[str, Any]) -> N
         payload["run_id"] = run_id
         payload["saved_at"] = time.time()
         payload["_workspace"] = ownership_metadata(workspace_path)
+        from kriya.control.run_coordinator import current_run_context
+        context = current_run_context()
+        if context is not None and context.record_revision is not None:
+            payload["_run_record"] = {
+                "classification": "derived",
+                "run_id": context.run_id,
+                "revision": context.record_revision,
+            }
         with open(tmp_path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2)
         os.replace(tmp_path, path)
