@@ -8,7 +8,7 @@ PRD-006,RunCoordinator and Mandatory Workspace Ownership Gateway,Wave 2,P0,PRD-0
 PRD-007,Canonical Persistent RunRecord,Wave 2,P0,PRD-006,NOT REQUIRED,VERIFIED,d267c3a,PYTEST_VERIFIED,NOT_REQUIRED
 PRD-008,Resume Integrity and Deterministic Invalidation,Wave 2,P0,PRD-007,NOT REQUIRED,VERIFIED,31d19da,PYTEST_VERIFIED,NOT_REQUIRED
 PRD-009,Sealed Production Runtime Profile,Wave 2,P0,PRD-008,NOT REQUIRED,VERIFIED,d7163de,PYTEST_VERIFIED,NOT_REQUIRED
-PRD-010,kriya doctor --production Deployment Gate,Wave 2,P0,PRD-009,REQUIRED,NOT_STARTED,,,
+PRD-010,kriya doctor --production Deployment Gate,Wave 2,P0,PRD-009,REQUIRED,READY_FOR_PYTEST_VERIFICATION,aa492ab,,
 PRD-011,OCI Toolchain Parity and Versioned Execution Images,Wave 3,P0,PRD-010,REQUIRED,NOT_STARTED,,,
 PRD-012,Production Egress and MCP Containment Enforcement,Wave 3,P0,PRD-011,REQUIRED,NOT_STARTED,,,
 PRD-013,Exact Local Model Runtime Fingerprint,Wave 4,P0,PRD-012,REQUIRED,NOT_STARTED,,,
