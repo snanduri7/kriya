@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Union
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -901,7 +901,25 @@ class WorkflowControllerConfig(BaseModel):
             raise ValueError(f"workflow_controller.mode must be 'shadow' or 'enforce', got {v!r}")
         return v
 
-_VALID_RUNTIME_PROFILES = (None, "legacy", "validated", "hardened")
+_VALID_RUNTIME_PROFILES = (None, "legacy", "validated", "hardened", "production")
+
+# A production run must have a finite outer deadline.  One hour is deliberately
+# generous enough for local-model generation while still preventing an
+# unbounded run.  The reserve and per-file estimates remain independently
+# configurable only outside the sealed profile.
+PRODUCTION_GENERATION_TIME_BUDGET_SECONDS = 3600
+
+# These guarantees have no weakening configuration knob: generation already
+# refuses to run in the application workspace when isolated-worktree creation
+# fails (workflow.py), and checkpoints/traces are persistent workflow artifacts.
+# Keep the identifiers public and machine-readable so PRD-010's production
+# doctor can report the mechanisms without inventing duplicate config flags.
+PRODUCTION_FIXED_RUNTIME_GUARANTEES = frozenset({
+    "candidate_isolation_fail_closed",
+    "checkpoint_persistence",
+    "trace_persistence",
+    "no_uncontained_host_fallback",
+})
 
 
 class AppConfig(BaseModel):
@@ -925,7 +943,17 @@ class AppConfig(BaseModel):
     (kriya/policy/enforcement.py, MA7.3) and control-plane persistence
     already happen unconditionally whenever workflow_controller.enabled is
     true - there is no separate, real toggle for either one to include
-    here, despite how the original review phrased the preset's contents."""
+    here, despite how the original review phrased the preset's contents.
+
+    `production` is the separately sealed posture. It requires WorkflowController
+    and ExecutionPolicy enforcement, a finite generation deadline, OCI target-code
+    containment, MCP containment for any configured MCP server, and a required
+    brownfield full-regression baseline. Candidate isolation, checkpoint/trace
+    persistence, and refusal to fall back to raw-host execution are fixed runtime
+    guarantees named in PRODUCTION_FIXED_RUNTIME_GUARANTEES, not decorative
+    switches. semantic_region_enforcement_required is intentionally not forced:
+    language support remains incomplete until PRD-028, and PRD-010 must expose
+    that precision boundary in production-doctor output."""
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
     llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
@@ -953,6 +981,37 @@ class AppConfig(BaseModel):
         if v not in _VALID_RUNTIME_PROFILES:
             raise ValueError(f"runtime_profile must be one of {_VALID_RUNTIME_PROFILES!r}, got {v!r}")
         return v
+
+    @model_validator(mode="after")
+    def _production_profile_must_remain_sealed(self) -> "AppConfig":
+        """Reject an incompletely expanded or manually weakened production profile.
+
+        load_config() expands the preset before constructing AppConfig, but callers
+        also construct AppConfig directly in integrations and tests. Validating the
+        effective object here prevents that second path from treating the profile
+        name as evidence while retaining unsafe defaults.
+        """
+        if self.runtime_profile != "production":
+            return self
+
+        required = runtime_profile_preset_fields("production")
+        violations = []
+        for (top, leaf), expected in required.items():
+            actual = getattr(getattr(self, top), leaf)
+            # MCP containment is conditional on MCP execution being enabled. The
+            # expanded preset still turns it on pre-emptively, so later adding an
+            # MCP server cannot weaken the posture by omission.
+            if (top, leaf) == ("autonomy", "mcp_contained_execution_required") and not self.mcp:
+                continue
+            if actual != expected:
+                violations.append(f"{top}.{leaf} must be {expected!r}, got {actual!r}")
+
+        if violations:
+            raise ValueError(
+                "runtime_profile 'production' is sealed; unsafe effective settings: "
+                + "; ".join(violations)
+            )
+        return self
 
 def runtime_profile_preset_fields(profile: Optional[str]) -> Dict[Any, Any]:
     """The exact (top_key, leaf_key) -> value mapping a runtime_profile
@@ -984,6 +1043,23 @@ def runtime_profile_preset_fields(profile: Optional[str]) -> Dict[Any, Any]:
             ("process_profiles", "enabled"): True,
             ("workflow_controller", "enabled"): True,
             ("workflow_controller", "mode"): "enforce",
+        }
+    if profile == "production":
+        return {
+            ("engineering_triage", "shadow_mode"): False,
+            ("process_profiles", "enabled"): True,
+            ("workflow_controller", "enabled"): True,
+            ("workflow_controller", "mode"): "enforce",
+            ("execution_policy", "enabled"): True,
+            ("execution_policy", "mode"): "enforce",
+            ("autonomy", "generation_time_budget_seconds"): PRODUCTION_GENERATION_TIME_BUDGET_SECONDS,
+            ("autonomy", "containment_backend"): "oci",
+            ("autonomy", "contained_execution_required"): True,
+            ("autonomy", "mcp_contained_execution_required"): True,
+            # Until PRD-024 gives `auto` a safe risk-derived meaning, production
+            # always captures the pristine full-suite baseline and fails closed
+            # if that baseline is indeterminate.
+            ("autonomy", "brownfield_full_regression_baseline_policy"): "required",
         }
     return {}
 
@@ -1276,15 +1352,38 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
     # runtime_profile value itself did not come from a trusted source.
     runtime_profile = config_dict.get("runtime_profile")
     if runtime_profile is not None:
-        conflicting = sorted(
-            key for key in ("engineering_triage", "process_profiles", "workflow_controller")
-            if key in user_data
-        )
-        if conflicting:
-            raise ValueError(
-                f"runtime_profile cannot be combined with explicit {conflicting!r}; choose the preset "
-                "or configure the individual subsystems"
+        preset_fields = runtime_profile_preset_fields(runtime_profile)
+        if runtime_profile == "production":
+            contradictory = []
+            for (top, leaf), required_value in preset_fields.items():
+                explicit_section = user_data.get(top)
+                if (
+                    isinstance(explicit_section, dict)
+                    and leaf in explicit_section
+                    and explicit_section[leaf] != required_value
+                ):
+                    contradictory.append(
+                        f"{top}.{leaf}={explicit_section[leaf]!r} (production requires {required_value!r})"
+                    )
+            if contradictory:
+                raise ValueError(
+                    "runtime_profile 'production' rejects contradictory overrides: "
+                    + "; ".join(sorted(contradictory))
+                )
+        else:
+            # Preserve the original all-or-nothing behavior of the three older
+            # presets exactly. Production is more precise because its sealed
+            # surface spans only selected leaves in larger sections such as
+            # autonomy, where unrelated settings remain legitimate.
+            conflicting = sorted(
+                key for key in ("engineering_triage", "process_profiles", "workflow_controller")
+                if key in user_data
             )
+            if conflicting:
+                raise ValueError(
+                    f"runtime_profile cannot be combined with explicit {conflicting!r}; choose the preset "
+                    "or configure the individual subsystems"
+                )
 
         rp_source = provenance.get((None, "runtime_profile"), ConfigSource.PACKAGED_DEFAULT)
         derived_source = (
@@ -1293,7 +1392,6 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
             ) else rp_source
         )
 
-        preset_fields = runtime_profile_preset_fields(runtime_profile)
         for (top, leaf), value in preset_fields.items():
             config_dict.setdefault(top, {})[leaf] = value
             provenance[(top, leaf)] = derived_source

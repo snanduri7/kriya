@@ -181,13 +181,34 @@ workflow_controller:
 # enabled/workflow_controller.enabled+mode to hand-tune can set, in its
 # OWN kriya.yaml:
 #   runtime_profile: hardened
-# Supported presets are legacy, validated, and hardened. They cannot be
+# Supported presets are legacy, validated, hardened, and production. The
+# first three cannot be
 # combined with explicit engineering_triage/process_profiles/
 # workflow_controller settings in the same user configuration. Hardened
 # sets those four fields to their most-real
 # settings (see kriya/config/config.py::AppConfig's own docstring for
 # exactly what it does and does NOT touch - execution_policy.mode stays
 # separately gated).
+#
+# `production` is an explicit sealed posture. It forces:
+#   engineering_triage.shadow_mode: false
+#   process_profiles.enabled: true
+#   workflow_controller.enabled: true
+#   workflow_controller.mode: enforce
+#   execution_policy.enabled: true
+#   execution_policy.mode: enforce
+#   autonomy.generation_time_budget_seconds: 3600
+#   autonomy.containment_backend: oci
+#   autonomy.contained_execution_required: true
+#   autonomy.mcp_contained_execution_required: true
+#   autonomy.brownfield_full_regression_baseline_policy: required
+# A contradictory explicit value is rejected at load time; matching values
+# are accepted. Candidate worktree isolation, persistent checkpoints/traces,
+# and refusal to fall back to raw-host execution are fixed runtime mechanisms,
+# not optional flags. Production deliberately does not force
+# autonomy.semantic_region_enforcement_required until PRD-028 establishes
+# language coverage; `kriya doctor --production` (PRD-010) reports that
+# precision boundary.
 # runtime_profile: null
 
 autonomy:

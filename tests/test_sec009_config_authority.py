@@ -17,13 +17,16 @@ import contextlib
 import os
 import subprocess
 import sys
-import textwrap
 
 import pytest
 import yaml
 
-from kriya.config.config import AppConfig, load_config
-from kriya.config.authority import ConfigAuthorityError
+from kriya.config.authority import (
+    ConfigAuthorityError,
+    ConfigSource,
+    FieldClassification,
+)
+from kriya.config.config import AppConfig, load_config, resolve_config_state
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KRIYA_BIN = os.path.join(os.path.dirname(sys.executable), "kriya")
@@ -281,15 +284,41 @@ def test_repo_execution_policy_weakening_denied(tmp_path):
             load_config()
 
 
-def test_repo_runtime_profile_laundering_denied(tmp_path):
+@pytest.mark.parametrize("profile", ["legacy", "production"])
+def test_repo_runtime_profile_laundering_denied(tmp_path, profile):
     """A repository cannot flip runtime_profile to reach around per-field
     classification and change workflow_controller/engineering_triage in one
     word - denied at the raw runtime_profile field itself."""
     ws = tmp_path / "rp_launder_ws"
     with _cwd(ws):
-        _write_yaml(ws / "kriya.yaml", {"runtime_profile": "legacy"})
+        _write_yaml(ws / "kriya.yaml", {"runtime_profile": profile})
         with pytest.raises(ConfigAuthorityError, match="runtime_profile"):
             load_config()
+
+
+def test_production_profile_and_derived_security_controls_retain_authority_classification(tmp_path):
+    """Preset expansion cannot launder production's containment/policy grants."""
+    ws = tmp_path / "production_authority_ws"
+    with _cwd(ws):
+        _write_yaml(ws / "kriya.yaml", {"runtime_profile": "production"})
+        state = resolve_config_state()
+
+    violations = {violation.field_path: violation for violation in state.violations}
+    assert violations["runtime_profile"].classification is FieldClassification.PLATFORM_POLICY
+    for field_path in (
+        "execution_policy.enabled",
+        "execution_policy.mode",
+        "workflow_controller.enabled",
+        "workflow_controller.mode",
+        "autonomy.containment_backend",
+        "autonomy.contained_execution_required",
+        "autonomy.mcp_contained_execution_required",
+    ):
+        assert violations[field_path].source is ConfigSource.RUNTIME_PROFILE_OVERRIDE
+        assert violations[field_path].classification in {
+            FieldClassification.SECURITY_AUTHORITY,
+            FieldClassification.PLATFORM_POLICY,
+        }
 
 
 def test_repo_registry_host_expansion_denied(tmp_path):

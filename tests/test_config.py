@@ -3,7 +3,14 @@ import os
 import pytest
 import yaml
 
-from kriya.config.config import AppConfig, load_config
+from kriya.config.config import (
+    PRODUCTION_FIXED_RUNTIME_GUARANTEES,
+    PRODUCTION_GENERATION_TIME_BUDGET_SECONDS,
+    AppConfig,
+    load_config,
+    resolve_config_state,
+    runtime_profile_preset_fields,
+)
 
 
 def test_load_default_config():
@@ -121,6 +128,109 @@ def test_runtime_profile_rejects_conflicting_individual_settings(tmp_path):
 @pytest.mark.parametrize("profile", ["legacy", "validated", "hardened"])
 def test_runtime_profile_accepts_supported_presets(profile):
     assert AppConfig(runtime_profile=profile).runtime_profile == profile
+
+
+def test_runtime_profile_production_expands_to_sealed_safe_posture(tmp_path):
+    config_file = tmp_path / "operator-production.yaml"
+    config_file.write_text("runtime_profile: production\n", encoding="utf-8")
+
+    state = resolve_config_state(str(config_file))
+    cfg = AppConfig(**state.config_dict)
+
+    assert cfg.runtime_profile == "production"
+    assert cfg.workflow_controller.enabled is True
+    assert cfg.workflow_controller.mode == "enforce"
+    assert cfg.execution_policy.enabled is True
+    assert cfg.execution_policy.mode == "enforce"
+    assert cfg.autonomy.generation_time_budget_seconds == PRODUCTION_GENERATION_TIME_BUDGET_SECONDS
+    assert cfg.autonomy.containment_backend == "oci"
+    assert cfg.autonomy.contained_execution_required is True
+    assert cfg.autonomy.mcp_contained_execution_required is True
+    assert cfg.autonomy.brownfield_full_regression_baseline_policy == "required"
+    # PRD-028 owns broad language-support proof; production must not pretend
+    # that unsupported semantic precision is enforced today.
+    assert cfg.autonomy.semantic_region_enforcement_required is False
+    assert PRODUCTION_FIXED_RUNTIME_GUARANTEES == {
+        "candidate_isolation_fail_closed",
+        "checkpoint_persistence",
+        "trace_persistence",
+        "no_uncontained_host_fallback",
+    }
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "unsafe", "required"),
+    [
+        ("workflow_controller", "mode", "shadow", "enforce"),
+        ("execution_policy", "mode", "audit", "enforce"),
+        ("execution_policy", "enabled", False, True),
+        ("autonomy", "generation_time_budget_seconds", None, PRODUCTION_GENERATION_TIME_BUDGET_SECONDS),
+        ("autonomy", "contained_execution_required", False, True),
+        ("autonomy", "mcp_contained_execution_required", False, True),
+        ("autonomy", "containment_backend", "none", "oci"),
+        ("autonomy", "brownfield_full_regression_baseline_policy", "auto", "required"),
+    ],
+)
+def test_runtime_profile_production_rejects_contradictory_overrides(
+    tmp_path, section, field, unsafe, required
+):
+    config_file = tmp_path / f"unsafe-{section}-{field}.yaml"
+    config_file.write_text(
+        yaml.safe_dump({"runtime_profile": "production", section: {field: unsafe}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=rf"production.*{section}\.{field}=.*requires {required!r}",
+    ):
+        resolve_config_state(str(config_file))
+
+
+def test_runtime_profile_production_allows_matching_and_unrelated_overrides(tmp_path):
+    config_file = tmp_path / "safe-production.yaml"
+    config_file.write_text(
+        yaml.safe_dump({
+            "runtime_profile": "production",
+            "execution_policy": {"mode": "enforce"},
+            "autonomy": {
+                "brownfield_full_regression_baseline_policy": "required",
+                "semantic_region_enforcement_required": False,
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    cfg = AppConfig(**resolve_config_state(str(config_file)).config_dict)
+    assert cfg.execution_policy.mode == "enforce"
+    assert cfg.autonomy.brownfield_full_regression_baseline_policy == "required"
+    assert cfg.autonomy.semantic_region_enforcement_required is False
+
+
+def test_direct_app_config_cannot_claim_production_with_unsafe_defaults():
+    with pytest.raises(Exception, match="production.*execution_policy.mode"):
+        AppConfig(runtime_profile="production")
+
+
+def test_existing_runtime_profile_mappings_remain_byte_for_byte_compatible():
+    assert runtime_profile_preset_fields("legacy") == {
+        ("engineering_triage", "shadow_mode"): True,
+        ("process_profiles", "enabled"): False,
+        ("workflow_controller", "enabled"): False,
+        ("workflow_controller", "mode"): "shadow",
+    }
+    assert runtime_profile_preset_fields("validated") == {
+        ("engineering_triage", "shadow_mode"): False,
+        ("process_profiles", "enabled"): True,
+        ("workflow_controller", "enabled"): True,
+        ("workflow_controller", "mode"): "shadow",
+    }
+    assert runtime_profile_preset_fields("hardened") == {
+        ("engineering_triage", "shadow_mode"): False,
+        ("process_profiles", "enabled"): True,
+        ("workflow_controller", "enabled"): True,
+        ("workflow_controller", "mode"): "enforce",
+    }
 
 
 def test_load_custom_config(tmp_path):
