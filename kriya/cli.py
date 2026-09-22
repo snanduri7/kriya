@@ -186,10 +186,26 @@ def config(ctx: click.Context) -> None:
     click.echo(json.dumps(_redact_secrets(cfg.model_dump(mode="json")), indent=2))
 
 @main.command()
+@click.option("--production", is_flag=True, help="Run the fail-closed production deployment preflight.")
+@click.option("--json", "json_output", is_flag=True, help="Emit the production report as stable JSON.")
 @click.pass_context
-def doctor(ctx: click.Context) -> None:
+def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
     """Check Kriya platform health, directories, and LLM connection."""
     cfg: AppConfig = ctx.obj['config']
+    if json_output and not production:
+        raise click.UsageError("--json is supported with --production")
+    if production:
+        from kriya.production_doctor import render_production_report, run_production_doctor
+
+        report = run_production_doctor(cfg, os.getcwd())
+        if json_output:
+            click.echo(json.dumps(report.to_dict(), sort_keys=True))
+        else:
+            click.echo(render_production_report(report))
+        if not report.production_ready:
+            ctx.exit(1)
+        return
+
     click.secho("=== Kriya Doctor ===", bold=True)
     
     # 1. Check directories

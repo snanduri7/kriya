@@ -1,0 +1,26 @@
+Base coding revision: 003099b
+@main.command()
+@click.pass_context
+def config(ctx: click.Context) -> None:
+    """Display current Kriya configuration."""
+    cfg: AppConfig = ctx.obj['config']
+    click.echo(json.dumps(_redact_secrets(cfg.model_dump(mode="json")), indent=2))
+
+@main.command()
+@click.pass_context
+def doctor(ctx: click.Context) -> None:
+    """Check Kriya platform health, directories, and LLM connection."""
+    cfg: AppConfig = ctx.obj['config']
+    click.secho("=== Kriya Doctor ===", bold=True)
+    
+    # 1. Check directories
+    click.echo("\nChecking directories:")
+    dirs = {
+        "Plugins Directory": cfg.plugins.directory,
+        "Skills Directory": cfg.paths.skills,
+        "Memory Directory": cfg.paths.memory,
+        "Logs Directory": cfg.paths.logs,
+    }
+    for name, path in dirs.items():
+        resolved = os.path.abspath(path)
+        exists = os.path.exists(resolved)

@@ -125,6 +125,21 @@ Exits non-zero if any check reports `[ERROR]` (e.g. LLM/embedding server unreach
 
 If `java` and/or `mvn` are found on PATH, `doctor` also reports which JDK major version each will actually build/run against and warns if they differ - `mvn` can silently resolve a different JDK than plain `java` (e.g. a Homebrew Maven install defaulting `JAVA_HOME` to its own openjdk), which can make a JVM startup flag correct for one JDK a fatal error under the other. Skipped entirely (no warning) if neither tool is found - not every project is Java-based.
 
+Before a production mutation run, use the stricter deployment gate:
+
+```bash
+.venv/bin/kriya -c operator-production.yaml --trust-file /secure/kriya-trust.json doctor --production
+.venv/bin/kriya -c operator-production.yaml --trust-file /secure/kriya-trust.json doctor --production --json
+```
+
+Production mode emits stable check IDs with `PASS`, `WARN`, `FAIL`, or
+`UNAVAILABLE`, evidence, and remediation. Any required `FAIL` or `UNAVAILABLE`
+returns a nonzero exit status. It checks the sealed production profile, core
+plugins, workspace locking, persistence and capacity, Git worktrees, declared
+toolchains, real OCI containment, egress, exact local-model metadata and known
+qualification, embeddings, optional LSP and role-model independence, and release
+integrity. It reports problems without changing configuration or installing tools.
+
 ### Inspect Resolved Configuration
 Print the fully-merged config (defaults + your `kriya.yaml`) as JSON - useful for confirming what a relative path or config layer actually resolved to:
 ```bash
