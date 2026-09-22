@@ -352,12 +352,55 @@ def compute_control_plane_hashes(
 class ResumeStatus(str, Enum):
     OK = "ok"
     NEEDS_REVIEW = "needs_review"
+    REFUSED = "refused"
+
+
+class ResumeAction(str, Enum):
+    INVALIDATE = "invalidate"
+    REFUSE = "refuse"
+
+
+RESUME_INVALIDATION_MATRIX = {
+    "base_commit": (ResumeAction.INVALIDATE, ("context", "candidate", "verification")),
+    "tree_hash": (ResumeAction.INVALIDATE, ("context", "candidate", "verification")),
+    "workspace_content_hash": (ResumeAction.INVALIDATE, ("context", "candidate", "verification")),
+    "control_state_hash": (ResumeAction.INVALIDATE, ("planning", "candidate", "verification")),
+    "contract_hash": (ResumeAction.INVALIDATE, ("planning", "candidate", "verification")),
+    "artifact_registry_hash": (ResumeAction.INVALIDATE, ("context", "candidate", "verification")),
+    "config_fingerprint": (ResumeAction.INVALIDATE, ("planning", "candidate", "verification")),
+    "goal_fingerprint": (ResumeAction.INVALIDATE, ("planning", "candidate", "verification")),
+    "approved_plan_hash": (ResumeAction.INVALIDATE, ("candidate", "verification")),
+    "obligation_ledger_hash": (ResumeAction.INVALIDATE, ("candidate", "verification")),
+    "skills_fingerprint": (ResumeAction.INVALIDATE, ("planning", "candidate", "verification")),
+    "model_runtime_fingerprint": (ResumeAction.INVALIDATE, ("model_protocol", "candidate", "verification")),
+    "containment_fingerprint": (ResumeAction.INVALIDATE, ("verification",)),
+    "toolchain_fingerprint": (ResumeAction.INVALIDATE, ("verification",)),
+    "verification_policy_fingerprint": (ResumeAction.INVALIDATE, ("verification",)),
+    "commit_state": (ResumeAction.REFUSE, ("mutation_authority", "candidate", "verification")),
+}
+
+
+@dataclass(frozen=True)
+class ResumeDecision:
+    fingerprint: str
+    action: ResumeAction
+    invalidated_stages: Tuple[str, ...]
+    reason: str
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "fingerprint": self.fingerprint,
+            "action": self.action.value,
+            "invalidated_stages": list(self.invalidated_stages),
+            "reason": self.reason,
+        }
 
 
 @dataclass(frozen=True)
 class ResumeValidationResult:
     status: ResumeStatus
     mismatches: Tuple[str, ...] = ()
+    decisions: Tuple[ResumeDecision, ...] = ()
 
 
 def validate_resume_against_reality(
@@ -366,6 +409,8 @@ def validate_resume_against_reality(
     control_state: Optional[Any] = None,
     contract_registry: Optional[Any] = None,
     artifact_registry: Optional[Any] = None,
+    current_fingerprints: Optional[Dict[str, Any]] = None,
+    run_record: Optional[Any] = None,
 ) -> ResumeValidationResult:
     """Section 30's flow: validate checkpoint commit -> validate tree hash
     -> validate control-state hash -> validate contract/artifact registry
@@ -395,18 +440,24 @@ def validate_resume_against_reality(
     it was actually saved with."""
 
     mismatches: List[str] = []
+    decisions: List[ResumeDecision] = []
+
+    def mismatch(fingerprint: str, reason: str) -> None:
+        mismatches.append(reason)
+        action, stages = RESUME_INVALIDATION_MATRIX[fingerprint]
+        decisions.append(ResumeDecision(fingerprint, action, stages, reason))
 
     stored_base_commit = checkpoint_data.get("base_commit")
     if stored_base_commit is not None:
         current = compute_base_commit(workspace_path)
         if current != stored_base_commit:
-            mismatches.append(f"base_commit: checkpoint={stored_base_commit!r} current={current!r}")
+            mismatch("base_commit", f"base_commit: checkpoint={stored_base_commit!r} current={current!r}")
 
     stored_tree_hash = checkpoint_data.get("tree_hash")
     if stored_tree_hash is not None:
         current = compute_tree_hash(workspace_path)
         if current != stored_tree_hash:
-            mismatches.append(f"tree_hash: checkpoint={stored_tree_hash!r} current={current!r}")
+            mismatch("tree_hash", f"tree_hash: checkpoint={stored_tree_hash!r} current={current!r}")
 
     # Only meaningful to require when the checkpoint is otherwise a real
     # control-plane checkpoint at all (i.e. it actually stored a
@@ -418,7 +469,7 @@ def validate_resume_against_reality(
     if stored_base_commit is not None:
         stored_content_hash = checkpoint_data.get("workspace_content_hash")
         if stored_content_hash is None:
-            mismatches.append(
+            mismatch("workspace_content_hash",
                 "workspace_content_hash missing - checkpoint predates the "
                 "working-tree-content identity check (schema_version < 2) "
                 "and is not safely resumable"
@@ -426,12 +477,12 @@ def validate_resume_against_reality(
         else:
             current = compute_workspace_content_hash(workspace_path)
             if current is None:
-                mismatches.append(
+                mismatch("workspace_content_hash",
                     "workspace_content_hash could not be recomputed for the current "
                     "workspace - failing closed rather than assuming unchanged"
                 )
             elif current != stored_content_hash:
-                mismatches.append(
+                mismatch("workspace_content_hash",
                     f"workspace_content_hash: checkpoint={stored_content_hash!r} current={current!r}"
                 )
 
@@ -439,19 +490,49 @@ def validate_resume_against_reality(
     if stored_control_hash is not None and control_state is not None:
         current = control_state.content_hash()
         if current != stored_control_hash:
-            mismatches.append("control_state_hash mismatch")
+            mismatch("control_state_hash", "control_state_hash mismatch")
 
     stored_contract_hash = checkpoint_data.get("contract_hash")
     if stored_contract_hash is not None and contract_registry is not None:
         current = compute_registry_hash(contract_registry.to_dict())
         if current != stored_contract_hash:
-            mismatches.append("contract_hash mismatch")
+            mismatch("contract_hash", "contract_hash mismatch")
 
     stored_artifact_hash = checkpoint_data.get("artifact_registry_hash")
     if stored_artifact_hash is not None and artifact_registry is not None:
         current = compute_registry_hash(artifact_registry.to_dict())
         if current != stored_artifact_hash:
-            mismatches.append("artifact_registry_hash mismatch")
+            mismatch("artifact_registry_hash", "artifact_registry_hash mismatch")
 
-    status = ResumeStatus.NEEDS_REVIEW if mismatches else ResumeStatus.OK
-    return ResumeValidationResult(status=status, mismatches=tuple(mismatches))
+    for fingerprint in (
+        "config_fingerprint", "goal_fingerprint", "approved_plan_hash",
+        "obligation_ledger_hash", "skills_fingerprint", "model_runtime_fingerprint",
+        "containment_fingerprint", "toolchain_fingerprint",
+        "verification_policy_fingerprint",
+    ):
+        stored = checkpoint_data.get(fingerprint)
+        if stored is None or current_fingerprints is None or fingerprint not in current_fingerprints:
+            continue
+        current = current_fingerprints[fingerprint]
+        if current != stored:
+            mismatch(fingerprint, f"{fingerprint}: checkpoint={stored!r} current={current!r}")
+
+    if run_record is not None:
+        lifecycle = getattr(getattr(run_record, "lifecycle_state", None), "value", None)
+        commit_result = getattr(run_record, "commit_result", None)
+        commit_intent = getattr(run_record, "commit_intent", None)
+        if lifecycle == "UNCERTAIN" or commit_result == "UNCERTAIN" or (
+            commit_intent is not None and commit_result is None
+        ):
+            mismatch(
+                "commit_state",
+                f"commit_state uncertain: lifecycle={lifecycle!r} result={commit_result!r}",
+            )
+
+    status = (
+        ResumeStatus.REFUSED if any(item.action == ResumeAction.REFUSE for item in decisions)
+        else ResumeStatus.NEEDS_REVIEW if mismatches else ResumeStatus.OK
+    )
+    return ResumeValidationResult(
+        status=status, mismatches=tuple(mismatches), decisions=tuple(decisions),
+    )

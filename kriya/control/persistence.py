@@ -25,7 +25,7 @@ write; that is the existing pattern this follows.
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.contracts import ContractRegistry
@@ -90,6 +90,20 @@ def load_run_record(workspace_path: str, run_id: str) -> Optional[RunRecord]:
     if data is None:
         return None
     return RunRecord.from_dict(data)
+
+
+def list_run_records(workspace_path: str) -> List[RunRecord]:
+    directory = os.path.join(_control_dir(workspace_path), _RUNS_DIRNAME)
+    if not os.path.isdir(directory):
+        return []
+    records: List[RunRecord] = []
+    for name in sorted(os.listdir(directory)):
+        if not name.endswith(".json"):
+            continue
+        record = load_run_record(workspace_path, name[:-5])
+        if record is not None:
+            records.append(record)
+    return records
 
 
 def save_run_record(

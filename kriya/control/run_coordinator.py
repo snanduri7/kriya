@@ -55,6 +55,10 @@ class RunContext:
     def record_revision(self) -> Optional[int]:
         return self._lease.record.revision if self._lease.record is not None else None
 
+    @property
+    def is_outermost_mutation(self) -> bool:
+        return self._lease.mutation_depth == 1
+
 
 _ACTIVE_RUN: ContextVar[Optional[RunContext]] = ContextVar(
     "kriya_active_mutating_run", default=None
@@ -93,16 +97,24 @@ def transition_mutating_run(context: RunContext, state: RunLifecycle, **updates:
 
 def _complete_successful_run(context: RunContext, payload: dict) -> None:
     """Persist the proven terminal sequence after the workflow returns success."""
-    transition_mutating_run(context, RunLifecycle.CANDIDATE)
-    transition_mutating_run(context, RunLifecycle.VERIFYING)
-    transition_mutating_run(context, RunLifecycle.COMMIT_ELIGIBLE)
     files = payload.get("files") or []
-    transition_mutating_run(
-        context,
-        RunLifecycle.COMMITTED,
-        commit_intent="APPLY_VERIFIED_CANDIDATE",
-        commit_result="COMMITTED" if files else "NO_CHANGES",
-    )
+    state = context._lease.record.lifecycle_state
+    if state == RunLifecycle.RUNNING:
+        transition_mutating_run(context, RunLifecycle.CANDIDATE)
+        state = RunLifecycle.CANDIDATE
+    if state == RunLifecycle.CANDIDATE:
+        transition_mutating_run(context, RunLifecycle.VERIFYING)
+        state = RunLifecycle.VERIFYING
+    if state == RunLifecycle.VERIFYING:
+        transition_mutating_run(context, RunLifecycle.COMMIT_ELIGIBLE)
+        state = RunLifecycle.COMMIT_ELIGIBLE
+    if state == RunLifecycle.COMMIT_ELIGIBLE:
+        transition_mutating_run(
+            context,
+            RunLifecycle.COMMITTED,
+            commit_intent="APPLY_VERIFIED_CANDIDATE",
+            commit_result="COMMITTED" if files else "NO_CHANGES",
+        )
     transition_mutating_run(context, RunLifecycle.SUCCESS)
 
 

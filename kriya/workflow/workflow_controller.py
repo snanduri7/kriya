@@ -107,9 +107,15 @@ from kriya.control.persistence import (
     save_approved_plan,
     save_contract_registry,
     save_control_state,
+    list_run_records,
 )
 from kriya.control.state import ControlState
-from kriya.control.run_coordinator import coordinated_mutation, current_run_context
+from kriya.control.run_coordinator import (
+    coordinated_mutation,
+    current_run_context,
+    transition_mutating_run,
+)
+from kriya.control.run_record import RunLifecycle
 from kriya.control.workspace_identity import json_document_is_ownerless
 from kriya.workflow import subtask_executor
 from kriya.workflow.checkpoint import (
@@ -3106,6 +3112,25 @@ class WorkflowController:
         verification_report: Optional[VerificationReport] = None
 
         if migration_mode == "enforce":
+            unsafe_run_records = [
+                record for record in list_run_records(workspace_path)
+                if record.run_id != run_id and (
+                    record.lifecycle_state == RunLifecycle.UNCERTAIN
+                    or (record.commit_intent is not None and record.commit_result is None)
+                )
+            ]
+            if unsafe_run_records:
+                return WorkflowResult(
+                    run_id=run_id, control_state=control_state, route=route,
+                    legacy_result={
+                        "status": "needs_review",
+                        "quality_gates_passed": False,
+                        "files": [],
+                        "reason_codes": ["UNCERTAIN_RUN_RECORD_COMMIT_STATE"],
+                        "uncertain_run_ids": [record.run_id for record in unsafe_run_records],
+                        "run_id": run_id,
+                    },
+                )
             # PRD-005: an in-progress durable commit record means a prior
             # process may have died between source-path replacements. Never
             # start or resume model work while that source state is unknown.
@@ -6195,10 +6220,21 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                                 expected_base_revision=original_plan_revisions[path],
                                 expected_base_exists=(action != FileAction.CREATE),
                             ))
+                        active_run = current_run_context()
+                        if active_run is not None and active_run.is_outermost_mutation:
+                            transition_mutating_run(
+                                active_run, RunLifecycle.COMMIT_ELIGIBLE,
+                                commit_intent="APPLY_VERIFIED_CANDIDATE",
+                            )
                         commit_result = commit_revision_grounded_batch(
                             terminal_writes, workspace_path=workspace_path,
                             transaction_id=run_id,
                         )
+                        if active_run is not None and active_run.is_outermost_mutation:
+                            transition_mutating_run(
+                                active_run, RunLifecycle.COMMITTED,
+                                commit_result="COMMITTED",
+                            )
                         workspace_commit_evidence = commit_result.evidence.to_dict()
                     workspace_commit_completed = True
                     await _emit_terminal_event(

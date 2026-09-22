@@ -1,6 +1,7 @@
 import asyncio
 import difflib
 import hashlib
+import json
 import logging
 import os
 import re
@@ -23,7 +24,13 @@ from kriya.agents.contracts import parse_planner_structured_output
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.control.run_coordinator import coordinated_mutation
+from kriya.control.persistence import load_run_record
+from kriya.control.run_coordinator import (
+    coordinated_mutation,
+    current_run_context,
+    transition_mutating_run,
+)
+from kriya.control.run_record import RunLifecycle
 from kriya.workflow.checkpoint import (
     compute_config_fingerprint,
     compute_workspace_content_hash,
@@ -33,6 +40,8 @@ from kriya.workflow.checkpoint import (
     load_checkpoint,
     new_run_id,
     save_checkpoint,
+    ResumeStatus,
+    validate_resume_against_reality,
 )
 from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -1075,6 +1084,37 @@ class WorkflowEngine:
                     current_cfg_fp = compute_config_fingerprint(self.kernel.config.model_dump())
                     current_goal_fp = hashlib.sha256(f"{goal}\x00{state.error_context or ''}".encode("utf-8")).hexdigest()
                     drift_reasons = []
+                    run_reference = candidate.get("_run_record")
+                    prior_run_record = None
+                    if isinstance(run_reference, dict) and run_reference.get("run_id"):
+                        prior_run_record = load_run_record(
+                            workspace_path, str(run_reference["run_id"]),
+                        )
+                    resume_validation = validate_resume_against_reality(
+                        candidate,
+                        workspace_path,
+                        current_fingerprints={
+                            "config_fingerprint": current_cfg_fp,
+                            "goal_fingerprint": current_goal_fp,
+                        },
+                        run_record=prior_run_record,
+                    )
+                    if resume_validation.decisions:
+                        logger.warning(
+                            "Structured resume decisions: %s",
+                            json.dumps([item.to_dict() for item in resume_validation.decisions], sort_keys=True),
+                        )
+                    if resume_validation.status == ResumeStatus.REFUSED:
+                        return {
+                            "status": "resume_refused",
+                            "quality_gates_passed": False,
+                            "files": [],
+                            "reason_codes": ["UNCERTAIN_COMMIT_STATE"],
+                            "resume_decisions": [
+                                item.to_dict() for item in resume_validation.decisions
+                            ],
+                            "run_id": str(run_reference.get("run_id")),
+                        }
                     if current_ws_fp is None:
                         # Not a git repo (or git unavailable) - there's no reliable way to
                         # confirm the workspace hasn't changed since the checkpoint was
@@ -3922,7 +3962,17 @@ class WorkflowEngine:
                             state.all_original_contents.get(filepath, "")
                         ),
                     ))
+                active_run = current_run_context()
+                if active_run is not None and active_run.is_outermost_mutation:
+                    transition_mutating_run(
+                        active_run, RunLifecycle.COMMIT_ELIGIBLE,
+                        commit_intent="APPLY_VERIFIED_CANDIDATE",
+                    )
                 commit_revision_grounded_batch(final_writes, workspace_path=workspace_path)
+                if active_run is not None and active_run.is_outermost_mutation:
+                    transition_mutating_run(
+                        active_run, RunLifecycle.COMMITTED, commit_result="COMMITTED",
+                    )
                 for filepath in sorted(state.all_files_written):
                     logger.info(
                         "Applied terminally verified sandbox change to workspace: %s", filepath,
