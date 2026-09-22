@@ -125,7 +125,7 @@ def test_stdout_restored_after_system_exit():
 
 def test_workspace_lock_refusal_is_json(invoke):
     from kriya.control.run_ownership import WorkspaceLockHeldError
-    with patch('kriya.cli.acquire_run_lock', side_effect=WorkspaceLockHeldError('busy')):
+    with patch('kriya.cli.begin_mutating_run', side_effect=WorkspaceLockHeldError('busy')):
         result = invoke()
     assert result.exit_code == 1
     assert json.loads(result.stdout)['quality_gates_passed'] is False
