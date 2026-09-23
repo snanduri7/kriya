@@ -72,7 +72,6 @@ def test_maven_containment_failure_with_java_files_cannot_fall_through_to_javac(
     (tmp_path / "Foo.java").write_text("public class Foo { public static void main(String[] a) {} }")
     validator._run_maven_cmd = _boom
     javac_called = []
-    original = validator._run_cmd_with_timeout
 
     def _tracking_boom(cmd, *args, **kwargs):
         if cmd and cmd[0] == "javac":
@@ -106,11 +105,12 @@ def test_gradle_containment_failure_cannot_fall_through_to_javac(tmp_path):
     assert not javac_called, "javac fallback must never be reached after a Gradle containment-setup failure"
 
 
-# --- 4: run_compile_check, Python - documents there is no containment
-# call in this path at all (a pure in-process `compile()` syntax check),
-# so there is nothing for a ContainmentSetupError to originate from here.
+# --- 4: run_compile_check, Python containment-setup failure ---
+# PRD-011 deliberately moved contained Python syntax checks into the
+# versioned Python image. The same fail-closed invariant therefore applies
+# here now: an unavailable backend cannot become a host-side syntax PASS.
 
-def test_python_compile_check_never_touches_containment(tmp_path):
+def test_python_compile_check_containment_failure_propagates(tmp_path):
     (tmp_path / "app.py").write_text("def f():\n    return 1\n")
     validator = PolymorphicValidator(
         str(tmp_path), autonomy_cfg=AutonomyConfig(contained_execution_required=True, containment_backend="oci"),
@@ -118,8 +118,8 @@ def test_python_compile_check_never_touches_containment(tmp_path):
     validator.stack = "python"
     validator._run_cmd_with_timeout = _boom
     validator._run_maven_cmd = _boom
-    result = validator.run_compile_check(["app.py"])
-    assert result["success"] is True  # a real, ordinary syntax check - unaffected
+    with pytest.raises(ContainmentSetupError):
+        validator.run_compile_check(["app.py"])
 
 
 # --- 5: run_compile_check, Ruby containment-setup failure ---
