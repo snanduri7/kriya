@@ -7,6 +7,7 @@ READY_FOR_PYTEST_VERIFICATION
 - Base revision: `6b91072aac92b6ef5c8cc7a30f10b71af44ce1a5`
 - Final revision / working-tree diff ID: `e2781e7022452df272becbc9a2cca482405b9663`
 - Coding revision: `54ad7983478bbb89ea7ef3cdcb0f0dd8058b8df3`
+- Full-suite compatibility follow-up: `d6b775ee9538da072d33814a8d5816e37e06239b`
 - Kriya version: `0.1.0`
 
 ## Scope implemented
@@ -54,8 +55,11 @@ Contained verification now resolves one versioned profile before subprocess crea
 | `.newvenv/bin/python -m pytest -q tests/test_containment.py tests/test_process_controller.py tests/test_process_controller_containment.py tests/test_process_profile.py tests/test_dependency_execution.py tests/test_prd011_toolchain_identity.py` | 48 | 0 | 9 | 4.88s | Core containment/process/dependency suites; skips are existing platform guards |
 | `.newvenv/bin/python -m pytest -q tests/test_containment_oci.py tests/test_containment_oci_registry_scoped_unit.py tests/test_service_runtime_oci.py tests/test_validate_oci.py` | 12 | 0 | 40 | 0.90s | Docker-dependent cases skipped because the coding sandbox cannot reach Docker |
 | `.newvenv/bin/python -m pytest -q tests/test_prd011_toolchain_identity_oci.py` | 0 | 0 | 2 | 0.23s | New real-Docker runtime/digest tests; Docker unavailable in coding sandbox |
+| `.newvenv/bin/python -m pytest -q tests/test_sec002_fail_closed_evidence.py tests/test_prd011_toolchain_identity.py` | 24 | 0 | 0 | 0.53s | Updated the stale SEC-002 Python test to require fail-closed contained compilation |
 
 The complete `tests/test_service_runtime.py` suite was also attempted. Its non-network cases passed, while 19 cases could not bind a loopback socket in the coding sandbox (`PermissionError: Operation not permitted`). This was an environment restriction, so the independent verifier must rerun the suite in the target workspace.
+
+The first user full-suite run reached `4759 passed` with one failure in the older SEC-002 regression that asserted Python syntax compilation never uses containment. PRD-011 deliberately changes that contract. The follow-up replaces the stale assertion with proof that a Python containment setup failure propagates and can never fall back to a host-side PASS.
 
 ## Static/lint/architecture checks
 - `.newvenv/bin/python -m ruff check` on all changed production/test files: PASS.
