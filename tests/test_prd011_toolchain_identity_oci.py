@@ -59,4 +59,3 @@ def test_actual_container_runtime_matches_profile_and_records_digest(tmp_path, i
     assert evidence["runtime_version"] == expected
     assert evidence["observed_runtime_version"] == expected
     assert evidence["image_digest"].startswith("sha256:")
-
