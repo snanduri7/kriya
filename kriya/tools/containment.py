@@ -25,11 +25,14 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Dict, List, Optional, Protocol, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Protocol, Tuple
 
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from kriya.tools.toolchain_identity import ToolchainIdentity
 
 
 class TrustClass(Enum):
@@ -179,6 +182,11 @@ class ContainmentProfile:
     run_as_uid: Optional[int] = None
     run_as_gid: Optional[int] = None
     authority_label: Optional[str] = None
+    # PRD-011: resolved from PolymorphicValidator's existing stack
+    # detection.  The OCI backend must honor this exact versioned profile;
+    # None preserves generic/MCP containment callers that have no project
+    # toolchain.
+    toolchain_identity: Optional["ToolchainIdentity"] = None
 
     @property
     def backend_required(self) -> bool:
@@ -246,6 +254,7 @@ class PreparedContainment:
     command_prefix: Optional[List[str]] = None
     cleanup: Optional[Callable[[], None]] = None
     exec_target: Optional[List[str]] = None
+    toolchain_identity: Optional["ToolchainIdentity"] = None
 
 
 class ContainmentBackend(Protocol):
@@ -265,9 +274,10 @@ class ContainmentBackend(Protocol):
         NOT a decision input for policy/authorization (that stays
         ExecutionPolicy's job, Invariant: authorization/containment stay
         separate layers) - a backend may use it only for backend-internal
-        setup choices with no security meaning of their own, e.g. an OCI
-        backend picking which base image has the right toolchain
-        (`mvn` vs `python`) preinstalled. `NullContainmentBackend`/
+        setup choices. For project verification the resolved
+        `profile.toolchain_identity` is security-relevant and must be
+        honored exactly; command-based selection remains only for generic
+        profiles without a toolchain identity. `NullContainmentBackend`/
         `DummyContainmentBackend` ignore it entirely."""
         ...
 

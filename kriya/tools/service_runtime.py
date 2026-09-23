@@ -46,8 +46,8 @@ from enum import Enum
 from socket import create_connection
 from typing import Callable, Dict, List, Optional, Tuple
 
-from kriya.tools.process import ManagedProcess, ProcessController
 from kriya.tools.containment import ContainmentBackend, ContainmentProfile
+from kriya.tools.process import ManagedProcess, ProcessController
 
 
 class ServiceVerificationOutcomeKind(str, Enum):
@@ -145,9 +145,10 @@ class ManagedServiceVerificationResult:
     probe_status: Optional[int] = None
     probe_body: Optional[str] = None
     cleanup_error: Optional[str] = None
+    toolchain_identity: Optional[Dict[str, object]] = None
 
     def to_dict(self) -> Dict[str, object]:
-        return {
+        result = {
             "outcome": self.outcome.value,
             "passed": self.passed,
             "reasoning": self.reasoning,
@@ -158,6 +159,9 @@ class ManagedServiceVerificationResult:
             "probe_body": self.probe_body,
             "cleanup_error": self.cleanup_error,
         }
+        if self.toolchain_identity is not None:
+            result["toolchain_identity"] = self.toolchain_identity
+        return result
 
 
 def _check_readiness(spec: ReadinessSpec) -> bool:
@@ -607,6 +611,7 @@ class _PreparationOutcome:
     stderr: str = ""
     command: Optional[List[str]] = None
     returncode: Optional[int] = None
+    toolchain_identity: Optional[Dict[str, object]] = None
 
 
 def _prepare_required_artifact(
@@ -642,17 +647,9 @@ def _prepare_required_artifact(
     rule) - a caller with `autonomy_cfg.contained_execution_required=True`
     passes these instead, so the `mvn package` build this function runs
     gets the exact same real containment PolymorphicValidator's own
-    compile/test commands get. Deliberately NOT threaded into the actual
-    LAUNCHED service below (`run_managed_service_verification`'s
-    `controller.start_managed()` call) this pass - that service is
-    reached by a HOST-side HTTP/TCP readiness probe
-    (`_check_readiness`/`_run_probe`), which needs the service's port
-    actually reachable from the host; a real network=DENIED container has
-    no reachable port by construction, and publishing one (`-p`) is a
-    different, weaker network posture than DENIED that needs its own
-    design pass, not squeezed into this build-step wiring. Named as a
-    residual limitation, not silently dropped - see this package's own
-    RETURN.
+    compile/test commands get. The launched service and its readiness/probe
+    checks use that same profile; readiness/probe route through docker exec
+    inside the container network namespace, with no host port publication.
 
     Distinguishes exactly three failure shapes, matching the two dedicated
     outcome kinds above:
@@ -704,16 +701,19 @@ def _prepare_required_artifact(
             f"preparation command {' '.join(build_command)} failed (exit {result.returncode}, "
             f"timeout={result.timeout})",
             stdout=result.stdout, stderr=result.stderr, command=build_command, returncode=result.returncode,
+            toolchain_identity=result.toolchain_identity,
         )
     if not os.path.isfile(artifact):
         return _PreparationOutcome(
             ServiceVerificationOutcomeKind.ARTIFACT_MATERIALIZATION_FAILED,
             f"preparation command {' '.join(build_command)} exited 0 but {artifact} still does not exist",
             stdout=result.stdout, stderr=result.stderr, command=build_command, returncode=result.returncode,
+            toolchain_identity=result.toolchain_identity,
         )
     return _PreparationOutcome(
         None, f"prepared {artifact} via {' '.join(build_command)}",
         stdout=result.stdout, stderr=result.stderr, command=build_command, returncode=result.returncode,
+        toolchain_identity=result.toolchain_identity,
     )
 
 
@@ -740,6 +740,7 @@ def run_managed_service_verification(
         return ManagedServiceVerificationResult(
             outcome=preparation.outcome, passed=False, reasoning=preparation.reasoning,
             stdout=preparation.stdout, stderr=preparation.stderr, returncode=preparation.returncode,
+            toolchain_identity=preparation.toolchain_identity,
         )
 
     try:
@@ -793,9 +794,11 @@ def run_managed_service_verification(
             reasoning=f"{reasoning} | cleanup also failed: {cleanup_error}",
             stdout=stdout, stderr=stderr, returncode=returncode,
             probe_status=probe_status, probe_body=probe_body, cleanup_error=cleanup_error,
+            toolchain_identity=managed.toolchain_identity,
         )
     return ManagedServiceVerificationResult(
         outcome=outcome, passed=passed, reasoning=reasoning,
         stdout=stdout, stderr=stderr, returncode=returncode,
         probe_status=probe_status, probe_body=probe_body,
+        toolchain_identity=managed.toolchain_identity,
     )

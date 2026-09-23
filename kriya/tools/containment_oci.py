@@ -72,12 +72,12 @@ from typing import Dict, List, Optional, Tuple
 from kriya.tools.containment import (
     BackendUnavailableError,
     ContainmentProfile,
-    ContainmentSetupError,
     NetworkAuthority,
     PreparedContainment,
     build_restricted_env,
 )
 from kriya.tools.process import ProcessResult
+from kriya.tools.toolchain_identity import ToolchainIdentity, ToolchainMismatchError
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +122,8 @@ _HOST_ONLY_ENV_VARS = frozenset({
 
 _MAVEN_EXE_RE = re.compile(r"\b(mvn|mvnw|javac|java|jar)\b")
 _PYTHON_EXE_RE = re.compile(r"\b(python3?|pytest|pip3?)\b")
+
+_ATTESTED_TOOLCHAINS: Dict[Tuple[str, str], ToolchainIdentity] = {}
 
 # Public (not underscore-prefixed) - kriya/tools/dependency_execution.py
 # imports these directly so its own `--dest`/`--find-links` flags always
@@ -171,6 +173,103 @@ def _select_image_and_cache_mount(command: List[str]) -> Tuple[str, Optional[str
             return _PYTHON_IMAGE, PIP_CACHE_MOUNT
 
     return _DEFAULT_IMAGE, None
+
+
+def _toolchain_cache_mount(identity: ToolchainIdentity) -> Optional[str]:
+    if identity.build_tool == "maven":
+        return MAVEN_CACHE_MOUNT
+    if identity.build_tool == "gradle":
+        return "/home/gradle/.gradle"
+    if identity.language == "python":
+        return PIP_CACHE_MOUNT
+    return None
+
+
+def _inspect_image_digest(docker_path: str, image: str) -> Optional[str]:
+    result = subprocess.run(
+        [docker_path, "image", "inspect", image, "--format", "{{.Id}}"],
+        capture_output=True, timeout=30, text=True,
+    )
+    if result.returncode != 0:
+        return None
+    digest = result.stdout.strip()
+    return digest if digest.startswith("sha256:") else None
+
+
+def _attest_toolchain_image(
+    docker_path: str, image: str, identity: ToolchainIdentity, *, allow_pull: bool,
+) -> ToolchainIdentity:
+    """Resolve an immutable image digest and prove its runtime before use."""
+    digest = _inspect_image_digest(docker_path, image)
+    if digest is None and allow_pull:
+        pulled = subprocess.run(
+            [docker_path, "pull", image], capture_output=True, timeout=600, text=True,
+        )
+        if pulled.returncode != 0:
+            raise BackendUnavailableError(
+                f"Required prebuilt toolchain image {image!r} is unavailable and could not be pulled: "
+                f"{pulled.stderr.strip()[:500]}"
+            )
+        digest = _inspect_image_digest(docker_path, image)
+    if digest is None:
+        raise BackendUnavailableError(
+            f"Required toolchain image {image!r} has no inspectable content digest; refusing verification."
+        )
+    cached = _ATTESTED_TOOLCHAINS.get((image, digest))
+    if cached is not None:
+        if cached.runtime_version != identity.runtime_version:
+            raise ToolchainMismatchError(
+                f"Image {image!r} digest {digest} was attested for {cached.runtime} "
+                f"{cached.runtime_version}, not required {identity.runtime} {identity.runtime_version}."
+            )
+        return identity.with_runtime_evidence(
+            image_digest=digest, observed_runtime_version=cached.observed_runtime_version or "",
+            observed_build_tool_version=cached.observed_build_tool_version,
+        )
+
+    if identity.language == "java":
+        entrypoint, args = "java", ["-version"]
+        pattern = r'(?:version\s+)?["\s](\d+)(?:\.|["\s])'
+    elif identity.language == "python":
+        entrypoint, args = "python3", ["--version"]
+        pattern = r"Python\s+(\d+\.\d+)"
+    else:
+        raise BackendUnavailableError(f"No OCI runtime attestation exists for {identity.language!r}.")
+    probe = subprocess.run(
+        [docker_path, "run", "--rm", "--entrypoint", entrypoint, image] + args,
+        capture_output=True, timeout=60, text=True,
+    )
+    output = (probe.stdout + "\n" + probe.stderr).strip()
+    match = re.search(pattern, output)
+    observed = match.group(1) if match else None
+    if probe.returncode != 0 or observed != identity.runtime_version:
+        raise ToolchainMismatchError(
+            f"Required {identity.runtime} {identity.runtime_version} does not match image {image!r} "
+            f"digest {digest}; observed {observed or 'unparseable runtime'} ({output[:500]})."
+        )
+    observed_build_tool = None
+    if identity.build_tool_version and identity.build_tool in {"maven", "gradle"}:
+        executable = "mvn" if identity.build_tool == "maven" else "gradle"
+        build_probe = subprocess.run(
+            [docker_path, "run", "--rm", "--entrypoint", executable, image, "--version"],
+            capture_output=True, timeout=60, text=True,
+        )
+        build_output = (build_probe.stdout + "\n" + build_probe.stderr).strip()
+        build_pattern = r"Apache Maven\s+(\d+\.\d+)" if executable == "mvn" else r"Gradle\s+(\d+\.\d+)"
+        build_match = re.search(build_pattern, build_output)
+        observed_build_tool = build_match.group(1) if build_match else None
+        if build_probe.returncode != 0 or observed_build_tool != identity.build_tool_version:
+            raise ToolchainMismatchError(
+                f"Required {identity.build_tool} {identity.build_tool_version} does not match image "
+                f"{image!r} digest {digest}; observed {observed_build_tool or 'unparseable build tool'} "
+                f"({build_output[:500]})."
+            )
+    resolved = identity.with_runtime_evidence(
+        image_digest=digest, observed_runtime_version=observed,
+        observed_build_tool_version=observed_build_tool,
+    )
+    _ATTESTED_TOOLCHAINS[(image, digest)] = resolved
+    return resolved
 
 
 # --- SEC-006: registry-scoped egress (DEPENDENCY_REGISTRY_ONLY) ---
@@ -646,7 +745,15 @@ class OCIContainmentBackend:
             )
 
         container_name = f"kriya-oci-{uuid.uuid4().hex[:12]}"
-        image, cache_mount_point = _select_image_and_cache_mount(command)
+        resolved_toolchain = None
+        if profile.toolchain_identity is not None:
+            image = profile.toolchain_identity.containment_image
+            cache_mount_point = _toolchain_cache_mount(profile.toolchain_identity)
+            resolved_toolchain = _attest_toolchain_image(
+                docker_path, image, profile.toolchain_identity, allow_pull=True,
+            )
+        else:
+            image, cache_mount_point = _select_image_and_cache_mount(command)
 
         args: List[str] = [
             docker_path, "run", "--rm", "--name", container_name,
@@ -838,6 +945,7 @@ class OCIContainmentBackend:
             # empirically: readiness/probe hung until ProcessController's
             # own timeout, not a docker-level failure).
             exec_target=[docker_path, "exec", "-i", container_name],
+            toolchain_identity=resolved_toolchain,
         )
 
     def _prepare_registry_scoped(
@@ -880,11 +988,21 @@ class OCIContainmentBackend:
         acquisition_uid, acquisition_gid = _resolve_acquisition_identity(workspace_host, cache_hosts)
 
         authority_id = compute_authority_id(hosts)
-        image, cache_mount_point = _select_image_and_cache_mount(command)
+        if profile.toolchain_identity is not None:
+            image = profile.toolchain_identity.containment_image
+            cache_mount_point = _toolchain_cache_mount(profile.toolchain_identity)
+        else:
+            image, cache_mount_point = _select_image_and_cache_mount(command)
         acq_image_tag = _acquisition_image_tag(image)
         _ensure_image(
             docker_path, acq_image_tag, _ACQUISITION_TOOLS_DOCKERFILE.format(base_image=image),
             purpose="acquisition firewall-tooling",
+        )
+        resolved_toolchain = (
+            _attest_toolchain_image(
+                docker_path, acq_image_tag, profile.toolchain_identity, allow_pull=False,
+            )
+            if profile.toolchain_identity is not None else None
         )
         _ensure_image(docker_path, _PROXY_IMAGE_TAG, _PROXY_DOCKERFILE, purpose="registry proxy")
         _check_net_admin_available(docker_path, acq_image_tag)
@@ -1066,6 +1184,7 @@ class OCIContainmentBackend:
         return PreparedContainment(
             env=None, preexec_fn=None, backend_name=self.name,
             command_prefix=args, cleanup=_cleanup,
+            toolchain_identity=resolved_toolchain,
         )
 
 

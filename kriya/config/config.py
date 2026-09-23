@@ -400,9 +400,8 @@ class AutonomyConfig(BaseModel):
     # True with containment_backend still "none" fails CLOSED (Null backend
     # now refuses any non-UNRESTRICTED-network profile), by design: this
     # flag means "these paths must be really contained", not merely "try
-    # to". A repo's own `java_home_override`-selected JDK is NOT threaded
-    # into the contained path this pass - see validate.py's own comment on
-    # build_subprocess_env_and_preexec for the residual limitation.
+    # to". Versioned toolchain selection and image attestation are owned by
+    # PolymorphicValidator/OCIContainmentBackend (PRD-011).
     contained_execution_required: bool = Field(default=False)
     # TOOL-003 P2 (2026-09-13): the MCP analogue of contained_execution_required
     # immediately above, deliberately a SEPARATE flag rather than reusing that

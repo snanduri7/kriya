@@ -15,8 +15,6 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy, extract_install_package_target
 from kriya.policy.filesystem import is_within_scope, make_workspace_scope
 from kriya.policy.model import ActionRequest, ActionType
-from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
-from kriya.tools.process import ProcessController
 from kriya.tools.containment import (
     ContainmentBackend,
     ContainmentProfile,
@@ -32,6 +30,9 @@ from kriya.tools.dependency_execution import (
     log_acquisition_outcome,
     maven_missing_artifact_signature,
 )
+from kriya.tools.process import ProcessController
+from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
+from kriya.tools.toolchain_identity import resolve_toolchain_identity
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,17 @@ class PolymorphicValidator:
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
         self.stack = self._detect_stack()
+        self.java_home_override = java_home_override
+        # PRD-011: stack ownership remains in _detect_stack(); contained
+        # execution only resolves a versioned OCI profile from that one
+        # decision. Resolution happens before any subprocess can start and
+        # raises fail-closed for unsupported/conflicting requirements.
+        self.toolchain_identity = (
+            resolve_toolchain_identity(
+                self.workspace_path, self.stack, java_home_override=self.java_home_override,
+            )
+            if self.autonomy_cfg.contained_execution_required else None
+        )
         # 'group:artifact' keys the caller has already determined are
         # explicitly authorized for removal by the goal (kriya/workflow/
         # migration.py::resolve_authorized_dependency_removals) - excluded
@@ -225,7 +237,6 @@ class PolymorphicValidator:
         # incompatible one (confirmed live: JDK 26 removed the Security Manager
         # entirely, breaking a Qpid Broker-J API call no goal-stated Java
         # version could have anticipated).
-        self.java_home_override = java_home_override
         # MA4.4 (control-plane implementation plan) - audit-only. See
         # _run_cmd_with_timeout below; never consulted for enforcement.
         self.execution_policy = ExecutionPolicy()
@@ -710,23 +721,11 @@ class PolymorphicValidator:
         required" is preserved exactly by staying on the raw env/preexec_fn
         path below until this is explicitly opted into).
 
-        Residual limitation, stated honestly rather than silently dropped:
-        `self.java_home_override` (a specific JDK version this validator
-        detected/selected on the HOST to match the compile gate) is NOT
-        threaded into the contained path - a containerized compile/test
-        run uses whichever JDK ships in the OCI backend's own toolchain
-        image, not the host-detected one. Reproducing per-repo JDK
-        selection INSIDE a container would need either a matrix of
-        version-pinned images or installing a JDK into the container at
-        run time, neither of which this package implements. Compile/test
-        results under `contained_execution_required=True` are therefore
-        validated against the container image's fixed JDK, not
-        necessarily the same version the rest of Kriya's JDK-detection
-        logic would pick on the host - a real, named gap (see this
-        package's own RETURN, not a silent behavior change: any caller
-        that sets BOTH `contained_execution_required=True` and relies on
-        `java_home_override` is getting the container's JDK, and that is
-        what this docstring documents).
+        PRD-011: the existing `_detect_stack()` result is resolved once to
+        a versioned ToolchainIdentity and carried on the profile. The OCI
+        backend verifies the actual runtime and image content digest before
+        execution; it never installs a JDK/compiler dynamically and never
+        falls back to host tools on a mismatch.
 
         SECOND residual limitation, CLOSED this pass (SEC-001-P6 Stage 3,
         2026-09-11): `_ensure_project_venv`/`_resolve_python_interpreter`
@@ -794,6 +793,7 @@ class PolymorphicValidator:
             memory_mb=memory_mb,
             dependency_cache_paths=[dependency_cache_path] if dependency_cache_path else [],
             dependency_cache_writable=dependency_cache_writable,
+            toolchain_identity=self.toolchain_identity,
         )
         backend = resolve_containment_backend(self.autonomy_cfg.containment_backend)
         return profile, backend
@@ -838,6 +838,14 @@ class PolymorphicValidator:
         cache_dir = os.path.join(self.workspace_path, ".kriya", "m2_cache")
         os.makedirs(cache_dir, exist_ok=True)
         return cache_dir
+
+    @staticmethod
+    def _validation_result(success: bool, output: str, command_result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Keep attested contained-toolchain evidence with the gate verdict."""
+        result: Dict[str, Any] = {"success": success, "output": output}
+        if command_result and command_result.get("toolchain_identity") is not None:
+            result["toolchain_identity"] = command_result["toolchain_identity"]
+        return result
 
     _MAVEN_ACQUISITION_INCOMPLETE_MARKER = "MAVEN_ACQUISITION_INCOMPLETE:"
 
@@ -1126,8 +1134,28 @@ class PolymorphicValidator:
         # established stack decisions remain stable.
         if self.stack == "unknown":
             self.stack = self._detect_stack()
+            if self.autonomy_cfg.contained_execution_required:
+                self.toolchain_identity = resolve_toolchain_identity(
+                    self.workspace_path, self.stack, java_home_override=self.java_home_override,
+                )
 
         if self.stack == "python":
+            if self.autonomy_cfg.contained_execution_required:
+                python_files = [
+                    os.path.relpath(os.path.join(self.workspace_path, f), self.workspace_path)
+                    for f in files
+                    if f.endswith(".py") and os.path.isfile(os.path.join(self.workspace_path, f))
+                ]
+                if not python_files:
+                    return {"success": True, "output": "No Python files to compile."}
+                res = self._run_cmd_with_timeout(
+                    ["python3", "-m", "py_compile", *python_files], cwd=self.workspace_path,
+                )
+                return self._validation_result(
+                    res["returncode"] == 0,
+                    "Python files compiled successfully." if res["returncode"] == 0 else res["stdout"] + "\n" + res["stderr"],
+                    res,
+                )
             errors = []
             for f in files:
                 if f.endswith(".py"):
@@ -1258,7 +1286,7 @@ class PolymorphicValidator:
                                             "conventional src/main/java layout."
                                         ),
                                     }
-                        return {"success": True, "output": "Maven compilation succeeded."}
+                        return self._validation_result(True, "Maven compilation succeeded.", res)
                     error_output = f"Maven compilation failed:\n{res['stdout']}\n{res['stderr']}"
                     try:
                         from kriya.tools.resolver import enrich_java_compiler_errors
@@ -1271,7 +1299,7 @@ class PolymorphicValidator:
                         )
                     except Exception as ree:
                         logger.warning(f"Resolver failed to run: {ree}")
-                    return {"success": False, "output": error_output}
+                    return self._validation_result(False, error_output, res)
                 except FileNotFoundError as e:
                     # 'mvn' itself isn't on PATH - a toolchain problem, not a code
                     # defect. Must be returned, not just logged: previously this
@@ -1301,8 +1329,8 @@ class PolymorphicValidator:
                     gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
                     res = self._run_cmd_with_timeout([gradle_cmd, "compileJava"], cwd=self.workspace_path)
                     if res["returncode"] == 0:
-                        return {"success": True, "output": "Gradle compilation succeeded."}
-                    return {"success": False, "output": f"Gradle compilation failed:\n{res['stdout']}\n{res['stderr']}"}
+                        return self._validation_result(True, "Gradle compilation succeeded.", res)
+                    return self._validation_result(False, f"Gradle compilation failed:\n{res['stdout']}\n{res['stderr']}", res)
                 except FileNotFoundError as e:
                     # Same reasoning as the mvn case above - don't silently fall
                     # through to the misleading raw javac fallback.
@@ -1350,8 +1378,8 @@ class PolymorphicValidator:
                         )
                     except Exception as ree:
                         logger.warning(f"Resolver failed to run: {ree}")
-                    return {"success": False, "output": error_output}
-                return {"success": True, "output": "Java classes compiled successfully."}
+                    return self._validation_result(False, error_output, res)
+                return self._validation_result(True, "Java classes compiled successfully.", res)
             except ContainmentSetupError:
                 # SEC-002 (2026-09-12): must propagate as the distinct
                 # containment-setup failure it is, not be reported as an
@@ -1487,7 +1515,9 @@ class PolymorphicValidator:
                     # empirically confirmed, not assumed).
                     cmd.extend(target_test_list)
                 res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
-                return {"success": res["returncode"] in (0, 5), "output": res["stdout"] + "\n" + res["stderr"]}
+                return self._validation_result(
+                    res["returncode"] in (0, 5), res["stdout"] + "\n" + res["stderr"], res,
+                )
 
             elif self.stack == "java":
                 # target_test comes from extract_target_test() as a raw file path
@@ -1519,14 +1549,18 @@ class PolymorphicValidator:
                     if java_test_class:
                         goals.append(f"-Dtest={java_test_class}")
                     res = self._run_maven_cmd(goals, cwd=self.workspace_path, timeout=300)
-                    return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
+                    return self._validation_result(
+                        res["returncode"] == 0, res["stdout"] + "\n" + res["stderr"], res,
+                    )
                 elif os.path.exists(os.path.join(self.workspace_path, "build.gradle")):
                     gradle_cmd = "./gradlew" if os.path.exists(os.path.join(self.workspace_path, "gradlew")) else "gradle"
                     cmd = [gradle_cmd, "test"]
                     if java_test_class:
                         cmd.extend(["--tests", java_test_class])
                     res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
-                    return {"success": res["returncode"] == 0, "output": res["stdout"] + "\n" + res["stderr"]}
+                    return self._validation_result(
+                        res["returncode"] == 0, res["stdout"] + "\n" + res["stderr"], res,
+                    )
                 return {"success": True, "output": "No Java test config found (pom.xml/gradle). Skipping."}
  
             elif self.stack == "ruby":

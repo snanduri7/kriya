@@ -42,9 +42,10 @@ class ProcessResult:
     timeout: bool
     stdout_truncated: bool = False
     stderr_truncated: bool = False
+    toolchain_identity: Optional[Dict[str, object]] = None
 
     def to_dict(self) -> Dict[str, object]:
-        return {
+        result = {
             "returncode": self.returncode,
             "stdout": self.stdout,
             "stderr": self.stderr,
@@ -52,6 +53,9 @@ class ProcessResult:
             "stdout_truncated": self.stdout_truncated,
             "stderr_truncated": self.stderr_truncated,
         }
+        if self.toolchain_identity is not None:
+            result["toolchain_identity"] = self.toolchain_identity
+        return result
 
 
 def _bounded_tail(value: str, limit: int) -> tuple[str, bool]:
@@ -99,7 +103,7 @@ class ManagedProcess:
 
     def __init__(
         self, popen: subprocess.Popen, *, max_output_chars: int, cleanup: Optional[Callable[[], None]] = None,
-        exec_target: Optional[List[str]] = None,
+        exec_target: Optional[List[str]] = None, toolchain_identity: Optional[Dict[str, object]] = None,
     ) -> None:
         self._popen = popen
         self._max_output_chars = max_output_chars
@@ -110,6 +114,7 @@ class ManagedProcess:
         # container's own network namespace) without publishing any port.
         # None for every non-container backend/host process, unchanged.
         self.exec_target: Optional[List[str]] = exec_target
+        self.toolchain_identity = toolchain_identity
         self._stdout_chunks: List[str] = []
         self._stderr_chunks: List[str] = []
         self._lock = threading.Lock()
@@ -197,6 +202,7 @@ class _ResolvedExecution:
     command: List[str]
     cleanup: Optional[Callable[[], None]] = None
     exec_target: Optional[List[str]] = None
+    toolchain_identity: Optional[Dict[str, object]] = None
 
 
 def _prepare_env_and_preexec(
@@ -236,6 +242,7 @@ def _prepare_env_and_preexec(
     return _ResolvedExecution(
         env=prepared.env, preexec_fn=prepared.preexec_fn, command=effective_command, cleanup=prepared.cleanup,
         exec_target=prepared.exec_target,
+        toolchain_identity=(prepared.toolchain_identity.to_dict() if prepared.toolchain_identity else None),
     )
 
 
@@ -342,6 +349,7 @@ class ProcessController:
             timeout=timed_out,
             stdout_truncated=stdout_truncated,
             stderr_truncated=stderr_truncated,
+            toolchain_identity=resolved.toolchain_identity,
         )
 
     async def run_async(
@@ -409,6 +417,7 @@ class ProcessController:
             timeout=timed_out,
             stdout_truncated=stdout_truncated,
             stderr_truncated=stderr_truncated,
+            toolchain_identity=resolved.toolchain_identity,
         )
 
     def start_managed(
@@ -451,6 +460,5 @@ class ProcessController:
         )
         return ManagedProcess(
             process, max_output_chars=self.max_output_chars, cleanup=resolved.cleanup,
-            exec_target=resolved.exec_target,
+            exec_target=resolved.exec_target, toolchain_identity=resolved.toolchain_identity,
         )
-
