@@ -77,6 +77,9 @@ class RunRecord:
     retry_state_reference: Optional[str] = None
     retry_counters: Dict[str, int] = field(default_factory=dict)
     commit_intent: Optional[str] = None
+    # PRD-004: the commit-evidence transaction this run's intent refers to
+    # (the controller's run_id can differ from the RunRecord's run_id).
+    commit_transaction_id: Optional[str] = None
     commit_result: Optional[str] = None
     terminal_status: Optional[str] = None
     store_revisions: Dict[str, int] = field(default_factory=dict)

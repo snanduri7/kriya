@@ -81,3 +81,32 @@ From the target checkout and its passing environment, independently run:
 ```
 
 Report complete pass/fail/skip/deselection counts and every skip reason. Write `handover/PRD-004_PYTEST_VERIFICATION.md`. PRD-004 remains `READY_FOR_PYTEST_VERIFICATION` until that independent full non-live run passes. No live-model verification is required.
+
+## Reopening addendum (2026-09-24, independent review)
+Blocking finding closed: commit-stage exceptions escaped `_run_structured_enforce` raw (the caller catches only
+planning exceptions), skipping the sandbox stage reset, final plan/ControlState persistence and any
+`WorkflowResult` - so terminal status could disagree with workspace state (AC3).
+
+- `_commit_verified_candidate()` (inner helper of the terminal section) is now the single real-workspace
+  transaction. It catches only controlled commit outcomes and returns a structured `workspace_commit_failure`:
+  - `CANDIDATE_MATERIALIZATION_FAILED` (new `_CandidateMaterializationError`, replacing bare `RuntimeError`),
+    `RUN_RECORD_INTENT_NOT_PERSISTED` (commit refused when durable intent cannot be written),
+    `WORKSPACE_REVISION_CONFLICT`, `WORKSPACE_COMMIT_FAILED` -> `workspace_state: UNCHANGED`;
+  - `WORKSPACE_COMMIT_UNCERTAIN` (UncertainCommitError, or commit evidence left IN_PROGRESS/UNCERTAIN) ->
+    `workspace_state: UNCERTAIN`; the candidate worktree is retained (`retained_candidate_path`) because it is
+    the only copy of possibly-partly-applied verified bytes.
+  Any other exception is still an orchestration bug and propagates (MA7.8 convention unchanged).
+- The run record is transitioned at the catch site from commit evidence, not defaulted by the coordinator
+  wrapper: FAILURE with `commit_result` NOT_COMMITTED / ROLLED_BACK, or UNCERTAIN. New optional RunRecord field
+  `commit_transaction_id` links the record to its commit evidence (the controller run_id can differ).
+- Ordering bug fixed: `workspace_commit_completed` is set immediately after the commit returns; a failure of
+  the COMMITTED record transition is now a `post_commit_persistence_errors` entry, not an escaped exception
+  over an already-mutated workspace.
+- Result aggregation: a commit failure yields `needs_review`, appends its reason code, and scope-conflict
+  reason codes are appended rather than overwriting. New telemetry event `workspace_commit_failed`.
+
+Tests (`tests/test_prd004_commit_failure.py`, whole-tree byte snapshots, not single-file reads):
+real concurrent edit between the last gate and the real commit (MODIFY + CREATE, nothing mocked to raise),
+missing candidate file, uncertain commit (record UNCERTAIN + candidate retained), COMMITTED-transition failure
+after a successful commit. Real-git-worktree + real decorated engine coverage lands with PRD-006, whose
+blocker currently makes that path unreachable.
