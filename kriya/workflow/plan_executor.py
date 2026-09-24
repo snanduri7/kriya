@@ -33,7 +33,7 @@ from kriya.workflow.execution_plan import (
     WorkUnitState,
     WorkUnitStatus,
 )
-from kriya.workflow.plan_adapters import direct_execution_plan, work_unit_record
+from kriya.workflow.plan_adapters import DIRECT_WORK_UNIT_KIND, direct_execution_plan, work_unit_record
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,15 @@ DEPENDENCY_FAILED = "DEPENDENCY_FAILED"
 PLAN_HALTED_AFTER_FAILURE = "PLAN_HALTED_AFTER_FAILURE"
 TERMINAL_PHASE_FAILED = "TERMINAL_PHASE_FAILED"
 PLAN_TERMINAL_MISMATCH = "PLAN_TERMINAL_MISMATCH"
+COMPLETION_REUSE_INCONSISTENT = "COMPLETION_REUSE_INCONSISTENT"
+STALE_COMPLETION = "STALE_COMPLETION"
+
+# Checkpoint selection events (PRD-008 S4c values, kept: persisted sidecar
+# assessments and RunRecords already carry them; the names are historical -
+# they apply to every work unit).
+CHECKPOINT_SELECTED = "MILESTONE_CHECKPOINT_SELECTED"
+NO_COMPATIBLE_CHECKPOINT = "NO_COMPATIBLE_MILESTONE_CHECKPOINT"
+CHECKPOINT_IDENTITY_MISMATCH = "CHECKPOINT_IDENTITY_MISMATCH"
 
 _ACTIVE_PLAN: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("kriya_active_plan", default=None)
 
@@ -82,10 +91,10 @@ class PlanDriver:
         result stops the plan with that result; the unit never runs."""
         return None
 
-    def select_checkpoint(
-        self, unit: WorkUnit, record: Optional[Dict[str, Any]], *, resume: bool, resume_id: Optional[str],
-    ) -> Tuple[bool, Optional[str]]:
-        return resume, resume_id
+    def on_checkpoint_selection(self, event: Dict[str, Any]) -> None:
+        """Record which checkpoint (if any) was offered to a unit. The
+        selection itself is common (select_work_unit_checkpoint)."""
+        logger.info("Checkpoint selection: %s", event)
 
     async def run_unit(
         self, plan: ExecutionPlan, unit: WorkUnit, invocation: WorkUnitInvocation,
@@ -184,16 +193,87 @@ def _set_active_unit(workspace_path: str, record: Optional[Dict[str, Any]]) -> N
         logger.warning(f"Could not record the active work unit on the run record: {error}")
 
 
+_WORK_UNIT_IDENTITY_KEYS = ("kind", "group_id", "milestone_id", "definition_digest")
+
+
+def same_work_unit(candidate: Any, record: Mapping[str, Any]) -> bool:
+    """Whether a persisted work-unit record names ``record``'s unit."""
+    return isinstance(candidate, Mapping) and all(
+        candidate.get(key) == record.get(key) for key in _WORK_UNIT_IDENTITY_KEYS
+    )
+
+
+def _checkpoint_belongs_to(checkpoint: Mapping[str, Any], record: Mapping[str, Any]) -> bool:
+    unit = checkpoint.get("work_unit")
+    if unit is not None:
+        return same_work_unit(unit, record)
+    # Compatibility reader: a checkpoint saved before its unit was recorded.
+    # One with no milestone group can only be a pre-PRD-008A direct run's;
+    # a pre-S4c milestone checkpoint is never offered (S4c).
+    return record.get("kind") == DIRECT_WORK_UNIT_KIND and not checkpoint.get("milestone_group_id")
+
+
+def select_work_unit_checkpoint(
+    workspace_path: str, record: Optional[Mapping[str, Any]], *,
+    resume: bool, resume_id: Optional[str], single_unit_plan: bool = False,
+) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    """(resume, resume_id, event) for one unit's generation call.
+
+    Selection is by work-unit identity only and never declares a checkpoint
+    safe: the chosen one still goes through PRD-008's
+    validate_resume_against_reality(). A bare ``resume=True`` is never
+    passed on - that would let the primitive pick the newest checkpoint in
+    the workspace, whichever unit made it.
+
+    An explicit ``resume_id`` in a single-unit plan can only mean that unit,
+    so it is passed through for PRD-008 to judge (a mismatch is its typed
+    ``resume_refused``, never a silent fresh run). In a multi-unit plan the
+    same id reaches every unit, so it is offered only to the unit it
+    belongs to."""
+    if not resume and not resume_id:
+        return False, None, None
+    if record is None:
+        return resume, resume_id, None
+    base = {
+        "milestone_id": record.get("milestone_id"), "unit_kind": record.get("kind"),
+        "work_unit_id": record.get("work_unit_id") or record.get("milestone_id"),
+    }
+    if resume_id and single_unit_plan:
+        return False, resume_id, dict(base, code=CHECKPOINT_SELECTED, checkpoint=resume_id, explicit=True)
+    from kriya.control.workspace_identity import WorkspaceOwnershipError
+    from kriya.workflow.checkpoint import list_checkpoints
+
+    try:
+        checkpoints = list_checkpoints(workspace_path)
+    except WorkspaceOwnershipError:
+        # Another workspace's state in this one is never silently skipped.
+        raise
+    except Exception:
+        checkpoints = []
+    if resume_id:
+        target = next((item for item in checkpoints if item.get("run_id") == resume_id), None)
+        if target is not None and _checkpoint_belongs_to(target, record):
+            return False, resume_id, dict(base, code=CHECKPOINT_SELECTED, checkpoint=resume_id, explicit=True)
+        return False, None, dict(base, code=CHECKPOINT_IDENTITY_MISMATCH, checkpoint=resume_id, explicit=True)
+    compatible = [item for item in checkpoints if _checkpoint_belongs_to(item, record)]
+    if not compatible:
+        logger.warning("No saved checkpoint found for this work unit - starting a fresh run instead.")
+        return False, None, dict(base, code=NO_COMPATIBLE_CHECKPOINT, checkpoint=None, explicit=False)
+    newest = max(compatible, key=lambda item: item.get("saved_at", 0))
+    return False, newest["run_id"], dict(base, code=CHECKPOINT_SELECTED, checkpoint=newest["run_id"], explicit=False)
+
+
 async def execute_plan(
     plan: ExecutionPlan, driver: PlanDriver, workspace_path: str, *,
     resume: bool = False, resume_id: Optional[str] = None,
-    reusable_unit_ids: Iterable[str] = (),
+    reusable_unit_ids: Iterable[str] = (), stale_unit_ids: Iterable[str] = (),
 ) -> Dict[str, Any]:
     """Execute ``plan`` under the caller's RunCoordinator ownership.
 
     ``reusable_unit_ids`` are units whose completion PRD-008 (S4b/S4c) has
     already validated from durable evidence; they are VERIFIED without
-    running. Nothing else is ever skipped."""
+    running. Nothing else is ever skipped. ``stale_unit_ids`` are units whose
+    earlier completion was invalidated; they start STALE and rerun."""
     if _ACTIVE_PLAN.get() is not None:
         raise NestedExecutionPlanError(
             f"plan {plan.plan_id!r} started inside plan {_ACTIVE_PLAN.get()!r}'s unit"
@@ -201,19 +281,43 @@ async def execute_plan(
     require_mutating_run(workspace_path)
     token = _ACTIVE_PLAN.set(plan.plan_id)
     try:
-        return await _execute(plan, driver, workspace_path, resume, resume_id, set(reusable_unit_ids))
+        return await _execute(
+            plan, driver, workspace_path, resume, resume_id, set(reusable_unit_ids), set(stale_unit_ids),
+        )
     finally:
         _ACTIVE_PLAN.reset(token)
 
 
 async def _execute(
     plan: ExecutionPlan, driver: PlanDriver, workspace_path: str,
-    resume: bool, resume_id: Optional[str], reusable: set,
+    resume: bool, resume_id: Optional[str], reusable: set, stale: set,
 ) -> Dict[str, Any]:
     lifecycle = _Lifecycle(plan, workspace_path)
+    # A reused unit's inputs are its ancestors' outputs: reuse is coherent
+    # only when every ancestor is reused too. PRD-008 S4b already reruns the
+    # descendants of anything it reruns, so a disagreement here is a defect
+    # in the evidence handed over - fail closed, never quietly rerun a unit
+    # the durable state still records as complete.
+    inconsistent = sorted(
+        unit.id for unit in plan.work_units
+        if unit.id in reusable and any(ancestor not in reusable for ancestor in plan.ancestors(unit.id))
+    )
+    if inconsistent:
+        for unit_id in inconsistent:
+            lifecycle.set(unit_id, WorkUnitStatus.STALE, (COMPLETION_REUSE_INCONSISTENT,), publish=False)
+        lifecycle._publish()
+        logger.error(f"Completed work units {inconsistent} are reusable but an ancestor is not - refusing.")
+        return {
+            "status": "needs_review",
+            "quality_gates_passed": False,
+            "reason_codes": [COMPLETION_REUSE_INCONSISTENT],
+            "work_unit_ids": inconsistent,
+        }
     for unit in plan.execution_order():
         if unit.id in reusable:
             lifecycle.set(unit.id, WorkUnitStatus.VERIFIED, (COMPLETION_REUSED,), publish=False)
+        elif unit.id in stale:
+            lifecycle.set(unit.id, WorkUnitStatus.STALE, (STALE_COMPLETION,), publish=False)
     lifecycle._publish()
 
     phases_done = False
@@ -239,9 +343,12 @@ async def _execute(
         _set_active_unit(workspace_path, record)
         try:
             while True:
-                call_resume, call_resume_id = driver.select_checkpoint(
-                    unit, record, resume=resume, resume_id=resume_id,
+                call_resume, call_resume_id, selection = select_work_unit_checkpoint(
+                    workspace_path, record, resume=resume, resume_id=resume_id,
+                    single_unit_plan=len(plan.work_units) == 1,
                 )
+                if selection is not None:
+                    driver.on_checkpoint_selection(selection)
                 lifecycle.set(unit.id, WorkUnitStatus.RUNNING)
                 result = await driver.run_unit(plan, unit, invocation, resume=call_resume, resume_id=call_resume_id)
                 if _passed(result):

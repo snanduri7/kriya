@@ -74,7 +74,6 @@ from kriya.workflow.milestone_completion import (
     no_change_verification,
     owning_run_commit_count,
     record_milestone_commits,
-    select_unit_checkpoint,
     verification_policy_fingerprint,
 )
 from kriya.workflow.resume_fingerprints import FingerprintStatus
@@ -1153,16 +1152,10 @@ class _MilestonePlanDriver(PlanDriver):
         self._cycles_before[unit.id] = owning_run_commit_count(self.workspace_path)
         return None
 
-    def select_checkpoint(
-        self, unit: WorkUnit, record: Optional[Dict[str, Any]], *, resume: bool, resume_id: Optional[str],
-    ) -> Tuple[bool, Optional[str]]:
-        # S4c-3: offer only this unit's own newest checkpoint (the PRD-008
-        # validator still decides whether it is reusable).
-        call_resume, call_resume_id, selection = select_unit_checkpoint(
-            self.workspace_path, record, resume=resume, resume_id=resume_id,
-        )
-        _record_selection(self.workspace_path, self.run_state, self.reuse_assessment, selection)
-        return call_resume, call_resume_id
+    def on_checkpoint_selection(self, event: Dict[str, Any]) -> None:
+        # S4c-3: the executor offered only this unit's own newest checkpoint
+        # (the PRD-008 validator still decides whether it is reusable).
+        _record_selection(self.workspace_path, self.run_state, self.reuse_assessment, event)
 
     async def run_unit(
         self, plan: ExecutionPlan, unit: WorkUnit, invocation: WorkUnitInvocation,
@@ -1679,4 +1672,5 @@ async def run_milestones(
     return await execute_plan(
         plan, driver, workspace_path, resume=resume, resume_id=resume_id,
         reusable_unit_ids=[m.id for m in ordered if m.id in run_state.completed_milestone_ids],
+        stale_unit_ids=run_state.stale_milestone_ids,
     )

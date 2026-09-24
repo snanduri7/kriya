@@ -82,9 +82,12 @@ COMMIT_LINEAGE_UNVERIFIED = "COMMIT_LINEAGE_UNVERIFIED"
 VERIFIED_NO_CHANGE_INVALIDATED = "VERIFIED_NO_CHANGE_INVALIDATED"
 COMPLETION_RECONSTRUCTED = "COMPLETION_RECONSTRUCTED"
 COMPLETION_RECONSTRUCTION_UNVERIFIED = "COMPLETION_RECONSTRUCTION_UNVERIFIED"
-CHECKPOINT_IDENTITY_MISMATCH = "CHECKPOINT_IDENTITY_MISMATCH"
-NO_COMPATIBLE_MILESTONE_CHECKPOINT = "NO_COMPATIBLE_MILESTONE_CHECKPOINT"
-MILESTONE_CHECKPOINT_SELECTED = "MILESTONE_CHECKPOINT_SELECTED"
+# Checkpoint selection is common to every work unit since PRD-008A.
+from kriya.workflow.plan_executor import (  # noqa: E402
+    CHECKPOINT_IDENTITY_MISMATCH,
+    CHECKPOINT_SELECTED as MILESTONE_CHECKPOINT_SELECTED,
+    NO_COMPATIBLE_CHECKPOINT as NO_COMPATIBLE_MILESTONE_CHECKPOINT,
+)
 # A path's current bytes differ from the post-state of a LATER commit that
 # superseded this milestone's write (the integration pass, or a milestone
 # that did not finish): the milestone's contribution may be what was lost.
@@ -243,9 +246,9 @@ def integration_work_unit(group_id: str, plan_digest: str) -> Dict[str, Any]:
 
 
 def _same_unit(candidate: Any, unit: Mapping[str, Any]) -> bool:
-    return isinstance(candidate, dict) and all(candidate.get(key) == unit.get(key) for key in (
-        "kind", "group_id", "milestone_id", "definition_digest",
-    ))
+    from kriya.workflow.plan_executor import same_work_unit
+
+    return same_work_unit(candidate, unit)
 
 
 @dataclass(frozen=True)
@@ -1294,34 +1297,12 @@ def find_completion_to_reconstruct(
 def select_unit_checkpoint(
     workspace_path: str, unit: Mapping[str, Any], *, resume: bool, resume_id: Optional[str],
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
-    """(resume, resume_id, event) to pass to this unit's workflow call.
+    """Compatibility entry point (PRD-008 S4c). The selection rule now lives
+    in kriya/workflow/plan_executor.py's select_work_unit_checkpoint(),
+    which every work unit - direct or milestone - goes through (PRD-008A)."""
+    from kriya.workflow.plan_executor import select_work_unit_checkpoint
 
-    Selection is by identity only and never declares a checkpoint safe: the
-    chosen one still goes through validate_resume_against_reality(). The
-    driver never passes a bare ``resume=True`` - that would let the workflow
-    pick the newest checkpoint in the workspace, whichever unit made it. A
-    checkpoint without a work_unit (saved before S4c) is never offered."""
-    if not resume and not resume_id:
-        return False, None, None
-    from kriya.workflow.checkpoint import list_checkpoints
-
-    try:
-        checkpoints = list_checkpoints(workspace_path)
-    except Exception:
-        checkpoints = []
-    base = {"milestone_id": unit.get("milestone_id"), "unit_kind": unit.get("kind")}
-    if resume_id:
-        target = next((item for item in checkpoints if item.get("run_id") == resume_id), None)
-        if target is not None and _same_unit(target.get("work_unit"), unit):
-            return False, resume_id, dict(base, code=MILESTONE_CHECKPOINT_SELECTED, checkpoint=resume_id, explicit=True)
-        return False, None, dict(base, code=CHECKPOINT_IDENTITY_MISMATCH, checkpoint=resume_id, explicit=True)
-    compatible = [item for item in checkpoints if _same_unit(item.get("work_unit"), unit)]
-    if not compatible:
-        return False, None, dict(base, code=NO_COMPATIBLE_MILESTONE_CHECKPOINT, checkpoint=None, explicit=False)
-    newest = max(compatible, key=lambda item: item.get("saved_at", 0))
-    return False, newest["run_id"], dict(
-        base, code=MILESTONE_CHECKPOINT_SELECTED, checkpoint=newest["run_id"], explicit=False,
-    )
+    return select_work_unit_checkpoint(workspace_path, unit, resume=resume, resume_id=resume_id)
 
 
 # ---------------------------------------------------------------- retention
