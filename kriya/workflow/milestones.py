@@ -78,6 +78,8 @@ from kriya.workflow.milestone_completion import (
     verification_policy_fingerprint,
 )
 from kriya.workflow.resume_fingerprints import FingerprintStatus
+from kriya.workflow.execution_plan import ExecutionPlan, TerminalPhase, WorkUnit, WorkUnitRole
+from kriya.workflow.plan_executor import PlanDriver, WorkUnitInvocation, execute_plan
 from kriya.workflow.milestone_normalization import normalize_legacy_milestones
 from kriya.workflow.milestone_validation import (
     MilestonePlanValidator,
@@ -1056,6 +1058,346 @@ def replay_prior_milestone_verifications(
     return failures
 
 
+class _MilestonePlanDriver(PlanDriver):
+    """The milestone-specific part of running a milestone ExecutionPlan
+    (PRD-008A). Everything here is bookkeeping and goal/context assembly
+    that existed in run_milestones' own loop before PRD-008A, unchanged in
+    order and effect; ordering, lifecycle, the active work-unit record,
+    dependency blocking and the terminal decision belong to execute_plan()."""
+
+    def __init__(
+        self, *, we: Any, run_state: MilestoneRunState, workspace_path: str, ordered: List[MilestoneV2],
+        contract_registry: Any, artifact_registry: Any, reuse_assessment: MilestoneReuseAssessment,
+        engine_config: Any, authoritative: bool,
+        milestone_failure_callback: Optional[Callable[[int, int, MilestoneV2, Dict[str, Any]], str]],
+        generation_kwargs: Dict[str, Any],
+    ):
+        self.we = we
+        self.run_state = run_state
+        self.workspace_path = workspace_path
+        self.ordered = ordered
+        self.total = len(ordered)
+        # Position is the index in the FULL order, completed milestones
+        # included - it is embedded in the goal text, and so in every
+        # checkpoint's goal fingerprint.
+        self.position = {milestone.id: index for index, milestone in enumerate(ordered, start=1)}
+        self.by_id = {milestone.id: milestone for milestone in ordered}
+        self.contract_registry = contract_registry
+        self.artifact_registry = artifact_registry
+        self.reuse_assessment = reuse_assessment
+        self.engine_config = engine_config
+        self.authoritative = authoritative
+        self.milestone_failure_callback = milestone_failure_callback
+        self.generation_kwargs = generation_kwargs
+        self._goal: Dict[str, str] = {}
+        self._consumed_context: Dict[str, str] = {}
+        # Every commit a unit's loop makes (retries included) is attributed
+        # to it from the RunRecord, never from its reported files.
+        self._cycles_before: Dict[str, int] = {}
+
+    def _milestone(self, unit: WorkUnit) -> Optional[MilestoneV2]:
+        return self.by_id.get(unit.id) if unit.role is WorkUnitRole.PRIMARY else None
+
+    async def before_unit(self, plan: ExecutionPlan, unit: WorkUnit) -> Optional[Dict[str, Any]]:
+        milestone = self._milestone(unit)
+        if milestone is None:
+            _log_phase_banner("INTEGRATION")
+            self._cycles_before[unit.id] = owning_run_commit_count(self.workspace_path)
+            return None
+        position = self.position[milestone.id]
+        _update_milestone_control_state(
+            self.workspace_path,
+            self.run_state.group_id,
+            milestone.id,
+            "in_progress",
+            self.contract_registry,
+            self.artifact_registry,
+            authoritative=self.authoritative,
+        )
+
+        _log_phase_banner(f"MILESTONE '{milestone.id}' ({position}/{self.total}): {milestone.goal[:40]}")
+        # A consumer may only execute against artifact coordinates that
+        # still match the provider's current build metadata. Providers with
+        # no recorded physical artifact remain valid logical contracts.
+        provider_ids = {
+            provider.id
+            for capability_name in milestone.consumes
+            for provider in self.run_state.milestones
+            if any(cap.name == capability_name for cap in provider.provides)
+        }
+        artifact_drift = [
+            validation
+            for provider_id in sorted(provider_ids)
+            for validation in self.artifact_registry.validate(self.workspace_path, provider_id)
+            if validation.drifted
+        ]
+        if artifact_drift:
+            return {
+                "status": "artifact_drift",
+                "group_id": self.run_state.group_id,
+                "milestone_id": milestone.id,
+                "quality_gates_passed": False,
+                "artifact_drift": [
+                    {
+                        "reason_code": item.reason_code,
+                        "recorded": item.recorded.to_dict(),
+                        "current": item.current.to_dict() if item.current else None,
+                    }
+                    for item in artifact_drift
+                ],
+            }
+        self._goal[unit.id] = build_milestone_goal_text(
+            milestone, position, self.total, self.run_state.established_dependencies
+        )
+        self._consumed_context[unit.id] = render_consumed_contract_context(milestone, self.contract_registry)
+        self._cycles_before[unit.id] = owning_run_commit_count(self.workspace_path)
+        return None
+
+    def select_checkpoint(
+        self, unit: WorkUnit, record: Optional[Dict[str, Any]], *, resume: bool, resume_id: Optional[str],
+    ) -> Tuple[bool, Optional[str]]:
+        # S4c-3: offer only this unit's own newest checkpoint (the PRD-008
+        # validator still decides whether it is reusable).
+        call_resume, call_resume_id, selection = select_unit_checkpoint(
+            self.workspace_path, record, resume=resume, resume_id=resume_id,
+        )
+        _record_selection(self.workspace_path, self.run_state, self.reuse_assessment, selection)
+        return call_resume, call_resume_id
+
+    async def run_unit(
+        self, plan: ExecutionPlan, unit: WorkUnit, invocation: WorkUnitInvocation,
+        *, resume: bool, resume_id: Optional[str],
+    ) -> Dict[str, Any]:
+        milestone = self._milestone(unit)
+        if milestone is None:
+            return await self.we.run_generation_workflow(
+                goal=unit.goal,
+                workspace_path=self.workspace_path,
+                **self.generation_kwargs,
+                milestone_group_id=self.run_state.group_id,
+                milestone_index=self.total + 1,
+                milestone_total=self.total + 1,
+                resume=resume,
+                resume_id=resume_id,
+                supplementary_context=render_established_file_context(self.run_state.established_file_context),
+                established_files=sorted(self.run_state.established_file_context.keys()),
+                work_unit=invocation,
+            )
+        return await self.we.run_generation_workflow(
+            goal=self._goal[unit.id],
+            workspace_path=self.workspace_path,
+            **self.generation_kwargs,
+            milestone_group_id=self.run_state.group_id,
+            milestone_index=self.position[milestone.id],
+            milestone_total=self.total,
+            resume=resume,
+            resume_id=resume_id,
+            supplementary_context="\n\n".join(filter(None, (
+                render_established_file_context(self.run_state.established_file_context),
+                self._consumed_context[unit.id],
+            ))),
+            established_files=sorted(self.run_state.established_file_context.keys()),
+            work_unit=invocation,
+        )
+
+    async def check_passed_unit(self, unit: WorkUnit, result: Dict[str, Any]) -> Dict[str, Any]:
+        milestone = self._milestone(unit)
+        if milestone is None:
+            return result
+        # A milestone's OWN Quality Gates can pass while still silently
+        # dropping an earlier milestone's dependency (the confirmed real
+        # pom.xml "tug-of-war" bug, docs/design.md section 2.3.4d) - by this
+        # point run_generation_workflow() has already applied the milestone's
+        # files to the real workspace, so this is treated as an ordinary
+        # milestone failure needing the SAME human decision point
+        # (milestone_failure_callback) as a Quality-Gates failure, not a
+        # separate exception path the callback never sees and that leaves no
+        # record behind for a later --from-milestones re-run to act on.
+        dropped = check_dependency_regression(self.workspace_path, self.run_state.established_dependencies)
+        if dropped:
+            result = dict(result)
+            result["quality_gates_passed"] = False
+            result["status"] = "dependency_regression"
+            result["dropped_dependencies"] = dropped
+            return result
+        if milestone.provides:
+            mark_capabilities_implemented(self.contract_registry, milestone)
+            _persist_contract_registry(
+                self.workspace_path,
+                self.contract_registry,
+                authoritative=self.authoritative,
+                milestone_id=milestone.id,
+            )
+        return result
+
+    def retry_failed_unit(self, unit: WorkUnit, result: Dict[str, Any]) -> bool:
+        milestone = self._milestone(unit)
+        if milestone is None:
+            return False
+        position = self.position[milestone.id]
+        decision = "abandon"
+        if self.milestone_failure_callback:
+            decision = self.milestone_failure_callback(position, self.total, milestone, result)
+        if decision == "retry":
+            logger.info(
+                f"Retrying milestone '{milestone.id}' ({position}/{self.total}) per "
+                "milestone_failure_callback decision."
+            )
+            return True
+        return False
+
+    async def unit_failed(self, unit: WorkUnit, result: Dict[str, Any]) -> Dict[str, Any]:
+        milestone = self._milestone(unit)
+        if milestone is None:
+            # Integration commits change paths milestones own; without them
+            # in the ledger a clean rerun would read those paths as edited.
+            if _record_ledger(self.workspace_path, self.run_state, None, self._cycles_before[unit.id]):
+                save_milestone_run_state(self.workspace_path, self.run_state)
+            return {
+                "status": "integration_failed",
+                "group_id": self.run_state.group_id,
+                "milestone_total": self.total,
+                "integration_result": result,
+                "milestone_reuse": self.reuse_assessment.to_dict(),
+            }
+        if _record_ledger(
+            self.workspace_path, self.run_state, milestone.id, self._cycles_before[unit.id],
+            loop_outcome=LOOP_FAILED,
+        ):
+            save_milestone_run_state(self.workspace_path, self.run_state)
+        return {
+            "status": "milestone_failed",
+            "group_id": self.run_state.group_id,
+            "milestone_id": milestone.id,
+            "milestone_index": self.position[milestone.id],
+            "milestone_total": self.total,
+            "result": result,
+            "milestone_reuse": self.reuse_assessment.to_dict(),
+        }
+
+    async def complete_unit(self, unit: WorkUnit, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        milestone = self._milestone(unit)
+        if milestone is None:
+            if _record_ledger(self.workspace_path, self.run_state, None, self._cycles_before[unit.id]):
+                save_milestone_run_state(self.workspace_path, self.run_state)
+            return None
+        # Persist the commits before any later step can fail and return:
+        # an unrecorded commit would make a clean rerun see edited paths.
+        milestone_entries = _record_ledger(
+            self.workspace_path, self.run_state, milestone.id, self._cycles_before[unit.id],
+            loop_outcome=LOOP_PASSED,
+        )
+        if milestone_entries:
+            save_milestone_run_state(self.workspace_path, self.run_state)
+
+        await self._capture_verification_commands(milestone, result)
+
+        completion_error = _complete_milestone(
+            self.workspace_path, self.run_state, milestone, milestone_entries, list(result.get("files", [])),
+            self.artifact_registry, result=result, config=self.engine_config,
+        )
+        if completion_error is not None:
+            return {
+                "status": "artifact_registry_failed",
+                "group_id": self.run_state.group_id,
+                "milestone_id": milestone.id,
+                "quality_gates_passed": False,
+                "artifact_error": completion_error,
+            }
+        _update_milestone_control_state(
+            self.workspace_path,
+            self.run_state.group_id,
+            milestone.id,
+            "done",
+            self.contract_registry,
+            self.artifact_registry,
+            authoritative=self.authoritative,
+        )
+        return None
+
+    async def _capture_verification_commands(self, milestone: MilestoneV2, result: Dict[str, Any]) -> None:
+        milestone_goal = self._goal[milestone.id]
+        try:
+            # Read the CURRENT real pom.xml (post-apply, same convention as
+            # attempt.py's own judge() call site) - without it judge() reliably
+            # mis-infers exec:java for a pom actually shaped for exec:exec
+            # (confirmed real, repeated failure - see RunVerifierAgent.judge()'s
+            # own system prompt/docstring), exactly the goal shape (Ignite/Qpid,
+            # needing --add-opens) this feature was built for.
+            pom_content_for_judge = None
+            try:
+                with open(os.path.join(self.workspace_path, "pom.xml"), "r", encoding="utf-8") as f:
+                    pom_content_for_judge = f.read()
+            except Exception as e:
+                logger.debug(f"No pom.xml available for milestone '{milestone.id}'s run-verification judgment: {e}")
+            judgment = await self.we.run_verifier.judge(
+                goal=milestone_goal,
+                design=result.get("design", ""),
+                files_written=result.get("files", []),
+                build_file_content=pom_content_for_judge,
+            )
+            # VER-005 implementation (2026-09-13): this is a THIRD, previously
+            # ungrounded RunVerifierAgent.judge() call site - independent of
+            # both call sites kriya/workflow/attempt.py already grounds
+            # (_execute_runtime_verification_directly and the mutating-path
+            # inline block) - a raw judgment captured here for LATER REPLAY
+            # (replay_prior_milestone_verifications, below) would otherwise
+            # persist and re-execute an unvalidated Python target (e.g. a
+            # test file selected for a library milestone) on every later
+            # integration pass, exactly the E4 defect this risk closes.
+            # Python-only, matching this fix's own scope - this milestone-
+            # replay path has no live evidence of the equivalent Java defect,
+            # and _build_java_main_class_map's own signature is
+            # AttemptContext-coupled, not plumbed through here; disclosed as
+            # a known, narrower scope in the VER-005 evidence doc rather than
+            # silently expanded.
+            if judgment.get("should_run") and judgment.get("run_commands"):
+                milestone_known_files = result.get("files", [])
+                if any(f.endswith(".py") for f in milestone_known_files):
+                    all_python_files, package_dirs, entrypoint_files = _build_python_runtime_grounding(
+                        self.workspace_path
+                    )
+                    corrected_py_commands = ground_python_runtime_target(
+                        judgment["run_commands"], judgment["command_source"],
+                        all_python_files, package_dirs, entrypoint_files,
+                    )
+                    if corrected_py_commands is None:
+                        judgment = dict(judgment)
+                        judgment["should_run"] = False
+                        judgment["run_commands"] = None
+                    elif corrected_py_commands != judgment["run_commands"]:
+                        judgment = dict(judgment)
+                        judgment["run_commands"] = corrected_py_commands
+            if judgment.get("should_run") and judgment.get("run_commands"):
+                self.run_state.verification_commands[milestone.id] = judgment["run_commands"]
+        except Exception as e:
+            logger.warning(f"Could not capture milestone '{milestone.id}'s verification commands for later replay: {e}")
+
+    async def run_phase(self, phase: TerminalPhase) -> Optional[Dict[str, Any]]:
+        if phase is not TerminalPhase.REPLAY_PRIOR_VERIFICATIONS:
+            raise ValueError(f"milestone plans have no '{phase.value}' phase")
+        replay_failures = replay_prior_milestone_verifications(self.workspace_path, self.run_state)
+        if replay_failures:
+            return {
+                "status": "milestone_replay_failed",
+                "group_id": self.run_state.group_id,
+                "milestone_total": self.total,
+                "failures": replay_failures,
+            }
+        return None
+
+    def plan_result(self, plan: ExecutionPlan, last_result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        # Only reached with every unit VERIFIED, so the integration unit
+        # (always last) passed and last_result is its result.
+        return {
+            "status": "success",
+            "group_id": self.run_state.group_id,
+            "milestone_total": self.total,
+            "integration_result": last_result,
+            "milestone_reuse": self.reuse_assessment.to_dict(),
+        }
+
+
 @coordinated_mutation
 async def run_milestones(
     we: Any,
@@ -1124,8 +1466,37 @@ async def run_milestones(
     position is no longer trusted as execution order, only its `depends_on`
     DAG is (MA3 section 23's own "no parallel execution yet, correct logical
     order first" rule - still strictly sequential, one milestone at a time).
-    completed_milestone_ids tracks progress by id, not list position."""
-    ordered = topological_order(run_state.milestones)
+    completed_milestone_ids tracks progress by id, not list position.
+
+    PRD-008A: the sequence runs as one ExecutionPlan (milestones + the
+    integration unit, replay as the plan-wide phase between them) through
+    kriya/workflow/plan_executor.py's execute_plan() - the same executor a
+    direct goal uses. What stays here is milestone-specific: plan
+    preparation below (completion revalidation, contract registration and
+    invalidation) and _MilestonePlanDriver's per-unit bookkeeping."""
+    from kriya.workflow.execution_plan import InvalidExecutionPlanError
+    from kriya.workflow.plan_adapters import milestone_execution_plan
+
+    try:
+        plan = milestone_execution_plan(run_state)
+    except InvalidExecutionPlanError as invalid:
+        # A hand-edited plan file with a dependency cycle or an unknown
+        # dependency: topological_order() would silently drop those
+        # milestones and the sequence could still report success.
+        return {
+            "status": "milestone_plan_invalid",
+            "group_id": run_state.group_id,
+            "quality_gates_passed": False,
+            "reason_codes": list(invalid.reason_codes),
+            "plan_issues": [issue.to_dict() for issue in invalid.issues],
+        }
+    # The milestones this run executes, in plan order. Built before any
+    # contract invalidation below may replace run_state.milestones, exactly
+    # as the pre-PRD-008A loop iterated its own up-front ordering.
+    by_id = {milestone.id: milestone for milestone in run_state.milestones}
+    ordered = [
+        by_id[unit.id] for unit in plan.execution_order() if unit.role is WorkUnitRole.PRIMARY
+    ]
     total = len(ordered)
     # PRD-008 S4b: completed_milestone_ids is trusted only after each entry's
     # completion proof validates against durable evidence and the workspace.
@@ -1288,274 +1659,24 @@ async def run_milestones(
         workspace_path, contract_registry, authoritative=authoritative,
     )
 
-    for position, milestone in enumerate(ordered, start=1):
-        if milestone.id in run_state.completed_milestone_ids:
-            logger.info(f"Milestone '{milestone.id}' ({position}/{total}) already completed (resume) - skipping.")
-            continue
-
-        _update_milestone_control_state(
-            workspace_path,
-            run_state.group_id,
-            milestone.id,
-            "in_progress",
-            contract_registry,
-            artifact_registry,
-            authoritative=authoritative,
-        )
-
-        _log_phase_banner(f"MILESTONE '{milestone.id}' ({position}/{total}): {milestone.goal[:40]}")
-        # A consumer may only execute against artifact coordinates that
-        # still match the provider's current build metadata. Providers with
-        # no recorded physical artifact remain valid logical contracts.
-        provider_ids = {
-            provider.id
-            for capability_name in milestone.consumes
-            for provider in run_state.milestones
-            if any(cap.name == capability_name for cap in provider.provides)
-        }
-        artifact_drift = [
-            validation
-            for provider_id in sorted(provider_ids)
-            for validation in artifact_registry.validate(workspace_path, provider_id)
-            if validation.drifted
-        ]
-        if artifact_drift:
-            return {
-                "status": "artifact_drift",
-                "group_id": run_state.group_id,
-                "milestone_id": milestone.id,
-                "quality_gates_passed": False,
-                "artifact_drift": [
-                    {
-                        "reason_code": item.reason_code,
-                        "recorded": item.recorded.to_dict(),
-                        "current": item.current.to_dict() if item.current else None,
-                    }
-                    for item in artifact_drift
-                ],
-            }
-        milestone_goal = build_milestone_goal_text(
-            milestone, position, total, run_state.established_dependencies
-        )
-        consumed_contract_context = render_consumed_contract_context(milestone, contract_registry)
-
-        # Every commit this milestone's loop makes (retries included) is
-        # attributed to it from the RunRecord, never from its reported files.
-        cycles_before = owning_run_commit_count(workspace_path)
-        unit = milestone_work_unit(run_state.group_id, milestone)
-        _set_work_unit(workspace_path, unit)
-        while True:
-            # S4c-3: offer only this milestone's own newest checkpoint (the
-            # PRD-008 validator still decides whether it is reusable).
-            call_resume, call_resume_id, selection = select_unit_checkpoint(
-                workspace_path, unit, resume=resume, resume_id=resume_id,
-            )
-            _record_selection(workspace_path, run_state, reuse_assessment, selection)
-            result = await we.run_generation_workflow(
-                goal=milestone_goal,
-                workspace_path=workspace_path,
-                approval_callback=approval_callback,
-                stream_callback=stream_callback,
-                skill_gap_callback=skill_gap_callback,
-                skill_conflict_callback=skill_conflict_callback,
-                web_lookup_callback=web_lookup_callback,
-                web_lookup_query_callback=web_lookup_query_callback,
-                milestone_group_id=run_state.group_id,
-                milestone_index=position,
-                milestone_total=total,
-                knowledge_risk_confirmed=knowledge_risk_confirmed,
-                resume=call_resume,
-                resume_id=call_resume_id,
-                supplementary_context="\n\n".join(filter(None, (
-                    render_established_file_context(run_state.established_file_context),
-                    consumed_contract_context,
-                ))),
-                established_files=sorted(run_state.established_file_context.keys()),
-            )
-
-            if result.get("quality_gates_passed"):
-                # A milestone's OWN Quality Gates can pass while still
-                # silently dropping an earlier milestone's dependency (the
-                # confirmed real pom.xml "tug-of-war" bug, docs/design.md
-                # section 2.3.4d) - by this point run_generation_workflow()
-                # has already applied the milestone's files to the real
-                # workspace, so this is treated as an ordinary milestone
-                # failure needing the SAME human decision point
-                # (milestone_failure_callback) as a Quality-Gates failure,
-                # not a separate exception path the callback never sees and
-                # that leaves no record behind for a later --from-milestones
-                # re-run to act on.
-                dropped = check_dependency_regression(workspace_path, run_state.established_dependencies)
-                if dropped:
-                    result = dict(result)
-                    result["quality_gates_passed"] = False
-                    result["status"] = "dependency_regression"
-                    result["dropped_dependencies"] = dropped
-                else:
-                    if milestone.provides:
-                        mark_capabilities_implemented(contract_registry, milestone)
-                        _persist_contract_registry(
-                            workspace_path,
-                            contract_registry,
-                            authoritative=authoritative,
-                            milestone_id=milestone.id,
-                        )
-                    break
-
-            decision = "abandon"
-            if milestone_failure_callback:
-                decision = milestone_failure_callback(position, total, milestone, result)
-            if decision == "retry":
-                logger.info(f"Retrying milestone '{milestone.id}' ({position}/{total}) per milestone_failure_callback decision.")
-                continue
-
-            if _record_ledger(workspace_path, run_state, milestone.id, cycles_before, loop_outcome=LOOP_FAILED):
-                save_milestone_run_state(workspace_path, run_state)
-            _set_work_unit(workspace_path, None)
-            return {
-                "status": "milestone_failed",
-                "group_id": run_state.group_id,
-                "milestone_id": milestone.id,
-                "milestone_index": position,
-                "milestone_total": total,
-                "result": result,
-                "milestone_reuse": reuse_assessment.to_dict(),
-            }
-
-        # Persist the commits before any later step can fail and return:
-        # an unrecorded commit would make a clean rerun see edited paths.
-        milestone_entries = _record_ledger(
-            workspace_path, run_state, milestone.id, cycles_before, loop_outcome=LOOP_PASSED,
-        )
-        if milestone_entries:
-            save_milestone_run_state(workspace_path, run_state)
-
-        try:
-            # Read the CURRENT real pom.xml (post-apply, same convention as
-            # attempt.py's own judge() call site) - without it judge() reliably
-            # mis-infers exec:java for a pom actually shaped for exec:exec
-            # (confirmed real, repeated failure - see RunVerifierAgent.judge()'s
-            # own system prompt/docstring), exactly the goal shape (Ignite/Qpid,
-            # needing --add-opens) this feature was built for.
-            pom_content_for_judge = None
-            try:
-                with open(os.path.join(workspace_path, "pom.xml"), "r", encoding="utf-8") as f:
-                    pom_content_for_judge = f.read()
-            except Exception as e:
-                logger.debug(f"No pom.xml available for milestone '{milestone.id}'s run-verification judgment: {e}")
-            judgment = await we.run_verifier.judge(
-                goal=milestone_goal,
-                design=result.get("design", ""),
-                files_written=result.get("files", []),
-                build_file_content=pom_content_for_judge,
-            )
-            # VER-005 implementation (2026-09-13): this is a THIRD, previously
-            # ungrounded RunVerifierAgent.judge() call site - independent of
-            # both call sites kriya/workflow/attempt.py already grounds
-            # (_execute_runtime_verification_directly and the mutating-path
-            # inline block) - a raw judgment captured here for LATER REPLAY
-            # (replay_prior_milestone_verifications, below) would otherwise
-            # persist and re-execute an unvalidated Python target (e.g. a
-            # test file selected for a library milestone) on every later
-            # integration pass, exactly the E4 defect this risk closes.
-            # Python-only, matching this fix's own scope - this milestone-
-            # replay path has no live evidence of the equivalent Java defect,
-            # and _build_java_main_class_map's own signature is
-            # AttemptContext-coupled, not plumbed through here; disclosed as
-            # a known, narrower scope in the VER-005 evidence doc rather than
-            # silently expanded.
-            if judgment.get("should_run") and judgment.get("run_commands"):
-                milestone_known_files = result.get("files", [])
-                if any(f.endswith(".py") for f in milestone_known_files):
-                    all_python_files, package_dirs, entrypoint_files = _build_python_runtime_grounding(
-                        workspace_path
-                    )
-                    corrected_py_commands = ground_python_runtime_target(
-                        judgment["run_commands"], judgment["command_source"],
-                        all_python_files, package_dirs, entrypoint_files,
-                    )
-                    if corrected_py_commands is None:
-                        judgment = dict(judgment)
-                        judgment["should_run"] = False
-                        judgment["run_commands"] = None
-                    elif corrected_py_commands != judgment["run_commands"]:
-                        judgment = dict(judgment)
-                        judgment["run_commands"] = corrected_py_commands
-            if judgment.get("should_run") and judgment.get("run_commands"):
-                run_state.verification_commands[milestone.id] = judgment["run_commands"]
-        except Exception as e:
-            logger.warning(f"Could not capture milestone '{milestone.id}'s verification commands for later replay: {e}")
-
-        completion_error = _complete_milestone(
-            workspace_path, run_state, milestone, milestone_entries, list(result.get("files", [])),
-            artifact_registry, result=result, config=engine_config,
-        )
-        if completion_error is not None:
-            _set_work_unit(workspace_path, None)
-            return {
-                "status": "artifact_registry_failed",
-                "group_id": run_state.group_id,
-                "milestone_id": milestone.id,
-                "quality_gates_passed": False,
-                "artifact_error": completion_error,
-            }
-        _update_milestone_control_state(
-            workspace_path,
-            run_state.group_id,
-            milestone.id,
-            "done",
-            contract_registry,
-            artifact_registry,
-            authoritative=authoritative,
-        )
-
-    replay_failures = replay_prior_milestone_verifications(workspace_path, run_state)
-    if replay_failures:
-        return {
-            "status": "milestone_replay_failed",
-            "group_id": run_state.group_id,
-            "milestone_total": total,
-            "failures": replay_failures,
-        }
-
-    _log_phase_banner("INTEGRATION")
-    integration_goal = build_integration_goal_text(run_state.original_goal, ordered)
-    integration_cycles_before = owning_run_commit_count(workspace_path)
-    integration_unit = integration_work_unit(run_state.group_id, _plan_digest(ordered))
-    _set_work_unit(workspace_path, integration_unit)
-    integration_resume, integration_resume_id, selection = select_unit_checkpoint(
-        workspace_path, integration_unit, resume=resume, resume_id=resume_id,
+    driver = _MilestonePlanDriver(
+        we=we, run_state=run_state, workspace_path=workspace_path, ordered=ordered,
+        contract_registry=contract_registry, artifact_registry=artifact_registry,
+        reuse_assessment=reuse_assessment, engine_config=engine_config, authoritative=authoritative,
+        milestone_failure_callback=milestone_failure_callback,
+        generation_kwargs=dict(
+            approval_callback=approval_callback,
+            stream_callback=stream_callback,
+            skill_gap_callback=skill_gap_callback,
+            skill_conflict_callback=skill_conflict_callback,
+            web_lookup_callback=web_lookup_callback,
+            web_lookup_query_callback=web_lookup_query_callback,
+            knowledge_risk_confirmed=knowledge_risk_confirmed,
+        ),
     )
-    _record_selection(workspace_path, run_state, reuse_assessment, selection)
-    integration_result = await we.run_generation_workflow(
-        goal=integration_goal,
-        workspace_path=workspace_path,
-        approval_callback=approval_callback,
-        stream_callback=stream_callback,
-        skill_gap_callback=skill_gap_callback,
-        skill_conflict_callback=skill_conflict_callback,
-        web_lookup_callback=web_lookup_callback,
-        web_lookup_query_callback=web_lookup_query_callback,
-        milestone_group_id=run_state.group_id,
-        milestone_index=total + 1,
-        milestone_total=total + 1,
-        knowledge_risk_confirmed=knowledge_risk_confirmed,
-        resume=integration_resume,
-        resume_id=integration_resume_id,
-        supplementary_context=render_established_file_context(run_state.established_file_context),
-        established_files=sorted(run_state.established_file_context.keys()),
+    # completed_milestone_ids here is what PRD-008 S4b/S4c revalidation (and
+    # contract invalidation) left standing - the only completions reused.
+    return await execute_plan(
+        plan, driver, workspace_path, resume=resume, resume_id=resume_id,
+        reusable_unit_ids=[m.id for m in ordered if m.id in run_state.completed_milestone_ids],
     )
-
-    # Integration commits change paths milestones own; without them in the
-    # ledger a clean rerun would read those paths as edited.
-    if _record_ledger(workspace_path, run_state, None, integration_cycles_before):
-        save_milestone_run_state(workspace_path, run_state)
-    _set_work_unit(workspace_path, None)
-
-    return {
-        "status": "success" if integration_result.get("quality_gates_passed") else "integration_failed",
-        "group_id": run_state.group_id,
-        "milestone_total": total,
-        "integration_result": integration_result,
-        "milestone_reuse": reuse_assessment.to_dict(),
-    }

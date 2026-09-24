@@ -891,8 +891,17 @@ class WorkflowEngine:
         obligation_ledger: Optional["ObligationLedger"] = None,
         completed_subtask_ids: Optional[FrozenSet[str]] = None,
         deterministic_failure_diagnostics: Optional["DeterministicFailureDiagnosticStore"] = None,
+        work_unit: Optional["WorkUnitInvocation"] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
+
+        work_unit (PRD-008A): None means this call is a new user intent - a
+        direct goal - so it becomes a one-unit ExecutionPlan and runs through
+        kriya/workflow/plan_executor.py's execute_plan(), which then calls
+        back here with the unit's WorkUnitInvocation. A caller executing a
+        unit of an outer plan (the milestone driver, the enforce subtask
+        loop) passes its WorkUnitInvocation and this method runs exactly that
+        unit. Either way the pipeline below is the same generation primitive.
 
         supplementary_context: raw text folded into convention_prompt BEFORE
         skills/RAG content is appended (see the `convention_prompt = ""` init
@@ -1029,6 +1038,10 @@ class WorkflowEngine:
         contract, never a caller bug silently degrading into "use only
         SOME predetermined values." None for all three (the default)
         preserves today's exact behavior for every other caller."""
+        if work_unit is None:
+            call_args = {name: value for name, value in locals().items() if name not in ("self", "work_unit")}
+            from kriya.workflow.plan_executor import execute_direct_goal
+            return await execute_direct_goal(self.run_generation_workflow, call_args)
         if (predetermined_plan is not None or predetermined_design is not None
                 or predetermined_architect_files is not None) and not (
                     predetermined_plan is not None and predetermined_design is not None

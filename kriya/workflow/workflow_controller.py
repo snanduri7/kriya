@@ -114,6 +114,8 @@ from kriya.control.persistence import (
 )
 from kriya.control.state import ControlState
 from kriya.control.commit_state import assess_workspace_commit_state
+from kriya.workflow.execution_plan import PlanSourceKind
+from kriya.workflow.plan_executor import WorkUnitInvocation
 from kriya.control.run_coordinator import (
     authorize_candidate_workspace,
     annotate_run,
@@ -4787,6 +4789,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     process_profiles is not None
                     and getattr(process_profiles, "enabled", False) is True
                     and getattr(process_profiles, "enforce_context_depth", False) is True
+                ),
+                # PRD-008A: a unit of this structured plan, never a new direct
+                # intent (which would wrap it in its own one-unit plan). The
+                # structured subtask loop is not yet executed by execute_plan;
+                # its subtasks keep active_work_unit=None, as before.
+                work_unit=WorkUnitInvocation(
+                    PlanSourceKind.STRUCTURED, plan.plan_id, target.id, plan.content_hash(),
                 ),
                 **{k: v for k, v in legacy_kwargs.items() if k != "trace_id_override"},
             )

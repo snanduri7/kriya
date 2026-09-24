@@ -97,6 +97,7 @@ _ANNOTATABLE_FIELDS = frozenset({
     "approved_plan_hash", "obligation_ledger_revision", "obligation_ledger_hash",
     "candidate_hash", "verification_evidence_ids", "retry_state_reference",
     "retry_counters", "resume_decision", "milestone_reuse", "active_work_unit",
+    "execution_plan", "work_unit_states",
 })
 
 # Requirement 2: every persistent store is authoritative for its own content,
@@ -184,6 +185,11 @@ class RunRecord:
     # into each cycle, so a commit is attributable to its milestone from the
     # moment its intent is durable - before any workspace byte changes.
     active_work_unit: Optional[Dict[str, Any]] = None
+    # PRD-008A: the ExecutionPlan this run executes (ExecutionPlan.to_dict())
+    # and each WorkUnit's lifecycle (unit id -> WorkUnitState.to_dict()).
+    # Evidence only; optional, like resume_decision.
+    execution_plan: Optional[Dict[str, Any]] = None
+    work_unit_states: Optional[Dict[str, Any]] = None
     # Schema 3: provenance of an explicit `kriya runs recover` settlement.
     recovery: Optional[Dict[str, Any]] = None
     commits: List[Dict[str, Any]] = field(default_factory=list)
