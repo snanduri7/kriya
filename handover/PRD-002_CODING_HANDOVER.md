@@ -61,3 +61,35 @@ Integrity checks prove required file presence, not cryptographic provenance or
 complete runtime qualification. Doctor mocks do not prove model readiness.
 No durable architecture rule changed; .eie/DECISIONS.md remains absent.
 Implementation is prepared; production acceptance remains PENDING user evidence.
+
+## Reopening addendum (2026-09-24, independent review)
+Findings closed:
+- **Unpinned build backend (req 4).** CI ran `pip install -r requirements.txt setuptools`. `setuptools==83.0.0`
+  (the version local builds already use) is now pinned inside the existing pip-compile lock, in pip-compile's own
+  `--allow-unsafe` format, and the lock header command now includes `--allow-unsafe` so a regeneration keeps it.
+  CI installs from the lock only. No second lock mechanism.
+- **Incomplete sdist (req 3, AC1/AC4).** `MANIFEST.in` used per-extension includes and silently dropped tracked
+  test fixtures (`tests/incidents/fixtures/*.json`) and skill content (`rules.txt`, `*.java`, `*.xml`,
+  `*.properties`). It now grafts `plugins/core_tools`, `scripts`, `skills`, `tests` whole.
+  `kriya.distribution --source-root <checkout>` fails an sdist missing any git-tracked file under those trees
+  (fails closed with a JSON error when the root is not a git checkout); `scripts/verify_release.sh` uses it for
+  the sdist.
+- Tests added: `test_sdist_missing_tracked_release_file_fails` (json/txt/java, parametrized),
+  `test_sdist_with_every_tracked_release_file_passes`, `test_source_root_that_is_not_a_git_checkout_fails_closed`,
+  `test_source_root_rejected_for_wheel`, `test_manifest_grafts_every_release_tree`.
+
+Accepted / known limitations:
+- The wheel installs `plugins/` as a namespace package in site-packages; another distribution shipping a top-level
+  `plugins` package would share that directory. Renaming would change the user-visible `plugins.directory` default
+  and the spec's non-goal forbids relocating core tools just for packaging; documented in README instead.
+- **Lock regeneration is currently broken locally**: `pip-compile` (pip-tools 7.6.0, locked) crashes with
+  `ImportError: cannot import name 'stdlib_pkgs'` under the venv's pip 26.2.1. The lock itself is valid (it installs
+  and `pip check`s); only regenerating it needs a compatible pip-tools/pip pair. Owned by PRD-034 (CI environment).
+- A dirty local checkout's untracked files under the grafted trees would enter a locally built sdist; the CI build
+  runs from a clean checkout. The check proves nothing tracked is missing, not that nothing extra is present.
+
+User verification:
+- `.venv/bin/pytest tests/test_distribution_integrity.py tests/test_plugins.py tests/test_plugins_command.py tests/test_cli_smoke.py -rs`
+- Release smoke (builds sdist+wheel, clean venv install, needs package-index access):
+  `KRIYA_PYTHON=.venv/bin/python bash scripts/verify_release.sh` - expect every `integrity.jsonl` line
+  `"passed": true` and the smoke log to finish without error.

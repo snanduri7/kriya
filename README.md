@@ -414,14 +414,19 @@ mcp: {}
 The canonical core plugin remains at `plugins/core_tools`. Wheels include that
 namespace package and `kriya/config/default_config.yaml`; the existing loader and
 installation-relative default paths are unchanged. Source distributions also
-include the dependency lock, build manifest, CI workflow and release smoke setup.
-No Git metadata is required at runtime.
+include the dependency lock, build manifest, CI workflow and release smoke setup,
+plus every git-tracked file under `plugins/core_tools`, `scripts`, `skills` and
+`tests` (`MANIFEST.in` grafts those trees whole). No Git metadata is required at
+runtime. The installed `plugins` directory is a namespace package in
+site-packages; another distribution shipping a top-level `plugins` package would
+share that directory - a known, accepted packaging limitation.
 
 Use Python 3.14 for the existing `requirements.txt` lock; the supported-version
 CI matrix continues to test declared dependency ranges. This change introduces
 no new dependency or parallel lock mechanism.
 
-After installing `requirements.txt` and setuptools, run:
+The build backend (`setuptools`) is pinned inside `requirements.txt` itself
+(`pip-compile --allow-unsafe`). After installing `requirements.txt`, run:
 
 ```bash
 python -m kriya.distribution .
@@ -429,7 +434,8 @@ bash scripts/verify_release.sh
 ```
 
 Set `KRIYA_PYTHON` to the desired interpreter if necessary. The script builds the
-wheel from the sdist, checks required contents, creates a clean venv, installs
+wheel from the sdist, checks required contents (for the sdist, against every
+tracked file in the release trees via `--source-root`), creates a clean venv, installs
 locked dependencies and the wheel, checks dependencies, and runs version/config/
 plugins/doctor smoke checks outside the checkout. Doctor network endpoints are
 mocked: this proves installation, not live-model readiness. Each run prints its

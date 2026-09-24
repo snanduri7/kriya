@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import subprocess
 import tarfile
 from pathlib import Path, PurePosixPath
 from zipfile import BadZipFile, ZipFile
@@ -16,15 +17,43 @@ REQUIRED_RUNTIME_FILES = (
 REQUIRED_SOURCE_FILES = (*REQUIRED_RUNTIME_FILES, "pyproject.toml", "requirements.txt",
                          "README.md", ".github/workflows/ci.yml", "MANIFEST.in",
                          "scripts/release_smoke.py", "scripts/verify_release.sh")
+# Trees MANIFEST.in grafts whole; an sdist must carry every tracked file in them.
+RELEASE_TREES = ("plugins/core_tools", "scripts", "skills", "tests")
 
 
-def check_distribution(path: Path) -> list[str]:
+def tracked_release_files(source_root: Path) -> list[str]:
+    """Git-tracked files under RELEASE_TREES; raises when git cannot answer."""
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--", *RELEASE_TREES],
+        cwd=source_root, capture_output=True, timeout=60,
+    )
+    if result.returncode != 0:
+        raise ValueError(f"git ls-files failed in {source_root}: "
+                         f"{result.stderr.decode(errors='replace').strip()}")
+    return sorted(name for name in result.stdout.decode().split("\0") if name)
+
+
+def _sdist_names(path: Path) -> set[str]:
+    with tarfile.open(path, "r:gz") as archive:
+        members = [PurePosixPath(item.name) for item in archive.getmembers() if item.isfile()]
+    roots = {item.parts[0] for item in members}
+    if len(roots) != 1:
+        raise ValueError("Source distribution must have exactly one root directory")
+    return {str(PurePosixPath(*item.parts[1:])) for item in members}
+
+
+def check_distribution(path: Path, source_root: Path | None = None) -> list[str]:
     """Return missing required files; corrupt/unsupported artifacts raise errors.
 
     A source export/sdist includes build and CI inputs. A wheel includes runtime
     files and installation metadata; Git history is deliberately not required.
-    This checks completeness, not cryptographic authenticity or dependency health.
+    With ``source_root`` (a git checkout), an sdist must also contain every
+    tracked file under RELEASE_TREES, so a narrow MANIFEST cannot silently drop
+    fixtures or skill content. This checks completeness, not cryptographic
+    authenticity or dependency health.
     """
+    if source_root is not None and not path.name.endswith(".tar.gz"):
+        raise ValueError("--source-root applies to a .tar.gz source distribution only")
     if path.is_dir():
         return [name for name in REQUIRED_SOURCE_FILES if not (path / name).is_file()]
     if path.suffix == ".whl":
@@ -42,24 +71,26 @@ def check_distribution(path: Path) -> list[str]:
                            if f"{root}/{name}" not in names)
         return missing
     if path.name.endswith(".tar.gz"):
-        with tarfile.open(path, "r:gz") as archive:
-            members = [PurePosixPath(item.name) for item in archive.getmembers() if item.isfile()]
-        roots = {item.parts[0] for item in members}
-        if len(roots) != 1:
-            raise ValueError("Source distribution must have exactly one root directory")
-        names = {str(PurePosixPath(*item.parts[1:])) for item in members}
-        return [name for name in REQUIRED_SOURCE_FILES if name not in names]
+        names = _sdist_names(path)
+        missing = [name for name in REQUIRED_SOURCE_FILES if name not in names]
+        if source_root is not None:
+            missing.extend(name for name in tracked_release_files(source_root)
+                           if name not in names and name not in missing)
+        return missing
     raise ValueError("Expected source directory, .whl, or .tar.gz")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("artifact", type=Path)
+    parser.add_argument("--source-root", type=Path, default=None,
+                        help="git checkout the sdist was built from; require every tracked "
+                             "file under the release trees")
     args = parser.parse_args()
     try:
-        missing = check_distribution(args.artifact)
+        missing = check_distribution(args.artifact, args.source_root)
         report = {"artifact": str(args.artifact), "passed": not missing, "missing": missing}
-    except (OSError, ValueError, tarfile.TarError, BadZipFile) as error:
+    except (OSError, ValueError, tarfile.TarError, BadZipFile, subprocess.SubprocessError) as error:
         report = {"artifact": str(args.artifact), "passed": False, "error": str(error)}
     print(json.dumps(report, sort_keys=True))
     raise SystemExit(0 if report["passed"] else 1)

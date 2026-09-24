@@ -85,7 +85,9 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install existing locked build and test dependencies
-        run: pip install -r requirements.txt setuptools
+        # setuptools (the sdist/wheel build backend) is pinned in the lock
+        # itself (--allow-unsafe), never installed unpinned alongside it.
+        run: pip install -r requirements.txt
       - name: Verify source, sdist, wheel and clean installed CLI
         run: |
           python -m kriya.distribution .

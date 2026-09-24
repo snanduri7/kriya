@@ -1,6 +1,6 @@
 task_id,title,wave,priority,dependencies,live_test,status,coding_revision,pytest_verdict,live_verdict
-PRD-001,Bootstrap and Configuration Contract Closure,Wave 0,P0,None,NOT REQUIRED,READY_FOR_PYTEST_VERIFICATION,reopened (see PRD-001_011_INDEPENDENT_REVIEW.md),,NOT_REQUIRED
-PRD-002,Canonical Repository and Distribution Integrity,Wave 0,P0,PRD-001,NOT REQUIRED,IMPLEMENTING,084fe7d reopened,,NOT_REQUIRED
+PRD-001,Bootstrap and Configuration Contract Closure,Wave 0,P0,None,NOT REQUIRED,VERIFIED,7a23840,PYTEST_VERIFIED,NOT_REQUIRED
+PRD-002,Canonical Repository and Distribution Integrity,Wave 0,P0,PRD-001,NOT REQUIRED,READY_FOR_PYTEST_VERIFICATION,084fe7d reopened,,NOT_REQUIRED
 PRD-003,CLI JSON Output Contract,Wave 0,P1,PRD-001,REQUIRED,VERIFIED,42060d2,PYTEST_VERIFIED,LIVE_VERIFIED
 PRD-004,Pre-Commit Terminal Correctness Gates,Wave 1,P0,PRD-003,NOT REQUIRED,IMPLEMENTING,ee673e0 reopened,,NOT_REQUIRED
 PRD-005,"Atomic Commit, Rollback and Crash-Safety Proof",Wave 1,P0,PRD-004,NOT REQUIRED,IMPLEMENTING,1d7c94e reopened,,NOT_REQUIRED

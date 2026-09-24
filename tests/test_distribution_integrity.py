@@ -76,3 +76,77 @@ def test_corrupt_wheel_cli_fails_with_json(tmp_path):
                             capture_output=True, text=True, timeout=10)
     assert result.returncode == 1
     assert json.loads(result.stdout)['passed'] is False
+
+
+def _git_checkout(root, tracked):
+    import subprocess
+    subprocess.run(['git', 'init', '-q', str(root)], check=True)
+    for name in tracked:
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('fixture')
+    subprocess.run(['git', 'add', '--', *tracked], cwd=root, check=True)
+
+
+def _sdist_with(path, names):
+    import io
+    import tarfile
+
+    from kriya.distribution import REQUIRED_SOURCE_FILES
+    with tarfile.open(path, 'w:gz') as archive:
+        for name in (*REQUIRED_SOURCE_FILES, *names):
+            info = tarfile.TarInfo(f'kriya-0.1.0/{name}')
+            info.size = 1
+            archive.addfile(info, io.BytesIO(b'x'))
+
+
+# Tracked non-.py release content the old per-extension MANIFEST dropped.
+_TRACKED_DATA = ['tests/incidents/fixtures/case.json', 'skills/demo/rules.txt',
+                 'skills/demo/Example.java']
+
+
+@pytest.mark.parametrize('missing', _TRACKED_DATA)
+def test_sdist_missing_tracked_release_file_fails(tmp_path, missing):
+    repo = tmp_path / 'repo'
+    _git_checkout(repo, _TRACKED_DATA)
+    sdist = tmp_path / 'kriya.tar.gz'
+    _sdist_with(sdist, [name for name in _TRACKED_DATA if name != missing])
+    assert check_distribution(sdist, repo) == [missing]
+
+
+def test_sdist_with_every_tracked_release_file_passes(tmp_path):
+    repo = tmp_path / 'repo'
+    _git_checkout(repo, [*_TRACKED_DATA, 'spikes/untracked_tree_is_ignored.txt'])
+    sdist = tmp_path / 'kriya.tar.gz'
+    _sdist_with(sdist, _TRACKED_DATA)
+    assert check_distribution(sdist, repo) == []
+
+
+def test_source_root_that_is_not_a_git_checkout_fails_closed(tmp_path):
+    import json
+    import subprocess
+    import sys
+    sdist = tmp_path / 'kriya.tar.gz'
+    _sdist_with(sdist, [])
+    not_git = tmp_path / 'plain'
+    not_git.mkdir()
+    result = subprocess.run([sys.executable, '-m', 'kriya.distribution', str(sdist),
+                             '--source-root', str(not_git)],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 1
+    report = json.loads(result.stdout)
+    assert report['passed'] is False and 'git ls-files failed' in report['error']
+
+
+def test_source_root_rejected_for_wheel(tmp_path):
+    wheel = tmp_path / 'kriya.whl'
+    _wheel(wheel)
+    with pytest.raises(ValueError, match='source distribution only'):
+        check_distribution(wheel, tmp_path)
+
+
+def test_manifest_grafts_every_release_tree():
+    from kriya.distribution import RELEASE_TREES
+    manifest = (Path(__file__).resolve().parents[1] / 'MANIFEST.in').read_text().splitlines()
+    grafted = {line.split(None, 1)[1].strip() for line in manifest if line.startswith('graft ')}
+    assert set(RELEASE_TREES) <= grafted
