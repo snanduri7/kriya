@@ -179,10 +179,14 @@ class _Docker:
             if not docker:
                 self._resolved = (None, {"error": "docker CLI not found"})
             else:
-                info = subprocess.run(
-                    [docker, "info", "--format", "{{json .ServerVersion}}"],
-                    capture_output=True, text=True, timeout=10,
-                )
+                try:
+                    info = subprocess.run(
+                        [docker, "info", "--format", "{{json .ServerVersion}}"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                except (OSError, subprocess.TimeoutExpired) as error:
+                    self._resolved = (None, {"error": f"docker daemon did not answer: {error}"})
+                    return self._resolved
                 if info.returncode != 0:
                     self._resolved = (None, {"error": info.stderr.strip() or "docker daemon is not reachable"})
                 else:

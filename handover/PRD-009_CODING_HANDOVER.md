@@ -103,10 +103,18 @@ Source: `handover/PRD-001_011_INDEPENDENT_REVIEW.md` (PRD-009: minor issues). Im
 | Isolation, persistence and no-host-fallback are declared constants, not verified | `kriya doctor --production` (PRD-010, `d22cb8e`) now verifies each guarantee against the real deployment. `runtime.fixed_guarantees` is derived from the checks that verify it (see the PRD-010 handover). The constant stays as the shared vocabulary; the docstring and YAML say it is verified, not asserted. |
 | The config docstring and YAML claim a doctor precision-boundary report that did not exist | The claim is now true: `semantic.precision_boundary` (PRD-010) reports `SEMANTIC_REGION_SUPPORTED_SCOPE`, which is owned by `semantic_region_authority.py`. |
 
+**Operator note - re-approve production configs.** Sealing `autonomy.egress_policy` adds it to the production profile's
+security-field set: at `590fa16` a `runtime_profile: production` config had 9 violations, at HEAD it has 10. A SEC-009
+approval (`kriya authority approve`, or a `--trust-file`) is digest-bound to the exact set, so every existing production
+approval stops matching and `load_config` denies until you re-approve or regenerate the trust file. This is the
+correct fail-closed behaviour. Re-approve before the live `doctor --production` step, or the doctor reports only
+`config.load` FAIL.
+
 Assertion changes: none weakened. The contradiction matrix gained 4 rejection rows (egress, 7200, 0, True). The expansion
 test asserts `egress_policy`. The SEC-009 derived-field list gained `autonomy.egress_policy`. The new tests are
 `test_runtime_profile_production_keeps_a_stricter_explicit_deadline` and
-`test_direct_production_app_config_accepts_only_an_equal_or_stricter_deadline`.
+`test_direct_production_app_config_accepts_only_an_equal_or_stricter_deadline`. The stricter-deadline test's provenance line only holds
+when the field is itself a violation; the value assertion (1800 kept) is the real proof.
 
 Non-pytest checks, plain-Python runner (not pytest): the touched production-profile tests pass (18 plus 3 SEC-009);
 ruff F821/F401 are clean; `git diff --check` is clean.
@@ -117,9 +125,13 @@ Pytest (user) - the batch commands are in the PRD-010 handover:
 .venv/bin/pytest -ra \
   tests/test_production_doctor.py tests/test_doctor_command.py \
   tests/test_config.py tests/test_config_command.py tests/test_config_extra.py \
-  tests/test_sec009_config_authority.py tests/test_execution_policy_config.py \
-  tests/test_workflow_execution_policy_config_wiring.py \
-  tests/test_containment.py tests/test_containment_oci.py tests/test_process_controller_containment.py \
-  tests/test_semantic_region_authority.py tests/test_plugins_command.py tests/test_bootstrap_contract.py
+  tests/test_autonomy_config_registry_hosts.py tests/test_sec009_config_authority.py \
+  tests/test_execution_policy_config.py tests/test_workflow_execution_policy_config_wiring.py \
+  tests/test_containment.py tests/test_containment_oci.py tests/test_containment_oci_registry_scoped_unit.py \
+  tests/test_process_controller_containment.py tests/test_ver006_distrust_containment.py \
+  tests/test_workflow_controller.py tests/test_workflow_controller_enforce.py \
+  tests/test_tool003_p2_deterministic.py tests/test_tool002_tool003_combined_closure.py \
+  tests/test_dispatch_generation.py tests/test_plugins.py tests/test_plugins_command.py \
+  tests/test_semantic_region_authority.py tests/test_bootstrap_contract.py
 .venv/bin/pytest
 ```

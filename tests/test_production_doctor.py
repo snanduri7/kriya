@@ -378,6 +378,33 @@ def test_an_unattested_gradle_build_tool_is_reported_not_claimed(tmp_path):
     assert check.evidence["build_tool_attested"] is False
 
 
+def test_a_stack_without_a_production_containment_profile_blocks(tmp_path):
+    """Ruby has no versioned containment image; under required containment it
+    cannot be verified, so it no longer passes on the host's interpreter."""
+    workspace = _git_workspace(tmp_path / "workspace")
+    (workspace / "Gemfile").write_text("source 'https://rubygems.org'\n", encoding="utf-8")
+    check = _checks(_run(tmp_path, workspace=workspace))["toolchain.required"]
+    assert check.status is CheckStatus.UNAVAILABLE
+    assert check.evidence["stack"] == "ruby"
+
+
+def test_a_hung_docker_daemon_is_unavailable_and_probed_once(tmp_path):
+    from kriya.production_doctor import _Docker
+
+    calls = []
+
+    def hung(*args, **kwargs):
+        calls.append(args)
+        raise subprocess.TimeoutExpired(args[0], 10)
+
+    with patch("kriya.production_doctor.shutil.which", return_value="/usr/bin/docker"), \
+         patch("kriya.production_doctor.subprocess.run", side_effect=hung):
+        docker = _Docker()
+        assert docker.resolve()[0] is None
+        assert docker.resolve()[0] is None
+    assert len(calls) == 1
+
+
 def test_a_workspace_with_no_detectable_toolchain_is_a_visible_warning(tmp_path):
     check = _checks(_run(tmp_path))["toolchain.required"]
     assert check.status is CheckStatus.WARN

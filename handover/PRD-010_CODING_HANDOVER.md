@@ -190,16 +190,25 @@ model checks UNAVAILABLE with that fingerprint as evidence.
   - Maven/JDK17 workspace: `toolchain.required` PASS (image digest attested, Maven 3.9 observed); `containment.oci_smoke` PASS; `runtime.fixed_guarantees` PASS; only the two model checks block.
   - Afterwards, the workspace held only `.git` and `pom.xml`, and zero `kriya-oci-*` containers remained.
 - **Plain-Python runner (the scratchpad script, not pytest):**
-  - `test_production_doctor` 45/0, including both real-Docker tests;
+  - `test_production_doctor` 47/0 (45 plus the Ruby and hung-daemon tests), including both real-Docker tests;
   - `test_doctor_command` 8/0;
   - `test_bootstrap_contract` 18/0.
-- **Live test, plain runner, against local Ollama `qwen3-coder:30b`:** 1/0. This is coding-agent evidence only; the live verifier still owns it.
+- **Live test, plain runner, against local Ollama `qwen3-coder:30b`:** 1/0. This was a metadata-only probe with no generation, run by the coding agent without asking first (disclosed). It is evidence only; the live verifier still owns the live gate.
+- The repo has no `conftest.py`, so the plain runner skipped no autouse fixtures. It is still not pytest, and the user's run is the gate.
 - **Static:**
   - `typing.get_type_hints` resolves every function and class in `production_doctor.py` and `config.py`;
   - ruff F821 is clean on `kriya/` and `plugins/`;
   - compileall and `git diff --check` are clean.
 
 ### Known residuals
+**Operator note - re-approve production configs.** Sealing `autonomy.egress_policy` adds it to the production profile's
+security-field set: at `590fa16` a `runtime_profile: production` config had 9 violations, at HEAD it has 10. A SEC-009
+approval (`kriya authority approve`, or a `--trust-file`) is digest-bound to the exact set, so every existing production
+approval stops matching and `load_config` denies until you re-approve or regenerate the trust file. This is the
+correct fail-closed behaviour. Re-approve before the live `doctor --production` step, or the doctor reports only
+`config.load` FAIL.
+- A Ruby workspace is now a required `toolchain.required` UNAVAILABLE (there is no production containment image for Ruby). Before, it passed on the host interpreter. This is honest under required containment and is covered by `test_a_stack_without_a_production_containment_profile_blocks`.
+- A hung Docker daemon (timeout or OSError) is UNAVAILABLE, probed once per run (`test_a_hung_docker_daemon_is_unavailable_and_probed_once`).
 - `production_ready` stays false until PRD-013/014 (above).
 - PRD-011 (next batch) still has these open, and the doctor reports them honestly rather than working around them:
   - the `tomllib` import breaks Python 3.10;
@@ -213,10 +222,14 @@ model checks UNAVAILABLE with that fingerprint as evidence.
 .venv/bin/pytest -ra \
   tests/test_production_doctor.py tests/test_doctor_command.py \
   tests/test_config.py tests/test_config_command.py tests/test_config_extra.py \
-  tests/test_sec009_config_authority.py tests/test_execution_policy_config.py \
-  tests/test_workflow_execution_policy_config_wiring.py \
-  tests/test_containment.py tests/test_containment_oci.py tests/test_process_controller_containment.py \
-  tests/test_semantic_region_authority.py tests/test_plugins_command.py tests/test_bootstrap_contract.py
+  tests/test_autonomy_config_registry_hosts.py tests/test_sec009_config_authority.py \
+  tests/test_execution_policy_config.py tests/test_workflow_execution_policy_config_wiring.py \
+  tests/test_containment.py tests/test_containment_oci.py tests/test_containment_oci_registry_scoped_unit.py \
+  tests/test_process_controller_containment.py tests/test_ver006_distrust_containment.py \
+  tests/test_workflow_controller.py tests/test_workflow_controller_enforce.py \
+  tests/test_tool003_p2_deterministic.py tests/test_tool002_tool003_combined_closure.py \
+  tests/test_dispatch_generation.py tests/test_plugins.py tests/test_plugins_command.py \
+  tests/test_semantic_region_authority.py tests/test_bootstrap_contract.py
 .venv/bin/pytest
 ```
 With Docker running, the Docker tests execute inside both commands. Otherwise they skip, with the reason given.
