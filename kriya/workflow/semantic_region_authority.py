@@ -71,6 +71,18 @@ from kriya.analyzer.java_members import (
 )
 from kriya.workflow.edit_safety import _strip_java_comments_and_strings
 
+# The region-level precision this module can enforce today (the V1 scope in
+# the module docstring). `kriya doctor --production` reports it verbatim as
+# `semantic.precision_boundary`; PRD-028 owns widening it. Any other language
+# has file-level write authority only.
+SEMANTIC_REGION_SUPPORTED_SCOPE: Dict[str, Tuple[str, ...]] = {
+    "languages": ("java",),
+    "constructs": (
+        "top_level_method", "constructor", "field_declaration", "record_component", "import",
+    ),
+    "unrecognized_constructs": ("residual_region_rejected",),
+}
+
 REASON_REGION_UNAUTHORIZED = "SEMANTIC_REGION_UNAUTHORIZED"
 REASON_MEMBER_DELETED = "SEMANTIC_MEMBER_DELETED"
 REASON_MEMBER_ADDED_UNAUTHORIZED = "SEMANTIC_MEMBER_ADDED_UNAUTHORIZED"

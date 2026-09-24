@@ -11,14 +11,13 @@ import json
 import os
 import shutil
 import subprocess
-import sys
 import tempfile
 import urllib.parse
 import urllib.request
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 from kriya.config.config import PRODUCTION_FIXED_RUNTIME_GUARANTEES, AppConfig
 
@@ -167,72 +166,184 @@ def probe_embedding(cfg: AppConfig) -> Dict[str, Any]:
     return {"model": cfg.embedding.model, "dimensions": len(vector)}
 
 
-def probe_oci_runtime() -> Dict[str, Any]:
-    docker = shutil.which("docker")
-    if not docker:
-        raise FileNotFoundError("docker CLI not found")
-    info = subprocess.run(
-        [docker, "info", "--format", "{{json .ServerVersion}}"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    if info.returncode != 0:
-        raise RuntimeError(info.stderr.strip() or "docker daemon is not reachable")
-    image = os.environ.get("KRIYA_OCI_IMAGE", "debian:bookworm-slim")
-    smoke = subprocess.run(
-        [
-            docker, "run", "--rm", "--network", "none", "--read-only",
-            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m", image,
-            "/bin/sh", "-c", "test ! -w / && test -w /tmp && printf KRIYA_OCI_OK",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=45,
-    )
-    if smoke.returncode != 0 or smoke.stdout != "KRIYA_OCI_OK":
-        raise RuntimeError(smoke.stderr.strip() or "contained smoke command failed")
-    return {"runtime": "docker", "server_version": info.stdout.strip().strip('"'), "image": image}
+class _Docker:
+    """The Docker CLI and daemon, probed once per doctor run."""
+
+    def __init__(self) -> None:
+        self._resolved: Optional[Tuple[Optional[str], Dict[str, Any]]] = None
+
+    def resolve(self) -> Tuple[Optional[str], Dict[str, Any]]:
+        """(docker path or None, evidence). None means UNAVAILABLE."""
+        if self._resolved is None:
+            docker = shutil.which("docker")
+            if not docker:
+                self._resolved = (None, {"error": "docker CLI not found"})
+            else:
+                info = subprocess.run(
+                    [docker, "info", "--format", "{{json .ServerVersion}}"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if info.returncode != 0:
+                    self._resolved = (None, {"error": info.stderr.strip() or "docker daemon is not reachable"})
+                else:
+                    self._resolved = (docker, {"runtime": "docker", "server_version": info.stdout.strip().strip('"')})
+        return self._resolved
 
 
-def _writable_probe(path: str) -> Dict[str, Any]:
-    os.makedirs(path, exist_ok=True)
-    fd, probe = tempfile.mkstemp(prefix=".kriya-doctor-", dir=path)
+# What the doctor's smoke command prints from inside the container, one
+# KEY=VALUE per line. Every assertion is something the OCI backend itself
+# enforces for a DENIED profile: no route off the loopback and no
+# non-loopback interface up (`--network none`; the kernel's fallback tunnel
+# devices exist in every namespace but stay down), no effective capabilities
+# (`--cap-drop ALL`), and `no-new-privileges`. The root filesystem is
+# deliberately not asserted read-only: production containers are not started
+# with `--read-only`.
+_SMOKE_SCRIPT = (
+    "printf 'IPV4_ROUTES=%s\\n' \"$(tail -n +2 /proc/net/route | grep -c .)\"; "
+    "printf 'IPV6_NON_LOOPBACK_ROUTES=%s\\n' \"$(if [ -r /proc/net/ipv6_route ]; "
+    "then grep -cv ' lo$' /proc/net/ipv6_route; else echo 0; fi)\"; "
+    "printf 'UP_INTERFACES=%s\\n' \"$(for i in /sys/class/net/*/; do n=$(basename \"$i\"); "
+    "[ \"$n\" != lo ] && [ \"$(cat \"$i/operstate\")\" = up ] && printf '%s ' \"$n\"; done)\"; "
+    "printf 'CAPEFF=%s\\n' \"$(grep '^CapEff:' /proc/self/status | cut -f2)\"; "
+    "printf 'NO_NEW_PRIVS=%s\\n' \"$(grep '^NoNewPrivs:' /proc/self/status | cut -f2)\""
+)
+
+
+def _kriya_containers(docker: str) -> List[str]:
+    listing = subprocess.run(
+        [docker, "ps", "-a", "--filter", "name=kriya-oci-", "--format", "{{.Names}}"],
+        capture_output=True, text=True, timeout=15,
+    )
+    return sorted(name for name in listing.stdout.split() if name.startswith("kriya-oci-"))
+
+
+def probe_oci_containment(cfg: AppConfig, docker: str, toolchain: Optional[Any]) -> Dict[str, Any]:
+    """Run one command through the configured production containment backend.
+
+    Uses the same backend resolution and the same ProcessController spawn
+    point real verification uses, against a scratch directory - never the
+    workspace. The image must already be present: `docker run` would
+    otherwise pull it, and the doctor never changes the environment."""
+    from kriya.tools.containment import (
+        ContainmentProfile,
+        NetworkAuthority,
+        TrustClass,
+        resolve_containment_backend,
+    )
+    from kriya.tools.containment_oci import _inspect_image_digest, _select_image_and_cache_mount
+    from kriya.tools.process import ProcessController
+
+    command = ["/bin/sh", "-c", _SMOKE_SCRIPT]
+    image = toolchain.containment_image if toolchain is not None else _select_image_and_cache_mount(command)[0]
+    if _inspect_image_digest(docker, image) is None:
+        raise FileNotFoundError(f"containment image {image!r} is not present locally; run: docker pull {image}")
+
+    backend = resolve_containment_backend(cfg.autonomy.containment_backend)
+    scratch = tempfile.mkdtemp(prefix="kriya-doctor-oci-")
+    before = set(_kriya_containers(docker))
     try:
-        os.write(fd, b"kriya")
-        os.fsync(fd)
+        profile = ContainmentProfile(
+            trust_class=TrustClass.UNTRUSTED_EXECUTION,
+            workspace_path=scratch,
+            network=NetworkAuthority.DENIED,
+            toolchain_identity=toolchain,
+        )
+        result = ProcessController().run(
+            command, cwd=scratch, timeout=60,
+            containment_profile=profile, containment_backend=backend,
+        )
     finally:
-        os.close(fd)
-        os.unlink(probe)
-    return {"path": os.path.realpath(path), "writable": True}
+        shutil.rmtree(scratch, ignore_errors=True)
+    leftover = sorted(set(_kriya_containers(docker)) - before)
+
+    fields = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    evidence = {
+        "backend": backend.name,
+        "image": image,
+        "returncode": result.returncode,
+        "ipv4_routes": fields.get("IPV4_ROUTES"),
+        "ipv6_non_loopback_routes": fields.get("IPV6_NON_LOOPBACK_ROUTES"),
+        "up_interfaces": fields.get("UP_INTERFACES", "").split(),
+        "effective_capabilities": fields.get("CAPEFF"),
+        "no_new_privileges": fields.get("NO_NEW_PRIVS"),
+        "leftover_containers": leftover,
+        "toolchain_identity": result.toolchain_identity,
+    }
+    violations = []
+    if result.returncode != 0 or result.timeout:
+        violations.append(f"smoke command failed: {result.stderr.strip()[:300]}")
+    if fields.get("IPV4_ROUTES") != "0" or fields.get("IPV6_NON_LOOPBACK_ROUTES") != "0" or evidence["up_interfaces"]:
+        violations.append("container has a network path off the loopback")
+    if fields.get("CAPEFF") != "0000000000000000":
+        violations.append("container retains Linux capabilities")
+    if fields.get("NO_NEW_PRIVS") != "1":
+        violations.append("no-new-privileges is not in effect")
+    if leftover:
+        violations.append("containment cleanup left containers behind")
+    if violations:
+        raise ContainmentSmokeError("; ".join(violations), evidence)
+    return evidence
 
 
-def _toolchain_requirements(workspace: str) -> List[Tuple[str, Iterable[str]]]:
-    requirements: List[Tuple[str, Iterable[str]]] = [("python", (sys.executable,))]
-    if os.path.exists(os.path.join(workspace, "pom.xml")):
-        requirements += [("java", ("java",)), ("maven", ("mvn", "mvnw"))]
-    if any(os.path.exists(os.path.join(workspace, name)) for name in ("build.gradle", "build.gradle.kts")):
-        requirements += [("java", ("java",)), ("gradle", ("gradle", "gradlew"))]
-    if os.path.exists(os.path.join(workspace, "package.json")):
-        requirements.append(("npm", ("npm",)))
-    if any(Path(workspace).glob("*.csproj")) or any(Path(workspace).glob("*.sln")):
-        requirements.append(("dotnet", ("dotnet",)))
-    return requirements
+class ContainmentSmokeError(RuntimeError):
+    def __init__(self, message: str, evidence: Dict[str, Any]) -> None:
+        super().__init__(message)
+        self.evidence = evidence
 
 
-def _resolve_tool(workspace: str, candidates: Iterable[str]) -> Optional[str]:
-    for candidate in candidates:
-        if os.path.isabs(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-        local = os.path.join(workspace, candidate)
-        if os.path.isfile(local) and os.access(local, os.X_OK):
-            return local
-        found = shutil.which(candidate)
-        if found:
-            return found
-    return None
+def _nearest_existing_directory(path: str) -> str:
+    current = os.path.realpath(path)
+    while not os.path.exists(current):
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return current
 
+
+def _store_probe(path: str, *, lock: bool = False) -> Dict[str, Any]:
+    """Whether a persistent store at ``path`` can be written, without creating it.
+
+    An existing directory gets a transient, fsynced, self-removing probe file
+    (flocked too when ``lock``); a missing one is judged by write access on its
+    nearest existing ancestor, where Kriya would create it on first use. The
+    doctor never creates the store itself."""
+    real = os.path.realpath(path)
+    if os.path.isdir(real):
+        fd, probe = tempfile.mkstemp(prefix=".kriya-doctor-", dir=real)
+        try:
+            os.write(fd, b"kriya")
+            os.fsync(fd)
+            if lock:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+            os.unlink(probe)
+        return {"path": real, "exists": True, "writable": True}
+    if os.path.exists(real):
+        raise NotADirectoryError(f"{real} exists and is not a directory")
+    ancestor = _nearest_existing_directory(real)
+    if not (os.path.isdir(ancestor) and os.access(ancestor, os.W_OK | os.X_OK)):
+        raise PermissionError(f"{real} does not exist and cannot be created under {ancestor}")
+    return {"path": real, "exists": False, "created_on_first_use_under": ancestor}
+
+
+def _model_endpoints(cfg: AppConfig) -> Dict[str, str]:
+    endpoints = {"llm": cfg.llm.base_url, "embedding": cfg.embedding.base_url}
+    for index, fallback in enumerate(cfg.llm_chain):
+        endpoints[f"llm_chain[{index}]"] = fallback.base_url
+    for role in _ROLES:
+        binding = getattr(cfg.agent_llms, role)
+        if binding.llm is not None:
+            endpoints[f"agent_llms.{role}.llm"] = binding.llm.base_url
+        for index, fallback in enumerate(binding.llm_chain):
+            endpoints[f"agent_llms.{role}.llm_chain[{index}]"] = fallback.base_url
+    return endpoints
+
+
+_ROLES = ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance")
 
 def probe_release_integrity() -> Dict[str, Any]:
     """Reuse PRD-002's source check or installed-wheel RECORD, as applicable."""
@@ -257,198 +368,568 @@ def probe_release_integrity() -> Dict[str, Any]:
     }
 
 
-def run_production_doctor(cfg: AppConfig, workspace_path: str) -> ProductionDoctorReport:
-    workspace = os.path.realpath(workspace_path)
-    checks: List[DoctorCheck] = []
+# Pinned, in report order. A report always carries exactly these IDs, whatever
+# fails: a check that raises is reported under its own ID, never dropped.
+PRODUCTION_DOCTOR_CHECK_IDS = (
+    "profile.production",
+    "plugins.core_tools",
+    "workspace.identity_lock",
+    "persistence.checkpoints",
+    "persistence.traces",
+    "capacity.workspace",
+    "capacity.temp",
+    "git.worktree",
+    "isolation.candidate_worktree",
+    "toolchain.required",
+    "containment.oci_smoke",
+    "containment.no_host_fallback",
+    "egress.policy",
+    "model.connectivity",
+    "model.runtime_fingerprint",
+    "model.qualification",
+    "embedding.connectivity",
+    "lsp.java",
+    "models.role_independence",
+    "semantic.precision_boundary",
+    "release.integrity",
+    "runtime.fixed_guarantees",
+)
+# The single check of the report `kriya doctor --production` emits when the
+# configuration itself cannot be loaded, so --json output stays parseable.
+CONFIG_LOAD_CHECK_ID = "config.load"
 
-    checks.append(_check(
+# Each fixed runtime guarantee (PRD-009) and the checks that verify it in this
+# deployment. `runtime.fixed_guarantees` is derived from these, never asserted.
+FIXED_GUARANTEE_EVIDENCE = {
+    "candidate_isolation_fail_closed": ("git.worktree", "isolation.candidate_worktree"),
+    "checkpoint_persistence": ("persistence.checkpoints",),
+    "trace_persistence": ("persistence.traces",),
+    "no_uncontained_host_fallback": ("containment.no_host_fallback", "containment.oci_smoke"),
+}
+
+CHECK_RAISED = "CHECK_RAISED"
+RUNTIME_FINGERPRINT_NOT_COMPUTABLE = "RUNTIME_FINGERPRINT_NOT_COMPUTABLE"
+RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE = "RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE"
+MODEL_NOT_QUALIFIED = "MODEL_NOT_QUALIFIED"
+
+_SEVERITY = {CheckStatus.PASS: 0, CheckStatus.WARN: 1, CheckStatus.UNAVAILABLE: 2, CheckStatus.FAIL: 3}
+
+
+@dataclass
+class _Context:
+    cfg: AppConfig
+    workspace: str
+    docker: _Docker = field(default_factory=_Docker)
+    runtime_probe: Dict[str, Any] = field(default_factory=dict)
+    toolchain: Optional[Any] = None
+    checks: Dict[str, DoctorCheck] = field(default_factory=dict)
+
+
+def _check_profile(ctx: _Context) -> DoctorCheck:
+    return _check(
         "profile.production",
-        CheckStatus.PASS if cfg.runtime_profile == "production" else CheckStatus.FAIL,
-        evidence={"runtime_profile": cfg.runtime_profile},
+        CheckStatus.PASS if ctx.cfg.runtime_profile == "production" else CheckStatus.FAIL,
+        evidence={"runtime_profile": ctx.cfg.runtime_profile},
         remediation="Load an operator-approved configuration with runtime_profile: production.",
-    ))
+    )
 
-    plugin_dir = os.path.realpath(cfg.plugins.directory)
+
+def _check_core_plugins(ctx: _Context) -> DoctorCheck:
+    plugin_dir = os.path.realpath(ctx.cfg.plugins.directory)
     core_files = [os.path.join(plugin_dir, "core_tools", name) for name in ("__init__.py", "validation_tool.py")]
-    core_enabled = not cfg.plugins.enabled or "core_tools" in cfg.plugins.enabled
-    core_ok = core_enabled and all(os.path.isfile(path) for path in core_files)
-    checks.append(_check(
+    core_enabled = not ctx.cfg.plugins.enabled or "core_tools" in ctx.cfg.plugins.enabled
+    present = all(os.path.isfile(path) for path in core_files)
+    return _check(
         "plugins.core_tools",
-        CheckStatus.PASS if core_ok else CheckStatus.FAIL,
-        evidence={"directory": plugin_dir, "enabled": core_enabled, "files_present": all(os.path.isfile(p) for p in core_files)},
+        CheckStatus.PASS if core_enabled and present else CheckStatus.FAIL,
+        evidence={"directory": plugin_dir, "enabled": core_enabled, "files_present": present},
         remediation="Install the complete Kriya distribution and enable core_tools.",
-    ))
+    )
 
+
+def _check_identity_lock(ctx: _Context) -> DoctorCheck:
+    """Read-only: the lock is probed, never taken, and its file never created."""
+    from kriya.control.run_ownership import _lock_path, probe_run_lock
+    from kriya.control.workspace_identity import workspace_identity
+
+    remediation = "Use a writable POSIX workspace and wait for the current mutating Kriya run to finish."
+    evidence: Dict[str, Any] = {"identity": workspace_identity(ctx.workspace)}
+    holder = probe_run_lock(ctx.workspace)
+    if holder is not None:
+        evidence["held_by"] = holder
+        return _check("workspace.identity_lock", CheckStatus.FAIL, evidence=evidence, remediation=remediation)
+    evidence["lock_store"] = _store_probe(os.path.dirname(_lock_path(ctx.workspace)), lock=True)
+    return _check("workspace.identity_lock", CheckStatus.PASS, evidence=evidence, remediation=remediation)
+
+
+def _store_check(check_id: str, path: str) -> DoctorCheck:
+    remediation = f"Make {path} writable with durable storage semantics."
     try:
-        from kriya.control.run_ownership import acquire_run_lock
-        from kriya.control.workspace_identity import workspace_identity
-        identity = workspace_identity(workspace)
-        with acquire_run_lock(workspace, run_id="production-doctor"):
-            pass
-        checks.append(_check("workspace.identity_lock", CheckStatus.PASS, evidence={"identity": identity}))
-    except Exception as error:
-        checks.append(_check(
-            "workspace.identity_lock", CheckStatus.FAIL,
-            evidence={"error": str(error)},
-            remediation="Use a writable POSIX workspace and wait for the current mutating Kriya run to finish.",
-        ))
+        return _check(check_id, CheckStatus.PASS, evidence=_store_probe(path), remediation=remediation)
+    except OSError as error:
+        return _check(check_id, CheckStatus.FAIL, evidence={"path": path, "error": str(error)}, remediation=remediation)
 
-    for check_id, path in (
-        ("persistence.checkpoints", os.path.join(workspace, ".kriya", "checkpoints")),
-        ("persistence.traces", os.path.realpath(cfg.paths.logs)),
-    ):
-        try:
-            checks.append(_check(check_id, CheckStatus.PASS, evidence=_writable_probe(path)))
-        except Exception as error:
-            checks.append(_check(
-                check_id, CheckStatus.FAIL, evidence={"path": path, "error": str(error)},
-                remediation=f"Make {path} writable with durable storage semantics.",
-            ))
 
-    for check_id, path in (("capacity.workspace", workspace), ("capacity.temp", tempfile.gettempdir())):
-        try:
-            free = shutil.disk_usage(path).free
-            checks.append(_check(
-                check_id,
-                CheckStatus.PASS if free >= MIN_FREE_BYTES else CheckStatus.FAIL,
-                evidence={"path": os.path.realpath(path), "free_bytes": free, "minimum_bytes": MIN_FREE_BYTES},
-                remediation=f"Free at least {MIN_FREE_BYTES} bytes on the filesystem containing {path}.",
-            ))
-        except Exception as error:
-            checks.append(_check(check_id, CheckStatus.UNAVAILABLE, evidence={"error": str(error)}, remediation="Make filesystem capacity queryable."))
+def _check_checkpoints(ctx: _Context) -> DoctorCheck:
+    from kriya.workflow.checkpoint import CHECKPOINT_DIR
 
+    return _store_check("persistence.checkpoints", os.path.join(ctx.workspace, CHECKPOINT_DIR))
+
+
+def _check_traces(ctx: _Context) -> DoctorCheck:
+    return _store_check("persistence.traces", os.path.realpath(ctx.cfg.paths.logs))
+
+
+def _capacity_check(check_id: str, path: str) -> DoctorCheck:
+    free = shutil.disk_usage(path).free
+    return _check(
+        check_id,
+        CheckStatus.PASS if free >= MIN_FREE_BYTES else CheckStatus.FAIL,
+        evidence={"path": os.path.realpath(path), "free_bytes": free, "minimum_bytes": MIN_FREE_BYTES},
+        remediation=f"Free at least {MIN_FREE_BYTES} bytes on the filesystem containing {path}.",
+    )
+
+
+def _check_workspace_capacity(ctx: _Context) -> DoctorCheck:
+    return _capacity_check("capacity.workspace", ctx.workspace)
+
+
+def _check_temp_capacity(ctx: _Context) -> DoctorCheck:
+    return _capacity_check("capacity.temp", tempfile.gettempdir())
+
+
+def _check_git_worktree(ctx: _Context) -> DoctorCheck:
+    remediation = "Install Git and run doctor from a Git worktree."
+    git = shutil.which("git")
+    if not git:
+        return _check("git.worktree", CheckStatus.FAIL, evidence={"error": "git executable not found"}, remediation=remediation)
+    inside = subprocess.run([git, "rev-parse", "--is-inside-work-tree"], cwd=ctx.workspace, capture_output=True, text=True, timeout=5)
+    worktrees = subprocess.run([git, "worktree", "list", "--porcelain"], cwd=ctx.workspace, capture_output=True, text=True, timeout=5)
+    if inside.returncode != 0 or inside.stdout.strip() != "true" or worktrees.returncode != 0:
+        error = inside.stderr.strip() or worktrees.stderr.strip() or "Git worktree support unavailable"
+        return _check("git.worktree", CheckStatus.FAIL, evidence={"error": error}, remediation=remediation)
+    return _check("git.worktree", CheckStatus.PASS, evidence={"git": git, "worktree_entries": worktrees.stdout.count("worktree ")})
+
+
+def _check_candidate_isolation(ctx: _Context) -> DoctorCheck:
+    """The real candidate-isolation mechanism, run on a throwaway repository.
+
+    This proves the mechanism works in this environment. That generation
+    refuses to run in the application workspace when isolation fails is a code
+    property proven by tests, not by this probe."""
+    from kriya.workflow.worktree import create_git_worktree
+
+    scratch = tempfile.mkdtemp(prefix="kriya-doctor-isolation-")
     try:
-        git = shutil.which("git")
-        if not git:
-            raise FileNotFoundError("git executable not found")
-        inside = subprocess.run([git, "rev-parse", "--is-inside-work-tree"], cwd=workspace, capture_output=True, text=True, timeout=5)
-        worktrees = subprocess.run([git, "worktree", "list", "--porcelain"], cwd=workspace, capture_output=True, text=True, timeout=5)
-        if inside.returncode != 0 or inside.stdout.strip() != "true" or worktrees.returncode != 0:
-            raise RuntimeError(inside.stderr.strip() or worktrees.stderr.strip() or "Git worktree support unavailable")
-        checks.append(_check("git.worktree", CheckStatus.PASS, evidence={"git": git, "worktree_entries": worktrees.stdout.count("worktree ")}))
-    except Exception as error:
-        checks.append(_check("git.worktree", CheckStatus.FAIL, evidence={"error": str(error)}, remediation="Install Git and run doctor from a Git worktree."))
+        worktree = create_git_worktree(scratch)
+        isolated = os.path.realpath(worktree) != os.path.realpath(scratch) and os.path.isdir(worktree)
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    return _check(
+        "isolation.candidate_worktree",
+        CheckStatus.PASS if isolated else CheckStatus.FAIL,
+        evidence={"mechanism": "create_git_worktree", "probe": "throwaway repository", "isolated": isolated},
+        remediation="Make Git worktree creation work for Kriya's user and temporary directory.",
+    )
 
-    missing_tools = []
-    resolved_tools = {}
-    for name, candidates in _toolchain_requirements(workspace):
-        resolved = _resolve_tool(workspace, candidates)
-        if resolved:
-            resolved_tools[name] = resolved
-        else:
-            missing_tools.append(name)
-    checks.append(_check(
-        "toolchain.required",
-        CheckStatus.PASS if not missing_tools else CheckStatus.FAIL,
-        evidence={"resolved": resolved_tools, "missing": sorted(set(missing_tools))},
-        remediation="Install the build tools declared by the workspace manifests.",
-    ))
 
+def _check_toolchain(ctx: _Context) -> DoctorCheck:
+    """The project's toolchain as production containment will run it: stack
+    from PolymorphicValidator, versioned image from PRD-011's resolver, the
+    runtime proven inside that image. Host tools are irrelevant here."""
+    from kriya.tools.containment_oci import _attest_toolchain_image, _inspect_image_digest
+    from kriya.tools.toolchain_identity import ToolchainMismatchError, ToolchainResolutionError
+    from kriya.tools.validate import PolymorphicValidator
+
+    remediation = "Declare a production-supported toolchain and pre-pull its containment image."
     try:
-        checks.append(_check("containment.oci_smoke", CheckStatus.PASS, evidence=probe_oci_runtime()))
+        validator = PolymorphicValidator(ctx.workspace, autonomy_cfg=ctx.cfg.autonomy)
+        identity = resolve_toolchain_for(validator)
+    except ToolchainResolutionError as error:
+        return _check("toolchain.required", CheckStatus.FAIL, evidence={"error": str(error)}, remediation=remediation)
+    evidence: Dict[str, Any] = {"stack": validator.stack}
+    if identity is None:
+        if validator.stack == "unknown":
+            evidence["reason"] = "no project toolchain detected; nothing to verify yet"
+            return _check("toolchain.required", CheckStatus.WARN, evidence=evidence, remediation=remediation)
+        evidence["reason"] = f"no production containment toolchain profile exists for stack {validator.stack!r}"
+        return _check("toolchain.required", CheckStatus.UNAVAILABLE, evidence=evidence, remediation=remediation)
+    evidence["required"] = identity.to_dict()
+    docker, docker_evidence = ctx.docker.resolve()
+    if docker is None:
+        evidence.update(docker_evidence)
+        return _check("toolchain.required", CheckStatus.UNAVAILABLE, evidence=evidence, remediation="Install and start Docker.")
+    if _inspect_image_digest(docker, identity.containment_image) is None:
+        evidence["error"] = f"image {identity.containment_image!r} is not present locally"
+        return _check(
+            "toolchain.required", CheckStatus.UNAVAILABLE, evidence=evidence,
+            remediation=f"Run: docker pull {identity.containment_image}",
+        )
+    try:
+        attested = _attest_toolchain_image(docker, identity.containment_image, identity, allow_pull=False)
+    except ToolchainMismatchError as error:
+        evidence["error"] = str(error)
+        return _check("toolchain.required", CheckStatus.FAIL, evidence=evidence, remediation=remediation)
+    ctx.toolchain = attested
+    evidence["attested"] = attested.to_dict()
+    # pip ships inside the Python image; Maven/Gradle are separate tools whose
+    # version PRD-011's attestation must observe to count as proven.
+    build_tool_attested = (
+        attested.build_tool not in ("maven", "gradle") or attested.observed_build_tool_version is not None
+    )
+    evidence["build_tool_attested"] = build_tool_attested
+    if not build_tool_attested:
+        evidence["reason"] = f"{attested.build_tool} version is not attested inside the image"
+        return _check("toolchain.required", CheckStatus.WARN, evidence=evidence, remediation=remediation)
+    return _check("toolchain.required", CheckStatus.PASS, evidence=evidence, remediation=remediation)
+
+
+def resolve_toolchain_for(validator: Any) -> Optional[Any]:
+    """The validator's own resolved identity, or - when contained execution is
+    not required and so it resolved none - the identity it would require."""
+    from kriya.tools.toolchain_identity import resolve_toolchain_identity
+
+    if validator.toolchain_identity is not None:
+        return validator.toolchain_identity
+    return resolve_toolchain_identity(validator.workspace_path, validator.stack)
+
+
+def _check_oci_smoke(ctx: _Context) -> DoctorCheck:
+    docker, docker_evidence = ctx.docker.resolve()
+    if docker is None:
+        return _check(
+            "containment.oci_smoke", CheckStatus.UNAVAILABLE, evidence=docker_evidence,
+            remediation="Install and start Docker.",
+        )
+    remediation = "Configure containment_backend: oci and verify Docker can run the containment image."
+    try:
+        evidence = probe_oci_containment(ctx.cfg, docker, ctx.toolchain)
     except FileNotFoundError as error:
-        checks.append(_check("containment.oci_smoke", CheckStatus.UNAVAILABLE, evidence={"error": str(error)}, remediation="Install and start Docker, then pre-pull the configured KRIYA_OCI_IMAGE."))
+        return _check("containment.oci_smoke", CheckStatus.UNAVAILABLE, evidence={"error": str(error)}, remediation=str(error))
+    except ContainmentSmokeError as error:
+        return _check("containment.oci_smoke", CheckStatus.FAIL, evidence={**error.evidence, "error": str(error)}, remediation=remediation)
     except Exception as error:
-        checks.append(_check("containment.oci_smoke", CheckStatus.FAIL, evidence={"error": str(error)}, remediation="Start Docker and verify the configured image supports read-only, no-network execution."))
+        return _check("containment.oci_smoke", CheckStatus.FAIL, evidence={"error": f"{type(error).__name__}: {error}"}, remediation=remediation)
+    evidence.update(docker_evidence)
+    return _check("containment.oci_smoke", CheckStatus.PASS, evidence=evidence)
 
-    registry_hosts = cfg.autonomy.acquisition_registry_hosts
-    egress_ok = cfg.autonomy.egress_policy == "local_only" and bool(registry_hosts)
-    checks.append(_check(
+
+def _check_no_host_fallback(ctx: _Context) -> DoctorCheck:
+    """Required containment can never quietly become host execution: it is
+    required by configuration, the configured backend is a real one, an
+    unknown backend name is refused, and the null backend refuses a profile
+    that needs isolation."""
+    from kriya.tools.containment import (
+        BackendUnavailableError,
+        ContainmentProfile,
+        NetworkAuthority,
+        NullContainmentBackend,
+        TrustClass,
+        resolve_containment_backend,
+    )
+
+    autonomy = ctx.cfg.autonomy
+    evidence: Dict[str, Any] = {
+        "contained_execution_required": autonomy.contained_execution_required,
+        "mcp_servers": sorted(ctx.cfg.mcp),
+        "mcp_contained_execution_required": autonomy.mcp_contained_execution_required,
+        "containment_backend": autonomy.containment_backend,
+    }
+    problems = []
+    if not autonomy.contained_execution_required:
+        problems.append("contained execution is not required")
+    if ctx.cfg.mcp and not autonomy.mcp_contained_execution_required:
+        problems.append("MCP servers are configured without required containment")
+    try:
+        configured = resolve_containment_backend(autonomy.containment_backend)
+        evidence["configured_backend"] = configured.name
+        if isinstance(configured, NullContainmentBackend):
+            problems.append("the configured backend provides no isolation")
+    except BackendUnavailableError as error:
+        problems.append(str(error))
+    try:
+        resolve_containment_backend("kriya-doctor-unknown-backend")
+        problems.append("an unknown backend name resolved instead of being refused")
+    except BackendUnavailableError:
+        evidence["unknown_backend_refused"] = True
+    scratch = tempfile.mkdtemp(prefix="kriya-doctor-null-")
+    try:
+        NullContainmentBackend().prepare(
+            ContainmentProfile(
+                trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=scratch,
+                network=NetworkAuthority.DENIED,
+            ),
+            ["true"],
+        )
+        problems.append("the null backend accepted an isolation-required profile")
+    except BackendUnavailableError:
+        evidence["null_backend_refuses_isolation_profile"] = True
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    evidence["problems"] = problems
+    return _check(
+        "containment.no_host_fallback",
+        CheckStatus.FAIL if problems else CheckStatus.PASS,
+        evidence=evidence,
+        remediation="Use runtime_profile: production with containment_backend: oci.",
+    )
+
+
+def _check_egress(ctx: _Context) -> DoctorCheck:
+    from kriya.core.llm import is_local_url
+
+    registry_hosts = ctx.cfg.autonomy.acquisition_registry_hosts
+    endpoints = _model_endpoints(ctx.cfg)
+    non_local = sorted(name for name, url in endpoints.items() if not is_local_url(url))
+    ok = ctx.cfg.autonomy.egress_policy == "local_only" and bool(registry_hosts) and not non_local
+    return _check(
         "egress.policy",
-        CheckStatus.PASS if egress_ok else CheckStatus.FAIL,
-        evidence={"policy": cfg.autonomy.egress_policy, "registry_hosts": registry_hosts},
-        remediation="Use local_only model egress and configure an explicit non-empty exact registry hostname allowlist.",
-    ))
+        CheckStatus.PASS if ok else CheckStatus.FAIL,
+        evidence={
+            "policy": ctx.cfg.autonomy.egress_policy,
+            "registry_hosts": registry_hosts,
+            "model_endpoints": endpoints,
+            "non_local_endpoints": non_local,
+        },
+        remediation=(
+            "Use local_only model egress, point every model endpoint at a loopback/private/.local "
+            "host, and configure an explicit non-empty exact registry hostname allowlist."
+        ),
+    )
 
-    runtime_probe: Dict[str, Any] = {}
+
+def _check_model_connectivity(ctx: _Context) -> DoctorCheck:
     try:
-        runtime_probe = probe_llm_runtime(cfg)
-        selected = runtime_probe.get("selected_model")
-        checks.append(_check(
-            "model.connectivity",
-            CheckStatus.PASS if selected is not None else CheckStatus.FAIL,
-            evidence={"model": cfg.llm.model, "available_models": runtime_probe.get("models", [])},
-            remediation="Start the configured local model endpoint and load the exact configured model.",
-        ))
+        ctx.runtime_probe = probe_llm_runtime(ctx.cfg)
     except Exception as error:
-        checks.append(_check("model.connectivity", CheckStatus.UNAVAILABLE, evidence={"error": str(error)}, remediation="Start the configured local model endpoint."))
+        return _check(
+            "model.connectivity", CheckStatus.UNAVAILABLE, evidence={"error": str(error)},
+            remediation="Start the configured local model endpoint.",
+        )
+    return _check(
+        "model.connectivity",
+        CheckStatus.PASS if ctx.runtime_probe.get("selected_model") is not None else CheckStatus.FAIL,
+        evidence={"model": ctx.cfg.llm.model, "available_models": ctx.runtime_probe.get("models", [])},
+        remediation="Start the configured local model endpoint and load the exact configured model.",
+    )
 
-    fingerprint = runtime_probe.get("fingerprint")
-    checks.append(_check(
+
+def _check_runtime_fingerprint(ctx: _Context) -> DoctorCheck:
+    """Never PASS yet: a fingerprint is only meaningful once it is bound to an
+    exact-runtime qualification record, which PRD-013/014 introduce. Until then
+    the computed fingerprint is evidence, and the check fails closed."""
+    fingerprint = ctx.runtime_probe.get("fingerprint")
+    return _check(
         "model.runtime_fingerprint",
-        CheckStatus.PASS if fingerprint else CheckStatus.UNAVAILABLE,
-        evidence={"model": cfg.llm.model, "fingerprint": fingerprint, "native_metadata": bool(runtime_probe.get("native_metadata"))},
-        remediation="Use a local endpoint exposing exact model metadata (Ollama /api/show) so the served artifact can be fingerprinted.",
-    ))
+        CheckStatus.UNAVAILABLE,
+        evidence={
+            "model": ctx.cfg.llm.model,
+            "fingerprint": fingerprint,
+            "native_metadata": bool(ctx.runtime_probe.get("native_metadata")),
+            "reason_code": (
+                RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE if fingerprint else RUNTIME_FINGERPRINT_NOT_COMPUTABLE
+            ),
+        },
+        remediation=(
+            "Exact runtime fingerprint binding arrives with PRD-013/014."
+            if fingerprint else
+            "Use a local endpoint exposing exact model metadata (Ollama /api/show) so the served artifact can be fingerprinted."
+        ),
+    )
 
+
+def _check_qualification(ctx: _Context) -> DoctorCheck:
+    """A model name is not a qualification. A model outside every campaign is
+    a FAIL; a campaign-named model is still UNAVAILABLE until its exact runtime
+    is qualified (PRD-013/014)."""
     from kriya.core.model_capabilities import resolve_model_capability_profile
-    capability = resolve_model_capability_profile(cfg, cfg.llm.model)
-    qualified = capability.source == "known_production_profile"
-    checks.append(_check(
+
+    source = resolve_model_capability_profile(ctx.cfg, ctx.cfg.llm.model).source
+    named = source == "known_production_profile"
+    return _check(
         "model.qualification",
-        CheckStatus.PASS if qualified else CheckStatus.FAIL,
-        evidence={"model": cfg.llm.model, "qualification_source": capability.source},
-        remediation="Qualify this exact model identity through the production model campaign before use.",
-    ))
+        CheckStatus.UNAVAILABLE if named else CheckStatus.FAIL,
+        evidence={
+            "model": ctx.cfg.llm.model,
+            "name_based_profile_source": source,
+            "name_based_profile_is_authority": False,
+            "reason_code": RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE if named else MODEL_NOT_QUALIFIED,
+        },
+        remediation="Qualify this exact model runtime through the production model campaign (PRD-013/014).",
+    )
 
+
+def _check_embedding(ctx: _Context) -> DoctorCheck:
     try:
-        checks.append(_check("embedding.connectivity", CheckStatus.PASS, evidence=probe_embedding(cfg)))
+        return _check("embedding.connectivity", CheckStatus.PASS, evidence=probe_embedding(ctx.cfg))
     except Exception as error:
-        checks.append(_check("embedding.connectivity", CheckStatus.UNAVAILABLE, evidence={"error": str(error)}, remediation="Start the configured embedding endpoint and pull its model."))
+        return _check(
+            "embedding.connectivity", CheckStatus.UNAVAILABLE, evidence={"error": str(error)},
+            remediation="Start the configured embedding endpoint and pull its model.",
+        )
 
+
+def _check_lsp(ctx: _Context) -> DoctorCheck:
     from kriya.tools.lsp import find_jdtls
+
     try:
         jdtls = find_jdtls()
-        lsp_evidence = {"path": jdtls, "policy_required": False}
+        evidence: Dict[str, Any] = {"path": jdtls, "policy_required": False}
     except Exception as error:
         jdtls = None
-        lsp_evidence = {"path": None, "policy_required": False, "error": str(error)}
-    checks.append(_check(
+        evidence = {"path": None, "policy_required": False, "error": str(error)}
+    return _check(
         "lsp.java",
         CheckStatus.PASS if jdtls else CheckStatus.WARN,
         required=False,
-        evidence=lsp_evidence,
+        evidence=evidence,
         remediation="Install jdtls to enable Java LSP grounding; current production policy does not require it.",
-    ))
+    )
 
-    role_models = {"primary": cfg.llm.model}
-    for role in ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance"):
-        binding = getattr(cfg.agent_llms, role)
+
+def _check_role_independence(ctx: _Context) -> DoctorCheck:
+    role_models = {"primary": ctx.cfg.llm.model}
+    for role in _ROLES:
+        binding = getattr(ctx.cfg.agent_llms, role)
         if binding.llm is not None:
             role_models[role] = binding.llm.model
     independent = len(set(role_models.values())) > 1
-    checks.append(_check(
+    return _check(
         "models.role_independence",
         CheckStatus.PASS if independent else CheckStatus.WARN,
         required=False,
         evidence={"role_models": role_models, "independent": independent, "policy_required": False},
         remediation="Configure separately qualified role models if independent review is desired.",
-    ))
+    )
 
+
+def _check_precision_boundary(ctx: _Context) -> DoctorCheck:
+    """Always reported, never blocking: production does not force semantic
+    region enforcement (PRD-009), and where it is enabled it covers only the
+    scope below. Everything else has file-level write authority only."""
+    from kriya.workflow.semantic_region_authority import SEMANTIC_REGION_SUPPORTED_SCOPE
+
+    return _check(
+        "semantic.precision_boundary",
+        CheckStatus.WARN,
+        required=False,
+        evidence={
+            "semantic_region_enforcement_required": ctx.cfg.autonomy.semantic_region_enforcement_required,
+            "forced_by_production_profile": False,
+            "supported_scope": {key: list(value) for key, value in SEMANTIC_REGION_SUPPORTED_SCOPE.items()},
+            "outside_scope": "file-level write authority only",
+            "owner": "PRD-028",
+        },
+        remediation="Region-level semantic precision beyond the supported scope arrives with PRD-028.",
+    )
+
+
+def _check_release_integrity(ctx: _Context) -> DoctorCheck:
+    remediation = "Install a PRD-002-complete release artifact containing every required runtime and release file."
     try:
         integrity = probe_release_integrity()
-        missing = integrity["missing"]
-        checks.append(_check(
-            "release.integrity",
-            CheckStatus.PASS if not missing else CheckStatus.FAIL,
-            evidence=integrity,
-            remediation="Install a PRD-002-complete release artifact containing every required runtime and release file.",
-        ))
     except Exception as error:
-        checks.append(_check("release.integrity", CheckStatus.UNAVAILABLE, evidence={"error": str(error)}, remediation="Install a verifiable Kriya release artifact."))
+        return _check("release.integrity", CheckStatus.UNAVAILABLE, evidence={"error": str(error)}, remediation="Install a verifiable Kriya release artifact.")
+    return _check(
+        "release.integrity",
+        CheckStatus.PASS if not integrity["missing"] else CheckStatus.FAIL,
+        evidence=integrity,
+        remediation=remediation,
+    )
 
-    checks.append(_check(
-        "runtime.fixed_guarantees",
-        CheckStatus.PASS,
-        evidence={"guarantees": sorted(PRODUCTION_FIXED_RUNTIME_GUARANTEES)},
-    ))
 
+def _check_fixed_guarantees(ctx: _Context) -> DoctorCheck:
+    """The worst status among the checks verifying each fixed guarantee."""
+    evidence: Dict[str, Any] = {}
+    worst = CheckStatus.PASS
+    if set(FIXED_GUARANTEE_EVIDENCE) != set(PRODUCTION_FIXED_RUNTIME_GUARANTEES):
+        worst = CheckStatus.FAIL
+        evidence["unverified_guarantees"] = sorted(set(PRODUCTION_FIXED_RUNTIME_GUARANTEES) - set(FIXED_GUARANTEE_EVIDENCE))
+    guarantees = {}
+    for guarantee, check_ids in sorted(FIXED_GUARANTEE_EVIDENCE.items()):
+        statuses = {check_id: ctx.checks[check_id].status for check_id in check_ids}
+        guarantee_status = max(statuses.values(), key=_SEVERITY.__getitem__)
+        worst = max(worst, guarantee_status, key=_SEVERITY.__getitem__)
+        guarantees[guarantee] = {
+            "status": guarantee_status.value,
+            "verified_by": {check_id: status.value for check_id, status in statuses.items()},
+        }
+    evidence["guarantees"] = guarantees
+    return _check(
+        "runtime.fixed_guarantees", worst, evidence=evidence,
+        remediation="Resolve the checks named under verified_by for each guarantee that is not PASS.",
+    )
+
+
+_CHECKS: Tuple[Tuple[str, bool, Callable[[_Context], DoctorCheck]], ...] = (
+    ("profile.production", True, _check_profile),
+    ("plugins.core_tools", True, _check_core_plugins),
+    ("workspace.identity_lock", True, _check_identity_lock),
+    ("persistence.checkpoints", True, _check_checkpoints),
+    ("persistence.traces", True, _check_traces),
+    ("capacity.workspace", True, _check_workspace_capacity),
+    ("capacity.temp", True, _check_temp_capacity),
+    ("git.worktree", True, _check_git_worktree),
+    ("isolation.candidate_worktree", True, _check_candidate_isolation),
+    ("toolchain.required", True, _check_toolchain),
+    ("containment.oci_smoke", True, _check_oci_smoke),
+    ("containment.no_host_fallback", True, _check_no_host_fallback),
+    ("egress.policy", True, _check_egress),
+    ("model.connectivity", True, _check_model_connectivity),
+    ("model.runtime_fingerprint", True, _check_runtime_fingerprint),
+    ("model.qualification", True, _check_qualification),
+    ("embedding.connectivity", True, _check_embedding),
+    ("lsp.java", False, _check_lsp),
+    ("models.role_independence", False, _check_role_independence),
+    ("semantic.precision_boundary", False, _check_precision_boundary),
+    ("release.integrity", True, _check_release_integrity),
+    ("runtime.fixed_guarantees", True, _check_fixed_guarantees),
+)
+
+
+def _run_check(ctx: _Context, check_id: str, required: bool, fn: Callable[[_Context], DoctorCheck]) -> DoctorCheck:
+    """One check, whatever happens inside it: an exception, or a result under
+    the wrong ID or required flag, is reported as that row's own failure."""
+    try:
+        check = fn(ctx)
+        if check.id != check_id or check.required != required:
+            raise RuntimeError(f"check returned id={check.id!r} required={check.required!r}")
+        return check
+    except Exception as error:
+        return _check(
+            check_id,
+            CheckStatus.FAIL if required else CheckStatus.WARN,
+            required=required,
+            evidence={"reason_code": CHECK_RAISED, "error": f"{type(error).__name__}: {error}"},
+            remediation="The check could not complete; resolve the error and rerun kriya doctor --production.",
+        )
+
+
+def _report(checks: Iterable[DoctorCheck]) -> ProductionDoctorReport:
+    checks = tuple(checks)
     ready = not any(
         check.required and check.status in (CheckStatus.FAIL, CheckStatus.UNAVAILABLE)
         for check in checks
     )
-    return ProductionDoctorReport(schema_version=1, production_ready=ready, checks=tuple(checks))
+    return ProductionDoctorReport(schema_version=1, production_ready=ready, checks=checks)
 
+
+def run_production_doctor(cfg: AppConfig, workspace_path: str) -> ProductionDoctorReport:
+    ctx = _Context(cfg=cfg, workspace=os.path.realpath(workspace_path))
+    for check_id, required, fn in _CHECKS:
+        ctx.checks[check_id] = _run_check(ctx, check_id, required, fn)
+    return _report(ctx.checks.values())
+
+
+def config_load_failure_report(error: BaseException) -> ProductionDoctorReport:
+    """The report when configuration cannot be loaded at all: nothing else can
+    be judged, and the deployment is not ready."""
+    return _report([_check(
+        CONFIG_LOAD_CHECK_ID,
+        CheckStatus.FAIL,
+        evidence={"error": f"{type(error).__name__}: {error}"},
+        remediation="Fix the configuration (see `kriya authority inspect` for authority denials) and rerun.",
+    )])
 
 def render_production_report(report: ProductionDoctorReport) -> str:
     lines = ["=== Kriya Production Doctor ==="]

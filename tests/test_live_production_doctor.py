@@ -1,24 +1,47 @@
-"""PRD-010 real local-model fingerprint and qualification evidence."""
+"""PRD-010 real local-model fingerprint and qualification evidence.
+
+Until PRD-013/014 bind qualification to an exact runtime, the doctor must
+compute a stable fingerprint from the real served artifact yet report both
+the fingerprint and the qualification as UNAVAILABLE: a model name is never
+a qualification."""
 import os
+import subprocess
 
 import pytest
 
 from kriya.config import AppConfig
-from kriya.core.model_capabilities import resolve_model_capability_profile
-from kriya.production_doctor import probe_llm_runtime
+from kriya.production_doctor import (
+    RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE,
+    CheckStatus,
+    probe_llm_runtime,
+    run_production_doctor,
+)
 
 
 @pytest.mark.live_model
-def test_production_doctor_recognizes_real_runtime_fingerprint_and_qualification():
+def test_production_doctor_fingerprints_the_real_runtime_and_withholds_name_based_qualification(tmp_path):
     cfg = AppConfig()
     cfg.llm.base_url = os.environ.get("KRIYA_LIVE_BASE_URL", "http://localhost:11434/v1")
     cfg.llm.model = os.environ.get("KRIYA_LIVE_LLM_MODEL", "qwen3-coder:30b")
     cfg.llm.api_key = os.environ.get("KRIYA_LIVE_API_KEY", "local-key")
 
-    runtime = probe_llm_runtime(cfg)
-    qualification = resolve_model_capability_profile(cfg, cfg.llm.model)
+    first = probe_llm_runtime(cfg)
+    second = probe_llm_runtime(cfg)
+    assert first["selected_model"] is not None
+    assert first["native_metadata"] and first["native_metadata"].get("digest")
+    assert first["fingerprint"] and len(first["fingerprint"]) == 64
+    assert first["fingerprint"] == second["fingerprint"]
 
-    assert runtime["selected_model"] is not None
-    assert runtime["native_metadata"]
-    assert runtime["fingerprint"] and len(runtime["fingerprint"]) == 64
-    assert qualification.source == "known_production_profile"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
+    checks = {check.id: check for check in run_production_doctor(cfg, str(workspace)).checks}
+
+    assert checks["model.connectivity"].status is CheckStatus.PASS
+    fingerprint = checks["model.runtime_fingerprint"]
+    assert fingerprint.status is CheckStatus.UNAVAILABLE
+    assert fingerprint.evidence["fingerprint"] == first["fingerprint"]
+    assert fingerprint.evidence["reason_code"] == RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE
+    qualification = checks["model.qualification"]
+    assert qualification.status is CheckStatus.UNAVAILABLE
+    assert qualification.evidence["name_based_profile_source"] == "known_production_profile"

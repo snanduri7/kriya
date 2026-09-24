@@ -136,10 +136,22 @@ Before a production mutation run, use the stricter deployment gate:
 Production mode emits stable check IDs with `PASS`, `WARN`, `FAIL`, or
 `UNAVAILABLE`, evidence, and remediation. Any required `FAIL` or `UNAVAILABLE`
 returns a nonzero exit status. It checks the sealed production profile, core
-plugins, workspace locking, persistence and capacity, Git worktrees, declared
-toolchains, real OCI containment, egress, exact local-model metadata and known
-qualification, embeddings, optional LSP and role-model independence, and release
-integrity. It reports problems without changing configuration or installing tools.
+plugins, the workspace lock (probed, never taken), checkpoint/trace store
+writability and capacity, Git worktrees and the real candidate-isolation
+mechanism (on a throwaway repository), the project toolchain as production
+containment runs it (the versioned OCI image, attested in place, never pulled),
+an OCI smoke command through the configured containment backend (no route off
+loopback, no capabilities, `no-new-privileges`, no leftover container), that
+required containment cannot fall back to the host, egress (policy, registry
+allowlist, and every model endpoint local), local-model connectivity, embeddings,
+optional LSP, role-model independence, the semantic-region precision boundary,
+and release integrity. The PRD-009 fixed guarantees are derived from the checks
+that verify them. The exact runtime fingerprint and qualification are reported
+`UNAVAILABLE` until exact-runtime qualification (PRD-013/014) exists, so no
+deployment is production-ready before then: a model name is never a
+qualification. If the configuration cannot load, `--json` still emits a report
+(a single failing `config.load` check). The doctor never changes configuration,
+installs tools, pulls images, or creates workspace state.
 
 ### Inspect Resolved Configuration
 Print the fully-merged config (defaults + your `kriya.yaml`) as JSON - useful for confirming what a relative path or config layer actually resolved to:

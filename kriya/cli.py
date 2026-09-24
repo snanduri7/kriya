@@ -138,6 +138,11 @@ def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -
     try:
         ctx.obj['config'] = load_config(config, trust_file=trust_file)
     except Exception as e:
+        if ctx.invoked_subcommand == 'doctor':
+            # PRD-010: `doctor --production --json` must still emit a parseable
+            # (failing) report; the doctor itself decides how to render this.
+            ctx.obj['config_error'] = e
+            return
         click.secho(f"Error loading configuration: {e}", fg="red", err=True)
         sys.exit(1)
     configure_logging(ctx.obj['config'])
@@ -198,13 +203,23 @@ def config(ctx: click.Context) -> None:
 @click.pass_context
 def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
     """Check Kriya platform health, directories, and LLM connection."""
-    cfg: AppConfig = ctx.obj['config']
     if json_output and not production:
         raise click.UsageError("--json is supported with --production")
+    config_error = ctx.obj.get('config_error')
+    if config_error is not None and not production:
+        click.secho(f"Error loading configuration: {config_error}", fg="red", err=True)
+        sys.exit(1)
     if production:
-        from kriya.production_doctor import render_production_report, run_production_doctor
+        from kriya.production_doctor import (
+            config_load_failure_report,
+            render_production_report,
+            run_production_doctor,
+        )
 
-        report = run_production_doctor(cfg, os.getcwd())
+        if config_error is not None:
+            report = config_load_failure_report(config_error)
+        else:
+            report = run_production_doctor(ctx.obj['config'], os.getcwd())
         if json_output:
             click.echo(json.dumps(report.to_dict(), sort_keys=True))
         else:
@@ -213,6 +228,7 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
             ctx.exit(1)
         return
 
+    cfg: AppConfig = ctx.obj['config']
     click.secho("=== Kriya Doctor ===", bold=True)
     
     # 1. Check directories
