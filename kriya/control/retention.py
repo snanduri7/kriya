@@ -12,6 +12,8 @@ Protected run records:
   * records whose commit state is unknown (unsettled or UNCERTAIN cycle);
   * records a resume checkpoint, or the persisted ControlState (enforce
     resume), still references;
+  * records a milestone sidecar's commit ledger references (PRD-008 S4b:
+    completed-milestone proofs are verified against them);
   * records the caller names (its own run);
   * the newest ``keep_terminal_runs`` terminal records.
 
@@ -40,6 +42,7 @@ from kriya.control.persistence import (
 )
 from kriya.workflow.checkpoint import list_checkpoint_run_references
 from kriya.workflow.edit_safety import CommitState, list_commit_evidence
+from kriya.workflow.milestone_completion import milestone_ledger_run_references
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +87,7 @@ def prune_run_state(
         return report
 
     protected: Set[str] = set(protect_run_ids) | set(list_checkpoint_run_references(workspace_path))
+    protected.update(milestone_ledger_run_references(workspace_path))
     control_state_run = load_control_state_run_reference(workspace_path)
     if control_state_run is not None:
         protected.add(control_state_run)

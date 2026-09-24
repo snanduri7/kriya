@@ -18,7 +18,7 @@ from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Callable, Iterator, Optional, TypeVar, cast
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar, cast
 
 from kriya.control.commit_state import UncertainWorkspaceStateError, assess_workspace_commit_state
 from kriya.control.persistence import load_run_record, save_run_record
@@ -151,6 +151,17 @@ def annotate_run(workspace_path: str, **evidence: Any) -> Optional[str]:
         logger.warning("Run %s: evidence annotation not persisted: %s", context.run_id, error)
         return f"{type(error).__name__}: {error}"
     return None
+
+
+def owning_run_commits(workspace_path: str) -> Optional[Tuple[str, List[Dict[str, Any]]]]:
+    """(run_id, a copy of its commit cycles) for the run that owns
+    ``workspace_path``, else None. Read-only: callers that attribute commits
+    to their own work (the milestone driver) take them from the RunRecord,
+    never from a workflow's reported file list."""
+    context = owning_run(workspace_path)
+    if context is None:
+        return None
+    return context.run_id, [dict(cycle) for cycle in context._lease.record.commits]
 
 
 def begin_run_commit(

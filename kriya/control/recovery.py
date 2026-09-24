@@ -234,7 +234,7 @@ class RecoveryAssessment:
 
 # ---------------------------------------------------------------- observation
 
-def _observe(path: str) -> Dict[str, Any]:
+def observe_path_state(path: str) -> Dict[str, Any]:
     """Exact state of a path, in the commit evidence's before/after shape.
     A symlink or directory is recorded as such: no commit ever creates one."""
     try:
@@ -248,7 +248,7 @@ def _observe(path: str) -> Dict[str, Any]:
     return {"exists": True, "sha256": digest, "mode": info.st_mode & 0o7777}
 
 
-def _same_state(current: Dict[str, Any], expected: Any) -> bool:
+def matches_file_state(current: Dict[str, Any], expected: Any) -> bool:
     if not isinstance(expected, dict) or current.get("not_a_regular_file"):
         return False
     if not expected.get("exists"):
@@ -267,7 +267,7 @@ def _inside(workspace: str, path: str) -> bool:
         return False
 
 
-def _target(workspace: str, relpath: Any) -> Optional[str]:
+def contained_workspace_path(workspace: str, relpath: Any) -> Optional[str]:
     if not isinstance(relpath, str) or not relpath or os.path.isabs(relpath):
         return None
     path = os.path.join(workspace, relpath)
@@ -283,7 +283,7 @@ def _staged_files(workspace: str, evidence: CommitEvidence) -> Dict[int, List[st
     prefix = stage_file_prefix(evidence.transaction_id)
     directories = set()
     for operation in evidence.operations:
-        target = _target(workspace, operation.get("target_path"))
+        target = contained_workspace_path(workspace, operation.get("target_path"))
         cursor = os.path.dirname(target) if target else None
         while cursor and (cursor == workspace or _inside(workspace, cursor)):
             directories.add(cursor)
@@ -307,9 +307,9 @@ def _staged_files(workspace: str, evidence: CommitEvidence) -> Dict[int, List[st
 
 
 def _classify_v2(current: Dict[str, Any], operation: Dict[str, Any]) -> str:
-    if _same_state(current, operation.get("after")):
+    if matches_file_state(current, operation.get("after")):
         return OP_APPLIED
-    if _same_state(current, operation.get("before")):
+    if matches_file_state(current, operation.get("before")):
         return OP_NOT_APPLIED
     return OP_FOREIGN
 
@@ -342,11 +342,11 @@ def _operation_findings(
 ) -> Tuple[OperationFinding, ...]:
     findings = []
     for index, operation in enumerate(evidence.operations):
-        target = _target(workspace, operation.get("target_path"))
+        target = contained_workspace_path(workspace, operation.get("target_path"))
         if target is None:
             classification, current = OP_FOREIGN, {"outside_workspace": True}
         else:
-            current = _observe(target)
+            current = observe_path_state(target)
             classification = (
                 _classify_v1(target, operation) if evidence.schema_version < 2
                 else _classify_v2(current, operation)
@@ -417,8 +417,8 @@ def _roll_forward_refusal(
                 f"found {len(item.staged_files)}"
             )
         else:
-            observed = _observe(item.staged_files[0])
-            if not _same_state(observed, operation.get("after")):
+            observed = observe_path_state(item.staged_files[0])
+            if not matches_file_state(observed, operation.get("after")):
                 return f"{item.target_path}: staged file does not hold the candidate bytes and mode"
         entries.append((item.target_path, observed["sha256"], observed["mode"]))
     if candidate_digest_of_entries(entries) != evidence.candidate_hash:
@@ -592,14 +592,14 @@ def _roll_forward(workspace: str, finding: EvidenceFinding) -> List[str]:
     for item, operation in zip(finding.operations, evidence.operations, strict=True):
         if item.classification != OP_NOT_APPLIED:
             continue
-        target = _target(workspace, operation.get("target_path"))
-        if target is None or not _same_state(_observe(target), operation.get("before")):
+        target = contained_workspace_path(workspace, operation.get("target_path"))
+        if target is None or not matches_file_state(observe_path_state(target), operation.get("before")):
             raise RuntimeError(f"{item.target_path} changed during recovery; nothing further applied")
         if operation.get("operation") == "delete":
             os.unlink(target)
         else:
             staged = item.staged_files[0]
-            if not _same_state(_observe(staged), operation.get("after")):
+            if not matches_file_state(observe_path_state(staged), operation.get("after")):
                 raise RuntimeError(f"staged file for {item.target_path} changed during recovery")
             os.makedirs(os.path.dirname(target), exist_ok=True)
             os.replace(staged, target)

@@ -552,7 +552,10 @@ async def test_shadow_context_empty_registries_are_honest_not_an_error(tmp_path)
 # --- execute_milestones (MA7-C4, 2026-08-25 external review) ---
 
 def _milestone_run_state(group_id="grp-1", original_goal="build a thing"):
-    return MagicMock(group_id=group_id, original_goal=original_goal)
+    # A real (empty) MilestoneRunState: execute_milestones now revalidates
+    # completed milestones (PRD-008 S4b), which reads its real fields.
+    from kriya.workflow.milestones import MilestoneRunState
+    return MilestoneRunState(group_id=group_id, original_goal=original_goal, milestones=[])
 
 
 @pytest.mark.asyncio

@@ -417,3 +417,10 @@ rerun with `[TIMEOUT] Command timed out after 180 seconds` after `KRIYA_STEP_PRO
 `FIREWALL=OK` and `IPV6_DISABLE=OK`, i.e. a cold-cache download slower than the test's 180 s budget. It
 passed in the S3 run (4976/0), and no S4 file is imported by the acquisition code. No leftover containers.
 The user accepted S4 as verified; rerun that test when the network is faster.
+
+## Reopening addendum - S4b: milestone completion revalidation
+
+Status: READY_FOR_PYTEST_VERIFICATION (committed locally; S5 blocked until verified). Full details, spec
+deviation, algorithm, tests and verification commands: `handover/PRD-008_S4B_CODING_HANDOVER.md`.
+A completed milestone is skipped only when its completion proof verifies against the RunRecord cycle,
+commit evidence and current workspace bytes; otherwise it reruns with its transitive dependents.

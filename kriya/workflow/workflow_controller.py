@@ -3388,6 +3388,11 @@ class WorkflowController:
                 ControlState.from_dict(json.load(handle))
         contract_registry = load_contract_registry(workspace_path)
         artifact_registry = load_artifact_registry(workspace_path)
+        # PRD-008 S4b: un-complete milestones whose completion proof fails
+        # BEFORE milestone_states is derived from completed_milestone_ids,
+        # so ControlState never marks a milestone done that will rerun.
+        from kriya.workflow.milestones import revalidate_completed_milestones
+        revalidate_completed_milestones(workspace_path, run_state)
         next_milestone_id = next(
             (
                 milestone.id for milestone in milestones

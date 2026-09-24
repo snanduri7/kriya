@@ -835,7 +835,15 @@ async def test_run_milestones_invalidates_a_completed_consumer_when_its_provider
         we.run_verifier = MagicMock()
         we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
 
-        result = await run_milestones(we, state, tmp)
+        # Isolates the contract-change mechanism: PRD-008 S4b would otherwise
+        # rerun all three (no completion proofs here), which
+        # tests/test_prd008_s4b_milestone_completion.py covers.
+        from kriya.workflow.milestone_completion import MilestoneReuseAssessment
+        with patch(
+            "kriya.workflow.milestones.revalidate_completed_milestones",
+            return_value=MilestoneReuseAssessment(),
+        ):
+            result = await run_milestones(we, state, tmp)
 
         assert result["status"] == "success"
         # M1 stays skipped (the provider itself isn't re-executed by this
@@ -1296,7 +1304,10 @@ async def test_run_milestones_dependency_regression_retry_recovers():
 
 
 @pytest.mark.asyncio
-async def test_run_milestones_resume_skips_already_completed():
+async def test_run_milestones_never_skips_a_completed_milestone_without_proof():
+    """PRD-008 S4b: before S4b this skipped M1 on completed_milestone_ids
+    alone. A completion with no durable proof is UNVERIFIED and reruns; a
+    proven skip is covered in tests/test_prd008_s4b_milestone_completion.py."""
     milestones = [
         mkv2("M1", goal="g1", success_criterion="c1"),
         mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"]),
@@ -1316,7 +1327,8 @@ async def test_run_milestones_resume_skips_already_completed():
         result = await run_milestones(we, state, tmp)
 
     assert result["status"] == "success"
-    assert we.run_generation_workflow.await_count == 2  # milestone 2 + integration only
+    assert we.run_generation_workflow.await_count == 3  # M1 reruns, M2, integration
+    assert result["milestone_reuse"]["decisions"][0]["status"] == "UNVERIFIED"
 
 
 # ============================================================

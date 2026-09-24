@@ -96,7 +96,7 @@ _ANNOTATABLE_FIELDS = frozenset({
     "effective_config_fingerprint", "model_runtime_fingerprint_ids", "goal_hash",
     "approved_plan_hash", "obligation_ledger_revision", "obligation_ledger_hash",
     "candidate_hash", "verification_evidence_ids", "retry_state_reference",
-    "retry_counters", "resume_decision",
+    "retry_counters", "resume_decision", "milestone_reuse",
 })
 
 # Requirement 2: every persistent store is authoritative for its own content,
@@ -176,6 +176,9 @@ class RunRecord:
     # PRD-008: what this run reused from a checkpoint (ResumePlan.to_dict()),
     # when it was asked to resume. Optional, so v2 records without it load.
     resume_decision: Optional[Dict[str, Any]] = None
+    # PRD-008 S4b: why each already-completed milestone was skipped or rerun
+    # (kriya/workflow/milestone_completion.py). Optional, like resume_decision.
+    milestone_reuse: Optional[Dict[str, Any]] = None
     # Schema 3: provenance of an explicit `kriya runs recover` settlement.
     recovery: Optional[Dict[str, Any]] = None
     commits: List[Dict[str, Any]] = field(default_factory=list)
