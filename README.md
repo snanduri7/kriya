@@ -434,10 +434,22 @@ bash scripts/verify_release.sh
 ```
 
 Set `KRIYA_PYTHON` to the desired interpreter if necessary. The script builds the
-wheel from the sdist, checks required contents (for the sdist, against every
-tracked file in the release trees via `--source-root`), creates a clean venv, installs
-locked dependencies and the wheel, checks dependencies, and runs version/config/
-plugins/doctor smoke checks outside the checkout. Doctor network endpoints are
+wheel from the sdist, checks required contents, and via `--source-root` requires each
+artifact's release trees to hold exactly the git-tracked files (the sdist's
+`plugins/core_tools`, `scripts`, `skills`, `tests`; the wheel's `plugins/core_tools`
+and `skills`) - a missing file or an untracked one (a runtime-generated `auto-*` skill,
+`staged_rules.txt`, OS clutter) fails the release. It then creates a clean venv,
+installs locked dependencies and the wheel, checks dependencies, and runs version/
+config/plugins/doctor smoke checks outside the checkout, including loading the bundled
+skill library from the installed wheel.
+
+The bundled skill library (`skills/`: activemq-artemis, binary-wire-protocol,
+ignite-java17, qpid) installs to `site-packages/skills`, the installed Kriya's global
+skills location. Project-specific or auto-generated skills belong in a project's own
+`paths.skills`, never in this shared library. setuptools warns that skill folders whose
+names are valid Python identifiers (e.g. `qpid`, `examples`) are "absent from
+packages"; they are still packaged as data today, and the wheel check above fails the
+release if a future setuptools stops including them. Doctor network endpoints are
 mocked: this proves installation, not live-model readiness. Each run prints its
 disposable environment/evidence directory; retain its build and smoke logs for
 review. Dependency installation requires access to your configured package index.

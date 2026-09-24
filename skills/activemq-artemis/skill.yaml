@@ -1,3 +1,4 @@
+category: Messaging
 name: activemq-artemis
 description: Embedded ActiveMQ Artemis AMQP Broker configuration and setup rules.
 tags:

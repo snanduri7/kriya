@@ -1,10 +1,9 @@
-# instructions for binary-wire-protocol
-
 # Encoding/decoding a fixed-width binary wire protocol in Java
 
 When a goal specifies an exact byte-level wire format (a header of named fields, each
-with its own declared byte width, e.g. "protocolVersion (1 byte), dataLength (3 bytes,
-big-endian), time (4 bytes, big-endian)"), the single most common mistake is reaching
+with its own declared byte width, e.g. "protocolVersion (1 byte), softwareVersion (1
+byte), dataLength (3 bytes, big-endian), time (4 bytes, big-endian)" - a 9-byte header),
+the single most common mistake is reaching
 for `ByteBuffer.putInt()`/`putShort()`/`putLong()` (or the matching `DataOutputStream`
 methods) for a field whose declared width doesn't exactly match that method's native
 write width. These methods always write their FULL native width - `putInt()` always
@@ -12,8 +11,7 @@ writes 4 bytes, `putShort()` always writes 2, regardless of what the wire format
 actually specifies for that field. Confirmed live, repeatedly: a 3-byte `dataLength`
 field written via `buffer.putInt(dataLength)` throws `java.nio.BufferOverflowException`
 the instant the destination buffer is sized to the wire format's real total length
-(e.g. a declared 9-byte header) rather than to what the 4-byte `putInt()` call actually
-needs.
+(the declared 9 bytes) rather than to what the 4-byte `putInt()` call actually needs.
 
 ## The fix: manual byte-by-byte packing for any narrower-than-native field
 

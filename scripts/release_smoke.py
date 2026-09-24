@@ -19,6 +19,16 @@ with tempfile.TemporaryDirectory(prefix="kriya-release-smoke-") as work:
     os.chdir(work)
     cfg = load_config()
     assert Path(cfg.plugins.directory, "core_tools", "__init__.py").is_file()
+    # The bundled skill library ships in the wheel, at the installed global
+    # skills location, and loads through the real SkillEngine.
+    from kriya.skills.skill import SkillEngine, get_global_skills_dir
+    assert Path(cfg.paths.skills).resolve() == Path(get_global_skills_dir()).resolve()
+    engine = SkillEngine(cfg.paths.skills, load_global=True, load_cwd=False, workspace_path=work)
+    engine.discover_and_load()
+    bundled = sorted(skill.name for skill in engine.list_skills())
+    print(f"BUNDLED SKILLS: {bundled}")
+    assert bundled == ["activemq-artemis", "binary-wire-protocol", "ignite-java17", "qpid"], bundled
+    assert Path(cfg.paths.skills, "qpid", "examples", "pom.xml").is_file()
     cfg.paths.memory = str(Path(work, "memory"))
     cfg.paths.logs = str(Path(work, "logs"))
     cfg.logging.file = None

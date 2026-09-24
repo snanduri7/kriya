@@ -9,5 +9,5 @@ graft plugins/core_tools
 graft scripts
 graft skills
 graft tests
-global-exclude *.py[cod]
+global-exclude *.py[cod] .DS_Store
 recursive-exclude * __pycache__

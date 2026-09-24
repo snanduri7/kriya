@@ -138,11 +138,78 @@ def test_source_root_that_is_not_a_git_checkout_fails_closed(tmp_path):
     assert report['passed'] is False and 'git ls-files failed' in report['error']
 
 
-def test_source_root_rejected_for_wheel(tmp_path):
+def test_source_root_rejected_for_a_source_directory(tmp_path):
+    with pytest.raises(ValueError, match='built .whl or .tar.gz'):
+        check_distribution(tmp_path, tmp_path)
+
+
+def test_sdist_with_an_untracked_file_in_a_release_tree_fails(tmp_path):
+    # e.g. a runtime-generated auto-<repo> skill or OS clutter in the checkout.
+    repo = tmp_path / 'repo'
+    _git_checkout(repo, _TRACKED_DATA)
+    sdist = tmp_path / 'kriya.tar.gz'
+    _sdist_with(sdist, [*_TRACKED_DATA, 'skills/auto-scratch/skill.yaml'])
+    assert check_distribution(sdist, repo) == ['untracked: skills/auto-scratch/skill.yaml']
+
+
+_PLUGIN_FILES = [name for name in REQUIRED_RUNTIME_FILES if name.startswith('plugins/core_tools/')]
+_SKILL_FILES = ['skills/demo/skill.yaml', 'skills/demo/rules.txt', 'skills/demo/examples/pom.xml']
+
+
+def _wheel_with(path, extra):
+    _wheel(path)
+    with ZipFile(path, 'a') as archive:
+        for name in extra:
+            archive.writestr(name, 'fixture')
+
+
+@pytest.mark.parametrize('missing', _SKILL_FILES)
+def test_wheel_missing_a_tracked_skill_file_fails(tmp_path, missing):
+    repo = tmp_path / 'repo'
+    _git_checkout(repo, [*_PLUGIN_FILES, *_SKILL_FILES])
     wheel = tmp_path / 'kriya.whl'
-    _wheel(wheel)
-    with pytest.raises(ValueError, match='source distribution only'):
-        check_distribution(wheel, tmp_path)
+    _wheel_with(wheel, [name for name in _SKILL_FILES if name != missing])
+    assert check_distribution(wheel, repo) == [missing]
+
+
+def test_wheel_with_exactly_the_tracked_skills_passes(tmp_path):
+    repo = tmp_path / 'repo'
+    _git_checkout(repo, [*_PLUGIN_FILES, *_SKILL_FILES, 'tests/not_in_wheel.py'])
+    wheel = tmp_path / 'kriya.whl'
+    _wheel_with(wheel, _SKILL_FILES)
+    assert check_distribution(wheel, repo) == []
+
+
+def test_wheel_with_untracked_skill_content_fails(tmp_path):
+    repo = tmp_path / 'repo'
+    _git_checkout(repo, [*_PLUGIN_FILES, *_SKILL_FILES])
+    wheel = tmp_path / 'kriya.whl'
+    _wheel_with(wheel, [*_SKILL_FILES, 'skills/demo/staged_rules.txt'])
+    assert check_distribution(wheel, repo) == ['untracked: skills/demo/staged_rules.txt']
+
+
+def test_wheel_package_data_patterns_cover_every_tracked_skill_file():
+    """Without building: every git-tracked skills/ file matches one of the
+    pyproject package-data shapes, so the wheel cannot silently drop one."""
+    import re
+    import subprocess
+    from pathlib import PurePosixPath
+
+    root = Path(__file__).resolve().parents[1]
+    pyproject = (root / 'pyproject.toml').read_text()
+    block = re.search(r'^"skills" = \[(.*?)^\]', pyproject, re.S | re.M).group(1)
+    patterns = re.findall(r'"([^"]+)"', block)
+    tracked = subprocess.run(['git', 'ls-files', '-z', '--', 'skills'], cwd=root,
+                             capture_output=True, check=True).stdout.decode().split('\0')
+    tracked = [name for name in tracked if name]
+    assert tracked, 'no tracked skills found'
+    uncovered = [
+        name for name in tracked
+        if not any(PurePosixPath(name).relative_to('skills').match(pattern)
+                   and len(PurePosixPath(name).relative_to('skills').parts) == len(PurePosixPath(pattern).parts)
+                   for pattern in patterns)
+    ]
+    assert uncovered == []
 
 
 def test_manifest_grafts_every_release_tree():

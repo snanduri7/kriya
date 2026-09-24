@@ -8,7 +8,8 @@ release_work="$(mktemp -d "${TMPDIR:-/tmp}/kriya-release.XXXXXXXX")"
 echo "Release evidence and disposable environment: $release_work"
 "$python_bin" -m build --no-isolation --outdir "$release_work/dist" 2>&1 | tee "$release_work/build.txt"
 for artifact in "$release_work"/dist/*.whl; do
-  "$python_bin" -m kriya.distribution "$artifact" | tee -a "$release_work/integrity.jsonl"
+  "$python_bin" -m kriya.distribution "$artifact" --source-root "$release_root" \
+    | tee -a "$release_work/integrity.jsonl"
 done
 for artifact in "$release_work"/dist/*.tar.gz; do
   "$python_bin" -m kriya.distribution "$artifact" --source-root "$release_root" \
