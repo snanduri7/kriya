@@ -326,7 +326,7 @@ deselected**. S3 = b44f7f5 + be7d51d + c86a536 + 5ca4f25, VERIFIED.
 
 ## Reopening addendum - S4: `kriya runs status|recover|prune`, evidence-based recovery, RunRecord v3
 
-Status: IMPLEMENTING (S4 committed locally as 369a1a5 + 0199844 review fixes; S5 pending). Closes review
+Status: USER-VERIFIED (S4 committed locally as 369a1a5 + 0199844 review fixes; S4b and S5 pending). Closes review
 §PRD-008 HIGH "an UNCERTAIN record / intent without result refuses the workspace permanently; no CLI/API
 resolves it".
 
@@ -409,3 +409,11 @@ Changed: `tests/test_prd007_run_lifecycle.py` (v1 now migrates to schema 3), `te
 ```
 Lint (coding agent, run): no new ruff findings on touched files. New tests were smoke-run as plain functions
 (not pytest); the three review-fix tests were confirmed to fail on the pre-fix code.
+
+**S4 verification result (2026-09-24, user):** full suite 5000 passed / 1 failed / 8 deselected. The one
+failure, `tests/test_dependency_execution.py::test_maven_two_phase_acquire_then_offline_execute`, is
+network-bound and unrelated to S4: real Docker + Maven Central through the SEC-006 proxy. It failed again on
+rerun with `[TIMEOUT] Command timed out after 180 seconds` after `KRIYA_STEP_PROXY_CONNECT=OK`,
+`FIREWALL=OK` and `IPV6_DISABLE=OK`, i.e. a cold-cache download slower than the test's 180 s budget. It
+passed in the S3 run (4976/0), and no S4 file is imported by the acquisition code. No leftover containers.
+The user accepted S4 as verified; rerun that test when the network is faster.
