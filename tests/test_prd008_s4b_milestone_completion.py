@@ -44,6 +44,7 @@ from kriya.workflow.edit_safety import commit_evidence_dir, read_file_revision
 from kriya.workflow.milestone_completion import (
     COMMIT_EVIDENCE_MISSING,
     COMPLETION_PROOF_MISSING,
+    COMPLETION_RECONSTRUCTION_UNVERIFIED,
     DELETED_PATH_RECREATED,
     LEGACY_STATE_UNVERIFIED,
     MILESTONE_DEFINITION_CHANGED,
@@ -312,11 +313,14 @@ os._exit(0)
 '''
 
 
-@pytest.mark.parametrize("crash_at,expected_status", [
-    ("stage2", STATUS_COMPLETE_PARTIAL_REQUIRED),
-    ("stage1", STATUS_RECOVERY_AVAILABLE),
+@pytest.mark.parametrize("crash_at,expected_status,m2_decision", [
+    # Rolled forward by --complete-partial: M2's commit is COMMITTED but was
+    # settled by recovery, not by its run - never reconstructed (S4c).
+    ("stage2", STATUS_COMPLETE_PARTIAL_REQUIRED, ("UNVERIFIED", [COMPLETION_RECONSTRUCTION_UNVERIFIED])),
+    # Rolled back: nothing of M2 was committed, so there is nothing to decide.
+    ("stage1", STATUS_RECOVERY_AVAILABLE, None),
 ])
-def test_c_recovery_across_milestone_commit_cycles(tmp_path, crash_at, expected_status):
+def test_c_recovery_across_milestone_commit_cycles(tmp_path, crash_at, expected_status, m2_decision):
     workspace = _workspace(tmp_path)
     crashed = subprocess.run(
         [sys.executable, "-c", _CRASH_SCRIPT, str(workspace), crash_at, str(ROOT)],
@@ -343,7 +347,10 @@ def test_c_recovery_across_milestone_commit_cycles(tmp_path, crash_at, expected_
     # transaction); M2 was never completed, whatever part of it landed.
     result, state = _run(workspace, CHAIN, engine)
     assert result["status"] == "success"
-    assert _decisions(result) == {"M1": ("MATCH", [])}
+    expected = {"M1": ("MATCH", [])}
+    if m2_decision is not None:
+        expected["M2"] = m2_decision
+    assert _decisions(result) == expected
     assert engine.calls == ["M2", "INTEGRATION"]
     assert state.completion_proofs["M1"]["transaction_ids"] == m1_proof["transaction_ids"]
     assert (workspace / "m2a.py").read_bytes() == b"A\n" and (workspace / "m2b.py").read_bytes() == b"B\n"

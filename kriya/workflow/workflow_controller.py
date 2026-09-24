@@ -3392,7 +3392,10 @@ class WorkflowController:
         # BEFORE milestone_states is derived from completed_milestone_ids,
         # so ControlState never marks a milestone done that will rerun.
         from kriya.workflow.milestones import revalidate_completed_milestones
-        revalidate_completed_milestones(workspace_path, run_state)
+        revalidate_completed_milestones(
+            workspace_path, run_state,
+            config=getattr(getattr(self.workflow_engine, "kernel", None), "config", None),
+        )
         next_milestone_id = next(
             (
                 milestone.id for milestone in milestones

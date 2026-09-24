@@ -96,7 +96,7 @@ _ANNOTATABLE_FIELDS = frozenset({
     "effective_config_fingerprint", "model_runtime_fingerprint_ids", "goal_hash",
     "approved_plan_hash", "obligation_ledger_revision", "obligation_ledger_hash",
     "candidate_hash", "verification_evidence_ids", "retry_state_reference",
-    "retry_counters", "resume_decision", "milestone_reuse",
+    "retry_counters", "resume_decision", "milestone_reuse", "active_work_unit",
 })
 
 # Requirement 2: every persistent store is authoritative for its own content,
@@ -179,6 +179,11 @@ class RunRecord:
     # PRD-008 S4b: why each already-completed milestone was skipped or rerun
     # (kriya/workflow/milestone_completion.py). Optional, like resume_decision.
     milestone_reuse: Optional[Dict[str, Any]] = None
+    # PRD-008 S4c: the unit of work (milestone group/id/definition digest,
+    # or the integration pass) currently executing. begin_commit copies it
+    # into each cycle, so a commit is attributable to its milestone from the
+    # moment its intent is durable - before any workspace byte changes.
+    active_work_unit: Optional[Dict[str, Any]] = None
     # Schema 3: provenance of an explicit `kriya runs recover` settlement.
     recovery: Optional[Dict[str, Any]] = None
     commits: List[Dict[str, Any]] = field(default_factory=list)
@@ -312,6 +317,8 @@ class RunRecord:
             "transaction_id": transaction_id, "intent": intent,
             "candidate_hash": candidate_hash, "result": None,
         }
+        if self.active_work_unit is not None:
+            cycle["work_unit"] = dict(self.active_work_unit)
         return self._advance(
             RunLifecycle.COMMIT_ELIGIBLE,
             commits=[*self.commits, cycle], commit_intent=intent,

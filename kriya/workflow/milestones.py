@@ -57,14 +57,26 @@ from kriya.workflow.checkpoint import compute_registry_hash
 from kriya.workflow.attempt import _build_python_runtime_grounding
 from kriya.workflow.file_resolution import _resolve_run_command, ground_python_runtime_target
 from kriya.workflow.milestone_completion import (
+    COMPLETION_RECONSTRUCTED,
+    COMPLETION_RECONSTRUCTION_UNVERIFIED,
+    LOOP_FAILED,
+    LOOP_PASSED,
     MILESTONE_COMPLETION_SCHEMA_VERSION,
     MILESTONE_SIDECAR_RELATIVE_DIR,
     MilestoneReuseAssessment,
+    MilestoneReuseDecision,
     assess_completed_milestone_reuse,
     completion_proof_for,
+    find_completion_to_reconstruct,
+    integration_work_unit,
+    milestone_work_unit,
+    no_change_verification,
     owning_run_commit_count,
     record_milestone_commits,
+    select_unit_checkpoint,
+    verification_policy_fingerprint,
 )
+from kriya.workflow.resume_fingerprints import FingerprintStatus
 from kriya.workflow.milestone_normalization import normalize_legacy_milestones
 from kriya.workflow.milestone_validation import (
     MilestonePlanValidator,
@@ -211,7 +223,12 @@ def _invalidate_milestone_checkpoints(
     for checkpoint in list_checkpoints(workspace_path):
         if checkpoint.get("milestone_group_id") != group_id:
             continue
-        if ids_by_position.get(checkpoint.get("milestone_index")) not in milestone_ids:
+        unit = checkpoint.get("work_unit")
+        checkpoint_milestone = (
+            unit.get("milestone_id") if isinstance(unit, dict)
+            else ids_by_position.get(checkpoint.get("milestone_index"))  # pre-S4c checkpoint
+        )
+        if checkpoint_milestone not in milestone_ids:
             continue
         run_id = checkpoint.get("run_id")
         if run_id:
@@ -415,37 +432,44 @@ def load_or_resume_milestone_run_state(workspace_path: str, plan_data: Dict[str,
 
 
 def revalidate_completed_milestones(
-    workspace_path: str, run_state: MilestoneRunState,
+    workspace_path: str, run_state: MilestoneRunState, *, config: Any = None,
 ) -> MilestoneReuseAssessment:
-    """PRD-008 S4b: decide, from durable evidence, which completed
+    """PRD-008 S4b/S4c: decide, from durable evidence, which completed
     milestones may still be skipped, and un-complete the rest before
     anything reads completed_milestone_ids.
 
-    A milestone that fails the check reruns together with every milestone
-    downstream of it (and any unrelated milestone sharing its paths - see
-    assess_completed_milestone_reuse); independent milestones whose own
-    proof validates stay skipped. Idempotent: a second call finds every
-    remaining completion valid and changes nothing."""
+    First, a milestone whose commit is durable but whose completion was
+    never saved (a crash in between) has its proof rebuilt from the
+    RunRecord + commit evidence when - and only when - that evidence proves
+    the exact committed output and the deterministic post-commit steps pass
+    again (S4c). Then every completion is assessed. A milestone that fails
+    the check reruns together with every milestone downstream of it (and any
+    unrelated milestone sharing its paths); independent milestones whose own
+    proof validates stay skipped. Decided once per run: a second call in the
+    same run returns the first decision."""
     owned = owning_run_commits(workspace_path)
     run_id = owned[0] if owned is not None else None
     previous = run_state.last_reuse_assessment
     if run_id is not None and isinstance(previous, dict) and previous.get("run_id") == run_id:
         # Already decided in this run (execute_milestones, then run_milestones).
         return MilestoneReuseAssessment.from_dict(previous)
-    if not run_state.completed_milestone_ids:
+    events, refused = _reconstruct_completions(workspace_path, run_state, config=config)
+    if not run_state.completed_milestone_ids and not events:
         return MilestoneReuseAssessment(run_id=run_id)
     assessment = assess_completed_milestone_reuse(
         workspace_path, run_state.milestones, run_state.completed_milestone_ids,
         run_state.completion_proofs, run_state.commit_ledger,
         legacy_state=run_state.completion_schema_version is None,
+        verification_policy=verification_policy_fingerprint(config),
     )
     assessment.run_id = run_id
+    assessment.events = events
+    assessment.decisions.extend(refused)
     rerun = assessment.rerun_ids
-    run_state.last_reuse_assessment = assessment.to_dict()
     for decision in assessment.decisions:
         if decision.milestone_id in rerun:
             logger.warning(
-                "Milestone '%s' was completed earlier but is %s and will rerun: %s",
+                "Milestone '%s' is %s and will run: %s",
                 decision.milestone_id, decision.status.value, ", ".join(decision.reason_codes),
             )
         else:
@@ -466,7 +490,8 @@ def revalidate_completed_milestones(
             run_state.completion_proofs.pop(milestone_id, None)
             run_state.verification_commands.pop(milestone_id, None)
         # Content captured from invalidated output must not be fed to the
-        # rerun (or its dependents) as "established".
+        # rerun (or its dependents) as "established". The rerun itself works
+        # on the CURRENT workspace bytes - never restored (see handover).
         for path in rerun_paths:
             run_state.established_file_context.pop(path, None)
         _invalidate_milestone_checkpoints(
@@ -474,19 +499,189 @@ def revalidate_completed_milestones(
         )
     # From here on the sidecar carries proofs, whatever it was before.
     run_state.completion_schema_version = MILESTONE_COMPLETION_SCHEMA_VERSION
+    _publish_reuse_assessment(workspace_path, run_state, assessment)
+    return assessment
+
+
+def _publish_reuse_assessment(
+    workspace_path: str, run_state: MilestoneRunState, assessment: MilestoneReuseAssessment,
+) -> None:
+    """One record of this run's reuse decisions, in the sidecar and on the
+    RunRecord (the result carries it too)."""
+    run_state.last_reuse_assessment = assessment.to_dict()
     save_milestone_run_state(workspace_path, run_state)
     annotation_error = annotate_run(workspace_path, milestone_reuse=assessment.to_dict())
     if annotation_error:
         logger.warning(f"Could not record the milestone reuse decision on the run record: {annotation_error}")
-    return assessment
+
+
+def _reconstruct_completions(
+    workspace_path: str, run_state: MilestoneRunState, *, config: Any,
+) -> Tuple[List[Dict[str, Any]], List[MilestoneReuseDecision]]:
+    """S4c-2: close the commit -> completion-save crash window. Returns the
+    reconstruction events and an UNVERIFIED decision for each refusal."""
+    events: List[Dict[str, Any]] = []
+    refused: List[MilestoneReuseDecision] = []
+    artifact_registry = None
+    for milestone in topological_order(run_state.milestones):
+        if milestone.id in run_state.completed_milestone_ids:
+            continue
+        if any(dep not in run_state.completed_milestone_ids for dep in milestone.depends_on):
+            continue  # an unfinished upstream reruns first; nothing to rebuild on
+        try:
+            candidate = find_completion_to_reconstruct(
+                workspace_path, run_state.group_id, milestone, run_state.commit_ledger,
+            )
+        except Exception as error:
+            logger.warning(f"Could not look for a completion to reconstruct for '{milestone.id}': {error}")
+            continue
+        if candidate is None:
+            continue
+        if candidate.failure is None:
+            dropped = check_dependency_regression(workspace_path, run_state.established_dependencies)
+            if dropped:
+                candidate.failure = {
+                    "code": COMPLETION_RECONSTRUCTION_UNVERIFIED,
+                    "detail": f"dependency regression after the commit: {dropped}",
+                }
+        if candidate.entries_verified:
+            run_state.commit_ledger.extend(entry.to_dict() for entry in candidate.new_entries)
+        if candidate.failure is None:
+            if artifact_registry is None:
+                artifact_registry = load_artifact_registry(workspace_path)
+            error = _complete_milestone(
+                workspace_path, run_state, milestone, candidate.entries,
+                sorted({op.path for entry in candidate.entries for op in entry.operations if op.kind != "DELETE"}),
+                artifact_registry, config=config,
+                reconstructed_from={
+                    "run_id": candidate.run_id,
+                    "transaction_ids": [entry.transaction_id for entry in candidate.entries],
+                },
+            )
+            if error is not None:
+                candidate.failure = {"code": COMPLETION_RECONSTRUCTION_UNVERIFIED, "detail": error}
+        event = candidate.event()
+        events.append(event)
+        if candidate.failure is None:
+            logger.warning(
+                "Milestone '%s': completion reconstructed from durable commit evidence (run %s).",
+                milestone.id, candidate.run_id,
+            )
+        else:
+            logger.warning(
+                "Milestone '%s': completion NOT reconstructed (%s) - it will run.",
+                milestone.id, candidate.failure.get("code"),
+            )
+            refused.append(MilestoneReuseDecision(milestone.id, FingerprintStatus.UNVERIFIED, [{
+                "code": COMPLETION_RECONSTRUCTION_UNVERIFIED,
+                "detail": "durable evidence does not prove the milestone's committed output",
+                "cause": candidate.failure,
+            }]))
+    return events, refused
+
+
+def _complete_milestone(
+    workspace_path: str,
+    run_state: MilestoneRunState,
+    milestone: MilestoneV2,
+    entries: List[Any],
+    files: List[str],
+    artifact_registry: Any,
+    *,
+    result: Optional[Dict[str, Any]] = None,
+    config: Any = None,
+    reconstructed_from: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """The deterministic post-success steps, shared by a normal completion
+    and a reconstructed one: refresh established dependencies and file
+    context, derive artifacts, then persist the completion proof. Returns an
+    error string (nothing persisted as complete) when a step fails."""
+    try:
+        from kriya.tools.validate import get_pom_dependencies
+        pom_path = os.path.join(workspace_path, "pom.xml")
+        if os.path.exists(pom_path):
+            run_state.established_dependencies = sorted(
+                set(run_state.established_dependencies) | set(get_pom_dependencies(pom_path))
+            )
+    except Exception as e:
+        logger.warning(f"Could not refresh established dependencies after milestone '{milestone.id}': {e}")
+
+    for path in files:
+        try:
+            with open(os.path.join(workspace_path, path), "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except OSError as e:
+            logger.warning(f"Could not capture established content for '{path}' after milestone '{milestone.id}': {e}")
+            continue
+        projection = project_implementation_source(
+            content, path, _ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
+            reason="established_by_earlier_milestone",
+        )
+        run_state.established_file_context[path] = projection.content
+
+    try:
+        derived = artifact_registry.derive_from_workspace(workspace_path, milestone.id)
+        for record in derived:
+            artifact_registry.record(record)
+        if derived:
+            save_artifact_registry(workspace_path, artifact_registry)
+    except Exception as e:
+        logger.error(f"Could not derive/persist real artifacts for milestone '{milestone.id}': {e}")
+        return f"artifact registry: {e}"
+
+    owned = owning_run_commits(workspace_path)
+    run_id = entries[0].run_id if entries else (owned[0] if owned is not None else None)
+    verification = None
+    if not entries and result is not None:
+        # S4c-1: a milestone that committed nothing is reusable only on
+        # deterministic gate evidence, never on a model's "no change".
+        verification = no_change_verification(
+            workspace_path, milestone, result, run_id=run_id, config=config,
+            proofs=run_state.completion_proofs, ledger_length=len(run_state.commit_ledger),
+        )
+    run_state.completion_proofs[milestone.id] = completion_proof_for(
+        milestone, entries, run_id, verification=verification, reconstructed_from=reconstructed_from,
+    ).to_dict()
+    run_state.completed_milestone_ids.append(milestone.id)
+    if milestone.id in run_state.stale_milestone_ids:
+        run_state.stale_milestone_ids.remove(milestone.id)
+    save_milestone_run_state(workspace_path, run_state)
+    return None
 
 
 def _record_ledger(
     workspace_path: str, run_state: MilestoneRunState, milestone_id: Optional[str], cycles_before: int,
+    *, loop_outcome: Optional[str] = None,
 ) -> List[Any]:
-    entries = record_milestone_commits(workspace_path, milestone_id, cycles_before)
+    entries = record_milestone_commits(workspace_path, milestone_id, cycles_before, loop_outcome=loop_outcome)
     run_state.commit_ledger.extend(entry.to_dict() for entry in entries)
     return entries
+
+
+def _set_work_unit(workspace_path: str, unit: Optional[Dict[str, Any]]) -> None:
+    """Name the unit of work every following commit cycle and checkpoint
+    belongs to. Best effort: if it cannot be recorded, commits stay
+    unattributed, which only ever means a rerun or a fresh start."""
+    error = annotate_run(workspace_path, active_work_unit=unit)
+    if error:
+        logger.warning(f"Could not record the active milestone on the run record: {error}")
+
+
+def _plan_digest(milestones: List[MilestoneV2]) -> str:
+    return hashlib.sha256(json.dumps(
+        [milestone.model_dump(mode="json") for milestone in milestones], sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def _record_selection(
+    workspace_path: str, run_state: MilestoneRunState, assessment: MilestoneReuseAssessment,
+    selection: Optional[Dict[str, Any]],
+) -> None:
+    if selection is None:
+        return
+    assessment.events.append(selection)
+    logger.info("Milestone checkpoint selection: %s", json.dumps(selection, sort_keys=True))
+    _publish_reuse_assessment(workspace_path, run_state, assessment)
 
 
 def _list_workspace_files(workspace_path: str, max_files: int = 200) -> List[str]:
@@ -928,7 +1123,8 @@ async def run_milestones(
     total = len(ordered)
     # PRD-008 S4b: completed_milestone_ids is trusted only after each entry's
     # completion proof validates against durable evidence and the workspace.
-    reuse_assessment = revalidate_completed_milestones(workspace_path, run_state)
+    engine_config = getattr(getattr(we, "kernel", None), "config", None)
+    reuse_assessment = revalidate_completed_milestones(workspace_path, run_state, config=engine_config)
 
     # MA5.2/5.7 (kriya/control/contracts.py) - the "one-way bridge" that
     # module's own docstring promised since MA5.2 but was never built until
@@ -1073,6 +1269,15 @@ async def run_milestones(
             _persist_milestone_control_state(
                 workspace_path, control_state, authoritative=authoritative,
             )
+    # A completion reconstructed from durable evidence (S4c-2) gets the same
+    # contract bookkeeping its interrupted run would have made.
+    reconstructed_ids = {
+        event.get("milestone_id") for event in reuse_assessment.events
+        if event.get("code") == COMPLETION_RECONSTRUCTED
+    }
+    for milestone in run_state.milestones:
+        if milestone.id in reconstructed_ids and milestone.provides:
+            mark_capabilities_implemented(contract_registry, milestone)
     _persist_contract_registry(
         workspace_path, contract_registry, authoritative=authoritative,
     )
@@ -1131,7 +1336,15 @@ async def run_milestones(
         # Every commit this milestone's loop makes (retries included) is
         # attributed to it from the RunRecord, never from its reported files.
         cycles_before = owning_run_commit_count(workspace_path)
+        unit = milestone_work_unit(run_state.group_id, milestone)
+        _set_work_unit(workspace_path, unit)
         while True:
+            # S4c-3: offer only this milestone's own newest checkpoint (the
+            # PRD-008 validator still decides whether it is reusable).
+            call_resume, call_resume_id, selection = select_unit_checkpoint(
+                workspace_path, unit, resume=resume, resume_id=resume_id,
+            )
+            _record_selection(workspace_path, run_state, reuse_assessment, selection)
             result = await we.run_generation_workflow(
                 goal=milestone_goal,
                 workspace_path=workspace_path,
@@ -1145,8 +1358,8 @@ async def run_milestones(
                 milestone_index=position,
                 milestone_total=total,
                 knowledge_risk_confirmed=knowledge_risk_confirmed,
-                resume=resume,
-                resume_id=resume_id,
+                resume=call_resume,
+                resume_id=call_resume_id,
                 supplementary_context="\n\n".join(filter(None, (
                     render_established_file_context(run_state.established_file_context),
                     consumed_contract_context,
@@ -1190,8 +1403,9 @@ async def run_milestones(
                 logger.info(f"Retrying milestone '{milestone.id}' ({position}/{total}) per milestone_failure_callback decision.")
                 continue
 
-            if _record_ledger(workspace_path, run_state, milestone.id, cycles_before):
+            if _record_ledger(workspace_path, run_state, milestone.id, cycles_before, loop_outcome=LOOP_FAILED):
                 save_milestone_run_state(workspace_path, run_state)
+            _set_work_unit(workspace_path, None)
             return {
                 "status": "milestone_failed",
                 "group_id": run_state.group_id,
@@ -1204,32 +1418,11 @@ async def run_milestones(
 
         # Persist the commits before any later step can fail and return:
         # an unrecorded commit would make a clean rerun see edited paths.
-        milestone_entries = _record_ledger(workspace_path, run_state, milestone.id, cycles_before)
+        milestone_entries = _record_ledger(
+            workspace_path, run_state, milestone.id, cycles_before, loop_outcome=LOOP_PASSED,
+        )
         if milestone_entries:
             save_milestone_run_state(workspace_path, run_state)
-
-        try:
-            from kriya.tools.validate import get_pom_dependencies
-            pom_path = os.path.join(workspace_path, "pom.xml")
-            if os.path.exists(pom_path):
-                run_state.established_dependencies = sorted(
-                    set(run_state.established_dependencies) | set(get_pom_dependencies(pom_path))
-                )
-        except Exception as e:
-            logger.warning(f"Could not refresh established dependencies after milestone '{milestone.id}': {e}")
-
-        for path in result.get("files", []):
-            try:
-                with open(os.path.join(workspace_path, path), "r", encoding="utf-8", errors="replace") as fh:
-                    content = fh.read()
-            except OSError as e:
-                logger.warning(f"Could not capture established content for '{path}' after milestone '{milestone.id}': {e}")
-                continue
-            projection = project_implementation_source(
-                content, path, _ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
-                reason="established_by_earlier_milestone",
-            )
-            run_state.established_file_context[path] = projection.content
 
         try:
             # Read the CURRENT real pom.xml (post-apply, same convention as
@@ -1287,30 +1480,19 @@ async def run_milestones(
         except Exception as e:
             logger.warning(f"Could not capture milestone '{milestone.id}'s verification commands for later replay: {e}")
 
-        try:
-            derived = artifact_registry.derive_from_workspace(workspace_path, milestone.id)
-            for record in derived:
-                artifact_registry.record(record)
-            if derived:
-                save_artifact_registry(workspace_path, artifact_registry)
-        except Exception as e:
-            logger.error(f"Could not derive/persist real artifacts for milestone '{milestone.id}': {e}")
+        completion_error = _complete_milestone(
+            workspace_path, run_state, milestone, milestone_entries, list(result.get("files", [])),
+            artifact_registry, result=result, config=engine_config,
+        )
+        if completion_error is not None:
+            _set_work_unit(workspace_path, None)
             return {
                 "status": "artifact_registry_failed",
                 "group_id": run_state.group_id,
                 "milestone_id": milestone.id,
                 "quality_gates_passed": False,
-                "artifact_error": str(e),
+                "artifact_error": completion_error,
             }
-
-        run_state.completion_proofs[milestone.id] = completion_proof_for(
-            milestone, milestone_entries,
-            milestone_entries[0].run_id if milestone_entries else None,
-        ).to_dict()
-        run_state.completed_milestone_ids.append(milestone.id)
-        if milestone.id in run_state.stale_milestone_ids:
-            run_state.stale_milestone_ids.remove(milestone.id)
-        save_milestone_run_state(workspace_path, run_state)
         _update_milestone_control_state(
             workspace_path,
             run_state.group_id,
@@ -1333,6 +1515,12 @@ async def run_milestones(
     _log_phase_banner("INTEGRATION")
     integration_goal = build_integration_goal_text(run_state.original_goal, ordered)
     integration_cycles_before = owning_run_commit_count(workspace_path)
+    integration_unit = integration_work_unit(run_state.group_id, _plan_digest(ordered))
+    _set_work_unit(workspace_path, integration_unit)
+    integration_resume, integration_resume_id, selection = select_unit_checkpoint(
+        workspace_path, integration_unit, resume=resume, resume_id=resume_id,
+    )
+    _record_selection(workspace_path, run_state, reuse_assessment, selection)
     integration_result = await we.run_generation_workflow(
         goal=integration_goal,
         workspace_path=workspace_path,
@@ -1346,8 +1534,8 @@ async def run_milestones(
         milestone_index=total + 1,
         milestone_total=total + 1,
         knowledge_risk_confirmed=knowledge_risk_confirmed,
-        resume=resume,
-        resume_id=resume_id,
+        resume=integration_resume,
+        resume_id=integration_resume_id,
         supplementary_context=render_established_file_context(run_state.established_file_context),
         established_files=sorted(run_state.established_file_context.keys()),
     )
@@ -1356,6 +1544,7 @@ async def run_milestones(
     # ledger a clean rerun would read those paths as edited.
     if _record_ledger(workspace_path, run_state, None, integration_cycles_before):
         save_milestone_run_state(workspace_path, run_state)
+    _set_work_unit(workspace_path, None)
 
     return {
         "status": "success" if integration_result.get("quality_gates_passed") else "integration_failed",

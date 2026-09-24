@@ -164,6 +164,14 @@ def owning_run_commits(workspace_path: str) -> Optional[Tuple[str, List[Dict[str
     return context.run_id, [dict(cycle) for cycle in context._lease.record.commits]
 
 
+def owning_run_work_unit(workspace_path: str) -> Optional[Dict[str, Any]]:
+    """The owning run's active unit of work (PRD-008 S4c), else None."""
+    context = owning_run(workspace_path)
+    if context is None or context._lease.record.active_work_unit is None:
+        return None
+    return dict(context._lease.record.active_work_unit)
+
+
 def begin_run_commit(
     workspace_path: str, transaction_id: str, *, candidate_hash: Optional[str],
     intent: str = "APPLY_VERIFIED_CANDIDATE", **evidence: Any,

@@ -29,6 +29,7 @@ from kriya.control.run_coordinator import (
     annotate_run,
     coordinated_mutation,
     mark_run_stage,
+    owning_run_work_unit,
 )
 from kriya.control.run_record import RunLifecycle
 from kriya.workflow.checkpoint import (
@@ -248,6 +249,43 @@ _RESUME_REFUSAL_REASON_CODES = {"commit_state": "UNCERTAIN_COMMIT_STATE"}
 _PHASE_BANNER_WIDTH = 70
 
 
+_UNRESOLVED_GATE_MARKERS = (
+    "quality gate skipped", "not confirmed", "no compile check available",
+    "no test runner available", "no java test config found",
+)
+
+
+def _gate_outcome_proven(outcome: Optional[Dict[str, Any]]) -> Optional[bool]:
+    """True only for a gate that actually executed and passed; None for a
+    skipped/unconfirmed one (e.g. an "unknown" stack's pass-through)."""
+    if outcome is None:
+        return None
+    if outcome.get("success") is False:
+        return False
+    output = str(outcome.get("output", "")).lower()
+    if any(marker in output for marker in _UNRESOLVED_GATE_MARKERS):
+        return None
+    return True if outcome.get("success") is True else None
+
+
+_DETERMINISTIC_GATE_TYPES = ("compile", "test", "targeted_test", "regression_test", "run_verification")
+
+
+def deterministic_gate_evidence(gate_outcomes: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """PRD-008 S4c: the latest outcome of each deterministic gate type that
+    genuinely executed, as evidence a caller can bind to (e.g. a milestone
+    that committed nothing). Model verdicts are never included."""
+    evidence = []
+    for gate_type in _DETERMINISTIC_GATE_TYPES:
+        latest = next(
+            (outcome for outcome in reversed(gate_outcomes or []) if outcome.get("type") == gate_type), None,
+        )
+        proven = _gate_outcome_proven(latest)
+        if proven is not None:
+            evidence.append({"type": gate_type, "passed": proven, "attempt": latest.get("attempt")})
+    return evidence
+
+
 def _build_required_verification_evidence(
     requirements: Optional[List[Dict[str, Any]]], quality_gates_passed: bool,
     gate_outcomes: Optional[List[Dict[str, Any]]] = None,
@@ -262,19 +300,7 @@ def _build_required_verification_evidence(
             None,
         )
 
-    def _outcome_passed(outcome: Optional[Dict[str, Any]]) -> Optional[bool]:
-        if outcome is None:
-            return None
-        if outcome.get("success") is False:
-            return False
-        output = str(outcome.get("output", "")).lower()
-        unresolved_markers = (
-            "quality gate skipped", "not confirmed", "no compile check available",
-            "no test runner available", "no java test config found",
-        )
-        if any(marker in output for marker in unresolved_markers):
-            return None
-        return True if outcome.get("success") is True else None
+    _outcome_passed = _gate_outcome_proven
 
     evidence: List[Dict[str, Any]] = []
     for requirement in requirements or []:
@@ -1991,6 +2017,11 @@ class WorkflowEngine:
                 "goal_fingerprint": checkpoint_goal_fp,
                 "milestone_group_id": milestone_group_id,
                 "milestone_index": milestone_index,
+                # PRD-008 S4c: which unit of work this checkpoint belongs
+                # to (the owning run's active milestone, set by the milestone
+                # driver), so milestone resume selects by identity, never by
+                # "newest in the workspace".
+                "work_unit": owning_run_work_unit(workspace_path),
                 # A3-P2 marker, audit only since PRD-008: the resume check
                 # is now the authority_context fingerprint, which binds the
                 # regions themselves (a changed boundary, not only a
@@ -4572,6 +4603,7 @@ class WorkflowEngine:
             "verification_results": _build_required_verification_evidence(
                 required_verification, quality_passed, gate_outcomes=state.gate_outcomes,
             ),
+            "deterministic_gate_evidence": deterministic_gate_evidence(state.gate_outcomes),
             "environment_failure": state.environment_failure if not quality_passed else None,
             "failure_category": failure_category,
             "failure_report": failure_report_dicts,

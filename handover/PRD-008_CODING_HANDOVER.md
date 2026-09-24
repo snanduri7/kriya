@@ -424,3 +424,10 @@ Status: READY_FOR_PYTEST_VERIFICATION (committed locally; S5 blocked until verif
 deviation, algorithm, tests and verification commands: `handover/PRD-008_S4B_CODING_HANDOVER.md`.
 A completed milestone is skipped only when its completion proof verifies against the RunRecord cycle,
 commit evidence and current workspace bytes; otherwise it reruns with its transitive dependents.
+
+## Reopening addendum - S4c: milestone resume closure
+
+Status: READY_FOR_PYTEST_VERIFICATION (committed locally; S5 blocked until verified). S4b is USER-VERIFIED (suite
+5029/0). S4c adds: durable work-unit identity on RunRecord cycles and checkpoints; VERIFIED_NO_CHANGE on
+deterministic gate evidence only; completion reconstruction after a commit/state-save crash; identity-aware
+milestone checkpoint selection; proven shared-write lineage. Details: `handover/PRD-008_S4C_CODING_HANDOVER.md`.

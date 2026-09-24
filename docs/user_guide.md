@@ -331,6 +331,24 @@ A final **integration pass** then runs once more against the whole assembled pro
 
 **Resuming**: re-running the identical `generate --from-milestones <file>` command picks up from the last completed milestone via a sidecar state file (`.kriya/milestones/<group_id>.json`) instead of restarting the whole sequence - but the milestones/goal themselves are always re-read fresh from the plan file, so an edit you make to the plan between runs still takes effect.
 
+**Which milestones a rerun skips (PRD-008).** Being listed as completed in the sidecar is not enough on its own. A completed milestone is skipped only when durable evidence proves it:
+- **A milestone that changed files** is skipped only when all of these hold:
+  - its commits are COMMITTED in the run record and in the commit evidence under `.kriya/control/`;
+  - every file it last wrote still has exactly the committed bytes and file mode;
+  - its definition in the plan file is unchanged.
+- **A milestone that changed nothing** is skipped only when all of these hold:
+  - tests or runtime verification actually ran and passed for it; a model saying "no change needed" never counts;
+  - the verification settings are unchanged;
+  - the workspace is exactly what the milestones completed since then explain.
+
+Anything else reruns that milestone and everything that depends on it. An unrelated milestone that wrote the same files also reruns. Other milestones stay skipped.
+
+**If a run crashed between a milestone's commit and saving its progress,** the rerun rebuilds that milestone's completion from the run record and commit evidence instead of redoing it, provided the evidence proves the exact committed output. If it doesn't, the milestone reruns. The reason for every skip, rerun and rebuild is recorded under `milestone_reuse` in the command's JSON result, in the run record and in the sidecar.
+
+**A rerun never restores earlier output.** A milestone that reruns because you edited, deleted or reset its files works on the files as they are now. Your edits are treated as intentional and are never rolled back. Kriya only decides whether earlier work may be reused; it is not an undo system.
+
+**`--resume` with milestones** offers each milestone only its own newest checkpoint: same sequence, same milestone, same definition. The normal resume checks still decide whether that checkpoint is reused. A checkpoint that belongs to another milestone, or that was saved before this rule existed, is never offered, and the milestone starts fresh. An explicit `--resume-id` is offered only to the milestone that saved it.
+
 Deliberately opt-in - there's no automatic "this goal looks too big" detection. The Milestone Planner's own slicing quality has to earn your trust goal by goal; auto-triggering on every large-looking goal would silently change behavior for every existing user with no proven size heuristic behind it.
 
 ### 3.5 Fix Bugs (`fix`)
