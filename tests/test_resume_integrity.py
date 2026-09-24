@@ -22,6 +22,15 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
     validate_resume_against_reality,
 )
+from kriya.workflow.resume_fingerprints import (
+    ARTIFACT_DEPENDENCIES,
+    FINGERPRINT_NAMES,
+    Fingerprint,
+    fingerprint_block,
+)
+from kriya.workflow.resume_fingerprints import (
+    CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
+)
 from kriya.workflow.workflow import WorkflowEngine
 
 
@@ -36,19 +45,24 @@ def git_repo(tmp_path):
     return str(tmp_path)
 
 
-@pytest.mark.parametrize(
-    "fingerprint",
-    [
-        "config_fingerprint", "goal_fingerprint", "approved_plan_hash",
-        "obligation_ledger_hash", "skills_fingerprint",
-        "model_runtime_fingerprint", "containment_fingerprint",
-        "toolchain_fingerprint", "verification_policy_fingerprint",
-    ],
-)
-def test_each_safety_fingerprint_has_machine_readable_invalidation(fingerprint):
+# PRD-008: the flat checkpoint keys (config_fingerprint, skills_fingerprint,
+# ...) and their skip-when-absent comparison are retired; every resume
+# fingerprint now lives in the checkpoint's resume_fingerprints block and is
+# compared by resume_fingerprints.compare_resume_fingerprints(). Its full
+# behaviour is covered in test_prd008_resume_fingerprints.py; these keep the
+# validator-level contract.
+
+def _all_artifacts():
+    return set(ARTIFACT_DEPENDENCIES)
+
+
+@pytest.mark.parametrize("fingerprint", FINGERPRINT_NAMES)
+def test_each_resume_fingerprint_has_machine_readable_invalidation(fingerprint):
+    stored = {name: Fingerprint("same", "basis") for name in FINGERPRINT_NAMES}
+    current = dict(stored, **{fingerprint: Fingerprint("different", "basis")})
     result = validate_resume_against_reality(
-        {fingerprint: "before"}, "/unused",
-        current_fingerprints={fingerprint: "after"},
+        {RESUME_FINGERPRINTS_KEY: fingerprint_block(stored)}, "/unused",
+        current_resume_fingerprints=current, reused_artifacts=_all_artifacts(),
     )
     assert result.status == ResumeStatus.NEEDS_REVIEW
     assert len(result.decisions) == 1
@@ -59,12 +73,10 @@ def test_each_safety_fingerprint_has_machine_readable_invalidation(fingerprint):
 
 
 def test_matching_fingerprints_preserve_safe_resume():
-    fingerprints = {
-        key: "same" for key in RESUME_INVALIDATION_MATRIX
-        if key not in {"base_commit", "tree_hash", "workspace_content_hash", "commit_state"}
-    }
+    fingerprints = {name: Fingerprint("same", "basis") for name in FINGERPRINT_NAMES}
     result = validate_resume_against_reality(
-        fingerprints, "/unused", current_fingerprints=fingerprints,
+        {RESUME_FINGERPRINTS_KEY: fingerprint_block(fingerprints)}, "/unused",
+        current_resume_fingerprints=fingerprints, reused_artifacts=_all_artifacts(),
     )
     assert result.status == ResumeStatus.OK
     assert result.decisions == ()
@@ -104,9 +116,26 @@ def test_terminal_uncertain_record_refuses_normal_resume():
     assert result.status == ResumeStatus.REFUSED
 
 
-def test_legacy_checkpoint_without_new_optional_fingerprints_remains_loadable():
+def test_validator_without_a_fingerprint_request_compares_nothing():
+    # A caller that asks for no fingerprint comparison (the control-plane
+    # hash bundle alone) gets none; the workflow always asks.
     result = validate_resume_against_reality({"stage": "planning"}, "/unused")
     assert result.status == ResumeStatus.OK
+    assert result.fingerprint_comparisons == ()
+
+
+def test_legacy_checkpoint_without_resume_fingerprints_is_unverified_not_resumable():
+    # PRD-008 semantic change: before, a checkpoint missing a fingerprint
+    # skipped that check. Now every fingerprint its reused artifacts depend
+    # on is UNVERIFIED, which invalidates like a change.
+    current = {name: Fingerprint("same", "basis") for name in FINGERPRINT_NAMES}
+    result = validate_resume_against_reality(
+        {"stage": "plan", "plan": "P"}, "/unused", current_resume_fingerprints=current,
+    )
+    assert result.status == ResumeStatus.NEEDS_REVIEW
+    assert "planning" in result.invalidated_stages
+    assert all("predates resume fingerprints" in item.reason
+               for item in result.fingerprint_comparisons if item.invalidates)
 
 
 @pytest.mark.asyncio

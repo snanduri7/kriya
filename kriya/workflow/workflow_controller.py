@@ -98,9 +98,12 @@ from kriya.control.decisions import (
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.contracts import ContractRegistry
 from kriya.control.persistence import (
+    UnreadableRunRecordError,
+    load_run_record,
     load_artifact_registry,
     load_contract_registry,
     load_control_state,
+    load_control_state_run_reference,
     artifact_registry_path,
     contract_registry_path,
     control_state_path,
@@ -4403,7 +4406,25 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     "were recorded against. Starting the plan fresh."
                 )
             else:
+                # PRD-008: the record the prior ControlState was derived
+                # under must still say its commit state is settled; a
+                # record that is gone leaves the state's provenance unknown.
+                prior_run_id = load_control_state_run_reference(workspace_path)
+                prior_run_record = None
+                prior_run_record_error = None
+                prior_run_record_missing = None
+                if prior_run_id is not None:
+                    try:
+                        prior_run_record = load_run_record(workspace_path, prior_run_id)
+                    except (UnreadableRunRecordError, ValueError) as error:
+                        prior_run_record_error = str(error)
+                    else:
+                        if prior_run_record is None:
+                            prior_run_record_missing = prior_run_id
                 resume_check = validate_resume_against_reality(
+                    run_record=prior_run_record,
+                    run_record_error=prior_run_record_error,
+                    run_record_missing=prior_run_record_missing,
                     checkpoint_data={
                         "base_commit": prior_control_state.base_commit,
                         "tree_hash": prior_control_state.tree_hash,

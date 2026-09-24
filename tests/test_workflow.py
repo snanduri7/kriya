@@ -141,6 +141,13 @@ from kriya.workflow.checkpoint import (
     load_checkpoint,
     save_checkpoint,
 )
+from kriya.workflow.resume_fingerprints import (
+    CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
+)
+from kriya.workflow.resume_fingerprints import (
+    fingerprint_block,
+    generation_resume_fingerprints,
+)
 from kriya.workflow.workflow import (
     RESOURCE_LIFECYCLE_HEADER,
     IncompleteGenerationError,
@@ -1292,9 +1299,15 @@ def _init_git_repo(tmp_path):
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=tmp_path, check=True)
 
 
-def _seed_checkpoint(tmp_path, cfg, goal, run_id, stage, **extra):
+def _seed_checkpoint(tmp_path, cfg, goal, run_id, stage, fingerprint_inputs=None, **extra):
+    """PRD-008: carries the resume fingerprints the workflow itself would
+    have saved for a run_generation_workflow(goal=goal, **fingerprint_inputs)
+    call - built by the same production function, never re-derived here."""
     save_checkpoint(str(tmp_path), run_id, {
         "stage": stage,
+        RESUME_FINGERPRINTS_KEY: fingerprint_block(generation_resume_fingerprints(
+            cfg, str(tmp_path), goal=goal, **(fingerprint_inputs or {}),
+        )),
         "workspace_fingerprint": compute_workspace_fingerprint(str(tmp_path)),
         # STATE-001 (2026-09-14): required alongside workspace_fingerprint -
         # its own absence is treated as a legacy/pre-fix checkpoint and
@@ -18149,9 +18162,14 @@ async def test_predetermined_architect_files_alone_raises():
 
 
 @pytest.mark.asyncio
-async def test_workflow_resumes_from_candidate_gates_checkpoint_but_still_runs_regression(tmp_path):
-    """Candidate generation and inner gates may be reused, but terminal
-    regression remains mandatory before application or overall success."""
+async def test_workflow_candidate_checkpoint_not_reused_while_toolchain_unverified(tmp_path):
+    """PRD-008 S2: a candidate-stage checkpoint hands the resumed run its
+    candidate AND its candidate-gate outcomes, which depend on the
+    toolchain. Toolchain identity is UNAVAILABLE until PRD-011, so that
+    dependency is UNVERIFIED - never a match - and the checkpoint is not
+    reused: the run starts fresh. (Before PRD-008 it reused the candidate
+    and skipped the candidate gates. S3 narrows this to re-running only the
+    invalidated gates against the reused candidate.)"""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
@@ -18171,18 +18189,23 @@ async def test_workflow_resumes_from_candidate_gates_checkpoint_but_still_runs_r
         retry_count=0,
     )
 
-    llm.complete = AsyncMock(side_effect=["Review: Approved"])  # only the Reviewer should run
+    llm.complete = AsyncMock(side_effect=[
+        "Step 1: Write code",
+        "Design: Write math.py",
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
+        "Review: Approved",
+    ])
 
     we = WorkflowEngine(kernel, llm)
-    res = await we.run_generation_workflow(goal=goal, workspace_path=str(tmp_path), resume=True)
+    with patch("kriya.workflow.workflow.logger") as workflow_logger:
+        res = await we.run_generation_workflow(goal=goal, workspace_path=str(tmp_path), resume=True)
 
     assert res["quality_gates_passed"] is True
-    assert res["candidate_gates_passed"] is True
-    assert res["terminal_regression_passed"] is True
-    assert res["overall_attempt_passed"] is True
-    assert "math.py" in res["files"]
-    assert (tmp_path / "math.py").read_text() == "def add(a,b):\n    return a+b"
-    assert llm.complete.await_count == 1  # Planner, Architect, Developer all skipped
+    assert res["plan"] == "Step 1: Write code"  # the checkpoint's plan was not reused either
+    assert llm.complete.await_count == 4  # nothing was skipped
+    warnings = " ".join(str(call.args[0]) for call in workflow_logger.warning.call_args_list)
+    assert "toolchain UNVERIFIED" in warnings
+    assert "Refusing to resume checkpoint 'ckpt-dev'" in warnings
 
 
 @pytest.mark.asyncio

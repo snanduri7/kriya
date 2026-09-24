@@ -40,8 +40,17 @@ from kriya.workflow.checkpoint import (
     load_checkpoint,
     new_run_id,
     save_checkpoint,
+    ResumeAction,
     ResumeStatus,
     validate_resume_against_reality,
+)
+from kriya.workflow.resume_fingerprints import (
+    CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
+)
+from kriya.workflow.resume_fingerprints import (
+    fingerprint_block,
+    generation_resume_fingerprints,
+    workspace_fingerprint,
 )
 from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -223,6 +232,10 @@ from kriya.workflow.planner_repair import (
 from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
 
 logger = logging.getLogger(__name__)
+
+# A REFUSE resume decision's machine-readable reason, keyed by the decision's
+# fingerprint (only commit_state refuses; everything else invalidates).
+_RESUME_REFUSAL_REASON_CODES = {"commit_state": "UNCERTAIN_COMMIT_STATE"}
 
 _PHASE_BANNER_WIDTH = 70
 
@@ -1078,6 +1091,34 @@ class WorkflowEngine:
                 "for gates/review)."
             )
 
+        # PRD-008: one computation of every resume fingerprint, used both
+        # when validating a checkpoint (below) and when saving one
+        # (_save_stage_checkpoint), so the two can never be derived
+        # differently. Every input here is fixed for the whole call.
+        def _resume_fingerprints(effective_obligation_ledger: Any, workspace: Any = None) -> Dict[str, Any]:
+            return generation_resume_fingerprints(
+                self.kernel.config, workspace_path, workspace=workspace,
+                goal=goal, error_context=state.error_context,
+                supplementary_context=supplementary_context,
+                recovery_contract_block=recovery_contract_block,
+                execution_scope=execution_scope, grounding_goal=grounding_goal,
+                established_files=established_files,
+                predetermined_plan=predetermined_plan, predetermined_design=predetermined_design,
+                predetermined_architect_files=predetermined_architect_files,
+                structured_plan=structured_plan, current_subtask_id=current_subtask_id,
+                completed_subtask_ids=completed_subtask_ids,
+                obligation_ledger=obligation_ledger,
+                effective_obligation_ledger=effective_obligation_ledger,
+                skill_engine_override=skill_engine_override,
+                allowed_write_relpaths=allowed_write_relpaths,
+                authorized_semantic_regions=authorized_semantic_regions,
+                write_scope_mode=write_scope_mode, protected_source_file=protected_source_file,
+                required_verification=required_verification,
+                runtime_verification_required=runtime_verification_required,
+                strict_spec_compliance=strict_spec_compliance,
+                strict_dependency_index=strict_dependency_index,
+            )
+
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)
         run_id = None
         resume_state: Optional[Dict[str, Any]] = None
@@ -1090,29 +1131,46 @@ class WorkflowEngine:
                 if not candidate:
                     logger.warning(f"Checkpoint '{target_id}' not found or unreadable - starting a fresh run instead.")
                 else:
-                    current_ws_fp = compute_workspace_fingerprint(workspace_path)
-                    current_cfg_fp = compute_config_fingerprint(self.kernel.config.model_dump())
-                    current_goal_fp = hashlib.sha256(f"{goal}\x00{state.error_context or ''}".encode("utf-8")).hexdigest()
-                    drift_reasons = []
+                    # PRD-008: the checkpoint is judged only by
+                    # validate_resume_against_reality(). Workspace content,
+                    # config, goal and the authorized-semantic-region
+                    # boundary (now the authority_context fingerprint, which
+                    # also catches a CHANGED boundary, not only a dropped
+                    # one) are all fingerprints there; an applicable one that
+                    # is missing or UNAVAILABLE is UNVERIFIED, never a match.
+                    # The resumed run starts from the caller's ledger (or an
+                    # empty one), so that is the current effective ledger.
+                    current_resume_fingerprints = _resume_fingerprints(obligation_ledger)
                     run_reference = candidate.get("_run_record")
+                    prior_run_id = (
+                        str(run_reference["run_id"])
+                        if isinstance(run_reference, dict) and run_reference.get("run_id") else None
+                    )
                     prior_run_record = None
                     prior_run_record_error = None
-                    if isinstance(run_reference, dict) and run_reference.get("run_id"):
+                    prior_run_record_missing = None
+                    if prior_run_id is not None:
                         try:
-                            prior_run_record = load_run_record(
-                                workspace_path, str(run_reference["run_id"]),
-                            )
+                            prior_run_record = load_run_record(workspace_path, prior_run_id)
                         except (UnreadableRunRecordError, ValueError) as error:
                             prior_run_record_error = str(error)
+                        else:
+                            if prior_run_record is None:
+                                prior_run_record_missing = prior_run_id
                     resume_validation = validate_resume_against_reality(
                         candidate,
                         workspace_path,
-                        current_fingerprints={
-                            "config_fingerprint": current_cfg_fp,
-                            "goal_fingerprint": current_goal_fp,
-                        },
+                        current_resume_fingerprints=current_resume_fingerprints,
                         run_record=prior_run_record,
                         run_record_error=prior_run_record_error,
+                        run_record_missing=prior_run_record_missing,
+                    )
+                    logger.info(
+                        "Resume fingerprints for checkpoint '%s': %s", target_id,
+                        json.dumps({
+                            item.name: item.status.value
+                            for item in resume_validation.fingerprint_comparisons
+                        }, sort_keys=True),
                     )
                     if resume_validation.decisions:
                         logger.warning(
@@ -1124,75 +1182,24 @@ class WorkflowEngine:
                             "status": "resume_refused",
                             "quality_gates_passed": False,
                             "files": [],
-                            "reason_codes": ["UNCERTAIN_COMMIT_STATE"],
+                            "reason_codes": sorted({
+                                _RESUME_REFUSAL_REASON_CODES[item.fingerprint]
+                                for item in resume_validation.decisions
+                                if item.action == ResumeAction.REFUSE
+                            }),
                             "resume_decisions": [
                                 item.to_dict() for item in resume_validation.decisions
                             ],
-                            "run_id": str(run_reference.get("run_id")),
+                            "run_id": prior_run_id,
                         }
-                    if current_ws_fp is None:
-                        # Not a git repo (or git unavailable) - there's no reliable way to
-                        # confirm the workspace hasn't changed since the checkpoint was
-                        # saved, so refuse rather than resume against an unverifiable state.
-                        drift_reasons.append("workspace is not a git repository, so drift can't be verified")
-                    elif candidate.get("workspace_fingerprint") != current_ws_fp:
-                        drift_reasons.append("workspace has changed (git HEAD/dirty-state differs)")
-                    # STATE-001 (2026-09-14): workspace_fingerprint above is
-                    # HEAD+dirty-BOOLEAN - it cannot distinguish two
-                    # different dirty working-tree contents at the same HEAD
-                    # (reproduced and permanently characterized by
-                    # test_checkpoint_workspace_fingerprint_cannot_
-                    # distinguish_two_different_dirty_states). This is the
-                    # REAL, content-sensitive check - required unconditionally
-                    # whenever workspace_fingerprint itself is present at all
-                    # (i.e. this is a real, non-legacy checkpoint); its own
-                    # absence means the checkpoint predates this fix and is
-                    # never silently treated as equivalent to a real match
-                    # (Task 10's own explicit instruction).
-                    if candidate.get("workspace_fingerprint") is not None:
-                        current_content_hash = compute_workspace_content_hash(workspace_path)
-                        stored_content_hash = candidate.get("workspace_content_hash")
-                        if stored_content_hash is None:
-                            drift_reasons.append(
-                                "checkpoint predates the working-tree-content identity check "
-                                "(legacy checkpoint) and is not safely resumable"
-                            )
-                        elif current_content_hash is None:
-                            drift_reasons.append(
-                                "workspace content identity could not be computed - failing closed"
-                            )
-                        elif current_content_hash != stored_content_hash:
-                            drift_reasons.append(
-                                "workspace content has changed (tracked/untracked content differs "
-                                "from the checkpoint)"
-                            )
-                    if candidate.get("config_fingerprint") != current_cfg_fp:
-                        drift_reasons.append("config has changed")
-                    if candidate.get("goal_fingerprint") != current_goal_fp:
-                        drift_reasons.append("goal/error text differs")
-                    # A3-P2: authorized_semantic_regions is NOT itself written
-                    # into or restored from a checkpoint (no field for it below)
-                    # - a checkpoint saved by a proposal-promoted run therefore
-                    # carries no evidence of the region boundary it was
-                    # executing under. Resuming it under a call that supplies
-                    # no regions (e.g. plain `generate --resume`, which knows
-                    # nothing about the proposal that started it) would
-                    # silently drop that boundary rather than honor or refuse
-                    # it - fail closed via the SAME drift-reasons/fresh-run
-                    # fallback already used for workspace/config/goal drift,
-                    # rather than inventing new resume semantics. See
-                    # proposal_promotion.py's own module docstring for the
-                    # complementary half (execute_approved_proposal() never
-                    # passes resume/resume_id at all).
-                    if candidate.get("had_authorized_semantic_regions") and not authorized_semantic_regions:
-                        drift_reasons.append(
-                            "checkpoint was saved with an authorized-semantic-region boundary "
-                            "that this resume call did not supply"
-                        )
-                    if drift_reasons:
+                    if resume_validation.status != ResumeStatus.OK:
+                        # PRD-008 S2: any invalidated stage still discards
+                        # the whole checkpoint; S3 narrows this to the
+                        # invalidated stages only.
                         logger.warning(
-                            f"Refusing to resume checkpoint '{target_id}': {'; '.join(drift_reasons)}. "
-                            "Starting a fresh run instead."
+                            f"Refusing to resume checkpoint '{target_id}' (invalidated stages: "
+                            f"{', '.join(resume_validation.invalidated_stages)}): "
+                            f"{'; '.join(resume_validation.mismatches)}. Starting a fresh run instead."
                         )
                     else:
                         run_id = target_id
@@ -1893,20 +1900,30 @@ class WorkflowEngine:
         checkpoint_content_hash = compute_workspace_content_hash(workspace_path)
         checkpoint_cfg_fp = compute_config_fingerprint(self.kernel.config.model_dump())
         checkpoint_goal_fp = hashlib.sha256(f"{goal}\x00{state.error_context or ''}".encode("utf-8")).hexdigest()
+        # PRD-008: the workspace fingerprint is fixed here for the same
+        # reason; the rest are recomputed per save (skills may be bootstrapped
+        # before planning, and the effective obligation ledger grows).
+        checkpoint_workspace_identity = workspace_fingerprint(workspace_path)
 
-        def _save_stage_checkpoint(stage: str, **extra: Any) -> None:
+        def _save_stage_checkpoint(
+            stage: str, *, effective_obligation_ledger: Any = None, **extra: Any,
+        ) -> None:
+            resume_fingerprints = _resume_fingerprints(
+                effective_obligation_ledger, workspace=checkpoint_workspace_identity,
+            )
             save_checkpoint(workspace_path, run_id, {
                 "stage": stage,
+                RESUME_FINGERPRINTS_KEY: fingerprint_block(resume_fingerprints),
                 "workspace_fingerprint": checkpoint_ws_fp,
                 "workspace_content_hash": checkpoint_content_hash,
                 "config_fingerprint": checkpoint_cfg_fp,
                 "goal_fingerprint": checkpoint_goal_fp,
                 "milestone_group_id": milestone_group_id,
                 "milestone_index": milestone_index,
-                # A3-P2 resume-safety marker - see the matching drift check
-                # above. A bare boolean, not the regions themselves: nothing
-                # resumes FROM this value, it only ever blocks an unsafe
-                # resume attempt that supplies none.
+                # A3-P2 marker, audit only since PRD-008: the resume check
+                # is now the authority_context fingerprint, which binds the
+                # regions themselves (a changed boundary, not only a
+                # dropped one, blocks reuse).
                 "had_authorized_semantic_regions": bool(authorized_semantic_regions),
                 # VAL-001 brownfield validation baselining - None for any
                 # checkpoint saved before baseline capture runs (the "plan"/
@@ -2980,6 +2997,7 @@ class WorkflowEngine:
                         logger.debug(f"Failed to snapshot '{filepath}' for checkpoint: {ex}")
                 _save_stage_checkpoint(
                     "candidate_gates_passed",
+                    effective_obligation_ledger=resolved_obligation_ledger,
                     plan=plan,
                     design=design,
                     final_files=final_files_for_checkpoint,
@@ -3947,6 +3965,7 @@ class WorkflowEngine:
                 # every required terminal gate has passed.
                 _save_stage_checkpoint(
                     "developer_success",
+                    effective_obligation_ledger=resolved_obligation_ledger,
                     plan=plan,
                     design=design,
                     final_files=final_files_for_checkpoint,

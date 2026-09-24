@@ -137,3 +137,71 @@ Lint (coding agent, run): `ruff check` on every touched/new file passes; `compil
 **S1 user verification (2026-09-24):** both S1 commands above all green after test-ordering fix e74f79d
 (`test_prune_never_removes_uncertain_or_unreadable_evidence...` planted bad evidence before its own commit; the
 batch correctly refused). S1 = 46d2a33 + e74f79d.
+
+### S2 - resume fingerprints and the single comparison path
+
+**New `kriya/workflow/resume_fingerprints.py`.** 13 fingerprints, each `{value | UNAVAILABLE, basis}`:
+`workspace` (git worktree content + HEAD), `config`, `goal` (goal, error context, supplementary/recovery
+context, execution scope, grounding goal, established files), `approved_plan` (predetermined plan/design/files,
+structured-plan hash, current subtask, completed subtasks), `input_obligation_ledger`,
+`effective_obligation_ledger`, `skills` (content of every skill source directory, taken from `SkillEngine`'s
+own `skills_dirs`; staged rules and bytecode excluded), `model_runtime` (UNAVAILABLE until PRD-013),
+`containment`, `toolchain` (UNAVAILABLE until PRD-011), `verification_policy` (config plus the run's
+verification arguments), `authority_context` (allowed write paths, semantic regions without their audit-only
+`source`, write-scope mode, protected file), `kriya_runtime` (every package source file, not bytecode, plus the
+distribution version; computed once per process).
+
+**Config ownership.** `CONFIG_FIELD_OWNERS` gives model identity (`llm.provider/model/base_url/api_key`,
+`llm_chain`, `agent_llms`), containment and verification-policy fields to their own fingerprints; every other
+field, including any added later, stays in `config` (fail closed). Tests assert every owned path exists and
+every leaf lands in exactly one bucket. The name is `config`, not "effective config": PRD-007's
+`RunRecord.effective_config_fingerprint` remains the full-config hash, unchanged.
+
+**Dependency matrix.** `ARTIFACT_DEPENDENCIES` (artifact -> stage + fingerprints) is the single source;
+`RESUME_INVALIDATION_MATRIX` entries for the fingerprints are derived from it. Reused artifacts are read from
+checkpoint VALUES (`_save_stage_checkpoint` always writes the baseline keys, usually None). NOT_APPLICABLE
+exists only when no reused artifact depends on a fingerprint; a missing/UNAVAILABLE value on either side, or
+different bases, is UNVERIFIED and invalidates like CHANGED. `model_runtime` invalidates only `model_protocol`,
+which no checkpoint reuses today (model_hops are trace-only), so a model change never blocks a plan resume.
+`kriya_runtime` is a dependency of every artifact: a different Kriya build reuses nothing.
+
+**One comparison path.** workflow.py's inline drift block is gone; the checkpoint is judged only by
+`validate_resume_against_reality(current_resume_fingerprints=...)`. Both validation and `_save_stage_checkpoint`
+build fingerprints through `generation_resume_fingerprints()` (same argument names and defaults as
+`run_generation_workflow`), so they cannot diverge; test seeding helpers call it too. The flat-key loop
+(`config_fingerprint`, `skills_fingerprint`, ...), which skipped any key absent on either side, is retired.
+The authorized-semantic-region check is now `authority_context`: a CHANGED boundary blocks reuse, not only a
+dropped one. A REFUSED payload's `reason_codes` are derived from the decisions.
+
+**Missing run record.** A checkpoint (or, in enforce mode, the persisted ControlState via new
+`load_control_state_run_reference`) whose referenced RunRecord no longer exists produces a
+`run_record_provenance` decision invalidating every stage (was: check skipped, fail open). INVALIDATE, not
+REFUSE: the S1 workspace gate has already established nothing is pending, and REFUSE would strand the
+checkpoint. Enforce resume now passes the prior RunRecord to the validator. Retention now also protects the
+run the ControlState references (otherwise pruning would itself cause that invalidation).
+
+**Behaviour in S2 (intermediate).** Any invalidated stage still discards the whole checkpoint (fresh run);
+S3 narrows this to the invalidated stages. Consequence: a candidate-stage checkpoint is never reused in S2,
+because candidate-gate outcomes depend on the UNVERIFIED toolchain. The enforce ControlState path gains the
+run-record check only; its "nothing reused" decision is S3 (note: completed->pending reset at wc ~6254 is in
+the `try` body, so a crash can leave sandbox-only "completed" states; S3 closes it).
+
+**Intended test semantic changes.** `test_workflow.py::test_workflow_resumes_from_candidate_gates_checkpoint_
+but_still_runs_regression` -> `test_workflow_candidate_checkpoint_not_reused_while_toolchain_unverified` (S3
+flips it again). `test_resume_integrity.py`: flat-key parametrized/matching tests ported to the fingerprint
+block; `test_legacy_checkpoint_without_new_optional_fingerprints_remains_loadable` replaced by
+`..._is_unverified_not_resumable` plus a no-request test. Seeding helpers in test_workflow.py and
+test_proposal_promotion.py now add the production fingerprint block; the two region tests seed their regions.
+New: `tests/test_prd008_resume_fingerprints.py`; `test_workflow_controller_enforce.py::
+test_enforce_resume_skips_nothing_when_the_control_state_run_record_is_gone`.
+
+**S2 verification commands (user runs):**
+```bash
+.venv/bin/pytest tests/test_prd008_resume_fingerprints.py tests/test_resume_integrity.py -ra
+.venv/bin/pytest tests/test_workflow.py -k "resume or checkpoint" tests/test_proposal_promotion.py \
+  tests/test_workflow_controller_enforce.py tests/test_state001_checkpoint_workspace_identity.py \
+  tests/test_checkpoint_control_plane_hashes.py tests/test_control_plane_end_to_end.py \
+  tests/test_prd007_run_lifecycle.py tests/test_prd008_commit_state_gate.py tests/test_milestones.py -ra
+```
+Lint (coding agent, run): `ruff check` clean on new files; no new findings on touched files (pre-existing
+F401/I001 only). One non-pytest smoke script confirmed a plan-stage resume end to end (3 model calls).

@@ -18,9 +18,21 @@ import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
+from kriya.workflow.resume_fingerprints import (
+    CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
+)
+from kriya.workflow.resume_fingerprints import (
+    FINGERPRINT_NAMES,
+    STAGE_ORDER,
+    Fingerprint,
+    FingerprintComparison,
+    compare_resume_fingerprints,
+    invalidated_stages_for,
+    reused_artifacts_for_checkpoint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -388,15 +400,14 @@ RESUME_INVALIDATION_MATRIX = {
     "control_state_hash": (ResumeAction.INVALIDATE, ("planning", "candidate", "verification")),
     "contract_hash": (ResumeAction.INVALIDATE, ("planning", "candidate", "verification")),
     "artifact_registry_hash": (ResumeAction.INVALIDATE, ("context", "candidate", "verification")),
-    "config_fingerprint": (ResumeAction.INVALIDATE, ("planning", "candidate", "verification")),
-    "goal_fingerprint": (ResumeAction.INVALIDATE, ("planning", "candidate", "verification")),
-    "approved_plan_hash": (ResumeAction.INVALIDATE, ("candidate", "verification")),
-    "obligation_ledger_hash": (ResumeAction.INVALIDATE, ("candidate", "verification")),
-    "skills_fingerprint": (ResumeAction.INVALIDATE, ("planning", "candidate", "verification")),
-    "model_runtime_fingerprint": (ResumeAction.INVALIDATE, ("model_protocol", "candidate", "verification")),
-    "containment_fingerprint": (ResumeAction.INVALIDATE, ("verification",)),
-    "toolchain_fingerprint": (ResumeAction.INVALIDATE, ("verification",)),
-    "verification_policy_fingerprint": (ResumeAction.INVALIDATE, ("verification",)),
+    # PRD-008: the resume fingerprints. Stages are derived from the
+    # reused-artifact dependency matrix (resume_fingerprints.py), never
+    # restated here.
+    **{name: (ResumeAction.INVALIDATE, invalidated_stages_for(name)) for name in FINGERPRINT_NAMES},
+    # A checkpoint whose run record is gone cannot prove where it came
+    # from; the workspace-wide commit gate already ran, so nothing unsafe
+    # is pending, but nothing from this checkpoint is reused either.
+    "run_record_provenance": (ResumeAction.INVALIDATE, STAGE_ORDER),
     "commit_state": (ResumeAction.REFUSE, ("mutation_authority", "candidate", "verification")),
 }
 
@@ -422,6 +433,12 @@ class ResumeValidationResult:
     status: ResumeStatus
     mismatches: Tuple[str, ...] = ()
     decisions: Tuple[ResumeDecision, ...] = ()
+    fingerprint_comparisons: Tuple[FingerprintComparison, ...] = ()
+
+    @property
+    def invalidated_stages(self) -> Tuple[str, ...]:
+        stages = {stage for item in self.decisions for stage in item.invalidated_stages}
+        return tuple(stage for stage in STAGE_ORDER if stage in stages)
 
 
 def validate_resume_against_reality(
@@ -430,9 +447,11 @@ def validate_resume_against_reality(
     control_state: Optional[Any] = None,
     contract_registry: Optional[Any] = None,
     artifact_registry: Optional[Any] = None,
-    current_fingerprints: Optional[Dict[str, Any]] = None,
+    current_resume_fingerprints: Optional[Mapping[str, Fingerprint]] = None,
+    reused_artifacts: Optional[Iterable[str]] = None,
     run_record: Optional[Any] = None,
     run_record_error: Optional[str] = None,
+    run_record_missing: Optional[str] = None,
 ) -> ResumeValidationResult:
     """Section 30's flow: validate checkpoint commit -> validate tree hash
     -> validate control-state hash -> validate contract/artifact registry
@@ -459,7 +478,20 @@ def validate_resume_against_reality(
     (committed-tree-only) drift signal. Task 10's own explicit instruction:
     such a checkpoint is not safely resumable and must fail closed with an
     explicit reason, never silently accepted under the weaker guarantee
-    it was actually saved with."""
+    it was actually saved with.
+
+    PRD-008 resume fingerprints: when the caller supplies
+    ``current_resume_fingerprints`` the checkpoint's stored block is compared
+    fingerprint by fingerprint (resume_fingerprints.py). Which fingerprints
+    apply follows from the artifacts the resume reuses (``reused_artifacts``,
+    or those derived from the checkpoint itself); an applicable fingerprint
+    that is missing or UNAVAILABLE on either side is UNVERIFIED and
+    invalidates like a change. The earlier flat-key comparison, which
+    skipped any fingerprint absent on either side, is gone.
+
+    ``run_record_missing`` names a run the checkpoint references whose
+    record no longer exists: its provenance is unknown, so nothing from the
+    checkpoint is reused."""
 
     mismatches: List[str] = []
     decisions: List[ResumeDecision] = []
@@ -526,18 +558,23 @@ def validate_resume_against_reality(
         if current != stored_artifact_hash:
             mismatch("artifact_registry_hash", "artifact_registry_hash mismatch")
 
-    for fingerprint in (
-        "config_fingerprint", "goal_fingerprint", "approved_plan_hash",
-        "obligation_ledger_hash", "skills_fingerprint", "model_runtime_fingerprint",
-        "containment_fingerprint", "toolchain_fingerprint",
-        "verification_policy_fingerprint",
-    ):
-        stored = checkpoint_data.get(fingerprint)
-        if stored is None or current_fingerprints is None or fingerprint not in current_fingerprints:
-            continue
-        current = current_fingerprints[fingerprint]
-        if current != stored:
-            mismatch(fingerprint, f"{fingerprint}: checkpoint={stored!r} current={current!r}")
+    comparisons: Tuple[FingerprintComparison, ...] = ()
+    if current_resume_fingerprints is not None:
+        comparisons = compare_resume_fingerprints(
+            checkpoint_data.get(RESUME_FINGERPRINTS_KEY),
+            current_resume_fingerprints,
+            reused_artifacts if reused_artifacts is not None
+            else reused_artifacts_for_checkpoint(checkpoint_data),
+        )
+        for item in comparisons:
+            if item.invalidates:
+                mismatch(item.name, f"{item.name} {item.status.value}: {item.reason}")
+
+    if run_record_missing is not None:
+        mismatch(
+            "run_record_provenance",
+            f"run_record_provenance: referenced run record {run_record_missing!r} no longer exists",
+        )
 
     if run_record_error is not None:
         # A referenced record that exists but cannot be read may be the only
@@ -563,4 +600,5 @@ def validate_resume_against_reality(
     )
     return ResumeValidationResult(
         status=status, mismatches=tuple(mismatches), decisions=tuple(decisions),
+        fingerprint_comparisons=comparisons,
     )

@@ -10,7 +10,8 @@ would read "no evidence" as "never started".)
 Protected run records:
   * non-terminal records (a crashed run's record stays for `kriya runs recover`);
   * records whose commit state is unknown (unsettled or UNCERTAIN cycle);
-  * records a resume checkpoint still references;
+  * records a resume checkpoint, or the persisted ControlState (enforce
+    resume), still references;
   * records the caller names (its own run);
   * the newest ``keep_terminal_runs`` terminal records.
 
@@ -32,7 +33,11 @@ import os
 from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Set
 
-from kriya.control.persistence import run_record_path, scan_run_records
+from kriya.control.persistence import (
+    load_control_state_run_reference,
+    run_record_path,
+    scan_run_records,
+)
 from kriya.workflow.checkpoint import list_checkpoint_run_references
 from kriya.workflow.edit_safety import CommitState, list_commit_evidence
 
@@ -79,6 +84,9 @@ def prune_run_state(
         return report
 
     protected: Set[str] = set(protect_run_ids) | set(list_checkpoint_run_references(workspace_path))
+    control_state_run = load_control_state_run_reference(workspace_path)
+    if control_state_run is not None:
+        protected.add(control_state_run)
     terminal = []
     for record in scan.records:
         if not record.terminal or record.commit_state_unknown:

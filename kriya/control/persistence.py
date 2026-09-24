@@ -280,6 +280,20 @@ def load_control_state(workspace_path: str) -> Optional[ControlState]:
         return None
 
 
+def load_control_state_run_reference(workspace_path: str) -> Optional[str]:
+    """The run id whose RunRecord the persisted ControlState was derived
+    under (``_run_record``), or None when there is none. PRD-008: enforce
+    resume checks that record, and retention protects it."""
+    try:
+        data = _load_json_document(control_state_path(workspace_path), workspace_path)
+    except WorkspaceOwnershipError:
+        return None
+    reference = (data or {}).get("_run_record")
+    if isinstance(reference, dict) and isinstance(reference.get("run_id"), str):
+        return reference["run_id"]
+    return None
+
+
 def save_contract_registry(workspace_path: str, registry: ContractRegistry) -> None:
     _save_json_document(workspace_path, contract_registry_path(workspace_path), registry.to_dict())
 

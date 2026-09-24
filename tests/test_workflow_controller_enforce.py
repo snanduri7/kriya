@@ -6392,6 +6392,40 @@ async def test_enforce_resume_skips_every_subtask_when_the_whole_plan_already_co
 
 
 @pytest.mark.asyncio
+async def test_enforce_resume_skips_nothing_when_the_control_state_run_record_is_gone(tmp_path):
+    """PRD-008: the persisted ControlState was derived under one run's
+    record; if that record no longer exists its provenance is unknown, so
+    no recorded completion is trusted (before, a missing record was never
+    checked at all)."""
+    from kriya.control.persistence import load_control_state_run_reference, run_record_path
+
+    _init_git_repo(tmp_path)
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append(kwargs["goal"])
+        path = "b.py" if "'s2'" in kwargs["goal"] else "a.py"
+        (tmp_path / path).write_text(f"# {path}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        controller = WorkflowController(we)
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+        assert len(calls) == 2
+        owner = load_control_state_run_reference(str(tmp_path))
+        assert owner is not None
+        os.remove(run_record_path(str(tmp_path), owner))
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce", resume=True)
+
+    assert len(calls) == 4, "both subtasks must run again - nothing recorded may be reused"
+
+
+@pytest.mark.asyncio
 async def test_enforce_resume_skips_only_the_subtasks_already_completed(tmp_path):
     """Subtask 2 failed on the first attempt (never got to run) - a resume
     must skip s1 (real) and still execute s2 for real."""

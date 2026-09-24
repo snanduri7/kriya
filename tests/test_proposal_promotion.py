@@ -52,6 +52,13 @@ from kriya.workflow.proposal_store import (
     persist_proposal,
     reject_proposal,
 )
+from kriya.workflow.resume_fingerprints import (
+    CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
+)
+from kriya.workflow.resume_fingerprints import (
+    fingerprint_block,
+    generation_resume_fingerprints,
+)
 from kriya.workflow.review_context import (
     AdjudicatedFinding,
     StructuredFinding,
@@ -151,14 +158,19 @@ def _init_git_repo(tmp_path):
     subprocess.run(["git", "commit", "-q", "-m", "initial"], cwd=tmp_path, check=True)
 
 
-def _seed_checkpoint(tmp_path, cfg, goal, run_id, stage, **extra):
+def _seed_checkpoint(tmp_path, cfg, goal, run_id, stage, fingerprint_inputs=None, **extra):
     # STATE-001 (2026-09-14): workspace_content_hash is required alongside
     # workspace_fingerprint - its own absence is treated as a legacy/pre-fix
     # checkpoint and fails closed (see run_generation_workflow's own
     # resume-check block). Every test in this file seeding a checkpoint it
     # expects to RESUME needs this present and accurate.
+    # PRD-008: plus the resume fingerprints the workflow itself would have
+    # saved for run_generation_workflow(goal=goal, **fingerprint_inputs).
     save_checkpoint(str(tmp_path), run_id, {
         "stage": stage,
+        RESUME_FINGERPRINTS_KEY: fingerprint_block(generation_resume_fingerprints(
+            cfg, str(tmp_path), goal=goal, **(fingerprint_inputs or {}),
+        )),
         "workspace_fingerprint": compute_workspace_fingerprint(str(tmp_path)),
         "workspace_content_hash": compute_workspace_content_hash(str(tmp_path)),
         "config_fingerprint": compute_config_fingerprint(cfg.model_dump()),
@@ -873,7 +885,8 @@ def test_resume_fails_closed_when_region_bound_checkpoint_resumed_without_region
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     _seed_checkpoint(tmp_path, cfg, "Create math library", "ckpt-region", "plan",
-                      plan="Stale plan", had_authorized_semantic_regions=True)
+                      plan="Stale plan", had_authorized_semantic_regions=True,
+                      fingerprint_inputs={"authorized_semantic_regions": FAKE_UNRELATED_REGION})
     llm.complete = AsyncMock(side_effect=[
         "Step 1: Write code", "Design: Write math.py",
         "def add(a,b):\n    return a+b", "Review: Approved",
@@ -896,7 +909,8 @@ def test_resume_succeeds_when_regions_supplied_on_resume_call_too(tmp_path):
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     _seed_checkpoint(tmp_path, cfg, "Create math library", "ckpt-region2", "plan",
-                      plan="Step 1: Write code", had_authorized_semantic_regions=True)
+                      plan="Step 1: Write code", had_authorized_semantic_regions=True,
+                      fingerprint_inputs={"authorized_semantic_regions": FAKE_UNRELATED_REGION})
     llm.complete = AsyncMock(side_effect=[
         "Design: Write math.py", "def add(a,b):\n    return a+b", "Review: Approved",
     ])
