@@ -147,7 +147,21 @@ a concurrent writer in between is a `FileRevisionConflict`, not a lost update; a
 overwritten as if absent. `kriya tools execute` records `DIRECT_TOOL_EXECUTION` (success or failure), never a
 commit.
 
+**Review fixes before hand-off (same day).** (1) SUCCESS no longer requires the lifecycle to sit at COMMITTED:
+a later stage that changes nothing (final milestone integration pass) moves the record to CANDIDATE, and the run
+still succeeds when its LAST cycle committed - the derived summary is the rule. (2) The controller's commit
+transaction id is now unique per cycle (`<run_id>-<12 hex>`), not `run_id`, which nested executes share and
+resume/trace overrides reuse; one commit-evidence file only ever describes one transaction. (3) A stage marker
+can no longer set `commit_result`/`terminal_status`. (4) `STORE_CLASSIFICATION` is honest: traces.db,
+milestone run state, the proposal store and knowledge staging are `independent` (not stamped, never consulted
+for lifecycle truth), not "derived".
+
 **Accepted limitations (disclosed).**
+- The single-read compare-and-swap detects a writer that changed the record since that read; the
+  revision-grounded write itself re-reads then replaces, so the cross-process guarantee rests on the workspace
+  run lock (only the owning run writes its record).
+- Run records are never pruned and every enforce run scans all of them. Pruning is unsafe while any record may
+  hold an unsettled cycle; it is deferred to PRD-008's settlement/recovery work.
 - A record whose commit cycle is unsettled/uncertain (crash between intent and result, or a failed write of the
   COMMITTED result) blocks enforce runs in that workspace until settled. Settling from the commit evidence and an
   operator recovery command are PRD-008's scope; until then the stricter gate blocks more often, by design.

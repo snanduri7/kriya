@@ -177,8 +177,10 @@ def save_run_record(
 
     The expected record revision and the file's content revision come from
     the same read, and the write is revision-grounded on that content, so a
-    concurrent writer between the check and the write is a conflict, never a
-    lost update."""
+    writer that changed the record since that read is detected as a
+    FileRevisionConflict. The revision-grounded write itself re-reads and
+    then replaces, so the cross-process guarantee rests on the workspace run
+    lock (only the owning run writes its record), not on this check alone."""
     current, file_revision = _read_run_record(workspace_path, record.run_id)
     actual_revision = current.revision if current is not None else None
     if actual_revision != expected_revision:

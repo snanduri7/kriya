@@ -84,8 +84,9 @@ _ANNOTATABLE_FIELDS = frozenset({
     "retry_counters",
 })
 
-# Requirement 2: every persistent store is either authoritative for its own
-# content or derived from a RunRecord revision. Derived stores stamp
+# Requirement 2: every persistent store is authoritative for its own content,
+# derived from a RunRecord revision, or independent of run lifecycle (never
+# consulted for lifecycle/commit truth, so not stamped). Derived stores stamp
 # ``_run_record: {classification, run_id, revision}`` on every write
 # (kriya/control/persistence.py, kriya/control/decisions.py,
 # kriya/workflow/checkpoint.py), so each identifies the revision it derives from.
@@ -98,7 +99,12 @@ STORE_CLASSIFICATION: Dict[str, str] = {
     "artifact_registry": "derived",
     "decision_ledger": "derived",
     "checkpoint": "derived",
-    "trace": "derived (observability only, never consulted for lifecycle)",
+    # Not stamped with a RunRecord revision, and never consulted for run
+    # lifecycle or commit truth:
+    "trace": "independent observability (traces.db, keyed by trace run_id)",
+    "milestone_run_state": "independent (milestone plan progress, .kriya/milestones)",
+    "proposal_store": "independent (review proposals, outside run lifecycle)",
+    "knowledge_staging": "independent (staged lessons/skills awaiting approval)",
 }
 
 
@@ -221,6 +227,8 @@ class RunRecord:
             raise self._refuse(state)
         if state == RunLifecycle.SUCCESS:
             return self._terminate(state, **updates)
+        if {"commit_result", "terminal_status"} & set(updates):
+            raise IllegalRunTransitionError("a stage marker cannot set commit_result/terminal_status")
         return self._advance(state, **updates)
 
     def _terminate(self, state: RunLifecycle, **updates: Any) -> "RunRecord":
@@ -228,10 +236,11 @@ class RunRecord:
         explicit = updates.pop("commit_result", None)
         terminal_status = updates.pop("terminal_status", None) or state.value
         if state == RunLifecycle.SUCCESS:
+            # Stage markers may move the record past COMMITTED (a later
+            # milestone that changed nothing); what matters is that the LAST
+            # cycle committed, which the derived summary already proves.
             if self.unsettled_commits or derived not in (COMMIT_COMMITTED, COMMIT_NONE):
                 raise self._refuse(state, f"commit result is {derived}")
-            if self.commits and self.lifecycle_state != RunLifecycle.COMMITTED:
-                raise self._refuse(state, "last commit cycle did not commit")
             # Without any commit cycle the caller may say precisely why
             # (e.g. a direct tool write); it can never claim COMMITTED.
             result = explicit if (explicit and not self.commits) else derived

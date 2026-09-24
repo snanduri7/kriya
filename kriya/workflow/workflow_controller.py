@@ -76,6 +76,7 @@ import logging
 import os
 import re
 import shutil
+import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -6092,13 +6093,18 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     "workspace_state": "UNCHANGED", "error": str(error),
                 }
             ledger_revision, ledger_hash = obligation_ledger.fingerprint()
+            # Unique per cycle: run_id is shared by nested executes (the
+            # outer run's id) and reused by resume/trace overrides, and one
+            # commit-evidence file must only ever describe one transaction.
+            run_prefix = re.sub(r"[^A-Za-z0-9_-]", "", run_id).lstrip("-_")[:100] or "run"
+            transaction_id = f"{run_prefix}-{uuid.uuid4().hex[:12]}"
             outcome = commit_terminal_candidate(
-                terminal_writes, workspace_path=workspace_path, transaction_id=run_id,
+                terminal_writes, workspace_path=workspace_path, transaction_id=transaction_id,
                 evidence={
                     "approved_plan_hash": current_plan_hash,
                     "obligation_ledger_revision": ledger_revision,
                     "obligation_ledger_hash": ledger_hash,
-                    "verification_evidence_ids": [f"commit:{run_id}"],
+                    "verification_evidence_ids": [f"commit:{transaction_id}"],
                 },
             )
             if not outcome.committed:

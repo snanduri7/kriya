@@ -34,6 +34,7 @@ from kriya.control.run_coordinator import (
     begin_mutating_run,
     coordinated_mutation,
     current_run_context,
+    mark_run_stage,
     transition_mutating_run,
 )
 from kriya.control.run_record import (
@@ -175,6 +176,12 @@ def test_several_commit_cycles_summarize_truthfully():
         first.begin_commit("m1", intent="A", candidate_hash="h1")
 
 
+def test_stage_marker_cannot_rewrite_the_current_cycle_result():
+    rolled_back = _running().begin_commit("tx", intent="A", candidate_hash=None).settle_commit("ROLLED_BACK")
+    with pytest.raises(IllegalRunTransitionError, match="stage marker"):
+        rolled_back.transition(RunLifecycle.VERIFYING, commit_result="COMMITTED")
+
+
 def test_annotate_cannot_touch_lifecycle_or_commit_state():
     for field_name in ("lifecycle_state", "commit_result", "commits", "commit_intent", "revision"):
         with pytest.raises(IllegalRunTransitionError):
@@ -296,6 +303,10 @@ def test_nested_real_workspace_commits_are_each_recorded_candidate_commits_are_n
         outcomes.append(await milestone(workspace_path=str(sandbox), content="sb\n", transaction_id="sb"))
         outcomes.append(await milestone(workspace_path=workspace_path, content="v2\n", transaction_id="m2"))
         assert all(outcome.committed for outcome in outcomes)
+        # A later stage that changes nothing (e.g. the final integration
+        # pass) moves the record off COMMITTED; the run still succeeded.
+        mark_run_stage(workspace_path, RunLifecycle.CANDIDATE)
+        assert current_run_context()._lease.record.lifecycle_state == RunLifecycle.CANDIDATE
         return {"status": "success", "quality_gates_passed": True}
 
     asyncio.run(sequence(workspace_path=str(workspace)))
@@ -521,16 +532,17 @@ async def test_enforce_controller_run_records_real_stages_and_evidence(tmp_path)
     ]
     [record] = list_run_records(str(repo))
     [cycle] = record.commits
-    assert cycle["transaction_id"] == result.run_id and cycle["result"] == "COMMITTED"
+    assert cycle["transaction_id"].startswith(result.run_id + "-") and cycle["result"] == "COMMITTED"
+    assert cycle["transaction_id"] == result.legacy_result["commit_evidence"]["transaction_id"]
     assert record.commit_result == "COMMITTED"
     assert record.approved_plan_hash == plan.content_hash()
     assert record.candidate_hash and cycle["candidate_hash"] == record.candidate_hash
     assert record.obligation_ledger_hash and record.obligation_ledger_revision is not None
-    assert record.verification_evidence_ids == [f"commit:{result.run_id}"]
+    assert record.verification_evidence_ids == [f"commit:{cycle['transaction_id']}"]
     assert record.goal_hash
     # Runtime model digests belong to PRD-013/014; empty means unverified.
     assert record.model_runtime_fingerprint_ids == []
-    assert commit_state_for_transaction(str(repo), result.run_id) is CommitState.COMMITTED
+    assert commit_state_for_transaction(str(repo), cycle["transaction_id"]) is CommitState.COMMITTED
 
 
 @pytest.mark.asyncio

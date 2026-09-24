@@ -154,7 +154,9 @@ async def test_real_concurrent_edit_between_gates_and_commit_is_structured_confl
     assert record.commit_intent == "APPLY_VERIFIED_CANDIDATE"
     assert record.commit_result in ("NOT_COMMITTED", "ROLLED_BACK")
     [cycle] = record.commits
-    assert cycle["transaction_id"] == result.run_id
+    # One unique transaction per cycle, correlated with the failure payload.
+    assert cycle["transaction_id"] == legacy["workspace_commit_failure"]["commit_transaction_id"]
+    assert cycle["transaction_id"].startswith(result.run_id + "-")
     assert cycle["result"] == record.commit_result
 
 
@@ -220,7 +222,8 @@ async def test_uncertain_commit_is_recorded_uncertain_and_candidate_retained(tmp
     record = _only_run_record(tmp_path)
     assert record.lifecycle_state == RunLifecycle.UNCERTAIN
     assert record.commit_result == "UNCERTAIN"
-    assert record.commit_transaction_id == result.run_id
+    assert record.commit_transaction_id == failure["commit_transaction_id"]
+    assert record.commits[-1]["result"] == "UNCERTAIN"
 
 
 @pytest.mark.asyncio
@@ -263,4 +266,4 @@ async def test_run_record_failure_after_successful_commit_is_persistence_error_n
     # so it can never be read as "nothing happened" - it ends UNCERTAIN.
     record = _only_run_record(tmp_path)
     assert record.lifecycle_state == RunLifecycle.UNCERTAIN
-    assert record.commits[0]["transaction_id"] == result.run_id
+    assert record.commits[0]["transaction_id"] == legacy["commit_evidence"]["transaction_id"]
