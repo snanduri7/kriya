@@ -1,7 +1,7 @@
 # PRD-010 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION
+READY_FOR_PYTEST_VERIFICATION (reopened; see "Reopen - independent review closure" below; batch PRD-009 + PRD-010)
 
 ## Source identity
 - Base revision: `d5d8ec5` in the target checkout (PRD-009 verified; tree-equivalent coding checkout revision `003099b`).
@@ -111,3 +111,129 @@ After pytest passes, run the live command above and, with Docker available, reru
 ```
 
 Record pytest in `handover/PRD-010_PYTEST_VERIFICATION.md` and real-environment evidence in `handover/PRD-010_LIVE_VERIFICATION.md`.
+
+
+## Reopen - independent review closure (2026-09-25)
+
+**Read this first: `production_ready` is now always `false`, by design, until PRD-013/014.**
+
+The review requires `model.runtime_fingerprint` to fail closed as UNAVAILABLE until an exact-runtime qualification
+binding exists, and a model name is not a qualification. So both model-binding checks are required UNAVAILABLE on every
+deployment today. On a fully healthy machine they are the only blockers; a test pins exactly that set. This is the
+intended PRD-010 outcome, not a regression.
+
+Source: `handover/PRD-001_011_INDEPENDENT_REVIEW.md` (PRD-010: partial). Implemented at `d22cb8e`, after the PRD-009
+reopen `3fb4749`.
+
+### Findings and resolutions
+| Finding | Resolution |
+|---|---|
+| `runtime.fixed_guarantees` is required and always PASSes | Derived from the checks that verify each guarantee (`FIXED_GUARANTEE_EVIDENCE`); its status is the worst of theirs. `candidate_isolation_fail_closed` comes from `git.worktree` and `isolation.candidate_worktree`. `checkpoint_persistence` comes from `persistence.checkpoints`. `trace_persistence` comes from `persistence.traces`. `no_uncontained_host_fallback` comes from `containment.no_host_fallback` and `containment.oci_smoke`. A mapping/guarantee mismatch is a FAIL. |
+| `toolchain.required` uses host `which` and `sys.executable` | The stack comes from `PolymorphicValidator` and the identity from the PRD-011 resolver. The versioned image is attested in place with `allow_pull=False`. An absent image is UNAVAILABLE with a `docker pull <image>` remediation. An unsupported declared toolchain (e.g. Java 11) is a FAIL. An unattested Gradle build tool is a visible WARN (a PRD-011 residual, not claimed). A workspace with no detectable stack is a WARN. |
+| `containment.oci_smoke` is a raw `docker run debian` | Runs through `resolve_containment_backend(cfg.autonomy.containment_backend)` and `ProcessController.run` (the one spawn point) on a scratch directory, using the attested toolchain image when there is one. The image must already be present (`docker run` would pull it). |
+| `model.qualification` is name-based | A campaign model name is UNAVAILABLE `RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE`, with `name_based_profile_is_authority: false`. An uncampaigned model is FAIL `MODEL_NOT_QUALIFIED`. |
+| `model.runtime_fingerprint` only checks existence | Always UNAVAILABLE. A computed fingerprint is kept as evidence (`RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE`); otherwise the reason is `RUNTIME_FINGERPRINT_NOT_COMPUTABLE`. |
+| Unwrapped exceptions crash `--json` | Checks are table-driven (`_CHECKS`). `_run_check` turns any exception, or a result with the wrong ID or required flag, into that row's own FAIL (required) or WARN (optional) with `CHECK_RAISED`. The report always carries `PRODUCTION_DOCTOR_CHECK_IDS`. If config load fails, `doctor --production [--json]` emits one `config.load` FAIL. Plain `doctor` keeps its old stderr and exit-1 behaviour. |
+| The doctor takes the real run lock and creates `.kriya/checkpoints` | The lock is probed with `probe_run_lock`, which is read-only, and a holder is FAIL with `held_by`. `_store_probe` writes a transient fsynced (flocked, for the lock store) file only inside an already-existing directory. Otherwise it checks write access on the nearest existing ancestor and reports `created_on_first_use_under`. A test proves a fresh workspace holds only `.git` after a run. |
+| `egress.policy` doesn't check `llm.base_url` locality | Every model endpoint must pass `is_local_url`: `llm`, `embedding`, each `llm_chain` entry, and each `agent_llms` role `llm` and `llm_chain` entry. |
+| PRD-009's precision-boundary report is missing | `semantic.precision_boundary`: optional, always WARN, with the scope taken from `SEMANTIC_REGION_SUPPORTED_SCOPE`. |
+
+### Finding made while fixing: the old smoke certified something production never has
+The old smoke started its own container with `--read-only` and asserted `test ! -w /`. Production containment
+(`OCIContainmentBackend.prepare`) never passes `--read-only`, so the doctor certified a property the real runtime lacks.
+That is false assurance, fixed locally.
+
+The smoke now asserts only what the backend enforces for a DENIED profile:
+- zero IPv4 routes;
+- no non-loopback IPv6 routes;
+- no non-loopback interface up;
+- `CapEff` equal to 0;
+- `NoNewPrivs` equal to 1;
+- no leftover `kriya-oci-*` container.
+
+"Only `lo` exists" was also wrong: a `--network none` namespace still lists the kernel's always-down fallback tunnel
+devices (gre0, sit0, tunl0, ...). This was found on the real Docker run. The backend was **not** changed; adding
+`--read-only` would alter a security boundary, which is out of scope. The renamed Docker test
+`test_real_oci_containment_smoke_proves_network_capabilities_and_cleanup` replaces
+`..._has_network_and_root_filesystem_closed`. `test_real_smoke_assertions_detect_an_uncontained_container` proves the
+script really discriminates.
+
+### Check IDs (pinned; the ordered tuple is `PRODUCTION_DOCTOR_CHECK_IDS`)
+- Added: `isolation.candidate_worktree`, `containment.no_host_fallback`, `semantic.precision_boundary`, and `config.load`
+  (only in the config-failure report).
+- Unchanged: the original 19.
+
+### Test changes (direction)
+Nothing weakened. Old assertions changed as follows:
+- **Stricter or reshaped to the new truth:**
+  - "all required pass, `production_ready` True" became "blocked only by the two model-binding checks".
+  - The model-qualification PASS became UNAVAILABLE, with the name recorded as non-authority.
+  - The lock-contention test now holds a **real** lock instead of mocking `acquire_run_lock`.
+  - The host-`which` toolchain test became image resolution, attestation and a no-pull assertion.
+- **New tests:**
+  - every check raising;
+  - per-check exception confinement (capability profile, validator, lock probe);
+  - no mutation;
+  - a guarantee derived to FAIL;
+  - two ways to weaken host fallback;
+  - non-local `llm`, `embedding` and `llm_chain` endpoints;
+  - precision boundary;
+  - config-load JSON, and plain doctor on config-load failure;
+  - the two real-Docker tests.
+
+The live test is renamed to `test_production_doctor_fingerprints_the_real_runtime_and_withholds_name_based_qualification`.
+It asserts a stable 64-character fingerprint computed twice from the real runtime, and that the doctor reports both
+model checks UNAVAILABLE with that fingerprint as evidence.
+
+### Coding-agent checks (not pytest)
+- **Real doctor run on this machine, Docker available:**
+  - Maven/JDK17 workspace: `toolchain.required` PASS (image digest attested, Maven 3.9 observed); `containment.oci_smoke` PASS; `runtime.fixed_guarantees` PASS; only the two model checks block.
+  - Afterwards, the workspace held only `.git` and `pom.xml`, and zero `kriya-oci-*` containers remained.
+- **Plain-Python runner (the scratchpad script, not pytest):**
+  - `test_production_doctor` 45/0, including both real-Docker tests;
+  - `test_doctor_command` 8/0;
+  - `test_bootstrap_contract` 18/0.
+- **Live test, plain runner, against local Ollama `qwen3-coder:30b`:** 1/0. This is coding-agent evidence only; the live verifier still owns it.
+- **Static:**
+  - `typing.get_type_hints` resolves every function and class in `production_doctor.py` and `config.py`;
+  - ruff F821 is clean on `kriya/` and `plugins/`;
+  - compileall and `git diff --check` are clean.
+
+### Known residuals
+- `production_ready` stays false until PRD-013/014 (above).
+- PRD-011 (next batch) still has these open, and the doctor reports them honestly rather than working around them:
+  - the `tomllib` import breaks Python 3.10;
+  - Gradle build tool not attested;
+  - Java 8/11 and Python 3.13+ are refused;
+  - the attested digest is not pinned at run time.
+- `REL-002` in the risk register is left at its current disposition until verification.
+
+### Verification handoff (batch PRD-009 + PRD-010)
+```bash
+.venv/bin/pytest -ra \
+  tests/test_production_doctor.py tests/test_doctor_command.py \
+  tests/test_config.py tests/test_config_command.py tests/test_config_extra.py \
+  tests/test_sec009_config_authority.py tests/test_execution_policy_config.py \
+  tests/test_workflow_execution_policy_config_wiring.py \
+  tests/test_containment.py tests/test_containment_oci.py tests/test_process_controller_containment.py \
+  tests/test_semantic_region_authority.py tests/test_plugins_command.py tests/test_bootstrap_contract.py
+.venv/bin/pytest
+```
+With Docker running, the Docker tests execute inside both commands. Otherwise they skip, with the reason given.
+
+Live (the user runs it; this is the real-environment checklist for the live verifier):
+```bash
+KRIYA_LIVE_BASE_URL=http://localhost:11434/v1 KRIYA_LIVE_LLM_MODEL=qwen3-coder:30b \
+  .venv/bin/pytest -m live_model -ra -s tests/test_live_production_doctor.py
+```
+Expected results:
+- the model is listed;
+- native metadata carries a digest;
+- the same 64-character fingerprint is computed twice;
+- `model.runtime_fingerprint` is UNAVAILABLE with that fingerprint as evidence;
+- `model.qualification` is UNAVAILABLE with source `known_production_profile`.
+
+Then run `.venv/bin/kriya doctor --production --json` from a real production-configured workspace and confirm:
+- the JSON parses;
+- exit code is 1;
+- no `.kriya/` directory was created by the doctor.

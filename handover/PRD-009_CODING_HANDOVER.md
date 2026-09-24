@@ -1,7 +1,7 @@
 # PRD-009 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION
+READY_FOR_PYTEST_VERIFICATION (reopened; see "Reopen - independent review closure" below; batch PRD-009 + PRD-010)
 
 ## Source identity
 - Base revision: `f70c1a5` in the target checkout (PRD-008 verified; tree-equivalent coding checkout revision `2508ad1`).
@@ -89,3 +89,37 @@ Run:
 ```
 
 Record complete counts and skip reasons in `handover/PRD-009_PYTEST_VERIFICATION.md`. No live-model verification is required.
+
+
+## Reopen - independent review closure (2026-09-25)
+
+Source: `handover/PRD-001_011_INDEPENDENT_REVIEW.md` (PRD-009: minor issues). Implemented at `3fb4749`, on top of PRD-008A
+(`590fa16`). The review's PRD-009 findings and how each one closed:
+
+| Finding | Resolution |
+|---|---|
+| The exact-equality seal rejects a stricter `generation_time_budget_seconds` | Accepted as 3600 or a smaller positive integer (`bool` excluded) at all three enforcement points: the dict-level contradiction check, the preset expansion (the stricter value is kept with its own provenance and never loosened back to 3600), and the direct-`AppConfig` validator. `production_sealed_value_satisfied()` / `production_sealed_requirement()` are the one rule. None, 0, True and 7200 are still rejected. |
+| `autonomy.egress_policy` not sealed | Sealed at `local_only`. The default is already `local_only`, so default users see no change. Added to the contradiction matrix and to the SEC-009 derived-field classification test; that test is now stricter. |
+| Isolation, persistence and no-host-fallback are declared constants, not verified | `kriya doctor --production` (PRD-010, `d22cb8e`) now verifies each guarantee against the real deployment. `runtime.fixed_guarantees` is derived from the checks that verify it (see the PRD-010 handover). The constant stays as the shared vocabulary; the docstring and YAML say it is verified, not asserted. |
+| The config docstring and YAML claim a doctor precision-boundary report that did not exist | The claim is now true: `semantic.precision_boundary` (PRD-010) reports `SEMANTIC_REGION_SUPPORTED_SCOPE`, which is owned by `semantic_region_authority.py`. |
+
+Assertion changes: none weakened. The contradiction matrix gained 4 rejection rows (egress, 7200, 0, True). The expansion
+test asserts `egress_policy`. The SEC-009 derived-field list gained `autonomy.egress_policy`. The new tests are
+`test_runtime_profile_production_keeps_a_stricter_explicit_deadline` and
+`test_direct_production_app_config_accepts_only_an_equal_or_stricter_deadline`.
+
+Non-pytest checks, plain-Python runner (not pytest): the touched production-profile tests pass (18 plus 3 SEC-009);
+ruff F821/F401 are clean; `git diff --check` is clean.
+
+Pytest (user) - the batch commands are in the PRD-010 handover:
+
+```bash
+.venv/bin/pytest -ra \
+  tests/test_production_doctor.py tests/test_doctor_command.py \
+  tests/test_config.py tests/test_config_command.py tests/test_config_extra.py \
+  tests/test_sec009_config_authority.py tests/test_execution_policy_config.py \
+  tests/test_workflow_execution_policy_config_wiring.py \
+  tests/test_containment.py tests/test_containment_oci.py tests/test_process_controller_containment.py \
+  tests/test_semantic_region_authority.py tests/test_plugins_command.py tests/test_bootstrap_contract.py
+.venv/bin/pytest
+```
