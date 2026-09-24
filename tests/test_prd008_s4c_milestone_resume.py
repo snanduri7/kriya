@@ -16,13 +16,12 @@
 Harness (FakeEngine, _run, ...) is S4b's: real commits through the one
 commit seam, milestone state reloaded from the sidecar like the CLI.
 """
-import asyncio
 import json
 import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
