@@ -473,3 +473,5 @@ PRD-008 is VERIFIED at final revision `6e1a846`, tested at `abadb4a`.
 
 **Next, per the S4c review decision:** the `[]` Developer defect
 (`handover/DEFECT_DEVELOPER_EMPTY_ARRAY_WRITTEN_AS_FILE.md`) is fixed immediately after S5 and before PRD-008A.
+Done: fixed at `fd42e01` and PYTEST_VERIFIED by the user (full suite 5106 passed / 0 failed / 8 deselected,
+2026-09-24). PRD-008A is unblocked.

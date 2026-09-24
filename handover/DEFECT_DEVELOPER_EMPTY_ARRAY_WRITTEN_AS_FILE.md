@@ -1,9 +1,10 @@
 # Defect: a Developer answer of `[]` is written verbatim as a file's content
 
 ## Status
-FIXED, READY_FOR_PYTEST_VERIFICATION (2026-09-24, after PRD-008 was VERIFIED at `6e1a846`). Found 2026-09-24
-during the PRD-008 S4c zero-write probe; kept out of PRD-008 on purpose. See "Fix" at the end. PRD-008A does not
-start until this fix is independently pytest-verified.
+FIXED, PYTEST_VERIFIED at `fd42e01` (user, 2026-09-24): focused defect/regression suite PASS; full non-live suite
+5106 passed / 0 failed / 8 deselected, 151 warnings, 1026.86 s. Found 2026-09-24 during the PRD-008 S4c zero-write
+probe; kept out of PRD-008 on purpose. See "Fix" and "Verification" at the end. PRD-008A is unblocked. No further
+change to this defect without new failing evidence.
 
 Classification (S4c review decision, 2026-09-24): a false-success-capable model-output/rendering defect.
 
@@ -141,3 +142,10 @@ non-mutating shadow run and never writes.
 .venv/bin/pytest tests/test_developer_file_list_answer_as_content.py tests/test_agents.py tests/test_retry_policy.py tests/test_workflow.py tests/test_workflow_controller_enforce.py tests/test_prd008_s4b_milestone_completion.py tests/test_prd008_s4c_milestone_resume.py tests/test_milestones.py
 .venv/bin/pytest
 ```
+
+## Verification (user, 2026-09-24)
+- Tested revision: `fd42e01` (the fix commit; the record-only commit that follows changes no code or tests).
+- Focused command above: PASS.
+- Full suite `.venv/bin/pytest`: 5106 passed / 0 failed / 8 deselected, 151 warnings, 1026.86 s (up from 5074 at
+  `abadb4a`: the 32 new tests in `tests/test_developer_file_list_answer_as_content.py`).
+- Verdict: PYTEST_VERIFIED. Live verdict: not required.
