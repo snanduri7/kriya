@@ -299,7 +299,25 @@ Four things can pause a `generate` run beyond the usual human-approval gate:
 ```bash
 kriya -c kriya.yaml generate "Create a Spring-XML Java 17 app running Ignite 2.18.0" --resume
 ```
-This is opt-in only - Kriya never guesses that you're resuming from goal text alone. It's also strict: if anything about the workspace (a new commit, uncommitted changes), the config, or the goal text has changed since the checkpoint was saved, Kriya refuses to resume and starts over instead, with a warning explaining why. A checkpoint is deleted the moment its run finishes normally (success or an explicit rejection at the approval gate) - it only ever survives a kill/crash. Requires the workspace to be a git repository.
+This is opt-in only - Kriya never guesses that you're resuming from goal text alone. A checkpoint is deleted the moment its run finishes normally (success or an explicit rejection at the approval gate) - it only ever survives a kill/crash, or a run whose Quality Gates never passed. Requires the workspace to be a git repository.
+
+**What a resume reuses (PRD-008).** Kriya compares what the checkpoint was built from with what is true now, and keeps only the work nothing has invalidated. The run log shows `Resuming checkpoint '<id>' partially: reusing ...` or `Refusing to resume checkpoint ...` with the reasons, and the decision is recorded as `resume_decision` on the run record (`.kriya/control/runs/`).
+
+| What changed since the checkpoint | What happens |
+|---|---|
+| The workspace content, the config, the goal/error text, the skills, or the Kriya installation itself | Nothing is reused: a fresh run |
+| The predetermined plan, the incoming obligations, or the write-scope/semantic-region authority | Planning is redone |
+| The candidate's saved bytes don't match their recorded digest, or the obligation ledger it was built against is missing or different | The plan and design are kept; the candidate is regenerated |
+| The containment, toolchain or verification settings | The candidate is kept, written into a fresh worktree through the normal write checks, and its gates run again |
+| Only the model identity (provider, model, base URL or API key, for the primary model or a per-role `agent_llms` model) | Nothing is dropped. Any other `llm`/`llm_chain`/`agent_llms` setting is part of the config: a fresh run |
+
+A value Kriya cannot determine counts as changed. The toolchain identity is not recorded until PRD-011, so today a resumed candidate always has its gates run again. Terminal full regression always runs before anything is applied, and a checkpoint whose run record has disappeared reuses nothing.
+
+**A crashed commit blocks every mutating command until it is settled.** If an earlier run died while writing files into the workspace (or its run record or commit evidence is unreadable), `generate`, `fix`, `generate --from-milestones`, `proposal execute`, and `tools execute` for a call that may write to the workspace, refuse to start, before any model call, and exit 1 with:
+```
+[Recovery Required] The workspace may hold a partial commit from an earlier run (runs with unsettled/uncertain commits: <run id>). Run `kriya runs recover` to settle it from the durable evidence.
+```
+See [Inspecting and recovering runs](#342-inspecting-and-recovering-runs-kriya-runs) below.
 
 #### 3.4.1 Milestone-Based Goal Decomposition (`plan-milestones` + `generate --from-milestones`)
 A single `generate` call has a fixed token budget the whole response has to fit inside - for a goal combining several real subsystems (e.g. a cache plus a message broker plus the wiring between them), that budget forces reasoning and content to compete, and the highest-risk code (the integration/wiring logic, usually written last) is the first thing cut off when the budget runs out. Milestone decomposition splits a goal like that into an ordered sequence of small, independently executable and verifiable slices before any code is generated.
@@ -353,6 +371,25 @@ Anything else reruns that milestone and everything that depends on it. An unrela
 **`--resume` with milestones** offers each milestone only its own newest checkpoint: same sequence, same milestone, same definition. The normal resume checks still decide whether that checkpoint is reused. A checkpoint that belongs to another milestone, or that was saved before this rule existed, is never offered, and the milestone starts fresh. An explicit `--resume-id` is offered only to the milestone that saved it.
 
 Deliberately opt-in - there's no automatic "this goal looks too big" detection. The Milestone Planner's own slicing quality has to earn your trust goal by goal; auto-triggering on every large-looking goal would silently change behavior for every existing user with no proven size heuristic behind it.
+
+#### 3.4.2 Inspecting and Recovering Runs (`kriya runs`)
+Every mutating run writes a run record under `.kriya/control/runs/`, and every commit into the workspace writes commit evidence under `.kriya/control/commits/` first: the exact bytes and file mode each file had before and must have after, plus the digest of the approved candidate. `kriya runs` reads that evidence. It works even when the current configuration is denied by authority checks, so a bad `kriya.yaml` can never block recovery.
+
+```bash
+kriya runs status                      # read-only: what crashed, and what recover would do
+kriya runs recover                     # settle what the evidence proves
+kriya runs recover --complete-partial  # also finish a half-applied, commit-eligible candidate
+kriya runs prune --dry-run             # reference-safe cleanup of old records and evidence
+```
+Each command takes `--workspace <dir>` (default `.`) and `--json`. Exit codes: **0** nothing needs attention, **1** action required (`status` returns 1 for anything other than CLEAN or RUN_ACTIVE, including "recovery available"), **3** a live Kriya run holds the workspace.
+
+- **`status`** never takes the workspace lock and never writes anything (it does not even create `.kriya/`). While a live run holds the workspace it reports `RUN_ACTIVE` and classifies nothing. Otherwise it compares every file of every interrupted commit with its recorded before/after state: `APPLIED`, `NOT_APPLIED`, `FOREIGN` (neither - someone else changed it) or `AMBIGUOUS` (old text-only evidence that can't tell the states apart).
+- **`recover`** takes the workspace lock. A commit whose files are all applied is settled COMMITTED; one with none applied is ROLLED_BACK; a run with no commit evidence at all never touched the workspace (NOT_COMMITTED). The run record becomes **RECOVERED**, with `terminal_status` NEEDS_REVIEW if anything was or may have been committed (the run's post-commit steps never ran) and FAILURE otherwise. A recovered run is never reported as a success. Plain `recover` never changes a source file.
+- **`--complete-partial`** finishes a commit that stopped halfway, from the staged files it left beside their targets. It is allowed only when the run record proves that exact candidate had passed its gates and reached the commit (the record's candidate digest, the evidence's digest and the digest recomputed from the bytes on disk all agree), and every missing write has exactly one intact staged file. There is **no rollback** after a crash: Kriya does not keep the original bytes durably, so a partial commit is either finished or left for you.
+- **Manual action** is reported for anything that can't be proven: a `FOREIGN` or `AMBIGUOUS` file, or an unreadable record or evidence file. Kriya never edits or deletes those. Restore each listed file to its `before` or `after` state (or move an unreadable record out of `.kriya/control/runs/` once you've confirmed it isn't the only evidence of a commit), then run `kriya runs status` again.
+- **`prune`** keeps the newest 50 terminal run records by default (`--keep N`) and never removes a non-terminal record, one whose commit state is unknown, one a checkpoint or the control state still references, or evidence a kept record needs. It removes nothing at all while any record is unreadable. The same pruning also runs automatically at the end of every run.
+
+A milestone whose commit was finished by `--complete-partial` is not redone by a later `generate --from-milestones` rerun - see "If a run crashed between a milestone's commit and saving its progress" in 3.4.1 above.
 
 ### 3.5 Fix Bugs (`fix`)
 Locate and repair bugs in your project using reproduced test outputs or stack traces:

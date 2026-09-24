@@ -1,7 +1,7 @@
 # PRD-008 S4c - Milestone Resume Closure - Coding Handover
 
 ## Status
-USER-VERIFIED (2026-09-24) at `abadb4a`: the focused command below and the full non-live suite both clean; full suite 5074 passed / 0 failed / 8 deselected / 152 warnings (1027 s). The review decision approved every sign-off listed under "Final review closure"; S4c is not reopened without new failing evidence.
+USER-VERIFIED (2026-09-24) at `abadb4a`: full non-live suite (a superset of the focused command below) 5074 passed / 0 failed / 8 deselected / 152 warnings (1027 s). The review decision approved every sign-off listed under "Final review closure"; S4c is not reopened without new failing evidence.
 
 S4c is committed locally and not pushed. S5 is unblocked. PRD-008A has not been started.
 

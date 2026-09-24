@@ -1,12 +1,20 @@
 # PRD-008 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION
+READY_FOR_PYTEST_VERIFICATION (S1-S4c each user-verified; S5 is documentation and handover only - see "S5" at the end)
 
 ## Source identity
 - Base revision: `ebe4994` (PRD-007 verified).
-- Production implementation revision: `31d19da` in the target checkout.
-- Final revision / working-tree diff ID: the handover commit following `31d19da`.
+- Original implementation: `31d19da` (+ handover `20369f0`, verification record `f70c1a5`), reopened by the independent review.
+- Reopened slices, all local and unpushed:
+  - S1 `46d2a33` `e74f79d` (verification `5c033d7`)
+  - S2 `72922c4` `63a45ea`
+  - S3 `b44f7f5` `be7d51d` `c86a536` `5ca4f25` (verification `ba4bb8d`)
+  - S4 `369a1a5` `0199844` (verification `47498ff`)
+  - S4b `ce32893` `91f92bc` (verification `8d3fdd8`)
+  - S4c `34d11df` `d1bfaf8` `0762a0e` `4ad70f2` `abadb4a` (verification `efb1ae7`)
+  - S5 (docs and handover only): the commit following `efb1ae7`.
+- Last production-code revision: `abadb4a`. S5 changes no code or tests.
 - Kriya version: 0.1.0.
 
 ## Scope implemented
@@ -54,7 +62,7 @@ The coding agent did not run the full project suite; independent user verificati
 
 ## Known limitations / residual risks
 - Fingerprints introduced by later model-runtime and containment PRDs remain optional until those owners populate them.
-- Refused uncertain commits require an explicit recovery workflow; PRD-008 intentionally does not guess whether to complete or roll back an ambiguous commit.
+- Refused uncertain commits are settled by `kriya runs recover` (S4; `docs/design.md` §4.4b), which acts only on what the durable evidence proves: it never guesses a rollback, and it finishes a partial commit only with `--complete-partial` when the commit-eligible candidate is proven.
 
 ## Decisions recorded
 - `.eie/DECISIONS.md` entries: none; the file is absent.
@@ -69,7 +77,7 @@ The coding agent did not run the full project suite; independent user verificati
 Run:
 
 ```bash
-.newvenv/bin/python -m pytest -ra \
+.venv/bin/pytest -ra \
   tests/test_resume_integrity.py \
   tests/test_checkpoint_control_plane_hashes.py \
   tests/test_state001_checkpoint_workspace_identity.py \
@@ -78,8 +86,7 @@ Run:
   tests/test_cli_smoke.py \
   tests/test_run_ownership.py
 
-.newvenv/bin/python -m pytest -m 'not live_model' -ra \
-  --junitxml=handover/evidence/PRD-008/user-full.xml
+.venv/bin/pytest -ra   # canonical full non-live suite (pyproject excludes live_model)
 ```
 
 Record complete counts and skip reasons in `handover/PRD-008_PYTEST_VERIFICATION.md`. No live-model verification is required.
@@ -439,3 +446,29 @@ Final S4c review closure (`abadb4a`, approved and user-verified):
 - Recovery-completed commits are reconstructed on proven recovery provenance, with `completion_origin: RECOVERY`. The recovered run stays RECOVERED.
 - Lineage divergence has the typed reason `CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE`.
 - The `[]` full-file defect is recorded separately in `handover/DEFECT_DEVELOPER_EMPTY_ARRAY_WRITTEN_AS_FILE.md`.
+
+## Reopening addendum - S5: documentation and handover closure
+
+Status: READY_FOR_PYTEST_VERIFICATION. S5 changes documentation and handover files only; no production code or test
+changed after `abadb4a`, and no test reads the edited documents.
+
+**Documentation reconciled with S1-S4c** (the docs still described the pre-PRD-008 all-or-nothing resume):
+- `docs/user_guide.md` §3.4 "Resuming an interrupted run": what a resume reuses per changed input (fresh run /
+  re-plan / regenerate candidate / re-gate candidate / nothing dropped), UNAVAILABLE counts as changed, terminal
+  regression always runs, `resume_decision` on the run record; the `[Recovery Required]` refusal on every mutating
+  command. New §3.4.2 `kriya runs status|recover|prune`: exit codes, read-only status, RECOVERED never SUCCESS,
+  `--complete-partial` conditions, no crash rollback, manual action, reference-safe prune.
+- `docs/design.md` §2.9 rewritten (13 fingerprints, `ARTIFACT_DEPENDENCIES` table, longest-valid-prefix resume,
+  candidate rebuild vs gate skip, enforce completion scope); new §4.4b (commit evidence schema 2 and write order,
+  commit-state gate, recovery algorithm, RunRecord v3, retention, residuals).
+- `README.md`: the "Resumable Runs" bullet no longer claims all-or-nothing resume; new "Crash-Safe Commits and
+  Recovery" bullet.
+- `handover/PRD-008_PYTEST_VERIFICATION.md` reset from the pre-reopen verdict (4715/0) to pending, with the
+  slice-by-slice history; tracker row set to READY_FOR_PYTEST_VERIFICATION.
+
+**Verification.** The code under test is `abadb4a`, which the user's full non-live suite already covered (5074
+passed / 0 failed / 8 deselected, 2026-09-24). The user decides whether that run stands as the PRD-008 verdict or
+whether to rerun `.venv/bin/pytest` on the S5 revision.
+
+**Next, per the S4c review decision:** the `[]` Developer defect
+(`handover/DEFECT_DEVELOPER_EMPTY_ARRAY_WRITTEN_AS_FILE.md`) is fixed immediately after S5 and before PRD-008A.
