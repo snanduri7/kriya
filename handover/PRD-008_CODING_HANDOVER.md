@@ -133,3 +133,7 @@ test now expects the earlier coordinator refusal (validator REFUSED stays covere
   tests/test_prd004_commit_failure.py tests/test_workflow_controller_enforce.py tests/test_cli_smoke.py -ra
 ```
 Lint (coding agent, run): `ruff check` on every touched/new file passes; `compileall`, `git diff --check` clean.
+
+**S1 user verification (2026-09-24):** both S1 commands above all green after test-ordering fix e74f79d
+(`test_prune_never_removes_uncertain_or_unreadable_evidence...` planted bad evidence before its own commit; the
+batch correctly refused). S1 = 46d2a33 + e74f79d.
