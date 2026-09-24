@@ -310,6 +310,7 @@ def test_production_profile_and_derived_security_controls_retain_authority_class
         "execution_policy.mode",
         "workflow_controller.enabled",
         "workflow_controller.mode",
+        "autonomy.egress_policy",
         "autonomy.containment_backend",
         "autonomy.contained_execution_required",
         "autonomy.mcp_contained_execution_required",

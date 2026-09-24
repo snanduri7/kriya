@@ -3,6 +3,7 @@ import os
 import pytest
 import yaml
 
+from kriya.config.authority import ConfigSource
 from kriya.config.config import (
     PRODUCTION_FIXED_RUNTIME_GUARANTEES,
     PRODUCTION_GENERATION_TIME_BUDGET_SECONDS,
@@ -142,6 +143,7 @@ def test_runtime_profile_production_expands_to_sealed_safe_posture(tmp_path):
     assert cfg.workflow_controller.mode == "enforce"
     assert cfg.execution_policy.enabled is True
     assert cfg.execution_policy.mode == "enforce"
+    assert cfg.autonomy.egress_policy == "local_only"
     assert cfg.autonomy.generation_time_budget_seconds == PRODUCTION_GENERATION_TIME_BUDGET_SECONDS
     assert cfg.autonomy.containment_backend == "oci"
     assert cfg.autonomy.contained_execution_required is True
@@ -164,7 +166,11 @@ def test_runtime_profile_production_expands_to_sealed_safe_posture(tmp_path):
         ("workflow_controller", "mode", "shadow", "enforce"),
         ("execution_policy", "mode", "audit", "enforce"),
         ("execution_policy", "enabled", False, True),
+        ("autonomy", "egress_policy", "unrestricted", "local_only"),
         ("autonomy", "generation_time_budget_seconds", None, PRODUCTION_GENERATION_TIME_BUDGET_SECONDS),
+        ("autonomy", "generation_time_budget_seconds", 7200, PRODUCTION_GENERATION_TIME_BUDGET_SECONDS),
+        ("autonomy", "generation_time_budget_seconds", 0, PRODUCTION_GENERATION_TIME_BUDGET_SECONDS),
+        ("autonomy", "generation_time_budget_seconds", True, PRODUCTION_GENERATION_TIME_BUDGET_SECONDS),
         ("autonomy", "contained_execution_required", False, True),
         ("autonomy", "mcp_contained_execution_required", False, True),
         ("autonomy", "containment_backend", "none", "oci"),
@@ -205,6 +211,37 @@ def test_runtime_profile_production_allows_matching_and_unrelated_overrides(tmp_
     assert cfg.execution_policy.mode == "enforce"
     assert cfg.autonomy.brownfield_full_regression_baseline_policy == "required"
     assert cfg.autonomy.semantic_region_enforcement_required is False
+
+
+def test_runtime_profile_production_keeps_a_stricter_explicit_deadline(tmp_path):
+    """A shorter deadline is safer than the sealed 3600s: it is accepted, kept
+    (never loosened back to the preset) and keeps its own provenance."""
+    config_file = tmp_path / "strict-production.yaml"
+    config_file.write_text(
+        yaml.safe_dump({"runtime_profile": "production", "autonomy": {"generation_time_budget_seconds": 1800}}),
+        encoding="utf-8",
+    )
+    state = resolve_config_state(str(config_file))
+    cfg = AppConfig(**state.config_dict)
+    assert cfg.autonomy.generation_time_budget_seconds == 1800
+    sources = {violation.field_path: violation.source for violation in state.violations}
+    assert sources.get("autonomy.generation_time_budget_seconds") is not ConfigSource.RUNTIME_PROFILE_OVERRIDE
+    assert sources["autonomy.egress_policy"] is ConfigSource.RUNTIME_PROFILE_OVERRIDE
+
+
+def test_direct_production_app_config_accepts_only_an_equal_or_stricter_deadline():
+    sealed = {
+        top: {leaf: value for (t, leaf), value in runtime_profile_preset_fields("production").items() if t == top}
+        for top in {top for top, _ in runtime_profile_preset_fields("production")}
+    }
+    assert AppConfig(runtime_profile="production", **sealed).autonomy.generation_time_budget_seconds == 3600
+    stricter = {**sealed, "autonomy": {**sealed["autonomy"], "generation_time_budget_seconds": 60}}
+    assert AppConfig(runtime_profile="production", **stricter).autonomy.generation_time_budget_seconds == 60
+    for unsafe in ({"generation_time_budget_seconds": 7200}, {"generation_time_budget_seconds": None},
+                   {"egress_policy": "unrestricted"}):
+        weakened = {**sealed, "autonomy": {**sealed["autonomy"], **unsafe}}
+        with pytest.raises(Exception, match="production.*is sealed"):
+            AppConfig(runtime_profile="production", **weakened)
 
 
 def test_direct_app_config_cannot_claim_production_with_unsafe_defaults():

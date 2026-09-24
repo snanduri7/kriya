@@ -197,7 +197,9 @@ workflow_controller:
 #   workflow_controller.mode: enforce
 #   execution_policy.enabled: true
 #   execution_policy.mode: enforce
-#   autonomy.generation_time_budget_seconds: 3600
+#   autonomy.egress_policy: local_only
+#   autonomy.generation_time_budget_seconds: 3600 (a smaller positive value is
+#     accepted as stricter; null or a larger value is rejected)
 #   autonomy.containment_backend: oci
 #   autonomy.contained_execution_required: true
 #   autonomy.mcp_contained_execution_required: true
@@ -205,10 +207,11 @@ workflow_controller:
 # A contradictory explicit value is rejected at load time; matching values
 # are accepted. Candidate worktree isolation, persistent checkpoints/traces,
 # and refusal to fall back to raw-host execution are fixed runtime mechanisms,
-# not optional flags. Production deliberately does not force
+# not optional flags; `kriya doctor --production` verifies each of them against
+# the real deployment. Production deliberately does not force
 # autonomy.semantic_region_enforcement_required until PRD-028 establishes
-# language coverage; `kriya doctor --production` (PRD-010) reports that
-# precision boundary.
+# language coverage; the production doctor reports that precision boundary
+# as `semantic.precision_boundary`.
 # runtime_profile: null
 
 autonomy:

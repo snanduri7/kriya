@@ -1,7 +1,7 @@
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -911,14 +911,49 @@ PRODUCTION_GENERATION_TIME_BUDGET_SECONDS = 3600
 # These guarantees have no weakening configuration knob: generation already
 # refuses to run in the application workspace when isolated-worktree creation
 # fails (workflow.py), and checkpoints/traces are persistent workflow artifacts.
-# Keep the identifiers public and machine-readable so PRD-010's production
-# doctor can report the mechanisms without inventing duplicate config flags.
+# Declaring them is not evidence that the deployment can honor them:
+# `kriya doctor --production` (kriya/production_doctor.py) verifies each one
+# against the real environment and derives `runtime.fixed_guarantees` from those
+# checks, so these identifiers stay the shared vocabulary, not a PASS.
 PRODUCTION_FIXED_RUNTIME_GUARANTEES = frozenset({
     "candidate_isolation_fail_closed",
     "checkpoint_persistence",
     "trace_persistence",
     "no_uncontained_host_fallback",
 })
+
+
+def _production_budget_is_at_least_as_strict(value: Any) -> bool:
+    return (
+        isinstance(value, int) and not isinstance(value, bool)
+        and 0 < value <= PRODUCTION_GENERATION_TIME_BUDGET_SECONDS
+    )
+
+
+# Sealed leaves for which a strictly safer explicit value is accepted in place
+# of the preset value. Every other sealed leaf already carries its strictest
+# setting, so it must equal the preset exactly.
+_PRODUCTION_STRICTER_ACCEPTED = {
+    ("autonomy", "generation_time_budget_seconds"): (
+        _production_budget_is_at_least_as_strict,
+        f"{PRODUCTION_GENERATION_TIME_BUDGET_SECONDS!r} or a smaller positive integer",
+    ),
+}
+
+
+def production_sealed_value_satisfied(key: Tuple[str, str], value: Any) -> bool:
+    """Whether ``value`` meets the production seal for ``key``: the preset
+    value itself, or - for the leaves in _PRODUCTION_STRICTER_ACCEPTED - a
+    value at least as strict."""
+    stricter = _PRODUCTION_STRICTER_ACCEPTED.get(key)
+    if stricter is not None:
+        return stricter[0](value)
+    return value == runtime_profile_preset_fields("production")[key]
+
+
+def production_sealed_requirement(key: Tuple[str, str]) -> str:
+    stricter = _PRODUCTION_STRICTER_ACCEPTED.get(key)
+    return stricter[1] if stricter is not None else repr(runtime_profile_preset_fields("production")[key])
 
 
 class AppConfig(BaseModel):
@@ -945,14 +980,17 @@ class AppConfig(BaseModel):
     here, despite how the original review phrased the preset's contents.
 
     `production` is the separately sealed posture. It requires WorkflowController
-    and ExecutionPolicy enforcement, a finite generation deadline, OCI target-code
-    containment, MCP containment for any configured MCP server, and a required
-    brownfield full-regression baseline. Candidate isolation, checkpoint/trace
-    persistence, and refusal to fall back to raw-host execution are fixed runtime
-    guarantees named in PRODUCTION_FIXED_RUNTIME_GUARANTEES, not decorative
-    switches. semantic_region_enforcement_required is intentionally not forced:
-    language support remains incomplete until PRD-028, and PRD-010 must expose
-    that precision boundary in production-doctor output."""
+    and ExecutionPolicy enforcement, local-only model egress, a finite generation
+    deadline (3600 seconds, or an explicitly stricter smaller value), OCI
+    target-code containment, MCP containment for any configured MCP server, and a
+    required brownfield full-regression baseline. Candidate isolation,
+    checkpoint/trace persistence, and refusal to fall back to raw-host execution
+    are fixed runtime guarantees named in PRODUCTION_FIXED_RUNTIME_GUARANTEES, not
+    decorative switches; `kriya doctor --production` verifies each against the
+    real deployment (`runtime.fixed_guarantees` is derived from those checks).
+    semantic_region_enforcement_required is intentionally not forced: language
+    support remains incomplete until PRD-028, and the production doctor reports
+    that precision boundary as `semantic.precision_boundary`."""
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
     llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
@@ -1002,8 +1040,10 @@ class AppConfig(BaseModel):
             # MCP server cannot weaken the posture by omission.
             if (top, leaf) == ("autonomy", "mcp_contained_execution_required") and not self.mcp:
                 continue
-            if actual != expected:
-                violations.append(f"{top}.{leaf} must be {expected!r}, got {actual!r}")
+            if not production_sealed_value_satisfied((top, leaf), actual):
+                violations.append(
+                    f"{top}.{leaf} must be {production_sealed_requirement((top, leaf))}, got {actual!r}"
+                )
 
         if violations:
             raise ValueError(
@@ -1051,6 +1091,7 @@ def runtime_profile_preset_fields(profile: Optional[str]) -> Dict[Any, Any]:
             ("workflow_controller", "mode"): "enforce",
             ("execution_policy", "enabled"): True,
             ("execution_policy", "mode"): "enforce",
+            ("autonomy", "egress_policy"): "local_only",
             ("autonomy", "generation_time_budget_seconds"): PRODUCTION_GENERATION_TIME_BUDGET_SECONDS,
             ("autonomy", "containment_backend"): "oci",
             ("autonomy", "contained_execution_required"): True,
@@ -1359,10 +1400,11 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                 if (
                     isinstance(explicit_section, dict)
                     and leaf in explicit_section
-                    and explicit_section[leaf] != required_value
+                    and not production_sealed_value_satisfied((top, leaf), explicit_section[leaf])
                 ):
                     contradictory.append(
-                        f"{top}.{leaf}={explicit_section[leaf]!r} (production requires {required_value!r})"
+                        f"{top}.{leaf}={explicit_section[leaf]!r} "
+                        f"(production requires {production_sealed_requirement((top, leaf))})"
                     )
             if contradictory:
                 raise ValueError(
@@ -1392,6 +1434,18 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
         )
 
         for (top, leaf), value in preset_fields.items():
+            if runtime_profile == "production":
+                explicit_section = user_data.get(top)
+                if (
+                    isinstance(explicit_section, dict)
+                    and leaf in explicit_section
+                    and explicit_section[leaf] != value
+                ):
+                    # Past the contradiction check above, a differing explicit
+                    # value is a stricter one (e.g. a shorter deadline): keep it,
+                    # with its own provenance, rather than loosening it back to
+                    # the preset.
+                    continue
             config_dict.setdefault(top, {})[leaf] = value
             provenance[(top, leaf)] = derived_source
 
