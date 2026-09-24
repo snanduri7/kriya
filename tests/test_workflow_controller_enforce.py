@@ -17,6 +17,7 @@ import pytest
 
 import kriya.workflow.plan_validation as plan_validation_module
 import kriya.workflow.workflow_controller as workflow_controller_module
+import kriya.workflow.terminal_commit as terminal_commit_module
 
 from kriya.control.persistence import load_approved_plan, load_control_state
 from kriya.control.state import ControlState
@@ -9997,7 +9998,7 @@ async def test_enforce_terminal_gate_failure_discards_candidate_before_commit(
         stack.enter_context(p2)
         stack.enter_context(p3)
         stack.enter_context(patch(
-            "kriya.workflow.workflow_controller.commit_revision_grounded_batch", commit_spy,
+            "kriya.workflow.terminal_commit.commit_revision_grounded_batch", commit_spy,
         ))
         if failing_gate == "migration":
             stack.enter_context(patch(
@@ -10114,7 +10115,7 @@ async def test_enforce_terminal_events_and_gate_inputs_precede_one_commit(tmp_pa
         return real_artifact_gate(registry, workspace, milestone_id)
 
     commit_calls = []
-    real_commit = workflow_controller_module.commit_revision_grounded_batch
+    real_commit = terminal_commit_module.commit_revision_grounded_batch
 
     def commit_once(writes, *, workspace_path, transaction_id=None):
         commit_calls.append(workspace_path)
@@ -10130,7 +10131,7 @@ async def test_enforce_terminal_events_and_gate_inputs_precede_one_commit(tmp_pa
         "kriya.workflow.workflow_controller.ArtifactRegistry.derive_from_workspace",
         autospec=True, side_effect=artifact_gate,
     ), patch(
-        "kriya.workflow.workflow_controller.commit_revision_grounded_batch",
+        "kriya.workflow.terminal_commit.commit_revision_grounded_batch",
         side_effect=commit_once,
     ):
         result = await WorkflowController(we).execute(

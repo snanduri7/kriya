@@ -25,7 +25,8 @@ write; that is the existing pattern this follows.
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.contracts import ContractRegistry
@@ -33,7 +34,7 @@ from kriya.control.state import ControlState
 from kriya.control.run_record import RunRecord
 from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
 from kriya.policy.filesystem import AuthorizedFileWriter
-from kriya.workflow.edit_safety import read_file_revision
+from kriya.workflow.edit_safety import content_revision, read_file_revision
 
 logger = logging.getLogger(__name__)
 
@@ -78,39 +79,107 @@ def approved_plan_path(workspace_path: str, plan_id: str) -> str:
     return os.path.join(_control_dir(workspace_path), _APPROVED_PLANS_DIRNAME, f"{safe_plan_id}.json")
 
 
+_RUN_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+
+
+def _valid_run_id(run_id: str) -> bool:
+    return bool(run_id) and set(run_id) <= _RUN_ID_CHARS
+
+
 def run_record_path(workspace_path: str, run_id: str) -> str:
-    safe_run_id = "".join(ch for ch in run_id if ch.isalnum() or ch in {"-", "_"})
-    if not safe_run_id or safe_run_id != run_id:
+    if not _valid_run_id(run_id):
         raise ValueError("run_id must contain only letters, digits, '-' or '_'")
-    return os.path.join(_control_dir(workspace_path), _RUNS_DIRNAME, f"{safe_run_id}.json")
+    return os.path.join(_control_dir(workspace_path), _RUNS_DIRNAME, f"{run_id}.json")
+
+
+class UnreadableRunRecordError(RuntimeError):
+    """A run record exists but cannot be trusted (corrupt, unknown schema,
+    or owned by another workspace). Never treated as absent: a record that
+    cannot be read may be the only evidence of an interrupted commit."""
+
+    def __init__(self, path: str, reason: str) -> None:
+        super().__init__(f"unreadable RunRecord {path}: {reason}")
+        self.path = path
+        self.reason = reason
+
+
+@dataclass(frozen=True)
+class RunRecordScan:
+    records: List[RunRecord]
+    unreadable: List[UnreadableRunRecordError]
+
+
+def _read_run_record(workspace_path: str, run_id: str) -> Tuple[Optional[RunRecord], Optional[str]]:
+    """(record, content revision) from ONE read; (None, None) when absent."""
+    path = run_record_path(workspace_path, run_id)
+    try:
+        # Same decoding as read_file_revision(), so the content revision the
+        # revision-grounded write checks is identical to this read.
+        with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except FileNotFoundError:
+        return None, None
+    except OSError as error:
+        raise UnreadableRunRecordError(path, f"{type(error).__name__}: {error}") from error
+    try:
+        payload = json.loads(text)
+        if not isinstance(payload, dict):
+            raise ValueError("RunRecord document is not a JSON object")
+        validate_ownership(workspace_path, payload, path)
+        record = RunRecord.from_dict(payload)
+    except (ValueError, WorkspaceOwnershipError) as error:
+        raise UnreadableRunRecordError(path, f"{type(error).__name__}: {error}") from error
+    if record.run_id != run_id:
+        raise UnreadableRunRecordError(path, f"file names run {run_id!r} but holds {record.run_id!r}")
+    return record, content_revision(text)
 
 
 def load_run_record(workspace_path: str, run_id: str) -> Optional[RunRecord]:
-    data = _load_json_document(run_record_path(workspace_path, run_id), workspace_path)
-    if data is None:
-        return None
-    return RunRecord.from_dict(data)
+    """None only when no record exists; raises UnreadableRunRecordError when
+    one exists but cannot be trusted."""
+    return _read_run_record(workspace_path, run_id)[0]
+
+
+def scan_run_records(workspace_path: str) -> RunRecordScan:
+    """Every record under runs/, with untrustworthy ones reported, not hidden.
+
+    Files whose names are not run ids (editor backups, stray notes, temp
+    files) are not run records and are ignored."""
+    directory = os.path.join(_control_dir(workspace_path), _RUNS_DIRNAME)
+    if not os.path.isdir(directory):
+        return RunRecordScan([], [])
+    records: List[RunRecord] = []
+    unreadable: List[UnreadableRunRecordError] = []
+    for name in sorted(os.listdir(directory)):
+        run_id = name[:-5] if name.endswith(".json") else ""
+        if not _valid_run_id(run_id):
+            continue
+        try:
+            record = load_run_record(workspace_path, run_id)
+        except UnreadableRunRecordError as error:
+            unreadable.append(error)
+            continue
+        if record is not None:
+            records.append(record)
+    return RunRecordScan(records, unreadable)
 
 
 def list_run_records(workspace_path: str) -> List[RunRecord]:
-    directory = os.path.join(_control_dir(workspace_path), _RUNS_DIRNAME)
-    if not os.path.isdir(directory):
-        return []
-    records: List[RunRecord] = []
-    for name in sorted(os.listdir(directory)):
-        if not name.endswith(".json"):
-            continue
-        record = load_run_record(workspace_path, name[:-5])
-        if record is not None:
-            records.append(record)
-    return records
+    """Readable records only - callers deciding safety must use
+    scan_run_records() so unreadable records fail closed."""
+    return scan_run_records(workspace_path).records
 
 
 def save_run_record(
     workspace_path: str, record: RunRecord, *, expected_revision: Optional[int]
 ) -> None:
-    """Atomically persist a record after an optimistic revision check."""
-    current = load_run_record(workspace_path, record.run_id)
+    """Atomically persist a record after an optimistic revision check.
+
+    The expected record revision and the file's content revision come from
+    the same read, and the write is revision-grounded on that content, so a
+    concurrent writer between the check and the write is a conflict, never a
+    lost update."""
+    current, file_revision = _read_run_record(workspace_path, record.run_id)
     actual_revision = current.revision if current is not None else None
     if actual_revision != expected_revision:
         raise StaleRunRecordError(
@@ -126,6 +195,7 @@ def save_run_record(
     _save_json_document(
         workspace_path, run_record_path(workspace_path, record.run_id),
         record.to_dict(), derived_from_active_run=False,
+        expected_file_revision=file_revision if file_revision is not None else content_revision(""),
     )
 
 
@@ -141,7 +211,7 @@ def load_approved_plan(workspace_path: str, plan_id: str) -> Optional[Dict[str, 
 
 def _save_json_document(
     workspace_path: str, path: str, payload: Dict[str, Any], *,
-    derived_from_active_run: bool = True,
+    derived_from_active_run: bool = True, expected_file_revision: Optional[str] = None,
 ) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     owned_payload = dict(payload)
@@ -156,7 +226,9 @@ def _save_json_document(
                 "revision": context.record_revision,
             }
     content = json.dumps(owned_payload, indent=2, sort_keys=True)
-    expected_revision = read_file_revision(path)
+    expected_revision = (
+        expected_file_revision if expected_file_revision is not None else read_file_revision(path)
+    )
     AuthorizedFileWriter(workspace_path).commit_file(path, content, expected_revision=expected_revision)
 
 

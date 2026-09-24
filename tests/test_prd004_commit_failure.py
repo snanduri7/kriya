@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import kriya.control.run_coordinator as run_coordinator_module
 import kriya.workflow.workflow_controller as workflow_controller_module
 from kriya.control.persistence import list_run_records, load_control_state
 from kriya.control.run_record import RunLifecycle
@@ -152,6 +153,9 @@ async def test_real_concurrent_edit_between_gates_and_commit_is_structured_confl
     assert record.lifecycle_state == RunLifecycle.FAILURE
     assert record.commit_intent == "APPLY_VERIFIED_CANDIDATE"
     assert record.commit_result in ("NOT_COMMITTED", "ROLLED_BACK")
+    [cycle] = record.commits
+    assert cycle["transaction_id"] == result.run_id
+    assert cycle["result"] == record.commit_result
 
 
 @pytest.mark.asyncio
@@ -171,7 +175,7 @@ async def test_missing_candidate_file_is_structured_materialization_failure(tmp_
     commit_spy = MagicMock()
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3, patch(
-        "kriya.workflow.workflow_controller.commit_revision_grounded_batch", commit_spy,
+        "kriya.workflow.terminal_commit.commit_revision_grounded_batch", commit_spy,
     ):
         result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
 
@@ -199,7 +203,7 @@ async def test_uncertain_commit_is_recorded_uncertain_and_candidate_retained(tmp
     we.run_generation_workflow = fake_run
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3, patch(
-        "kriya.workflow.workflow_controller.commit_revision_grounded_batch",
+        "kriya.workflow.terminal_commit.commit_revision_grounded_batch",
         side_effect=UncertainCommitError("rollback of app.py failed"),
     ):
         result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
@@ -230,19 +234,18 @@ async def test_run_record_failure_after_successful_commit_is_persistence_error_n
         (sandboxed / "app.py").write_text("verified candidate\n")
         return {"status": "success", "quality_gates_passed": True, "files": ["app.py"]}
 
-    real_transition = workflow_controller_module.transition_mutating_run
+    real_save = run_coordinator_module.save_run_record
 
-    def fail_committed_transition(context, state, **updates):
-        if state == RunLifecycle.COMMITTED:
+    def fail_committed_save(workspace, record, *, expected_revision):
+        if record.lifecycle_state == RunLifecycle.COMMITTED:
             raise OSError("run record disk full")
-        return real_transition(context, state, **updates)
+        return real_save(workspace, record, expected_revision=expected_revision)
 
     we = _workflow_engine()
     we.run_generation_workflow = fake_run
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3, patch(
-        "kriya.workflow.workflow_controller.transition_mutating_run",
-        side_effect=fail_committed_transition,
+        "kriya.control.run_coordinator.save_run_record", side_effect=fail_committed_save,
     ):
         result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
 
@@ -253,6 +256,11 @@ async def test_run_record_failure_after_successful_commit_is_persistence_error_n
     assert legacy["commit_evidence"]["state"] == "committed"
     assert (tmp_path / "app.py").read_text() == "verified candidate\n"
     assert {
-        "operation": "run_record_committed_transition",
+        "operation": "run_record_commit_committed",
         "error": "OSError: run record disk full",
     } in legacy["post_commit_persistence_errors"]
+    # The record still holds durable intent for a cycle it could not settle,
+    # so it can never be read as "nothing happened" - it ends UNCERTAIN.
+    record = _only_run_record(tmp_path)
+    assert record.lifecycle_state == RunLifecycle.UNCERTAIN
+    assert record.commits[0]["transaction_id"] == result.run_id

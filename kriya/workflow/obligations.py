@@ -55,7 +55,9 @@ enums (JSON-serializable) so checkpoint persistence can be added later
 without a shape change."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -364,6 +366,19 @@ class ObligationLedger:
                 self.regressions.append(regression)
         history.append(rec)
         return regression
+
+    def fingerprint(self) -> Tuple[int, str]:
+        """(revision, hash) of the whole ledger for the RunRecord (PRD-007).
+
+        The revision is the number of records ever appended (the ledger is
+        append-only); the hash covers every record's content in order."""
+        entries = [
+            [obligation_id, [asdict(rec) for rec in history]]
+            for obligation_id, history in sorted(self._history.items())
+        ]
+        blob = json.dumps(entries, sort_keys=True, default=str)
+        revision = sum(len(history) for history in self._history.values())
+        return revision, hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     def current(self, obligation_id: str) -> Optional[ObligationRecord]:
         """The obligation's AUTHORITATIVE state (spec §16), never a bare

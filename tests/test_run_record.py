@@ -4,6 +4,7 @@ import asyncio
 import json
 import multiprocessing
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -58,27 +59,32 @@ def _crash_with_running_record(workspace_path):
 
 
 def test_schema_round_trip_contains_required_lifecycle_fields(tmp_path):
-    record = RunRecord.new("run-1", "workspace-1", "commit-1", "tree-1")
-    record = record.transition(
+    initial = RunRecord.new("run-1", "workspace-1", "commit-1", "tree-1")
+    record = initial.transition(
         RunLifecycle.RUNNING,
         effective_config_fingerprint="config-1",
         model_runtime_fingerprint_ids=["model-1"],
         goal_hash="goal-1",
+    ).annotate(
         approved_plan_hash="plan-1",
         obligation_ledger_revision=3,
         obligation_ledger_hash="ledger-1",
-        candidate_revision="candidate-rev",
-        candidate_hash="candidate-hash",
         verification_evidence_ids=["evidence-1"],
         retry_state_reference="checkpoint-1",
         retry_counters={"developer": 2},
-        commit_intent="commit-candidate",
-        commit_result="pending",
-        store_revisions={"control_state": 4},
+    ).transition(RunLifecycle.CANDIDATE).begin_commit(
+        "tx-1", intent="APPLY_VERIFIED_CANDIDATE", candidate_hash="candidate-hash",
     )
-    save_run_record(str(tmp_path), RunRecord.new("run-1", "workspace-1", "commit-1", "tree-1"), expected_revision=None)
-    save_run_record(str(tmp_path), record, expected_revision=1)
+    save_run_record(str(tmp_path), initial, expected_revision=None)
+    # Revisions are written one at a time; persist each intermediate step.
+    for revision in range(2, record.revision + 1):
+        step = replace(record, revision=revision)
+        save_run_record(str(tmp_path), step, expected_revision=revision - 1)
     assert load_run_record(str(tmp_path), "run-1") == record
+    assert record.commits == [{
+        "transaction_id": "tx-1", "intent": "APPLY_VERIFIED_CANDIDATE",
+        "candidate_hash": "candidate-hash", "result": None,
+    }]
 
 
 def test_illegal_and_post_terminal_transitions_fail_closed():
@@ -97,7 +103,7 @@ def test_stale_writer_cannot_overwrite_newer_record(tmp_path):
     save_run_record(str(tmp_path), running, expected_revision=1)
     with pytest.raises(StaleRunRecordError):
         save_run_record(
-            str(tmp_path), initial.transition(RunLifecycle.PLANNING), expected_revision=1,
+            str(tmp_path), initial.annotate(goal_hash="stale"), expected_revision=1,
         )
     assert load_run_record(str(tmp_path), "run-1") == running
 
@@ -111,8 +117,10 @@ def test_successful_public_mutation_persists_terminal_success(tmp_path):
     assert record is not None
     assert record.lifecycle_state == RunLifecycle.SUCCESS
     assert record.terminal_status == "SUCCESS"
-    assert record.commit_intent == "APPLY_VERIFIED_CANDIDATE"
-    assert record.commit_result == "NO_CHANGES"
+    # No commit transaction happened, and the record never invents one.
+    assert record.commit_intent is None
+    assert record.commits == []
+    assert record.commit_result == "NO_COMMIT"
 
 
 def test_controlled_exception_persists_terminal_failure(tmp_path):

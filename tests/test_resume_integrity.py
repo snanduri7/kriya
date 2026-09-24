@@ -85,8 +85,8 @@ def test_source_change_invalidates_context_candidate_and_verification(git_repo):
 def test_uncertain_run_record_refuses_normal_resume():
     record = RunRecord.new("run-1", "workspace-1", "base", "tree")
     record = record.transition(RunLifecycle.RUNNING)
-    record = record.transition(
-        RunLifecycle.COMMIT_ELIGIBLE, commit_intent="APPLY_VERIFIED_CANDIDATE",
+    record = record.begin_commit(
+        "tx-1", intent="APPLY_VERIFIED_CANDIDATE", candidate_hash=None,
     )
     result = validate_resume_against_reality({}, "/unused", run_record=record)
     assert result.status == ResumeStatus.REFUSED
@@ -115,8 +115,8 @@ async def test_workflow_refuses_uncertain_commit_before_any_model_call(git_repo)
     save_run_record(git_repo, prior, expected_revision=None)
     running = prior.transition(RunLifecycle.RUNNING)
     save_run_record(git_repo, running, expected_revision=1)
-    eligible = running.transition(
-        RunLifecycle.COMMIT_ELIGIBLE, commit_intent="APPLY_VERIFIED_CANDIDATE",
+    eligible = running.begin_commit(
+        "tx-prior", intent="APPLY_VERIFIED_CANDIDATE", candidate_hash=None,
     )
     save_run_record(git_repo, eligible, expected_revision=2)
 

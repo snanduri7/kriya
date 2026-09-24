@@ -22,7 +22,7 @@ from typing import Any, Callable, Iterator, Optional, TypeVar, cast
 
 from kriya.control.persistence import load_run_record, save_run_record
 from kriya.control.run_ownership import acquire_run_lock
-from kriya.control.run_record import RunLifecycle, RunRecord
+from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, RunRecord
 from kriya.control.workspace_identity import workspace_identity
 
 
@@ -93,50 +93,120 @@ def _git_revision(workspace_path: str, revision: str) -> Optional[str]:
 
 def transition_mutating_run(context: RunContext, state: RunLifecycle, **updates: Any) -> RunRecord:
     """Persist one validated lifecycle transition for the active capability."""
+    return _persist(context, lambda record: record.transition(state, **updates))
+
+
+def _persist(context: RunContext, change: Callable[[RunRecord], RunRecord]) -> RunRecord:
     require_mutating_run(context.workspace_path, context)
     current = context._lease.record or load_run_record(context.workspace_path, context.run_id)
     if current is None:
         raise InvalidRunContextError("active RunContext has no durable RunRecord")
-    updated = current.transition(state, **updates)
+    updated = change(current)
     save_run_record(context.workspace_path, updated, expected_revision=current.revision)
     context._lease.record = updated
     return updated
 
 
-def _complete_successful_run(context: RunContext, payload: dict) -> None:
-    """Persist the proven terminal sequence after the workflow returns success."""
-    files = payload.get("files") or []
-    state = context._lease.record.lifecycle_state
-    if state == RunLifecycle.RUNNING:
-        transition_mutating_run(context, RunLifecycle.CANDIDATE)
-        state = RunLifecycle.CANDIDATE
-    if state == RunLifecycle.CANDIDATE:
-        transition_mutating_run(context, RunLifecycle.VERIFYING)
-        state = RunLifecycle.VERIFYING
-    if state == RunLifecycle.VERIFYING:
-        transition_mutating_run(context, RunLifecycle.COMMIT_ELIGIBLE)
-        state = RunLifecycle.COMMIT_ELIGIBLE
-    if state == RunLifecycle.COMMIT_ELIGIBLE:
-        transition_mutating_run(
-            context,
-            RunLifecycle.COMMITTED,
-            commit_intent="APPLY_VERIFIED_CANDIDATE",
-            commit_result="COMMITTED" if files else "NO_CHANGES",
-        )
-    transition_mutating_run(context, RunLifecycle.SUCCESS)
+def owning_run(workspace_path: str) -> Optional[RunContext]:
+    """The active run whose OWN workspace is ``workspace_path``, else None.
+
+    Lifecycle and commit records describe the run's real workspace. Work
+    inside an authorized candidate (the enforce plan worktree) is part of
+    the run but is not a real-workspace commit, so it is never recorded as
+    one; every commit that targets the real workspace is, however deeply
+    nested (e.g. once per milestone)."""
+    context = current_run_context()
+    if context is None or context._lease.record is None:
+        return None
+    return context if _canonical_workspace(workspace_path) == context.workspace_path else None
+
+
+def mark_run_stage(workspace_path: str, state: RunLifecycle, **evidence: Any) -> None:
+    """Best-effort forward stage marker for the owning run.
+
+    Stage markers are progress evidence, not authority: an out-of-order or
+    repeated marker is skipped, and a persistence failure is logged, so a
+    marker can never fail a run. Commit intent is NOT a marker - see
+    begin_run_commit()."""
+    context = owning_run(workspace_path)
+    if context is None or context._lease.record.lifecycle_state == state:
+        return
+    try:
+        transition_mutating_run(context, state, **evidence)
+    except IllegalRunTransitionError as error:
+        logger.debug("Run %s: stage marker skipped: %s", context.run_id, error)
+    except Exception as error:
+        logger.warning("Run %s: stage %s not persisted: %s", context.run_id, state.value, error)
+
+
+def annotate_run(workspace_path: str, **evidence: Any) -> Optional[str]:
+    """Best-effort evidence annotation for the owning run; returns an error
+    string instead of raising."""
+    context = owning_run(workspace_path)
+    if context is None or context._lease.record.terminal:
+        return None
+    try:
+        _persist(context, lambda record: record.annotate(**evidence))
+    except Exception as error:
+        logger.warning("Run %s: evidence annotation not persisted: %s", context.run_id, error)
+        return f"{type(error).__name__}: {error}"
+    return None
+
+
+def begin_run_commit(
+    workspace_path: str, transaction_id: str, *, candidate_hash: Optional[str],
+    intent: str = "APPLY_VERIFIED_CANDIDATE", **evidence: Any,
+) -> Optional[RunContext]:
+    """Durably record commit intent before any real-workspace byte changes.
+
+    Returns the owning context (pass it to settle_run_commit), or None when
+    no run owns ``workspace_path``. Raises when intent cannot be persisted:
+    the caller must then not commit, because a crash inside an unrecorded
+    commit could never be recognized afterwards."""
+    context = owning_run(workspace_path)
+    if context is None:
+        return None
+    _persist(context, lambda record: record.begin_commit(
+        transaction_id, intent=intent, candidate_hash=candidate_hash, **evidence,
+    ))
+    return context
+
+
+def settle_run_commit(context: Optional[RunContext], result: str) -> Optional[str]:
+    """Record the outcome of the current commit cycle; returns an error
+    string instead of raising (the workspace outcome already happened)."""
+    if context is None:
+        return None
+    try:
+        _persist(context, lambda record: record.settle_commit(result))
+    except Exception as error:
+        logger.error("Run %s: commit result %s not persisted: %s", context.run_id, result, error)
+        return f"{type(error).__name__}: {error}"
+    return None
+
+
+def _complete_successful_run(context: RunContext) -> None:
+    """Terminal SUCCESS from what the record itself proves.
+
+    Never walks stages or reads the result payload: the record reaches
+    SUCCESS only after a settled COMMITTED cycle, or with no commit cycle at
+    all (NO_COMMIT). Anything else is contradictory and fails closed."""
+    try:
+        transition_mutating_run(context, RunLifecycle.SUCCESS)
+    except IllegalRunTransitionError as error:
+        logger.error("Run %s: reported success contradicts its record: %s", context.run_id, error)
+        _fail_active_run(context)
 
 
 def _fail_active_run(context: RunContext, error: Optional[BaseException] = None) -> None:
     record = context._lease.record
     if record is None or record.terminal:
         return
-    uncertain = error is not None and any(
+    uncertain = record.commit_state_unknown or (error is not None and any(
         cls.__name__ == "UncertainCommitError" for cls in type(error).__mro__
-    )
+    ))
     transition_mutating_run(
-        context,
-        RunLifecycle.UNCERTAIN if uncertain else RunLifecycle.FAILURE,
-        commit_result="UNCERTAIN" if uncertain else (record.commit_result or "NOT_COMMITTED"),
+        context, RunLifecycle.UNCERTAIN if uncertain else RunLifecycle.FAILURE,
     )
 
 
@@ -266,6 +336,24 @@ def _use_or_begin(
 F = TypeVar("F", bound=Callable[..., Any])
 
 
+def _config_fingerprint(arguments: dict) -> Optional[str]:
+    """The resume checkpoint's own config fingerprint, from the entry
+    point's engine (``self.kernel``/``self.workflow_engine.kernel``/``we``)."""
+    from kriya.workflow.checkpoint import compute_config_fingerprint
+
+    for value in arguments.values():
+        for owner in (value, getattr(value, "workflow_engine", None)):
+            config = getattr(getattr(owner, "kernel", None), "config", None)
+            dump = getattr(config, "model_dump", None)
+            if callable(dump):
+                try:
+                    payload = dump()
+                except Exception:
+                    return None
+                return compute_config_fingerprint(payload) if isinstance(payload, dict) else None
+    return None
+
+
 def coordinated_mutation(function: F) -> F:
     """Ensure an async public mutation API always executes with ownership.
 
@@ -296,7 +384,10 @@ def coordinated_mutation(function: F) -> F:
                     hashlib.sha256(goal.encode("utf-8")).hexdigest()
                     if isinstance(goal, str) else None
                 )
-                transition_mutating_run(context, RunLifecycle.RUNNING, goal_hash=goal_hash)
+                transition_mutating_run(
+                    context, RunLifecycle.RUNNING, goal_hash=goal_hash,
+                    effective_config_fingerprint=_config_fingerprint(bound.arguments),
+                )
             try:
                 result = await function(*args, **kwargs)
                 if outermost and lease.record is not None and not lease.record.terminal:
@@ -305,7 +396,7 @@ def coordinated_mutation(function: F) -> F:
                         status = str(payload.get("status", "")).lower()
                         quality = payload.get("quality_gates_passed")
                         if quality is True or status == "success":
-                            _complete_successful_run(context, payload)
+                            _complete_successful_run(context)
                         elif quality is False or status in {"failed", "failure", "needs_review"}:
                             _fail_active_run(context)
                 return result

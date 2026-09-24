@@ -116,3 +116,10 @@ non-UTF-8 / new-file-mode fidelity, symlink refusal, base escape, empty batch, e
 pruning. The previously `pragma: no cover` rollback-failure path is now covered.
 Remaining for PRD-008: an operator recovery command that uses `candidate_revision`/`stage_prefix` to resolve
 an uncertain commit (the review's "no recovery path" finding).
+
+## Follow-up (2026-09-24, found during PRD-007)
+The generation workflow's own terminal apply (`workflow.py`, the default `kriya generate` path when the
+controller is disabled) still built `StagedFileWrite(content=<text-decoded>)` with no `content_bytes`/`mode`
+and no transaction id, so CRLF/non-UTF-8 content and executable bits were not preserved there. It now goes
+through the shared seam `kriya/workflow/terminal_commit.py` (exact bytes and mode, unique transaction id,
+durable RunRecord intent). Covered by `tests/test_prd007_run_lifecycle.py`.

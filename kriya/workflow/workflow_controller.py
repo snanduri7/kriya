@@ -107,14 +107,15 @@ from kriya.control.persistence import (
     save_approved_plan,
     save_contract_registry,
     save_control_state,
-    list_run_records,
+    scan_run_records,
 )
 from kriya.control.state import ControlState
 from kriya.control.run_coordinator import (
     authorize_candidate_workspace,
+    annotate_run,
     coordinated_mutation,
     current_run_context,
-    transition_mutating_run,
+    mark_run_stage,
 )
 from kriya.control.run_record import RunLifecycle
 from kriya.control.workspace_identity import json_document_is_ownerless
@@ -172,15 +173,15 @@ from kriya.workflow.recovery_plan import (
     RecoveryParticipantRole,
 )
 from kriya.workflow.edit_safety import (
-    BatchCommitError,
-    CommitState,
-    FileRevisionConflict,
     StagedFileWrite,
-    UncertainCommitError,
-    commit_revision_grounded_batch,
-    commit_state_for_transaction,
     find_uncertain_commit_evidence,
     read_file_revision,
+)
+from kriya.workflow.terminal_commit import (
+    CandidateFile,
+    CandidateMaterializationError,
+    commit_terminal_candidate,
+    materialize_candidate,
 )
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
@@ -296,12 +297,6 @@ class _StructuredPlanUnavailable(Exception):
     stay a clean failure result, never silently retried via a different
     execution model that could double-generate or conflict with whatever
     was already applied to the real workspace."""
-
-
-class _CandidateMaterializationError(Exception):
-    """PRD-004: the verified candidate could not be turned into terminal
-    writes (an approved file is missing, or an approved delete did not
-    happen). Raised before any real-workspace mutation."""
 
 
 class _UnsafeStructuredPlan(Exception):
@@ -3124,22 +3119,33 @@ class WorkflowController:
         verification_report: Optional[VerificationReport] = None
 
         if migration_mode == "enforce":
+            # PRD-007: a record with an unsettled/uncertain commit cycle, or
+            # one that exists but cannot be read, may be the only evidence of
+            # an interrupted commit - never treated as absent.
+            run_record_scan = scan_run_records(workspace_path)
+            active_run_id = active_run.run_id if active_run is not None else None
             unsafe_run_records = [
-                record for record in list_run_records(workspace_path)
-                if record.run_id != run_id and (
-                    record.lifecycle_state == RunLifecycle.UNCERTAIN
-                    or (record.commit_intent is not None and record.commit_result is None)
-                )
+                record for record in run_record_scan.records
+                if record.run_id not in (run_id, active_run_id) and record.commit_state_unknown
             ]
-            if unsafe_run_records:
+            if unsafe_run_records or run_record_scan.unreadable:
+                reason_codes = []
+                if unsafe_run_records:
+                    reason_codes.append("UNCERTAIN_RUN_RECORD_COMMIT_STATE")
+                if run_record_scan.unreadable:
+                    reason_codes.append("RUN_RECORD_UNREADABLE")
                 return WorkflowResult(
                     run_id=run_id, control_state=control_state, route=route,
                     legacy_result={
                         "status": "needs_review",
                         "quality_gates_passed": False,
                         "files": [],
-                        "reason_codes": ["UNCERTAIN_RUN_RECORD_COMMIT_STATE"],
+                        "reason_codes": reason_codes,
                         "uncertain_run_ids": [record.run_id for record in unsafe_run_records],
+                        "unreadable_run_records": [
+                            {"path": item.path, "reason": item.reason}
+                            for item in run_record_scan.unreadable
+                        ],
                         "run_id": run_id,
                     },
                 )
@@ -3968,6 +3974,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         planning_repository_evidence = bounded_repository_evidence(
             workspace_path, planning_repository_candidates,
         )
+        mark_run_stage(workspace_path, RunLifecycle.PLANNING)
         plan_text = await self.workflow_engine.planner.run(
             authoritative_planner_request,
             max_tokens_override=planner_token_cap,
@@ -4522,6 +4529,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # begin. ControlState remains the compact resume index; this owned
         # document is the durable source for what was approved and how each
         # ordered execution stage progressed.
+        annotate_run(workspace_path, approved_plan_hash=current_plan_hash)
         save_approved_plan(
             workspace_path, plan.plan_id,
             build_approved_plan_document(
@@ -4561,6 +4569,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # candidate; it is part of this run, authorized explicitly.
         if plan_workspace_path != workspace_path:
             authorize_candidate_workspace(plan_workspace_path)
+        mark_run_stage(workspace_path, RunLifecycle.CANDIDATE)
         # Resolved ONCE, here, against workspace_path - the real, immutable
         # PRE-mutation baseline, before plan_workspace_path accumulates any
         # subtask's committed writes - and reused unchanged by every bounded
@@ -6048,155 +6057,58 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             await _emit_terminal_event("terminal_gate_outcome", **payload)
 
         def _materialize_terminal_writes() -> List[StagedFileWrite]:
-            """The verified candidate as one revision-grounded batch. Reads
-            nothing from and writes nothing to the real workspace except
-            each target's recorded base revision, checked by the commit."""
-            terminal_writes: List[StagedFileWrite] = []
+            """The verified candidate as one revision-grounded batch, in the
+            final action each approved path has after every subtask."""
             subtasks_by_id = {subtask.id: subtask for subtask in plan.subtasks}
-            execution_ordered_subtasks = [
-                subtasks_by_id[sid]
-                for sid in topological_subtask_order(plan)
-                if sid in subtasks_by_id
-            ]
             final_action_by_path: Dict[str, FileAction] = {}
-            for planned_subtask in execution_ordered_subtasks:
-                for planned_file in planned_subtask.planned_files:
-                    final_action_by_path[planned_file.path] = planned_file.action
-            for path, action in final_action_by_path.items():
-                candidate_path = os.path.join(plan_workspace_path, path)
-                target_path = os.path.join(workspace_path, path)
-                if action == FileAction.DELETE:
-                    if os.path.exists(candidate_path):
-                        raise _CandidateMaterializationError(
-                            f"Terminal plan candidate did not delete approved file {path!r}"
-                        )
-                    terminal_writes.append(StagedFileWrite(
-                        target_path=target_path, content="", base_path=target_path,
-                        expected_base_revision=original_plan_revisions[path], delete=True,
-                        expected_base_exists=True,
-                    ))
-                    continue
-                try:
-                    # The verified candidate's exact bytes and mode are what
-                    # is committed (PRD-005); the decoded text is only its
-                    # revision identity, matching read_file_revision().
-                    with open(candidate_path, "rb") as handle:
-                        candidate_bytes = handle.read()
-                    candidate_mode = os.stat(candidate_path).st_mode & 0o7777
-                    with open(candidate_path, "r", encoding="utf-8", errors="replace") as handle:
-                        candidate_content = handle.read()
-                except OSError as error:
-                    raise _CandidateMaterializationError(
-                        f"Terminal plan candidate is missing approved file {path!r}: {error}"
-                    ) from error
-                terminal_writes.append(StagedFileWrite(
-                    target_path=target_path, content=candidate_content,
-                    base_path=target_path,
-                    expected_base_revision=original_plan_revisions[path],
+            for sid in topological_subtask_order(plan):
+                if sid in subtasks_by_id:
+                    for planned_file in subtasks_by_id[sid].planned_files:
+                        final_action_by_path[planned_file.path] = planned_file.action
+            return materialize_candidate(plan_workspace_path, workspace_path, [
+                CandidateFile(
+                    relpath=path, expected_base_revision=original_plan_revisions[path],
                     expected_base_exists=(action != FileAction.CREATE),
-                    content_bytes=candidate_bytes, mode=candidate_mode,
-                ))
-            return terminal_writes
-
-        def _record_run_transition(state: RunLifecycle, **updates: Any) -> Optional[str]:
-            """Persist one lifecycle transition for the outermost run; return
-            an error string instead of raising so a record failure can never
-            leave the terminal result unreported."""
-            active_run = current_run_context()
-            if active_run is None or not active_run.is_outermost_mutation:
-                return None
-            try:
-                transition_mutating_run(active_run, state, **updates)
-            except Exception as error:
-                return f"{type(error).__name__}: {error}"
-            return None
+                    delete=(action == FileAction.DELETE),
+                )
+                for path, action in final_action_by_path.items()
+            ])
 
         async def _commit_verified_candidate() -> Optional[Dict[str, Any]]:
             """PRD-004: the one real-workspace transaction of an enforce run.
 
             Returns None after a successful commit, or a structured failure
-            whose ``reason_code`` says whether the real workspace is unchanged
-            (materialization failure, revision conflict, rolled-back commit,
-            run-record intent not persisted) or its state is uncertain. Only
-            these controlled commit outcomes are caught; any other exception
-            is an orchestration bug and propagates (see execute()).
+            whose ``workspace_state`` says whether the real workspace is
+            UNCHANGED or UNCERTAIN. The commit itself, its durable RunRecord
+            intent and its settled result are kriya/workflow/terminal_commit.py's
+            (PRD-007), shared with the generation workflow's terminal apply.
             """
             nonlocal workspace_commit_completed, workspace_commit_evidence
             try:
                 terminal_writes = _materialize_terminal_writes()
-            except _CandidateMaterializationError as error:
-                failure: Dict[str, Any] = {
+            except CandidateMaterializationError as error:
+                return {
                     "reason_code": "CANDIDATE_MATERIALIZATION_FAILED",
                     "workspace_state": "UNCHANGED", "error": str(error),
                 }
-                _record_run_transition(RunLifecycle.FAILURE, commit_result="NOT_COMMITTED")
-                return failure
-
-            intent_error = _record_run_transition(
-                RunLifecycle.COMMIT_ELIGIBLE,
-                commit_intent="APPLY_VERIFIED_CANDIDATE",
-                commit_transaction_id=run_id,
+            ledger_revision, ledger_hash = obligation_ledger.fingerprint()
+            outcome = commit_terminal_candidate(
+                terminal_writes, workspace_path=workspace_path, transaction_id=run_id,
+                evidence={
+                    "approved_plan_hash": current_plan_hash,
+                    "obligation_ledger_revision": ledger_revision,
+                    "obligation_ledger_hash": ledger_hash,
+                    "verification_evidence_ids": [f"commit:{run_id}"],
+                },
             )
-            if intent_error is not None:
-                # Without durable intent a crash inside the commit could not
-                # be recognized later, so the commit must not start.
-                _record_run_transition(RunLifecycle.FAILURE, commit_result="NOT_COMMITTED")
-                return {
-                    "reason_code": "RUN_RECORD_INTENT_NOT_PERSISTED",
-                    "workspace_state": "UNCHANGED", "error": intent_error,
-                }
-
-            try:
-                commit_result = commit_revision_grounded_batch(
-                    terminal_writes, workspace_path=workspace_path,
-                    transaction_id=run_id,
-                )
-            except UncertainCommitError as error:
-                _record_run_transition(RunLifecycle.UNCERTAIN, commit_result="UNCERTAIN")
-                return {
-                    "reason_code": "WORKSPACE_COMMIT_UNCERTAIN",
-                    "workspace_state": "UNCERTAIN", "error": str(error),
-                    "commit_transaction_id": run_id,
-                }
-            except (FileRevisionConflict, BatchCommitError) as error:
-                conflict = isinstance(error, FileRevisionConflict) or isinstance(
-                    error.__cause__, FileRevisionConflict,
-                )
-                try:
-                    evidence_state = commit_state_for_transaction(workspace_path, run_id)
-                except Exception:
-                    evidence_state = CommitState.UNCERTAIN
-                if evidence_state in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN):
-                    _record_run_transition(RunLifecycle.UNCERTAIN, commit_result="UNCERTAIN")
-                    return {
-                        "reason_code": "WORKSPACE_COMMIT_UNCERTAIN",
-                        "workspace_state": "UNCERTAIN", "error": str(error),
-                        "commit_transaction_id": run_id,
-                    }
-                commit_outcome = (
-                    "ROLLED_BACK" if evidence_state == CommitState.ROLLED_BACK else "NOT_COMMITTED"
-                )
-                _record_run_transition(RunLifecycle.FAILURE, commit_result=commit_outcome)
-                return {
-                    "reason_code": (
-                        "WORKSPACE_REVISION_CONFLICT" if conflict else "WORKSPACE_COMMIT_FAILED"
-                    ),
-                    "workspace_state": "UNCHANGED", "commit_result": commit_outcome,
-                    "error": str(error), "commit_transaction_id": run_id,
-                }
-
+            if not outcome.committed:
+                return outcome.failure_payload()
             # The workspace now holds the verified candidate. Everything after
             # this line is persistence/observability and cannot undo that.
             workspace_commit_completed = True
-            workspace_commit_evidence = commit_result.evidence.to_dict()
-            committed_error = _record_run_transition(
-                RunLifecycle.COMMITTED, commit_result="COMMITTED",
-            )
-            if committed_error is not None:
-                post_commit_persistence_errors.append({
-                    "operation": "run_record_committed_transition",
-                    "error": committed_error,
-                })
+            if outcome.evidence is not None:
+                workspace_commit_evidence = outcome.evidence.to_dict()
+            post_commit_persistence_errors.extend(outcome.record_errors)
             return None
 
         workspace_commit_failure: Optional[Dict[str, Any]] = None
@@ -6206,6 +6118,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # PRD-004: every blocking terminal gate runs against the one
                 # isolated candidate. The real workspace remains immutable
                 # until this complete set has passed.
+                mark_run_stage(workspace_path, RunLifecycle.VERIFYING)
                 await _emit_terminal_event(
                     "terminal_gates_started", candidate_workspace=plan_workspace_path,
                 )

@@ -696,9 +696,19 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
                                 click.echo(result)
                         except Exception as ex:
                             click.secho(f"Execution failed: {ex}", fg="red")
+                            if run_context is not None:
+                                # A failed tool may still have written: its
+                                # mutation is direct, never a commit transaction.
+                                transition_mutating_run(
+                                    run_context, RunLifecycle.FAILURE,
+                                    commit_result="DIRECT_TOOL_EXECUTION",
+                                )
                         else:
                             if run_context is not None:
-                                transition_mutating_run(run_context, RunLifecycle.SUCCESS)
+                                transition_mutating_run(
+                                    run_context, RunLifecycle.SUCCESS,
+                                    commit_result="DIRECT_TOOL_EXECUTION",
+                                )
                 except WorkspaceLockHeldError as e:
                     click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
                     sys.exit(1)

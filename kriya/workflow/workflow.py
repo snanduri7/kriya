@@ -24,11 +24,11 @@ from kriya.agents.contracts import parse_planner_structured_output
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.control.persistence import load_run_record
+from kriya.control.persistence import UnreadableRunRecordError, load_run_record
 from kriya.control.run_coordinator import (
+    annotate_run,
     coordinated_mutation,
-    current_run_context,
-    transition_mutating_run,
+    mark_run_stage,
 )
 from kriya.control.run_record import RunLifecycle
 from kriya.workflow.checkpoint import (
@@ -96,10 +96,14 @@ from kriya.workflow.edit_safety import (
     _strip_java_comments_and_strings,
     apply_anchored_edits,
     atomic_write_file,
-    commit_revision_grounded_batch,
     content_revision,
     find_structural_corruption,
     normalize_whitespace,
+)
+from kriya.workflow.terminal_commit import (
+    CandidateFile,
+    commit_terminal_candidate,
+    materialize_candidate,
 )
 from kriya.workflow.attribution import (
     FutureOwnerVerificationDeferral,
@@ -1086,10 +1090,14 @@ class WorkflowEngine:
                     drift_reasons = []
                     run_reference = candidate.get("_run_record")
                     prior_run_record = None
+                    prior_run_record_error = None
                     if isinstance(run_reference, dict) and run_reference.get("run_id"):
-                        prior_run_record = load_run_record(
-                            workspace_path, str(run_reference["run_id"]),
-                        )
+                        try:
+                            prior_run_record = load_run_record(
+                                workspace_path, str(run_reference["run_id"]),
+                            )
+                        except (UnreadableRunRecordError, ValueError) as error:
+                            prior_run_record_error = str(error)
                     resume_validation = validate_resume_against_reality(
                         candidate,
                         workspace_path,
@@ -1098,6 +1106,7 @@ class WorkflowEngine:
                             "goal_fingerprint": current_goal_fp,
                         },
                         run_record=prior_run_record,
+                        run_record_error=prior_run_record_error,
                     )
                     if resume_validation.decisions:
                         logger.warning(
@@ -2770,6 +2779,7 @@ class WorkflowEngine:
         try:
             worktree_path = create_git_worktree(workspace_path)
             logger.info(f"Isolated sandbox worktree created at: {worktree_path}")
+            mark_run_stage(workspace_path, RunLifecycle.CANDIDATE)
         except Exception as e:
             raise RuntimeError(
                 f"Failed to create an isolated generation sandbox: {e}. "
@@ -3944,35 +3954,43 @@ class WorkflowEngine:
                     overall_attempt_passed=False,
                 )
 
-                # Terminal apply: materialize the complete verified candidate as
-                # one revision-grounded batch. Every real-workspace base revision
-                # must still match what this run originally read; a partial write
-                # is rolled back by commit_revision_grounded_batch.
-                final_writes = []
-                for filepath in sorted(state.all_files_written):
-                    candidate_path = os.path.join(worktree_path, filepath)
-                    with open(candidate_path, "r", encoding="utf-8", errors="replace") as fh:
-                        candidate_content = fh.read()
-                    actual_path = os.path.join(workspace_path, filepath)
-                    final_writes.append(StagedFileWrite(
-                        target_path=actual_path,
-                        content=candidate_content,
-                        base_path=actual_path,
+                # Terminal apply: the complete verified candidate as one
+                # revision-grounded batch through the shared commit seam
+                # (kriya/workflow/terminal_commit.py) - exact bytes and mode,
+                # durable RunRecord intent before the first workspace byte,
+                # and a settled commit result. Every real-workspace base
+                # revision must still match what this run originally read; a
+                # partial write is rolled back.
+                final_writes = materialize_candidate(worktree_path, workspace_path, [
+                    CandidateFile(
+                        relpath=filepath,
                         expected_base_revision=content_revision(
                             state.all_original_contents.get(filepath, "")
                         ),
-                    ))
-                active_run = current_run_context()
-                if active_run is not None and active_run.is_outermost_mutation:
-                    transition_mutating_run(
-                        active_run, RunLifecycle.COMMIT_ELIGIBLE,
-                        commit_intent="APPLY_VERIFIED_CANDIDATE",
                     )
-                commit_revision_grounded_batch(final_writes, workspace_path=workspace_path)
-                if active_run is not None and active_run.is_outermost_mutation:
-                    transition_mutating_run(
-                        active_run, RunLifecycle.COMMITTED, commit_result="COMMITTED",
-                    )
+                    for filepath in sorted(state.all_files_written)
+                ])
+                annotate_run(
+                    workspace_path,
+                    retry_counters={
+                        "retry_count": state.budgets.retry_count,
+                        "targeted_retry_count": state.budgets.targeted_retry_count,
+                    },
+                    retry_state_reference=f"checkpoint:{run_id}",
+                )
+                # Unique per cycle: a resumed run reuses run_id.
+                terminal_transaction_id = uuid.uuid4().hex
+                commit_outcome = commit_terminal_candidate(
+                    final_writes, workspace_path=workspace_path,
+                    transaction_id=terminal_transaction_id,
+                    evidence={
+                        "verification_evidence_ids": [
+                            f"commit:{terminal_transaction_id}",
+                        ],
+                    },
+                )
+                if not commit_outcome.committed:
+                    raise commit_outcome.error
                 for filepath in sorted(state.all_files_written):
                     logger.info(
                         "Applied terminally verified sandbox change to workspace: %s", filepath,

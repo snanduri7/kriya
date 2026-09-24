@@ -411,6 +411,7 @@ def validate_resume_against_reality(
     artifact_registry: Optional[Any] = None,
     current_fingerprints: Optional[Dict[str, Any]] = None,
     run_record: Optional[Any] = None,
+    run_record_error: Optional[str] = None,
 ) -> ResumeValidationResult:
     """Section 30's flow: validate checkpoint commit -> validate tree hash
     -> validate control-state hash -> validate contract/artifact registry
@@ -517,11 +518,17 @@ def validate_resume_against_reality(
         if current != stored:
             mismatch(fingerprint, f"{fingerprint}: checkpoint={stored!r} current={current!r}")
 
+    if run_record_error is not None:
+        # A referenced record that exists but cannot be read may be the only
+        # evidence of an interrupted commit (PRD-007): never resume past it.
+        mismatch("commit_state", f"commit_state unknown: run record unreadable: {run_record_error}")
     if run_record is not None:
         lifecycle = getattr(getattr(run_record, "lifecycle_state", None), "value", None)
         commit_result = getattr(run_record, "commit_result", None)
         commit_intent = getattr(run_record, "commit_intent", None)
-        if lifecycle == "UNCERTAIN" or commit_result == "UNCERTAIN" or (
+        if getattr(run_record, "commit_state_unknown", False) or lifecycle == "UNCERTAIN" or (
+            commit_result == "UNCERTAIN"
+        ) or (
             commit_intent is not None and commit_result is None
         ):
             mismatch(
