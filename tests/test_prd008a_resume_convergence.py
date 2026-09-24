@@ -192,3 +192,45 @@ def test_plan_drift_invalidates_exactly_the_changed_units_and_their_descendants(
     assert newest.execution_plan["fingerprint"] != first
     reused = {uid for uid, state in newest.work_unit_states.items() if "COMPLETION_REUSED" in state["reason_codes"]}
     assert reused == {"M1", "M2", "M3"} - set(rerun)
+
+
+INDEPENDENT = [_milestone("W1"), _milestone("W2"), _milestone("W3", ["W1"])]
+INDEPENDENT_OUTPUTS = {m.id: {f"{m.id.lower()}.py": f"{m.id} = 1\n".encode()} for m in INDEPENDENT}
+
+
+def _newest_record(ws):
+    return max(scan_run_records(str(ws)).records, key=lambda r: r.created_at)
+
+
+def _reused(record):
+    return {uid for uid, state in record.work_unit_states.items() if "COMPLETION_REUSED" in state["reason_codes"]}
+
+
+def test_reordering_independent_units_is_detected_but_does_not_invalidate_their_completion(tmp_path):
+    """The plan fingerprint is a change detector, not the reuse key: a pure
+    reorder of independent units changes it, and every unit is still reused
+    because each unit's own definition and dependencies are unchanged. A real
+    edit of W1 then invalidates W1 and its dependent W3 only; W2 stays reused."""
+    ws = _workspace(tmp_path)
+    result, _ = _run(ws, INDEPENDENT, FailingEngine(INDEPENDENT, INDEPENDENT_OUTPUTS))
+    assert result["status"] == "success", result
+    first = _newest_record(ws).execution_plan["fingerprint"]
+
+    reordered = [INDEPENDENT[1], INDEPENDENT[0], INDEPENDENT[2]]  # W2, W1, W3
+    engine = FailingEngine(reordered, INDEPENDENT_OUTPUTS)
+    result, _ = _run(ws, reordered, engine)
+    assert result["status"] == "success", result
+    reorder_record = _newest_record(ws)
+    assert reorder_record.execution_plan["fingerprint"] != first  # the change is detected and recorded
+    assert [u["id"] for u in reorder_record.execution_plan["work_units"]][:3] == ["W2", "W1", "W3"]
+    assert engine.calls == ["INTEGRATION"]  # no unit re-executed
+    assert _reused(reorder_record) == {"W1", "W2", "W3"}
+
+    edited = _goal_edited(reordered, "W1", "build W1 differently")
+    engine = FailingEngine(edited, INDEPENDENT_OUTPUTS)
+    result, _ = _run(ws, edited, engine)
+    assert result["status"] == "success", result
+    edit_record = _newest_record(ws)
+    assert edit_record.execution_plan["fingerprint"] != reorder_record.execution_plan["fingerprint"]
+    assert engine.calls == ["W1", "W3", "INTEGRATION"]
+    assert _reused(edit_record) == {"W2"}
