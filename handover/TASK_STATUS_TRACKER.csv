@@ -1,11 +1,11 @@
 task_id,title,wave,priority,dependencies,live_test,status,coding_revision,pytest_verdict,live_verdict
 PRD-001,Bootstrap and Configuration Contract Closure,Wave 0,P0,None,NOT REQUIRED,VERIFIED,7a23840,PYTEST_VERIFIED,NOT_REQUIRED
-PRD-002,Canonical Repository and Distribution Integrity,Wave 0,P0,PRD-001,NOT REQUIRED,READY_FOR_PYTEST_VERIFICATION,084fe7d reopened,,NOT_REQUIRED
+PRD-002,Canonical Repository and Distribution Integrity,Wave 0,P0,PRD-001,NOT REQUIRED,VERIFIED,da84030 899c97f 51d1ca7,PYTEST_VERIFIED,NOT_REQUIRED
 PRD-003,CLI JSON Output Contract,Wave 0,P1,PRD-001,REQUIRED,VERIFIED,42060d2,PYTEST_VERIFIED,LIVE_VERIFIED
-PRD-004,Pre-Commit Terminal Correctness Gates,Wave 1,P0,PRD-003,NOT REQUIRED,READY_FOR_PYTEST_VERIFICATION,ee673e0 reopened,,NOT_REQUIRED
-PRD-005,"Atomic Commit, Rollback and Crash-Safety Proof",Wave 1,P0,PRD-004,NOT REQUIRED,READY_FOR_PYTEST_VERIFICATION,1d7c94e reopened,,NOT_REQUIRED
-PRD-006,RunCoordinator and Mandatory Workspace Ownership Gateway,Wave 2,P0,PRD-005,NOT REQUIRED,READY_FOR_PYTEST_VERIFICATION,eff63b9 reopened,,NOT_REQUIRED
-PRD-007,Canonical Persistent RunRecord,Wave 2,P0,PRD-006,NOT REQUIRED,READY_FOR_PYTEST_VERIFICATION,d267c3a reopened,,NOT_REQUIRED
+PRD-004,Pre-Commit Terminal Correctness Gates,Wave 1,P0,PRD-003,NOT REQUIRED,VERIFIED,54cd571,PYTEST_VERIFIED,NOT_REQUIRED
+PRD-005,"Atomic Commit, Rollback and Crash-Safety Proof",Wave 1,P0,PRD-004,NOT REQUIRED,VERIFIED,83ebef2 f02ba8a,PYTEST_VERIFIED,NOT_REQUIRED
+PRD-006,RunCoordinator and Mandatory Workspace Ownership Gateway,Wave 2,P0,PRD-005,NOT REQUIRED,VERIFIED,a052ea8,PYTEST_VERIFIED,NOT_REQUIRED
+PRD-007,Canonical Persistent RunRecord,Wave 2,P0,PRD-006,NOT REQUIRED,VERIFIED,0421640 316e296 f3f356f,PYTEST_VERIFIED,NOT_REQUIRED
 PRD-008,Resume Integrity and Deterministic Invalidation,Wave 2,P0,PRD-007,NOT REQUIRED,IMPLEMENTING,31d19da reopened,,NOT_REQUIRED
 PRD-009,Sealed Production Runtime Profile,Wave 2,P0,PRD-008,NOT REQUIRED,IMPLEMENTING,d7163de reopened,,NOT_REQUIRED
 PRD-010,kriya doctor --production Deployment Gate,Wave 2,P0,PRD-009,REQUIRED,IMPLEMENTING,aa492ab reopened,,
