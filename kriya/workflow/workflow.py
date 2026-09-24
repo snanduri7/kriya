@@ -1165,8 +1165,8 @@ class WorkflowEngine:
                     # ledger is restored from the checkpoint, so its
                     # current value is the restored snapshot's (UNAVAILABLE
                     # if there is none - never an empty ledger).
-                    resume_restored_ledger, ledger_problem = restore_effective_ledger(candidate)
                     try:
+                        resume_restored_ledger, ledger_problem = restore_effective_ledger(candidate)
                         current_resume_fingerprints = _resume_fingerprints(
                             obligation_ledger,
                             effective_obligation_fingerprint=(

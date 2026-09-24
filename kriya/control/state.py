@@ -220,6 +220,10 @@ class ControlState:
         hashable = self.to_dict()
         hashable.pop("created_at", None)
         hashable.pop("updated_at", None)
+        # PRD-008 added this field; unset, it leaves every earlier state's
+        # hash (and each checkpoint that stored one) unchanged.
+        if hashable.get("subtask_completion_scope") is None:
+            hashable.pop("subtask_completion_scope", None)
         blob = json.dumps(hashable, sort_keys=True, default=str)
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 

@@ -295,7 +295,24 @@ gate-skip and unverifiable-candidate tests. `test_prd008_resume_fingerprints.py`
   tests/test_state001_checkpoint_workspace_identity.py tests/test_checkpoint_control_plane_hashes.py \
   tests/test_milestones.py tests/test_obligations.py tests/test_containment.py tests/test_prd011_toolchain_identity.py tests/test_prd011_toolchain_identity_oci.py \
   tests/test_review_context.py tests/test_proposal_store.py -ra
+# modules whose imports b44f7f5 changed
+.venv/bin/pytest tests/test_acceptance.py tests/test_migration.py tests/test_context_budget.py \
+  tests/test_corr016_planner_authority_gate.py tests/test_corr018_general_case_closure.py \
+  tests/test_containment_oci_registry_scoped_unit.py tests/test_containment_oci.py -ra
 .venv/bin/pytest tests/test_workflow.py -ra
 ```
 Lint (coding agent, run): no new ruff findings on touched files. New tests were smoke-run as plain functions
 (not pytest) by the coding agent.
+
+**S3 review fixes (follow-up commit).** The knowledge-gap gate reads the skills directory (a library with no
+covering skill is a gap), and before S3 its exact dependencies never mattered (any invalidation was a fresh
+run); `skills` is now a `knowledge_clearance` dependency, so a skill change reopens the gate and nothing is
+reused. The knowledge cache (public release dates) is deliberately not a dependency. An unset
+`subtask_completion_scope` is left out of `ControlState.content_hash()`, so stored control-state hashes (e.g.
+milestone checkpoints) do not all read as changed once after the upgrade. The effective-ledger restore moved
+inside the try that keeps fingerprinting from ever failing a run. Reason-code buckets: the enforce completeness
+test collects `reason_codes.append("...")` literals only; the three new resume reasons are decision values, not
+appended reason codes. Partial generation resume keeps the checkpoint id and logs "Resuming checkpoint ...
+partially" instead of "Refusing to resume"; the existing drift tests assert the regenerated plan and call count,
+which hold either way.
+

@@ -110,7 +110,9 @@ ARTIFACT_STAGE: Dict[str, str] = {
 
 ARTIFACT_DEPENDENCIES: Dict[str, FrozenSet[str]] = {
     # A resumed checkpoint skips the knowledge-gap gate (workflow.py).
-    "knowledge_clearance": frozenset({"workspace", "config", "goal", "kriya_runtime"}),
+    # The knowledge-gap check also reads the skills directory (a library with
+    # no covering skill is a gap), so a skill change re-opens the gate.
+    "knowledge_clearance": frozenset({"workspace", "config", "goal", "skills", "kriya_runtime"}),
     "plan": _PLANNING_DEPENDENCIES,
     "design": _PLANNING_DEPENDENCIES,
     # Model-protocol state (negotiated capabilities, tool protocol). No

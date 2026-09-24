@@ -748,3 +748,25 @@ def test_control_state_completion_scope_round_trips_and_defaults_to_unrecorded()
     legacy = state.to_dict()
     legacy.pop("subtask_completion_scope")
     assert ControlState.from_dict(legacy).subtask_completion_scope is None
+
+
+def test_an_unset_completion_scope_leaves_the_control_state_hash_unchanged():
+    import hashlib
+    import json
+
+    state = ControlState(schema_version=CURRENT_SCHEMA_VERSION, run_id="r", subtask_states={"s1": "completed"})
+    pre_prd008 = state.to_dict()
+    for key in ("created_at", "updated_at", "subtask_completion_scope"):
+        pre_prd008.pop(key)
+    expected = hashlib.sha256(json.dumps(pre_prd008, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+    assert state.content_hash() == expected
+    assert state.with_updates(subtask_completion_scope="workspace").content_hash() != expected
+
+
+def test_a_skill_change_reopens_the_knowledge_gate_so_nothing_is_reused():
+    # The knowledge-gap check reads the skills directory.
+    assert "skills" in ARTIFACT_DEPENDENCIES["knowledge_clearance"]
+    checkpoint = dict(_checkpoint("candidate_gates_passed"), **{RESUME_FINGERPRINTS_KEY: fingerprint_block(SAME)})
+    current = dict(SAME, skills=Fingerprint("other", "b"))
+    result = validate_resume_against_reality(checkpoint, "/unused", current_resume_fingerprints=current)
+    assert not apply_resume_invalidation("ckpt", checkpoint, result.invalidated_stages).resumes
