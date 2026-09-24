@@ -4,18 +4,6 @@
 READY_FOR_PYTEST_VERIFICATION (2026-09-24). Slices A1–A7 implemented as one batch, one local commit per slice, all unpushed.
 A8 (focused pytest, full non-live pytest, live-model cases) is the user's. Not marked VERIFIED.
 
-Base: `282b306` (DEF-DEV-EMPTY-ARRAY PYTEST_VERIFIED at `fd42e01`, full suite 5106/0/8).
-
-| Slice | Commit | Content |
-|---|---|---|
-| A1 | `e1d0e4c` | ExecutionPlan/WorkUnit contracts, validation, order, fingerprint, serialization |
-| A2 | `eacac0d` | direct adapter |
-| A3 | `933d11b` | milestone adapter |
-| A4 | `39cb5c2` | common executor; both modes routed through it |
-| A5 | `2181aec` | WorkUnit-aware checkpoint selection; common completion reuse |
-| A6 | `5f3c846` | common terminal decision (RunCoordinator); cross-path invariant suite |
-| A7 | `6a90ff1` | cleanup, docs (design §2.9a, user_guide §3.4/§3.4.1, CLAUDE.md) |
-
 ## Current-state paths found (traced from source before any edit)
 
 **Direct** (`kriya generate`, `fix`, proposal promotion):
@@ -55,6 +43,20 @@ user intent ─┬─ direct goal ──────► direct_execution_plan() 
 - `source_kind` is provenance only; the executor never branches on it. Remaining shape-based rules: an explicit `--resume-id` in a one-unit plan passes to PRD-008 (below); a multi-unit plan result carries `work_unit_states`.
 
 ## Files changed
+Base: `282b306` (DEF-DEV-EMPTY-ARRAY PYTEST_VERIFIED at `fd42e01`, full suite 5106/0/8).
+
+| Slice | Commit | Content |
+|---|---|---|
+| A1 | `e1d0e4c` | ExecutionPlan/WorkUnit contracts, validation, order, fingerprint, serialization |
+| A2 | `eacac0d` | direct adapter |
+| A3 | `933d11b` | milestone adapter |
+| A4 | `39cb5c2` | common executor; both modes routed through it |
+| A5 | `2181aec` | WorkUnit-aware checkpoint selection; common completion reuse |
+| A6 | `5f3c846` | common terminal decision (RunCoordinator); cross-path invariant suite |
+| A7 | `6a90ff1` | cleanup, docs (design §2.9a, user_guide §3.4/§3.4.1, CLAUDE.md) |
+| A6b | `594fa16` | fix-up: exception in preconditions/selection/phase fails the unit (was left PENDING); lock, commit-eligibility, outside-write cross-path invariants |
+| handover | `eefb01d` + follow-up | |
+
 - New: `kriya/workflow/execution_plan.py`, `kriya/workflow/plan_adapters.py`, `kriya/workflow/plan_executor.py`.
 - `kriya/workflow/workflow.py` — `work_unit` parameter; new-intent wrapper (11 lines).
 - `kriya/workflow/milestones.py` — `run_milestones` builds the plan and delegates its loop to `execute_plan` via `_MilestonePlanDriver` (the old loop body moved verbatim into the driver hooks); `_set_work_unit` removed.
@@ -64,7 +66,7 @@ user intent ─┬─ direct goal ──────► direct_execution_plan() 
 - `kriya/control/run_coordinator.py` — `_complete_successful_run` refuses SUCCESS with a non-VERIFIED unit.
 - `kriya/cli.py` — docstring only.
 - Docs: `docs/design.md` §2.9 + new §2.9a, `docs/user_guide.md` §3.4/§3.4.1, `CLAUDE.md`.
-- Tests (new): `test_prd008a_execution_plan.py` (29), `test_prd008a_plan_adapters.py` (15), `test_prd008a_plan_executor.py` (16), `test_prd008a_resume_convergence.py` (12), `test_prd008a_cross_path.py` (13). No existing test modified.
+- Tests (new): `test_prd008a_execution_plan.py` (29), `test_prd008a_plan_adapters.py` (15), `test_prd008a_plan_executor.py` (18), `test_prd008a_resume_convergence.py` (12), `test_prd008a_cross_path.py` (19). No existing test modified.
 
 ## Schemas
 **ExecutionPlan** (schema 1): `plan_id`, `source_kind` (direct|milestone|structured), `work_units` (declared order), `commit_strategy` (`incremental_work_unit`; `atomic_plan` declared, fails validation `UNSUPPORTED_COMMIT_STRATEGY`), `terminal_phases` (`replay_prior_verifications`), `provenance` (not fingerprinted), `fingerprint` = SHA-256 over canonical JSON of schema/source/strategy/phases/units in declared order. `from_dict` refuses a stored fingerprint that no longer matches (`PLAN_FINGERPRINT_MISMATCH`) and unknown schemas.
@@ -103,17 +105,35 @@ Requires the caller's RunCoordinator ownership (`require_mutating_run`); owns: p
 ## Compatibility/migrations
 - No persisted format migrated. RunRecord gains two optional fields (old records load; strict loader unchanged). Checkpoints gain a `work_unit` for direct runs; old checkpoints stay readable. Milestone sidecars/plan files unchanged; legacy v1 plan files adapt. `select_unit_checkpoint`, `_same_unit`, `milestone_work_unit`, `integration_work_unit` and the S4c selection code constants remain importable.
 
-## Evidence (coding agent; plain-Python runner, not pytest)
-- New tests: 85/85 across the five new files (manual runner supports parametrize, `tmp_path`, `monkeypatch`, module fixtures incl. autouse).
-- Regression smoke with the final tree: `test_prd008_s4b_milestone_completion` 28/0, `test_prd008_s4c_milestone_resume` 45/0, `test_milestones` 68/0, `test_workflow_controller_enforce` 271/0, `test_workflow_controller` 32/0, `test_prd008_resume_fingerprints` 97/0, `test_resume_integrity` 20/0, `test_state001_checkpoint_workspace_identity` 35/0, `test_prd007_run_lifecycle` 28/0, `test_run_ownership` 32/0, `test_prd008_commit_state_gate` 26/0, `test_prd008_recovery` 23/0, `test_proposal_promotion` 52/0, `test_developer_file_list_answer_as_content` 32/0, `test_cli_smoke` 65/0, `test_dispatch_generation` 5/0, `test_control_contracts` 40/0, `test_workflow` 862 ok / 1 fail — the one failure (`test_resolve_jdk_home_for_version_falls_back_to_bin_java_heuristic_on_linux`) fails identically on the pre-PRD-008A baseline under the same runner (runner artifact), expected to pass under pytest. `test_milestone3_4::test_staged_skill_accrual` likewise fails identically on baseline under the runner.
-- Negative controls: direct unit-aware resume test fails with the pre-A5 pass-through selector; RunCoordinator terminal test fails with the guard stubbed.
-- The runner is not pytest (memory: manual runs have diverged before) — pytest is authoritative.
-
 ## Focused pytest
 ```
 .venv/bin/pytest tests/test_prd008a_execution_plan.py tests/test_prd008a_plan_adapters.py tests/test_prd008a_plan_executor.py tests/test_prd008a_resume_convergence.py tests/test_prd008a_cross_path.py tests/test_milestones.py tests/test_milestone2.py tests/test_milestone3_4.py tests/test_prd008_s4b_milestone_completion.py tests/test_prd008_s4c_milestone_resume.py tests/test_prd008_resume_fingerprints.py tests/test_resume_integrity.py tests/test_state001_checkpoint_workspace_identity.py tests/test_prd007_run_lifecycle.py tests/test_run_ownership.py tests/test_prd008_commit_state_gate.py tests/test_prd008_recovery.py tests/test_workflow_controller.py tests/test_workflow_controller_enforce.py tests/test_dispatch_generation.py tests/test_developer_file_list_answer_as_content.py tests/test_proposal_promotion.py tests/test_control_contracts.py tests/test_cli_smoke.py
 ```
-If something fails, each commit message lists the files its slice most likely affects (bisect A4 → A5 → A6 → A7).
+If something fails, each commit message lists the files its slice most likely affects (bisect A4 → A5 → A6 → A7 → A6b).
+
+**Coding-agent pre-check (plain-Python runner, NOT pytest; pytest is authoritative - manual runs have diverged before).**
+- At `594fa16`: the five new files 29+15+18+12+19 = 93/93; `test_prd008_s4c_milestone_resume` 45/0, `test_prd008_s4b_milestone_completion` 28/0, `test_milestones` 68/0.
+- At `eefb01d` (= A7 code): `test_workflow` 862 ok / 1 fail / 5 skipped (runner lacks `caplog`), `test_workflow_controller_enforce` 271/0. The one failure, `test_resolve_jdk_home_for_version_falls_back_to_bin_java_heuristic_on_linux`, fails identically on the pre-PRD-008A baseline under the runner (runner artifact); so does `test_milestone3_4::test_staged_skill_accrual`.
+- At `2181aec`-`6a90ff1` (after the last change to the code they exercise): `test_prd008_resume_fingerprints` 97/0, `test_resume_integrity` 20/0, `test_state001_checkpoint_workspace_identity` 35/0, `test_prd007_run_lifecycle` 28/0, `test_run_ownership` 32/0, `test_prd008_commit_state_gate` 26/0, `test_prd008_recovery` 23/0, `test_proposal_promotion` 52/0, `test_developer_file_list_answer_as_content` 32/0, `test_workflow_controller` 32/0, `test_cli_smoke` 65/0, `test_dispatch_generation` 5/0, `test_control_contracts` 40/0.
+- Negative controls: the direct unit-aware resume test fails with the pre-A5 pass-through selector; the RunCoordinator terminal test fails with its guard stubbed.
+
+**PRD required test → coverage.**
+| PRD item | Where | Note |
+|---|---|---|
+| Contracts: serialization, hash, duplicate/missing/cycle, topo order, direct = 1 unit, milestone conversion | `test_prd008a_execution_plan.py`, `test_prd008a_plan_adapters.py` | |
+| Direct parity: success, failure, checkpoint, resume, recovery-required refusal, commit, terminal, one unit | `test_prd008a_plan_executor.py` (direct section), `test_prd008a_cross_path.py` | |
+| Direct parity: retry, candidate reuse | existing `test_workflow.py`, `test_prd008_resume_fingerprints.py` (now running through the one-unit wrapper) | indirect only |
+| Milestone: sequential, failed dependency, blocked downstream, completed-unit reuse, invalid plan | `test_prd008a_plan_executor.py`, `test_prd008a_cross_path.py` | |
+| Milestone: acceptance criteria / provides / consumes preservation | `test_prd008a_plan_adapters.py` | |
+| Milestone: independent units | `test_prd008a_plan_executor.py` (scripted driver: `PLAN_HALTED_AFTER_FAILURE`) | scripted driver only |
+| Milestone: obligation propagation | none new - no milestone carries obligation-ledger input today (risk 5) | gap by design |
+| Milestone: crash/resume within unit, recovery-completed unit, shared-file invalidation | existing S4b/S4c suites, unchanged, now running through the executor | |
+| Cross-path: lock, RunRecord, commit-state gate, PRD-008 validation, checkpoint ownership, commit eligibility, terminal, mutation authority (outside-workspace write), verification (failure never commits) | `test_prd008a_cross_path.py`, parameterized direct/milestone | mutation authority is outcome-level only |
+| Cross-path: recovery | not parameterized - recovery engine untouched and path-agnostic; `test_prd008_recovery.py` + S4c crash tests | single-path |
+| Plan drift: goal, criterion, dependency, new unit | `test_prd008a_resume_convergence.py` | "reorder only independent units" not tested |
+| Checkpoint identity W1/W2, PRD-008 still validates | `test_prd008a_resume_convergence.py` | |
+| Completion reuse: committed / no-change / recovered / stale bytes / missing evidence / shared writer | existing S4b/S4c suites (rules unchanged) + reuse-coherence guard test | |
+
 
 ## Full suite
 ```
@@ -126,7 +146,8 @@ Use a scratch git repo under `~/kriya-live-validation/` (existing convention). A
 plus `git diff`, the run log, and `ollama ps`/model digest.
 1. **Simple direct** — `calc.py` with `add`; `kriya -c kriya.yaml generate "Add a subtract(a, b) function to calc.py" -y`. Expect `execution_plan.source_kind=direct`, one unit `direct` VERIFIED, SUCCESS, commit cycle `work_unit.kind=direct`, no milestone planning call in the log.
 2. **Multi-unit** — hand-write `.kriya/milestones/g1.plan.json` with M1 (module), M2 depends M1 (function using it), M3 depends M2 (CLI entrypoint), then `generate --from-milestones … -y`. Expect `source_kind=milestone`, units M1, M2, M3, `__integration__` in order, all VERIFIED, SUCCESS.
-3. **Deterministic W2 failure** — same plan; when the `MILESTONE 'M2'` banner prints, stop the model server (`ollama stop <model>` / quit Ollama) so M2 cannot pass; `-y` abandons. Expect status `milestone_failed` (M2), `work_unit_states`: M1 VERIFIED, M2 FAILED, M3 and `__integration__` BLOCKED `DEPENDENCY_FAILED` blocked_by M2, RunRecord not SUCCESS. Then restart the server, rerun the same command: M1 `COMPLETION_REUSED`, M2/M3/integration run.
+3. **Deterministic W2 failure** — same plan, with `autonomy.mode: human-in-the-loop` in the scratch `kriya.yaml` and **without** `-y`: approve M1's changes (`y`), **reject** M2's at the approval gate (`n`) - that returns `human_rejected` with `quality_gates_passed=false`, no timing involved - then answer `abandon`. Expect JSON status `milestone_failed` (M2), `work_unit_states`: M1 VERIFIED, M2 FAILED, M3 and `__integration__` BLOCKED `DEPENDENCY_FAILED` blocked_by M2, RunRecord FAILURE. Rerun with `-y`: M1 `COMPLETION_REUSED`, M2/M3/integration run.
+   (Stopping the model server instead is not deterministic: a transport error during planning raises out of `run_generation_workflow` - the planner call is not wrapped - so M2 is `FAILED/WORK_UNIT_EXCEPTION`, the CLI prints "Milestone sequence error" with no JSON result, and only the RunRecord shows the BLOCKED units; during Developer attempts it exhausts retries and returns `milestone_failed`. Either way the invariant is M3/integration BLOCKED `DEPENDENCY_FAILED`.)
 
 ## Remaining risks / sign-offs for the user
 1. **STRUCTURED scope**: the enforce-mode subtask loop still orchestrates its own subtasks (own resume via ControlState, TOOL-subtask resume exclusion, completion skip). Its calls now carry a STRUCTURED `WorkUnitInvocation` and stay otherwise unchanged. Converging it onto `execute_plan` is a separate decision (it is not named in PRD-008A's acceptance criteria).
@@ -135,3 +156,4 @@ plus `git diff`, the run log, and `ollama ps`/model digest.
 4. **Known parity quirk kept**: when contract invalidation replaces `run_state.milestones` mid-run, execution still follows the plan built at the start (exactly what the pre-PRD-008A loop did with its up-front `ordered` list).
 5. `obligation_refs` is empty for both adapters: no milestone carries obligation-ledger inputs today, and a direct run's obligations stay in the per-run ledger restored by PRD-008 resume fingerprinting; nothing new was invented.
 6. Only manual-runner evidence so far; pytest and the live cases are pending.
+7. Behaviour changes to confirm: a foreign-workspace checkpoint now raises (milestones too); direct `--resume` ignores milestone checkpoints; a cyclic/unknown-dependency milestone plan is refused up front.
