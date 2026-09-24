@@ -316,3 +316,96 @@ appended reason codes. Partial generation resume keeps the checkpoint id and log
 partially" instead of "Refusing to resume"; the existing drift tests assert the regenerated plan and call count,
 which hold either way.
 
+
+**S3 user verification (2026-09-24):** the first two S3 commands surfaced 17 failures: validator fixtures that
+reused the candidate without holding one (the new `candidate_integrity` check correctly added a second
+decision), the STATE-001 name guard (`apply_resume_invalidation` renamed `build_resume_plan`: it applies the
+one validator decision, it does not make a second), and the enforce persist-call count (10, the post-commit
+scope save). Fixed in 5ca4f25 (no production change). User's full suite afterwards: **4976 passed, 0 failed, 8
+deselected**. S3 = b44f7f5 + be7d51d + c86a536 + 5ca4f25, VERIFIED.
+
+## Reopening addendum - S4: `kriya runs status|recover|prune`, evidence-based recovery, RunRecord v3
+
+Status: IMPLEMENTING (S4 committed locally as 369a1a5 + 0199844 review fixes; S5 pending). Closes review
+§PRD-008 HIGH "an UNCERTAIN record / intent without result refuses the workspace permanently; no CLI/API
+resolves it".
+
+**`kriya/control/recovery.py`** is the one recovery implementation; `kriya runs` is a thin CLI over it.
+- Per interrupted transaction (evidence IN_PROGRESS/UNCERTAIN) every operation is classified by its recorded
+  exact before/after byte state (evidence schema 2: exists, sha256, mode) against the file on disk: APPLIED,
+  NOT_APPLIED, FOREIGN (neither), AMBIGUOUS (schema-1 text-only evidence that cannot tell the states apart; a
+  path escaping the workspace or a symlink/directory at a target is FOREIGN). All APPLIED -> evidence
+  COMMITTED; all NOT_APPLIED -> ROLLED_BACK (the same terminal state an in-process staging failure records);
+  a mix is PARTIAL; any FOREIGN/AMBIGUOUS/unreadable -> manual action.
+- Per RunRecord, every open cycle (result None or UNCERTAIN) gets the result its evidence proves: no evidence
+  at all -> NOT_COMMITTED (IN_PROGRESS evidence precedes every byte, including staged temp files, and S1
+  retention never prunes evidence an unknown-state record references); COMMITTED/ROLLED_BACK evidence -> the
+  same. Only when every open cycle is proven does the record become RECOVERED.
+- **PARTIAL is finished only by `--complete-partial`**, and only when: evidence schema >= 2 with a candidate
+  hash; exactly one readable RunRecord holds this transaction as an OPEN commit cycle (a cycle exists only via
+  `begin_commit`, i.e. durable proof the exact candidate reached COMMIT_ELIGIBLE - an UNCERTAIN cycle left by
+  an in-process failure qualifies too); that cycle's `candidate_hash` equals the evidence's; every unapplied
+  write has exactly one staged file holding the recorded after bytes+mode; and `candidate_digest` recomputed
+  from the bytes actually on disk (applied targets + staged files) equals that hash. Each step re-checks target
+  and staged file immediately before `os.replace`/`unlink`; a crash part-way just leaves more operations
+  APPLIED. Evidence-only (no run record) partial commits are never rolled forward.
+- **No crash rollback** (base bytes are not durable). The in-process rollback of a controlled failure is
+  unchanged - and now also covers interrupts (below).
+- Order: evidence is settled before the records that reference it (a crash between leaves a record whose next
+  recovery reads the settled evidence); staged temp files are removed only after their transaction settles,
+  matched by exact name shape `.kriya-stage-<txid>-<index>-<mkstemp name>` (ids may contain `-`; a bare
+  prefix test could claim another transaction's files). `settle_recovered_commit_evidence` refuses if the
+  evidence changed since it was assessed.
+
+**RunRecord schema 3** (v1 and v2 migrate): terminal `RunLifecycle.RECOVERED` + `recovery` provenance (tool,
+kriya_version, recovered_at, complete_partial, prior lifecycle/commit_result/terminal_status, settled cycles).
+`RunRecord.recover(cycle_results, provenance)` settles exactly the open cycles with proven results
+(COMMITTED/ROLLED_BACK/NOT_COMMITTED, never UNCERTAIN), refuses SUCCESS/FAILURE/RECOVERED records, and never
+yields SUCCESS: `terminal_status` is NEEDS_REVIEW when any cycle committed (post-commit steps never ran) or the
+record was UNCERTAIN with no cycle to account for it, else FAILURE (the word every failed run already records).
+Lifecycle, commit_result and terminal_status stay separate dimensions, per the approved plan.
+
+**Lock semantics.** `runs status` is read-only: `run_ownership.probe_run_lock` opens the lock file read-only
+(never creating it) and takes a released shared probe lock; while a live run holds the workspace it reports
+RUN_ACTIVE and classifies nothing (a live run's IN_PROGRESS evidence would otherwise read as PARTIAL). `recover`
+and `prune` take the exclusive lock (RUN_ACTIVE, exit 3, while held). A non-terminal record is treated as a
+dead run only under that lock. Exit codes: 0 nothing to do, 1 action required, 3 run active. `kriya runs` skips
+`load_config()` like `kriya authority`, so a denied configuration can never block recovery.
+
+**S4 review fixes (0199844).** (1) Reproduced before the fix: a Ctrl-C (KeyboardInterrupt) mid-apply skipped
+the `except Exception` rollback while the `finally` deleted the unapplied write's staged file, leaving a
+partially applied commit, an UNCERTAIN record, and recovery able only to report MANUAL - the "blocks forever"
+outcome through the most common interruption. `commit_revision_grounded_batch` now rolls back on any
+BaseException and re-raises the interrupt unchanged, and removes staged files only once the evidence is
+settled (ROLLED_BACK), so a failed rollback leaves the candidate bytes for `--complete-partial`. (2) Exact
+staged-file name matching (above). (3) One failure word (FAILURE). (4) `runs status` names the manual step for
+an unreadable run record.
+
+**Disclosed residuals.**
+- Unreadable run records and unreadable commit evidence are never modified by recovery; they block mutation
+  until an operator confirms they are not the only evidence of an interrupted commit and moves them aside
+  (`runs status` says so). No `--quarantine-unreadable` flag was added.
+- "No evidence => NOT_COMMITTED" rests on S1's reference-safe retention. A development workspace that ran the
+  pre-S1 count-based evidence pruning (never pushed) could in principle have lost a referenced COMMITTED file.
+- Schema-1 evidence is text-revision evidence: it can settle COMMITTED/ROLLED_BACK when unambiguous but is
+  never rolled forward.
+
+**Tests.** New `tests/test_prd008_recovery.py` (23): real crash windows via a subprocess killed with `os._exit`
+at an exact commit step (before evidence, after staging, between replaces, after every replace, mid-stage with
+no commit), in-process Ctrl-C with and without a failed rollback, partial without a record / with foreign
+content / tampered staged file / candidate-hash mismatch / another transaction's staged file, unreadable
+evidence, read-only status (whole-tree bytes+mtime snapshot; no `.kriya` created), live-run refusal, CLI JSON +
+exit codes, reachability under denied config, prune protection then removal, RunRecord v3 unit contract.
+Changed: `tests/test_prd007_run_lifecycle.py` (v1 now migrates to schema 3), `tests/test_cli_smoke.py`
+(command inventory gains `runs`).
+
+**S4 verification commands (user runs):**
+```bash
+.venv/bin/pytest tests/test_prd008_recovery.py tests/test_cli_smoke.py tests/test_run_record.py \
+  tests/test_prd007_run_lifecycle.py tests/test_prd008_commit_state_gate.py \
+  tests/test_prd005_commit_transactions.py tests/test_prd004_commit_failure.py tests/test_run_ownership.py \
+  tests/test_resume_integrity.py tests/test_state001_checkpoint_workspace_identity.py \
+  tests/test_bootstrap_contract.py -ra
+```
+Lint (coding agent, run): no new ruff findings on touched files. New tests were smoke-run as plain functions
+(not pytest); the three review-fix tests were confirmed to fail on the pre-fix code.
