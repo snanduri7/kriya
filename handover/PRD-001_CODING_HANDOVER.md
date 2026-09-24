@@ -51,3 +51,19 @@ The user explicitly owns full-project pytest and all live verification, overridi
 5. No live command is needed for PRD-001. Later live-required tasks will have task-specific setup and handovers.
 
 Production acceptance criteria: implementation and focused evidence prepared; final acceptance PENDING user verification. Later tasks remain NOT_STARTED.
+
+## Reopening addendum (2026-09-24, independent review)
+- Reopened because 11 F821 undefined names remained in production code and the guard covered 2 files only.
+  All 11 were string/`__future__` annotations (lint + `get_type_hints` failures, not runtime import failures).
+- Fix: `TYPE_CHECKING` imports in `kriya/workflow/attempt.py` (`ContextItem`, `EngineeringPlan`,
+  `PolymorphicValidator`) and `kriya/workflow/context_budget.py` (`SourceDerivationCache`); `Iterable` added to
+  `kriya/workflow/workflow_controller.py`'s typing import. No runtime behavior change.
+- Guard: `test_config_has_no_undefined_names` replaced by `test_production_code_has_no_undefined_names`, which
+  runs ruff F821 over every tracked `kriya/` and `plugins/` Python file.
+- Evidence: `ruff check --select F821` over tracked production files -> "All checks passed!"; per-file total
+  ruff findings did not increase (attempt.py 12->6, context_budget.py 15->12, workflow_controller.py 2->1).
+- Out of scope, unchanged: ~430 pre-existing repo-wide ruff findings (mostly I001/F401) that keep the CI
+  `ruff check .` job red - owned by PRD-034.
+- User verification command:
+  `.venv/bin/pytest tests/test_bootstrap_contract.py tests/test_config.py tests/test_sec009_config_authority.py tests/test_cli_smoke.py -rs`
+  (confirm the four SEC-009 subprocess CLI tests execute, not skip).

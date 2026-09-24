@@ -45,11 +45,24 @@ def test_cli_bootstrap_in_fresh_process():
     assert "Usage:" in result.stdout
 
 
-def test_config_has_no_undefined_names():
+def _production_python_files():
+    # Tracked files only, so local scratch copies never decide the result;
+    # fall back to the package directories outside a git checkout (sdist).
+    listed = subprocess.run(
+        ["git", "ls-files", "kriya/*.py", "plugins/*.py"],
+        cwd=ROOT, capture_output=True, text=True, timeout=60,
+    )
+    files = listed.stdout.split() if listed.returncode == 0 else []
+    return files or ["kriya", "plugins"]
+
+
+def test_production_code_has_no_undefined_names():
+    # F821 also covers string/deferred annotations, which neither a fresh
+    # import nor Python 3.14's lazy annotations would ever surface.
     result = subprocess.run(
         [sys.executable, "-m", "ruff", "check", "--select", "F821",
-         "kriya/config/authority.py", "kriya/config/config.py"],
-        cwd=ROOT, capture_output=True, text=True, timeout=60,
+         *_production_python_files()],
+        cwd=ROOT, capture_output=True, text=True, timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
 

@@ -14,11 +14,15 @@ import tokenize
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
 from kriya.workflow.edit_safety import _strip_java_comments_and_strings, content_revision
 from kriya.workflow.process_profile import ContextDepth
+
+if TYPE_CHECKING:
+    # String-annotation-only name (PRD-001); a runtime import would cycle.
+    from kriya.workflow.context_source import SourceDerivationCache
 
 logger = logging.getLogger(__name__)
 
