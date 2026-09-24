@@ -223,7 +223,7 @@ F401/I001 only).
 
 ### S3 - stage-precise invalidation, candidate rebuild, enforce completion scope
 
-**Generation resume keeps the longest valid prefix.** `resume_fingerprints.apply_resume_invalidation()` (pure)
+**Generation resume keeps the longest valid prefix.** `resume_fingerprints.build_resume_plan()` (pure)
 turns the validator's invalidated stages into a `ResumePlan`: artifacts are dropped from the first invalidated
 stage of the derivation chain `context -> planning -> candidate -> verification` onward. `model_protocol` is off
 that chain (nothing downstream is derived from negotiated model state), so a model change never discards a plan

@@ -52,7 +52,7 @@ from kriya.workflow.resume_fingerprints import (
     EFFECTIVE_LEDGER_KEY,
     Fingerprint,
     ResumePlan,
-    apply_resume_invalidation,
+    build_resume_plan,
     candidate_snapshot_digest,
     fingerprint_block,
     generation_resume_fingerprints,
@@ -1236,8 +1236,8 @@ class WorkflowEngine:
                                 "run_id": prior_run_id,
                             }
                         # PRD-008 S3: keep only what no invalidated stage
-                        # touches (resume_fingerprints.apply_resume_invalidation).
-                        resume_plan = apply_resume_invalidation(
+                        # touches (resume_fingerprints.build_resume_plan).
+                        resume_plan = build_resume_plan(
                             target_id, candidate, resume_validation.invalidated_stages,
                         )
                         logger.info("Resume decision: %s", json.dumps(resume_plan.to_dict(), sort_keys=True))

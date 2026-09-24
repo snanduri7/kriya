@@ -24,8 +24,10 @@ from kriya.workflow.checkpoint import (
 )
 from kriya.workflow.resume_fingerprints import (
     ARTIFACT_DEPENDENCIES,
+    CANDIDATE_HASH_KEY,
     FINGERPRINT_NAMES,
     Fingerprint,
+    candidate_snapshot_digest,
     fingerprint_block,
 )
 from kriya.workflow.resume_fingerprints import (
@@ -56,12 +58,22 @@ def _all_artifacts():
     return set(ARTIFACT_DEPENDENCIES)
 
 
+def _checkpoint(fingerprints):
+    # Reusing every artifact includes the candidate, so the checkpoint must
+    # carry an intact one; otherwise candidate_integrity rightly invalidates.
+    files = {"math.py": "def add(a, b):\n    return a + b\n"}
+    return {
+        RESUME_FINGERPRINTS_KEY: fingerprint_block(fingerprints),
+        "final_files": files, CANDIDATE_HASH_KEY: candidate_snapshot_digest(files),
+    }
+
+
 @pytest.mark.parametrize("fingerprint", FINGERPRINT_NAMES)
 def test_each_resume_fingerprint_has_machine_readable_invalidation(fingerprint):
     stored = {name: Fingerprint("same", "basis") for name in FINGERPRINT_NAMES}
     current = dict(stored, **{fingerprint: Fingerprint("different", "basis")})
     result = validate_resume_against_reality(
-        {RESUME_FINGERPRINTS_KEY: fingerprint_block(stored)}, "/unused",
+        _checkpoint(stored), "/unused",
         current_resume_fingerprints=current, reused_artifacts=_all_artifacts(),
     )
     assert result.status == ResumeStatus.NEEDS_REVIEW
@@ -75,7 +87,7 @@ def test_each_resume_fingerprint_has_machine_readable_invalidation(fingerprint):
 def test_matching_fingerprints_preserve_safe_resume():
     fingerprints = {name: Fingerprint("same", "basis") for name in FINGERPRINT_NAMES}
     result = validate_resume_against_reality(
-        {RESUME_FINGERPRINTS_KEY: fingerprint_block(fingerprints)}, "/unused",
+        _checkpoint(fingerprints), "/unused",
         current_resume_fingerprints=fingerprints, reused_artifacts=_all_artifacts(),
     )
     assert result.status == ResumeStatus.OK

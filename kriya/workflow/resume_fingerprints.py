@@ -262,7 +262,7 @@ class ResumePlan:
         }
 
 
-def apply_resume_invalidation(
+def build_resume_plan(
     checkpoint_id: str, checkpoint: Mapping[str, Any], invalidated_stages: Iterable[str],
 ) -> ResumePlan:
     """Keep the longest prefix of DERIVATION_CHAIN no invalidated stage
@@ -704,7 +704,7 @@ def generation_resume_fingerprints(
 __all__ = [
     "ARTIFACT_DEPENDENCIES", "ARTIFACT_STAGE", "CANDIDATE_CHECKPOINT_STAGES", "CANDIDATE_HASH_KEY",
     "CHECKPOINT_KEY", "CONFIG_FIELD_OWNERS", "DERIVATION_CHAIN", "EFFECTIVE_LEDGER_KEY", "FINGERPRINT_NAMES",
-    "ResumePlan", "apply_resume_invalidation", "candidate_integrity_problem", "candidate_snapshot_digest",
+    "ResumePlan", "build_resume_plan", "candidate_integrity_problem", "candidate_snapshot_digest",
     "restore_effective_ledger", "Fingerprint", "FingerprintComparison",
     "FingerprintStatus", "RESUME_FINGERPRINT_SCHEMA_VERSION", "STAGE_ORDER", "UNAVAILABLE",
     "authority_context_fingerprint", "compare_resume_fingerprints", "compute_resume_fingerprints",

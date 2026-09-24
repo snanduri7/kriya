@@ -42,7 +42,7 @@ from kriya.workflow.resume_fingerprints import (
     UNAVAILABLE,
     Fingerprint,
     FingerprintStatus,
-    apply_resume_invalidation,
+    build_resume_plan,
     authority_context_fingerprint,
     candidate_integrity_problem,
     candidate_snapshot_digest,
@@ -406,8 +406,8 @@ def test_effective_ledger_grown_by_the_prior_run_blocks_candidate_reuse(git_repo
 
 def test_missing_referenced_run_record_invalidates_everything():
     result = validate_resume_against_reality(
-        {RESUME_FINGERPRINTS_KEY: fingerprint_block(SAME)}, "/unused",
-        current_resume_fingerprints=SAME, reused_artifacts=set(ARTIFACT_DEPENDENCIES),
+        dict(_checkpoint("developer_success"), **{RESUME_FINGERPRINTS_KEY: fingerprint_block(SAME)}),
+        "/unused", current_resume_fingerprints=SAME, reused_artifacts=set(ARTIFACT_DEPENDENCIES),
         run_record_missing="gone-run",
     )
     assert result.status is ResumeStatus.NEEDS_REVIEW
@@ -599,7 +599,7 @@ def _checkpoint(stage):
      "candidate_gates_passed"),
 ])
 def test_invalidation_keeps_the_longest_valid_prefix(invalidated, reused, stage):
-    plan = apply_resume_invalidation("ckpt", _checkpoint("candidate_gates_passed"), invalidated)
+    plan = build_resume_plan("ckpt", _checkpoint("candidate_gates_passed"), invalidated)
     assert plan.reused == reused
     assert plan.state["stage"] == stage
     # The returned state offers exactly what the plan reuses, nothing more.
@@ -609,17 +609,17 @@ def test_invalidation_keeps_the_longest_valid_prefix(invalidated, reused, stage)
 
 
 def test_context_invalidation_reuses_nothing():
-    plan = apply_resume_invalidation("ckpt", _checkpoint("candidate_gates_passed"), STAGE_ORDER)
+    plan = build_resume_plan("ckpt", _checkpoint("candidate_gates_passed"), STAGE_ORDER)
     assert not plan.resumes and plan.state is None and plan.reused == frozenset()
     assert plan.to_dict()["discarded"] == sorted(plan.offered)
 
 
 def test_reuse_flags_come_from_the_plan_never_from_checkpoint_content():
     forged = dict(_checkpoint("candidate_gates_passed"), skip_candidate_gates=True, reuse_candidate=True)
-    plan = apply_resume_invalidation("ckpt", forged, ("verification",))
+    plan = build_resume_plan("ckpt", forged, ("verification",))
     assert plan.reuse_candidate is True
     assert plan.skip_candidate_gates is False
-    plan = apply_resume_invalidation("ckpt", forged, ("candidate", "verification"))
+    plan = build_resume_plan("ckpt", forged, ("candidate", "verification"))
     assert plan.reuse_candidate is False and plan.skip_candidate_gates is False
 
 
@@ -632,7 +632,7 @@ def test_every_surviving_artifact_has_only_matching_dependencies(kind, changed):
     checkpoint = dict(_checkpoint(kind), **{RESUME_FINGERPRINTS_KEY: fingerprint_block(SAME)})
     current = dict(SAME, **{changed: Fingerprint("different", "b")})
     result = validate_resume_against_reality(checkpoint, "/unused", current_resume_fingerprints=current)
-    plan = apply_resume_invalidation("ckpt", checkpoint, result.invalidated_stages)
+    plan = build_resume_plan("ckpt", checkpoint, result.invalidated_stages)
     statuses = {item.name: item.status for item in result.fingerprint_comparisons}
     for artifact in plan.reused:
         for dependency in ARTIFACT_DEPENDENCIES[artifact]:
@@ -651,7 +651,7 @@ def test_model_runtime_change_never_discards_a_candidate():
     checkpoint = dict(_checkpoint("candidate_gates_passed"), **{RESUME_FINGERPRINTS_KEY: fingerprint_block(SAME)})
     current = dict(SAME, model_runtime=Fingerprint("other-model", "b"))
     result = validate_resume_against_reality(checkpoint, "/unused", current_resume_fingerprints=current)
-    plan = apply_resume_invalidation("ckpt", checkpoint, result.invalidated_stages)
+    plan = build_resume_plan("ckpt", checkpoint, result.invalidated_stages)
     assert plan.reuse_candidate and plan.skip_candidate_gates
 
 
@@ -675,7 +675,7 @@ def test_a_tampered_candidate_is_dropped_but_its_plan_is_kept():
     result = validate_resume_against_reality(checkpoint, "/unused", current_resume_fingerprints=SAME)
     assert [item.fingerprint for item in result.decisions] == ["candidate_integrity"]
     assert RESUME_INVALIDATION_MATRIX["candidate_integrity"][1] == ("candidate", "verification")
-    plan = apply_resume_invalidation("ckpt", checkpoint, result.invalidated_stages)
+    plan = build_resume_plan("ckpt", checkpoint, result.invalidated_stages)
     assert plan.reused == {"knowledge_clearance", "plan", "design"}
     assert plan.state["final_files"] is None
 
@@ -769,4 +769,4 @@ def test_a_skill_change_reopens_the_knowledge_gate_so_nothing_is_reused():
     checkpoint = dict(_checkpoint("candidate_gates_passed"), **{RESUME_FINGERPRINTS_KEY: fingerprint_block(SAME)})
     current = dict(SAME, skills=Fingerprint("other", "b"))
     result = validate_resume_against_reality(checkpoint, "/unused", current_resume_fingerprints=current)
-    assert not apply_resume_invalidation("ckpt", checkpoint, result.invalidated_stages).resumes
+    assert not build_resume_plan("ckpt", checkpoint, result.invalidated_stages).resumes

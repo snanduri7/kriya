@@ -447,7 +447,9 @@ def test_run_structured_enforce_uses_persist_control_state_closure_everywhere():
     # implementation). Every other real per-subtask save site must go
     # through the closure, never call save_control_state() raw.
     assert raw_save_calls == 1, f"expected exactly 1 raw save_control_state call (inside the closure itself), found {raw_save_calls}"
-    assert persist_calls == 9, persist_calls
+    # 10: PRD-008 S3 added the post-commit save that records the
+    # completions as landed in the workspace (subtask_completion_scope).
+    assert persist_calls == 10, persist_calls
 
 
 # ---------------------------------------------------------------------------
