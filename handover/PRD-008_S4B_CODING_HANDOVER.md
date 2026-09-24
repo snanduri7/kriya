@@ -1,7 +1,7 @@
 # PRD-008 S4b - Milestone Completion Revalidation - Coding Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION
+USER-VERIFIED (2026-09-24): full non-live suite 5029 passed / 0 failed / 8 deselected (996 s).
 
 S4b is committed locally and not pushed. S5 must not start until S4b's pytest run is verified.
 
@@ -166,7 +166,7 @@ ruff: no new findings. The 7 pre-existing findings in touched files are unchange
   tests/test_bootstrap_contract.py tests/test_cli_smoke.py -ra
 .venv/bin/pytest   # full non-live suite
 ```
-Full non-live pytest result: pending (user).
+Full non-live pytest result (user, 2026-09-24): 5029 passed, 0 failed, 8 deselected, 153 warnings in 996.12 s.
 
 ## Remaining risks
 - **A crash between a commit and the sidecar save** leaves that commit out of the ledger. If it overwrote a path a completed milestone owns, that milestone is judged CHANGED on the next run. This is conservative: extra reruns, never a false skip.
