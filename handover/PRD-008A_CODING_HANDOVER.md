@@ -1,7 +1,7 @@
 # PRD-008A Coding Agent Handover — Unified ExecutionPlan / WorkUnit Orchestration
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION (2026-09-24). Slices A1–A7 implemented as one batch, one local commit per slice, all unpushed.
+PYTEST_VERIFIED at `b99db27` (user, 2026-09-25: 5200 passed / 0 failed / 8 deselected); see `PRD-008A_PYTEST_VERIFICATION.md`. Live cases are still pending. Earlier status: READY_FOR_PYTEST_VERIFICATION (2026-09-24). Slices A1–A7 implemented as one batch, one local commit per slice, all unpushed.
 A8 (focused pytest, full non-live pytest, live-model cases) is the user's. Not marked VERIFIED.
 Final pre-pytest review (2026-09-24): architecture approved; decisions recorded under "Decisions (final review)"; one test added in `123d78c` (independent-unit reorder). No production change.
 
