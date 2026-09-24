@@ -274,10 +274,10 @@ class RunRecord:
         self, transaction_id: str, *, intent: str, candidate_hash: Optional[str], **evidence: Any,
     ) -> "RunRecord":
         """Durable commit intent: must precede the first workspace byte."""
-        if self.terminal or self.lifecycle_state not in _COMMIT_SOURCES:
-            raise self._refuse(RunLifecycle.COMMIT_ELIGIBLE)
         if self.unsettled_commits:
             raise self._refuse(RunLifecycle.COMMIT_ELIGIBLE, "a previous commit is unsettled")
+        if self.terminal or self.lifecycle_state not in _COMMIT_SOURCES:
+            raise self._refuse(RunLifecycle.COMMIT_ELIGIBLE)
         if not transaction_id or not intent:
             raise self._refuse(RunLifecycle.COMMIT_ELIGIBLE, "intent and transaction id are required")
         if any(cycle["transaction_id"] == transaction_id for cycle in self.commits):

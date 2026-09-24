@@ -7561,6 +7561,12 @@ _CODES_TERMINAL_NON_REPAIRABLE = {
     # repair guidance) is what actually resolves it, matching that sibling
     # code's own precedent exactly.
     "PRESERVED_REFERENCE_REGRESSION_REJECTED",
+    # PRD-007 (2026-09-24): pre-planning safety gates, emitted before any
+    # plan exists - a prior run's commit state is unsettled/uncertain, or a
+    # run record cannot be read. No plan repair can resolve either; only
+    # settling the workspace state can (PRD-008's recovery path).
+    "UNCERTAIN_RUN_RECORD_COMMIT_STATE",
+    "RUN_RECORD_UNREADABLE",
 }
 
 # Bucket 3 (Repair Guidance audit, 2026-09-07): codes deliberately left
