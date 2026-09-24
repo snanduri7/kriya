@@ -332,7 +332,11 @@ async def _execute(
             logger.info(f"Work unit '{unit.id}' already completed (resume) - skipping.")
             continue
 
-        stop = await driver.before_unit(plan, unit)
+        try:
+            stop = await driver.before_unit(plan, unit)
+        except BaseException as error:
+            _record_exception(lifecycle, unit.id, error)
+            raise
         if stop is not None:
             lifecycle.set(unit.id, WorkUnitStatus.BLOCKED, (WORK_UNIT_PRECONDITION_FAILED, _status_code(stop)))
             lifecycle.block_after(unit.id)
@@ -369,9 +373,7 @@ async def _execute(
             lifecycle.set(unit.id, WorkUnitStatus.VERIFIED)
             last_result = result
         except BaseException as error:
-            if lifecycle.status(unit.id) is WorkUnitStatus.RUNNING:
-                lifecycle.set(unit.id, WorkUnitStatus.FAILED, (WORK_UNIT_EXCEPTION, type(error).__name__))
-                lifecycle.block_after(unit.id)
+            _record_exception(lifecycle, unit.id, error)
             raise
         finally:
             _set_active_unit(workspace_path, None)
@@ -383,13 +385,28 @@ async def _execute(
     return _terminal(lifecycle, driver.plan_result(plan, last_result))
 
 
+def _record_exception(lifecycle: _Lifecycle, unit_id: str, error: BaseException) -> None:
+    """An exception anywhere in a unit's handling (preconditions, checkpoint
+    selection, generation, completion) fails that unit and blocks the rest
+    before it propagates - never leaves them looking PENDING."""
+    if lifecycle.status(unit_id) in (WorkUnitStatus.VERIFIED, WorkUnitStatus.FAILED, WorkUnitStatus.BLOCKED):
+        return
+    lifecycle.set(unit_id, WorkUnitStatus.FAILED, (WORK_UNIT_EXCEPTION, type(error).__name__))
+    lifecycle.block_after(unit_id)
+
+
 async def _run_phases(
     plan: ExecutionPlan, driver: PlanDriver, lifecycle: _Lifecycle, gated_unit: Optional[WorkUnit],
 ) -> Optional[Dict[str, Any]]:
     """Plan-wide phases run once every PRIMARY unit is VERIFIED. A failure
     blocks the gated (integration) unit."""
     for phase in plan.terminal_phases:
-        failure = await driver.run_phase(phase)
+        try:
+            failure = await driver.run_phase(phase)
+        except BaseException as error:
+            if gated_unit is not None:
+                lifecycle.set(gated_unit.id, WorkUnitStatus.BLOCKED, (TERMINAL_PHASE_FAILED, type(error).__name__))
+            raise
         if failure is not None:
             logger.warning(f"Plan phase '{phase.value}' failed: {_status_code(failure)}")
             if gated_unit is not None:

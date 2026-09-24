@@ -174,3 +174,60 @@ def test_a_direct_result_is_its_units_own_result_unchanged(calc_workspace):
     engine, _ = _engine(CALC_WITH_SUB)
     result = _invoke("direct", calc_workspace, engine)
     assert "work_unit_states" not in result
+
+
+# --- lock, commit eligibility, mutation authority --------------------------------------
+
+def _probing_engine(workspace, developer_answer, file_list='["calc.py"]', probes=None):
+    """The role LLM, plus a probe run during every Developer call."""
+    from kriya.control.run_ownership import WorkspaceLockHeldError, acquire_run_lock
+    from kriya.core import LLMClient
+
+    cfg = _config()
+    base = _role_llm(cfg, developer_answer)
+
+    async def complete(system_prompt, *args, **kwargs):
+        first = (system_prompt or "").splitlines()[0] if system_prompt else ""
+        if "File List Planner" in first:
+            return file_list
+        if "Developer Agent" in first and probes is not None:
+            try:
+                with acquire_run_lock(str(workspace)):
+                    probes.append("ACQUIRED")
+            except WorkspaceLockHeldError:
+                probes.append("HELD")
+        return await base.complete.side_effect(system_prompt, *args, **kwargs)
+
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=complete)
+    engine = WorkflowEngine(Kernel(config=cfg), llm)
+    engine.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+    return engine
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_the_workspace_lock_is_held_for_the_whole_unit(mode, calc_workspace):
+    probes = []
+    _invoke(mode, calc_workspace, _probing_engine(calc_workspace, CALC_WITH_SUB, probes=probes))
+    assert probes and set(probes) == {"HELD"}
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_every_commit_is_an_eligible_verified_candidate_of_a_unit(mode, calc_workspace):
+    engine, _ = _engine(CALC_WITH_SUB)
+    _invoke(mode, calc_workspace, engine)
+    [record] = scan_run_records(str(calc_workspace)).records
+    committed = [c for c in record.commits if c.get("result") == "COMMITTED"]
+    assert committed
+    for cycle in committed:
+        assert cycle["intent"] == "APPLY_VERIFIED_CANDIDATE"
+        assert cycle["candidate_hash"]
+        assert cycle["work_unit"]["kind"] in ("direct", "milestone", "integration")
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_a_write_outside_the_workspace_never_lands(mode, calc_workspace):
+    outside = Path(calc_workspace).parent / "outside.py"
+    engine = _probing_engine(calc_workspace, "x = 1\n", file_list='["calc.py", "../outside.py"]')
+    _invoke(mode, calc_workspace, engine)
+    assert not outside.exists()

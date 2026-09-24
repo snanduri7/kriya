@@ -358,3 +358,26 @@ def test_a_hand_edited_plan_with_a_cycle_is_refused_before_any_work(tmp_path):
     assert result["quality_gates_passed"] is False
     assert "DEPENDENCY_CYCLE" in result["reason_codes"]
     assert engine.calls == []
+
+
+@pytest.mark.parametrize("hook", ["before_unit", "on_checkpoint_selection"])
+def test_an_exception_before_generation_still_fails_the_unit_and_blocks_the_rest(tmp_path, hook):
+    ws = _workspace(tmp_path)
+    plan = _plan(_unit("W1"), _unit("W2", ["W1"]))
+
+    class Raising(ScriptedDriver):
+        async def before_unit(self, plan, unit):
+            if hook == "before_unit":
+                raise RuntimeError("precondition store unavailable")
+            return None
+
+        def on_checkpoint_selection(self, event):
+            raise RuntimeError("selection record unavailable")
+
+    with pytest.raises(RuntimeError):
+        _execute(ws, plan, Raising(ws), resume=True)
+    [record] = scan_run_records(str(ws)).records
+    assert record.work_unit_states["W1"]["status"] == "FAILED"
+    assert WORK_UNIT_EXCEPTION in record.work_unit_states["W1"]["reason_codes"]
+    assert record.work_unit_states["W2"]["status"] == "BLOCKED"
+    assert record.lifecycle_state is RunLifecycle.FAILURE
