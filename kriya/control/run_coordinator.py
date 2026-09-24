@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import logging
 import os
 import subprocess
 from contextlib import contextmanager
@@ -25,6 +26,9 @@ from kriya.control.run_record import RunLifecycle, RunRecord
 from kriya.control.workspace_identity import workspace_identity
 
 
+logger = logging.getLogger(__name__)
+
+
 class InvalidRunContextError(RuntimeError):
     """A missing, expired, or wrong-workspace mutation capability was used."""
 
@@ -34,6 +38,10 @@ class _RunLease:
     active: bool = True
     mutation_depth: int = 0
     record: Optional[RunRecord] = None
+    # PRD-006: isolated candidate workspaces (e.g. the enforce plan worktree)
+    # this run created and explicitly authorized. Nested mutation of one of
+    # them is part of the same run; nothing else is.
+    candidate_workspace_ids: set = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -153,12 +161,34 @@ def require_mutating_run(
         raise InvalidRunContextError("mutating operation requires an active RunContext")
     if not candidate.active:
         raise InvalidRunContextError("RunContext has expired")
-    if candidate.workspace_id != expected:
+    if candidate.workspace_id != expected and expected not in candidate._lease.candidate_workspace_ids:
         raise InvalidRunContextError(
             "RunContext belongs to a different workspace "
-            f"({candidate.workspace_path!r}, not {_canonical_workspace(workspace_path)!r})"
+            f"({candidate.workspace_path!r}, not {_canonical_workspace(workspace_path)!r}) "
+            "and that path is not a candidate workspace this run authorized"
         )
     return candidate
+
+
+def authorize_candidate_workspace(
+    candidate_path: str, context: Optional[RunContext] = None,
+) -> Optional[RunContext]:
+    """Authorize an isolated candidate workspace created by the active run.
+
+    Called by the owner of the candidate (e.g. the enforce controller right
+    after creating its plan worktree). Authorization is explicit and
+    lease-scoped - never inferred from path containment, because a candidate
+    sandbox may live outside the real workspace - and expires with the run.
+    Returns None when no run is active (nothing to extend).
+    """
+    active = context or current_run_context()
+    if active is None:
+        return None
+    require_mutating_run(active.workspace_path, active)
+    active._lease.candidate_workspace_ids.add(
+        workspace_identity(_canonical_workspace(candidate_path))
+    )
+    return active
 
 
 @contextmanager
@@ -199,12 +229,21 @@ def begin_mutating_run(
         try:
             yield context
         except BaseException as error:
-            _fail_active_run(context, error)
+            try:
+                _fail_active_run(context, error)
+            except Exception as record_error:  # never mask the run's own error
+                logger.error("Run %s: terminal failure record not persisted: %s", context.run_id, record_error)
             raise
         finally:
-            _fail_active_run(context)
-            lease.active = False
-            _ACTIVE_RUN.reset(token)
+            try:
+                _fail_active_run(context)
+            except Exception as record_error:
+                logger.error("Run %s: terminal record not persisted: %s", context.run_id, record_error)
+            finally:
+                # Always expire the capability with the lock, so a same-process
+                # caller (e.g. the REPL) can never reuse it without ownership.
+                lease.active = False
+                _ACTIVE_RUN.reset(token)
 
 
 @contextmanager
@@ -272,7 +311,13 @@ def coordinated_mutation(function: F) -> F:
                 return result
             except BaseException as error:
                 if outermost:
-                    _fail_active_run(context, error)
+                    try:
+                        _fail_active_run(context, error)
+                    except Exception as record_error:  # never mask the real error
+                        logger.error(
+                            "Run %s: terminal failure record not persisted: %s",
+                            context.run_id, record_error,
+                        )
                 raise
             finally:
                 lease.mutation_depth -= 1

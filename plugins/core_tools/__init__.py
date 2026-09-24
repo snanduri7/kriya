@@ -58,6 +58,9 @@ class ASTArgs(BaseModel):
 # =====================================================================
 
 class FilesystemTool(BaseTool):
+    def mutates_workspace(self, arguments):
+        return str(arguments.get("operation", "")).lower() not in ("read", "list")
+
     @property
     def name(self) -> str:
         return "filesystem"
@@ -330,6 +333,9 @@ class GitTool(BaseTool):
         # default) - same convention ShellTool's own POL-001 wiring uses.
         self._execution_policy = ExecutionPolicy()
 
+    def mutates_workspace(self, arguments):
+        return str(arguments.get("subcommand", "")).lower() in self._MUTATING_SUBCOMMANDS
+
     @property
     def name(self) -> str:
         return "git"
@@ -451,6 +457,9 @@ class GitTool(BaseTool):
 
 
 class SearchTool(BaseTool):
+    def mutates_workspace(self, arguments):
+        return False
+
     @property
     def name(self) -> str:
         return "search"
@@ -502,6 +511,9 @@ class SearchTool(BaseTool):
 
 
 class ASTTool(BaseTool):
+    def mutates_workspace(self, arguments):
+        return False
+
     @property
     def name(self) -> str:
         return "ast"

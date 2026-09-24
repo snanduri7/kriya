@@ -508,7 +508,10 @@ def test_tools_execute_shell_requires_confirmation_without_yes(runner):
     assert "Non-TTY" in result.output
 
 
-def test_tools_execute_shell_runs_with_yes_flag(runner):
+def test_tools_execute_shell_runs_with_yes_flag(runner, tmp_path, monkeypatch):
+    # A shell call is possibly-mutating, so it owns its working directory
+    # (PRD-006); keep that ownership record out of the repository checkout.
+    monkeypatch.chdir(tmp_path)
     result = runner.invoke(main, ["tools", "execute", "-y", "shell", '{"command": "echo hi"}'])
     assert result.exit_code == 0, result.output
     assert "hi" in result.output

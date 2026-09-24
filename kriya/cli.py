@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import contextlib
 import os
 import sys
 import urllib.error
@@ -15,7 +16,8 @@ from kriya.agents import ReviewerAgent
 from kriya.analyzer import RepositoryAnalyzer
 from kriya.cli_output import GenerateOutput
 from kriya.config import AppConfig, load_config
-from kriya.control.run_coordinator import begin_mutating_run
+from kriya.control.run_coordinator import begin_mutating_run, transition_mutating_run
+from kriya.control.run_record import RunLifecycle
 from kriya.control.run_ownership import WorkspaceLockHeldError
 from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
@@ -675,14 +677,31 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
                         click.secho("Execution cancelled.", fg="yellow")
                         sys.exit(1)
 
+                # PRD-006: a possibly-mutating direct tool call owns the
+                # workspace through the same gateway as generate/fix, so it
+                # can never run concurrently with a mutating Kriya run.
                 try:
-                    result = await tool.execute(**args)
-                    if isinstance(result, (dict, list)):
-                        click.echo(json.dumps(result, indent=2))
-                    else:
-                        click.echo(result)
-                except Exception as ex:
-                    click.secho(f"Execution failed: {ex}", fg="red")
+                    ownership = (
+                        begin_mutating_run(os.getcwd())
+                        if tool.mutates_workspace(args) else contextlib.nullcontext()
+                    )
+                    with ownership as run_context:
+                        if run_context is not None:
+                            transition_mutating_run(run_context, RunLifecycle.RUNNING)
+                        try:
+                            result = await tool.execute(**args)
+                            if isinstance(result, (dict, list)):
+                                click.echo(json.dumps(result, indent=2))
+                            else:
+                                click.echo(result)
+                        except Exception as ex:
+                            click.secho(f"Execution failed: {ex}", fg="red")
+                        else:
+                            if run_context is not None:
+                                transition_mutating_run(run_context, RunLifecycle.SUCCESS)
+                except WorkspaceLockHeldError as e:
+                    click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
+                    sys.exit(1)
             finally:
                 # try/finally so a bad --yes-less invalid-JSON arguments_json,
                 # or any other exception before reaching the end of the happy

@@ -83,3 +83,37 @@ From the target checkout, independently run:
 ```
 
 Report complete pass/fail/skip/deselection counts and every skip reason. Write `handover/PRD-006_PYTEST_VERIFICATION.md`. PRD-006 remains `READY_FOR_PYTEST_VERIFICATION` until the independent full non-live suite passes. No live-model verification is required.
+
+## Reopening addendum (2026-09-24, independent review)
+Blocking finding closed: every real enforce-mode structured subtask raised `InvalidRunContextError` - the
+controller runs the `@coordinated_mutation` engine against its `.kriya/worktree` candidate while the active
+RunContext is bound to the real workspace. Earlier tests were green only because fixtures mapped the worktree to
+the workspace or replaced the engine with an undecorated fake.
+
+- `authorize_candidate_workspace()` (run_coordinator): the owner of an isolated candidate registers it on the
+  active lease right after creating it (the enforce controller does so after `create_git_worktree`).
+  `require_mutating_run` accepts the run's workspace or an explicitly authorized candidate of the same lease;
+  never inferred from path containment (a scoped snapshot sandbox may live outside the workspace); expires with
+  the run. A nested begin on a candidate joins the run - no second lock, no second RunRecord.
+- Lease cleanup hardened: a failure to persist the terminal record in `begin_mutating_run` (except or finally)
+  or in the decorator's failure path is logged and can no longer mask the run's own error or skip
+  `lease.active = False` / ContextVar reset - so a same-process caller (REPL) can never reuse a capability
+  whose lock was released.
+- `kriya tools execute` now goes through the same gateway for possibly-mutating calls:
+  `BaseTool.mutates_workspace(arguments)` fails closed (True, incl. every MCP tool); filesystem read/list,
+  git status/diff/log/branch/blame, search and ast opt out. A mutating call while another run owns the CWD
+  workspace prints `[Workspace Locked]` and exits 1; its RunRecord goes RUNNING -> SUCCESS on success.
+
+Req 3 note: the `coordinated_mutation` compatibility adapter (acquire a context when none is supplied) remains
+the production default; commit primitives (`commit_revision_grounded_batch`, `AuthorizedFileWriter`) still do
+not call `require_mutating_run` themselves - every real-workspace call site is reached only through a
+coordinated entry point. Enforcing at the primitive would break ~dozens of direct unit callers and sandbox-only
+writes; recorded as an accepted residual rather than silently claimed.
+
+Tests (`tests/test_prd006_candidate_workspace.py`): REAL git repo + REAL create/remove_git_worktree + engine
+stand-in carrying the REAL decorator (and a proof the production method carries it): subtask runs in the
+candidate under the same run_id, one RunRecord, SUCCESS/COMMITTED, workspace changed only by the terminal
+commit; unauthorized other workspace refused; authorized out-of-tree candidate accepted and expiring with the
+run; lock + capability released when the terminal record write fails; mutating tool call refused while the
+workspace is owned (file not written); read-only tool call takes no lock. `test_cli_smoke`'s shell test now runs
+in tmp_path so its ownership record stays out of the checkout.

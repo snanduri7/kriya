@@ -111,6 +111,7 @@ from kriya.control.persistence import (
 )
 from kriya.control.state import ControlState
 from kriya.control.run_coordinator import (
+    authorize_candidate_workspace,
     coordinated_mutation,
     current_run_context,
     transition_mutating_run,
@@ -4556,6 +4557,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             raise _StructuredPlanUnavailable(
                 f"failed to create isolated plan-level worktree sandbox: {e}"
             ) from e
+        # PRD-006: subtasks run the (coordinated) engine against this
+        # candidate; it is part of this run, authorized explicitly.
+        if plan_workspace_path != workspace_path:
+            authorize_candidate_workspace(plan_workspace_path)
         # Resolved ONCE, here, against workspace_path - the real, immutable
         # PRE-mutation baseline, before plan_workspace_path accumulates any
         # subtask's committed writes - and reused unchanged by every bounded
