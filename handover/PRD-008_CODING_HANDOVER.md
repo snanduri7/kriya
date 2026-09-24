@@ -420,19 +420,19 @@ The user accepted S4 as verified; rerun that test when the network is faster.
 
 ## Reopening addendum - S4b: milestone completion revalidation
 
-Status: READY_FOR_PYTEST_VERIFICATION (committed locally; S5 blocked until verified). Full details, spec
+Status: USER-VERIFIED (full suite 5029/0). Full details, spec
 deviation, algorithm, tests and verification commands: `handover/PRD-008_S4B_CODING_HANDOVER.md`.
 A completed milestone is skipped only when its completion proof verifies against the RunRecord cycle,
 commit evidence and current workspace bytes; otherwise it reruns with its transitive dependents.
 
 ## Reopening addendum - S4c: milestone resume closure
 
-Status: READY_FOR_PYTEST_VERIFICATION (committed locally; S5 blocked until verified). S4b is USER-VERIFIED (suite
+Status: USER-VERIFIED at `abadb4a` (full suite 5074 passed / 0 failed / 8 deselected, 2026-09-24; S5 unblocked). S4b is USER-VERIFIED (suite
 5029/0). S4c adds: durable work-unit identity on RunRecord cycles and checkpoints; VERIFIED_NO_CHANGE on
 deterministic gate evidence only; completion reconstruction after a commit/state-save crash; identity-aware
 milestone checkpoint selection; proven shared-write lineage. Details: `handover/PRD-008_S4C_CODING_HANDOVER.md`.
 
-Final S4c review closure (one more local commit, still READY_FOR_PYTEST_VERIFICATION):
+Final S4c review closure (`abadb4a`, approved and user-verified):
 - VERIFIED_NO_CHANGE now requires deterministic evidence mapped to every structured acceptance criterion. Zero executed tests are never positive evidence.
 - The proof is bound to PRD-008's toolchain fingerprint; it is UNVERIFIED while that identity is UNAVAILABLE (PRD-011). `model_runtime` is NOT_APPLICABLE.
 - The workspace evidence excludes the analyzer's generated-output directories for untracked files only.

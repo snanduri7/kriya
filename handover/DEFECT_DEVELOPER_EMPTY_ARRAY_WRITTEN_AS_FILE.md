@@ -3,7 +3,9 @@
 ## Status
 OPEN. Not fixed; kept out of PRD-008 on purpose. Found 2026-09-24 during the PRD-008 S4c zero-write probe.
 
-Proposed route: model-protocol / output-normalization work (likely PRD-015). Promote it to an earlier blocking defect if live testing shows it happens with real models.
+Classification (S4c review decision, 2026-09-24): a false-success-capable model-output/rendering defect.
+
+Schedule: fixed immediately after PRD-008 S5, before PRD-008A. It no longer waits for PRD-015.
 
 ## Summary
 The file is `calc.py`. The Developer is in `MODE: REPAIR_WITH_FULL_FILE`. It answers with the two characters `[]`, an empty JSON file array that means "no files to change".

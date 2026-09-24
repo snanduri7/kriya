@@ -1,9 +1,9 @@
 # PRD-008 S4c - Milestone Resume Closure - Coding Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION
+USER-VERIFIED (2026-09-24) at `abadb4a`: the focused command below and the full non-live suite both clean; full suite 5074 passed / 0 failed / 8 deselected / 152 warnings (1027 s). The review decision approved every sign-off listed under "Final review closure"; S4c is not reopened without new failing evidence.
 
-S4c is committed locally and not pushed. S5 must not start until S4c is verified by pytest. PRD-008A has not been started.
+S4c is committed locally and not pushed. S5 is unblocked. PRD-008A has not been started.
 
 Commits: `34d11df`, `d1bfaf8`, `0762a0e`, `4ad70f2`, plus one final review-closure commit (see below). No history was rewritten.
 
