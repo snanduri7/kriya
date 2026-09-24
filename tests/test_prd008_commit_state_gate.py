@@ -442,10 +442,12 @@ def test_prune_does_nothing_while_any_record_is_unreadable(tmp_path):
 
 
 def test_prune_never_removes_uncertain_or_unreadable_evidence_and_dry_run_removes_nothing(tmp_path):
+    # Commit first: the batch itself (correctly) refuses while uncertain or
+    # unreadable evidence exists.
+    _commit(tmp_path, "orphan")
     _evidence_file(tmp_path, "crashed", _raw_evidence("crashed", "in_progress"))
     _evidence_file(tmp_path, "broken", _raw_evidence("broken", "uncertain"))
     _evidence_file(tmp_path, "garbage", "{")
-    _commit(tmp_path, "orphan")
 
     dry = prune_run_state(str(tmp_path), keep_unreferenced_evidence=0, dry_run=True)
     assert dry.pruned_evidence_ids == ["orphan"]
