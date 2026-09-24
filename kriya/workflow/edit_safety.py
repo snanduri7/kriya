@@ -1,5 +1,6 @@
 """Deterministic sanity checks applied to an anchored edit or full-file write before it reaches disk - whitespace-tolerant anchor matching and structural corruption detection. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization). The "which file does this edit concern" checks that used to live here (find_misdirected_edit_target, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line) moved to kriya/workflow/attribution.py on 2026-08-14 - see that module's own docstring taxonomy for why. What's left here is purely mechanical edit-safety: does the edit apply cleanly, and does the resulting file look structurally sound - never "which file"."""
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -213,11 +214,16 @@ def atomic_write_file(
 
 def _atomic_write_bytes(full_path: str, content: bytes) -> None:
     tmp_path = f"{full_path}.kriya-rollback-{os.getpid()}"
-    with open(tmp_path, "wb") as fh:
-        fh.write(content)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp_path, full_path)
+    try:
+        with open(tmp_path, "wb") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, full_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
 
 
 _COMMIT_EVIDENCE_SCHEMA_VERSION = 1

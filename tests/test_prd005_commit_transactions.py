@@ -284,7 +284,8 @@ def test_fault_before_replace_takes_effect_rolls_back(tmp_path, failure_target):
     real_replace = os.replace
 
     def fail_before(source, target):
-        if Path(target).name == failure_target:
+        # Only the forward apply (staged -> target); rollback restores must work.
+        if Path(target).name == failure_target and Path(source).name.startswith(".kriya-stage-"):
             raise OSError("fault before replace")
         return real_replace(source, target)
 
@@ -326,7 +327,8 @@ def test_rolled_back_evidence_write_failure_is_uncertain(tmp_path):
         return real_persist(workspace, evidence)
 
     def fail_modified(source, target):
-        if Path(target).name == "modified.txt":
+        # Only the forward apply (staged -> target); rollback restores must work.
+        if Path(target).name == "modified.txt" and Path(source).name.startswith(".kriya-stage-"):
             raise OSError("fault")
         return real_replace(source, target)
 
