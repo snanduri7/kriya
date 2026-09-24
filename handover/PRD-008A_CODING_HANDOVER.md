@@ -3,6 +3,13 @@
 ## Status
 READY_FOR_PYTEST_VERIFICATION (2026-09-24). Slices A1–A7 implemented as one batch, one local commit per slice, all unpushed.
 A8 (focused pytest, full non-live pytest, live-model cases) is the user's. Not marked VERIFIED.
+Final pre-pytest review (2026-09-24): architecture approved; decisions recorded under "Decisions (final review)"; one test added in `123d78c` (independent-unit reorder). No production change.
+
+## Decisions (final review)
+- **Plan fingerprint = change detector; unit/dependency evidence = reuse authority.** A changed fingerprint is detected and recorded on the RunRecord (`execution_plan.fingerprint`) but never invalidates every unit by itself. An unchanged unit is reused only when its own `definition_digest`, its dependencies (S4b upstream proof identity), its completion evidence and the PRD-008 validations all still hold; a changed unit and its genuinely affected descendants invalidate normally. Obligation context: `obligation_refs` is empty today for both adapters (risk 5), so it adds no reuse input yet.
+- **Enforce/STRUCTURED orchestration is explicitly deferred (out of scope for PRD-008A).** Direct + milestone convergence is what PRD-008A delivers. The enforce-mode subtask loop still owns its higher-level loop (own ControlState resume, TOOL-subtask resume exclusion, completion skip); its calls carry a STRUCTURED `WorkUnitInvocation` as provenance only. It should converge during PRD-030/031 coordination/service extraction. PRD-008A does **not** claim all orchestration is unified.
+- **Explicit direct `--resume-id`** continues through PRD-008 validation and returns the typed refusal on mismatch; never silently converted to a fresh run.
+- **Kept**: foreign-workspace milestone checkpoint rejection, direct/milestone checkpoint separation, upfront cycle/unknown-dependency rejection.
 
 ## Current-state paths found (traced from source before any edit)
 
@@ -66,7 +73,7 @@ Base: `282b306` (DEF-DEV-EMPTY-ARRAY PYTEST_VERIFIED at `fd42e01`, full suite 51
 - `kriya/control/run_coordinator.py` — `_complete_successful_run` refuses SUCCESS with a non-VERIFIED unit.
 - `kriya/cli.py` — docstring only.
 - Docs: `docs/design.md` §2.9 + new §2.9a, `docs/user_guide.md` §3.4/§3.4.1, `CLAUDE.md`.
-- Tests (new): `test_prd008a_execution_plan.py` (29), `test_prd008a_plan_adapters.py` (15), `test_prd008a_plan_executor.py` (18), `test_prd008a_resume_convergence.py` (12), `test_prd008a_cross_path.py` (19). No existing test modified.
+- Tests (new): `test_prd008a_execution_plan.py` (29), `test_prd008a_plan_adapters.py` (15), `test_prd008a_plan_executor.py` (18), `test_prd008a_resume_convergence.py` (13, incl. the reorder test from `123d78c`), `test_prd008a_cross_path.py` (19). No existing test modified.
 
 ## Schemas
 **ExecutionPlan** (schema 1): `plan_id`, `source_kind` (direct|milestone|structured), `work_units` (declared order), `commit_strategy` (`incremental_work_unit`; `atomic_plan` declared, fails validation `UNSUPPORTED_COMMIT_STRATEGY`), `terminal_phases` (`replay_prior_verifications`), `provenance` (not fingerprinted), `fingerprint` = SHA-256 over canonical JSON of schema/source/strategy/phases/units in declared order. `from_dict` refuses a stored fingerprint that no longer matches (`PLAN_FINGERPRINT_MISMATCH`) and unknown schemas.
@@ -112,6 +119,7 @@ Requires the caller's RunCoordinator ownership (`require_mutating_run`); owns: p
 If something fails, each commit message lists the files its slice most likely affects (bisect A4 → A5 → A6 → A7 → A6b).
 
 **Coding-agent pre-check (plain-Python runner, NOT pytest; pytest is authoritative - manual runs have diverged before).**
+- At `123d78c`: the reorder test passes (plain-Python run; reorder re-executes only INTEGRATION, the W1 edit re-executes W1, W3, INTEGRATION).
 - At `594fa16`: the five new files 29+15+18+12+19 = 93/93; `test_prd008_s4c_milestone_resume` 45/0, `test_prd008_s4b_milestone_completion` 28/0, `test_milestones` 68/0.
 - At `eefb01d` (= A7 code): `test_workflow` 862 ok / 1 fail / 5 skipped (runner lacks `caplog`), `test_workflow_controller_enforce` 271/0. The one failure, `test_resolve_jdk_home_for_version_falls_back_to_bin_java_heuristic_on_linux`, fails identically on the pre-PRD-008A baseline under the runner (runner artifact); so does `test_milestone3_4::test_staged_skill_accrual`.
 - At `2181aec`-`6a90ff1` (after the last change to the code they exercise): `test_prd008_resume_fingerprints` 97/0, `test_resume_integrity` 20/0, `test_state001_checkpoint_workspace_identity` 35/0, `test_prd007_run_lifecycle` 28/0, `test_run_ownership` 32/0, `test_prd008_commit_state_gate` 26/0, `test_prd008_recovery` 23/0, `test_proposal_promotion` 52/0, `test_developer_file_list_answer_as_content` 32/0, `test_workflow_controller` 32/0, `test_cli_smoke` 65/0, `test_dispatch_generation` 5/0, `test_control_contracts` 40/0.
@@ -130,7 +138,8 @@ If something fails, each commit message lists the files its slice most likely af
 | Milestone: crash/resume within unit, recovery-completed unit, shared-file invalidation | existing S4b/S4c suites, unchanged, now running through the executor | |
 | Cross-path: lock, RunRecord, commit-state gate, PRD-008 validation, checkpoint ownership, commit eligibility, terminal, mutation authority (outside-workspace write), verification (failure never commits) | `test_prd008a_cross_path.py`, parameterized direct/milestone | mutation authority is outcome-level only |
 | Cross-path: recovery | not parameterized - recovery engine untouched and path-agnostic; `test_prd008_recovery.py` + S4c crash tests | single-path |
-| Plan drift: goal, criterion, dependency, new unit | `test_prd008a_resume_convergence.py` | "reorder only independent units" not tested |
+| Plan drift: goal, criterion, dependency, new unit | `test_prd008a_resume_convergence.py` | |
+| Reorder only independent units (fingerprint changes, W1/W2 reused; then a W1 edit invalidates W1 + dependent W3, W2 stays reused) | `test_prd008a_resume_convergence.py::test_reordering_independent_units_is_detected_but_does_not_invalidate_their_completion` (`123d78c`) | |
 | Checkpoint identity W1/W2, PRD-008 still validates | `test_prd008a_resume_convergence.py` | |
 | Completion reuse: committed / no-change / recovered / stale bytes / missing evidence / shared writer | existing S4b/S4c suites (rules unchanged) + reuse-coherence guard test | |
 
@@ -150,10 +159,10 @@ plus `git diff`, the run log, and `ollama ps`/model digest.
    (Stopping the model server instead is not deterministic: a transport error during planning raises out of `run_generation_workflow` - the planner call is not wrapped - so M2 is `FAILED/WORK_UNIT_EXCEPTION`, the CLI prints "Milestone sequence error" with no JSON result, and only the RunRecord shows the BLOCKED units; during Developer attempts it exhausts retries and returns `milestone_failed`. Either way the invariant is M3/integration BLOCKED `DEPENDENCY_FAILED`.)
 
 ## Remaining risks / sign-offs for the user
-1. **STRUCTURED scope**: the enforce-mode subtask loop still orchestrates its own subtasks (own resume via ControlState, TOOL-subtask resume exclusion, completion skip). Its calls now carry a STRUCTURED `WorkUnitInvocation` and stay otherwise unchanged. Converging it onto `execute_plan` is a separate decision (it is not named in PRD-008A's acceptance criteria).
-2. **Plan fingerprint vs unit identity** (above): a plan-fingerprint change alone does not invalidate an unaffected unit. This preserves S4b and the PRD's own "independent unaffected unit" requirement; it is the one place the PRD text ("changed plan identity/fingerprint invalidates") is read narrowly.
-3. **Explicit `--resume-id` on a direct run** keeps PRD-008's typed refusal rather than an identity pre-filter (single-unit rule).
+1. **STRUCTURED scope — DECIDED: deferred.** The enforce-mode subtask loop still orchestrates its own subtasks; converge it during PRD-030/031. See "Decisions (final review)".
+2. **Plan fingerprint vs unit identity — DECIDED: change detector, not reuse key.** Proven by the reorder test (`123d78c`).
+3. **Explicit `--resume-id` on a direct run — DECIDED:** keeps PRD-008's typed refusal (single-unit rule).
 4. **Known parity quirk kept**: when contract invalidation replaces `run_state.milestones` mid-run, execution still follows the plan built at the start (exactly what the pre-PRD-008A loop did with its up-front `ordered` list).
 5. `obligation_refs` is empty for both adapters: no milestone carries obligation-ledger inputs today, and a direct run's obligations stay in the per-run ledger restored by PRD-008 resume fingerprinting; nothing new was invented.
 6. Only manual-runner evidence so far; pytest and the live cases are pending.
-7. Behaviour changes to confirm: a foreign-workspace checkpoint now raises (milestones too); direct `--resume` ignores milestone checkpoints; a cyclic/unknown-dependency milestone plan is refused up front.
+7. Behaviour changes (confirmed, kept): a foreign-workspace checkpoint now raises (milestones too); direct `--resume` ignores milestone checkpoints; a cyclic/unknown-dependency milestone plan is refused up front.
