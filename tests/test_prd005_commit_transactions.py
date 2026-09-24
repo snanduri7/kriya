@@ -421,13 +421,17 @@ def test_evidence_records_candidate_revisions_and_stage_prefix(tmp_path):
     assert by_target["deleted.txt"]["candidate_revision"] is None
 
 
-def test_terminal_evidence_is_pruned_but_uncertain_never_is(tmp_path):
+def test_batch_never_prunes_evidence_on_its_own(tmp_path):
+    """PRD-008: count-based pruning inside the batch could delete the
+    COMMITTED evidence of another run's unsettled cycle. Retention is now
+    reference-safe and lives in kriya/control/retention.py
+    (tests/test_prd008_commit_state_gate.py)."""
     target = tmp_path / "f.txt"
     target.write_text("0")
-    for index in range(edit_safety_module._COMMIT_EVIDENCE_RETAINED_TERMINAL + 5):
+    for index in range(60):
         commit_revision_grounded_batch([
             StagedFileWrite(str(target), str(index + 1), str(target),
                             content_revision(target.read_text()), expected_base_exists=True),
         ], workspace_path=str(tmp_path), transaction_id=f"t{index}")
     files = list((tmp_path / ".kriya/control/commits").glob("*.json"))
-    assert len(files) == edit_safety_module._COMMIT_EVIDENCE_RETAINED_TERMINAL
+    assert len(files) == 60

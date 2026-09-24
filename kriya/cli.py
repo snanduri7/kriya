@@ -19,6 +19,7 @@ from kriya.config import AppConfig, load_config
 from kriya.control.run_coordinator import begin_mutating_run, transition_mutating_run
 from kriya.control.run_record import RunLifecycle
 from kriya.control.run_ownership import WorkspaceLockHeldError
+from kriya.control.commit_state import UncertainWorkspaceStateError
 from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
 from kriya.plugins.plugin import PluginManager
@@ -709,6 +710,9 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
                                     run_context, RunLifecycle.SUCCESS,
                                     commit_result="DIRECT_TOOL_EXECUTION",
                                 )
+                except UncertainWorkspaceStateError as e:
+                    click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
+                    sys.exit(1)
                 except WorkspaceLockHeldError as e:
                     click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
                     sys.exit(1)
@@ -1753,6 +1757,10 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         try:
             with begin_mutating_run(os.getcwd()):
                 milestone_result = asyncio.run(run_milestone_sequence())
+        except UncertainWorkspaceStateError as e:
+            click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
+            output.fail(str(e))
+            sys.exit(1)
         except WorkspaceLockHeldError as e:
             click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
             output.fail(str(e))
@@ -2165,6 +2173,10 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
     try:
         with begin_mutating_run(os.getcwd()):
             final_res = asyncio.run(run_workflow())
+    except UncertainWorkspaceStateError as e:
+        click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
+        output.fail(str(e))
+        sys.exit(1)
     except WorkspaceLockHeldError as e:
         click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
         output.fail(str(e))
@@ -2853,6 +2865,9 @@ def proposal_execute(ctx: click.Context, proposal_id: str, yes: bool) -> None:
     try:
         with begin_mutating_run(workspace_root):
             res = asyncio.run(run_execution())
+    except UncertainWorkspaceStateError as e:
+        click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red", err=True)
+        sys.exit(1)
     except WorkspaceLockHeldError as e:
         click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red", err=True)
         sys.exit(1)
@@ -3314,6 +3329,9 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
     try:
         with begin_mutating_run(os.path.abspath(workspace)):
             asyncio.run(run_fix())
+    except UncertainWorkspaceStateError as e:
+        click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
+        sys.exit(1)
     except WorkspaceLockHeldError as e:
         click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
         sys.exit(1)

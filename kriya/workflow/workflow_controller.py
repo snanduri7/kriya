@@ -108,9 +108,9 @@ from kriya.control.persistence import (
     save_approved_plan,
     save_contract_registry,
     save_control_state,
-    scan_run_records,
 )
 from kriya.control.state import ControlState
+from kriya.control.commit_state import assess_workspace_commit_state
 from kriya.control.run_coordinator import (
     authorize_candidate_workspace,
     annotate_run,
@@ -175,7 +175,6 @@ from kriya.workflow.recovery_plan import (
 )
 from kriya.workflow.edit_safety import (
     StagedFileWrite,
-    find_uncertain_commit_evidence,
     read_file_revision,
 )
 from kriya.workflow.terminal_commit import (
@@ -3062,6 +3061,15 @@ class WorkflowController:
     def __init__(self, workflow_engine: Any) -> None:
         self.workflow_engine = workflow_engine
 
+    def workspace_refusal_result(self, assessment: Any, arguments: Dict[str, Any]) -> WorkflowResult:
+        """PRD-008: a fresh run refused by the RunCoordinator's commit-state
+        gate, before triage/planning, so there is no route or control state."""
+        run_id = arguments.get("run_id") or new_run_id()
+        return WorkflowResult(
+            run_id=run_id, control_state=None, route=None,
+            legacy_result=assessment.to_payload(run_id=run_id),
+        )
+
     @coordinated_mutation
     async def execute(
         self,
@@ -3120,59 +3128,19 @@ class WorkflowController:
         verification_report: Optional[VerificationReport] = None
 
         if migration_mode == "enforce":
-            # PRD-007: a record with an unsettled/uncertain commit cycle, or
-            # one that exists but cannot be read, may be the only evidence of
-            # an interrupted commit - never treated as absent.
-            run_record_scan = scan_run_records(workspace_path)
+            # PRD-005/007/008: never start or resume model work while the
+            # workspace may hold a partial commit. A fresh run is already
+            # refused by the RunCoordinator before its record exists; this
+            # re-check (same assessment, excluding this run's own record)
+            # covers a controller entered inside an already-owned run.
             active_run_id = active_run.run_id if active_run is not None else None
-            unsafe_run_records = [
-                record for record in run_record_scan.records
-                if record.run_id not in (run_id, active_run_id) and record.commit_state_unknown
-            ]
-            if unsafe_run_records or run_record_scan.unreadable:
-                reason_codes = []
-                if unsafe_run_records:
-                    reason_codes.append("UNCERTAIN_RUN_RECORD_COMMIT_STATE")
-                if run_record_scan.unreadable:
-                    reason_codes.append("RUN_RECORD_UNREADABLE")
+            commit_assessment = assess_workspace_commit_state(
+                workspace_path, exclude_run_ids=(run_id, active_run_id),
+            )
+            if not commit_assessment.safe:
                 return WorkflowResult(
                     run_id=run_id, control_state=control_state, route=route,
-                    legacy_result={
-                        "status": "needs_review",
-                        "quality_gates_passed": False,
-                        "files": [],
-                        "reason_codes": reason_codes,
-                        "uncertain_run_ids": [record.run_id for record in unsafe_run_records],
-                        "unreadable_run_records": [
-                            {"path": item.path, "reason": item.reason}
-                            for item in run_record_scan.unreadable
-                        ],
-                        "run_id": run_id,
-                    },
-                )
-            # PRD-005: an in-progress durable commit record means a prior
-            # process may have died between source-path replacements. Never
-            # start or resume model work while that source state is unknown.
-            try:
-                uncertain_commits = find_uncertain_commit_evidence(workspace_path)
-            except Exception as error:
-                uncertain_commits = ()
-                uncertain_commit_error = str(error)
-            else:
-                uncertain_commit_error = None
-            if uncertain_commits or uncertain_commit_error:
-                ids = [item.transaction_id for item in uncertain_commits]
-                return WorkflowResult(
-                    run_id=run_id, control_state=control_state, route=route,
-                    legacy_result={
-                        "status": "needs_review",
-                        "quality_gates_passed": False,
-                        "files": [],
-                        "reason_codes": ["UNCERTAIN_COMMIT_STATE"],
-                        "uncertain_commit_ids": ids,
-                        "error": uncertain_commit_error,
-                        "run_id": run_id,
-                    },
+                    legacy_result=commit_assessment.to_payload(run_id=run_id),
                 )
             kernel = getattr(self.workflow_engine, "kernel", None)
             if kernel is not None:

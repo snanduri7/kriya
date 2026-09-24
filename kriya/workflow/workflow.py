@@ -771,6 +771,12 @@ class WorkflowEngine:
             logger.warning(f"web_lookup_query_callback failed, skipping live lookup: {ex}")
             return False
 
+    def workspace_refusal_result(self, assessment: Any, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """PRD-008: the structured result when a fresh run is refused because
+        the workspace's prior commit state is uncertain (see
+        kriya/control/commit_state.py). No model call has happened."""
+        return assessment.to_payload(run_id=arguments.get("trace_id_override"))
+
     @coordinated_mutation
     async def run_generation_workflow(
         self, 

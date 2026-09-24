@@ -14,17 +14,17 @@ import inspect
 import logging
 import os
 import subprocess
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from functools import wraps
 from typing import Any, Callable, Iterator, Optional, TypeVar, cast
 
+from kriya.control.commit_state import UncertainWorkspaceStateError, assess_workspace_commit_state
 from kriya.control.persistence import load_run_record, save_run_record
 from kriya.control.run_ownership import acquire_run_lock
 from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, RunRecord
 from kriya.control.workspace_identity import workspace_identity
-
 
 logger = logging.getLogger(__name__)
 
@@ -270,6 +270,14 @@ def begin_mutating_run(
     Lock and capability release run for normal return, exceptions, and
     ``KeyboardInterrupt``.  The OS also releases the underlying lock if the
     process terminates without executing Python cleanup.
+
+    PRD-008 order: lock first, then assess the workspace's PRIOR commit
+    state, and only then create this run's record - so every mutating entry
+    point (generate, fix, milestones, enforce, direct tool writes, proposal
+    execution, any future API) refuses a possibly half-committed workspace
+    with UncertainWorkspaceStateError, and the new record can never
+    contaminate that assessment. At the end, still under the lock, run state
+    is pruned reference-safely (kriya/control/retention.py).
     """
     canonical = _canonical_workspace(workspace_path)
     existing = current_run_context()
@@ -279,6 +287,9 @@ def begin_mutating_run(
         return
 
     with acquire_run_lock(canonical, run_id=run_id) as acquired_run_id:
+        assessment = assess_workspace_commit_state(canonical)
+        if not assessment.safe:
+            raise UncertainWorkspaceStateError(assessment)
         lease = _RunLease()
         base_revision = _git_revision(canonical, "HEAD")
         base_tree_hash = _git_revision(canonical, "HEAD^{tree}")
@@ -309,6 +320,9 @@ def begin_mutating_run(
                 _fail_active_run(context)
             except Exception as record_error:
                 logger.error("Run %s: terminal record not persisted: %s", context.run_id, record_error)
+            else:
+                from kriya.control.retention import prune_after_run
+                prune_after_run(canonical, context.run_id)
             finally:
                 # Always expire the capability with the lock, so a same-process
                 # caller (e.g. the REPL) can never reuse it without ownership.
@@ -360,6 +374,11 @@ def coordinated_mutation(function: F) -> F:
     ``run_context=`` is accepted as an additive capability parameter even
     when the wrapped legacy signature does not expose it.  Omitting it invokes
     the compatibility adapter, which safely acquires a fresh run context.
+
+    When a fresh run is refused because prior commit state is uncertain,
+    an owner that defines ``workspace_refusal_result(assessment, arguments)``
+    (WorkflowEngine, WorkflowController) returns its own structured refusal;
+    any other entry point raises UncertainWorkspaceStateError.
     """
     signature = inspect.signature(function)
 
@@ -374,7 +393,15 @@ def coordinated_mutation(function: F) -> F:
             raise InvalidRunContextError(
                 f"{function.__qualname__} requires a workspace_path for mutation ownership"
             )
-        with _use_or_begin(os.fspath(workspace_path), supplied) as context:
+        with ExitStack() as stack:
+            try:
+                context = stack.enter_context(_use_or_begin(os.fspath(workspace_path), supplied))
+            except UncertainWorkspaceStateError as refusal:
+                render = getattr(bound.arguments.get("self"), "workspace_refusal_result", None)
+                if not callable(render):
+                    raise
+                logger.error("%s refused: %s", function.__qualname__, refusal)
+                return render(refusal.assessment, bound.arguments)
             lease = context._lease
             lease.mutation_depth += 1
             outermost = lease.mutation_depth == 1

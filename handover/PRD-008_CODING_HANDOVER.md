@@ -83,3 +83,53 @@ Run:
 ```
 
 Record complete counts and skip reasons in `handover/PRD-008_PYTEST_VERIFICATION.md`. No live-model verification is required.
+
+## Reopening addendum (2026-09-24, independent review) - S1: commit-state gate, exact evidence, reference-safe retention
+
+Status: IMPLEMENTING (S1 of S1-S5 committed locally; S2-S5 pending). Findings closed here: review §PRD-008
+"uncertain record blocks forever" groundwork (the gate half; `kriya runs recover` is S4) and the retention
+hole found during planning.
+
+**One gate for every mutating entry point.** `kriya/control/commit_state.py::assess_workspace_commit_state`
+(RunRecords with an unsettled/UNCERTAIN cycle, unreadable records, IN_PROGRESS/UNCERTAIN/unreadable commit
+evidence) is called by `begin_mutating_run` AFTER the workspace lock is taken and BEFORE the new run's record is
+created, so the new record can never contaminate the assessment. Refusal = `UncertainWorkspaceStateError`
+(lock released, no record written). `coordinated_mutation` turns it into the owner's structured refusal when the
+owner defines `workspace_refusal_result` (WorkflowEngine -> dict, WorkflowController -> WorkflowResult with
+`control_state=None, route=None`), else re-raises (milestones, future APIs). Every CLI `begin_mutating_run` site
+prints `[Recovery Required]` and exits 1 (AST test enforces this for future sites). Previously only enforce mode
+checked; `generate`/`fix`/milestones/proposal execution/tool writes could run model work on a half-committed
+workspace. The controller's own enforce re-check now uses the same assessment (covers a controller entered inside
+an already-owned run). Reason codes unchanged; the payload now reports every unsafe store at once (was
+first-tier only) and carries `recovery_command`.
+
+**Commit evidence schema 2** (`edit_safety.py`, v1 still loads): each operation records `kind`
+(CREATE/MODIFY/DELETE) and exact `before`/`after` state `{exists, sha256 (bytes), mode}` - no magic null
+hashes, CRLF/non-UTF-8 visible - plus top-level `candidate_hash` (`candidate_digest`, moved from
+terminal_commit.py) equal to the RunRecord cycle's `candidate_hash`, linking the two for S4's
+`--complete-partial` proof. Durability order (tested): RunRecord intent -> IN_PROGRESS evidence (fsync file+dir)
+-> staged temp files (fsync) -> first replace. Deliberately NOT the order proposed in review item 10 (stage
+before IN_PROGRESS): staged temp files live beside source files, so staging first would leave unattributed bytes
+in the workspace after a crash.
+
+**Reference-safe retention** (`kriya/control/retention.py`). The batch no longer prunes evidence by count
+(pre-fix reproduction: 50 later commits deleted the COMMITTED evidence of an unsettled cycle, which recovery would
+have read as "never started"). Mark-and-sweep: protected = non-terminal, commit-state-unknown,
+checkpoint-referenced (`checkpoint.list_checkpoint_run_references`), caller-named, newest N terminal; a record and
+the evidence its cycles reference are pruned as a unit; IN_PROGRESS/UNCERTAIN/unreadable evidence never; nothing
+at all while any record is unreadable. Runs best-effort at the end of every run, under the lock.
+
+**Tests changed:** `test_prd005_commit_transactions.py::test_terminal_evidence_is_pruned_but_uncertain_never_is`
+replaced by `test_batch_never_prunes_evidence_on_its_own` (behavior deliberately moved); 
+`test_prd007_run_lifecycle.py` unreadable test now expects both codes; `test_resume_integrity.py` uncertain-resume
+test now expects the earlier coordinator refusal (validator REFUSED stays covered at unit level). New:
+`tests/test_prd008_commit_state_gate.py`.
+
+**S1 verification commands (user runs):**
+```bash
+.venv/bin/pytest tests/test_prd008_commit_state_gate.py -ra
+.venv/bin/pytest tests/test_prd005_commit_transactions.py tests/test_prd007_run_lifecycle.py \
+  tests/test_resume_integrity.py tests/test_run_ownership.py tests/test_run_record.py \
+  tests/test_prd004_commit_failure.py tests/test_workflow_controller_enforce.py tests/test_cli_smoke.py -ra
+```
+Lint (coding agent, run): `ruff check` on every touched/new file passes; `compileall`, `git diff --check` clean.

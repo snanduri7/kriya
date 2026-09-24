@@ -458,7 +458,8 @@ def test_unreadable_record_blocks_enforce_but_a_stray_file_does_not(tmp_path):
     assert run_once().legacy_result["reason_codes"] == ["UNCERTAIN_COMMIT_STATE"]
     (runs / "half-written.json").write_text('{"schema_version": 2, "revis')
     second = run_once().legacy_result
-    assert second["reason_codes"] == ["RUN_RECORD_UNREADABLE"]
+    # PRD-008: the one shared assessment reports every unsafe store at once.
+    assert second["reason_codes"] == ["RUN_RECORD_UNREADABLE", "UNCERTAIN_COMMIT_STATE"]
     assert second["unreadable_run_records"][0]["path"].endswith("half-written.json")
 
 

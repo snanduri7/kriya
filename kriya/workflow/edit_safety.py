@@ -98,6 +98,11 @@ class CommitEvidence:
     operations: Tuple[Dict[str, Any], ...]
     result_revisions: Dict[str, str]
     failure: Optional[str] = None
+    # PRD-008 (schema 2): identity of the exact candidate this transaction
+    # applies (candidate_digest), linking it to its RunRecord commit cycle,
+    # and the provenance of an explicit `kriya runs recover` settlement.
+    candidate_hash: Optional[str] = None
+    recovery: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -226,8 +231,37 @@ def _atomic_write_bytes(full_path: str, content: bytes) -> None:
         raise
 
 
-_COMMIT_EVIDENCE_SCHEMA_VERSION = 1
+# Schema 2 (PRD-008) adds exact per-operation byte state ("before"/"after":
+# exists, sha256, mode), the operation kind and the candidate hash. Schema 1
+# evidence still loads; recovery treats its text-only revisions as weaker
+# evidence and never guesses when they cannot tell states apart.
+_COMMIT_EVIDENCE_SCHEMA_VERSION = 2
+_SUPPORTED_COMMIT_EVIDENCE_SCHEMAS = frozenset({1, 2})
 _COMMIT_EVIDENCE_RELATIVE_DIR = os.path.join(".kriya", "control", "commits")
+
+
+def commit_evidence_dir(workspace_path: str) -> str:
+    return os.path.join(workspace_path, _COMMIT_EVIDENCE_RELATIVE_DIR)
+
+
+def candidate_digest(writes: Iterable["StagedFileWrite"], workspace_root: Optional[str]) -> str:
+    """Content identity of an exact candidate: path, bytes, mode, deletion.
+
+    The same value is recorded in the RunRecord commit cycle (terminal
+    commit seam) and in the commit evidence, so recovery can prove both
+    describe the same verified candidate."""
+    entries = []
+    for item in writes:
+        data = item.content_bytes if item.content_bytes is not None else item.content.encode("utf-8")
+        relpath = (
+            os.path.relpath(item.target_path, workspace_root)
+            if workspace_root is not None else item.target_path
+        )
+        entries.append([
+            relpath, "delete" if item.delete else hashlib.sha256(data).hexdigest(), item.mode,
+        ])
+    blob = json.dumps(sorted(entries), sort_keys=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def _within_workspace(workspace_path: str, path: str) -> bool:
@@ -287,7 +321,7 @@ def load_commit_evidence(path: str) -> CommitEvidence:
     with open(path, "r", encoding="utf-8") as handle:
         payload = json.load(handle)
     schema_version = int(payload["schema_version"])
-    if schema_version != _COMMIT_EVIDENCE_SCHEMA_VERSION:
+    if schema_version not in _SUPPORTED_COMMIT_EVIDENCE_SCHEMAS:
         raise ValueError(f"Unsupported commit evidence schema: {schema_version}.")
     return CommitEvidence(
         schema_version=schema_version,
@@ -298,7 +332,29 @@ def load_commit_evidence(path: str) -> CommitEvidence:
         operations=tuple(payload.get("operations", ())),
         result_revisions=dict(payload.get("result_revisions", {})),
         failure=payload.get("failure"),
+        candidate_hash=payload.get("candidate_hash"),
+        recovery=payload.get("recovery"),
     )
+
+
+def list_commit_evidence(
+    workspace_path: str,
+) -> List[Tuple[str, Optional[CommitEvidence], Optional[str]]]:
+    """Every evidence file as (path, evidence, error); unreadable files are
+    reported with their error, never skipped."""
+    directory = commit_evidence_dir(workspace_path)
+    try:
+        names = sorted(name for name in os.listdir(directory) if name.endswith(".json"))
+    except FileNotFoundError:
+        return []
+    entries: List[Tuple[str, Optional[CommitEvidence], Optional[str]]] = []
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            entries.append((path, load_commit_evidence(path), None))
+        except Exception as error:
+            entries.append((path, None, f"{type(error).__name__}: {error}"))
+    return entries
 
 
 def commit_state_for_transaction(workspace_path: str, transaction_id: str) -> CommitState:
@@ -311,19 +367,13 @@ def commit_state_for_transaction(workspace_path: str, transaction_id: str) -> Co
 
 def find_uncertain_commit_evidence(workspace_path: str) -> Tuple[CommitEvidence, ...]:
     """Return durable commits whose process never recorded a safe terminal state."""
-    directory = os.path.join(workspace_path, _COMMIT_EVIDENCE_RELATIVE_DIR)
-    try:
-        names = sorted(name for name in os.listdir(directory) if name.endswith(".json"))
-    except FileNotFoundError:
-        return ()
     uncertain = []
-    for name in names:
-        try:
-            evidence = load_commit_evidence(os.path.join(directory, name))
-        except Exception as error:
+    for path, evidence, error in list_commit_evidence(workspace_path):
+        if evidence is None:
             raise UncertainCommitError(
-                f"Commit evidence {name!r} is unreadable; source state is uncertain: {error}"
-            ) from error
+                f"Commit evidence {os.path.basename(path)!r} is unreadable; "
+                f"source state is uncertain: {error}"
+            )
         if evidence.state in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN):
             uncertain.append(evidence)
     return tuple(uncertain)
@@ -347,6 +397,20 @@ def stage_file_prefix(transaction_id: str) -> str:
     return f".kriya-stage-{transaction_id}-"
 
 
+def _candidate_mode(item: StagedFileWrite) -> int:
+    """Permission bits the committed file will have."""
+    if item.mode is not None:
+        return item.mode & 0o7777
+    try:
+        return os.stat(item.target_path, follow_symlinks=False).st_mode & 0o7777
+    except FileNotFoundError:
+        # mkstemp is deliberately restrictive. Match ordinary file-create
+        # behavior for a new target while respecting the process umask.
+        current_umask = os.umask(0)
+        os.umask(current_umask)
+        return 0o666 & ~current_umask
+
+
 def _stage_content(item: StagedFileWrite, transaction_id: str, index: int) -> str:
     parent = _existing_parent(item.target_path)
     fd, path = tempfile.mkstemp(
@@ -360,18 +424,7 @@ def _stage_content(item: StagedFileWrite, transaction_id: str, index: int) -> st
             )
             handle.flush()
             os.fsync(handle.fileno())
-        if item.mode is not None:
-            mode = item.mode & 0o7777
-        else:
-            try:
-                mode = os.stat(item.target_path, follow_symlinks=False).st_mode & 0o7777
-            except FileNotFoundError:
-                # mkstemp is deliberately restrictive. Match ordinary file-create
-                # behavior for a new target while respecting the process umask.
-                current_umask = os.umask(0)
-                os.umask(current_umask)
-                mode = 0o666 & ~current_umask
-        os.chmod(path, mode)
+        os.chmod(path, _candidate_mode(item))
         return path
     except Exception:
         try:
@@ -379,6 +432,22 @@ def _stage_content(item: StagedFileWrite, transaction_id: str, index: int) -> st
         except FileNotFoundError:
             pass
         raise
+
+
+def _candidate_bytes(item: StagedFileWrite) -> bytes:
+    return item.content_bytes if item.content_bytes is not None else item.content.encode("utf-8")
+
+
+def _file_state(data: Optional[bytes], mode: Optional[int]) -> Dict[str, Any]:
+    if data is None:
+        return {"exists": False, "sha256": None, "mode": None}
+    return {"exists": True, "sha256": hashlib.sha256(data).hexdigest(), "mode": mode}
+
+
+def _operation_kind(item: StagedFileWrite, target_exists: bool) -> str:
+    if item.delete:
+        return "DELETE"
+    return "MODIFY" if target_exists else "CREATE"
 
 
 def _preflight_batch(
@@ -436,31 +505,6 @@ def _preflight_batch(
             )
 
 
-_COMMIT_EVIDENCE_RETAINED_TERMINAL = 50
-
-
-def _prune_terminal_commit_evidence(workspace_path: str, keep: int = _COMMIT_EVIDENCE_RETAINED_TERMINAL) -> None:
-    """Best-effort bound on committed/rolled-back evidence files. Never
-    removes in-progress/uncertain (or unreadable) evidence - those block
-    later commits until explicitly recovered."""
-    directory = os.path.join(workspace_path, _COMMIT_EVIDENCE_RELATIVE_DIR)
-    try:
-        entries = []
-        for name in os.listdir(directory):
-            if not name.endswith(".json"):
-                continue
-            path = os.path.join(directory, name)
-            try:
-                evidence = load_commit_evidence(path)
-            except Exception:
-                continue
-            if evidence.state in (CommitState.COMMITTED, CommitState.ROLLED_BACK):
-                entries.append((evidence.updated_at_unix, path))
-        for _, path in sorted(entries, reverse=True)[keep:]:
-            os.unlink(path)
-    except OSError as error:
-        logger.debug("Commit evidence pruning skipped: %s", error)
-
 
 def commit_revision_grounded_batch(
     writes: Iterable[StagedFileWrite], workspace_path: Optional[str] = None,
@@ -474,12 +518,18 @@ def commit_revision_grounded_batch(
        revision) and refusal while any prior commit is uncertain - all before
        anything is written.
     2. Snapshot every target's bytes and mode.
-    3. Persist IN_PROGRESS evidence (operations with base and candidate
-       revisions plus the staged-file prefix) BEFORE staging, so any temp file
-       a crash leaves behind is attributable and removable.
+    3. Persist IN_PROGRESS evidence (fsynced file + directory; each operation's
+       kind, exact before/after byte state, base and candidate revisions, and
+       the staged-file prefix) BEFORE staging, so no byte - not even a staged
+       temp file beside a source file - reaches the workspace before durable
+       evidence says a commit began, and anything a crash leaves behind is
+       attributable and removable. (The terminal commit seam records RunRecord
+       intent before calling this.)
     4. Stage every write as a fully fsynced temp file beside its target.
     5. Apply each operation (os.replace / unlink) after re-checking its base.
-    6. Persist COMMITTED evidence; prune old terminal evidence.
+    6. Persist COMMITTED evidence. Retention is reference-safe and lives in
+       kriya/control/retention.py, never here: evidence is pruned only
+       together with the run record that references it.
 
     Any controlled failure before step 5 changes no source path. A failure
     during step 5 restores every applied path's bytes, existence and mode and
@@ -512,26 +562,6 @@ def commit_revision_grounded_batch(
     def _rel(path: str) -> str:
         return os.path.relpath(path, workspace_path) if workspace_path is not None else path
 
-    started_at = time.time()
-    operations = tuple({
-        "target_path": _rel(item.target_path),
-        "base_path": _rel(item.base_path),
-        "operation": "delete" if item.delete else "write",
-        "expected_base_revision": item.expected_base_revision,
-        "expected_base_exists": item.expected_base_exists,
-        "candidate_revision": None if item.delete else content_revision(item.content),
-        "stage_prefix": None if item.delete else stage_file_prefix(transaction_id),
-    } for item in staged)
-
-    def _evidence(state: CommitState, **extra: Any) -> CommitEvidence:
-        return CommitEvidence(
-            schema_version=_COMMIT_EVIDENCE_SCHEMA_VERSION,
-            transaction_id=transaction_id, state=state,
-            started_at_unix=started_at, updated_at_unix=time.time(),
-            operations=operations,
-            result_revisions=extra.pop("result_revisions", {}), **extra,
-        )
-
     snapshots: Dict[str, Tuple[Optional[bytes], Optional[int]]] = {}
     for item in staged:
         try:
@@ -541,6 +571,37 @@ def commit_revision_grounded_batch(
                 )
         except FileNotFoundError:
             snapshots[item.target_path] = (None, None)
+
+    started_at = time.time()
+    operations = tuple({
+        "target_path": _rel(item.target_path),
+        "base_path": _rel(item.base_path),
+        "operation": "delete" if item.delete else "write",
+        "expected_base_revision": item.expected_base_revision,
+        "expected_base_exists": item.expected_base_exists,
+        "candidate_revision": None if item.delete else content_revision(item.content),
+        "stage_prefix": None if item.delete else stage_file_prefix(transaction_id),
+        # PRD-008: exact byte state of the target before and after, so crash
+        # recovery classifies each path by bytes and mode, not by decoded text.
+        "kind": _operation_kind(item, snapshots[item.target_path][0] is not None),
+        "before": _file_state(*snapshots[item.target_path]),
+        "after": (
+            _file_state(None, None) if item.delete
+            else _file_state(_candidate_bytes(item), _candidate_mode(item))
+        ),
+    } for item in staged)
+    batch_candidate_hash = (
+        candidate_digest(staged, workspace_path) if workspace_path is not None else None
+    )
+
+    def _evidence(state: CommitState, **extra: Any) -> CommitEvidence:
+        return CommitEvidence(
+            schema_version=_COMMIT_EVIDENCE_SCHEMA_VERSION,
+            transaction_id=transaction_id, state=state,
+            started_at_unix=started_at, updated_at_unix=time.time(),
+            operations=operations, candidate_hash=batch_candidate_hash,
+            result_revisions=extra.pop("result_revisions", {}), **extra,
+        )
 
     if workspace_path is not None:
         try:
@@ -659,7 +720,6 @@ def commit_revision_grounded_batch(
             raise UncertainCommitError(
                 f"Source changes were applied but committed evidence could not be persisted: {error}"
             ) from error
-        _prune_terminal_commit_evidence(workspace_path)
     return BatchCommitResult(revisions, committed_evidence)
 
 

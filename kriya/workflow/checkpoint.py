@@ -241,6 +241,27 @@ def find_latest_checkpoint(workspace_path: str) -> Optional[str]:
     return checkpoints[-1]["run_id"]
 
 
+def list_checkpoint_run_references(workspace_path: str) -> List[str]:
+    """Run ids whose RunRecord a saved checkpoint references (PRD-008
+    retention protects them). A checkpoint that cannot be loaded is one
+    resume will not use, so its reference does not need protecting."""
+    d = _checkpoints_dir(workspace_path)
+    if not os.path.isdir(d):
+        return []
+    references = []
+    for fn in sorted(os.listdir(d)):
+        if not fn.endswith(".json"):
+            continue
+        try:
+            data = load_checkpoint(workspace_path, fn[:-len(".json")])
+        except WorkspaceOwnershipError:
+            continue
+        reference = (data or {}).get("_run_record")
+        if isinstance(reference, dict) and reference.get("run_id"):
+            references.append(str(reference["run_id"]))
+    return references
+
+
 # --- MA5.9: control-plane hash bundle + resume-vs-reality validation ---
 #
 # save_checkpoint() itself is untouched (still a plain Dict[str, Any] - "Do

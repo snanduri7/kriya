@@ -135,7 +135,11 @@ async def test_workflow_refuses_uncertain_commit_before_any_model_call(git_repo)
     result = await WorkflowEngine(Kernel(config=config), llm).run_generation_workflow(
         goal=goal, workspace_path=git_repo, resume_id="checkpoint-1",
     )
-    assert result["status"] == "resume_refused"
-    assert result["reason_codes"] == ["UNCERTAIN_COMMIT_STATE"]
-    assert result["resume_decisions"][0]["action"] == "refuse"
+    # PRD-008: the RunCoordinator refuses the whole run before resume logic
+    # (or any model call) even starts; the validator's own REFUSED decision
+    # stays covered at unit level above.
+    assert result["status"] == "needs_review"
+    assert result["reason_codes"] == ["UNCERTAIN_RUN_RECORD_COMMIT_STATE"]
+    assert result["uncertain_run_ids"] == ["prior-run"]
+    assert result["recovery_command"] == "kriya runs recover"
     llm.complete.assert_not_awaited()

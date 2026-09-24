@@ -17,8 +17,6 @@ Callers map the returned TerminalCommitOutcome into their own result shape.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
@@ -37,6 +35,7 @@ from kriya.workflow.edit_safety import (
     FileRevisionConflict,
     StagedFileWrite,
     UncertainCommitError,
+    candidate_digest,
     commit_revision_grounded_batch,
     commit_state_for_transaction,
 )
@@ -99,20 +98,6 @@ def materialize_candidate(
             content_bytes=candidate_bytes, mode=candidate_mode,
         ))
     return writes
-
-
-def candidate_digest(writes: Iterable[StagedFileWrite], workspace_root: str) -> str:
-    """Content identity of an exact candidate: path, bytes, mode, deletion."""
-    entries = []
-    for item in writes:
-        data = item.content_bytes if item.content_bytes is not None else item.content.encode("utf-8")
-        entries.append([
-            os.path.relpath(item.target_path, workspace_root),
-            "delete" if item.delete else hashlib.sha256(data).hexdigest(),
-            item.mode,
-        ])
-    blob = json.dumps(sorted(entries), sort_keys=True)
-    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 @dataclass
