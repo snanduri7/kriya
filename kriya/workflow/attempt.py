@@ -78,6 +78,7 @@ from kriya.workflow.context_source import (
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.context_package import ContextItem
 from kriya.workflow.plan_schema import EngineeringPlan
+from kriya.workflow.resume_fingerprints import ResumePlan
 from kriya.workflow.retry_prompts import _build_coordinated_retry_prompt,_build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
 from kriya.workflow.retry_policy import API_CONTRACT_RECOVERY_MAX_ATTEMPTS, RetryAction, decide_retry_action
@@ -1634,6 +1635,11 @@ class AttemptContext:
     # existing tests keeps working unchanged; every real call site supplies
     # one. See that module's own docstring for the incident this closes.
     deterministic_failure_diagnostics: Optional["DeterministicFailureDiagnosticStore"] = None
+    # PRD-008: what this run reuses from a resumed checkpoint
+    # (resume_fingerprints.ResumePlan). The only source of the candidate
+    # reuse and gate-skip decisions: resume_state is checkpoint data and can
+    # never grant either. None for every non-resumed run.
+    resume_plan: Optional["ResumePlan"] = None
 
 
 def _process_boundary_obligation_id(subtask_id: str) -> str:
@@ -4894,15 +4900,18 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # that block entirely) still has it in scope.
     from kriya.tools.validate import PolymorphicValidator
 
-    # A candidate-gates checkpoint means generation plus the inner checks
-    # passed, but terminal regression did not. The legacy developer_success
-    # name is accepted conservatively as the same pre-regression boundary;
-    # neither form may bypass the terminal suite.
-    resuming_candidate_stage = bool(
-        ctx.resume_state
-        and ctx.resume_state.get("stage") in {"candidate_gates_passed", "developer_success"}
+    # PRD-008: a reused candidate replaces generation on the first attempt
+    # only; it is written into this attempt's fresh worktree through the
+    # same write path as model output. Its candidate gates are skipped only
+    # when the resume also kept their outcomes (every verification
+    # fingerprint matched); terminal regression always runs.
+    reusing_candidate = bool(
+        ctx.resume_plan is not None
+        and ctx.resume_plan.reuse_candidate
+        and ctx.resume_state
         and state.attempt_number == 1
     )
+    skipping_candidate_gates = bool(reusing_candidate and ctx.resume_plan.skip_candidate_gates)
     # PRV-06 completion (2026-08-29, "MA8.1 <-> MA9 composition and
     # AttemptContext correctness"): a defensive baseline, not the real fix
     # (see the MA9-coordinated branch below, which now assigns a real,
@@ -4917,17 +4926,21 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # as anchored edits.
     active_code_context = ""
 
-    if resuming_candidate_stage:
+    if reusing_candidate:
         logger.info(
-            f"Resuming checkpoint '{ctx.run_id}': using saved candidate output and skipping "
-            "generation plus candidate gates; terminal regression remains required."
+            f"Resuming checkpoint '{ctx.run_id}': rebuilding the saved candidate in a fresh worktree "
+            "instead of generating; "
+            + ("its candidate gates are skipped (all verification fingerprints matched)"
+               if skipping_candidate_gates else "its candidate gates run again")
+            + "; terminal regression remains required."
         )
         files = [
             {"filepath": fp, "content": content}
-            for fp, content in ctx.resume_state.get("final_files", {}).items()
+            for fp, content in (ctx.resume_state.get("final_files") or {}).items()
         ]
-        state.gate_outcomes = ctx.resume_state.get("gate_outcomes", state.gate_outcomes)
-        state.model_hops = ctx.resume_state.get("model_hops", state.model_hops)
+        if skipping_candidate_gates:
+            state.gate_outcomes = list(ctx.resume_state.get("gate_outcomes") or state.gate_outcomes)
+        state.model_hops = list(ctx.resume_state.get("model_hops") or state.model_hops)
         model_override = None
         base_url_override = None
         api_key_override = None
@@ -6926,7 +6939,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
 
-    if not resuming_candidate_stage:
+    if not skipping_candidate_gates:
         # Completeness Check: catch the Developer Agent silently under-delivering
         # (e.g. only writing pom.xml when the Architect's design called for 7 files).
         # A trivially-passing compile on a near-empty sandbox would otherwise report

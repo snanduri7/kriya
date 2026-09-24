@@ -6425,6 +6425,236 @@ async def test_enforce_resume_skips_nothing_when_the_control_state_run_record_is
     assert len(calls) == 4, "both subtasks must run again - nothing recorded may be reused"
 
 
+# --- PRD-008 S3: completions only count once they are in the real workspace ---
+#
+# Production enforce runs always use a separate plan sandbox (the autouse
+# fixture above maps it onto the workspace for orchestration-only tests), so
+# these use a real separate copy, outside the workspace like .kriya/worktree
+# (which the workspace content hash excludes).
+
+
+def _separate_plan_sandbox(monkeypatch, sandbox):
+    def create_plan_sandbox(workspace):
+        shutil.rmtree(sandbox, ignore_errors=True)
+        shutil.copytree(workspace, sandbox, ignore=shutil.ignore_patterns(".kriya", ".git"))
+        return str(sandbox)
+
+    monkeypatch.setattr("kriya.workflow.workflow_controller.create_git_worktree", create_plan_sandbox)
+    monkeypatch.setattr(
+        "kriya.workflow.workflow_controller.remove_git_worktree",
+        lambda workspace, candidate: shutil.rmtree(candidate, ignore_errors=True),
+    )
+
+
+def _sandbox_writer(sandbox, calls, crash_on=None):
+    async def fake_run(**kwargs):
+        subtask_id = "s2" if "'s2'" in kwargs["goal"] else "s1"
+        calls.append(subtask_id)
+        if subtask_id == crash_on:
+            raise RuntimeError("process interrupted")
+        path = "b.py" if subtask_id == "s2" else "a.py"
+        (sandbox / path).write_text(f"# {subtask_id}\n")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    return fake_run
+
+
+def _workspace_bytes(workspace):
+    return {
+        path.relative_to(workspace).as_posix(): path.read_bytes()
+        for path in workspace.rglob("*")
+        if path.is_file() and ".kriya" not in path.parts and ".git" not in path.parts
+    }
+
+
+@pytest.mark.asyncio
+async def test_enforce_resume_never_skips_sandbox_only_completions_after_a_crash(tmp_path, monkeypatch):
+    """Pre-fix reproduction: s1 completed in the sandbox, the process died in
+    s2, and the resume skipped s1 - whose output died with the sandbox - so
+    the terminal commit failed (CANDIDATE_MATERIALIZATION_FAILED) on every
+    later resume too."""
+    workspace, sandbox = tmp_path / "ws", tmp_path / "plan-sandbox"
+    workspace.mkdir()
+    _init_git_repo(workspace)
+    _separate_plan_sandbox(monkeypatch, sandbox)
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        we.run_generation_workflow = _sandbox_writer(sandbox, calls, crash_on="s2")
+        with pytest.raises(RuntimeError, match="process interrupted"):
+            await WorkflowController(we).execute("goal", str(workspace), migration_mode="enforce")
+        persisted = load_control_state(str(workspace))
+        assert persisted.subtask_states["s1"] == "completed"
+        assert persisted.subtask_completion_scope == "candidate"
+
+        calls.clear()
+        we.run_generation_workflow = _sandbox_writer(sandbox, calls)
+        result = await WorkflowController(we).execute(
+            "goal", str(workspace), migration_mode="enforce", resume=True,
+        )
+
+    assert calls == ["s1", "s2"]
+    assert result.legacy_result["status"] == "success"
+    assert (workspace / "a.py").read_text() == "# s1\n"
+    assert (workspace / "b.py").read_text() == "# s2\n"
+    decision = result.legacy_result["resume_decision"]
+    assert decision["reason"] == "COMPLETIONS_NOT_IN_WORKSPACE"
+    assert decision["reused_subtasks"] == []
+
+
+@pytest.mark.asyncio
+async def test_enforce_resume_after_a_committed_sandbox_plan_reuses_it_and_changes_nothing(tmp_path, monkeypatch):
+    """After the terminal commit the sandbox's completions are the
+    workspace's (scope recorded as "workspace"): a resume skips them, and the
+    re-verified candidate commits byte-identical content."""
+    workspace, sandbox = tmp_path / "ws", tmp_path / "plan-sandbox"
+    workspace.mkdir()
+    _init_git_repo(workspace)
+    _separate_plan_sandbox(monkeypatch, sandbox)
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        we.run_generation_workflow = _sandbox_writer(sandbox, calls)
+        first = await WorkflowController(we).execute("goal", str(workspace), migration_mode="enforce")
+        assert first.legacy_result["status"] == "success"
+        assert load_control_state(str(workspace)).subtask_completion_scope == "workspace"
+        before = _workspace_bytes(workspace)
+
+        calls.clear()
+        second = await WorkflowController(we).execute(
+            "goal", str(workspace), migration_mode="enforce", resume=True,
+        )
+
+    assert calls == []
+    assert second.legacy_result["status"] == "success"
+    assert second.legacy_result["resume_decision"]["reused_subtasks"] == ["s1", "s2"]
+    assert _workspace_bytes(workspace) == before
+
+
+@pytest.mark.asyncio
+async def test_enforce_refused_resume_still_quarantines_files_of_a_committed_sandbox_plan(tmp_path, monkeypatch):
+    workspace, sandbox = tmp_path / "ws", tmp_path / "plan-sandbox"
+    workspace.mkdir()
+    _init_git_repo(workspace)
+    _separate_plan_sandbox(monkeypatch, sandbox)
+    we = _workflow_engine()
+    calls = []
+
+    p1, p2, p3 = _patched(_two_subtask_plan())
+    with p1, p2, p3:
+        we.run_generation_workflow = _sandbox_writer(sandbox, calls)
+        await WorkflowController(we).execute("goal", str(workspace), migration_mode="enforce")
+    assert (workspace / "b.py").exists()
+
+    replanned = EngineeringPlan(
+        plan_id="run2", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s1", description="write a.py", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="a.py", action=FileAction.MODIFY)],
+        )],
+    )
+    p1, p2, p3 = _patched(replanned)
+    with p1, p2, p3:
+        await WorkflowController(we).execute("goal", str(workspace), migration_mode="enforce", resume=True)
+
+    assert not (workspace / "b.py").exists(), "the abandoned plan's committed file is quarantined"
+    assert list((workspace / ".kriya" / "abandoned_plan_files").rglob("b.py"))
+
+
+@pytest.mark.asyncio
+async def test_enforce_refused_resume_never_quarantines_user_files_named_by_sandbox_only_completions(
+    tmp_path, monkeypatch,
+):
+    """A crashed sandbox run records the paths it modified in the sandbox.
+    Those paths hold the user's own files in the real workspace; a refused
+    resume must not move them."""
+    workspace, sandbox = tmp_path / "ws", tmp_path / "plan-sandbox"
+    workspace.mkdir()
+    _init_git_repo(workspace)
+    (workspace / "a.py").write_text("# the user's own work\n")
+    _separate_plan_sandbox(monkeypatch, sandbox)
+    plan = EngineeringPlan(
+        plan_id="run1", kind=ChangeKind.TASK,
+        subtasks=[
+            Subtask(
+                id="s1", description="edit a.py", execution_method=ExecutionMethod.MODEL,
+                planned_files=[PlannedFile(path="a.py", action=FileAction.MODIFY)],
+            ),
+            Subtask(
+                id="s2", description="write b.py", execution_method=ExecutionMethod.MODEL,
+                depends_on=["s1"], planned_files=[PlannedFile(path="b.py", action=FileAction.CREATE)],
+            ),
+        ],
+    )
+    we = _workflow_engine()
+    calls = []
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        we.run_generation_workflow = _sandbox_writer(sandbox, calls, crash_on="s2")
+        with pytest.raises(RuntimeError, match="process interrupted"):
+            await WorkflowController(we).execute("goal", str(workspace), migration_mode="enforce")
+    assert load_control_state(str(workspace)).subtask_written_files.get("s1") == ["a.py"]
+
+    replanned = EngineeringPlan(
+        plan_id="run2", kind=ChangeKind.TASK,
+        subtasks=[Subtask(
+            id="s9", description="write c.py", execution_method=ExecutionMethod.MODEL,
+            planned_files=[PlannedFile(path="c.py", action=FileAction.CREATE)],
+        )],
+    )
+
+    async def write_c(**kwargs):
+        (sandbox / "c.py").write_text("# c\n")
+        return {"status": "success", "quality_gates_passed": True, "files": ["c.py"]}
+
+    we.run_generation_workflow = write_c
+    p1, p2, p3 = _patched(replanned)
+    with p1, p2, p3:
+        await WorkflowController(we).execute("goal", str(workspace), migration_mode="enforce", resume=True)
+
+    assert (workspace / "a.py").read_text() == "# the user's own work\n"
+    assert not (workspace / ".kriya" / "abandoned_plan_files").exists()
+
+
+@pytest.mark.asyncio
+async def test_enforce_resume_reuses_nothing_from_a_legacy_control_state_without_a_completion_scope(tmp_path):
+    """A state saved before PRD-008 cannot say where its completions live:
+    nothing is reused (a one-time re-run after upgrading)."""
+    from kriya.control.persistence import save_control_state
+
+    _init_git_repo(tmp_path)
+    plan = _two_subtask_plan()
+    we = _workflow_engine()
+    calls = []
+
+    async def fake_run(**kwargs):
+        calls.append("s2" if "'s2'" in kwargs["goal"] else "s1")
+        path = "b.py" if calls[-1] == "s2" else "a.py"
+        (tmp_path / path).write_text(f"# {path}")
+        return {"status": "success", "quality_gates_passed": True, "files": [path]}
+
+    we.run_generation_workflow = fake_run
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+        legacy = load_control_state(str(tmp_path)).with_updates(subtask_completion_scope=None)
+        save_control_state(str(tmp_path), legacy)
+        calls.clear()
+        result = await WorkflowController(we).execute(
+            "goal", str(tmp_path), migration_mode="enforce", resume=True,
+        )
+
+    assert calls == ["s1", "s2"]
+    assert result.legacy_result["resume_decision"]["reason"] == "COMPLETIONS_NOT_IN_WORKSPACE"
+    assert (tmp_path / "a.py").exists(), "no quarantine from a legacy state either"
+
+
 @pytest.mark.asyncio
 async def test_enforce_resume_skips_only_the_subtasks_already_completed(tmp_path):
     """Subtask 2 failed on the first attempt (never got to run) - a resume

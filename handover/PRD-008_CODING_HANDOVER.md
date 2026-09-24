@@ -218,3 +218,84 @@ gets a command of its own:
 ```
 Lint (coding agent, run): `ruff check` clean on new files; no new findings on touched files (pre-existing
 F401/I001 only).
+
+**S2 user verification (2026-09-24):** all three S2 commands above green. S2 = 72922c4 + 63a45ea.
+
+### S3 - stage-precise invalidation, candidate rebuild, enforce completion scope
+
+**Generation resume keeps the longest valid prefix.** `resume_fingerprints.apply_resume_invalidation()` (pure)
+turns the validator's invalidated stages into a `ResumePlan`: artifacts are dropped from the first invalidated
+stage of the derivation chain `context -> planning -> candidate -> verification` onward. `model_protocol` is off
+that chain (nothing downstream is derived from negotiated model state), so a model change never discards a plan
+or candidate. Context invalidated = nothing reused (fresh run). The plan's `state` is the checkpoint with every
+discarded artifact set to None and the stage label lowered, so it offers exactly what the plan reuses (tested
+for every single-fingerprint change x plan/design/candidate checkpoints). The decision is logged, annotated on
+the RunRecord (`resume_decision`, new optional annotatable field, no schema bump; v2 records without it load)
+and returned by enforce runs.
+
+**Candidate reuse split from gate skip.** `AttemptContext.resume_plan` is the only source of both flags; the
+checkpoint dict cannot grant either (tested with a forged checkpoint). A reused candidate replaces generation on
+attempt 1 and is written into that attempt's fresh worktree through the normal write path (ownership,
+write-scope and semantic-region content checks all still run: they sit before the gate-skip block). Candidate
+gates are skipped, and their old outcomes restored, only when every verification fingerprint matched; otherwise
+they run again and the old outcomes are discarded. Terminal regression always runs. Until PRD-011 binds the
+toolchain, verification is always UNVERIFIED, so a candidate is always re-gated (the skip path is tested with a
+bound toolchain).
+
+**Candidate integrity.** The candidate checkpoint now captures exact bytes (strict UTF-8, no newline
+translation; was `errors="replace"` and silently skipped unreadable files) and stores
+`candidate_snapshot_hash`; any file not captured exactly means no digest. A missing (legacy), mismatched
+(tampered) or malformed candidate is a `candidate_integrity` decision (INVALIDATE candidate+verification): the
+candidate is regenerated, the plan kept.
+
+**Effective obligation ledger persisted and restored.** `ObligationLedger.to_snapshot()/from_snapshot()` (replay,
+so regressions are rebuilt; fingerprint-identical round trip tested with tuples, enums, nested evidence) and
+`restore_from()` (in place: enforce forwards `resume`/`resume_id` and its shared ledger into every subtask's
+generation call). Checkpoint key `effective_obligation_ledger_snapshot`. The current effective-ledger
+fingerprint on resume is the restored snapshot's; a missing snapshot is UNAVAILABLE (never an empty ledger), so
+the candidate is not reused.
+
+**Enforce: completions count only once they are in the real workspace.** New `ControlState.subtask_completion_scope`
+("workspace" | "candidate" | None=legacy). Production enforce runs always execute in a separate plan sandbox that
+is discarded unless the whole plan commits, so completions are "candidate" until the terminal commit succeeds,
+then re-persisted as "workspace" (post-commit persistence failure leaves "candidate": fails closed, never undoes
+the commit). A resume reuses completions only with scope "workspace" (reason `COMPLETIONS_NOT_IN_WORKSPACE`
+otherwise). Pre-fix reproduction (script, recorded here): s1 completed in the sandbox, the process died in s2;
+the resume skipped s1, whose output had died with the sandbox, and every resume ended `needs_review` with
+`CANDIDATE_MATERIALIZATION_FAILED`. The abandoned-plan-file quarantine is gated the same way: pre-fix, a refused
+resume after such a crash moved the user's own pre-existing file (a path the sandbox had modified) into
+`.kriya/abandoned_plan_files/` (reproduced with the new test on the pre-fix code). This also closes the
+reset-in-try defect noted in S2: sandbox-only "completed" states that survive a crash are no longer trusted.
+A resume after a committed sandbox plan skips every subtask and leaves the workspace byte-identical (the new
+sandbox is synced with the workspace's uncommitted changes; a planned path missing from it fails
+materialization, never becomes a delete).
+
+**Behaviour changes to know.** Enforce resume after an interrupted or failed run now reuses nothing (before: it
+skipped subtasks whose work was gone). A ControlState saved before this change has no scope: one-time full
+re-run, and no quarantine from it. The orchestration tests' autouse fixture runs in place (scope "workspace"),
+so their existing resume expectations are unchanged.
+
+**Also in this slice (separate commit b44f7f5, at the user's request):** `typing.get_type_hints()` raised
+NameError on 26 classes/functions in 9 modules whose annotation names were TYPE_CHECKING-only imports (F821
+accepts those). Now runtime imports; the three mutually importing pairs bind a module alias at the end of the
+module. Guards in `tests/test_bootstrap_contract.py`.
+
+**Intended test changes.** `test_workflow.py::test_workflow_candidate_checkpoint_not_reused_while_toolchain_
+unverified` (S2) -> `test_workflow_rebuilds_checkpointed_candidate_and_reruns_its_gates_while_toolchain_
+unverified` (no Planner/Architect/Developer call; gates run on the rebuilt bytes; stale outcomes gone), plus the
+gate-skip and unverifiable-candidate tests. `test_prd008_resume_fingerprints.py`: two candidate fixtures gain
+`gate_outcomes` (gate outcomes are now reused by value, like every other artifact).
+
+**S3 verification commands (user runs):**
+```bash
+.venv/bin/pytest tests/test_prd008_resume_fingerprints.py tests/test_resume_integrity.py tests/test_bootstrap_contract.py -ra
+.venv/bin/pytest tests/test_workflow_controller_enforce.py tests/test_workflow_controller.py \
+  tests/test_proposal_promotion.py tests/test_proposal_binding.py tests/test_run_record.py \
+  tests/test_prd007_run_lifecycle.py tests/test_control_plane_end_to_end.py \
+  tests/test_state001_checkpoint_workspace_identity.py tests/test_checkpoint_control_plane_hashes.py \
+  tests/test_milestones.py tests/test_obligations.py tests/test_containment.py tests/test_prd011_toolchain_identity.py tests/test_prd011_toolchain_identity_oci.py \
+  tests/test_review_context.py tests/test_proposal_store.py -ra
+.venv/bin/pytest tests/test_workflow.py -ra
+```
+Lint (coding agent, run): no new ruff findings on touched files. New tests were smoke-run as plain functions
+(not pytest) by the coding agent.

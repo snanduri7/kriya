@@ -151,8 +151,144 @@ def reused_artifacts_for_checkpoint(checkpoint: Mapping[str, Any]) -> FrozenSet[
     ):
         reused.add("validation_baselines")
     if checkpoint.get("stage") in CANDIDATE_CHECKPOINT_STAGES:
-        reused.update({"candidate", "candidate_gate_outcomes"})
+        reused.add("candidate")
+        if checkpoint.get("gate_outcomes") is not None:
+            reused.add("candidate_gate_outcomes")
     return frozenset(reused)
+
+
+# ---------------------------------------------------------------- candidate + ledger snapshots
+
+# Checkpoint keys written with a candidate (workflow.py _save_stage_checkpoint).
+CANDIDATE_HASH_KEY = "candidate_snapshot_hash"
+EFFECTIVE_LEDGER_KEY = "effective_obligation_ledger_snapshot"
+
+
+def candidate_snapshot_digest(final_files: Mapping[str, str]) -> str:
+    """Digest of a checkpointed candidate (relpath -> exact text)."""
+    return _digest(sorted(final_files.items()))
+
+
+def candidate_integrity_problem(checkpoint: Mapping[str, Any]) -> Optional[str]:
+    """Why a checkpoint's candidate cannot be reused, or None. The save side
+    stores no digest when any written file could not be captured exactly
+    (unreadable, deleted, not UTF-8), so an incomplete candidate is never
+    rebuilt as if it were whole."""
+    final_files = checkpoint.get("final_files")
+    if not isinstance(final_files, dict) or not all(
+        isinstance(path, str) and isinstance(content, str) for path, content in final_files.items()
+    ):
+        return "checkpoint holds no well-formed candidate files"
+    stored = checkpoint.get(CANDIDATE_HASH_KEY)
+    if not isinstance(stored, str):
+        return "checkpoint recorded no candidate digest (legacy, or a file could not be captured exactly)"
+    if candidate_snapshot_digest(final_files) != stored:
+        return "checkpointed candidate files do not match their recorded digest"
+    return None
+
+
+def restore_effective_ledger(checkpoint: Mapping[str, Any]) -> Tuple[Any, Optional[str]]:
+    """(ledger, problem): the effective obligation ledger saved with a
+    candidate, or None and why not. A missing snapshot is never an empty
+    ledger."""
+    from kriya.workflow.obligations import ObligationLedger
+
+    snapshot = checkpoint.get(EFFECTIVE_LEDGER_KEY)
+    if snapshot is None:
+        return None, "checkpoint holds no effective obligation ledger snapshot"
+    try:
+        return ObligationLedger.from_snapshot(snapshot), None
+    except ValueError as error:
+        return None, str(error)
+
+
+# ---------------------------------------------------------------- invalidation
+
+# Each stage's artifacts are derived from the ones before it on this chain,
+# so a resume keeps a prefix of it. model_protocol is not on it: nothing
+# downstream is derived from negotiated model state, so a model change
+# never discards a plan or candidate (it invalidates model_protocol only).
+DERIVATION_CHAIN: Tuple[str, ...] = ("context", "planning", "candidate", "verification")
+
+_ARTIFACT_KEYS: Dict[str, Tuple[str, ...]] = {
+    "plan": ("plan",),
+    "design": ("design", "architect_files"),
+    "candidate": ("final_files", "original_files", CANDIDATE_HASH_KEY, EFFECTIVE_LEDGER_KEY, "model_hops"),
+    "candidate_gate_outcomes": ("gate_outcomes",),
+    "validation_baselines": ("validation_baseline_targeted", "validation_baseline_full_regression"),
+    "model_protocol_state": (),
+}
+
+
+@dataclass(frozen=True)
+class ResumePlan:
+    """What a resumed run actually reuses from one checkpoint. ``state`` is
+    the checkpoint with every discarded artifact removed (None: nothing is
+    reused, the run starts fresh). The reuse flags live here, never in the
+    checkpoint file, so a checkpoint cannot grant itself a gate skip."""
+
+    checkpoint_id: str
+    checkpoint_stage: Optional[str]
+    offered: FrozenSet[str]
+    reused: FrozenSet[str]
+    invalidated_stages: Tuple[str, ...]
+    truncated_at: Optional[str]
+    state: Optional[Dict[str, Any]]
+
+    @property
+    def resumes(self) -> bool:
+        return self.state is not None
+
+    @property
+    def reuse_candidate(self) -> bool:
+        return "candidate" in self.reused
+
+    @property
+    def skip_candidate_gates(self) -> bool:
+        return "candidate_gate_outcomes" in self.reused
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "checkpoint_id": self.checkpoint_id,
+            "checkpoint_stage": self.checkpoint_stage,
+            "reused": sorted(self.reused),
+            "discarded": sorted(self.offered - self.reused),
+            "invalidated_stages": list(self.invalidated_stages),
+            "truncated_at": self.truncated_at,
+            "reuse_candidate": self.reuse_candidate,
+            "skip_candidate_gates": self.skip_candidate_gates,
+        }
+
+
+def apply_resume_invalidation(
+    checkpoint_id: str, checkpoint: Mapping[str, Any], invalidated_stages: Iterable[str],
+) -> ResumePlan:
+    """Keep the longest prefix of DERIVATION_CHAIN no invalidated stage
+    touches; drop every artifact from the first invalidated stage on. Pure."""
+    invalidated = tuple(stage for stage in STAGE_ORDER if stage in set(invalidated_stages))
+    offered = reused_artifacts_for_checkpoint(checkpoint)
+    truncated_at = next((stage for stage in DERIVATION_CHAIN if stage in invalidated), None)
+    kept_stages = (
+        set(DERIVATION_CHAIN) if truncated_at is None
+        else set(DERIVATION_CHAIN[:DERIVATION_CHAIN.index(truncated_at)])
+    )
+    reused = frozenset(
+        artifact for artifact in offered
+        if ARTIFACT_STAGE[artifact] in kept_stages and ARTIFACT_STAGE[artifact] not in invalidated
+    )
+    if "knowledge_clearance" not in reused:
+        return ResumePlan(
+            checkpoint_id, checkpoint.get("stage"), offered, frozenset(), invalidated, truncated_at, None,
+        )
+    state = copy.deepcopy(dict(checkpoint))
+    for artifact in offered - reused:
+        for key in _ARTIFACT_KEYS[artifact]:
+            state[key] = None
+    if "candidate" not in reused:
+        # The stage label must not keep claiming a candidate that is gone.
+        state["stage"] = "design" if "design" in reused else "plan" if "plan" in reused else "context"
+    state["resumed_checkpoint_stage"] = checkpoint.get("stage")
+    return ResumePlan(checkpoint_id, checkpoint.get("stage"), offered, reused, invalidated, truncated_at, state)
 
 
 # ---------------------------------------------------------------- comparison
@@ -442,6 +578,7 @@ def compute_resume_fingerprints(
     verification_inputs: Mapping[str, Any],
     workspace: Optional[Fingerprint] = None,
     input_obligation_fingerprint: Optional[Fingerprint] = None,
+    effective_obligation_fingerprint: Optional[Fingerprint] = None,
 ) -> Dict[str, Fingerprint]:
     """Every fingerprint in FINGERPRINT_NAMES. ``workspace`` and
     ``input_obligation_fingerprint`` may be passed precomputed: a run fixes
@@ -458,7 +595,10 @@ def compute_resume_fingerprints(
             input_obligation_fingerprint if input_obligation_fingerprint is not None
             else ledger_fingerprint(input_obligation_ledger)
         ),
-        "effective_obligation_ledger": ledger_fingerprint(effective_obligation_ledger),
+        "effective_obligation_ledger": (
+            effective_obligation_fingerprint if effective_obligation_fingerprint is not None
+            else ledger_fingerprint(effective_obligation_ledger)
+        ),
         "skills": skills_fingerprint(skill_source_dirs),
         "model_runtime": Fingerprint.unavailable("model runtime identity is not bound until PRD-013"),
         "containment": Fingerprint(_digest(owned["containment"]), "containment-config"),
@@ -502,6 +642,7 @@ def generation_resume_fingerprints(
     strict_dependency_index: bool = False,
     workspace: Optional[Fingerprint] = None,
     input_obligation_fingerprint: Optional[Fingerprint] = None,
+    effective_obligation_fingerprint: Optional[Fingerprint] = None,
 ) -> Dict[str, Fingerprint]:
     """The fingerprints of one run_generation_workflow() call, from its own
     arguments (same names, same defaults). The workflow uses this both to
@@ -517,6 +658,7 @@ def generation_resume_fingerprints(
         workspace_path=workspace_path,
         workspace=workspace,
         input_obligation_fingerprint=input_obligation_fingerprint,
+        effective_obligation_fingerprint=effective_obligation_fingerprint,
         config_dump=config.model_dump(),
         goal_inputs={
             "goal": goal,
@@ -558,8 +700,10 @@ def generation_resume_fingerprints(
 
 
 __all__ = [
-    "ARTIFACT_DEPENDENCIES", "ARTIFACT_STAGE", "CANDIDATE_CHECKPOINT_STAGES", "CHECKPOINT_KEY",
-    "CONFIG_FIELD_OWNERS", "FINGERPRINT_NAMES", "Fingerprint", "FingerprintComparison",
+    "ARTIFACT_DEPENDENCIES", "ARTIFACT_STAGE", "CANDIDATE_CHECKPOINT_STAGES", "CANDIDATE_HASH_KEY",
+    "CHECKPOINT_KEY", "CONFIG_FIELD_OWNERS", "DERIVATION_CHAIN", "EFFECTIVE_LEDGER_KEY", "FINGERPRINT_NAMES",
+    "ResumePlan", "apply_resume_invalidation", "candidate_integrity_problem", "candidate_snapshot_digest",
+    "restore_effective_ledger", "Fingerprint", "FingerprintComparison",
     "FingerprintStatus", "RESUME_FINGERPRINT_SCHEMA_VERSION", "STAGE_ORDER", "UNAVAILABLE",
     "authority_context_fingerprint", "compare_resume_fingerprints", "compute_resume_fingerprints",
     "fingerprint_block", "generation_resume_fingerprints", "invalidated_stages_for", "kriya_runtime_fingerprint", "ledger_fingerprint",

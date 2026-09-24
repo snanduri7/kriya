@@ -81,7 +81,7 @@ _ANNOTATABLE_FIELDS = frozenset({
     "effective_config_fingerprint", "model_runtime_fingerprint_ids", "goal_hash",
     "approved_plan_hash", "obligation_ledger_revision", "obligation_ledger_hash",
     "candidate_hash", "verification_evidence_ids", "retry_state_reference",
-    "retry_counters",
+    "retry_counters", "resume_decision",
 })
 
 # Requirement 2: every persistent store is authoritative for its own content,
@@ -158,6 +158,9 @@ class RunRecord:
     verification_evidence_ids: List[str] = field(default_factory=list)
     retry_state_reference: Optional[str] = None
     retry_counters: Dict[str, int] = field(default_factory=dict)
+    # PRD-008: what this run reused from a checkpoint (ResumePlan.to_dict()),
+    # when it was asked to resume. Optional, so v2 records without it load.
+    resume_decision: Optional[Dict[str, Any]] = None
     commits: List[Dict[str, Any]] = field(default_factory=list)
     # The CURRENT commit cycle (reset by each begin_commit); run-level
     # commit_result is the summary over ``commits`` once terminal.

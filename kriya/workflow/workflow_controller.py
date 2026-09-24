@@ -4398,12 +4398,35 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         )
 
         resumed_subtask_states: Dict[str, str] = {}
+        # PRD-008: the structured record of what this resume reused (logged,
+        # annotated on the RunRecord and returned), one per resume request.
+        enforce_resume_decision: Optional[Dict[str, Any]] = None
         if prior_control_state is not None:
+            enforce_resume_decision = {
+                "source": "control_state",
+                "prior_control_state_run_id": prior_control_state.run_id,
+                "subtask_completion_scope": prior_control_state.subtask_completion_scope,
+                "reused_subtasks": [],
+                "reason": None,
+            }
             if prior_control_state.current_plan_hash != current_plan_hash:
+                enforce_resume_decision["reason"] = "PLAN_CHANGED"
                 logger.warning(
                     f"WorkflowController enforce run {run_id!r}: refusing subtask resume - the "
                     "freshly re-planned goal no longer matches the plan these subtask states "
                     "were recorded against. Starting the plan fresh."
+                )
+            elif prior_control_state.subtask_completion_scope != "workspace":
+                # A sandbox-only completion was discarded with its sandbox
+                # (a failed or interrupted plan never commits), so it proves
+                # nothing about the real workspace; a legacy state cannot say
+                # where its completions live.
+                enforce_resume_decision["reason"] = "COMPLETIONS_NOT_IN_WORKSPACE"
+                logger.warning(
+                    f"WorkflowController enforce run {run_id!r}: reusing no subtask - the recorded "
+                    "completions were never applied to the real workspace (scope "
+                    f"{prior_control_state.subtask_completion_scope or 'unrecorded'!s}). "
+                    "Starting the plan fresh."
                 )
             else:
                 # PRD-008: the record the prior ControlState was derived
@@ -4438,6 +4461,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     workspace_path=workspace_path,
                 )
                 if resume_check.status != ResumeStatus.OK:
+                    enforce_resume_decision["reason"] = "RESUME_VALIDATION_FAILED"
+                    enforce_resume_decision["decisions"] = [item.to_dict() for item in resume_check.decisions]
                     logger.warning(
                         f"WorkflowController enforce run {run_id!r}: refusing subtask resume - "
                         f"workspace drift detected ({'; '.join(resume_check.mismatches)}). "
@@ -4455,11 +4480,25 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "(authority must always revalidate - see exclude_tool_subtasks_from_"
                             "resume's own docstring) - they will re-execute for real."
                         )
+                    enforce_resume_decision["reused_subtasks"] = sorted(
+                        subtask_id for subtask_id, status in resumed_subtask_states.items()
+                        if status == "completed"
+                    )
                     logger.info(
                         f"WorkflowController enforce run {run_id!r}: resuming - "
                         f"{sum(1 for v in resumed_subtask_states.values() if v == 'completed')} "
                         "subtask(s) already completed will be skipped."
                     )
+            logger.info(
+                "WorkflowController enforce run %r: resume decision %s",
+                run_id, json.dumps(enforce_resume_decision, sort_keys=True),
+            )
+            annotation_error = annotate_run(workspace_path, resume_decision=enforce_resume_decision)
+            if annotation_error:
+                logger.warning(
+                    f"WorkflowController enforce run {run_id!r}: could not record the resume "
+                    f"decision on the run record: {annotation_error}"
+                )
 
         # A refused resume (either branch above) leaves resumed_subtask_states
         # empty while prior_control_state still holds real record of an
@@ -4473,7 +4512,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # REQUESTED-but-refused case (prior_control_state is only ever loaded
         # at all when the caller opted into resume), not a broader always-on
         # scan of the workspace for anything Kriya might have ever written.
-        if prior_control_state is not None and not resumed_subtask_states:
+        # PRD-008: only completions that reached the real workspace left
+        # files there; a sandbox-only record may name paths the user's own
+        # files occupy, which must never be moved.
+        if (
+            prior_control_state is not None and not resumed_subtask_states
+            and prior_control_state.subtask_completion_scope == "workspace"
+        ):
             try:
                 new_plan_files = {pf.path for st in plan.subtasks for pf in st.planned_files}
                 abandoned_files = compute_abandoned_plan_files(
@@ -4501,6 +4546,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # are the same real git-derived fields/functions that method
         # already uses, just given a second, route-independent purpose.
         control_state = control_state.with_updates(
+            # Reused completions are in the real workspace; the scope becomes
+            # "candidate" once a separate plan sandbox is created below.
+            subtask_completion_scope="workspace" if resumed_subtask_states else None,
             current_plan_hash=current_plan_hash, subtask_states=dict(resumed_subtask_states),
             base_commit=compute_base_commit(workspace_path), tree_hash=compute_tree_hash(workspace_path),
             workspace_content_hash=compute_workspace_content_hash(workspace_path),
@@ -4559,6 +4607,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # candidate; it is part of this run, authorized explicitly.
         if plan_workspace_path != workspace_path:
             authorize_candidate_workspace(plan_workspace_path)
+        # PRD-008: every completion recorded from here on lives where the
+        # subtasks write; in a separate sandbox that is discarded unless the
+        # whole plan commits, so it is not resumable until then.
+        control_state = control_state.with_updates(
+            subtask_completion_scope="workspace" if plan_workspace_path == workspace_path else "candidate",
+        )
         mark_run_stage(workspace_path, RunLifecycle.CANDIDATE)
         # Resolved ONCE, here, against workspace_path - the real, immutable
         # PRE-mutation baseline, before plan_workspace_path accumulates any
@@ -6271,6 +6325,19 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             "workspace_commit_completed",
                             commit_evidence=workspace_commit_evidence,
                         )
+                    if workspace_commit_completed and plan_workspace_path != workspace_path:
+                        # The sandbox's completions are now the workspace's.
+                        # A failure here leaves "candidate" (nothing reused
+                        # later): safe, and never undoes the commit.
+                        try:
+                            control_state = _persist_control_state(
+                                control_state.with_updates(subtask_completion_scope="workspace"),
+                            )
+                        except Exception as error:
+                            post_commit_persistence_errors.append({
+                                "operation": "save_control_state",
+                                "error": f"{type(error).__name__}: {error}",
+                            })
 
             if not all_completed and plan_workspace_path != workspace_path:
                 # Sandbox-only completion state cannot be resumed after the
@@ -6413,6 +6480,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             aggregated["observability_errors"] = terminal_observability_errors
         if post_commit_persistence_errors:
             aggregated["post_commit_persistence_errors"] = post_commit_persistence_errors
+        if enforce_resume_decision is not None:
+            aggregated["resume_decision"] = enforce_resume_decision
 
         report = build_verification_report(plan.acceptance_criteria)
         return aggregated, plan, tuple(subtask_results), ledger.all(), report, control_state

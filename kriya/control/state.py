@@ -125,6 +125,14 @@ class ControlState:
 
     last_verified_checkpoint: Optional[str] = None
 
+    # PRD-008: where the "completed" entries in subtask_states live.
+    # "workspace": applied to the real workspace (in-place execution, or a
+    # plan sandbox after its successful terminal commit), so a resume may
+    # skip them. "candidate": only in a plan sandbox that is discarded unless
+    # the whole plan commits. None (legacy, or not yet known) is treated as
+    # "candidate": nothing recorded is reused.
+    subtask_completion_scope: Optional[str] = None
+
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
 
@@ -165,6 +173,7 @@ class ControlState:
             "workspace_content_hash": self.workspace_content_hash,
             "patch_hash": self.patch_hash,
             "last_verified_checkpoint": self.last_verified_checkpoint,
+            "subtask_completion_scope": self.subtask_completion_scope,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -196,6 +205,7 @@ class ControlState:
             workspace_content_hash=data.get("workspace_content_hash"),
             patch_hash=data.get("patch_hash"),
             last_verified_checkpoint=data.get("last_verified_checkpoint"),
+            subtask_completion_scope=data.get("subtask_completion_scope"),
             created_at=data.get("created_at", _now_iso()),
             updated_at=data.get("updated_at", _now_iso()),
         )

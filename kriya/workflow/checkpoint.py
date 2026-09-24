@@ -29,6 +29,7 @@ from kriya.workflow.resume_fingerprints import (
     STAGE_ORDER,
     Fingerprint,
     FingerprintComparison,
+    candidate_integrity_problem,
     compare_resume_fingerprints,
     invalidated_stages_for,
     reused_artifacts_for_checkpoint,
@@ -408,6 +409,9 @@ RESUME_INVALIDATION_MATRIX = {
     # from; the workspace-wide commit gate already ran, so nothing unsafe
     # is pending, but nothing from this checkpoint is reused either.
     "run_record_provenance": (ResumeAction.INVALIDATE, STAGE_ORDER),
+    # A checkpointed candidate that is incomplete, legacy (no digest) or
+    # altered on disk is not rebuilt; the plan it came from may still be.
+    "candidate_integrity": (ResumeAction.INVALIDATE, ("candidate", "verification")),
     "commit_state": (ResumeAction.REFUSE, ("mutation_authority", "candidate", "verification")),
 }
 
@@ -560,15 +564,20 @@ def validate_resume_against_reality(
 
     comparisons: Tuple[FingerprintComparison, ...] = ()
     if current_resume_fingerprints is not None:
-        comparisons = compare_resume_fingerprints(
-            checkpoint_data.get(RESUME_FINGERPRINTS_KEY),
-            current_resume_fingerprints,
+        reused = frozenset(
             reused_artifacts if reused_artifacts is not None
-            else reused_artifacts_for_checkpoint(checkpoint_data),
+            else reused_artifacts_for_checkpoint(checkpoint_data)
+        )
+        comparisons = compare_resume_fingerprints(
+            checkpoint_data.get(RESUME_FINGERPRINTS_KEY), current_resume_fingerprints, reused,
         )
         for item in comparisons:
             if item.invalidates:
                 mismatch(item.name, f"{item.name} {item.status.value}: {item.reason}")
+        if "candidate" in reused:
+            candidate_problem = candidate_integrity_problem(checkpoint_data)
+            if candidate_problem is not None:
+                mismatch("candidate_integrity", f"candidate_integrity: {candidate_problem}")
 
     if run_record_missing is not None:
         mismatch(

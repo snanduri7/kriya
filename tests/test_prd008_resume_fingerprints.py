@@ -1,5 +1,5 @@
-"""PRD-008 S2: resume fingerprints, the reused-artifact dependency matrix,
-and the single resume comparison path."""
+"""PRD-008 S2/S3: resume fingerprints, the reused-artifact dependency
+matrix, the single resume comparison path, and stage-precise invalidation."""
 
 import os
 import subprocess
@@ -12,6 +12,7 @@ from kriya.config.config import LLMConfig
 from kriya.control.persistence import save_control_state
 from kriya.control.retention import prune_run_state
 from kriya.control.run_coordinator import begin_mutating_run
+from kriya.control.run_record import RunRecord
 from kriya.control.state import CURRENT_SCHEMA_VERSION, ControlState
 from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
@@ -31,18 +32,26 @@ from kriya.workflow.obligations import (
 )
 from kriya.workflow.resume_fingerprints import (
     ARTIFACT_DEPENDENCIES,
+    ARTIFACT_STAGE,
+    CANDIDATE_HASH_KEY,
     CONFIG_FIELD_OWNERS,
+    DERIVATION_CHAIN,
+    EFFECTIVE_LEDGER_KEY,
     FINGERPRINT_NAMES,
     STAGE_ORDER,
     UNAVAILABLE,
     Fingerprint,
     FingerprintStatus,
+    apply_resume_invalidation,
     authority_context_fingerprint,
+    candidate_integrity_problem,
+    candidate_snapshot_digest,
     compare_resume_fingerprints,
     fingerprint_block,
     generation_resume_fingerprints,
     invalidated_stages_for,
     ledger_fingerprint,
+    restore_effective_ledger,
     reused_artifacts_for_checkpoint,
     skills_fingerprint,
     split_config_by_owner,
@@ -188,8 +197,12 @@ def test_reused_artifacts_follow_values_not_key_presence():
     assert reused_artifacts_for_checkpoint(plan_stage) == {"knowledge_clearance", "plan"}
     with_baseline = dict(plan_stage, validation_baseline_targeted={"passed": True})
     assert "validation_baselines" in reused_artifacts_for_checkpoint(with_baseline)
-    candidate = {"stage": "candidate_gates_passed", "plan": "p", "design": "d"}
+    candidate = {"stage": "candidate_gates_passed", "plan": "p", "design": "d", "gate_outcomes": []}
     assert {"candidate", "candidate_gate_outcomes"} <= reused_artifacts_for_checkpoint(candidate)
+    # S3: gate outcomes a resume discarded (None) are not offered again.
+    discarded = dict(candidate, gate_outcomes=None)
+    assert "candidate" in reused_artifacts_for_checkpoint(discarded)
+    assert "candidate_gate_outcomes" not in reused_artifacts_for_checkpoint(discarded)
 
 
 def test_toolchain_is_not_applicable_to_a_plan_resume_but_blocks_candidate_reuse():
@@ -201,7 +214,7 @@ def test_toolchain_is_not_applicable_to_a_plan_resume_but_blocks_candidate_reuse
     assert _statuses(plan)["toolchain"] is FingerprintStatus.NOT_APPLICABLE
     candidate = compare_resume_fingerprints(
         fingerprint_block(fingerprints), fingerprints,
-        reused_artifacts_for_checkpoint({"stage": "candidate_gates_passed", "plan": "p"}),
+        reused_artifacts_for_checkpoint({"stage": "candidate_gates_passed", "plan": "p", "gate_outcomes": []}),
     )
     assert _statuses(candidate)["toolchain"] is FingerprintStatus.UNVERIFIED
 
@@ -547,3 +560,191 @@ def test_retention_protects_the_run_the_control_state_references(tmp_path):
     assert "state-owner" in report.protected_run_ids
     assert "state-owner" not in report.pruned_run_ids
     assert os.path.exists(os.path.join(str(tmp_path), ".kriya", "control", "runs", "state-owner.json"))
+
+
+# ---------------------------------------------------------------- S3: stage-precise invalidation
+
+_FILES = {"math.py": "def add(a, b):\n    return a + b\n"}
+
+
+def _checkpoint(stage):
+    """One checkpoint of each kind, carrying what the workflow saves."""
+    data = {
+        "stage": stage, "plan": "P",
+        "validation_baseline_targeted": {"status": "captured"},
+        "validation_baseline_full_regression": None,
+    }
+    if stage in ("design", "candidate_gates_passed", "developer_success"):
+        data.update(design="D", architect_files=["math.py"])
+    if stage in ("candidate_gates_passed", "developer_success"):
+        data.update(
+            final_files=dict(_FILES), original_files={}, gate_outcomes=[{"type": "compile", "success": True}],
+            model_hops=["m"], **{
+                CANDIDATE_HASH_KEY: candidate_snapshot_digest(_FILES),
+                EFFECTIVE_LEDGER_KEY: ObligationLedger().to_snapshot(),
+            },
+        )
+    return data
+
+
+@pytest.mark.parametrize("invalidated, reused, stage", [
+    ((), {"knowledge_clearance", "plan", "design", "candidate", "candidate_gate_outcomes", "validation_baselines"},
+     "candidate_gates_passed"),
+    (("verification",), {"knowledge_clearance", "plan", "design", "candidate"}, "candidate_gates_passed"),
+    (("candidate", "verification"), {"knowledge_clearance", "plan", "design"}, "design"),
+    (("planning", "candidate", "verification"), {"knowledge_clearance"}, "context"),
+    # model_protocol is off the derivation chain: nothing downstream drops.
+    (("model_protocol",),
+     {"knowledge_clearance", "plan", "design", "candidate", "candidate_gate_outcomes", "validation_baselines"},
+     "candidate_gates_passed"),
+])
+def test_invalidation_keeps_the_longest_valid_prefix(invalidated, reused, stage):
+    plan = apply_resume_invalidation("ckpt", _checkpoint("candidate_gates_passed"), invalidated)
+    assert plan.reused == reused
+    assert plan.state["stage"] == stage
+    # The returned state offers exactly what the plan reuses, nothing more.
+    assert reused_artifacts_for_checkpoint(plan.state) == plan.reused
+    for artifact in plan.offered - plan.reused:
+        assert artifact not in reused_artifacts_for_checkpoint(plan.state)
+
+
+def test_context_invalidation_reuses_nothing():
+    plan = apply_resume_invalidation("ckpt", _checkpoint("candidate_gates_passed"), STAGE_ORDER)
+    assert not plan.resumes and plan.state is None and plan.reused == frozenset()
+    assert plan.to_dict()["discarded"] == sorted(plan.offered)
+
+
+def test_reuse_flags_come_from_the_plan_never_from_checkpoint_content():
+    forged = dict(_checkpoint("candidate_gates_passed"), skip_candidate_gates=True, reuse_candidate=True)
+    plan = apply_resume_invalidation("ckpt", forged, ("verification",))
+    assert plan.reuse_candidate is True
+    assert plan.skip_candidate_gates is False
+    plan = apply_resume_invalidation("ckpt", forged, ("candidate", "verification"))
+    assert plan.reuse_candidate is False and plan.skip_candidate_gates is False
+
+
+@pytest.mark.parametrize("kind", ["plan", "design", "candidate_gates_passed"])
+@pytest.mark.parametrize("changed", FINGERPRINT_NAMES)
+def test_every_surviving_artifact_has_only_matching_dependencies(kind, changed):
+    """Invariant: after one fingerprint changes, everything a resume still
+    reuses depends only on MATCH/NOT_APPLICABLE fingerprints, and nothing
+    survives whose upstream artifact on the derivation chain was dropped."""
+    checkpoint = dict(_checkpoint(kind), **{RESUME_FINGERPRINTS_KEY: fingerprint_block(SAME)})
+    current = dict(SAME, **{changed: Fingerprint("different", "b")})
+    result = validate_resume_against_reality(checkpoint, "/unused", current_resume_fingerprints=current)
+    plan = apply_resume_invalidation("ckpt", checkpoint, result.invalidated_stages)
+    statuses = {item.name: item.status for item in result.fingerprint_comparisons}
+    for artifact in plan.reused:
+        for dependency in ARTIFACT_DEPENDENCIES[artifact]:
+            assert statuses[dependency] in (FingerprintStatus.MATCH, FingerprintStatus.NOT_APPLICABLE), (
+                artifact, dependency,
+            )
+    dropped_stages = {ARTIFACT_STAGE[artifact] for artifact in plan.offered - plan.reused}
+    for artifact in plan.reused:
+        stage = ARTIFACT_STAGE[artifact]
+        if stage in DERIVATION_CHAIN:
+            upstream = DERIVATION_CHAIN[:DERIVATION_CHAIN.index(stage)]
+            assert not dropped_stages & set(upstream), (artifact, dropped_stages)
+
+
+def test_model_runtime_change_never_discards_a_candidate():
+    checkpoint = dict(_checkpoint("candidate_gates_passed"), **{RESUME_FINGERPRINTS_KEY: fingerprint_block(SAME)})
+    current = dict(SAME, model_runtime=Fingerprint("other-model", "b"))
+    result = validate_resume_against_reality(checkpoint, "/unused", current_resume_fingerprints=current)
+    plan = apply_resume_invalidation("ckpt", checkpoint, result.invalidated_stages)
+    assert plan.reuse_candidate and plan.skip_candidate_gates
+
+
+# ---------------------------------------------------------------- S3: candidate integrity
+
+def test_candidate_integrity_accepts_only_an_exact_complete_snapshot():
+    good = _checkpoint("candidate_gates_passed")
+    assert candidate_integrity_problem(good) is None
+    assert "digest" in candidate_integrity_problem(dict(good, **{CANDIDATE_HASH_KEY: None}))
+    tampered = dict(good, final_files={"math.py": "import os\n"})
+    assert "do not match" in candidate_integrity_problem(tampered)
+    assert "no well-formed" in candidate_integrity_problem(dict(good, final_files=None))
+
+
+def test_a_tampered_candidate_is_dropped_but_its_plan_is_kept():
+    checkpoint = dict(
+        _checkpoint("candidate_gates_passed"),
+        final_files={"math.py": "import os\n"},
+        **{RESUME_FINGERPRINTS_KEY: fingerprint_block(SAME)},
+    )
+    result = validate_resume_against_reality(checkpoint, "/unused", current_resume_fingerprints=SAME)
+    assert [item.fingerprint for item in result.decisions] == ["candidate_integrity"]
+    assert RESUME_INVALIDATION_MATRIX["candidate_integrity"][1] == ("candidate", "verification")
+    plan = apply_resume_invalidation("ckpt", checkpoint, result.invalidated_stages)
+    assert plan.reused == {"knowledge_clearance", "plan", "design"}
+    assert plan.state["final_files"] is None
+
+
+# ---------------------------------------------------------------- S3: effective ledger snapshot
+
+def _rich_ledger():
+    ledger = ObligationLedger()
+    common = {"kind": ObligationKind.PRESERVED_REFERENCE, "authority": ObligationAuthority.DETERMINISTIC,
+              "description": "keep Foo.bar", "source": "test"}
+    ledger.record(ObligationRecord(
+        id="ref.foo", status=ObligationStatus.SATISFIED, revision=1,
+        evidence={"paths": ("a.java", "b.java"), "nested": {"lines": [1, 2], "kind": ObligationKind.PRESERVED_REFERENCE}},
+        repair_scope=("a.java",), terminal_required=True, **common,
+    ))
+    ledger.record(ObligationRecord(id="ref.foo", status=ObligationStatus.VIOLATED, revision="s2", **common))
+    return ledger
+
+
+def test_ledger_snapshot_round_trips_to_the_same_fingerprint():
+    ledger = _rich_ledger()
+    restored = ObligationLedger.from_snapshot(ledger.to_snapshot())
+    assert restored.fingerprint() == ledger.fingerprint()
+    assert ledger_fingerprint(restored) == ledger_fingerprint(ledger)
+    assert restored.current("ref.foo").status is ObligationStatus.VIOLATED
+    assert restored.history("ref.foo")[0].repair_scope == ("a.java",)
+    assert len(restored.regressions) == 1  # rebuilt by replay
+
+
+def test_restore_from_keeps_the_callers_ledger_object():
+    shared = ObligationLedger()
+    identity = id(shared)
+    shared.restore_from(ObligationLedger.from_snapshot(_rich_ledger().to_snapshot()))
+    assert id(shared) == identity
+    assert shared.fingerprint() == _rich_ledger().fingerprint()
+
+
+@pytest.mark.parametrize("snapshot", [
+    {"schema_version": 99, "history": []},
+    {"schema_version": 1},
+    {"schema_version": 1, "history": [["x", [{"id": "x", "kind": "not-a-kind"}]]]},
+    {"schema_version": 1, "history": [["other-id", [{
+        "id": "x", "kind": "preserved_reference", "status": "satisfied", "authority": "deterministic",
+        "description": "d", "source": "s",
+    }]]]},
+])
+def test_malformed_ledger_snapshots_are_rejected(snapshot):
+    with pytest.raises(ValueError):
+        ObligationLedger.from_snapshot(snapshot)
+
+
+def test_a_missing_ledger_snapshot_is_never_an_empty_ledger():
+    ledger, problem = restore_effective_ledger({})
+    assert ledger is None and "no effective obligation ledger" in problem
+
+
+# ---------------------------------------------------------------- S3: durable decision records
+
+def test_run_record_accepts_a_resume_decision_and_old_records_still_load():
+    record = RunRecord.new("run-1", "ws", None, None).annotate(resume_decision={"reused": ["plan"]})
+    assert RunRecord.from_dict(record.to_dict()).resume_decision == {"reused": ["plan"]}
+    legacy = record.to_dict()
+    legacy.pop("resume_decision")
+    assert RunRecord.from_dict(legacy).resume_decision is None
+
+
+def test_control_state_completion_scope_round_trips_and_defaults_to_unrecorded():
+    state = ControlState(schema_version=CURRENT_SCHEMA_VERSION, run_id="r", subtask_completion_scope="workspace")
+    assert ControlState.from_dict(state.to_dict()).subtask_completion_scope == "workspace"
+    legacy = state.to_dict()
+    legacy.pop("subtask_completion_scope")
+    assert ControlState.from_dict(legacy).subtask_completion_scope is None

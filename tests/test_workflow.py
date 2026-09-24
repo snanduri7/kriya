@@ -18161,51 +18161,170 @@ async def test_predetermined_architect_files_alone_raises():
         )
 
 
+def _seed_candidate_checkpoint(tmp_path, cfg, goal, candidate_files, **extra):
+    """A candidate_gates_passed checkpoint exactly as the workflow saves one:
+    fingerprints, candidate digest and effective-ledger snapshot."""
+    from kriya.workflow.obligations import ObligationLedger
+    from kriya.workflow.resume_fingerprints import candidate_snapshot_digest
+
+    fields = {
+        "plan": "Step 1 (from checkpoint)",
+        "design": "Design: Write math.py (from checkpoint)",
+        "final_files": candidate_files,
+        "original_files": {},
+        "gate_outcomes": [{"attempt": 1, "type": "compile", "success": True, "output": "stale outcome"}],
+        "model_hops": ["checkpoint-model"],
+        "retry_count": 0,
+        "candidate_snapshot_hash": candidate_snapshot_digest(candidate_files),
+        "effective_obligation_ledger_snapshot": ObligationLedger().to_snapshot(),
+    }
+    fields.update(extra)
+    _seed_checkpoint(tmp_path, cfg, goal, "ckpt-dev", "candidate_gates_passed", **fields)
+
+
+def _spy_compile_checks(monkeypatch):
+    from kriya.tools.validate import PolymorphicValidator
+
+    seen = []
+    original = PolymorphicValidator.run_compile_check
+
+    def spy(self, files):
+        seen.append({
+            relpath: open(os.path.join(self.workspace_path, relpath), "rb").read()
+            for relpath in files if os.path.isfile(os.path.join(self.workspace_path, relpath))
+        })
+        return original(self, files)
+
+    monkeypatch.setattr(PolymorphicValidator, "run_compile_check", spy)
+    return seen
+
+
 @pytest.mark.asyncio
-async def test_workflow_candidate_checkpoint_not_reused_while_toolchain_unverified(tmp_path):
-    """PRD-008 S2: a candidate-stage checkpoint hands the resumed run its
-    candidate AND its candidate-gate outcomes, which depend on the
-    toolchain. Toolchain identity is UNAVAILABLE until PRD-011, so that
-    dependency is UNVERIFIED - never a match - and the checkpoint is not
-    reused: the run starts fresh. (Before PRD-008 it reused the candidate
-    and skipped the candidate gates. S3 narrows this to re-running only the
-    invalidated gates against the reused candidate.)"""
+async def test_workflow_rebuilds_checkpointed_candidate_and_reruns_its_gates_while_toolchain_unverified(
+    tmp_path, monkeypatch,
+):
+    """PRD-008 S3: the candidate, plan and design all still match, so they
+    are reused - no Planner, Architect or Developer call. The candidate
+    gates' outcomes depend on the toolchain, which is UNVERIFIED until
+    PRD-011, so the gates run again against the candidate rebuilt in the
+    fresh worktree, and their old outcomes are discarded."""
+    import kriya.workflow.workflow as workflow_module
+
     _init_git_repo(tmp_path)
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    kernel = Kernel(config=cfg)
-    llm = LLMClient(cfg)
     goal = "Create math library"
-
-    _seed_checkpoint(
-        tmp_path, cfg, goal, "ckpt-dev", "candidate_gates_passed",
-        plan="Step 1 (from checkpoint)",
-        design="Design: Write math.py (from checkpoint)",
-        final_files={"math.py": "def add(a,b):\n    return a+b"},
-        original_files={},
-        gate_outcomes=[],
-        model_hops=[],
-        retry_count=0,
+    final_files = {"math.py": "def add(a,b):\n    return a+b\n"}
+    _seed_candidate_checkpoint(tmp_path, cfg, goal, final_files)
+    compiled = _spy_compile_checks(monkeypatch)
+    saved = []
+    real_save = workflow_module.save_checkpoint
+    monkeypatch.setattr(
+        workflow_module, "save_checkpoint",
+        lambda workspace, run_id, data: (saved.append(data), real_save(workspace, run_id, data))[1],
     )
 
-    llm.complete = AsyncMock(side_effect=[
-        "Step 1: Write code",
-        "Design: Write math.py",
-        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
-        "Review: Approved",
-    ])
-
-    we = WorkflowEngine(kernel, llm)
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=["Review: Approved"])  # only the Reviewer runs
+    we = WorkflowEngine(Kernel(config=cfg), llm)
     with patch("kriya.workflow.workflow.logger") as workflow_logger:
         res = await we.run_generation_workflow(goal=goal, workspace_path=str(tmp_path), resume=True)
 
     assert res["quality_gates_passed"] is True
-    assert res["plan"] == "Step 1: Write code"  # the checkpoint's plan was not reused either
-    assert llm.complete.await_count == 4  # nothing was skipped
+    assert res["terminal_regression_passed"] is True
+    assert res["plan"] == "Step 1 (from checkpoint)"
+    assert llm.complete.await_count == 1
+    assert (tmp_path / "math.py").read_bytes() == final_files["math.py"].encode()
+    # The gates ran, on the rebuilt candidate's exact bytes.
+    assert {"math.py": final_files["math.py"].encode()} in compiled
     warnings = " ".join(str(call.args[0]) for call in workflow_logger.warning.call_args_list)
     assert "toolchain UNVERIFIED" in warnings
-    assert "Refusing to resume checkpoint 'ckpt-dev'" in warnings
+    assert "discarding candidate_gate_outcomes" in warnings
+    # The re-saved candidate checkpoint carries this run's gate outcomes,
+    # not the stale one.
+    resaved = [data for data in saved if data["stage"] == "candidate_gates_passed"]
+    assert resaved
+    assert all(item.get("output") != "stale outcome" for item in resaved[-1]["gate_outcomes"])
+
+
+@pytest.mark.asyncio
+async def test_workflow_skips_candidate_gates_only_when_every_verification_fingerprint_matches(
+    tmp_path, monkeypatch,
+):
+    """The gate-skip path (unreachable until PRD-011 binds the toolchain):
+    with a toolchain value available and unchanged, the candidate gates are
+    skipped and their outcomes restored; terminal regression still runs."""
+    import kriya.workflow.resume_fingerprints as resume_fingerprints
+    from kriya.workflow.resume_fingerprints import Fingerprint
+
+    original = resume_fingerprints.compute_resume_fingerprints
+
+    def with_bound_toolchain(**kwargs):
+        return dict(original(**kwargs), toolchain=Fingerprint("toolchain-1", "test-toolchain"))
+
+    monkeypatch.setattr(resume_fingerprints, "compute_resume_fingerprints", with_bound_toolchain)
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    goal = "Create math library"
+    final_files = {"math.py": "def add(a,b):\n    return a+b\n"}
+    _seed_candidate_checkpoint(tmp_path, cfg, goal, final_files)
+    compiled = _spy_compile_checks(monkeypatch)
+    regression = []
+    from kriya.tools.validate import PolymorphicValidator
+    original_tests = PolymorphicValidator.run_tests
+
+    def spy_tests(self, *args, **kwargs):
+        regression.append(self.workspace_path)
+        return original_tests(self, *args, **kwargs)
+
+    monkeypatch.setattr(PolymorphicValidator, "run_tests", spy_tests)
+
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=["Review: Approved"])
+    we = WorkflowEngine(Kernel(config=cfg), llm)
+    res = await we.run_generation_workflow(goal=goal, workspace_path=str(tmp_path), resume=True)
+
+    assert res["quality_gates_passed"] is True
+    assert res["terminal_regression_passed"] is True
+    assert llm.complete.await_count == 1
+    assert compiled == [], "candidate gates were skipped"
+    assert regression, "terminal regression still ran"
+    assert (tmp_path / "math.py").read_bytes() == final_files["math.py"].encode()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("problem", ["tampered", "legacy_no_digest", "no_ledger_snapshot"])
+async def test_workflow_regenerates_an_unverifiable_candidate_but_keeps_its_plan(tmp_path, problem):
+    """A candidate whose files no longer match their digest, a legacy
+    candidate without one, or one without its effective-ledger snapshot is
+    not rebuilt; the plan and design it came from still are."""
+    _init_git_repo(tmp_path)
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    goal = "Create math library"
+    final_files = {"math.py": "def add(a,b):\n    return a+b\n"}
+    overrides = {
+        "tampered": {"final_files": {"math.py": "import os\n"}},
+        "legacy_no_digest": {"candidate_snapshot_hash": None},
+        "no_ledger_snapshot": {"effective_obligation_ledger_snapshot": None},
+    }[problem]
+    _seed_candidate_checkpoint(tmp_path, cfg, goal, final_files, **overrides)
+
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=[
+        '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
+        "Review: Approved",
+    ])
+    we = WorkflowEngine(Kernel(config=cfg), llm)
+    res = await we.run_generation_workflow(goal=goal, workspace_path=str(tmp_path), resume=True)
+
+    assert res["quality_gates_passed"] is True
+    assert res["plan"] == "Step 1 (from checkpoint)"  # planning reused
+    assert llm.complete.await_count == 2  # Developer + Reviewer only
 
 
 @pytest.mark.asyncio

@@ -380,6 +380,56 @@ class ObligationLedger:
         revision = sum(len(history) for history in self._history.values())
         return revision, hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
+    SNAPSHOT_SCHEMA_VERSION = 1
+
+    def to_snapshot(self) -> Dict[str, Any]:
+        """JSON-safe copy of the whole history (PRD-008 checkpoints).
+        Values fingerprint() would render with ``default=str`` are rendered
+        the same way here, so a restored ledger fingerprints identically."""
+        history = [
+            [obligation_id, [asdict(rec) for rec in records]]
+            for obligation_id, records in sorted(self._history.items())
+        ]
+        return {
+            "schema_version": self.SNAPSHOT_SCHEMA_VERSION,
+            "history": json.loads(json.dumps(history, default=str)),
+        }
+
+    @classmethod
+    def from_snapshot(cls, data: Any) -> "ObligationLedger":
+        """Rebuild by replaying every record in order (which also rebuilds
+        ``regressions``). Raises ValueError on anything malformed."""
+        if not isinstance(data, dict) or data.get("schema_version") != cls.SNAPSHOT_SCHEMA_VERSION:
+            raise ValueError("obligation ledger snapshot is malformed or an unsupported version")
+        history = data.get("history")
+        if not isinstance(history, list):
+            raise ValueError("obligation ledger snapshot has no history")
+        ledger = cls()
+        try:
+            for obligation_id, records in history:
+                for raw in records:
+                    rec = ObligationRecord(
+                        **{
+                            **raw,
+                            "kind": ObligationKind(raw["kind"]),
+                            "status": ObligationStatus(raw["status"]),
+                            "authority": ObligationAuthority(raw["authority"]),
+                            "repair_scope": tuple(raw.get("repair_scope") or ()),
+                        }
+                    )
+                    if rec.id != obligation_id:
+                        raise ValueError(f"record {rec.id!r} filed under {obligation_id!r}")
+                    ledger.record(rec)
+        except (TypeError, KeyError) as error:
+            raise ValueError(f"obligation ledger snapshot is malformed: {error}") from error
+        return ledger
+
+    def restore_from(self, other: "ObligationLedger") -> None:
+        """Replace this ledger's content in place: callers share one ledger
+        object across a run, so a resumed run must grow the same object."""
+        self._history = {key: list(records) for key, records in other._history.items()}
+        self.regressions = list(other.regressions)
+
     def current(self, obligation_id: str) -> Optional[ObligationRecord]:
         """The obligation's AUTHORITATIVE state (spec §16), never a bare
         "last written" lookup - a lower-authority record arriving after an

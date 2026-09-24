@@ -48,9 +48,16 @@ from kriya.workflow.resume_fingerprints import (
     CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
 )
 from kriya.workflow.resume_fingerprints import (
+    CANDIDATE_HASH_KEY,
+    EFFECTIVE_LEDGER_KEY,
+    Fingerprint,
+    ResumePlan,
+    apply_resume_invalidation,
+    candidate_snapshot_digest,
     fingerprint_block,
     generation_resume_fingerprints,
     ledger_fingerprint,
+    restore_effective_ledger,
     workspace_fingerprint,
 )
 from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
@@ -1100,10 +1107,14 @@ class WorkflowEngine:
         # effective ledger, so its input fingerprint is fixed here, at entry.
         entry_obligation_fingerprint = ledger_fingerprint(obligation_ledger)
 
-        def _resume_fingerprints(effective_obligation_ledger: Any, workspace: Any = None) -> Dict[str, Any]:
+        def _resume_fingerprints(
+            effective_obligation_ledger: Any, workspace: Any = None,
+            effective_obligation_fingerprint: Optional[Fingerprint] = None,
+        ) -> Dict[str, Any]:
             return generation_resume_fingerprints(
                 self.kernel.config, workspace_path, workspace=workspace,
                 input_obligation_fingerprint=entry_obligation_fingerprint,
+                effective_obligation_fingerprint=effective_obligation_fingerprint,
                 goal=goal, error_context=state.error_context,
                 supplementary_context=supplementary_context,
                 recovery_contract_block=recovery_contract_block,
@@ -1128,6 +1139,11 @@ class WorkflowEngine:
         # Resume resolution (opt-in only - no auto-detection from goal-text matching)
         run_id = None
         resume_state: Optional[Dict[str, Any]] = None
+        # PRD-008 S3: what the resumed run reuses, decided once, here, from
+        # the validation result; attempt.py reads its reuse flags from this,
+        # never from the checkpoint file.
+        resume_plan: Optional[ResumePlan] = None
+        resume_restored_ledger: Any = None
         if resume or resume_id:
             target_id = resume_id or find_latest_checkpoint(workspace_path)
             if not target_id:
@@ -1144,10 +1160,21 @@ class WorkflowEngine:
                     # also catches a CHANGED boundary, not only a dropped
                     # one) are all fingerprints there; an applicable one that
                     # is missing or UNAVAILABLE is UNVERIFIED, never a match.
-                    # The resumed run starts from the caller's ledger (or an
-                    # empty one), so that is the current effective ledger.
+                    # A candidate is reused together with the effective
+                    # obligation ledger it was verified against; that
+                    # ledger is restored from the checkpoint, so its
+                    # current value is the restored snapshot's (UNAVAILABLE
+                    # if there is none - never an empty ledger).
+                    resume_restored_ledger, ledger_problem = restore_effective_ledger(candidate)
                     try:
-                        current_resume_fingerprints = _resume_fingerprints(obligation_ledger)
+                        current_resume_fingerprints = _resume_fingerprints(
+                            obligation_ledger,
+                            effective_obligation_fingerprint=(
+                                ledger_fingerprint(resume_restored_ledger)
+                                if resume_restored_ledger is not None
+                                else Fingerprint.unavailable(ledger_problem or "no ledger snapshot")
+                            ),
+                        )
                     except Exception as error:
                         # Checkpointing is a convenience and never fails the
                         # run; an unverifiable checkpoint is simply not used.
@@ -1208,10 +1235,16 @@ class WorkflowEngine:
                                 ],
                                 "run_id": prior_run_id,
                             }
-                        if resume_validation.status != ResumeStatus.OK:
-                            # PRD-008 S2: any invalidated stage still discards
-                            # the whole checkpoint; S3 narrows this to the
-                            # invalidated stages only.
+                        # PRD-008 S3: keep only what no invalidated stage
+                        # touches (resume_fingerprints.apply_resume_invalidation).
+                        resume_plan = apply_resume_invalidation(
+                            target_id, candidate, resume_validation.invalidated_stages,
+                        )
+                        logger.info("Resume decision: %s", json.dumps(resume_plan.to_dict(), sort_keys=True))
+                        annotation_error = annotate_run(workspace_path, resume_decision=resume_plan.to_dict())
+                        if annotation_error:
+                            logger.warning(f"Could not record the resume decision on the run record: {annotation_error}")
+                        if not resume_plan.resumes:
                             logger.warning(
                                 f"Refusing to resume checkpoint '{target_id}' (invalidated stages: "
                                 f"{', '.join(resume_validation.invalidated_stages)}): "
@@ -1219,8 +1252,20 @@ class WorkflowEngine:
                             )
                         else:
                             run_id = target_id
-                            resume_state = candidate
-                            logger.info(f"Resuming checkpoint '{run_id}' at stage '{candidate.get('stage')}'.")
+                            resume_state = resume_plan.state
+                            discarded = sorted(resume_plan.offered - resume_plan.reused)
+                            if discarded:
+                                logger.warning(
+                                    f"Resuming checkpoint '{run_id}' partially: reusing "
+                                    f"{', '.join(sorted(resume_plan.reused))}; discarding "
+                                    f"{', '.join(discarded)} (invalidated stages: "
+                                    f"{', '.join(resume_validation.invalidated_stages)}): "
+                                    f"{'; '.join(resume_validation.mismatches)}."
+                                )
+                            else:
+                                logger.info(
+                                    f"Resuming checkpoint '{run_id}' at stage '{candidate.get('stage')}'."
+                                )
         if run_id is None:
             run_id = new_run_id()
 
@@ -2859,6 +2904,12 @@ class WorkflowEngine:
         # Legacy call gets its own fresh one, mirroring migration_resolution's
         # own "resolved once, reused, or created fresh for this call" pattern.
         resolved_obligation_ledger = obligation_ledger if obligation_ledger is not None else ObligationLedger()
+        # PRD-008: a reused candidate comes with the effective ledger it was
+        # verified against (its fingerprint matched the checkpoint's). The
+        # input ledger matched too, so this only adds what that run recorded;
+        # restored in place because callers share one ledger object.
+        if resume_plan is not None and resume_plan.reuse_candidate and resume_restored_ledger is not None:
+            resolved_obligation_ledger.restore_from(resume_restored_ledger)
         # PRV-17 (2026-09-08, P7 efficiency finding) - kriya/workflow/
         # deterministic_failure_diagnostic.py. Same "resolved once, reused
         # across every bounded-subtask call, or created fresh for a plain
@@ -2947,6 +2998,7 @@ class WorkflowEngine:
             obligation_ledger=resolved_obligation_ledger,
             completed_subtask_ids=completed_subtask_ids or frozenset(),
             deterministic_failure_diagnostics=resolved_deterministic_failure_diagnostics,
+            resume_plan=resume_plan,
         )
 
         from kriya.workflow.retry_policy import decide_for_state
@@ -3014,16 +3066,33 @@ class WorkflowEngine:
                 # Candidate-only checkpoint: generation and inner gates passed, but
                 # terminal regression and application have not. Its name and payload
                 # preserve that distinction for resume and external inspection.
+                # PRD-008: the candidate is reusable only if every written
+                # file was captured exactly (strict UTF-8, no newline
+                # translation); otherwise no digest is stored and a resume
+                # regenerates it instead of rebuilding a partial candidate.
                 final_files_for_checkpoint = {}
+                candidate_snapshot_complete = True
                 for filepath in state.all_files_written:
                     try:
-                        with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
-                            final_files_for_checkpoint[filepath] = fh.read()
+                        with open(os.path.join(worktree_path, filepath), "rb") as fh:
+                            final_files_for_checkpoint[filepath] = fh.read().decode("utf-8")
                     except Exception as ex:
-                        logger.debug(f"Failed to snapshot '{filepath}' for checkpoint: {ex}")
+                        candidate_snapshot_complete = False
+                        logger.warning(
+                            f"Candidate file '{filepath}' could not be captured exactly for the "
+                            f"checkpoint ({type(ex).__name__}: {ex}); a resume will regenerate the candidate."
+                        )
+                candidate_checkpoint_fields = {
+                    CANDIDATE_HASH_KEY: (
+                        candidate_snapshot_digest(final_files_for_checkpoint)
+                        if candidate_snapshot_complete else None
+                    ),
+                    EFFECTIVE_LEDGER_KEY: resolved_obligation_ledger.to_snapshot(),
+                }
                 _save_stage_checkpoint(
                     "candidate_gates_passed",
                     effective_obligation_ledger=resolved_obligation_ledger,
+                    **candidate_checkpoint_fields,
                     plan=plan,
                     design=design,
                     final_files=final_files_for_checkpoint,
@@ -3989,9 +4058,11 @@ class WorkflowEngine:
 
                 # A semantically final-success checkpoint is legal only after
                 # every required terminal gate has passed.
+                candidate_checkpoint_fields[EFFECTIVE_LEDGER_KEY] = resolved_obligation_ledger.to_snapshot()
                 _save_stage_checkpoint(
                     "developer_success",
                     effective_obligation_ledger=resolved_obligation_ledger,
+                    **candidate_checkpoint_fields,
                     plan=plan,
                     design=design,
                     final_files=final_files_for_checkpoint,
