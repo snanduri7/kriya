@@ -8,7 +8,7 @@ PRD-006,RunCoordinator and Mandatory Workspace Ownership Gateway,Wave 2,P0,PRD-0
 PRD-007,Canonical Persistent RunRecord,Wave 2,P0,PRD-006,NOT REQUIRED,VERIFIED,0421640 316e296 f3f356f,PYTEST_VERIFIED,NOT_REQUIRED
 PRD-008,Resume Integrity and Deterministic Invalidation,Wave 2,P0,PRD-007,NOT REQUIRED,VERIFIED,31d19da reopened S1-S4c through abadb4a (tested) + S5 docs 6e1a846 (final),PYTEST_VERIFIED,NOT_REQUIRED
 DEF-DEV-EMPTY-ARRAY,Developer [] answer written as file content (false success),Wave 2,P0,PRD-008,NOT REQUIRED,VERIFIED,fd42e01 (tested; full suite 5106/0/8),PYTEST_VERIFIED,NOT_REQUIRED
-PRD-008A,Unified ExecutionPlan / WorkUnit Orchestration,Wave 2,P0,PRD-008 DEF-DEV-EMPTY-ARRAY,REQUIRED,READY_FOR_PYTEST_VERIFICATION,e1d0e4c eacac0d 933d11b 39cb5c2 2181aec 5f3c846 6a90ff1 594fa16 123d78c (A1-A7+A6b+reorder test),,
+PRD-008A,Unified ExecutionPlan / WorkUnit Orchestration,Wave 2,P0,PRD-008 DEF-DEV-EMPTY-ARRAY,REQUIRED,READY_FOR_PYTEST_VERIFICATION,e1d0e4c eacac0d 933d11b 39cb5c2 2181aec 5f3c846 6a90ff1 594fa16 123d78c b99db27 (A1-A7+A6b+reorder test+annotation fix),,
 PRD-009,Sealed Production Runtime Profile,Wave 2,P0,PRD-008,NOT REQUIRED,IMPLEMENTING,d7163de reopened,,NOT_REQUIRED
 PRD-010,kriya doctor --production Deployment Gate,Wave 2,P0,PRD-009,REQUIRED,IMPLEMENTING,aa492ab reopened,,
 PRD-011,OCI Toolchain Parity and Versioned Execution Images,Wave 3,P0,PRD-010,REQUIRED,IMPLEMENTING,54ad798 reopened,,
