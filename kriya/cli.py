@@ -1468,12 +1468,12 @@ async def _dispatch_generation(we: "WorkflowEngine", cfg: AppConfig, **kwargs: A
     (kriya.yaml, default False) so its shadow-mode control-plane bookkeeping
     (MA5/MA6) actually runs alongside a real `kriya generate` call instead
     of being permanently unreachable, per WorkflowController's own
-    docstring. `mode` is only ever "legacy" or "shadow" here - "enforce" is
-    rejected at config-load time (WorkflowControllerConfig's validator,
-    MA6.14) - so with the packaged default this is a pure passthrough to
-    we.run_generation_workflow, identical to every call site before this
-    change. Module-level (not a nested closure inside `generate()`) so it's
-    independently unit-testable without invoking the full CLI command."""
+    docstring. `mode` is "legacy", "shadow" or (since MA7.8) "enforce"; with
+    the packaged default (enabled=False) this is a pure passthrough to
+    we.run_generation_workflow, which runs the goal as a one-unit
+    ExecutionPlan (PRD-008A). Module-level (not a nested closure inside
+    `generate()`) so it's independently unit-testable without invoking the
+    full CLI command."""
     if cfg.workflow_controller.enabled:
         result = await WorkflowController(we).execute(
             migration_mode=cfg.workflow_controller.mode, **kwargs,

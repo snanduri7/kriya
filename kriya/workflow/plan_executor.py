@@ -21,7 +21,7 @@ from __future__ import annotations
 import contextvars
 import logging
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
 from kriya.control.run_coordinator import annotate_run, require_mutating_run
 from kriya.workflow.execution_plan import (

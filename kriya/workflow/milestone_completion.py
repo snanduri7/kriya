@@ -83,7 +83,7 @@ VERIFIED_NO_CHANGE_INVALIDATED = "VERIFIED_NO_CHANGE_INVALIDATED"
 COMPLETION_RECONSTRUCTED = "COMPLETION_RECONSTRUCTED"
 COMPLETION_RECONSTRUCTION_UNVERIFIED = "COMPLETION_RECONSTRUCTION_UNVERIFIED"
 # Checkpoint selection is common to every work unit since PRD-008A.
-from kriya.workflow.plan_executor import (  # noqa: E402
+from kriya.workflow.plan_executor import (  # noqa: E402,F401 - compatibility names
     CHECKPOINT_IDENTITY_MISMATCH,
     CHECKPOINT_SELECTED as MILESTONE_CHECKPOINT_SELECTED,
     NO_COMPATIBLE_CHECKPOINT as NO_COMPATIBLE_MILESTONE_CHECKPOINT,
@@ -232,13 +232,17 @@ def milestone_definition_digest(milestone: Any) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def milestone_work_unit(group_id: str, milestone: Any) -> Dict[str, Any]:
-    """The durable identity of one milestone's execution (RunRecord
+def milestone_unit_record(group_id: str, milestone_id: str, definition_digest: str) -> Dict[str, Any]:
+    """The durable identity record of one milestone's execution (RunRecord
     active_work_unit -> each commit cycle and checkpoint)."""
     return {
-        "kind": "milestone", "group_id": group_id, "milestone_id": milestone.id,
-        "definition_digest": milestone_definition_digest(milestone),
+        "kind": "milestone", "group_id": group_id, "milestone_id": milestone_id,
+        "definition_digest": definition_digest,
     }
+
+
+def milestone_work_unit(group_id: str, milestone: Any) -> Dict[str, Any]:
+    return milestone_unit_record(group_id, milestone.id, milestone_definition_digest(milestone))
 
 
 def integration_work_unit(group_id: str, plan_digest: str) -> Dict[str, Any]:

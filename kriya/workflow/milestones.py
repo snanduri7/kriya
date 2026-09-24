@@ -69,8 +69,6 @@ from kriya.workflow.milestone_completion import (
     assess_completed_milestone_reuse,
     completion_proof_for,
     find_completion_to_reconstruct,
-    integration_work_unit,
-    milestone_work_unit,
     no_change_verification,
     owning_run_commit_count,
     record_milestone_commits,
@@ -663,15 +661,6 @@ def _record_ledger(
     entries = record_milestone_commits(workspace_path, milestone_id, cycles_before, loop_outcome=loop_outcome)
     run_state.commit_ledger.extend(entry.to_dict() for entry in entries)
     return entries
-
-
-def _set_work_unit(workspace_path: str, unit: Optional[Dict[str, Any]]) -> None:
-    """Name the unit of work every following commit cycle and checkpoint
-    belongs to. Best effort: if it cannot be recorded, commits stay
-    unattributed, which only ever means a rerun or a fresh start."""
-    error = annotate_run(workspace_path, active_work_unit=unit)
-    if error:
-        logger.warning(f"Could not record the active milestone on the run record: {error}")
 
 
 def _plan_digest(milestones: List[MilestoneV2]) -> str:
@@ -1439,19 +1428,13 @@ async def run_milestones(
     fresh call already gets fresh retry budgets by construction, no new
     retry infrastructure needed.
 
-    resume/resume_id: passed through unchanged to EVERY run_generation_workflow()
-    call below (each milestone and the integration pass alike), so a sequence
-    interrupted mid a single milestone's own Plan/Design/Developer stage (a
-    separate, finer-grained checkpoint than this module's own
-    completed_milestone_ids sidecar - see run_generation_workflow()'s own
-    resume docstring) can pick back up inside that milestone instead of
-    restarting it from scratch. This is safe to pass unconditionally to every
-    call, not just the one milestone actually in flight when the interruption
-    happened: run_generation_workflow() only actually resumes a checkpoint
-    whose goal/config/workspace fingerprints still match current state, and
-    refuses (falling back to a fresh run, with a warning) on any drift -
-    since each milestone's goal text differs, at most one call in the
-    sequence can ever match a given saved checkpoint.
+    resume/resume_id: lets a sequence interrupted mid a single milestone's
+    own Plan/Design/Developer stage (a finer-grained checkpoint than the
+    completed_milestone_ids sidecar) pick back up inside that milestone. Each
+    unit is offered only its OWN newest checkpoint, by work-unit identity
+    (plan_executor.select_work_unit_checkpoint, PRD-008 S4c / PRD-008A), and
+    run_generation_workflow() still resumes it only if PRD-008's
+    validate_resume_against_reality() accepts it.
 
     MA3.7: milestones execute in DETERMINISTIC TOPOLOGICAL order
     (kriya/workflow/milestone_validation.py's topological_order()), not
@@ -1490,7 +1473,6 @@ async def run_milestones(
     ordered = [
         by_id[unit.id] for unit in plan.execution_order() if unit.role is WorkUnitRole.PRIMARY
     ]
-    total = len(ordered)
     # PRD-008 S4b: completed_milestone_ids is trusted only after each entry's
     # completion proof validates against durable evidence and the workspace.
     engine_config = getattr(getattr(we, "kernel", None), "config", None)

@@ -51,17 +51,12 @@ def work_unit_record(plan: ExecutionPlan, unit_id: str) -> Optional[Dict[str, An
             "definition_digest": None, "work_unit_id": unit.id,
         }
     if plan.source_kind is PlanSourceKind.MILESTONE:
-        # Exactly kriya/workflow/milestone_completion.py's milestone_work_unit
-        # / integration_work_unit shapes (PRD-008 S4c).
+        # The PRD-008 S4c record shapes, from their one definition.
+        from kriya.workflow.milestone_completion import integration_work_unit, milestone_unit_record
+
         if unit.role is WorkUnitRole.INTEGRATION:
-            return {
-                "kind": "integration", "group_id": plan.plan_id, "milestone_id": None,
-                "definition_digest": unit.definition_digest,
-            }
-        return {
-            "kind": "milestone", "group_id": plan.plan_id, "milestone_id": unit.id,
-            "definition_digest": unit.definition_digest,
-        }
+            return integration_work_unit(plan.plan_id, unit.definition_digest)
+        return milestone_unit_record(plan.plan_id, unit.id, unit.definition_digest)
     # STRUCTURED subtasks never had a durable unit record; unchanged.
     return None
 

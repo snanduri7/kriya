@@ -29,7 +29,6 @@ from kriya.agents.contracts import AcceptanceCriterion
 from kriya.control.persistence import scan_run_records
 from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata
 from kriya.workflow.checkpoint import checkpoint_path, list_checkpoints, save_checkpoint
-from kriya.workflow.execution_plan import PlanSourceKind
 from kriya.workflow.plan_adapters import direct_execution_plan, work_unit_record
 from kriya.workflow.plan_executor import (
     CHECKPOINT_IDENTITY_MISMATCH,

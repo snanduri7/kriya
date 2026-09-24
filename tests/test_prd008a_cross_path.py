@@ -6,7 +6,6 @@ The same invariant tests run through the real direct entry point
 twice, never two implementations each tested once.
 """
 import asyncio
-import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock
 
