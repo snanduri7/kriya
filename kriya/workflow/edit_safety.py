@@ -10,7 +10,7 @@ import tempfile
 import time
 import uuid
 import xml.etree.ElementTree as ET
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from enum import Enum
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -257,10 +257,18 @@ def candidate_digest(writes: Iterable["StagedFileWrite"], workspace_root: Option
             os.path.relpath(item.target_path, workspace_root)
             if workspace_root is not None else item.target_path
         )
-        entries.append([
+        entries.append((
             relpath, "delete" if item.delete else hashlib.sha256(data).hexdigest(), item.mode,
-        ])
-    blob = json.dumps(sorted(entries), sort_keys=True)
+        ))
+    return candidate_digest_of_entries(entries)
+
+
+def candidate_digest_of_entries(
+    entries: Iterable[Tuple[str, Optional[str], Optional[int]]],
+) -> str:
+    """candidate_digest over (relpath, sha256 or "delete", mode) entries, so
+    recovery can recompute it from bytes observed on disk."""
+    blob = json.dumps(sorted([list(entry) for entry in entries]), sort_keys=True)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
@@ -355,6 +363,29 @@ def list_commit_evidence(
         except Exception as error:
             entries.append((path, None, f"{type(error).__name__}: {error}"))
     return entries
+
+
+def settle_recovered_commit_evidence(
+    workspace_path: str, expected: CommitEvidence, *, state: CommitState,
+    recovery: Dict[str, Any], result_revisions: Dict[str, str],
+) -> CommitEvidence:
+    """Record the terminal state explicit recovery proved for an interrupted
+    transaction (kriya/control/recovery.py). Refuses unless the evidence on
+    disk is still exactly ``expected`` and still IN_PROGRESS/UNCERTAIN, so a
+    settlement can never overwrite evidence that changed after it was read."""
+    if state not in (CommitState.COMMITTED, CommitState.ROLLED_BACK):
+        raise BatchCommitError(f"Recovery can only settle to committed/rolled_back, not {state.value}.")
+    current = load_commit_evidence(_evidence_path(workspace_path, expected.transaction_id))
+    if current != expected or current.state not in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN):
+        raise BatchCommitError(
+            f"Commit evidence {expected.transaction_id!r} changed since it was assessed; re-run recovery."
+        )
+    settled = replace(
+        current, state=state, updated_at_unix=time.time(),
+        result_revisions=dict(result_revisions), recovery=dict(recovery),
+    )
+    _persist_commit_evidence(workspace_path, settled)
+    return settled
 
 
 def commit_state_for_transaction(workspace_path: str, transaction_id: str) -> CommitState:

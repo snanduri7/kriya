@@ -15,7 +15,7 @@ from kriya.cli import _mark_run_in_progress, main
 TOP_LEVEL_COMMANDS = [
     "version", "config", "doctor", "repl", "plugins", "analyze",
     "generate", "plan-milestones", "review", "ask", "learn", "fix", "traces", "completion",
-    "proposal", "authority",
+    "proposal", "authority", "runs",
 ]
 SUBCOMMAND_GROUPS = {
     "prompt": ["render", "generate"],
@@ -23,6 +23,7 @@ SUBCOMMAND_GROUPS = {
     "skills": ["list", "show", "create", "approve"],
     "proposal": ["show", "approve", "reject", "execute"],
     "authority": ["inspect", "approve", "revoke"],
+    "runs": ["status", "recover", "prune"],
 }
 
 

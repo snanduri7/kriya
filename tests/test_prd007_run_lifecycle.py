@@ -83,7 +83,7 @@ def _v1_payload(**overrides):
 
 def test_v1_record_with_a_commit_migrates_to_one_explicit_cycle():
     record = RunRecord.from_dict(_v1_payload())
-    assert record.schema_version == 2
+    assert record.schema_version == 3  # v1 -> v2 -> v3 (PRD-008 S4)
     assert record.commits == [{
         "transaction_id": "tx-old", "intent": "APPLY_VERIFIED_CANDIDATE",
         "candidate_hash": None, "result": "COMMITTED",

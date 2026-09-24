@@ -150,3 +150,25 @@ def acquire_run_lock(workspace_path: str, run_id: Optional[str] = None) -> Itera
         except OSError:
             pass
         os.close(fd)
+
+
+def probe_run_lock(workspace_path: str) -> Optional[str]:
+    """Who holds the workspace lock right now, or None when nobody does.
+
+    Read-only (``kriya runs status``): never creates the lock file or its
+    directory and never writes diagnostics. A shared probe lock conflicts
+    with the exclusive lock of any live run, including one in this process,
+    and is released immediately, so the answer is a snapshot."""
+    try:
+        fd = os.open(_lock_path(workspace_path), os.O_RDONLY)
+    except FileNotFoundError:
+        return None
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except OSError:
+            return _describe_current_owner(fd)
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return None
+    finally:
+        os.close(fd)

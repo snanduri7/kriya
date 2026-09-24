@@ -11,6 +11,12 @@ make several real-workspace commits (a milestone sequence commits once per
 milestone). Each cycle is ``{transaction_id, intent, candidate_hash,
 result}``; a cycle whose ``result`` is still ``None`` is an unsettled commit
 - a crash there means the workspace state is unknown, never "not started".
+
+Schema 3 (PRD-008) adds the RECOVERED terminal lifecycle and its ``recovery``
+provenance. RECOVERED says only HOW the record ended - explicit, evidence-based
+``kriya runs recover`` - never that the run succeeded: ``commit_result`` still
+says what reached the workspace and ``terminal_status`` is NEEDS_REVIEW or
+FAILED, because the run's post-commit steps never ran.
 """
 
 from __future__ import annotations
@@ -18,9 +24,9 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-RUN_RECORD_SCHEMA_VERSION = 2
+RUN_RECORD_SCHEMA_VERSION = 3
 
 
 def _now() -> str:
@@ -38,11 +44,19 @@ class RunLifecycle(str, Enum):
     SUCCESS = "SUCCESS"
     FAILURE = "FAILURE"
     UNCERTAIN = "UNCERTAIN"
+    # Settled by `kriya runs recover` (recover()); never SUCCESS.
+    RECOVERED = "RECOVERED"
 
 
 TERMINAL_LIFECYCLES = frozenset({
-    RunLifecycle.SUCCESS, RunLifecycle.FAILURE, RunLifecycle.UNCERTAIN,
+    RunLifecycle.SUCCESS, RunLifecycle.FAILURE, RunLifecycle.UNCERTAIN, RunLifecycle.RECOVERED,
 })
+# Records recover() may settle: a run that died (non-terminal, which is only
+# provable while the caller holds the workspace lock) or one that ended with
+# its commit state unknown. SUCCESS/FAILURE are already settled.
+_RECOVERABLE_TERMINALS = frozenset({RunLifecycle.UNCERTAIN})
+TERMINAL_STATUS_NEEDS_REVIEW = "NEEDS_REVIEW"
+TERMINAL_STATUS_FAILED = "FAILED"
 
 # Settled results of one commit cycle.
 COMMIT_COMMITTED = "COMMITTED"
@@ -161,6 +175,8 @@ class RunRecord:
     # PRD-008: what this run reused from a checkpoint (ResumePlan.to_dict()),
     # when it was asked to resume. Optional, so v2 records without it load.
     resume_decision: Optional[Dict[str, Any]] = None
+    # Schema 3: provenance of an explicit `kriya runs recover` settlement.
+    recovery: Optional[Dict[str, Any]] = None
     commits: List[Dict[str, Any]] = field(default_factory=list)
     # The CURRENT commit cycle (reset by each begin_commit); run-level
     # commit_result is the summary over ``commits`` once terminal.
@@ -315,6 +331,66 @@ class RunRecord:
         next_state = RunLifecycle.COMMITTED if result == COMMIT_COMMITTED else RunLifecycle.CANDIDATE
         return self._advance(next_state, commits=commits, commit_result=result)
 
+    @property
+    def open_commit_cycles(self) -> Tuple[Dict[str, Any], ...]:
+        """Cycles whose result recovery must prove: unsettled or UNCERTAIN."""
+        return tuple(
+            cycle for cycle in self.commits
+            if cycle.get("result") is None or cycle.get("result") == COMMIT_UNCERTAIN
+        )
+
+    @property
+    def needs_recovery(self) -> bool:
+        return (not self.terminal) or self.lifecycle_state in _RECOVERABLE_TERMINALS
+
+    def recover(
+        self, cycle_results: Mapping[str, str], provenance: Mapping[str, Any],
+    ) -> "RunRecord":
+        """Settle a crashed or UNCERTAIN run from proven evidence.
+
+        ``cycle_results`` must give every open cycle (unsettled or UNCERTAIN)
+        a result the caller PROVED - COMMITTED, ROLLED_BACK or NOT_COMMITTED,
+        never UNCERTAIN - and nothing else; settled cycles never change. The
+        caller must hold the workspace lock (only then is a non-terminal
+        record provably dead). Never produces SUCCESS."""
+        if not self.needs_recovery:
+            raise IllegalRunTransitionError(
+                f"record {self.run_id!r} is {self.lifecycle_state.value}; nothing to recover"
+            )
+        open_ids = [cycle["transaction_id"] for cycle in self.open_commit_cycles]
+        if sorted(cycle_results) != sorted(open_ids):
+            raise IllegalRunTransitionError(
+                f"recovery must settle exactly the open cycles {sorted(open_ids)}, "
+                f"got {sorted(cycle_results)}"
+            )
+        proven = {COMMIT_COMMITTED, COMMIT_ROLLED_BACK, COMMIT_NOT_COMMITTED}
+        unproven = {txid: result for txid, result in cycle_results.items() if result not in proven}
+        if unproven:
+            raise IllegalRunTransitionError(f"recovery results must be proven, got {unproven}")
+        commits = [
+            {**cycle, "result": cycle_results[cycle["transaction_id"]]}
+            if cycle["transaction_id"] in cycle_results else cycle
+            for cycle in self.commits
+        ]
+        # The workspace changed (post-commit steps never ran), or the run was
+        # UNCERTAIN for a reason no commit cycle accounts for: a human looks.
+        needs_review = any(cycle.get("result") == COMMIT_COMMITTED for cycle in commits) or (
+            self.lifecycle_state == RunLifecycle.UNCERTAIN and not open_ids
+        )
+        recovery = {
+            **dict(provenance),
+            "prior_lifecycle_state": self.lifecycle_state.value,
+            "prior_commit_result": self.commit_result,
+            "prior_terminal_status": self.terminal_status,
+            "settled_cycles": dict(cycle_results),
+        }
+        return self._advance(
+            RunLifecycle.RECOVERED, commits=commits,
+            commit_result=summarize_commit_result(commits),
+            terminal_status=TERMINAL_STATUS_NEEDS_REVIEW if needs_review else TERMINAL_STATUS_FAILED,
+            recovery=recovery,
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
         payload["lifecycle_state"] = self.lifecycle_state.value
@@ -331,7 +407,10 @@ class RunRecord:
         version = data.get("schema_version")
         if version == 1:
             data = _migrate_v1(data)
-        elif version != RUN_RECORD_SCHEMA_VERSION:
+        if data.get("schema_version") == 2:
+            # v2 -> v3 only adds the optional recovery field.
+            data["schema_version"] = RUN_RECORD_SCHEMA_VERSION
+        elif data.get("schema_version") != RUN_RECORD_SCHEMA_VERSION:
             raise UnsupportedRunRecordError(f"unsupported RunRecord schema_version {version!r}")
         known = {item.name for item in fields(cls)}
         unknown = set(data) - known
@@ -366,5 +445,5 @@ def _migrate_v1(data: Dict[str, Any]) -> Dict[str, Any]:
             "result": result,
         })
     migrated["commits"] = commits
-    migrated["schema_version"] = RUN_RECORD_SCHEMA_VERSION
+    migrated["schema_version"] = 2
     return migrated
