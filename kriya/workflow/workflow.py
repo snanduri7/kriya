@@ -61,6 +61,7 @@ from kriya.workflow.resume_fingerprints import (
     restore_effective_ledger,
     workspace_fingerprint,
 )
+from kriya.workflow.plan_executor import WorkUnitInvocation
 from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.validation_baseline import (
@@ -891,7 +892,7 @@ class WorkflowEngine:
         obligation_ledger: Optional["ObligationLedger"] = None,
         completed_subtask_ids: Optional[FrozenSet[str]] = None,
         deterministic_failure_diagnostics: Optional["DeterministicFailureDiagnosticStore"] = None,
-        work_unit: Optional["WorkUnitInvocation"] = None,
+        work_unit: Optional[WorkUnitInvocation] = None,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
 
