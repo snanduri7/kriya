@@ -14,7 +14,6 @@ import asyncio
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,10 +22,11 @@ from _milestone_proof_harness import (  # shared harness, see its docstring
     CHAIN,
     CHAIN_OUTPUTS,
     GROUP,
-    TESTS_DIR,
+    MID_COMMIT_OUTPUTS,
     FakeEngine,
     _completed_chain,
     _config,
+    _crash_mid_commit,
     _decisions,
     _engine,
     _milestone,
@@ -55,7 +55,8 @@ from kriya.workflow.edit_safety import commit_evidence_dir
 from kriya.workflow.milestone_completion import (
     COMMIT_EVIDENCE_MISSING,
     COMPLETION_PROOF_MISSING,
-    COMPLETION_RECONSTRUCTION_UNVERIFIED,
+    COMPLETION_RECONSTRUCTED,
+    CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE,
     DELETED_PATH_RECREATED,
     LEGACY_STATE_UNVERIFIED,
     MILESTONE_DEFINITION_CHANGED,
@@ -155,59 +156,23 @@ def test_b_resume_inside_a_milestone_uses_the_prd008_validator(git_workspace, wo
 
 # ---------------------------------------------------------------- C: recovery across cycles
 
-# M1 commits normally; M2's two-file commit is killed with os._exit between
-# its staged-file replaces (crash_at "stage2": m2a.py applied, m2b.py not) or
-# before the first one ("stage1").
-_CRASH_SCRIPT = r'''
-import asyncio, os, sys
-sys.path.insert(0, sys.argv[3])
-from _milestone_proof_harness import CHAIN, FakeEngine, _plan
-from kriya.workflow.milestones import load_or_resume_milestone_run_state, run_milestones
-
-workspace, crash_at = sys.argv[1], sys.argv[2]
-real_replace = os.replace
-count = {"stage": 0}
-
-def crashing_replace(src, dst):
-    if os.path.basename(src).startswith(".kriya-stage-"):
-        count["stage"] += 1
-        if f"stage{count['stage']}" == crash_at:
-            os._exit(9)
-    return real_replace(src, dst)
-
-class CrashingEngine(FakeEngine):
-    async def run_generation_workflow(self, goal, workspace_path, milestone_index=None, **kwargs):
-        if milestone_index == 2:
-            os.replace = crashing_replace
-        return await super().run_generation_workflow(goal, workspace_path, milestone_index, **kwargs)
-
-engine = CrashingEngine(CHAIN, {"M1": {"m1.py": b"M1 = 1\n"}, "M2": {"m2a.py": b"A\n", "m2b.py": b"B\n"}})
-state = load_or_resume_milestone_run_state(workspace, _plan(CHAIN))
-asyncio.run(run_milestones(engine, state, workspace))
-os._exit(0)
-'''
-
-
-@pytest.mark.parametrize("crash_at,expected_status,m2_decision", [
-    # Rolled forward by --complete-partial: M2's commit is COMMITTED but was
-    # settled by recovery, not by its run - never reconstructed (S4c).
-    ("stage2", STATUS_COMPLETE_PARTIAL_REQUIRED, ("UNVERIFIED", [COMPLETION_RECONSTRUCTION_UNVERIFIED])),
+@pytest.mark.parametrize("crash_at,expected_status,m2_decision,m2_runs", [
+    # Rolled forward by --complete-partial: M2's commit is COMMITTED, and
+    # recovery's provenance proves it finished exactly the authorized
+    # candidate - M2's completion is reconstructed (origin RECOVERY, S4c
+    # final review) instead of regenerated.
+    ("stage2", STATUS_COMPLETE_PARTIAL_REQUIRED, ("MATCH", [COMPLETION_RECONSTRUCTED]), False),
     # Rolled back: nothing of M2 was committed, so there is nothing to decide.
-    ("stage1", STATUS_RECOVERY_AVAILABLE, None),
+    ("stage1", STATUS_RECOVERY_AVAILABLE, None, True),
 ])
-def test_c_recovery_across_milestone_commit_cycles(tmp_path, crash_at, expected_status, m2_decision):
+def test_c_recovery_across_milestone_commit_cycles(tmp_path, crash_at, expected_status, m2_decision, m2_runs):
     workspace = _workspace(tmp_path)
-    crashed = subprocess.run(
-        [sys.executable, "-c", _CRASH_SCRIPT, str(workspace), crash_at, TESTS_DIR],
-        env=dict(os.environ, PYTHONPATH=TESTS_DIR), capture_output=True, text=True, timeout=120,
-    )
-    assert crashed.returncode == 9, crashed.stderr
+    _crash_mid_commit(workspace, crash_at)
     m1_proof = load_milestone_run_state(str(workspace), GROUP).completion_proofs["M1"]
     assert len(m1_proof["transaction_ids"]) == 1
 
     # Normal execution is refused while M2's commit is unsettled.
-    outputs = {"M1": {"m1.py": b"M1 = 1\n"}, "M2": {"m2a.py": b"A\n", "m2b.py": b"B\n"}}
-    engine = FakeEngine(CHAIN, outputs)
+    engine = FakeEngine(CHAIN, MID_COMMIT_OUTPUTS)
     with pytest.raises(UncertainWorkspaceStateError):
         _run(workspace, CHAIN, engine)
     assert engine.calls == []
@@ -219,14 +184,14 @@ def test_c_recovery_across_milestone_commit_cycles(tmp_path, crash_at, expected_
     assert crashed_record.lifecycle_state == RunLifecycle.RECOVERED
 
     # Legal again: M1 is skipped on its proof (still bound to M1's own
-    # transaction); M2 was never completed, whatever part of it landed.
+    # transaction); M2 is either rebuilt from its recovered commit or runs.
     result, state = _run(workspace, CHAIN, engine)
     assert result["status"] == "success"
     expected = {"M1": ("MATCH", [])}
     if m2_decision is not None:
         expected["M2"] = m2_decision
     assert _decisions(result) == expected
-    assert engine.calls == ["M2", "INTEGRATION"]
+    assert engine.calls == (["M2", "INTEGRATION"] if m2_runs else ["INTEGRATION"])
     assert state.completion_proofs["M1"]["transaction_ids"] == m1_proof["transaction_ids"]
     assert (workspace / "m2a.py").read_bytes() == b"A\n" and (workspace / "m2b.py").read_bytes() == b"B\n"
 
@@ -416,7 +381,9 @@ def test_milestones_modifying_each_others_files_stay_valid_when_nothing_changed(
     # (S4c-4 - before S4c this edit went unnoticed and both were MATCH).
     (workspace / "pom.xml").write_bytes(b"edited\n")
     result, _ = _run(workspace, CHAIN, FakeEngine(CHAIN, outputs, integration))
-    assert _decisions(result) == {"M1": ("MATCH", []), "M2": ("CHANGED", [OUTPUT_CHANGED])}
+    assert _decisions(result) == {
+        "M1": ("MATCH", []), "M2": ("CHANGED", [CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE]),
+    }
 
 
 def test_a_milestone_that_committed_nothing_is_unverified(tmp_path):

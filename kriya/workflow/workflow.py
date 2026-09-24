@@ -275,11 +275,14 @@ _TEST_GATE_TYPES = frozenset({"test", "targeted_test", "regression_test"})
 def deterministic_gate_evidence(
     gate_outcomes: Optional[List[Dict[str, Any]]], attempt: Optional[int],
 ) -> List[Dict[str, Any]]:
-    """PRD-008 S4c: the latest outcome of each deterministic gate type that
-    genuinely executed IN ``attempt`` (the run's final attempt), as evidence
-    a caller can bind to (e.g. a milestone that committed nothing). A gate
-    that passed in an earlier attempt ran against a different candidate and
-    is never included; neither are model verdicts."""
+    """PRD-008 S4c: the latest outcome of each deterministic gate type IN
+    ``attempt`` (the run's final attempt), as evidence a caller can bind to
+    (e.g. a milestone that committed nothing). A gate that passed in an
+    earlier attempt ran against a different candidate and is never included;
+    neither are model verdicts. ``status`` is PASS_WITH_TESTS (a test gate
+    that ran tests), PASSED, FAILED, NO_TESTS_EXECUTED (exited 0, ran
+    nothing) or UNAVAILABLE (skipped/unconfirmed); ``passed`` is True only
+    for the first two - the only positive evidence."""
     if attempt is None:
         return []
     final = [outcome for outcome in (gate_outcomes or []) if outcome.get("attempt") == attempt]
@@ -288,14 +291,21 @@ def deterministic_gate_evidence(
         latest = next(
             (outcome for outcome in reversed(final) if outcome.get("type") == gate_type), None,
         )
+        if latest is None:
+            continue
         proven = _gate_outcome_proven(latest)
-        if (
-            proven and gate_type in _TEST_GATE_TYPES
-            and not output_confirms_nonzero_test_execution(str(latest.get("output", "")))
-        ):
-            proven = None  # "collected 0 items" passes vacuously; it proves nothing
-        if proven is not None:
-            evidence.append({"type": gate_type, "passed": proven, "attempt": latest.get("attempt")})
+        if proven is False:
+            status = "FAILED"
+        elif proven is None:
+            status = "UNAVAILABLE"
+        elif gate_type not in _TEST_GATE_TYPES:
+            status = "PASSED"
+        elif output_confirms_nonzero_test_execution(str(latest.get("output", ""))):
+            status = "PASS_WITH_TESTS"
+        else:
+            # "collected 0 items" passes vacuously; it proves nothing.
+            status, proven = "NO_TESTS_EXECUTED", None
+        evidence.append({"type": gate_type, "passed": proven, "status": status, "attempt": latest.get("attempt")})
     return evidence
 
 

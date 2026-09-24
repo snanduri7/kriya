@@ -85,15 +85,55 @@ COMPLETION_RECONSTRUCTION_UNVERIFIED = "COMPLETION_RECONSTRUCTION_UNVERIFIED"
 CHECKPOINT_IDENTITY_MISMATCH = "CHECKPOINT_IDENTITY_MISMATCH"
 NO_COMPATIBLE_MILESTONE_CHECKPOINT = "NO_COMPATIBLE_MILESTONE_CHECKPOINT"
 MILESTONE_CHECKPOINT_SELECTED = "MILESTONE_CHECKPOINT_SELECTED"
-COMMIT_SETTLED_BY_RECOVERY = "COMMIT_SETTLED_BY_RECOVERY"
+# A path's current bytes differ from the post-state of a LATER commit that
+# superseded this milestone's write (the integration pass, or a milestone
+# that did not finish): the milestone's contribution may be what was lost.
+CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE = "CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE"
+# `kriya runs recover` settled the commit, but its recorded provenance does
+# not prove it completed exactly the authorized candidate.
+RECOVERY_PROVENANCE_UNVERIFIED = "RECOVERY_PROVENANCE_UNVERIFIED"
+# The no-change verification rests on toolchain-dependent evidence and the
+# toolchain identity (PRD-011) is unavailable on either side.
+TOOLCHAIN_IDENTITY_UNAVAILABLE = "TOOLCHAIN_IDENTITY_UNAVAILABLE"
+# Why a milestone that committed nothing got no VERIFIED_NO_CHANGE proof.
+QUALITY_GATES_NOT_PASSED = "QUALITY_GATES_NOT_PASSED"
+ACCEPTANCE_COVERAGE_UNAVAILABLE = "ACCEPTANCE_COVERAGE_UNAVAILABLE"
+ACCEPTANCE_COVERAGE_INCOMPLETE = "ACCEPTANCE_COVERAGE_INCOMPLETE"
+WORKSPACE_IDENTITY_UNAVAILABLE = "WORKSPACE_IDENTITY_UNAVAILABLE"
+VERIFICATION_POLICY_UNAVAILABLE = "VERIFICATION_POLICY_UNAVAILABLE"
 
 # Completion kinds. A VERIFIED_NO_CHANGE completion committed nothing and is
-# proven only by deterministic gates that actually ran and passed.
+# proven only by deterministic evidence covering every acceptance criterion.
 COMMITTED_CHANGE = "COMMITTED_CHANGE"
 VERIFIED_NO_CHANGE = "VERIFIED_NO_CHANGE"
-# Gates whose pass says something about behaviour. Compile alone never
-# proves a milestone needed no change.
-BEHAVIOURAL_GATES = frozenset({"test", "targeted_test", "regression_test", "run_verification"})
+
+# Where a completion proof came from. RECOVERY: rebuilt from a commit that
+# `kriya runs recover --complete-partial` finished; the recovered run's own
+# terminal status is never changed by it.
+ORIGIN_RUN = "RUN"
+ORIGIN_RECONSTRUCTED = "RECONSTRUCTED"
+ORIGIN_RECOVERY = "RECOVERY"
+
+# Verification statuses (the workflow's deterministic_gate_evidence uses the
+# same words). Only PASS_WITH_TESTS / PASSED are positive evidence; a test
+# command that exited 0 after running zero tests is NO_TESTS_EXECUTED.
+PASS_WITH_TESTS = "PASS_WITH_TESTS"
+PASSED = "PASSED"
+NO_TESTS_EXECUTED = "NO_TESTS_EXECUTED"
+FAILED = "FAILED"
+UNAVAILABLE = "UNAVAILABLE"
+UNCOVERED = "UNCOVERED"
+_TEST_EVIDENCE_KINDS = frozenset({"test", "targeted_test", "regression_test"})
+# Evidence a criterion may be covered by, each tied to a gate family that
+# must itself have executed and passed in the final attempt. All of them
+# depend on the toolchain that ran them.
+_COVERAGE_GATE_FAMILY = {
+    "compile": frozenset({"compile"}),
+    "test": _TEST_EVIDENCE_KINDS,
+    "targeted_test": _TEST_EVIDENCE_KINDS,
+    "regression_test": _TEST_EVIDENCE_KINDS,
+    "run_verification": frozenset({"run_verification"}),
+}
 
 LOOP_PASSED = "passed"
 LOOP_FAILED = "failed"
@@ -146,7 +186,7 @@ class MilestoneCommitEntry:
     # Set when the evidence could not be read at record time; the entry can
     # then never verify.
     evidence_error: Optional[str] = None
-    # S4c: workspace content (git index hash, .kriya excluded) right after
+    # S4c: workspace evidence identity (workspace_evidence_hash) right after
     # this unit's commits - a VERIFIED_NO_CHANGE proof's lineage anchor.
     workspace_content_hash_after: Optional[str] = None
     # S4c: how the milestone loop that made the commit ended: "passed",
@@ -226,6 +266,10 @@ class MilestoneCompletionProof:
     verification: Optional[Dict[str, Any]] = None
     # Set when the proof was rebuilt from durable evidence after a crash.
     reconstructed_from: Optional[Dict[str, Any]] = None
+    # ORIGIN_RUN / ORIGIN_RECONSTRUCTED / ORIGIN_RECOVERY.
+    completion_origin: str = ORIGIN_RUN
+    # A milestone that committed nothing and got no VERIFIED_NO_CHANGE: why.
+    no_change_refusal: Optional[Dict[str, Any]] = None
     schema_version: int = MILESTONE_COMPLETION_SCHEMA_VERSION
 
     def to_dict(self) -> Dict[str, Any]:
@@ -235,6 +279,7 @@ class MilestoneCompletionProof:
             "completed_at": self.completed_at, "definition_digest": self.definition_digest,
             "kind": self.kind, "verification": self.verification,
             "reconstructed_from": self.reconstructed_from,
+            "completion_origin": self.completion_origin, "no_change_refusal": self.no_change_refusal,
         }
 
     @classmethod
@@ -252,6 +297,8 @@ class MilestoneCompletionProof:
             kind=str(data.get("kind", COMMITTED_CHANGE)),
             verification=data.get("verification"),
             reconstructed_from=data.get("reconstructed_from"),
+            completion_origin=str(data.get("completion_origin") or ORIGIN_RUN),
+            no_change_refusal=data.get("no_change_refusal"),
         )
 
 
@@ -283,15 +330,54 @@ def _operations_from_evidence(evidence: Any) -> Tuple[CommittedOperation, ...]:
     return tuple(operations)
 
 
-def workspace_content_hash(workspace_path: str) -> Optional[str]:
-    """Exact workspace content (git index hash of every non-ignored file,
-    .kriya excluded), independent of HEAD; None outside git."""
-    from kriya.workflow.checkpoint import compute_workspace_content_hash
+def workspace_evidence_hash(workspace_path: str) -> Optional[str]:
+    """The workspace a VERIFIED_NO_CHANGE proof is bound to: a git tree hash
+    (scratch index, like STATE-001's compute_workspace_content_hash, which
+    stays unchanged for checkpoints) of
 
+      * every TRACKED file, wherever it lives;
+      * every untracked file .gitignore does not exclude, except under a
+        directory the repository analyzer already treats as generated output
+        (GENERATED_OUTPUT_DIRS: __pycache__, target, build, .venv, ...).
+
+    So a __pycache__ written by a test run never invalidates the proof, and
+    a new untracked source/config file always does. Files a milestone
+    committed are checked byte-exactly on their own (see _assess_no_change),
+    whatever directory they are in. .kriya is excluded. None outside git."""
+    import subprocess
+    import tempfile
+    import uuid
+
+    from kriya.analyzer.analyzer import GENERATED_OUTPUT_DIRS
+    from kriya.workflow.checkpoint import compute_base_commit
+
+    index = os.path.join(tempfile.gettempdir(), f".kriya-evidence-index-{uuid.uuid4().hex}")
+    env = {**os.environ, "GIT_INDEX_FILE": index}
+    generated = [f":(exclude,glob)**/{name}/**" for name in sorted(GENERATED_OUTPUT_DIRS)]
+    steps = (
+        ["git", "read-tree", "HEAD"],
+        ["git", "add", "-A", "--", ".", ":!.kriya", *generated],
+        ["git", "add", "-u", "--", ".", ":!.kriya"],
+        ["git", "write-tree"],
+    )
     try:
-        return compute_workspace_content_hash(workspace_path)
+        output = ""
+        for step in steps:
+            done = subprocess.run(step, cwd=workspace_path, env=env, capture_output=True, text=True)
+            if done.returncode != 0:
+                return None
+            output = done.stdout.strip()
+        base = compute_base_commit(workspace_path)
+        if base is None or not output:
+            return None
+        return hashlib.sha256(f"{base}\x00{output}".encode("utf-8")).hexdigest()
     except Exception:
         return None
+    finally:
+        try:
+            os.remove(index)
+        except OSError:
+            pass
 
 
 def entries_from_cycles(
@@ -339,7 +425,7 @@ def record_milestone_commits(
         return []
     return entries_from_cycles(
         workspace_path, milestone_id, run_id, new_cycles,
-        loop_outcome=loop_outcome, content_hash=workspace_content_hash(workspace_path),
+        loop_outcome=loop_outcome, content_hash=workspace_evidence_hash(workspace_path),
     )
 
 
@@ -347,6 +433,8 @@ def completion_proof_for(
     milestone: Any, entries: Sequence[MilestoneCommitEntry], run_id: Optional[str],
     *, verification: Optional[Dict[str, Any]] = None,
     reconstructed_from: Optional[Dict[str, Any]] = None,
+    completion_origin: str = ORIGIN_RUN,
+    no_change_refusal: Optional[Dict[str, Any]] = None,
 ) -> MilestoneCompletionProof:
     """A COMMITTED_CHANGE proof, or - with no commits and deterministic
     ``verification`` (see no_change_verification) - a VERIFIED_NO_CHANGE one."""
@@ -360,6 +448,8 @@ def completion_proof_for(
         kind=VERIFIED_NO_CHANGE if no_change else COMMITTED_CHANGE,
         verification=verification if no_change else None,
         reconstructed_from=reconstructed_from,
+        completion_origin=completion_origin,
+        no_change_refusal=no_change_refusal if not entries and not no_change else None,
     )
 
 
@@ -388,41 +478,131 @@ def upstream_proof_identity(milestone: Any, proofs: Mapping[str, Any]) -> str:
     return hashlib.sha256(json.dumps(upstream, sort_keys=True).encode()).hexdigest()
 
 
+def current_toolchain_identity() -> Dict[str, Any]:
+    """PRD-008's toolchain fingerprint - the one source direct resume uses.
+    UNAVAILABLE until PRD-011 binds a canonical toolchain identity; never a
+    second, milestone-only approximation."""
+    from kriya.workflow import resume_fingerprints
+
+    return resume_fingerprints.toolchain_fingerprint().to_dict()
+
+
+def _toolchain_value(identity: Any) -> Optional[str]:
+    value = identity.get("value") if isinstance(identity, dict) else None
+    return None if value in (None, UNAVAILABLE) else str(value)
+
+
+def acceptance_coverage(milestone: Any, result: Mapping[str, Any]) -> Tuple[List[Dict[str, Any]], Dict[str, str]]:
+    """Which of the milestone's acceptance criteria deterministic evidence
+    covers: (the positive evidence items, {criterion_id: status}).
+
+    The coverage map is the workflow result's ``acceptance_coverage``: one
+    item per (criterion, evidence) pair a deterministic verifier produced -
+    ``{"criterion_id", "kind", "selector", "attempt", "status",
+    "tests_executed"}``. Kriya checks each item; it never infers coverage:
+
+      * ``kind`` is compile / test / targeted_test / regression_test /
+        run_verification, and a gate of that family must itself have executed
+        and passed in the run's final attempt (deterministic_gate_evidence);
+      * ``attempt`` is that final attempt;
+      * a test item counts only as PASS_WITH_TESTS with tests_executed > 0 -
+        a command that exited 0 after running no test is NO_TESTS_EXECUTED;
+      * an item naming a criterion the milestone does not have covers nothing.
+
+    No production verifier emits this map yet: milestone acceptance
+    criteria are free text, so today every criterion is UNCOVERED."""
+    criteria = [criterion.id for criterion in (getattr(milestone, "acceptance", None) or [])]
+    gates = [item for item in (result.get("deterministic_gate_evidence") or []) if isinstance(item, dict)]
+    final_attempt = max((item.get("attempt") for item in gates if isinstance(item.get("attempt"), int)), default=None)
+    passing = {item.get("type") for item in gates if item.get("passed") is True and item.get("attempt") == final_attempt}
+    statuses = {criterion: UNCOVERED for criterion in criteria}
+    rank = {UNCOVERED: 0, UNAVAILABLE: 1, NO_TESTS_EXECUTED: 2, FAILED: 3}
+    covered: List[Dict[str, Any]] = []
+    for item in result.get("acceptance_coverage") or []:
+        if not isinstance(item, dict) or item.get("criterion_id") not in statuses:
+            continue
+        criterion, kind, status = item["criterion_id"], item.get("kind"), item.get("status")
+        family = _COVERAGE_GATE_FAMILY.get(kind)
+        if status == FAILED:
+            outcome = FAILED
+        elif kind in _TEST_EVIDENCE_KINDS and (
+            status == NO_TESTS_EXECUTED or not isinstance(item.get("tests_executed"), int)
+            or item["tests_executed"] <= 0
+        ):
+            outcome = NO_TESTS_EXECUTED
+        elif (
+            family is None or not item.get("selector") or final_attempt is None
+            or item.get("attempt") != final_attempt or not (family & passing)
+            or status != (PASS_WITH_TESTS if kind in _TEST_EVIDENCE_KINDS else PASSED)
+        ):
+            outcome = UNAVAILABLE
+        else:
+            outcome = status
+        if outcome in (PASS_WITH_TESTS, PASSED):
+            covered.append({key: item.get(key) for key in (
+                "criterion_id", "kind", "selector", "attempt", "status", "tests_executed",
+            )})
+            statuses[criterion] = outcome
+        elif statuses[criterion] not in (PASS_WITH_TESTS, PASSED) and rank[outcome] > rank[statuses[criterion]]:
+            statuses[criterion] = outcome
+    return covered, statuses
+
+
 def no_change_verification(
     workspace_path: str, milestone: Any, result: Mapping[str, Any], *,
     run_id: Optional[str], config: Any, proofs: Mapping[str, Any], ledger_length: int,
-) -> Optional[Dict[str, Any]]:
-    """The deterministic binding for a milestone that committed nothing, or
-    None when it cannot be proven. Model output (an empty diff, "no change
-    needed", a review verdict) is never evidence: only behavioural quality
-    gates that actually executed and passed (the workflow's
-    deterministic_gate_evidence, which excludes skipped/unconfirmed gates)."""
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """(binding, None) for a milestone that committed nothing and whose
+    every acceptance criterion deterministic evidence covers (see
+    acceptance_coverage), else (None, the typed refusal). Model output (an
+    empty diff, "no change needed", a review verdict) is never evidence, and
+    neither is a generic passing test that no criterion maps to."""
     if not result.get("quality_gates_passed"):
-        return None
-    gates = [
-        item for item in (result.get("deterministic_gate_evidence") or [])
-        if isinstance(item, dict) and item.get("passed") is True
-    ]
-    if not any(item.get("type") in BEHAVIOURAL_GATES for item in gates):
-        return None
+        return None, _reason(QUALITY_GATES_NOT_PASSED, "the milestone's quality gates did not pass")
+    covered, statuses = acceptance_coverage(milestone, result)
+    if not statuses:
+        return None, _reason(
+            ACCEPTANCE_COVERAGE_UNAVAILABLE,
+            "the milestone has no structured acceptance criteria; its free-text goal has no deterministic check",
+        )
+    if any(status not in (PASS_WITH_TESTS, PASSED) for status in statuses.values()):
+        return None, _reason(
+            ACCEPTANCE_COVERAGE_INCOMPLETE,
+            "not every acceptance criterion is covered by deterministic evidence",
+            criteria=dict(statuses),
+        )
     policy = verification_policy_fingerprint(config)
-    content = workspace_content_hash(workspace_path)
-    if policy is None or content is None:
-        return None
+    if policy is None:
+        return None, _reason(VERIFICATION_POLICY_UNAVAILABLE, "the verification policy fingerprint is unavailable")
+    content = workspace_evidence_hash(workspace_path)
+    if content is None:
+        return None, _reason(WORKSPACE_IDENTITY_UNAVAILABLE, "workspace identity is unavailable (not a git workspace?)")
     return {
-        "gate_evidence": gates,
+        "acceptance_coverage": covered,
+        "gate_evidence": [
+            item for item in (result.get("deterministic_gate_evidence") or [])
+            if isinstance(item, dict) and item.get("passed") is True
+        ],
         "verification_evidence_ids": [
-            f"run:{run_id}:attempt:{item.get('attempt')}:gate:{item.get('type')}" for item in gates
+            f"run:{run_id}:attempt:{item['attempt']}:criterion:{item['criterion_id']}"
+            f":{item['kind']}:{item['selector']}"
+            for item in covered
         ],
         "verification_policy": policy,
         "upstream": upstream_proof_identity(milestone, proofs),
         "workspace_content_hash": content,
         "ledger_position": ledger_length,
         "zero_mutations": True,
+        # Every coverage kind is test/build/runtime evidence: it depends on
+        # the toolchain that produced it.
+        "toolchain": current_toolchain_identity(),
+        # Deterministic repository verification only - no model-produced
+        # evidence authorizes this result.
+        "model_runtime": FingerprintStatus.NOT_APPLICABLE.value,
         # The milestone driver passes no obligation ledger to its workflow
         # calls, so there is none to bind.
         "obligations": FingerprintStatus.NOT_APPLICABLE.value,
-    }
+    }, None
 
 
 # ---------------------------------------------------------------- assessment
@@ -710,9 +890,12 @@ def assess_completed_milestone_reuse(
         if charged.status is FingerprintStatus.MATCH:
             charged.status = FingerprintStatus.CHANGED
         charged.reasons.append(dict(
-            mismatch, transaction_id=writers[-1].transaction_id,
-            superseded_by=latest.transaction_id,
-            detail=f"{mismatch['detail']} (last written by a later commit, {latest.transaction_id})",
+            mismatch, code=CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE, divergence=mismatch["code"],
+            transaction_id=writers[-1].transaction_id, superseded_by=latest.transaction_id,
+            detail=(
+                f"{mismatch['detail']}: the current bytes are not what the committed lineage"
+                f" (last written by {latest.transaction_id}) predicts"
+            ),
         ))
 
     # Everything that will run this time: completed milestones that failed
@@ -771,7 +954,7 @@ class _AssessmentContext:
 
     def content_hash(self) -> Optional[str]:
         if self._content_hash is None:
-            self._content_hash = (workspace_content_hash(self.workspace),)
+            self._content_hash = (workspace_evidence_hash(self.workspace),)
         return self._content_hash[0]
 
 
@@ -811,7 +994,8 @@ def _assess_one(context: _AssessmentContext, milestone: Any, raw_proof: Any) -> 
     if not proof.transaction_ids:
         decision.reasons.append(_reason(
             NO_COMMITTED_OUTPUT,
-            "the milestone committed nothing and no deterministic gate proved no change was needed",
+            "the milestone committed nothing and no deterministic evidence proved no change was needed",
+            cause=proof.no_change_refusal,
         ))
         return decision
     own_entries = []
@@ -869,13 +1053,19 @@ def _assess_no_change(
 ) -> MilestoneReuseDecision:
     """A VERIFIED_NO_CHANGE completion stays valid only while everything its
     deterministic verification depended on is unchanged: the verification
-    policy, the completions it was verified on top of, and the workspace -
-    exactly as its recorded content plus every later VERIFIED ledger commit
-    explains it."""
+    policy, the completions it was verified on top of, the workspace -
+    exactly as its recorded identity plus every later VERIFIED ledger commit
+    explains it, and every committed path byte-exact - and the toolchain
+    that ran the evidence (UNVERIFIED while that identity is unavailable)."""
     binding = proof.verification or {}
     invalid = []
-    if not binding.get("gate_evidence") or binding.get("zero_mutations") is not True:
-        decision.reasons.append(_reason(COMPLETION_PROOF_MISSING, "no-change proof has no gate evidence"))
+    if (
+        not binding.get("acceptance_coverage") or not binding.get("verification_evidence_ids")
+        or binding.get("zero_mutations") is not True
+    ):
+        decision.reasons.append(_reason(
+            COMPLETION_PROOF_MISSING, "no-change proof has no deterministic acceptance coverage",
+        ))
         return decision
     if binding.get("verification_policy") != context.verification_policy or context.verification_policy is None:
         invalid.append("verification policy changed")
@@ -902,11 +1092,31 @@ def _assess_no_change(
         return decision
     if current != expected:
         invalid.append("workspace content differs from what the verified commit history explains")
+    # Files the history committed are compared byte-exactly too, whichever
+    # directory they live in (the identity above skips generated output).
+    diverged = sorted(
+        path for path, (_, operation) in context.owner.items()
+        if _output_mismatch(context.workspace, operation) is not None
+    )
+    if diverged:
+        invalid.append(f"committed files differ from their committed bytes: {diverged}")
     if invalid:
         decision.status = FingerprintStatus.CHANGED
         decision.reasons.append(_reason(VERIFIED_NO_CHANGE_INVALIDATED, "; ".join(invalid)))
-    else:
-        decision.status = FingerprintStatus.MATCH
+        return decision
+    recorded, now = _toolchain_value(binding.get("toolchain")), _toolchain_value(current_toolchain_identity())
+    if recorded is None or now is None:
+        decision.reasons.append(_reason(
+            TOOLCHAIN_IDENTITY_UNAVAILABLE,
+            "the no-change evidence depends on the toolchain that ran it, and the toolchain identity is"
+            " unavailable (PRD-011)",
+        ))
+        return decision
+    if recorded != now:
+        decision.status = FingerprintStatus.CHANGED
+        decision.reasons.append(_reason(VERIFIED_NO_CHANGE_INVALIDATED, "toolchain changed"))
+        return decision
+    decision.status = FingerprintStatus.MATCH
     return decision
 
 
@@ -926,6 +1136,8 @@ class ReconstructionCandidate:
     # entries are then real history for the ledger even if the completion
     # itself is refused (e.g. its output was edited after the crash).
     entries_verified: bool = False
+    # ORIGIN_RECOVERY when `kriya runs recover` completed one of the commits.
+    origin: str = ORIGIN_RECONSTRUCTED
 
     def event(self) -> Dict[str, Any]:
         return {
@@ -933,8 +1145,37 @@ class ReconstructionCandidate:
             "code": COMPLETION_RECONSTRUCTION_UNVERIFIED if self.failure else COMPLETION_RECONSTRUCTED,
             "run_id": self.run_id,
             "transaction_ids": [entry.transaction_id for entry in self.entries],
+            "completion_origin": self.origin,
             "reason": self.failure,
         }
+
+
+def _recovery_provenance_problem(recovery: Any) -> Optional[str]:
+    """None when `kriya runs recover` recorded that it settled an interrupted
+    commit (durable intent, IN_PROGRESS/UNCERTAIN) to COMMITTED by applying
+    or rolling forward every operation - no foreign or ambiguous path."""
+    from kriya.control.recovery import OP_APPLIED, OP_NOT_APPLIED, RECOVERY_TOOL
+
+    if not isinstance(recovery, dict):
+        return "recovery provenance is malformed"
+    if recovery.get("tool") != RECOVERY_TOOL:
+        return f"settled by {recovery.get('tool')!r}, not {RECOVERY_TOOL!r}"
+    if recovery.get("prior_state") not in (CommitState.IN_PROGRESS.value, CommitState.UNCERTAIN.value):
+        return f"the commit was {recovery.get('prior_state')!r} before recovery, not an interrupted commit"
+    if recovery.get("outcome") not in ("COMMITTED", "ROLLED_FORWARD"):
+        return f"recovery outcome {recovery.get('outcome')!r} is not a completed commit"
+    operations = recovery.get("operations")
+    rolled = set(recovery.get("rolled_forward") or [])
+    if not isinstance(operations, list) or not operations:
+        return "recovery recorded no operations"
+    for operation in operations:
+        classification = operation.get("classification") if isinstance(operation, dict) else None
+        applied = classification == OP_APPLIED or (
+            classification == OP_NOT_APPLIED and operation.get("target_path") in rolled
+        )
+        if not applied:
+            return f"{operation!r} was neither applied nor rolled forward by recovery"
+    return None
 
 
 def find_completion_to_reconstruct(
@@ -974,7 +1215,7 @@ def find_completion_to_reconstruct(
     new_cycles = [cycle for _, cycle in cycles if cycle.get("transaction_id") not in by_txid]
     new_entries = entries_from_cycles(
         workspace, milestone.id, newest.run_id, new_cycles,
-        loop_outcome=LOOP_PASSED, content_hash=workspace_content_hash(workspace),
+        loop_outcome=LOOP_PASSED, content_hash=workspace_evidence_hash(workspace),
     )
     ordered = sorted(
         existing + new_entries,
@@ -1012,20 +1253,29 @@ def find_completion_to_reconstruct(
             candidate.failure = failure
             return candidate
     candidate.entries_verified = True
-    # A commit the interrupted process never saw finish - settled afterwards
-    # by `kriya runs recover` - is history, not a completion: the milestone
-    # reruns (conservative; the workflow never returned from that commit).
+    # A commit the interrupted process never saw finish, completed by
+    # `kriya runs recover --complete-partial`, is a completion only when its
+    # recorded provenance proves recovery finished exactly the authorized
+    # candidate (the candidate hash and every post-state were verified
+    # above). The candidate had passed its gates: the one commit seam starts
+    # a commit (COMMIT_ELIGIBLE) only for a verified candidate.
     for entry in ordered:
         path = _evidence_file(workspace, entry.transaction_id)
         try:
-            recovered = path is not None and load_commit_evidence(path).recovery is not None
-        except Exception:
-            recovered = True
-        if recovered:
-            candidate.failure = _reason(
-                COMMIT_SETTLED_BY_RECOVERY, "the commit was settled by `kriya runs recover`, not by its run",
+            recovery = load_commit_evidence(path).recovery if path is not None else None
+        except Exception as error:
+            recovery, candidate.failure = None, _reason(
+                RECOVERY_PROVENANCE_UNVERIFIED, f"commit evidence unreadable: {error}",
                 transaction_id=entry.transaction_id,
             )
+        if candidate.failure is None and recovery is not None:
+            problem = _recovery_provenance_problem(recovery)
+            if problem is not None:
+                candidate.failure = _reason(
+                    RECOVERY_PROVENANCE_UNVERIFIED, problem, transaction_id=entry.transaction_id,
+                )
+            candidate.origin = ORIGIN_RECOVERY
+        if candidate.failure is not None:
             return candidate
     final: Dict[str, CommittedOperation] = {}
     for entry in ordered:

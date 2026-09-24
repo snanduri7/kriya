@@ -63,6 +63,7 @@ from kriya.workflow.milestone_completion import (
     LOOP_PASSED,
     MILESTONE_COMPLETION_SCHEMA_VERSION,
     MILESTONE_SIDECAR_RELATIVE_DIR,
+    ORIGIN_RUN,
     MilestoneReuseAssessment,
     MilestoneReuseDecision,
     assess_completed_milestone_reuse,
@@ -556,7 +557,9 @@ def _reconstruct_completions(
                 reconstructed_from={
                     "run_id": candidate.run_id,
                     "transaction_ids": [entry.transaction_id for entry in candidate.entries],
+                    "completion_origin": candidate.origin,
                 },
+                completion_origin=candidate.origin,
             )
             if error is not None:
                 candidate.failure = {"code": COMPLETION_RECONSTRUCTION_UNVERIFIED, "detail": error}
@@ -591,6 +594,7 @@ def _complete_milestone(
     result: Optional[Dict[str, Any]] = None,
     config: Any = None,
     reconstructed_from: Optional[Dict[str, Any]] = None,
+    completion_origin: str = ORIGIN_RUN,
 ) -> Optional[str]:
     """The deterministic post-success steps, shared by a normal completion
     and a reconstructed one: refresh established dependencies and file
@@ -631,16 +635,18 @@ def _complete_milestone(
 
     owned = owning_run_commits(workspace_path)
     run_id = entries[0].run_id if entries else (owned[0] if owned is not None else None)
-    verification = None
+    verification = refusal = None
     if not entries and result is not None:
-        # S4c-1: a milestone that committed nothing is reusable only on
-        # deterministic gate evidence, never on a model's "no change".
-        verification = no_change_verification(
+        # S4c-1: a milestone that committed nothing is reusable only when
+        # deterministic evidence covers every acceptance criterion, never
+        # on a model's "no change" or a generic passing test.
+        verification, refusal = no_change_verification(
             workspace_path, milestone, result, run_id=run_id, config=config,
             proofs=run_state.completion_proofs, ledger_length=len(run_state.commit_ledger),
         )
     run_state.completion_proofs[milestone.id] = completion_proof_for(
         milestone, entries, run_id, verification=verification, reconstructed_from=reconstructed_from,
+        completion_origin=completion_origin, no_change_refusal=refusal,
     ).to_dict()
     run_state.completed_milestone_ids.append(milestone.id)
     if milestone.id in run_state.stale_milestone_ids:

@@ -337,13 +337,16 @@ A final **integration pass** then runs once more against the whole assembled pro
   - every file it last wrote still has exactly the committed bytes and file mode;
   - its definition in the plan file is unchanged.
 - **A milestone that changed nothing** is skipped only when all of these hold:
-  - tests or runtime verification actually ran and passed for it; a model saying "no change needed" never counts;
+  - every one of its structured acceptance criteria is covered by deterministic evidence that ran and passed in its final attempt: a specific test, compile check or runtime verification mapped to that criterion. A model saying "no change needed" never counts, nor does an unrelated passing test, nor a test command that ran zero tests;
   - the verification settings are unchanged;
-  - the workspace is exactly what the milestones completed since then explain.
+  - the toolchain that produced that evidence is known and unchanged;
+  - the workspace is exactly what the milestones completed since then explain. Untracked files under generated-output directories the repository model already ignores (`__pycache__`, `target`, `build`, `dist`, `node_modules`, `.venv`, ...) do not count; any other new or changed file, tracked or not, does.
 
-Anything else reruns that milestone and everything that depends on it. An unrelated milestone that wrote the same files also reruns. Other milestones stay skipped.
+  In practice this path is not reachable yet. Milestone acceptance criteria are free text, and nothing maps them to specific checks. The toolchain identity is also unavailable until PRD-011. So a milestone that changed nothing reruns. A milestone that rewrites its file with identical bytes is an ordinary change and is skipped as described above.
 
-**If a run crashed between a milestone's commit and saving its progress,** the rerun rebuilds that milestone's completion from the run record and commit evidence instead of redoing it, provided the evidence proves the exact committed output. If it doesn't, the milestone reruns. The reason for every skip, rerun and rebuild is recorded under `milestone_reuse` in the command's JSON result, in the run record and in the sidecar.
+Anything else reruns that milestone and everything that depends on it. An unrelated milestone that wrote the same files also reruns. Other milestones stay skipped. A file that several milestones and the integration pass wrote is checked against its last committed state. If it differs, the last completed milestone that wrote it reruns, with the reason `CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE`.
+
+**If a run crashed between a milestone's commit and saving its progress,** the rerun rebuilds that milestone's completion from the run record and commit evidence instead of redoing it, provided the evidence proves the exact committed output. If it doesn't, the milestone reruns. This also applies when the crash was inside the commit and `kriya runs recover --complete-partial` finished it. The recovery record must show that recovery completed exactly the interrupted, authorized commit: every file was applied or rolled forward, and none was foreign or ambiguous. The rebuilt completion is marked `completion_origin: RECOVERY`. The recovered run keeps its own status (RECOVERED, with NEEDS_REVIEW or FAILURE); it never becomes a success. The reason for every skip, rerun and rebuild is recorded under `milestone_reuse` in the command's JSON result, in the run record and in the sidecar.
 
 **A rerun never restores earlier output.** A milestone that reruns because you edited, deleted or reset its files works on the files as they are now. Your edits are treated as intentional and are never rolled back. Kriya only decides whether earlier work may be reused; it is not an undo system.
 

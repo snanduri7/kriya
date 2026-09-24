@@ -303,12 +303,18 @@ def parse_gitignore(root_path: str) -> List[str]:
             logger.debug(f"Failed to read '.gitignore' at '{gitignore_path}': {e}")
     return patterns
 
+# Directory names the repository model treats as generated output / tooling
+# state, never source (PRD-008 S4c's milestone workspace evidence reuses it).
+GENERATED_OUTPUT_DIRS = frozenset({
+    "target", "build", "node_modules", "dist", ".git", ".venv", "venv", "__pycache__", "obj", "bin",
+})
+
+
 def is_ignored(filepath: str, root_path: str, gitignore_patterns: List[str]) -> bool:
     rel_path = os.path.relpath(filepath, root_path)
     parts = rel_path.split(os.sep)
-    system_ignores = {"target", "build", "node_modules", "dist", ".git", ".venv", "venv", "__pycache__", "obj", "bin"}
     for p in parts:
-        if p in system_ignores or p.startswith("."):
+        if p in GENERATED_OUTPUT_DIRS or p.startswith("."):
             return True
     for pat in gitignore_patterns:
         if pat.endswith("/"):

@@ -604,7 +604,7 @@ def compute_resume_fingerprints(
         "skills": skills_fingerprint(skill_source_dirs),
         "model_runtime": Fingerprint.unavailable("model runtime identity is not bound until PRD-013"),
         "containment": Fingerprint(_digest(owned["containment"]), "containment-config"),
-        "toolchain": Fingerprint.unavailable("toolchain identity is not bound until PRD-011"),
+        "toolchain": toolchain_fingerprint(),
         "verification_policy": Fingerprint(
             _digest({"config": owned["verification_policy"], "run": dict(verification_inputs)}),
             "verification-policy",
@@ -612,6 +612,12 @@ def compute_resume_fingerprints(
         "authority_context": authority_context_fingerprint(**authority_inputs),
         "kriya_runtime": kriya_runtime_fingerprint(),
     }
+
+
+def toolchain_fingerprint() -> Fingerprint:
+    """The toolchain identity every reuse decision compares (direct resume
+    and milestone VERIFIED_NO_CHANGE alike). UNAVAILABLE until PRD-011."""
+    return Fingerprint.unavailable("toolchain identity is not bound until PRD-011")
 
 
 def generation_resume_fingerprints(
@@ -710,5 +716,5 @@ __all__ = [
     "authority_context_fingerprint", "compare_resume_fingerprints", "compute_resume_fingerprints",
     "fingerprint_block", "generation_resume_fingerprints", "invalidated_stages_for", "kriya_runtime_fingerprint", "ledger_fingerprint",
     "parse_fingerprint_block", "reused_artifacts_for_checkpoint", "skills_fingerprint",
-    "split_config_by_owner", "workspace_fingerprint",
+    "split_config_by_owner", "toolchain_fingerprint", "workspace_fingerprint",
 ]

@@ -431,3 +431,11 @@ Status: READY_FOR_PYTEST_VERIFICATION (committed locally; S5 blocked until verif
 5029/0). S4c adds: durable work-unit identity on RunRecord cycles and checkpoints; VERIFIED_NO_CHANGE on
 deterministic gate evidence only; completion reconstruction after a commit/state-save crash; identity-aware
 milestone checkpoint selection; proven shared-write lineage. Details: `handover/PRD-008_S4C_CODING_HANDOVER.md`.
+
+Final S4c review closure (one more local commit, still READY_FOR_PYTEST_VERIFICATION):
+- VERIFIED_NO_CHANGE now requires deterministic evidence mapped to every structured acceptance criterion. Zero executed tests are never positive evidence.
+- The proof is bound to PRD-008's toolchain fingerprint; it is UNVERIFIED while that identity is UNAVAILABLE (PRD-011). `model_runtime` is NOT_APPLICABLE.
+- The workspace evidence excludes the analyzer's generated-output directories for untracked files only.
+- Recovery-completed commits are reconstructed on proven recovery provenance, with `completion_origin: RECOVERY`. The recovered run stays RECOVERED.
+- Lineage divergence has the typed reason `CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE`.
+- The `[]` full-file defect is recorded separately in `handover/DEFECT_DEVELOPER_EMPTY_ARRAY_WRITTEN_AS_FILE.md`.

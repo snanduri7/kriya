@@ -9,6 +9,7 @@ default import mode), like _plugin_test_support.
 import asyncio
 import os
 import subprocess
+import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -155,3 +156,46 @@ def _engine(cfg, responses):
     engine = WorkflowEngine(Kernel(config=cfg), llm)
     engine.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
     return engine, llm
+
+
+# M1 commits normally; M2's two-file commit is killed with os._exit between
+# its staged-file replaces (crash_at "stage2": m2a.py applied, m2b.py not) or
+# before the first one ("stage1").
+CRASH_MID_COMMIT_SCRIPT = r'''
+import asyncio, os, sys
+sys.path.insert(0, sys.argv[3])
+from _milestone_proof_harness import CHAIN, FakeEngine, _plan
+from kriya.workflow.milestones import load_or_resume_milestone_run_state, run_milestones
+
+workspace, crash_at = sys.argv[1], sys.argv[2]
+real_replace = os.replace
+count = {"stage": 0}
+
+def crashing_replace(src, dst):
+    if os.path.basename(src).startswith(".kriya-stage-"):
+        count["stage"] += 1
+        if f"stage{count['stage']}" == crash_at:
+            os._exit(9)
+    return real_replace(src, dst)
+
+class CrashingEngine(FakeEngine):
+    async def run_generation_workflow(self, goal, workspace_path, milestone_index=None, **kwargs):
+        if milestone_index == 2:
+            os.replace = crashing_replace
+        return await super().run_generation_workflow(goal, workspace_path, milestone_index, **kwargs)
+
+engine = CrashingEngine(CHAIN, {"M1": {"m1.py": b"M1 = 1\n"}, "M2": {"m2a.py": b"A\n", "m2b.py": b"B\n"}})
+state = load_or_resume_milestone_run_state(workspace, _plan(CHAIN))
+asyncio.run(run_milestones(engine, state, workspace))
+os._exit(0)
+'''
+MID_COMMIT_OUTPUTS = {"M1": {"m1.py": b"M1 = 1\n"}, "M2": {"m2a.py": b"A\n", "m2b.py": b"B\n"}}
+
+
+def _crash_mid_commit(workspace, crash_at):
+    """Run the chain in a subprocess that dies inside M2's commit."""
+    crashed = subprocess.run(
+        [sys.executable, "-c", CRASH_MID_COMMIT_SCRIPT, str(workspace), crash_at, TESTS_DIR],
+        env=dict(os.environ, PYTHONPATH=TESTS_DIR), capture_output=True, text=True, timeout=120,
+    )
+    assert crashed.returncode == 9, crashed.stderr

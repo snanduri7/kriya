@@ -1,13 +1,16 @@
 """PRD-008 S4c: milestone resume closure.
 
 1. VERIFIED_NO_CHANGE - a milestone that committed nothing is reusable only
-   on deterministic gate evidence (never a model's "no change"), bound to the
-   verification policy, the completions it built on, and the workspace as the
-   verified commit history explains it.
-2. A crash between a milestone's durable commit and its completion save is
-   closed by rebuilding the proof from the RunRecord's attributed cycle +
-   commit evidence - and refused (the milestone reruns) whenever that
-   evidence does not prove the exact committed output.
+   when deterministic evidence covers every acceptance criterion (never a
+   model's "no change", an unrelated passing test, or zero executed tests),
+   bound to the verification policy, the completions it built on, the
+   toolchain (UNVERIFIED while PRD-011 has no identity), and the workspace
+   as the verified commit history explains it (generated output excluded).
+2. A crash between a milestone's durable commit and its completion save -
+   or inside the commit, finished by `kriya runs recover --complete-partial`
+   - is closed by rebuilding the proof from the RunRecord's attributed cycle
+   + commit evidence (+ recovery provenance), and refused (the milestone
+   reruns) whenever that evidence does not prove the exact committed output.
 3. `--resume` selects a milestone's OWN newest checkpoint by work-unit
    identity; the PRD-008 validator still decides whether it is reusable.
 4. Shared-file lineage: an earlier milestone is never excused by a later
@@ -16,6 +19,7 @@
 Harness (FakeEngine, _run, ...) is S4b's: real commits through the one
 commit seam, milestone state reloaded from the sidecar like the CLI.
 """
+import dataclasses
 import json
 import os
 import subprocess
@@ -28,10 +32,12 @@ from _milestone_proof_harness import (
     CHAIN,
     CHAIN_OUTPUTS,
     GROUP,
+    MID_COMMIT_OUTPUTS,
     TESTS_DIR,
     FakeEngine,
     _completed_chain,
     _config,
+    _crash_mid_commit,
     _decisions,
     _engine,
     _milestone,
@@ -40,39 +46,59 @@ from _milestone_proof_harness import (
     git_workspace,  # noqa: F401 - pytest fixture
 )
 
+from kriya.agents.contracts import AcceptanceCriterion, MilestoneV2
 from kriya.config.config import AppConfig
 from kriya.control.commit_state import UncertainWorkspaceStateError
 from kriya.control.persistence import scan_run_records
+from kriya.control.recovery import recover_workspace
+from kriya.control.run_record import RunLifecycle
+from kriya.workflow import resume_fingerprints
 from kriya.workflow.checkpoint import save_checkpoint
-from kriya.workflow.edit_safety import commit_evidence_dir
+from kriya.workflow.edit_safety import _persist_commit_evidence, commit_evidence_dir, load_commit_evidence
 from kriya.workflow.milestone_completion import (
+    ACCEPTANCE_COVERAGE_INCOMPLETE,
+    ACCEPTANCE_COVERAGE_UNAVAILABLE,
     CHECKPOINT_IDENTITY_MISMATCH,
     COMMIT_EVIDENCE_MISSING,
     COMMIT_LINEAGE_UNVERIFIED,
     COMPLETION_RECONSTRUCTED,
     COMPLETION_RECONSTRUCTION_UNVERIFIED,
+    CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE,
     MILESTONE_CHECKPOINT_SELECTED,
     NO_COMMITTED_OUTPUT,
     NO_COMPATIBLE_MILESTONE_CHECKPOINT,
+    ORIGIN_RECOVERY,
     OUTPUT_CHANGED,
+    RECOVERY_PROVENANCE_UNVERIFIED,
+    TOOLCHAIN_IDENTITY_UNAVAILABLE,
     UPSTREAM_INVALIDATED,
     VERIFIED_NO_CHANGE,
     VERIFIED_NO_CHANGE_INVALIDATED,
     milestone_work_unit,
 )
 from kriya.workflow.milestones import load_milestone_run_state
+from kriya.workflow.resume_fingerprints import Fingerprint
+from kriya.workflow.workflow import deterministic_gate_evidence
 
-TESTS_PASSED = [{"type": "test", "passed": True, "attempt": 1}]
+TESTS_PASSED = [{"type": "test", "passed": True, "status": "PASS_WITH_TESTS", "attempt": 1}]
+# What a deterministic verifier would report: criterion A of M1 is covered
+# by one specific test that ran three tests and passed.
+COVERS_A = [{
+    "criterion_id": "A", "kind": "test", "selector": "tests/test_m1.py::test_a",
+    "attempt": 1, "status": "PASS_WITH_TESTS", "tests_executed": 3,
+}]
 
 
 class GatedEngine(FakeEngine):
     """FakeEngine whose workflow result also reports deterministic gate
-    evidence per milestone (as run_generation_workflow does), and which
-    carries a real config for the verification-policy fingerprint."""
+    evidence and acceptance coverage per milestone (as a deterministic
+    verifier would), and which carries a real config for the
+    verification-policy fingerprint."""
 
-    def __init__(self, milestones, outputs, gates=None, integration=None, config=None):
+    def __init__(self, milestones, outputs, gates=None, integration=None, config=None, coverage=None):
         super().__init__(milestones, outputs, integration)
         self.gates = gates or {}
+        self.coverage = coverage or {}
         self.kernel = MagicMock()
         self.kernel.config = config or AppConfig()
         self.kwargs = []
@@ -82,6 +108,7 @@ class GatedEngine(FakeEngine):
         self.kwargs.append((name, {key: kwargs.get(key) for key in ("resume", "resume_id")}))
         result = await super().run_generation_workflow(goal, workspace_path, milestone_index, **kwargs)
         result["deterministic_gate_evidence"] = self.gates.get(name, [])
+        result["acceptance_coverage"] = self.coverage.get(name, [])
         return result
 
 
@@ -89,21 +116,73 @@ def _events(result):
     return result["milestone_reuse"]["events"]
 
 
+def _accepted(mid, depends_on=(), criteria=("A",)):
+    """A milestone with structured acceptance criteria."""
+    return MilestoneV2(
+        id=mid, goal=f"build {mid}", depends_on=list(depends_on),
+        acceptance=[AcceptanceCriterion(id=criterion, description=f"{mid}: {criterion}") for criterion in criteria],
+    )
+
+
+@pytest.fixture
+def toolchain_bound(monkeypatch):
+    """Stand-in for PRD-011: a canonical toolchain identity is available.
+    Mutate ``identity["value"]`` to model a toolchain change."""
+    identity = {"value": "toolchain-1"}
+    monkeypatch.setattr(
+        resume_fingerprints, "toolchain_fingerprint", lambda: Fingerprint(identity["value"], "test-toolchain"),
+    )
+    return identity
+
+
+def _proof(workspace, milestone_id):
+    return load_milestone_run_state(str(workspace), GROUP).completion_proofs[milestone_id]
+
+
 # ---------------------------------------------------------------- 1. VERIFIED_NO_CHANGE
 
+ACCEPTED_CHAIN = [_accepted("M1"), _accepted("M2", ["M1"])]
 NO_OP_OUTPUTS = {"M1": {}, "M2": {"m2.py": b"M2 = 1\n"}}
 
 
-def test_a_stable_no_op_milestone_is_verified_no_change_and_skipped(git_workspace):  # noqa: F811
-    _run(git_workspace, CHAIN, GatedEngine(CHAIN, NO_OP_OUTPUTS, gates={"M1": TESTS_PASSED}))
-    proof = load_milestone_run_state(str(git_workspace), GROUP).completion_proofs["M1"]
-    assert proof["kind"] == VERIFIED_NO_CHANGE and proof["transaction_ids"] == []
-    assert proof["verification"]["gate_evidence"] == TESTS_PASSED
+def _no_op_engine(gates=None, coverage=None, milestones=ACCEPTED_CHAIN, outputs=NO_OP_OUTPUTS, **kwargs):
+    return GatedEngine(
+        milestones, outputs,
+        gates={"M1": TESTS_PASSED if gates is None else gates},
+        coverage={"M1": COVERS_A if coverage is None else coverage}, **kwargs,
+    )
 
-    engine = GatedEngine(CHAIN, NO_OP_OUTPUTS, gates={"M1": TESTS_PASSED})
-    result, _ = _run(git_workspace, CHAIN, engine)
+
+def test_c_a_covered_no_op_milestone_is_verified_no_change_and_skipped(git_workspace, toolchain_bound):  # noqa: F811
+    _run(git_workspace, ACCEPTED_CHAIN, _no_op_engine())
+    proof = _proof(git_workspace, "M1")
+    assert proof["kind"] == VERIFIED_NO_CHANGE and proof["transaction_ids"] == []
+    binding = proof["verification"]
+    assert binding["acceptance_coverage"] == COVERS_A
+    assert binding["verification_evidence_ids"] == [
+        f"run:{proof['run_id']}:attempt:1:criterion:A:test:tests/test_m1.py::test_a",
+    ]
+    assert binding["toolchain"]["value"] == "toolchain-1"
+    assert binding["model_runtime"] == "NOT_APPLICABLE"
+
+    engine = _no_op_engine()
+    result, _ = _run(git_workspace, ACCEPTED_CHAIN, engine)
     assert _decisions(result) == {"M1": ("MATCH", []), "M2": ("MATCH", [])}
     assert engine.calls == ["INTEGRATION"]  # no Developer/model work, no mutation
+
+
+def test_no_change_reuse_is_unverified_while_the_toolchain_identity_is_unavailable(git_workspace):  # noqa: F811
+    # Production today: PRD-011 has not bound a toolchain identity, and the
+    # evidence is test evidence - so the proof is issued but never reused.
+    _run(git_workspace, ACCEPTED_CHAIN, _no_op_engine())
+    proof = _proof(git_workspace, "M1")
+    assert proof["kind"] == VERIFIED_NO_CHANGE and proof["verification"]["toolchain"]["value"] == "UNAVAILABLE"
+    engine = _no_op_engine()
+    result, _ = _run(git_workspace, ACCEPTED_CHAIN, engine)
+    assert _decisions(result) == {
+        "M1": ("UNVERIFIED", [TOOLCHAIN_IDENTITY_UNAVAILABLE]), "M2": ("CHANGED", [UPSTREAM_INVALIDATED]),
+    }
+    assert engine.calls == ["M1", "M2", "INTEGRATION"]
 
 
 def test_a_real_engine_no_change_milestone_converges(git_workspace):  # noqa: F811
@@ -124,22 +203,27 @@ def test_a_real_engine_no_change_milestone_converges(git_workspace):  # noqa: F8
     assert _decisions(result) == {"M1": ("MATCH", [])}
     assert llm.complete.await_count == len(integration)  # only the integration pass ran
     # The real workflow reports its deterministic gates; this repository has
-    # no tests, so the vacuous "no tests ran" regression pass is excluded.
+    # no tests, so the "no tests ran" regression pass is NO_TESTS_EXECUTED,
+    # never positive evidence.
     assert result["integration_result"]["deterministic_gate_evidence"] == [
-        {"type": "compile", "passed": True, "attempt": 1},
+        {"type": "compile", "passed": True, "status": "PASSED", "attempt": 1},
+        {"type": "regression_test", "passed": None, "status": "NO_TESTS_EXECUTED", "attempt": 1},
     ]
 
 
-@pytest.mark.parametrize("change", ["verification_policy", "workspace_edit", "upstream_recompleted"])
-def test_b_a_changed_dependency_invalidates_verified_no_change(git_workspace, change):  # noqa: F811
-    milestones = [_milestone("M0"), _milestone("M1", ["M0"]), _milestone("M2", ["M1"])]
+@pytest.mark.parametrize("change", ["verification_policy", "workspace_edit", "upstream_recompleted", "toolchain"])
+def test_b_a_changed_dependency_invalidates_verified_no_change(git_workspace, toolchain_bound, change):  # noqa: F811
+    milestones = [_accepted("M0"), _accepted("M1", ["M0"]), _accepted("M2", ["M1"])]
     outputs = {"M0": {"m0.py": b"M0 = 1\n"}, "M1": {}, "M2": {"m2.py": b"M2 = 1\n"}}
-    _run(git_workspace, milestones, GatedEngine(milestones, outputs, gates={"M1": TESTS_PASSED}))
+    _run(git_workspace, milestones, _no_op_engine(milestones=milestones, outputs=outputs))
+    assert _proof(git_workspace, "M1")["kind"] == VERIFIED_NO_CHANGE
     config = AppConfig()
     if change == "verification_policy":
         config.autonomy.run_verification_enabled = not config.autonomy.run_verification_enabled
     elif change == "workspace_edit":
         (git_workspace / "unrelated.txt").write_text("user edit\n")
+    elif change == "toolchain":
+        toolchain_bound["value"] = "toolchain-2"
     else:
         # M0's proof now names a different completion than the one M1's
         # no-change verification was bound to.
@@ -147,23 +231,123 @@ def test_b_a_changed_dependency_invalidates_verified_no_change(git_workspace, ch
         payload = json.loads(sidecar.read_text())
         payload["completion_proofs"]["M0"]["transaction_ids"] = ["redone"]
         sidecar.write_text(json.dumps(payload))
-    engine = GatedEngine(milestones, outputs, gates={"M1": TESTS_PASSED}, config=config)
+    engine = _no_op_engine(milestones=milestones, outputs=outputs, config=config)
     result, _ = _run(git_workspace, milestones, engine)
     assert _decisions(result)["M1"] == ("CHANGED", [VERIFIED_NO_CHANGE_INVALIDATED])
     assert _decisions(result)["M2"] == ("CHANGED", [UPSTREAM_INVALIDATED])
     assert "M1" in engine.calls
 
 
-@pytest.mark.parametrize("gates", [[], [{"type": "compile", "passed": True, "attempt": 1}]])
+def _assert_not_issued(workspace, engine_factory, code, criteria=None):
+    """M1 committed nothing and got no VERIFIED_NO_CHANGE proof, for
+    ``code``; the next run says why and M1 reruns."""
+    _run(workspace, ACCEPTED_CHAIN, engine_factory())
+    proof = _proof(workspace, "M1")
+    assert proof["kind"] != VERIFIED_NO_CHANGE and proof["verification"] is None
+    assert proof["no_change_refusal"]["code"] == code
+    if criteria is not None:
+        assert proof["no_change_refusal"]["criteria"] == criteria
+    engine = engine_factory()
+    result, _ = _run(workspace, ACCEPTED_CHAIN, engine)
+    assert _decisions(result)["M1"] == ("UNVERIFIED", [NO_COMMITTED_OUTPUT])
+    [decision] = [d for d in result["milestone_reuse"]["decisions"] if d["milestone_id"] == "M1"]
+    assert decision["reasons"][0]["cause"]["code"] == code
+    assert engine.calls[0] == "M1"
+
+
+UNRELATED_TEST = [dict(COVERS_A[0], criterion_id="Z", selector="tests/test_other.py::test_unrelated")]
+
+
+@pytest.mark.parametrize("gates,coverage,status", [
+    # A test passed, but no criterion of this milestone maps to it.
+    (TESTS_PASSED, UNRELATED_TEST, "UNCOVERED"),
+    (TESTS_PASSED, [], "UNCOVERED"),
+    # Coverage claimed by a test gate that never executed in the run.
+    ([{"type": "compile", "passed": True, "status": "PASSED", "attempt": 1}], COVERS_A, "UNAVAILABLE"),
+    # Coverage from an earlier attempt (a different candidate).
+    ([dict(TESTS_PASSED[0], attempt=2)], COVERS_A, "UNAVAILABLE"),
+    # A failed covering test.
+    (TESTS_PASSED, [dict(COVERS_A[0], status="FAILED")], "FAILED"),
+])
+def test_a_an_unrelated_or_unproven_passing_test_never_issues_verified_no_change(
+    git_workspace, gates, coverage, status,  # noqa: F811
+):
+    _assert_not_issued(
+        git_workspace, lambda: _no_op_engine(gates=gates, coverage=coverage),
+        ACCEPTANCE_COVERAGE_INCOMPLETE, {"A": status},
+    )
+
+
+@pytest.mark.parametrize("claimed", ["NO_TESTS_EXECUTED", "PASS_WITH_TESTS"])
+def test_b_zero_executed_tests_are_never_positive_evidence(git_workspace, claimed):  # noqa: F811
+    # The real gate evidence of a test command that exited 0 after running
+    # nothing, and a coverage item on it - even one claiming a pass.
+    gates = deterministic_gate_evidence([
+        {"attempt": 1, "type": "regression_test", "success": True,
+         "output": "collected 0 items\n\n============ no tests ran in 0.00s ============"},
+    ], 1)
+    assert gates == [{"type": "regression_test", "passed": None, "status": "NO_TESTS_EXECUTED", "attempt": 1}]
+    coverage = [dict(COVERS_A[0], kind="regression_test", status=claimed, tests_executed=0)]
+    _assert_not_issued(
+        git_workspace, lambda: _no_op_engine(gates=gates, coverage=coverage),
+        ACCEPTANCE_COVERAGE_INCOMPLETE, {"A": "NO_TESTS_EXECUTED"},
+    )
+
+
+@pytest.mark.parametrize("gates", [[], [{"type": "compile", "passed": True, "status": "PASSED", "attempt": 1}]])
 def test_c_a_model_only_no_change_never_becomes_reusable(git_workspace, gates):  # noqa: F811
-    # quality gates "passed" but no behavioural gate actually ran: the
-    # model's no-change verdict is all there is.
-    _run(git_workspace, CHAIN, GatedEngine(CHAIN, NO_OP_OUTPUTS, gates={"M1": gates}))
+    # quality gates "passed", the milestone's criteria are free text only
+    # (no structured acceptance): the model's no-change verdict is all
+    # there is.
+    _run(git_workspace, CHAIN, GatedEngine(CHAIN, NO_OP_OUTPUTS, gates={"M1": gates}, coverage={"M1": COVERS_A}))
     proof = load_milestone_run_state(str(git_workspace), GROUP).completion_proofs["M1"]
     assert proof["kind"] != VERIFIED_NO_CHANGE and proof["verification"] is None
+    assert proof["no_change_refusal"]["code"] == ACCEPTANCE_COVERAGE_UNAVAILABLE
     engine = GatedEngine(CHAIN, NO_OP_OUTPUTS, gates={"M1": gates})
     result, _ = _run(git_workspace, CHAIN, engine)
     assert _decisions(result)["M1"] == ("UNVERIFIED", [NO_COMMITTED_OUTPUT])
+    assert engine.calls[0] == "M1"
+
+
+def test_d_generated_output_never_invalidates_verified_no_change(git_workspace, toolchain_bound):  # noqa: F811
+    # No .gitignore: only the repository model's generated-output
+    # directories keep these out of the workspace evidence.
+    assert not (git_workspace / ".gitignore").exists()
+    _run(git_workspace, ACCEPTED_CHAIN, _no_op_engine())
+    for relpath in ("__pycache__/m2.cpython-312.pyc", "pkg/__pycache__/x.cpython-312.pyc", "target/classes/A.class"):
+        (git_workspace / relpath).parent.mkdir(parents=True, exist_ok=True)
+        (git_workspace / relpath).write_bytes(b"\x00generated")
+    engine = _no_op_engine()
+    result, _ = _run(git_workspace, ACCEPTED_CHAIN, engine)
+    assert _decisions(result) == {"M1": ("MATCH", []), "M2": ("MATCH", [])}
+    assert engine.calls == ["INTEGRATION"]
+
+
+@pytest.mark.parametrize("change", [
+    "new_untracked_source", "new_untracked_config", "tracked_file_in_generated_dir", "committed_file_in_generated_dir",
+])
+def test_e_relevant_untracked_or_tracked_changes_invalidate_verified_no_change(
+    git_workspace, toolchain_bound, change,  # noqa: F811
+):
+    outputs = dict(NO_OP_OUTPUTS)
+    if change == "tracked_file_in_generated_dir":
+        (git_workspace / "build").mkdir()
+        (git_workspace / "build" / "settings.gradle").write_text("tracked\n")
+        subprocess.run(["git", "add", "build/settings.gradle"], cwd=git_workspace, check=True)
+        subprocess.run(["git", "commit", "-qm", "tracked build file"], cwd=git_workspace, check=True)
+    if change == "committed_file_in_generated_dir":
+        outputs["M2"] = {"bin/tool.sh": b"#!/bin/sh\n"}
+    _run(git_workspace, ACCEPTED_CHAIN, _no_op_engine(outputs=outputs))
+    assert _proof(git_workspace, "M1")["kind"] == VERIFIED_NO_CHANGE
+    target = {
+        "new_untracked_source": "src/new_module.py", "new_untracked_config": "config.yaml",
+        "tracked_file_in_generated_dir": "build/settings.gradle", "committed_file_in_generated_dir": "bin/tool.sh",
+    }[change]
+    (git_workspace / target).parent.mkdir(parents=True, exist_ok=True)
+    (git_workspace / target).write_text("changed by the user\n")
+    engine = _no_op_engine(outputs=outputs)
+    result, _ = _run(git_workspace, ACCEPTED_CHAIN, engine)
+    assert _decisions(result)["M1"] == ("CHANGED", [VERIFIED_NO_CHANGE_INVALIDATED])
     assert engine.calls[0] == "M1"
 
 
@@ -260,6 +444,86 @@ def test_e_corrupt_evidence_is_refused_by_the_gate_first(tmp_path):
     with pytest.raises(UncertainWorkspaceStateError):
         _run(workspace, CHAIN, engine)
     assert engine.calls == []
+
+
+# ---------------------------------------------------------------- 2b. recovery-completed commits
+
+def _recovered_mid_commit(tmp_path):
+    """M2's commit killed between its two file replaces, then finished by
+    `kriya runs recover --complete-partial`. Returns the workspace and the
+    recovered run's record as recovery left it."""
+    workspace = _workspace(tmp_path)
+    _crash_mid_commit(workspace, "stage2")
+    report = recover_workspace(str(workspace), complete_partial=True)
+    assert report.rolled_forward and not report.errors, report.to_dict()
+    [record] = scan_run_records(str(workspace)).records
+    assert record.lifecycle_state == RunLifecycle.RECOVERED
+    return workspace, record
+
+
+def test_f_a_recovery_completed_milestone_is_reusable_and_its_run_stays_recovered(tmp_path):
+    workspace, recovered = _recovered_mid_commit(tmp_path)
+    engine = FakeEngine(CHAIN, MID_COMMIT_OUTPUTS)
+    result, state = _run(workspace, CHAIN, engine)
+    assert result["status"] == "success"
+    assert _decisions(result) == {"M1": ("MATCH", []), "M2": ("MATCH", [COMPLETION_RECONSTRUCTED])}
+    assert engine.calls == ["INTEGRATION"]  # M2 is not regenerated
+    [event] = [e for e in _events(result) if e["milestone_id"] == "M2"]
+    assert event["code"] == COMPLETION_RECONSTRUCTED and event["completion_origin"] == ORIGIN_RECOVERY
+    proof = state.completion_proofs["M2"]
+    assert proof["completion_origin"] == ORIGIN_RECOVERY
+    assert proof["reconstructed_from"]["run_id"] == recovered.run_id
+    # The recovered run itself is untouched: still RECOVERED, never SUCCESS.
+    after = next(r for r in scan_run_records(str(workspace)).records if r.run_id == recovered.run_id)
+    assert after.lifecycle_state == RunLifecycle.RECOVERED
+    assert (after.terminal_status, after.commit_result, after.revision) == (
+        recovered.terminal_status, recovered.commit_result, recovered.revision,
+    )
+    assert after.terminal_status in ("NEEDS_REVIEW", "FAILURE")
+    # And the rebuilt proof is an ordinary one from now on.
+    engine = FakeEngine(CHAIN, MID_COMMIT_OUTPUTS)
+    result, _ = _run(workspace, CHAIN, engine)
+    assert _decisions(result)["M2"] == ("MATCH", [COMPLETION_RECONSTRUCTED])
+    assert engine.calls == ["INTEGRATION"]
+
+
+def _tamper_recovery(workspace, txid, **changes):
+    path = os.path.join(commit_evidence_dir(str(workspace)), f"{txid}.json")
+    evidence = load_commit_evidence(path)
+    _persist_commit_evidence(str(workspace), dataclasses.replace(evidence, recovery=dict(evidence.recovery, **changes)))
+
+
+@pytest.mark.parametrize("damage,cause", [
+    ("delete_evidence", COMMIT_EVIDENCE_MISSING),
+    # Evidence that still loads and still matches the candidate and bytes,
+    # but whose recovery provenance does not prove an exact completion:
+    # only the recovery-provenance check refuses these.
+    ("foreign_operation", RECOVERY_PROVENANCE_UNVERIFIED),
+    ("not_an_interrupted_commit", RECOVERY_PROVENANCE_UNVERIFIED),
+    ("not_kriya_recovery", RECOVERY_PROVENANCE_UNVERIFIED),
+])
+def test_g_recovery_completion_with_unproven_evidence_is_refused_and_reruns(tmp_path, damage, cause):
+    workspace, recovered = _recovered_mid_commit(tmp_path)
+    [cycle] = [c for c in recovered.commits if (c.get("work_unit") or {}).get("milestone_id") == "M2"]
+    txid = cycle["transaction_id"]
+    if damage == "delete_evidence":
+        os.unlink(os.path.join(commit_evidence_dir(str(workspace)), f"{txid}.json"))
+    elif damage == "foreign_operation":
+        _tamper_recovery(workspace, txid, operations=[
+            {"target_path": "m2a.py", "classification": "APPLIED"},
+            {"target_path": "m2b.py", "classification": "FOREIGN"},
+        ], rolled_forward=[])
+    elif damage == "not_an_interrupted_commit":
+        _tamper_recovery(workspace, txid, prior_state="committed")
+    else:
+        _tamper_recovery(workspace, txid, tool="hand-edited")
+    engine = FakeEngine(CHAIN, MID_COMMIT_OUTPUTS)
+    result, state = _run(workspace, CHAIN, engine)
+    assert _decisions(result)["M2"] == ("UNVERIFIED", [COMPLETION_RECONSTRUCTION_UNVERIFIED])
+    [decision] = [d for d in result["milestone_reuse"]["decisions"] if d["milestone_id"] == "M2"]
+    assert decision["reasons"][0]["cause"]["code"] == cause
+    assert engine.calls == ["M2", "INTEGRATION"]
+    assert state.completion_proofs["M2"]["completion_origin"] == "RUN"
 
 
 # ---------------------------------------------------------------- 3. checkpoint selection
@@ -423,10 +687,12 @@ def test_i_an_edit_to_a_path_the_integration_pass_owns_is_charged_to_its_milesto
     engine = FakeEngine(milestones, outputs, integration)
     result, _ = _run(workspace, milestones, engine)
     assert _decisions(result) == {
-        "M1": ("MATCH", []), "M2": ("CHANGED", [OUTPUT_CHANGED]), "M3": ("CHANGED", [UPSTREAM_INVALIDATED]),
+        "M1": ("MATCH", []), "M2": ("CHANGED", [CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE]),
+        "M3": ("CHANGED", [UPSTREAM_INVALIDATED]),
     }
     [reason] = next(d for d in result["milestone_reuse"]["decisions"] if d["milestone_id"] == "M2")["reasons"]
     assert reason["path"] == "pom.xml" and reason["superseded_by"]  # the integration commit
+    assert reason["divergence"] == OUTPUT_CHANGED
     assert engine.calls == ["M2", "M3", "INTEGRATION"]
 
 
@@ -444,7 +710,7 @@ def test_i_an_edit_to_a_path_a_failed_milestone_wrote_last_is_charged_to_the_com
     assert first["status"] == "milestone_failed"
     (workspace / "shared.cfg").write_bytes(b"user\n")
     result, _ = _run(workspace, milestones, FakeEngine(milestones, outputs))
-    assert _decisions(result) == {"M1": ("CHANGED", [OUTPUT_CHANGED])}
+    assert _decisions(result) == {"M1": ("CHANGED", [CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE])}
 
 
 # ---------------------------------------------------------------- current workspace is the source of truth
@@ -468,8 +734,6 @@ def test_k_a_stale_milestone_reruns_on_the_users_bytes_never_restored(tmp_path):
 # ---------------------------------------------------------------- gate evidence
 
 def test_gate_evidence_counts_only_the_final_attempt_and_never_unconfirmed_gates():
-    from kriya.workflow.workflow import deterministic_gate_evidence
-
     outcomes = [
         # Attempt 1 ran targeted tests against a different candidate, then failed.
         {"attempt": 1, "type": "targeted_test", "success": True, "output": "2 passed"},
@@ -480,8 +744,9 @@ def test_gate_evidence_counts_only_the_final_attempt_and_never_unconfirmed_gates
         {"attempt": 2, "type": "regression_test", "success": True, "output": "5 passed"},
     ]
     assert deterministic_gate_evidence(outcomes, 2) == [
-        {"type": "compile", "passed": True, "attempt": 2},
-        {"type": "regression_test", "passed": True, "attempt": 2},
+        {"type": "compile", "passed": True, "status": "PASSED", "attempt": 2},
+        {"type": "test", "passed": None, "status": "UNAVAILABLE", "attempt": 2},
+        {"type": "regression_test", "passed": True, "status": "PASS_WITH_TESTS", "attempt": 2},
     ]
     assert deterministic_gate_evidence(outcomes, None) == []
 
@@ -489,9 +754,11 @@ def test_gate_evidence_counts_only_the_final_attempt_and_never_unconfirmed_gates
 def test_gate_evidence_never_counts_a_test_run_that_executed_zero_tests():
     # Real pytest output from a repository with no tests: success, and
     # nothing verified. Seen live in the real engine's regression gate.
-    from kriya.workflow.workflow import deterministic_gate_evidence
-
     vacuous = "collected 0 items\n\n============================ no tests ran in 0.00s ======"
     assert deterministic_gate_evidence([
         {"attempt": 1, "type": "regression_test", "success": True, "output": vacuous},
-    ], 1) == []
+        {"attempt": 1, "type": "compile", "success": False, "output": "SyntaxError"},
+    ], 1) == [
+        {"type": "compile", "passed": False, "status": "FAILED", "attempt": 1},
+        {"type": "regression_test", "passed": None, "status": "NO_TESTS_EXECUTED", "attempt": 1},
+    ]
