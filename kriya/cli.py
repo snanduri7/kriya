@@ -2455,7 +2455,6 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
             )
             sys.exit(1)
 
-        import sys
         def on_stream(token: str):
             click.echo(token, nl=False)
             sys.stdout.flush()
