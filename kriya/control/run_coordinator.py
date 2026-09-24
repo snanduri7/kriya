@@ -204,12 +204,31 @@ def settle_run_commit(context: Optional[RunContext], result: str) -> Optional[st
     return None
 
 
+def _unverified_work_units(record: Optional[RunRecord]) -> List[str]:
+    """PRD-008A: work units of this run's ExecutionPlan that are not VERIFIED."""
+    states = (record.work_unit_states if record is not None else None) or {}
+    return sorted(
+        unit_id for unit_id, state in states.items()
+        if not isinstance(state, dict) or state.get("status") != "VERIFIED"
+    )
+
+
 def _complete_successful_run(context: RunContext) -> None:
     """Terminal SUCCESS from what the record itself proves.
 
     Never walks stages or reads the result payload: the record reaches
     SUCCESS only after a settled COMMITTED cycle, or with no commit cycle at
-    all (NO_COMMIT). Anything else is contradictory and fails closed."""
+    all (NO_COMMIT), and - PRD-008A - only when every work unit of the plan
+    it executed is VERIFIED (partial completion is never SUCCESS, whichever
+    mode produced it). Anything else is contradictory and fails closed."""
+    unverified = _unverified_work_units(context._lease.record)
+    if unverified:
+        logger.error(
+            "Run %s: reported success but work units %s are not VERIFIED - failing closed.",
+            context.run_id, unverified,
+        )
+        _fail_active_run(context)
+        return
     try:
         transition_mutating_run(context, RunLifecycle.SUCCESS)
     except IllegalRunTransitionError as error:

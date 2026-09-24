@@ -415,8 +415,18 @@ def _terminal(lifecycle: _Lifecycle, result: Dict[str, Any]) -> Dict[str, Any]:
             "reason_codes": [PLAN_TERMINAL_MISMATCH],
             "unverified_work_units": unverified,
             "result": result,
+            "work_unit_states": _state_payload(lifecycle),
         }
+    if len(lifecycle.plan.work_units) > 1 and isinstance(result, dict):
+        # A multi-unit plan's result names each unit's outcome (BLOCKED
+        # reasons included). A one-unit plan's result is its unit's own
+        # result, unchanged.
+        result = {**result, "work_unit_states": _state_payload(lifecycle)}
     return result
+
+
+def _state_payload(lifecycle: _Lifecycle) -> Dict[str, Any]:
+    return {unit_id: state.to_dict() for unit_id, state in lifecycle.states.items()}
 
 
 # ------------------------------------------------------------------ direct
