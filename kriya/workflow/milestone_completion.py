@@ -17,8 +17,9 @@ not stale merely because M2 legitimately modified a file M1 created.
 
 A completed milestone is then:
   * MATCH (skip) - every link verifies and every path it still owns matches;
-  * CHANGED (rerun) - a path it owns no longer has the committed state, or a
-    milestone it depends on, or an unrelated milestone sharing one of its
+  * CHANGED (rerun) - a path it owns no longer has the committed state, its
+    own definition in the (hand-editable) plan changed, or a milestone it
+    depends on, or an unrelated milestone sharing one of its
     paths, reruns;
   * UNVERIFIED (rerun) - any required evidence is missing, unreadable,
     pruned, legacy or inconsistent. Nothing is reconstructed from the
@@ -30,6 +31,7 @@ milestone reuse share one freshness model. No model call participates.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -71,6 +73,7 @@ OUTPUT_MISSING = "OUTPUT_MISSING"
 OUTPUT_CHANGED = "OUTPUT_CHANGED"
 DELETED_PATH_RECREATED = "DELETED_PATH_RECREATED"
 MODE_CHANGED = "MODE_CHANGED"
+MILESTONE_DEFINITION_CHANGED = "MILESTONE_DEFINITION_CHANGED"
 UPSTREAM_INVALIDATED = "UPSTREAM_INVALIDATED"
 SHARED_PATH_WITH_RERUN = "SHARED_PATH_WITH_RERUN"
 
@@ -145,22 +148,33 @@ class MilestoneCommitEntry:
         )
 
 
+def milestone_definition_digest(milestone: Any) -> str:
+    """The milestone's own definition (goal, criterion, depends_on,
+    provides, consumes, ...) - the milestone counterpart of direct resume's
+    goal fingerprint. Deliberately not the rendered goal text, which embeds
+    position/total and would change whenever another milestone is added."""
+    payload = milestone.model_dump(mode="json")
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class MilestoneCompletionProof:
     """What a completed milestone committed: its ledger transactions, in
-    order. The post-states live in those ledger entries."""
+    order, and the definition it completed under. The post-states live in
+    those ledger entries."""
 
     milestone_id: str
     run_id: str
     transaction_ids: Tuple[str, ...]
     completed_at: str
+    definition_digest: str
     schema_version: int = MILESTONE_COMPLETION_SCHEMA_VERSION
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "schema_version": self.schema_version, "milestone_id": self.milestone_id,
             "run_id": self.run_id, "transaction_ids": list(self.transaction_ids),
-            "completed_at": self.completed_at,
+            "completed_at": self.completed_at, "definition_digest": self.definition_digest,
         }
 
     @classmethod
@@ -174,6 +188,7 @@ class MilestoneCompletionProof:
             milestone_id=str(data["milestone_id"]), run_id=str(data["run_id"]),
             transaction_ids=tuple(str(item) for item in transaction_ids),
             completed_at=str(data.get("completed_at", "")),
+            definition_digest=str(data["definition_digest"]),
         )
 
 
@@ -239,13 +254,14 @@ def record_milestone_commits(
 
 
 def completion_proof_for(
-    milestone_id: str, entries: Sequence[MilestoneCommitEntry], run_id: Optional[str],
+    milestone: Any, entries: Sequence[MilestoneCommitEntry], run_id: Optional[str],
 ) -> MilestoneCompletionProof:
     return MilestoneCompletionProof(
-        milestone_id=milestone_id,
+        milestone_id=milestone.id,
         run_id=run_id or (entries[0].run_id if entries else ""),
         transaction_ids=tuple(entry.transaction_id for entry in entries),
         completed_at=_now(),
+        definition_digest=milestone_definition_digest(milestone),
     )
 
 
@@ -280,6 +296,10 @@ class MilestoneReuseDecision:
 class MilestoneReuseAssessment:
     decisions: List[MilestoneReuseDecision] = field(default_factory=list)
     assessed_at: str = field(default_factory=_now)
+    # The run that made the decision: one assessment per run, so a second
+    # entry point in the same run reuses it instead of re-deciding over the
+    # already-pruned completed list (and losing why milestones reran).
+    run_id: Optional[str] = None
 
     def get(self, milestone_id: str) -> Optional[MilestoneReuseDecision]:
         return next((item for item in self.decisions if item.milestone_id == milestone_id), None)
@@ -292,8 +312,22 @@ class MilestoneReuseAssessment:
         return {
             "schema_version": MILESTONE_COMPLETION_SCHEMA_VERSION,
             "assessed_at": self.assessed_at,
+            "run_id": self.run_id,
             "decisions": [item.to_dict() for item in self.decisions],
         }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "MilestoneReuseAssessment":
+        return cls(
+            decisions=[
+                MilestoneReuseDecision(
+                    milestone_id=item["milestone_id"], status=FingerprintStatus(item["status"]),
+                    reasons=list(item.get("reasons", [])),
+                )
+                for item in data.get("decisions", [])
+            ],
+            assessed_at=str(data.get("assessed_at", "")), run_id=data.get("run_id"),
+        )
 
 
 def _verify_entry(
@@ -433,10 +467,11 @@ def assess_completed_milestone_reuse(
             for operation in entry.operations:
                 owner[operation.path] = (entry, operation)
 
+    by_id = {milestone.id: milestone for milestone in milestones}
     decisions: Dict[str, MilestoneReuseDecision] = {}
     for milestone_id in completed:
         decisions[milestone_id] = _assess_one(
-            workspace, milestone_id, proofs.get(milestone_id), entries, failures, owner,
+            workspace, by_id[milestone_id], proofs.get(milestone_id), entries, failures, owner,
             legacy_state=legacy_state, malformed_ledger=bool(malformed),
         )
 
@@ -483,7 +518,7 @@ def assess_completed_milestone_reuse(
 
 def _assess_one(
     workspace: str,
-    milestone_id: str,
+    milestone: Any,
     raw_proof: Any,
     entries: Sequence[MilestoneCommitEntry],
     failures: Mapping[int, Optional[Dict[str, Any]]],
@@ -492,6 +527,7 @@ def _assess_one(
     legacy_state: bool,
     malformed_ledger: bool,
 ) -> MilestoneReuseDecision:
+    milestone_id = milestone.id
     decision = MilestoneReuseDecision(milestone_id, FingerprintStatus.UNVERIFIED)
     if raw_proof is None:
         decision.reasons.append(_reason(
@@ -506,6 +542,12 @@ def _assess_one(
         return decision
     if proof.milestone_id != milestone_id:
         decision.reasons.append(_reason(COMPLETION_PROOF_MISSING, "proof names a different milestone"))
+        return decision
+    if proof.definition_digest != milestone_definition_digest(milestone):
+        decision.status = FingerprintStatus.CHANGED
+        decision.reasons.append(_reason(
+            MILESTONE_DEFINITION_CHANGED, "the milestone's definition in the plan changed since it completed",
+        ))
         return decision
     if not proof.transaction_ids:
         decision.reasons.append(_reason(

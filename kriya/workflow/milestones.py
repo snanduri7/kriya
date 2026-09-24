@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
-from kriya.control.run_coordinator import annotate_run, coordinated_mutation
+from kriya.control.run_coordinator import annotate_run, coordinated_mutation, owning_run_commits
 from kriya.control.contracts import (
     mark_capabilities_implemented,
     register_provided_capabilities,
@@ -366,6 +366,10 @@ def save_milestone_run_state(workspace_path: str, run_state: MilestoneRunState) 
     path = _sidecar_path(workspace_path, run_state.group_id)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     payload = run_state.to_dict()
+    # Every save carries the proof-era schema: revalidation always runs
+    # before a save that could still hold legacy (proof-less) completions,
+    # and a fresh plan file (no schema key) must not read as legacy later.
+    payload["milestone_completion_schema"] = MILESTONE_COMPLETION_SCHEMA_VERSION
     payload["_workspace"] = ownership_metadata(workspace_path)
     AuthorizedFileWriter(workspace_path).commit_file(
         path, json.dumps(payload, indent=2, sort_keys=True), expected_revision=read_file_revision(path),
@@ -422,13 +426,20 @@ def revalidate_completed_milestones(
     assess_completed_milestone_reuse); independent milestones whose own
     proof validates stay skipped. Idempotent: a second call finds every
     remaining completion valid and changes nothing."""
+    owned = owning_run_commits(workspace_path)
+    run_id = owned[0] if owned is not None else None
+    previous = run_state.last_reuse_assessment
+    if run_id is not None and isinstance(previous, dict) and previous.get("run_id") == run_id:
+        # Already decided in this run (execute_milestones, then run_milestones).
+        return MilestoneReuseAssessment.from_dict(previous)
     if not run_state.completed_milestone_ids:
-        return MilestoneReuseAssessment()
+        return MilestoneReuseAssessment(run_id=run_id)
     assessment = assess_completed_milestone_reuse(
         workspace_path, run_state.milestones, run_state.completed_milestone_ids,
         run_state.completion_proofs, run_state.commit_ledger,
         legacy_state=run_state.completion_schema_version is None,
     )
+    assessment.run_id = run_id
     rerun = assessment.rerun_ids
     run_state.last_reuse_assessment = assessment.to_dict()
     for decision in assessment.decisions:
@@ -1293,7 +1304,7 @@ async def run_milestones(
             }
 
         run_state.completion_proofs[milestone.id] = completion_proof_for(
-            milestone.id, milestone_entries,
+            milestone, milestone_entries,
             milestone_entries[0].run_id if milestone_entries else None,
         ).to_dict()
         run_state.completed_milestone_ids.append(milestone.id)

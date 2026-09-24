@@ -46,6 +46,7 @@ from kriya.workflow.milestone_completion import (
     COMPLETION_PROOF_MISSING,
     DELETED_PATH_RECREATED,
     LEGACY_STATE_UNVERIFIED,
+    MILESTONE_DEFINITION_CHANGED,
     MODE_CHANGED,
     NO_COMMITTED_OUTPUT,
     OUTPUT_CHANGED,
@@ -606,3 +607,40 @@ def test_invalidated_output_is_not_fed_back_as_established_context(tmp_path):
 
     _run(workspace, CHAIN, Recording(CHAIN, CHAIN_OUTPUTS))
     assert seen[0] == []  # M1 reruns without its own stale output as "established"
+
+
+def test_execute_milestones_records_every_decision_once_per_run(tmp_path):
+    # execute_milestones and run_milestones both revalidate; the second call
+    # must reuse the run's assessment, not re-decide over the already
+    # pruned completed list and lose why M2 reran.
+    milestones = [_milestone("M1"), _milestone("M2", ["M1"]), _milestone("M3", ["M1"])]
+    outputs = {mid: {f"{mid.lower()}.py": f"{mid} = 1\n".encode()} for mid in ("M1", "M2", "M3")}
+    workspace = _completed_chain(tmp_path, outputs, milestones)
+    (workspace / "m2.py").write_bytes(b"edited\n")
+    engine = FakeEngine(milestones, outputs)
+    state = load_or_resume_milestone_run_state(str(workspace), _plan(milestones))
+    result = asyncio.run(WorkflowController(engine).execute_milestones(state, str(workspace)))
+
+    expected = {"M1": ("MATCH", []), "M2": ("CHANGED", [OUTPUT_CHANGED]), "M3": ("MATCH", [])}
+    assert _decisions(result.legacy_result) == expected
+    newest = max(scan_run_records(str(workspace)).records, key=lambda record: record.created_at)
+    assert _decisions({"milestone_reuse": newest.milestone_reuse}) == expected
+    sidecar = load_milestone_run_state(str(workspace), GROUP).last_reuse_assessment
+    assert _decisions({"milestone_reuse": sidecar}) == expected
+    assert engine.calls == ["M2", "INTEGRATION"]
+
+
+def test_a_hand_edited_milestone_definition_reruns_with_its_dependents(tmp_path):
+    # Direct resume's goal fingerprint catches a changed goal; a milestone
+    # whose definition changed in the plan file must not be skipped either.
+    workspace = _completed_chain(tmp_path)
+    edited = [
+        MilestoneV2(id="M1", goal="build M1 differently", success_criterion="M1 works"),
+        _milestone("M2", ["M1"]),
+    ]
+    engine = FakeEngine(edited, CHAIN_OUTPUTS)
+    result, _ = _run(workspace, edited, engine)
+    assert _decisions(result) == {
+        "M1": ("CHANGED", [MILESTONE_DEFINITION_CHANGED]), "M2": ("CHANGED", [UPSTREAM_INVALIDATED]),
+    }
+    assert engine.calls == ["M1", "M2", "INTEGRATION"]

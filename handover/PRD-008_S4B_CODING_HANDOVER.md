@@ -56,7 +56,8 @@ Result: the engine was called only for integration (`calls == [3]`). M1 and M2 w
 
 ## Completion-proof format (`kriya/workflow/milestone_completion.py`)
 ```
-MilestoneCompletionProof {schema_version: 1, milestone_id, run_id, transaction_ids: [..], completed_at}
+MilestoneCompletionProof {schema_version: 1, milestone_id, run_id, transaction_ids: [..], completed_at,
+                          definition_digest}
 MilestoneCommitEntry     {milestone_id | null (integration), run_id, transaction_id, candidate_hash,
                           operations: [{path, operation: CREATE|MODIFY|DELETE,
                                         post_state: {exists, sha256, mode}}],
@@ -77,8 +78,12 @@ MilestoneCommitEntry     {milestone_id | null (integration), run_id, transaction
 5. The evidence is schema 2 or later (else `COMMIT_EVIDENCE_LEGACY`), with state `COMMITTED`.
 6. `candidate_hash` is non-empty and identical in the evidence, the cycle and the ledger entry (else `PROOF_EVIDENCE_MISMATCH`).
 7. The ledger entry's (path, kind, post_state) set equals the evidence's (else `PROOF_EVIDENCE_MISMATCH`).
-8. The proof's txids exist in the ledger for this milestone and run (else `TRANSACTION_MISMATCH`).
-9. For each path the milestone still owns, the workspace is compared byte-exactly (see below).
+8. The proof's `definition_digest` (sha256 of the milestone's own `model_dump()`: goal, criterion,
+   `depends_on`, `provides`, `consumes`) equals the digest of the current plan's definition (else
+   `CHANGED/MILESTONE_DEFINITION_CHANGED`). This is the milestone counterpart of direct resume's `goal`
+   fingerprint. It is deliberately not the rendered goal text, which embeds position and total.
+9. The proof's txids exist in the ledger for this milestone and run (else `TRANSACTION_MISMATCH`).
+10. For each path the milestone still owns, the workspace is compared byte-exactly (see below).
 
 **Workspace comparison.** It uses `lstat` and never follows a symlink; the path must be contained in the workspace. It hashes raw bytes with sha256 and compares the mode. A mismatch gives one of `OUTPUT_MISSING`, `OUTPUT_CHANGED`, `MODE_CHANGED` or `DELETED_PATH_RECREATED`, and the status becomes `CHANGED`. Text is never normalised.
 
@@ -96,7 +101,9 @@ MilestoneCommitEntry     {milestone_id | null (integration), run_id, transaction
 6. **Where it runs:**
    - At the start of `run_milestones()`.
    - In `execute_milestones()` before `milestone_states` is derived, so the ControlState never marks as done a milestone that is about to rerun.
-   - It is idempotent.
+   - It decides once per run. The assessment carries the owning `run_id`, so the second call (from
+     `run_milestones()` after `execute_milestones()`) reuses it instead of re-deciding over the
+     already-pruned completed list.
 
 ## Backward compatibility
 - **A legacy sidecar** (no `milestone_completion_schema`) loads unchanged. Each completed entry is `UNVERIFIED/LEGACY_STATE_UNVERIFIED` and reruns, along with its dependents; nothing is invented. Once those milestones re-complete, the sidecar carries real proofs.
@@ -105,7 +112,7 @@ MilestoneCommitEntry     {milestone_id | null (integration), run_id, transaction
 - **Retention.** `prune_run_state` now protects every run id a sidecar ledger references. An unreadable sidecar contributes no references, because its proofs are unusable anyway.
 
 ## Tests
-- **New file:** `tests/test_prd008_s4b_milestone_completion.py`, 26 cases:
+- **New file:** `tests/test_prd008_s4b_milestone_completion.py`, 28 cases:
   - **A** – `execute_milestones` refusal with the same reason and status as direct `execute()`, before triage or any record.
   - **B** – real `WorkflowEngine`, resume inside a milestone. When the fingerprints match, the plan is reused (RunRecord `resume_decision` includes `plan`, one fewer LLM call). When the workspace changed, nothing is reused.
   - **C** – a real subprocess `os._exit` during M2's commit (partial and not-applied variants). A rerun is refused; `recover_workspace` (with `--complete-partial` where needed) leaves the record RECOVERED; the rerun then skips M1 on its original transaction and runs M2.
@@ -128,7 +135,7 @@ What was run: every test function in the affected modules, called as plain Pytho
 
 | Module | Result |
 |---|---|
-| test_prd008_s4b_milestone_completion | 26 passed, 0 failed |
+| test_prd008_s4b_milestone_completion | 28 passed, 0 failed |
 | test_milestones | 68 / 0 |
 | test_workflow_controller | 31 / 0 (1 needs monkeypatch, skipped) |
 | test_control_contracts | 40 / 0 |
@@ -168,3 +175,18 @@ Full non-live pytest result: pending (user).
 - **An unreadable sidecar** gives no retention protection. Its proofs couldn't be used anyway.
 - **Resume selection inside a milestone.** With `--resume` and no id, each milestone's call resumes the workspace's latest checkpoint. A checkpoint from another milestone is rejected by the goal/workspace fingerprints (a fresh run, never a wrong reuse), but a milestone may miss its own older checkpoint. This is unchanged by S4b; PRD-008A is the right place to fix it.
 - **PRD-008A.** This gap existed because milestone execution has its own "completed work reuse" concept. Once direct and milestone execution share `ExecutionPlan → WorkUnit[]`, completion reuse should become a single shared invariant.
+
+## Review fixes (independent review before handover)
+- **Defect fixed:** on the `execute_milestones` path the second revalidation (inside `run_milestones`)
+  re-decided over the already-pruned completed list. That overwrote the result's, the RunRecord's and the
+  sidecar's `milestone_reuse` with only the milestones still valid, losing why M2 reran. The fix is one
+  assessment per run, keyed by the owning `run_id`.
+  - Test: `test_execute_milestones_records_every_decision_once_per_run`, which checks all three places.
+  - Impact: `workflow_controller.enabled` is off by default and on in the hardened profile.
+- **Parity gap closed:** a hand-edited milestone definition (same id) was still skipped when its bytes were
+  intact; direct resume catches the equivalent change through the `goal` fingerprint. Added
+  `definition_digest` and `MILESTONE_DEFINITION_CHANGED`.
+  - Test: `test_a_hand_edited_milestone_definition_reruns_with_its_dependents`.
+- **Schema stamp:** every sidecar save now writes `milestone_completion_schema`. Before this, a first CLI run
+  (starting from a plan file with no schema key) saved a null schema, so a later missing proof would have
+  read as LEGACY. It was still UNVERIFIED either way.
