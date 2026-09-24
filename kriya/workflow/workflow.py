@@ -73,7 +73,7 @@ from kriya.workflow.validation_baseline import (
 )
 from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.failure_reporting import build_failure_report_entry
-from kriya.workflow.acceptance import goal_requires_runtime_behavior
+from kriya.workflow.acceptance import goal_requires_runtime_behavior, output_confirms_nonzero_test_execution
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.policy.errors import PolicyDeniedError
@@ -269,18 +269,31 @@ def _gate_outcome_proven(outcome: Optional[Dict[str, Any]]) -> Optional[bool]:
 
 
 _DETERMINISTIC_GATE_TYPES = ("compile", "test", "targeted_test", "regression_test", "run_verification")
+_TEST_GATE_TYPES = frozenset({"test", "targeted_test", "regression_test"})
 
 
-def deterministic_gate_evidence(gate_outcomes: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+def deterministic_gate_evidence(
+    gate_outcomes: Optional[List[Dict[str, Any]]], attempt: Optional[int],
+) -> List[Dict[str, Any]]:
     """PRD-008 S4c: the latest outcome of each deterministic gate type that
-    genuinely executed, as evidence a caller can bind to (e.g. a milestone
-    that committed nothing). Model verdicts are never included."""
+    genuinely executed IN ``attempt`` (the run's final attempt), as evidence
+    a caller can bind to (e.g. a milestone that committed nothing). A gate
+    that passed in an earlier attempt ran against a different candidate and
+    is never included; neither are model verdicts."""
+    if attempt is None:
+        return []
+    final = [outcome for outcome in (gate_outcomes or []) if outcome.get("attempt") == attempt]
     evidence = []
     for gate_type in _DETERMINISTIC_GATE_TYPES:
         latest = next(
-            (outcome for outcome in reversed(gate_outcomes or []) if outcome.get("type") == gate_type), None,
+            (outcome for outcome in reversed(final) if outcome.get("type") == gate_type), None,
         )
         proven = _gate_outcome_proven(latest)
+        if (
+            proven and gate_type in _TEST_GATE_TYPES
+            and not output_confirms_nonzero_test_execution(str(latest.get("output", "")))
+        ):
+            proven = None  # "collected 0 items" passes vacuously; it proves nothing
         if proven is not None:
             evidence.append({"type": gate_type, "passed": proven, "attempt": latest.get("attempt")})
     return evidence
@@ -4603,7 +4616,9 @@ class WorkflowEngine:
             "verification_results": _build_required_verification_evidence(
                 required_verification, quality_passed, gate_outcomes=state.gate_outcomes,
             ),
-            "deterministic_gate_evidence": deterministic_gate_evidence(state.gate_outcomes),
+            "deterministic_gate_evidence": deterministic_gate_evidence(
+                state.gate_outcomes, state.attempt_number,
+            ),
             "environment_failure": state.environment_failure if not quality_passed else None,
             "failure_category": failure_category,
             "failure_report": failure_report_dicts,

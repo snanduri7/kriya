@@ -123,6 +123,11 @@ def test_a_real_engine_no_change_milestone_converges(git_workspace):  # noqa: F8
     result, _ = _run(git_workspace, milestones, engine)
     assert _decisions(result) == {"M1": ("MATCH", [])}
     assert llm.complete.await_count == len(integration)  # only the integration pass ran
+    # The real workflow reports its deterministic gates; this repository has
+    # no tests, so the vacuous "no tests ran" regression pass is excluded.
+    assert result["integration_result"]["deterministic_gate_evidence"] == [
+        {"type": "compile", "passed": True, "attempt": 1},
+    ]
 
 
 @pytest.mark.parametrize("change", ["verification_policy", "workspace_edit", "upstream_recompleted"])
@@ -405,6 +410,43 @@ def test_j_a_reordered_ledger_cannot_rewrite_who_wrote_last(tmp_path):
     assert COMMIT_LINEAGE_UNVERIFIED in codes
 
 
+def test_i_an_edit_to_a_path_the_integration_pass_owns_is_charged_to_its_milestone(tmp_path):
+    milestones = [_milestone("M1"), _milestone("M2", ["M1"]), _milestone("M3", ["M2"])]
+    outputs = {"M1": {"m1.py": b"1\n"}, "M2": {"pom.xml": b"<m2/>\n"}, "M3": {"m3.py": b"3\n"}}
+    integration = {"pom.xml": b"<m2/><int/>\n"}
+    workspace = _workspace(tmp_path)
+    _run(workspace, milestones, FakeEngine(milestones, outputs, integration))
+    clean, _ = _run(workspace, milestones, FakeEngine(milestones, outputs, integration))
+    assert {status for status, _ in _decisions(clean).values()} == {"MATCH"}
+
+    (workspace / "pom.xml").write_bytes(b"<user-edit/>\n")
+    engine = FakeEngine(milestones, outputs, integration)
+    result, _ = _run(workspace, milestones, engine)
+    assert _decisions(result) == {
+        "M1": ("MATCH", []), "M2": ("CHANGED", [OUTPUT_CHANGED]), "M3": ("CHANGED", [UPSTREAM_INVALIDATED]),
+    }
+    [reason] = next(d for d in result["milestone_reuse"]["decisions"] if d["milestone_id"] == "M2")["reasons"]
+    assert reason["path"] == "pom.xml" and reason["superseded_by"]  # the integration commit
+    assert engine.calls == ["M2", "M3", "INTEGRATION"]
+
+
+def test_i_an_edit_to_a_path_a_failed_milestone_wrote_last_is_charged_to_the_completed_writer(tmp_path):
+    milestones = [_milestone("M1"), _milestone("M2", ["M1"])]
+    outputs = {"M1": {"shared.cfg": b"m1\n"}, "M2": {"shared.cfg": b"m2\n"}}
+
+    class M2CommitsThenFails(FakeEngine):
+        async def run_generation_workflow(self, goal, workspace_path, milestone_index=None, **kwargs):
+            result = await super().run_generation_workflow(goal, workspace_path, milestone_index, **kwargs)
+            return dict(result, quality_gates_passed=milestone_index != 2)
+
+    workspace = _workspace(tmp_path)
+    first, _ = _run(workspace, milestones, M2CommitsThenFails(milestones, outputs))
+    assert first["status"] == "milestone_failed"
+    (workspace / "shared.cfg").write_bytes(b"user\n")
+    result, _ = _run(workspace, milestones, FakeEngine(milestones, outputs))
+    assert _decisions(result) == {"M1": ("CHANGED", [OUTPUT_CHANGED])}
+
+
 # ---------------------------------------------------------------- current workspace is the source of truth
 
 def test_k_a_stale_milestone_reruns_on_the_users_bytes_never_restored(tmp_path):
@@ -421,3 +463,35 @@ def test_k_a_stale_milestone_reruns_on_the_users_bytes_never_restored(tmp_path):
     result, _ = _run(workspace, CHAIN, Observing(CHAIN, CHAIN_OUTPUTS))
     assert _decisions(result)["M1"] == ("CHANGED", [OUTPUT_CHANGED])
     assert seen["m1.py"] == b"USER EDIT\n"  # Kriya did not roll the user's edit back
+
+
+# ---------------------------------------------------------------- gate evidence
+
+def test_gate_evidence_counts_only_the_final_attempt_and_never_unconfirmed_gates():
+    from kriya.workflow.workflow import deterministic_gate_evidence
+
+    outcomes = [
+        # Attempt 1 ran targeted tests against a different candidate, then failed.
+        {"attempt": 1, "type": "targeted_test", "success": True, "output": "2 passed"},
+        {"attempt": 1, "type": "compile", "success": False, "output": "error"},
+        # Attempt 2 (final): compile passed; tests were an unconfirmed skip.
+        {"attempt": 2, "type": "compile", "success": True, "output": "ok"},
+        {"attempt": 2, "type": "test", "success": True, "output": "No test runner available for this stack"},
+        {"attempt": 2, "type": "regression_test", "success": True, "output": "5 passed"},
+    ]
+    assert deterministic_gate_evidence(outcomes, 2) == [
+        {"type": "compile", "passed": True, "attempt": 2},
+        {"type": "regression_test", "passed": True, "attempt": 2},
+    ]
+    assert deterministic_gate_evidence(outcomes, None) == []
+
+
+def test_gate_evidence_never_counts_a_test_run_that_executed_zero_tests():
+    # Real pytest output from a repository with no tests: success, and
+    # nothing verified. Seen live in the real engine's regression gate.
+    from kriya.workflow.workflow import deterministic_gate_evidence
+
+    vacuous = "collected 0 items\n\n============================ no tests ran in 0.00s ======"
+    assert deterministic_gate_evidence([
+        {"attempt": 1, "type": "regression_test", "success": True, "output": vacuous},
+    ], 1) == []

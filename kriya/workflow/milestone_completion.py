@@ -411,7 +411,9 @@ def no_change_verification(
         return None
     return {
         "gate_evidence": gates,
-        "verification_evidence_ids": [f"run:{run_id}:gate:{item.get('type')}" for item in gates],
+        "verification_evidence_ids": [
+            f"run:{run_id}:attempt:{item.get('attempt')}:gate:{item.get('type')}" for item in gates
+        ],
         "verification_policy": policy,
         "upstream": upstream_proof_identity(milestone, proofs),
         "workspace_content_hash": content,
@@ -685,6 +687,33 @@ def assess_completed_milestone_reuse(
     decisions: Dict[str, MilestoneReuseDecision] = {}
     for milestone_id in completed:
         decisions[milestone_id] = _assess_one(context, by_id[milestone_id], proofs.get(milestone_id))
+
+    # A path whose latest verified writer is NOT a completed milestone (the
+    # integration pass, or a milestone that did not finish) is checked too:
+    # its committed post-state is what the history predicts. A mismatch is
+    # charged to the latest completed milestone that wrote the path - its
+    # contribution may be what was lost - naming the superseding commit.
+    completed_set = set(completed)
+    for path, (latest, operation) in sorted(owner.items()):
+        if latest.milestone_id in completed_set:
+            continue  # _assess_one compared it against that milestone's own commit
+        mismatch = _output_mismatch(workspace, operation)
+        if mismatch is None:
+            continue
+        writers = [
+            entry for entry in entries
+            if failures[id(entry)] is None and entry.milestone_id in completed_set and path in entry.paths
+        ]
+        if not writers:
+            continue
+        charged = decisions[writers[-1].milestone_id]
+        if charged.status is FingerprintStatus.MATCH:
+            charged.status = FingerprintStatus.CHANGED
+        charged.reasons.append(dict(
+            mismatch, transaction_id=writers[-1].transaction_id,
+            superseded_by=latest.transaction_id,
+            detail=f"{mismatch['detail']} (last written by a later commit, {latest.transaction_id})",
+        ))
 
     # Everything that will run this time: completed milestones that failed
     # the check, and every milestone not completed at all.

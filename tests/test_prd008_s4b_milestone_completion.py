@@ -411,11 +411,12 @@ def test_milestones_modifying_each_others_files_stay_valid_when_nothing_changed(
     result, _ = _run(workspace, CHAIN, engine)
     assert _decisions(result) == {"M1": ("MATCH", []), "M2": ("MATCH", [])}
     assert engine.calls == ["INTEGRATION"]
-    # Editing the shared file is charged to its latest milestone writer only
-    # when that writer is a milestone - here the integration pass owns it.
+    # Editing the shared file: its latest writer is the integration pass, so
+    # the mismatch is charged to the latest COMPLETED milestone that wrote it
+    # (S4c-4 - before S4c this edit went unnoticed and both were MATCH).
     (workspace / "pom.xml").write_bytes(b"edited\n")
     result, _ = _run(workspace, CHAIN, FakeEngine(CHAIN, outputs, integration))
-    assert _decisions(result) == {"M1": ("MATCH", []), "M2": ("MATCH", [])}
+    assert _decisions(result) == {"M1": ("MATCH", []), "M2": ("CHANGED", [OUTPUT_CHANGED])}
 
 
 def test_a_milestone_that_committed_nothing_is_unverified(tmp_path):

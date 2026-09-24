@@ -22,7 +22,13 @@ S4b already built path ownership from verified entries only, so an unproven over
   - Across runs the workspace lock serializes runs, so `RunRecord.created_at` is the only ordering evidence available. This is the only place a timestamp is used, and only because no transaction ordering exists across runs.
   - An entry out of order is `COMMIT_LINEAGE_UNVERIFIED` and never owns a path.
   - Without this, reordering the ledger would let an earlier writer "own" a file, and a revert of the later milestone's output would pass as MATCH. A test covers exactly that.
-- **Result:** every superseding transaction used to explain an earlier milestone must be present, readable, COMMITTED, bound to its RunRecord, and correctly ordered. Otherwise it gives UNVERIFIED/CHANGED, never MATCH.
+- **Final comparison against the last writer.**
+  - Every path's current bytes are compared with the post-state of its latest verified writer, even when that writer is the integration pass or a milestone that did not finish.
+  - A mismatch there is charged to the latest completed milestone that wrote the path (`CHANGED/OUTPUT_*`), with `superseded_by` naming the later commit.
+  - Before this fix, a user could delete a milestone's contribution from an integration-rewritten `pom.xml` and every milestone was still skipped. A clean rerun still converges.
+  - Tests: `test_i_an_edit_to_a_path_the_integration_pass_owns_...` and `..._a_failed_milestone_wrote_last_...`.
+- **Result:** every superseding transaction used to explain an earlier milestone must be present, readable, COMMITTED, bound to its RunRecord, and correctly ordered. The path's current bytes must also equal that last writer's post-state. Otherwise the result is UNVERIFIED/CHANGED, never MATCH.
+- **S4b assertion changed (stricter, stated explicitly).** The second half of S4b's `test_milestones_modifying_each_others_files_stay_valid_when_nothing_changed` edited an integration-owned `pom.xml` and asserted both milestones MATCH; that was exactly this gap. It now asserts `M1 MATCH, M2 CHANGED/OUTPUT_CHANGED`.
 
 ## S4c-3: milestone-aware checkpoint selection
 `select_unit_checkpoint()` runs before every workflow call of a milestone, including the integration pass:
@@ -66,10 +72,12 @@ Both crash windows are closed and tested:
 
 **Proof requirements** (`no_change_verification()`). All of these must hold, otherwise the completion stays `NO_COMMITTED_OUTPUT` and reruns:
 - `quality_gates_passed`, with zero committed cycles for the milestone;
-- at least one behavioural gate (`test`, `targeted_test`, `regression_test` or `run_verification`) in the workflow's new `deterministic_gate_evidence`:
-  - that field lists the latest outcome per gate type, using the existing rule that marks skipped or unconfirmed gates (e.g. an "unknown" stack's pass-through) as not proven;
-  - compile alone never counts;
-  - an empty diff, "NO CHANGE", or a Planner, Developer or Reviewer verdict are never evidence.
+- at least one behavioural gate (`test`, `targeted_test`, `regression_test` or `run_verification`) in the workflow's new `deterministic_gate_evidence`. That field lists the latest outcome per gate type and excludes:
+  - gates from earlier attempts, which ran against a different candidate; only the final attempt counts, and the attempt number is part of each evidence id;
+  - skipped or unconfirmed gates, using the existing rule (e.g. an "unknown" stack's pass-through);
+  - test runs that executed zero tests, using the existing `output_confirms_nonzero_test_execution`. The real engine reported `regression_test` as passed on a repository with no tests ("collected 0 items / no tests ran"), and that pass is now excluded.
+
+  Compile alone never counts. An empty diff, "NO CHANGE", or a Planner, Developer or Reviewer verdict are never evidence.
 - a current verification-policy fingerprint (PRD-008's `verification_policy` owner split, not a second freshness model);
 - a git content hash for the workspace.
 
@@ -134,7 +142,7 @@ Everything is recorded in one place: `milestone_reuse` on the run result (succes
 - **`docs/user_guide.md`:** §3.4.1 rules.
 
 ## Tests
-**New file:** `tests/test_prd008_s4c_milestone_resume.py`, 22 cases.
+**New file:** `tests/test_prd008_s4c_milestone_resume.py`, 26 cases. The shared harness moved to `tests/_milestone_proof_harness.py`, imported by bare name like `_plugin_test_support`. `tests/` has no `__init__.py`, so a `from tests....` import would fail collection under pytest.
 
 | Spec test | What it covers |
 |---|---|
@@ -146,20 +154,25 @@ Everything is recorded in one place: `milestone_reuse` on the run result (succes
 | F | `--resume` selects each milestone's own newest checkpoint and never another milestone's. |
 | G | Real engine: the checkpoint is selected by identity, then the PRD-008 validator reuses it when fingerprints match and invalidates it when the workspace changed. A newer decoy checkpoint of another unit is ignored. |
 | H | Only other units' or legacy checkpoints exist: fresh start with `NO_COMPATIBLE_MILESTONE_CHECKPOINT`. An explicit `--resume-id` is offered only to its own unit. |
-| I | A fully proven overwrite leaves both milestones valid. |
+| I | A fully proven overwrite leaves both milestones valid. An edit to a path last written by the integration pass or by a failed milestone is charged to the completed milestone that wrote it. |
 | J | An unproven overwrite gives `COMMIT_LINEAGE_UNVERIFIED` naming the transaction; corrupt evidence is refused by the gate; a reordered ledger cannot rewrite who wrote last. |
 | K | A rerun sees the user's bytes; they are not restored. |
 
-**Updated:** `tests/test_prd008_s4b_milestone_completion.py` Test C now also asserts M2's reconstruction-refusal decision in the rolled-forward case. The existing assertions are unchanged.
+**Updated:** `tests/test_prd008_s4b_milestone_completion.py`:
+- Test C now also asserts M2's reconstruction-refusal decision in the rolled-forward case.
+- The shared-file test is now stricter (see S4c-4).
+
+Two unit tests also cover `deterministic_gate_evidence` itself: final attempt only, and zero-test runs excluded.
 
 ### Coding-agent checks (plain-function runner, not pytest)
-- **S4c tests:** 22 of 22 pass.
+- **S4c tests:** 26 of 26 pass. The S4b and S4c files also pass when run from `/tmp` with only `tests/` on `sys.path`, which is how pytest imports them.
 - **Mutation checks:** each one disables a feature and confirms its test then fails. All six fail as they should:
   - lineage ordering off → the reorder test fails;
   - selection off → Tests F and H fail;
   - reconstruction off → Test D fails;
   - lineage label off → Test J fails;
-  - model-trusting no-change → Test C fails.
+  - model-trusting no-change → Test C fails;
+  - the S4c-4 last-writer comparison reverted → both new Test I cases and the S4b shared-file test fail.
 - **Regression modules, all 0 failed:** s4b 28, milestones 68, workflow_controller 31, control_contracts 40, prd007 28, run_record 9, prd008_recovery 20, commit_state_gate 26, resume_fingerprints 47, resume_integrity 18, state001 12, bootstrap_contract 18, cli_smoke 4, subtask_checkpoint 8, checkpoint_control_plane_hashes 3, dispatch_generation 1.
 - **Modules that need pytest-only fixtures:**
   - `test_workflow_controller_enforce`: the same 52 functions fail before and after (autouse fixtures).
