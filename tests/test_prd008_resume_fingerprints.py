@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from kriya.config import AppConfig
+from kriya.config.config import LLMConfig
 from kriya.control.persistence import save_control_state
 from kriya.control.retention import prune_run_state
 from kriya.control.run_coordinator import begin_mutating_run
@@ -216,7 +217,12 @@ def _leaves(value, prefix=()):
 
 
 def test_every_owned_config_path_exists():
-    dump = AppConfig().model_dump()
+    # Per-role model overrides (agent_llms.<role>.llm) default to None, so
+    # check the owned leaves against a config where every role sets one.
+    config = AppConfig()
+    for role in config.agent_llms.model_dump():
+        getattr(config.agent_llms, role).llm = LLMConfig()
+    dump = config.model_dump()
     for path in CONFIG_FIELD_OWNERS:
         node = dump
         for key in path:
@@ -224,8 +230,20 @@ def test_every_owned_config_path_exists():
             node = node[key]
 
 
+def test_only_model_identity_leaves_leave_config():
+    # Per-role and fallback knobs other than identity must stay in config.
+    config = AppConfig()
+    config.agent_llms.planner.llm = LLMConfig(model="m", max_tokens=17)
+    owned = split_config_by_owner(config.model_dump())
+    assert owned["model_runtime"]["agent_llms.planner.llm.model"] == "m"
+    assert owned["config"]["agent_llms"]["planner"]["llm"]["max_tokens"] == 17
+    assert "llm_chain" in owned["config"]
+
+
 def test_config_split_partitions_every_leaf_exactly_once():
-    dump = AppConfig().model_dump()
+    config = AppConfig()
+    config.agent_llms.reviewer.llm = LLMConfig()
+    dump = config.model_dump()
     owned = split_config_by_owner(dump)
     remainder_leaves = set(_leaves(owned["config"]))
     owned_paths = set(CONFIG_FIELD_OWNERS)
@@ -284,6 +302,59 @@ def test_skills_fingerprint_tracks_rule_content_and_ignores_staged_rules(tmp_pat
     (skill / "rules.txt").write_text("rule two\n")
     assert skills_fingerprint([str(tmp_path / "skills")]) != before
     assert not skills_fingerprint(None).available
+
+
+def test_authority_context_sorts_regions_that_differ_only_by_a_missing_successor():
+    # Sorting raw tuples raised TypeError (None vs str) for such a pair.
+    common = {"relpath": "A.java", "region_type": RegionType.METHOD_BODY, "member_key": "m"}
+    regions = [
+        AuthorizedSemanticRegion(successor_key="n", **common),
+        AuthorizedSemanticRegion(successor_key=None, **common),
+    ]
+    fingerprint = authority_context_fingerprint(
+        authorized_semantic_regions=regions, allowed_write_relpaths=None,
+        write_scope_mode=None, protected_source_file=None,
+    )
+    assert fingerprint == authority_context_fingerprint(
+        authorized_semantic_regions=list(reversed(regions)), allowed_write_relpaths=None,
+        write_scope_mode=None, protected_source_file=None,
+    )
+
+
+def test_input_ledger_is_fixed_at_entry_while_effective_grows(git_repo):
+    ledger = ObligationLedger()
+    entry = ledger_fingerprint(ledger)
+    ledger.record(_grown_ledger().current("goal.requirement"))  # the run grows the SAME object
+    saved = generation_resume_fingerprints(
+        _config(), str(git_repo), goal=GOAL, obligation_ledger=ledger,
+        effective_obligation_ledger=ledger, input_obligation_fingerprint=entry,
+    )
+    assert saved["input_obligation_ledger"] == entry
+    assert saved["effective_obligation_ledger"] != entry
+
+
+def test_kriya_runtime_ignores_dotfiles_and_bytecode(tmp_path, monkeypatch):
+    import kriya
+    from kriya.workflow import resume_fingerprints as module
+
+    package = tmp_path / "kriya"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    (package / "a.py").write_text("x = 1\n")
+    monkeypatch.setattr(kriya, "__file__", str(package / "__init__.py"))
+    module.kriya_runtime_fingerprint.cache_clear()
+    try:
+        before = module.kriya_runtime_fingerprint()
+        (package / ".DS_Store").write_bytes(b"finder")
+        (package / "__pycache__").mkdir()
+        (package / "__pycache__" / "a.cpython.pyc").write_bytes(b"\0")
+        module.kriya_runtime_fingerprint.cache_clear()
+        assert module.kriya_runtime_fingerprint() == before
+        (package / "a.py").write_text("x = 2\n")
+        module.kriya_runtime_fingerprint.cache_clear()
+        assert module.kriya_runtime_fingerprint() != before
+    finally:
+        module.kriya_runtime_fingerprint.cache_clear()
 
 
 def test_authority_context_is_order_independent_and_ignores_audit_source():

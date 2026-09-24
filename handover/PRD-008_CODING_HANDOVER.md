@@ -195,13 +195,26 @@ test_proposal_promotion.py now add the production fingerprint block; the two reg
 New: `tests/test_prd008_resume_fingerprints.py`; `test_workflow_controller_enforce.py::
 test_enforce_resume_skips_nothing_when_the_control_state_run_record_is_gone`.
 
-**S2 verification commands (user runs):**
+**S2 review fixes (follow-up commit).** `kriya_runtime` hashed `.DS_Store` files under `kriya/` (Finder
+rewrites them, so a real cross-process resume could read CHANGED); it now skips dotfiles and bytecode, and the
+skills hash skips OS metadata files (other dotfiles such as `.skill_conflicts.json` still count). Model-runtime
+ownership narrowed to identity leaves (`llm.*` and `agent_llms.<role>.llm.*` provider/model/base_url/api_key);
+per-role knobs and `llm_chain` stay in `config`. The input-ledger fingerprint is fixed at entry (the caller's
+ledger is the same object the run grows into its effective ledger). Fingerprint computation can no longer fail
+the run: on save the checkpoint is written without the block (UNVERIFIED on resume); on resume the run starts
+fresh. Region sort uses a serialized key (None vs str `successor_key` raised TypeError). Verified with a
+non-pytest script: checkpoint seeded in one process, resumed in another (plan reused, 3 model calls).
+
+**S2 verification commands (user runs).** The `-k` filter applies to every path on its command line, so it
+gets a command of its own:
 ```bash
 .venv/bin/pytest tests/test_prd008_resume_fingerprints.py tests/test_resume_integrity.py -ra
-.venv/bin/pytest tests/test_workflow.py -k "resume or checkpoint" tests/test_proposal_promotion.py \
-  tests/test_workflow_controller_enforce.py tests/test_state001_checkpoint_workspace_identity.py \
-  tests/test_checkpoint_control_plane_hashes.py tests/test_control_plane_end_to_end.py \
-  tests/test_prd007_run_lifecycle.py tests/test_prd008_commit_state_gate.py tests/test_milestones.py -ra
+.venv/bin/pytest tests/test_proposal_promotion.py tests/test_proposal_binding.py \
+  tests/test_workflow_controller.py tests/test_workflow_controller_enforce.py \
+  tests/test_state001_checkpoint_workspace_identity.py tests/test_checkpoint_control_plane_hashes.py \
+  tests/test_control_plane_end_to_end.py tests/test_run_record.py tests/test_prd007_run_lifecycle.py \
+  tests/test_prd008_commit_state_gate.py tests/test_milestones.py -ra
+.venv/bin/pytest tests/test_workflow.py -ra   # unfiltered: every successful run now fingerprints each checkpoint
 ```
 Lint (coding agent, run): `ruff check` clean on new files; no new findings on touched files (pre-existing
-F401/I001 only). One non-pytest smoke script confirmed a plan-stage resume end to end (3 model calls).
+F401/I001 only).

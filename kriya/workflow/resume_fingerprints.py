@@ -246,9 +246,14 @@ def compare_resume_fingerprints(
 
 # ---------------------------------------------------------------- config ownership
 
+_MODEL_IDENTITY_KEYS = ("provider", "model", "base_url", "api_key")
+_AGENT_ROLES = ("architect", "planner", "reviewer", "run_verifier", "skill_gap", "spec_compliance")
+# Identity leaves only. Per-role and fallback knobs (temperature, max_tokens,
+# context_window, ...) stay in `config`; `llm_chain` is a list and stays in
+# `config` whole (over-invalidating is the safe direction).
 MODEL_RUNTIME_CONFIG_FIELDS: Tuple[Tuple[str, ...], ...] = (
-    ("llm", "provider"), ("llm", "model"), ("llm", "base_url"), ("llm", "api_key"),
-    ("llm_chain",), ("agent_llms",),
+    *(("llm", key) for key in _MODEL_IDENTITY_KEYS),
+    *(("agent_llms", role, "llm", key) for role in _AGENT_ROLES for key in _MODEL_IDENTITY_KEYS),
 )
 CONTAINMENT_CONFIG_FIELDS: Tuple[Tuple[str, ...], ...] = (
     ("autonomy", "containment_backend"),
@@ -330,8 +335,10 @@ def ledger_fingerprint(ledger: Any) -> Fingerprint:
 
 
 _SKILL_IGNORED_DIRS = frozenset({"__pycache__", ".git"})
-# Staged rules are proposals, never loaded as skills until `kriya skills approve`.
-_SKILL_IGNORED_FILES = frozenset({"staged_rules.txt"})
+# Staged rules are proposals, never loaded as skills until `kriya skills
+# approve`; Finder/Explorer metadata changes behind anyone's back. Other
+# dotfiles (e.g. .skill_conflicts.json) do affect behaviour and are hashed.
+_SKILL_IGNORED_FILES = frozenset({"staged_rules.txt", ".DS_Store", "Thumbs.db", "desktop.ini"})
 
 
 def skills_fingerprint(skill_source_dirs: Optional[Sequence[str]]) -> Fingerprint:
@@ -371,9 +378,12 @@ def kriya_runtime_fingerprint() -> Fingerprint:
     files = []
     try:
         for root, dirnames, filenames in os.walk(package_dir):
-            dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+            dirnames[:] = sorted(d for d in dirnames if d != "__pycache__" and not d.startswith("."))
             for filename in sorted(filenames):
-                if filename.endswith((".pyc", ".pyo")):
+                # Source and package data only: bytecode is written at import
+                # time and dotfiles (.DS_Store) change outside Kriya, either of
+                # which would make every cross-process resume read CHANGED.
+                if filename.startswith(".") or filename.endswith((".pyc", ".pyo")):
                     continue
                 path = os.path.join(root, filename)
                 with open(path, "rb") as handle:
@@ -399,18 +409,21 @@ def authority_context_fingerprint(
     ``source`` is audit-only provenance and deliberately excluded."""
     regions = sorted(
         (
-            getattr(region, "relpath", None),
-            getattr(getattr(region, "region_type", None), "value", None),
-            getattr(region, "member_key", None),
-            getattr(region, "successor_key", None),
-        )
-        for region in (authorized_semantic_regions or [])
+            [
+                getattr(region, "relpath", None),
+                getattr(getattr(region, "region_type", None), "value", None),
+                getattr(region, "member_key", None),
+                getattr(region, "successor_key", None),
+            ]
+            for region in (authorized_semantic_regions or [])
+        ),
+        key=lambda region: json.dumps(region),
     )
     return Fingerprint(_digest({
         "allowed_write_relpaths": (
             sorted(allowed_write_relpaths) if allowed_write_relpaths is not None else None
         ),
-        "authorized_semantic_regions": [list(region) for region in regions],
+        "authorized_semantic_regions": regions,
         "write_scope_mode": getattr(write_scope_mode, "value", write_scope_mode),
         "protected_source_file": protected_source_file,
     }), "authority-context")
@@ -428,16 +441,23 @@ def compute_resume_fingerprints(
     authority_inputs: Mapping[str, Any],
     verification_inputs: Mapping[str, Any],
     workspace: Optional[Fingerprint] = None,
+    input_obligation_fingerprint: Optional[Fingerprint] = None,
 ) -> Dict[str, Fingerprint]:
-    """Every fingerprint in FINGERPRINT_NAMES. ``workspace`` may be passed
-    precomputed (a run fixes it once, before touching the real workspace)."""
+    """Every fingerprint in FINGERPRINT_NAMES. ``workspace`` and
+    ``input_obligation_fingerprint`` may be passed precomputed: a run fixes
+    both at entry (the caller's ledger is the same object the run then grows
+    into its effective ledger, so recomputing it later would lose the
+    input/effective distinction)."""
     owned = split_config_by_owner(config_dump)
     return {
         "workspace": workspace if workspace is not None else workspace_fingerprint(workspace_path),
         "config": Fingerprint(_digest(owned["config"]), "config-excluding-owned-fields"),
         "goal": Fingerprint(_digest(dict(goal_inputs)), "goal-inputs"),
         "approved_plan": Fingerprint(_digest(dict(approved_plan_inputs)), "approved-plan-inputs"),
-        "input_obligation_ledger": ledger_fingerprint(input_obligation_ledger),
+        "input_obligation_ledger": (
+            input_obligation_fingerprint if input_obligation_fingerprint is not None
+            else ledger_fingerprint(input_obligation_ledger)
+        ),
         "effective_obligation_ledger": ledger_fingerprint(effective_obligation_ledger),
         "skills": skills_fingerprint(skill_source_dirs),
         "model_runtime": Fingerprint.unavailable("model runtime identity is not bound until PRD-013"),
@@ -481,6 +501,7 @@ def generation_resume_fingerprints(
     strict_spec_compliance: bool = False,
     strict_dependency_index: bool = False,
     workspace: Optional[Fingerprint] = None,
+    input_obligation_fingerprint: Optional[Fingerprint] = None,
 ) -> Dict[str, Fingerprint]:
     """The fingerprints of one run_generation_workflow() call, from its own
     arguments (same names, same defaults). The workflow uses this both to
@@ -495,6 +516,7 @@ def generation_resume_fingerprints(
     return compute_resume_fingerprints(
         workspace_path=workspace_path,
         workspace=workspace,
+        input_obligation_fingerprint=input_obligation_fingerprint,
         config_dump=config.model_dump(),
         goal_inputs={
             "goal": goal,

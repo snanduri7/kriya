@@ -50,6 +50,7 @@ from kriya.workflow.resume_fingerprints import (
 from kriya.workflow.resume_fingerprints import (
     fingerprint_block,
     generation_resume_fingerprints,
+    ledger_fingerprint,
     workspace_fingerprint,
 )
 from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
@@ -1095,9 +1096,14 @@ class WorkflowEngine:
         # when validating a checkpoint (below) and when saving one
         # (_save_stage_checkpoint), so the two can never be derived
         # differently. Every input here is fixed for the whole call.
+        # The caller's ledger is the object this run grows into its
+        # effective ledger, so its input fingerprint is fixed here, at entry.
+        entry_obligation_fingerprint = ledger_fingerprint(obligation_ledger)
+
         def _resume_fingerprints(effective_obligation_ledger: Any, workspace: Any = None) -> Dict[str, Any]:
             return generation_resume_fingerprints(
                 self.kernel.config, workspace_path, workspace=workspace,
+                input_obligation_fingerprint=entry_obligation_fingerprint,
                 goal=goal, error_context=state.error_context,
                 supplementary_context=supplementary_context,
                 recovery_contract_block=recovery_contract_block,
@@ -1140,71 +1146,81 @@ class WorkflowEngine:
                     # is missing or UNAVAILABLE is UNVERIFIED, never a match.
                     # The resumed run starts from the caller's ledger (or an
                     # empty one), so that is the current effective ledger.
-                    current_resume_fingerprints = _resume_fingerprints(obligation_ledger)
-                    run_reference = candidate.get("_run_record")
-                    prior_run_id = (
-                        str(run_reference["run_id"])
-                        if isinstance(run_reference, dict) and run_reference.get("run_id") else None
-                    )
-                    prior_run_record = None
-                    prior_run_record_error = None
-                    prior_run_record_missing = None
-                    if prior_run_id is not None:
-                        try:
-                            prior_run_record = load_run_record(workspace_path, prior_run_id)
-                        except (UnreadableRunRecordError, ValueError) as error:
-                            prior_run_record_error = str(error)
+                    try:
+                        current_resume_fingerprints = _resume_fingerprints(obligation_ledger)
+                    except Exception as error:
+                        # Checkpointing is a convenience and never fails the
+                        # run; an unverifiable checkpoint is simply not used.
+                        logger.warning(
+                            f"Could not compute resume fingerprints ({type(error).__name__}: {error}) - "
+                            f"not resuming checkpoint '{target_id}'; starting a fresh run instead."
+                        )
+                        current_resume_fingerprints = None
+                    if current_resume_fingerprints is not None:
+                        run_reference = candidate.get("_run_record")
+                        prior_run_id = (
+                            str(run_reference["run_id"])
+                            if isinstance(run_reference, dict) and run_reference.get("run_id") else None
+                        )
+                        prior_run_record = None
+                        prior_run_record_error = None
+                        prior_run_record_missing = None
+                        if prior_run_id is not None:
+                            try:
+                                prior_run_record = load_run_record(workspace_path, prior_run_id)
+                            except (UnreadableRunRecordError, ValueError) as error:
+                                prior_run_record_error = str(error)
+                            else:
+                                if prior_run_record is None:
+                                    prior_run_record_missing = prior_run_id
+                        resume_validation = validate_resume_against_reality(
+                            candidate,
+                            workspace_path,
+                            current_resume_fingerprints=current_resume_fingerprints,
+                            run_record=prior_run_record,
+                            run_record_error=prior_run_record_error,
+                            run_record_missing=prior_run_record_missing,
+                        )
+                        logger.info(
+                            "Resume fingerprints for checkpoint '%s': %s", target_id,
+                            json.dumps({
+                                item.name: item.status.value
+                                for item in resume_validation.fingerprint_comparisons
+                            }, sort_keys=True),
+                        )
+                        if resume_validation.decisions:
+                            logger.warning(
+                                "Structured resume decisions: %s",
+                                json.dumps([item.to_dict() for item in resume_validation.decisions], sort_keys=True),
+                            )
+                        if resume_validation.status == ResumeStatus.REFUSED:
+                            return {
+                                "status": "resume_refused",
+                                "quality_gates_passed": False,
+                                "files": [],
+                                "reason_codes": sorted({
+                                    _RESUME_REFUSAL_REASON_CODES[item.fingerprint]
+                                    for item in resume_validation.decisions
+                                    if item.action == ResumeAction.REFUSE
+                                }),
+                                "resume_decisions": [
+                                    item.to_dict() for item in resume_validation.decisions
+                                ],
+                                "run_id": prior_run_id,
+                            }
+                        if resume_validation.status != ResumeStatus.OK:
+                            # PRD-008 S2: any invalidated stage still discards
+                            # the whole checkpoint; S3 narrows this to the
+                            # invalidated stages only.
+                            logger.warning(
+                                f"Refusing to resume checkpoint '{target_id}' (invalidated stages: "
+                                f"{', '.join(resume_validation.invalidated_stages)}): "
+                                f"{'; '.join(resume_validation.mismatches)}. Starting a fresh run instead."
+                            )
                         else:
-                            if prior_run_record is None:
-                                prior_run_record_missing = prior_run_id
-                    resume_validation = validate_resume_against_reality(
-                        candidate,
-                        workspace_path,
-                        current_resume_fingerprints=current_resume_fingerprints,
-                        run_record=prior_run_record,
-                        run_record_error=prior_run_record_error,
-                        run_record_missing=prior_run_record_missing,
-                    )
-                    logger.info(
-                        "Resume fingerprints for checkpoint '%s': %s", target_id,
-                        json.dumps({
-                            item.name: item.status.value
-                            for item in resume_validation.fingerprint_comparisons
-                        }, sort_keys=True),
-                    )
-                    if resume_validation.decisions:
-                        logger.warning(
-                            "Structured resume decisions: %s",
-                            json.dumps([item.to_dict() for item in resume_validation.decisions], sort_keys=True),
-                        )
-                    if resume_validation.status == ResumeStatus.REFUSED:
-                        return {
-                            "status": "resume_refused",
-                            "quality_gates_passed": False,
-                            "files": [],
-                            "reason_codes": sorted({
-                                _RESUME_REFUSAL_REASON_CODES[item.fingerprint]
-                                for item in resume_validation.decisions
-                                if item.action == ResumeAction.REFUSE
-                            }),
-                            "resume_decisions": [
-                                item.to_dict() for item in resume_validation.decisions
-                            ],
-                            "run_id": prior_run_id,
-                        }
-                    if resume_validation.status != ResumeStatus.OK:
-                        # PRD-008 S2: any invalidated stage still discards
-                        # the whole checkpoint; S3 narrows this to the
-                        # invalidated stages only.
-                        logger.warning(
-                            f"Refusing to resume checkpoint '{target_id}' (invalidated stages: "
-                            f"{', '.join(resume_validation.invalidated_stages)}): "
-                            f"{'; '.join(resume_validation.mismatches)}. Starting a fresh run instead."
-                        )
-                    else:
-                        run_id = target_id
-                        resume_state = candidate
-                        logger.info(f"Resuming checkpoint '{run_id}' at stage '{candidate.get('stage')}'.")
+                            run_id = target_id
+                            resume_state = candidate
+                            logger.info(f"Resuming checkpoint '{run_id}' at stage '{candidate.get('stage')}'.")
         if run_id is None:
             run_id = new_run_id()
 
@@ -1908,12 +1924,22 @@ class WorkflowEngine:
         def _save_stage_checkpoint(
             stage: str, *, effective_obligation_ledger: Any = None, **extra: Any,
         ) -> None:
-            resume_fingerprints = _resume_fingerprints(
-                effective_obligation_ledger, workspace=checkpoint_workspace_identity,
-            )
+            # Checkpointing never fails the run (save_checkpoint swallows its
+            # own errors too). Without the block the checkpoint is simply
+            # UNVERIFIED on resume, never trusted.
+            try:
+                resume_fingerprint_block: Optional[Dict[str, Any]] = fingerprint_block(_resume_fingerprints(
+                    effective_obligation_ledger, workspace=checkpoint_workspace_identity,
+                ))
+            except Exception as error:
+                logger.warning(
+                    f"Could not compute resume fingerprints for the '{stage}' checkpoint "
+                    f"({type(error).__name__}: {error}) - it will not be resumable."
+                )
+                resume_fingerprint_block = None
             save_checkpoint(workspace_path, run_id, {
                 "stage": stage,
-                RESUME_FINGERPRINTS_KEY: fingerprint_block(resume_fingerprints),
+                RESUME_FINGERPRINTS_KEY: resume_fingerprint_block,
                 "workspace_fingerprint": checkpoint_ws_fp,
                 "workspace_content_hash": checkpoint_content_hash,
                 "config_fingerprint": checkpoint_cfg_fp,
