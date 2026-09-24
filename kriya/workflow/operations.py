@@ -176,8 +176,12 @@ def validate_operation_result(
 
 
 def all_results_are_no_change(results: Iterable[Dict[str, Any]]) -> bool:
+    # A protocol-error entry also has the content=None/no-edits shape, but it is
+    # a rejected response, never a no-change assessment - independent of whether
+    # the caller already ran validate_operation_result() on it.
     results = list(results)
     return bool(results) and all(
-        classify_result_operation(result) is CodeOperation.NO_CHANGE_ASSESSMENT
+        not result.get("protocol_error")
+        and classify_result_operation(result) is CodeOperation.NO_CHANGE_ASSESSMENT
         for result in results
     )

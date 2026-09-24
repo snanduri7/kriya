@@ -6005,6 +6005,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 file_locations=[FileLocation(filepath=filepath)],
                 likely_files=[filepath],
                 attempted_edits=file_obj.get("edits") or [],
+                # Typed only when the producer named the violation (e.g. a `[]`
+                # file-list answer given as file content). Deliberately NOT in
+                # _DETERMINISTIC_VERDICT_REASON_CODES: it is model output, and a
+                # resampled retry can genuinely return real content.
+                diagnostics=(
+                    {"reason_code": file_obj["protocol_reason_code"]}
+                    if file_obj.get("protocol_reason_code") else None
+                ),
                 attempt=state.attempt_number,
             )
             state.gate_outcomes.append(failure.to_gate_outcome())

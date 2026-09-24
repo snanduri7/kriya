@@ -205,6 +205,26 @@ _XML_COMMENT_RE = re.compile(r"<!--(.*?)-->", re.DOTALL)
 # no new write-path plumbing needed.
 _NO_CHANGE_NEEDED_RE = re.compile(r"^[^\n]*?no change(?:s)? needed[^\n]*", re.IGNORECASE | re.MULTILINE)
 
+# Data formats whose whole document may legitimately be a bare JSON array or
+# object (`[]` is a valid, meaningful data.json or config.yaml). A response of
+# that shape for one of these targets is content, not a file-list protocol
+# answer - see DeveloperAgent._file_list_protocol_answer_error().
+_JSON_DOCUMENT_EXTENSIONS = frozenset({
+    ".json", ".jsonc", ".json5", ".geojson", ".yaml", ".yml",
+})
+# Extensionless tool-config dotfiles whose content is commonly a JSON (or YAML)
+# document - `{}` is the canonical content of .watchmanconfig. Any other
+# extensionless file fails closed: a JSON-array/envelope answer is rejected.
+_JSON_DOCUMENT_BASENAMES = frozenset({
+    ".babelrc", ".eslintrc", ".jshintrc", ".lintstagedrc", ".mocharc", ".nycrc",
+    ".prettierrc", ".releaserc", ".stylelintrc", ".swcrc", ".watchmanconfig",
+})
+
+# Typed reason code carried on a Developer file entry (and from there onto the
+# operation_contract Failure) when a single-file content response is really a
+# file-list protocol answer such as `[]`.
+FILE_LIST_PROTOCOL_ANSWER_AS_CONTENT = "FILE_LIST_PROTOCOL_ANSWER_AS_CONTENT"
+
 
 async def call_with_escalation(
     llm: LLMClient,
@@ -927,8 +947,12 @@ class DeveloperAgent(BaseAgent):
         the original text untouched) on anything else - a real file whose own
         legitimate content happens to be JSON (e.g. package.json) essentially
         never matches this specific "files"/"path"/"content" shape, but an
-        ambiguous or unmatched envelope is left for the existing STRUCTURAL
-        CORRUPTION gate to catch and retry, not guessed at here."""
+        ambiguous, unmatched or content-less envelope is not guessed at here.
+        For a non-data target, _fill_missing_content then rejects it through
+        _file_list_protocol_answer_error() (a typed operation-contract failure
+        and a retry) - it no longer relies on a STRUCTURAL CORRUPTION gate,
+        which a .py target never had: `{"files": [...]}` is a valid Python
+        dict literal."""
         try:
             parsed = json.loads(text)
         except (json.JSONDecodeError, TypeError):
@@ -957,6 +981,56 @@ class DeveloperAgent(BaseAgent):
         if len(with_content) == 1:
             return with_content[0]["content"]
         return None
+
+    @staticmethod
+    def _file_list_protocol_answer_error(content: Optional[str], filepath: str) -> Optional[str]:
+        """Return a protocol error when a single-file content response is really
+        a file-list protocol answer, never file content.
+
+        Found 2026-09-24 (handover/DEFECT_DEVELOPER_EMPTY_ARRAY_WRITTEN_AS_FILE.md):
+        a Developer in MODE: REPAIR_WITH_FULL_FILE answered `[]` - the batch
+        protocol's "no files to change" - and the two characters became the
+        whole of calc.py. `[]` is valid Python, the repository had no tests, so
+        every gate passed and the destroyed file was committed as SUCCESS.
+        _unwrap_file_content_envelope() only recovers an envelope that carries
+        real content, so an empty or content-less one fell through as text.
+
+        `content` is the already-sanitized text (fences stripped, any
+        recoverable envelope already unwrapped). A protocol answer is a whole
+        response that parses as JSON and is a top-level array (an empty or
+        path-only file list), an empty object, or an object with an envelope
+        key (files/filepath/path). Nothing else is inspected: a real source
+        file essentially never parses as one of those JSON shapes. Targets
+        whose own format may legitimately be such a document (data.json,
+        config.yaml, package.json with its "files" key, .babelrc-style tool
+        dotfiles) are exempt - for them the text is content and the ordinary
+        gates judge it. Any other target fails closed, so a JSON config file
+        outside those lists cannot be created as `[]`/`{}` (an accepted
+        availability limit, never a silent write)."""
+        if content is None:
+            return None
+        if (
+            os.path.splitext(filepath)[1].lower() in _JSON_DOCUMENT_EXTENSIONS
+            or os.path.basename(filepath) in _JSON_DOCUMENT_BASENAMES
+        ):
+            return None
+        try:
+            parsed = json.loads(content)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return None
+        if isinstance(parsed, list):
+            shape = "an empty JSON array" if not parsed else "a JSON array (a file list)"
+        elif isinstance(parsed, dict) and (
+            not parsed or any(key in parsed for key in ("files", "filepath", "path"))
+        ):
+            shape = "an empty JSON object" if not parsed else "a JSON file envelope"
+        else:
+            return None
+        return (
+            f"{FILE_LIST_PROTOCOL_ANSWER_AS_CONTENT}: the response for '{filepath}' is "
+            f"{shape} - a file-list protocol answer, not file content; the file is left "
+            "untouched"
+        )
 
     @staticmethod
     def sanitize_generated_content(text: Optional[str], filepath: Optional[str] = None) -> Optional[str]:
@@ -2066,14 +2140,27 @@ class DeveloperAgent(BaseAgent):
             # live (2026-08-13, ignite_qpid_protocol validation): the model's own
             # analysis correctly named the real cause in a sibling file, but
             # nothing downstream ever read this text again after logging it.
+            protocol_reason_code = None
             if edits:
                 file_entry = {"filepath": filepath, "content": None, "edits": edits}
             else:
-                file_entry = {"filepath": filepath, "content": self.sanitize_generated_content(content, filepath=filepath)}
+                sanitized = self.sanitize_generated_content(content, filepath=filepath)
+                list_answer_error = self._file_list_protocol_answer_error(sanitized, filepath)
+                if list_answer_error:
+                    logger.warning(
+                        f"Developer returned a file-list protocol answer instead of content for "
+                        f"'{filepath}': {sanitized!r}. Refusing to write it as the file."
+                    )
+                    sanitized = None
+                    protocol_error = list_answer_error
+                    protocol_reason_code = FILE_LIST_PROTOCOL_ANSWER_AS_CONTENT
+                file_entry = {"filepath": filepath, "content": sanitized}
             if analysis:
                 file_entry["analysis"] = analysis
             if protocol_error:
                 file_entry["protocol_error"] = protocol_error
+            if protocol_reason_code:
+                file_entry["protocol_reason_code"] = protocol_reason_code
             files_out.append(file_entry)
         return files_out
 
