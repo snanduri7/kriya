@@ -2790,6 +2790,9 @@ def _print_recovery_assessment(assessment) -> None:
             click.echo(f"  {len(finding.leftover_staged_files)} staged temp file(s) to remove")
     for path, reason in assessment.unreadable_records:
         click.secho(f"\nUnreadable run record {path}: {reason}", fg="red")
+        click.echo("  Kriya never edits or deletes it. Once you have confirmed it is not the only "
+                   "evidence of an interrupted commit (no commit above belongs to it and the "
+                   "workspace files are as you expect), move it out of .kriya/control/runs/.")
     if assessment.evidence_error:
         click.secho(f"\nCommit evidence could not be listed: {assessment.evidence_error}", fg="red")
 

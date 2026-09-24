@@ -16,7 +16,7 @@ Schema 3 (PRD-008) adds the RECOVERED terminal lifecycle and its ``recovery``
 provenance. RECOVERED says only HOW the record ended - explicit, evidence-based
 ``kriya runs recover`` - never that the run succeeded: ``commit_result`` still
 says what reached the workspace and ``terminal_status`` is NEEDS_REVIEW or
-FAILED, because the run's post-commit steps never ran.
+FAILURE, because the run's post-commit steps never ran.
 """
 
 from __future__ import annotations
@@ -56,7 +56,8 @@ TERMINAL_LIFECYCLES = frozenset({
 # its commit state unknown. SUCCESS/FAILURE are already settled.
 _RECOVERABLE_TERMINALS = frozenset({RunLifecycle.UNCERTAIN})
 TERMINAL_STATUS_NEEDS_REVIEW = "NEEDS_REVIEW"
-TERMINAL_STATUS_FAILED = "FAILED"
+# Same word an ordinary failed run records (its lifecycle value).
+TERMINAL_STATUS_FAILURE = RunLifecycle.FAILURE.value
 
 # Settled results of one commit cycle.
 COMMIT_COMMITTED = "COMMITTED"
@@ -387,7 +388,7 @@ class RunRecord:
         return self._advance(
             RunLifecycle.RECOVERED, commits=commits,
             commit_result=summarize_commit_result(commits),
-            terminal_status=TERMINAL_STATUS_NEEDS_REVIEW if needs_review else TERMINAL_STATUS_FAILED,
+            terminal_status=TERMINAL_STATUS_NEEDS_REVIEW if needs_review else TERMINAL_STATUS_FAILURE,
             recovery=recovery,
         )
 

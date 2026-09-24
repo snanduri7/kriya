@@ -14,7 +14,7 @@ then recovered through kriya/control/recovery.py and the CLI:
   in a stage, no commit    -              crashed run -> RECOVERED/FAILED
 
 RECOVERED never means SUCCESS: terminal_status is NEEDS_REVIEW whenever the
-workspace changed, FAILED otherwise.
+workspace changed, FAILURE otherwise.
 """
 import hashlib
 import json
@@ -27,6 +27,7 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+import kriya.workflow.edit_safety as edit_safety_module
 from kriya.cli import main as cli_main
 from kriya.control.commit_state import UncertainWorkspaceStateError, assess_workspace_commit_state
 from kriya.control.persistence import load_run_record, run_record_path, scan_run_records
@@ -46,7 +47,7 @@ from kriya.control.recovery import (
     recover_workspace,
 )
 from kriya.control.retention import prune_run_state
-from kriya.control.run_coordinator import begin_mutating_run
+from kriya.control.run_coordinator import begin_mutating_run, transition_mutating_run
 from kriya.control.run_ownership import WorkspaceLockHeldError, acquire_run_lock
 from kriya.control.run_record import (
     IllegalRunTransitionError,
@@ -54,7 +55,14 @@ from kriya.control.run_record import (
     RunRecord,
     UnsupportedRunRecordError,
 )
-from kriya.workflow.edit_safety import CommitState, load_commit_evidence, stage_file_prefix
+from kriya.workflow.edit_safety import (
+    CommitState,
+    StagedFileWrite,
+    load_commit_evidence,
+    read_file_revision,
+    stage_file_prefix,
+)
+from kriya.workflow.terminal_commit import commit_terminal_candidate
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -206,7 +214,7 @@ def test_crash_before_commit_evidence_settles_the_cycle_not_committed(tmp_path):
     record = _only_record(workspace)
     assert record.lifecycle_state is RunLifecycle.RECOVERED
     assert record.commits[0]["result"] == "NOT_COMMITTED"
-    assert (record.commit_result, record.terminal_status) == ("NOT_COMMITTED", "FAILED")
+    assert (record.commit_result, record.terminal_status) == ("NOT_COMMITTED", "FAILURE")
     assert record.recovery["prior_lifecycle_state"] == "COMMIT_ELIGIBLE"
     assert record.recovery["tool"] == "kriya runs recover"
     assert _source_snapshot(workspace) == before
@@ -231,7 +239,7 @@ def test_crash_after_staging_settles_rolled_back_and_removes_staged_files(tmp_pa
     assert _staged(workspace) == [] and len(report.removed_staged_files) == 2
     record = _only_record(workspace)
     assert (record.lifecycle_state, record.commit_result, record.terminal_status) == (
-        RunLifecycle.RECOVERED, "ROLLED_BACK", "FAILED",
+        RunLifecycle.RECOVERED, "ROLLED_BACK", "FAILURE",
     )
     assert _source_snapshot(workspace) == original
     _assert_gate_admits(workspace)
@@ -353,13 +361,13 @@ def test_crashed_run_without_a_commit_is_recovered_as_failed(tmp_path):
     record = _only_record(workspace)
     assert record.lifecycle_state is RunLifecycle.CANDIDATE and not record.commit_state_unknown
     [finding] = assess_recovery(workspace).records
-    assert finding.proposed_terminal_status == "FAILED"
+    assert finding.proposed_terminal_status == "FAILURE"
 
     recover_workspace(workspace)
 
     record = _only_record(workspace)
     assert (record.lifecycle_state, record.commit_result, record.terminal_status) == (
-        RunLifecycle.RECOVERED, "NO_COMMIT", "FAILED",
+        RunLifecycle.RECOVERED, "NO_COMMIT", "FAILURE",
     )
 
 
@@ -376,6 +384,88 @@ def test_unreadable_evidence_blocks_its_run_and_is_never_touched(tmp_path):
 
     assert evidence_path.read_text() == "{ torn"
     assert _only_record(workspace).lifecycle_state is RunLifecycle.COMMIT_ELIGIBLE
+
+
+# ---------------------------------------------------------------- in-process interrupts
+
+def _interrupted_commit(tmp_path, monkeypatch, *, rollback_fails=False):
+    """Ctrl-C (KeyboardInterrupt) on the second staged replace of a real
+    terminal commit inside a real mutating run."""
+    workspace = canonical_workspace(str(_workspace(tmp_path)))
+    real_replace = os.replace
+    calls = []
+
+    def interrupting_replace(source, target):
+        if os.path.basename(source).startswith(".kriya-stage-"):
+            calls.append(target)
+            if len(calls) == 2:
+                raise KeyboardInterrupt
+        return real_replace(source, target)
+
+    def write(rel, data, exists):
+        path = os.path.join(workspace, rel)
+        return StagedFileWrite(path, data.decode(), path, read_file_revision(path),
+                               expected_base_exists=exists, content_bytes=data, mode=0o644)
+
+    if rollback_fails:
+        monkeypatch.setattr(edit_safety_module, "_atomic_write_bytes",
+                            lambda *_: (_ for _ in ()).throw(OSError("restore failed")))
+    with pytest.raises(KeyboardInterrupt):
+        with begin_mutating_run(workspace) as context:
+            transition_mutating_run(context, RunLifecycle.RUNNING)
+            transition_mutating_run(context, RunLifecycle.CANDIDATE)
+            monkeypatch.setattr(os, "replace", interrupting_replace)
+            commit_terminal_candidate(
+                [write("a.py", A_AFTER, True), write("pkg/new.py", NEW_AFTER, False)],
+                workspace_path=workspace, transaction_id="tx1",
+            )
+    monkeypatch.setattr(os, "replace", real_replace)
+    return workspace
+
+
+def test_interrupt_mid_apply_rolls_back_in_process_and_needs_no_recovery(tmp_path, monkeypatch):
+    workspace = _interrupted_commit(tmp_path, monkeypatch)
+    assert Path(workspace, "a.py").read_bytes() == A_BEFORE
+    assert not Path(workspace, "pkg/new.py").exists() and _staged(workspace) == []
+    assert _evidence(workspace).state is CommitState.ROLLED_BACK
+    record = _only_record(workspace)
+    assert (record.lifecycle_state, record.commit_result) == (RunLifecycle.FAILURE, "ROLLED_BACK")
+    assert assess_recovery(workspace).status == STATUS_CLEAN
+    _assert_gate_admits(workspace)
+
+
+def test_interrupt_with_a_failed_rollback_keeps_the_candidate_for_complete_partial(tmp_path, monkeypatch):
+    workspace = _interrupted_commit(tmp_path, monkeypatch, rollback_fails=True)
+    monkeypatch.undo()
+    assert _evidence(workspace).state is CommitState.UNCERTAIN
+    assert _only_record(workspace).lifecycle_state is RunLifecycle.UNCERTAIN
+    assert len(_staged(workspace)) == 1  # kept: the only copy of pkg/new.py's bytes
+    [finding] = assess_recovery(workspace).evidence
+    assert finding.outcome == OUTCOME_PARTIAL and finding.roll_forward_refusal is None
+
+    report = recover_workspace(workspace, complete_partial=True)
+
+    assert report.after.status == STATUS_CLEAN and not report.errors
+    assert Path(workspace, "pkg/new.py").read_bytes() == NEW_AFTER and _staged(workspace) == []
+    record = _only_record(workspace)
+    assert (record.lifecycle_state, record.commit_result, record.terminal_status) == (
+        RunLifecycle.RECOVERED, "COMMITTED", "NEEDS_REVIEW",
+    )
+    assert record.recovery["prior_lifecycle_state"] == "UNCERTAIN"
+
+
+def test_staged_files_of_a_transaction_whose_id_extends_this_one_are_never_claimed(tmp_path):
+    workspace = _crash(_workspace(tmp_path), "stage2")
+    # Transaction "tx1-1", operation 0: a bare prefix test would read it as
+    # tx1's operation 1, find two candidates and refuse, or delete it.
+    other = Path(workspace, stage_file_prefix("tx1-1") + "0-zzzz")
+    other.write_bytes(b"another transaction\n")
+    [finding] = assess_recovery(workspace).evidence
+    assert finding.roll_forward_refusal is None
+    assert str(other) not in finding.leftover_staged_files
+
+    assert recover_workspace(workspace, complete_partial=True).after.status == STATUS_CLEAN
+    assert other.read_bytes() == b"another transaction\n"
 
 
 # ---------------------------------------------------------------- lock and read-only
@@ -484,7 +574,7 @@ def test_recover_accepts_an_uncertain_record_and_nothing_already_settled():
     uncertain = _eligible().settle_commit("UNCERTAIN")
     assert uncertain.lifecycle_state is RunLifecycle.UNCERTAIN
     recovered = uncertain.recover({"tx-a": "ROLLED_BACK"}, {})
-    assert (recovered.commit_result, recovered.terminal_status) == ("ROLLED_BACK", "FAILED")
+    assert (recovered.commit_result, recovered.terminal_status) == ("ROLLED_BACK", "FAILURE")
     for settled in (
         _eligible().settle_commit("COMMITTED").transition(RunLifecycle.SUCCESS),
         RunRecord.new("r", "ws", None, None).transition(RunLifecycle.FAILURE),

@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import stat
 import uuid
 from dataclasses import dataclass, field, replace
@@ -88,6 +89,9 @@ STATUS_RUN_ACTIVE = "RUN_ACTIVE"
 STATUS_RECOVERY_AVAILABLE = "RECOVERY_AVAILABLE"
 STATUS_COMPLETE_PARTIAL_REQUIRED = "COMPLETE_PARTIAL_REQUIRED"
 STATUS_MANUAL_ACTION_REQUIRED = "MANUAL_ACTION_REQUIRED"
+
+# What follows stage_file_prefix(): "<operation index>-<mkstemp random name>".
+_STAGED_SUFFIX = re.compile(r"(\d+)-[a-z0-9_]+")
 
 _OPEN_EVIDENCE_STATES = (CommitState.IN_PROGRESS, CommitState.UNCERTAIN)
 _EVIDENCE_TO_CYCLE = {
@@ -293,11 +297,12 @@ def _staged_files(workspace: str, evidence: CommitEvidence) -> Dict[int, List[st
         except (FileNotFoundError, NotADirectoryError):
             continue
         for name in names:
-            if not name.startswith(prefix):
-                continue
-            index = name[len(prefix):].split("-", 1)[0]
-            if index.isdigit():
-                found.setdefault(int(index), []).append(os.path.join(directory, name))
+            # Exact shape "<prefix><index>-<mkstemp suffix>": transaction ids
+            # may contain "-", so a bare prefix test could claim the staged
+            # files of another transaction whose id extends this one.
+            match = _STAGED_SUFFIX.fullmatch(name[len(prefix):]) if name.startswith(prefix) else None
+            if match:
+                found.setdefault(int(match.group(1)), []).append(os.path.join(directory, name))
     return found
 
 

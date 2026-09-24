@@ -648,6 +648,11 @@ def commit_revision_grounded_batch(
     applied: List[str] = []
     created_directories: List[str] = []
     mutation_started = False
+    # Staged files are removed only once durable evidence says the batch is
+    # settled (or there is no evidence at all). While it is IN_PROGRESS or
+    # UNCERTAIN they may be the only copy of the candidate bytes that
+    # `kriya runs recover --complete-partial` needs to finish the commit.
+    evidence_settled = workspace_path is None
     try:
         for index, item in enumerate(staged):
             if not item.delete:
@@ -682,7 +687,9 @@ def commit_revision_grounded_batch(
                 os.replace(staged_paths[item.target_path], item.target_path)
                 staged_paths.pop(item.target_path)
             _fsync_directory(parent)
-    except Exception as commit_error:
+    except BaseException as commit_error:
+        # BaseException: a KeyboardInterrupt/SystemExit mid-apply must still
+        # restore the workspace (PRD-005), then propagate unchanged below.
         rollback_errors = []
         for target_path in reversed(applied):
             try:
@@ -712,6 +719,12 @@ def commit_revision_grounded_batch(
                 _persist_commit_evidence(workspace_path, _evidence(terminal_state, failure=failure))
             except Exception as error:
                 evidence_error = error
+            else:
+                evidence_settled = terminal_state is CommitState.ROLLED_BACK
+        if not isinstance(commit_error, Exception):
+            # The evidence now says what happened (ROLLED_BACK, or UNCERTAIN/
+            # IN_PROGRESS for `kriya runs recover`); the interrupt itself wins.
+            raise
         if rollback_errors:
             raise UncertainCommitError(
                 f"Candidate commit failed ({commit_error}); rollback also failed for: "
@@ -730,11 +743,12 @@ def commit_revision_grounded_batch(
             f"Candidate commit failed and was rolled back: {commit_error}"
         ) from commit_error
     finally:
-        for path in staged_paths.values():
-            try:
-                os.unlink(path)
-            except FileNotFoundError:
-                pass
+        if evidence_settled or not mutation_started:
+            for path in staged_paths.values():
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
 
     revisions = {
         item.target_path: content_revision("" if item.delete else item.content)
