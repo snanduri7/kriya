@@ -43,7 +43,7 @@ marker there), not here.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from kriya.workflow.proposal_binding import proposal_to_authorized_semantic_regions
 from kriya.workflow.proposal_store import (
@@ -52,10 +52,6 @@ from kriya.workflow.proposal_store import (
     verify_persisted_proposal,
 )
 from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion
-
-if TYPE_CHECKING:
-    from kriya.workflow.review_context import ProposedModification
-    from kriya.workflow.workflow import WorkflowEngine
 
 REASON_PROPOSAL_NOT_APPROVED = "PROPOSAL_NOT_APPROVED"
 REASON_PROPOSAL_APPROVED_DIGEST_MISSING = "PROPOSAL_APPROVED_DIGEST_MISSING"
@@ -94,7 +90,7 @@ class PromotionResult:
     details: Tuple[str, ...] = ()
 
 
-def build_authoritative_goal(proposal: "ProposedModification") -> str:
+def build_authoritative_goal(proposal: "_review_context_module.ProposedModification") -> str:
     """Pure, deterministic. Reads ONLY digest-bearing fields of `proposal`
     (target_file, target_member_key, proposed_change, must_preserve,
     verification - all members of proposal_store.py's own _DIGEST_FIELDS) -
@@ -248,7 +244,7 @@ class ProposalPromotionError(Exception):
 async def execute_approved_proposal(
     proposal_id: str,
     workspace_root: str,
-    we: "WorkflowEngine",
+    we: "_workflow_module.WorkflowEngine",
     *,
     knowledge_risk_confirmed: bool = False,
     step_callback: Optional[Callable[[str, str], Any]] = None,
@@ -291,3 +287,11 @@ async def execute_approved_proposal(
         web_lookup_query_callback=web_lookup_query_callback,
         protected_source_file=protected_source_file,
     )
+
+
+# Annotation-only modules (PRD-001), imported at runtime so
+# typing.get_type_hints() resolves. Module imports at the end of this
+# module: they import it back, and a module object (unlike a name) can be
+# bound while either side is still initializing, whichever loads first.
+import kriya.workflow.review_context as _review_context_module  # noqa: E402
+import kriya.workflow.workflow as _workflow_module  # noqa: E402

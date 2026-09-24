@@ -25,14 +25,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Protocol, Tuple
+from typing import Callable, Dict, List, Optional, Protocol, Tuple
 
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 
 logger = logging.getLogger(__name__)
-
-if TYPE_CHECKING:
-    from kriya.tools.toolchain_identity import ToolchainIdentity
 
 
 class TrustClass(Enum):
@@ -186,7 +183,7 @@ class ContainmentProfile:
     # detection.  The OCI backend must honor this exact versioned profile;
     # None preserves generic/MCP containment callers that have no project
     # toolchain.
-    toolchain_identity: Optional["ToolchainIdentity"] = None
+    toolchain_identity: Optional["_toolchain_identity_module.ToolchainIdentity"] = None
 
     @property
     def backend_required(self) -> bool:
@@ -254,7 +251,7 @@ class PreparedContainment:
     command_prefix: Optional[List[str]] = None
     cleanup: Optional[Callable[[], None]] = None
     exec_target: Optional[List[str]] = None
-    toolchain_identity: Optional["ToolchainIdentity"] = None
+    toolchain_identity: Optional["_toolchain_identity_module.ToolchainIdentity"] = None
 
 
 class ContainmentBackend(Protocol):
@@ -397,3 +394,10 @@ def resolve_containment_backend(name: str) -> ContainmentBackend:
             "registered under that name. This is a configuration error, not a "
             "reason to fall back to uncontained execution."
         ) from None
+
+
+# Annotation-only modules (PRD-001), imported at runtime so
+# typing.get_type_hints() resolves. Module imports at the end of this
+# module: they import it back, and a module object (unlike a name) can be
+# bound while either side is still initializing, whichever loads first.
+import kriya.tools.toolchain_identity as _toolchain_identity_module  # noqa: E402

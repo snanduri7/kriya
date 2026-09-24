@@ -25,18 +25,18 @@ scan) and dynamic (patched write-capable components raise-on-call) zero-write
 proofs, matching review_context.py's own A1/A2 convention.
 
 `ProposedModification` itself (and the fields this module adds to it) stays
-defined in `kriya/workflow/review_context.py` - importing it here at RUNTIME
-would be circular (review_context.py imports this module's `EvidenceBinding`/
-`bind_evidence`/`sha256_file`), so every reference to it here is
-TYPE_CHECKING-only; functions that take a proposal only ever read its public
-fields (duck-typed), never construct or mutate one.
+defined in `kriya/workflow/review_context.py`, which imports this module's
+`EvidenceBinding`/`bind_evidence`/`sha256_file`; to avoid that cycle, annotations
+name it through a module alias bound at the end of this module (PRD-001).
+Functions that take a proposal only ever read its public fields (duck-typed),
+never construct or mutate one.
 """
 from __future__ import annotations
 
 import hashlib
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from kriya.analyzer.java_members import JavaMember
 from kriya.control.workspace_identity import workspace_identity
@@ -47,9 +47,6 @@ from kriya.workflow.semantic_region_authority import (
     build_file_snapshot,
     stable_member_key,
 )
-
-if TYPE_CHECKING:
-    from kriya.workflow.review_context import ProposedModification, RelatedFile
 
 EVIDENCE_TYPE_JAVA_MEMBER = "java_member"
 EVIDENCE_TYPE_RELATED_FILE = "related_file"
@@ -108,7 +105,7 @@ def _read_text(path: str) -> str:
 def bind_evidence(
     eid: str,
     member_ids: Dict[str, JavaMember],
-    relation_ids: Dict[str, "RelatedFile"],
+    relation_ids: Dict[str, "_review_context_module.RelatedFile"],
     workspace_root: str,
     target_relpath: str,
 ) -> EvidenceBinding:
@@ -175,7 +172,7 @@ def _content_bytes(path: str) -> bytes:
         return fh.read()
 
 
-def verify_proposal_bindings(proposal: "ProposedModification", workspace_root: str) -> BindingVerificationResult:
+def verify_proposal_bindings(proposal: "_review_context_module.ProposedModification", workspace_root: str) -> BindingVerificationResult:
     """Read-only re-verification - never raises for an expected stale/invalid
     state (missing file, changed content, wrong workspace); always returns a
     structured result instead, so a future A3 promotion step can report
@@ -245,7 +242,7 @@ def verify_proposal_bindings(proposal: "ProposedModification", workspace_root: s
     return BindingVerificationResult(ok=not reasons, reason_codes=tuple(reasons), details=tuple(details))
 
 
-def proposal_to_authorized_semantic_regions(proposal: "ProposedModification") -> List[AuthorizedSemanticRegion]:
+def proposal_to_authorized_semantic_regions(proposal: "_review_context_module.ProposedModification") -> List[AuthorizedSemanticRegion]:
     """Pure translation of a proposal's ALREADY-APPROVED-SHAPED semantics
     into CORR-018-P1's own authority representation - never approval itself,
     never a second authority system. Reads only `proposal`'s own fields (set
@@ -289,3 +286,10 @@ def proposal_to_authorized_semantic_regions(proposal: "ProposedModification") ->
         ),
         AuthorizedSemanticRegion(relpath=proposal.target_file, region_type=RegionType.IMPORTS, source=source),
     ]
+
+
+# Annotation-only modules (PRD-001), imported at runtime so
+# typing.get_type_hints() resolves. Module imports at the end of this
+# module: they import it back, and a module object (unlike a name) can be
+# bound while either side is still initializing, whichever loads first.
+import kriya.workflow.review_context as _review_context_module  # noqa: E402

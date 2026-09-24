@@ -67,6 +67,57 @@ def test_production_code_has_no_undefined_names():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_every_production_annotation_resolves_at_runtime():
+    # F821 accepts a name imported only under TYPE_CHECKING, but
+    # typing.get_type_hints() cannot see it and raises NameError. Every
+    # class, method and function defined in kriya/ must resolve.
+    script = """
+import importlib, inspect, typing
+from pathlib import Path
+unresolved = []
+for path in sorted(Path('kriya').rglob('*.py')):
+    parts = list(path.with_suffix('').parts)
+    if parts[-1] == '__init__':
+        parts.pop()
+    module = importlib.import_module('.'.join(parts))
+    for name, obj in vars(module).items():
+        if getattr(obj, '__module__', None) != module.__name__:
+            continue
+        targets = [obj]
+        if inspect.isclass(obj):
+            targets += [v for v in vars(obj).values() if inspect.isfunction(v)]
+        elif not inspect.isfunction(obj):
+            continue
+        for target in targets:
+            try:
+                typing.get_type_hints(target)
+            except NameError as error:
+                unresolved.append(f'{module.__name__}.{name}: {error}')
+print('\\n'.join(unresolved))
+raise SystemExit(1 if unresolved else 0)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=ROOT,
+        capture_output=True, text=True, timeout=180,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+# Pairs that import each other; annotations cross via a module alias bound at
+# the end of the module, which must work whichever side loads first.
+@pytest.mark.parametrize("module", [
+    "kriya.tools.containment", "kriya.tools.toolchain_identity",
+    "kriya.workflow.proposal_binding", "kriya.workflow.proposal_promotion",
+    "kriya.workflow.review_context", "kriya.workflow.workflow",
+])
+def test_mutually_importing_modules_load_first_in_fresh_process(module):
+    result = subprocess.run(
+        [sys.executable, "-c", f"import {module}"], cwd=ROOT,
+        capture_output=True, text=True, timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("mode", ["audit", "enforce"])
 def test_execution_policy_accepts_supported_modes(mode):
     assert ExecutionPolicyConfig(mode=mode).mode == mode

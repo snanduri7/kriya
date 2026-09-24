@@ -19,7 +19,7 @@ import re
 import statistics
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.agents.contracts import (
@@ -72,12 +72,12 @@ from kriya.workflow.context_source import (
     evaluate_member_hints_from_search_evidence,
     resolve_member_hints_from_failure_location,
 )
-if TYPE_CHECKING:
-    # String-annotation-only names (PRD-001): imported for type checkers and
-    # get_type_hints() without adding runtime import cycles.
-    from kriya.tools.validate import PolymorphicValidator
-    from kriya.workflow.context_package import ContextItem
-    from kriya.workflow.plan_schema import EngineeringPlan
+# Annotation-only names, imported at runtime so typing.get_type_hints() on
+# this module's dataclasses and functions resolves (PRD-001; none of these
+# modules imports attempt.py, so there is no cycle).
+from kriya.tools.validate import PolymorphicValidator
+from kriya.workflow.context_package import ContextItem
+from kriya.workflow.plan_schema import EngineeringPlan
 from kriya.workflow.retry_prompts import _build_coordinated_retry_prompt,_build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
 from kriya.workflow.retry_policy import API_CONTRACT_RECOVERY_MAX_ATTEMPTS, RetryAction, decide_retry_action

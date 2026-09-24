@@ -58,7 +58,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from kriya.analyzer.java_members import extract_java_members
 from kriya.workflow.contract_authority import (
@@ -75,8 +75,9 @@ from kriya.workflow.semantic_region_authority import (
     stable_record_component_key,
 )
 
-if TYPE_CHECKING:
-    from kriya.workflow.plan_schema import EngineeringPlan
+# Annotation-only names, imported at runtime so typing.get_type_hints()
+# resolves (PRD-001); no cycle.
+from kriya.workflow.plan_schema import EngineeringPlan
 
 _RECORD_DECL_RE = re.compile(r"\brecord\s+([A-Za-z_$][\w$]*)\b")
 _INTERFACE_DECL_RE_TEMPLATE = r"\binterface\s+{name}\b"

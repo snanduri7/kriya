@@ -34,10 +34,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-if TYPE_CHECKING:
-    from kriya.workflow.plan_schema import EngineeringPlan
+# Annotation-only names, imported at runtime so typing.get_type_hints()
+# resolves (PRD-001); no cycle.
+from kriya.workflow.plan_schema import EngineeringPlan
 
 
 class AuthorizationProvenance(str, Enum):

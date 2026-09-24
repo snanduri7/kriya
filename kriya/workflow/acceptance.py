@@ -1,12 +1,13 @@
 """Deterministic acceptance assertions above compiler/test exit codes."""
 
 import re
-from typing import Any, Dict, TYPE_CHECKING, Optional
+from typing import Any, Dict, Optional
 
 from kriya.workflow.generation_manifest import FileRole, classify_file_role
 
-if TYPE_CHECKING:
-    from kriya.workflow.plan_schema import EngineeringPlan, Subtask
+# Annotation-only names, imported at runtime so typing.get_type_hints()
+# resolves (PRD-001); no cycle.
+from kriya.workflow.plan_schema import EngineeringPlan, Subtask
 
 
 _EXPLICIT_TEST_REQUEST_RE = re.compile(
