@@ -1,14 +1,18 @@
 # PRD-008 Pytest Verification
 
 ## Verdict
-PENDING - the user decides whether the S4c full-suite run below stands as the PRD-008 verdict, or reruns it on
-the S5 revision. S5 changed documentation and handover files only.
+VERIFIED (user decision, 2026-09-24).
 
-## Current candidate
-- Last production-code revision: `abadb4a` (PRD-008 S4c final review closure).
+- Final PRD-008 revision: `6e1a846` (S5 documentation and handover closure).
+- Tested production revision: `abadb4a` (S4c final review closure).
 - Full non-live suite on `abadb4a` (user, 2026-09-24): **5074 passed, 0 failed, 8 deselected, 152 warnings**, 1027.49 s.
+- Delta `abadb4a` -> `6e1a846`: docs, handover and tracker only. `git diff abadb4a 6e1a846 -- kriya tests plugins`
+  is empty (no production-code or test-code change), and no test reads the edited documents.
+- The suite was deliberately not rerun for S5 (user decision): the run on `abadb4a` covers the final code.
 - Live-model verification: not required.
 - Command: `.venv/bin/pytest`
+
+PRD-008 is not modified further unless new evidence demonstrates a defect.
 
 ## Slice history (reopened PRD-008, all user-run)
 | Slice | Revision | Result |

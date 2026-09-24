@@ -1,7 +1,8 @@
 # PRD-008 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION (S1-S4c each user-verified; S5 is documentation and handover only - see "S5" at the end)
+VERIFIED at final revision `6e1a846` (tested production revision `abadb4a`: full suite 5074 passed / 0 failed / 8
+deselected, 2026-09-24; S5 is documentation and handover only - see "S5" at the end)
 
 ## Source identity
 - Base revision: `ebe4994` (PRD-007 verified).
@@ -449,7 +450,7 @@ Final S4c review closure (`abadb4a`, approved and user-verified):
 
 ## Reopening addendum - S5: documentation and handover closure
 
-Status: READY_FOR_PYTEST_VERIFICATION. S5 changes documentation and handover files only; no production code or test
+Status: VERIFIED (user decision, 2026-09-24). S5 changes documentation and handover files only; no production code or test
 changed after `abadb4a`, and no test reads the edited documents.
 
 **Documentation reconciled with S1-S4c** (the docs still described the pre-PRD-008 all-or-nothing resume):
@@ -467,8 +468,8 @@ changed after `abadb4a`, and no test reads the edited documents.
   slice-by-slice history; tracker row set to READY_FOR_PYTEST_VERIFICATION.
 
 **Verification.** The code under test is `abadb4a`, which the user's full non-live suite already covered (5074
-passed / 0 failed / 8 deselected, 2026-09-24). The user decides whether that run stands as the PRD-008 verdict or
-whether to rerun `.venv/bin/pytest` on the S5 revision.
+passed / 0 failed / 8 deselected, 2026-09-24). The user accepted that run as the PRD-008 verdict without a rerun:
+PRD-008 is VERIFIED at final revision `6e1a846`, tested at `abadb4a`.
 
 **Next, per the S4c review decision:** the `[]` Developer defect
 (`handover/DEFECT_DEVELOPER_EMPTY_ARRAY_WRITTEN_AS_FILE.md`) is fixed immediately after S5 and before PRD-008A.
