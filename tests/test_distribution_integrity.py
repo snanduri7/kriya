@@ -79,7 +79,15 @@ def test_corrupt_wheel_cli_fails_with_json(tmp_path):
 
 
 def _git_checkout(root, tracked):
+    """A checkout tracking ``tracked`` plus every required source file that
+    lives in a release tree (the fixture artifacts always contain those, and
+    the exact-match check rejects artifact files git does not track)."""
     import subprocess
+
+    from kriya.distribution import RELEASE_TREES, REQUIRED_SOURCE_FILES
+    tracked = [*tracked, *(name for name in REQUIRED_SOURCE_FILES
+                           if name.startswith(tuple(tree + '/' for tree in RELEASE_TREES))
+                           and name not in tracked)]
     subprocess.run(['git', 'init', '-q', str(root)], check=True)
     for name in tracked:
         target = root / name
