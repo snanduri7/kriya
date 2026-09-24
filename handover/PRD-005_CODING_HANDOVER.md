@@ -87,3 +87,32 @@ From the target checkout, independently run:
 ```
 
 Report complete pass/fail/skip/deselection counts and every skip reason. Write `handover/PRD-005_PYTEST_VERIFICATION.md`. PRD-005 remains `READY_FOR_PYTEST_VERIFICATION` until the independent full non-live suite passes. No live-model verification is required.
+
+## Reopening addendum (2026-09-24, independent review)
+Findings closed in `kriya/workflow/edit_safety.py::commit_revision_grounded_batch` (order of operations now
+documented in its docstring):
+- **Temp-file leak / untraceable leftovers**: IN_PROGRESS evidence is persisted BEFORE staging and staging runs
+  inside the same try/finally as the apply loop, so a staging or evidence fault leaves no `.kriya-stage-*` file;
+  operations now record `stage_prefix` (derived from the transaction id) so a post-SIGKILL leftover is
+  attributable, and `candidate_revision` so recovery can classify each target as applied / not applied by hash.
+- **Rollback failure misreported**: a failed rollback step, or a failure to persist ROLLED_BACK evidence after a
+  clean rollback, now raises `UncertainCommitError` (previously a plain `BatchCommitError` while the evidence
+  said UNCERTAIN / stayed IN_PROGRESS). Intent-persistence failure before any write is a plain
+  `BatchCommitError` with no evidence file (= not started).
+- **Committed bytes != verified bytes**: `StagedFileWrite` gained `content_bytes` and `mode`; staging writes
+  bytes. The enforce controller now passes the candidate's exact bytes (CRLF / non-UTF-8 preserved) and mode
+  (new executable files such as `mvnw` keep +x). `content` stays the decoded text used for revision identity,
+  consistent with `read_file_revision()`.
+- **Symlink targets** are refused before mutation (a link would have been replaced by a regular file and could
+  not be restored); **base_path** containment is now checked alongside target containment.
+- **Evidence growth**: a zero-write batch still performs the uncertainty check but writes no evidence; terminal
+  (committed / rolled-back) evidence is pruned to the newest 50 after each commit; in-progress, uncertain and
+  unreadable evidence is never pruned.
+
+Tests added (`tests/test_prd005_commit_transactions.py`): intent-persistence failure, staging failure mid-batch,
+fault before a replace takes effect, rollback failure -> UNCERTAIN and later commits refused, rolled-back
+evidence write failure -> IN_PROGRESS + UncertainCommitError, revision conflict at every position, CRLF /
+non-UTF-8 / new-file-mode fidelity, symlink refusal, base escape, empty batch, evidence traceability fields,
+pruning. The previously `pragma: no cover` rollback-failure path is now covered.
+Remaining for PRD-008: an operator recovery command that uses `candidate_revision`/`stage_prefix` to resolve
+an uncertain commit (the review's "no recovery path" finding).

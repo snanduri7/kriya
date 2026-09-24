@@ -6072,9 +6072,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     ))
                     continue
                 try:
-                    with open(
-                        candidate_path, "r", encoding="utf-8", errors="replace",
-                    ) as handle:
+                    # The verified candidate's exact bytes and mode are what
+                    # is committed (PRD-005); the decoded text is only its
+                    # revision identity, matching read_file_revision().
+                    with open(candidate_path, "rb") as handle:
+                        candidate_bytes = handle.read()
+                    candidate_mode = os.stat(candidate_path).st_mode & 0o7777
+                    with open(candidate_path, "r", encoding="utf-8", errors="replace") as handle:
                         candidate_content = handle.read()
                 except OSError as error:
                     raise _CandidateMaterializationError(
@@ -6085,6 +6089,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     base_path=target_path,
                     expected_base_revision=original_plan_revisions[path],
                     expected_base_exists=(action != FileAction.CREATE),
+                    content_bytes=candidate_bytes, mode=candidate_mode,
                 ))
             return terminal_writes
 
