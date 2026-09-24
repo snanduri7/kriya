@@ -24,6 +24,21 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from _milestone_proof_harness import (
+    CHAIN,
+    CHAIN_OUTPUTS,
+    GROUP,
+    TESTS_DIR,
+    FakeEngine,
+    _completed_chain,
+    _config,
+    _decisions,
+    _engine,
+    _milestone,
+    _run,
+    _workspace,
+    git_workspace,  # noqa: F401 - pytest fixture
+)
 
 from kriya.config.config import AppConfig
 from kriya.control.commit_state import UncertainWorkspaceStateError
@@ -46,22 +61,7 @@ from kriya.workflow.milestone_completion import (
     milestone_work_unit,
 )
 from kriya.workflow.milestones import load_milestone_run_state
-from tests.test_prd008_s4b_milestone_completion import (
-    CHAIN,
-    CHAIN_OUTPUTS,
-    GROUP,
-    FakeEngine,
-    _completed_chain,
-    _config,
-    _decisions,
-    _engine,
-    _milestone,
-    _run,
-    _workspace,
-    git_workspace,  # noqa: F401 - pytest fixture
-)
 
-ROOT = Path(__file__).resolve().parents[1]
 TESTS_PASSED = [{"type": "test", "passed": True, "attempt": 1}]
 
 
@@ -171,7 +171,7 @@ def test_c_a_model_only_no_change_never_becomes_reusable(git_workspace, gates): 
 _CRASH_AFTER_COMMIT = r'''
 import asyncio, os, sys
 sys.path.insert(0, sys.argv[3])
-from tests.test_prd008_s4b_milestone_completion import CHAIN, FakeEngine, _plan
+from _milestone_proof_harness import CHAIN, FakeEngine, _plan
 from kriya.workflow.milestones import load_or_resume_milestone_run_state, run_milestones
 
 workspace, where = sys.argv[1], sys.argv[2]
@@ -197,8 +197,8 @@ os._exit(0)
 
 def _crash_after_commit(workspace, where):
     crashed = subprocess.run(
-        [sys.executable, "-c", _CRASH_AFTER_COMMIT, str(workspace), where, str(ROOT)],
-        env=dict(os.environ, PYTHONPATH=str(ROOT)), capture_output=True, text=True, timeout=120,
+        [sys.executable, "-c", _CRASH_AFTER_COMMIT, str(workspace), where, TESTS_DIR],
+        env=dict(os.environ, PYTHONPATH=TESTS_DIR), capture_output=True, text=True, timeout=120,
     )
     assert crashed.returncode == 9, crashed.stderr
     state = load_milestone_run_state(str(workspace), GROUP)

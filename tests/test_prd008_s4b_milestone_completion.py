@@ -15,16 +15,29 @@ import json
 import os
 import subprocess
 import sys
-import tempfile
-import uuid
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
+from _milestone_proof_harness import (  # shared harness, see its docstring
+    CHAIN,
+    CHAIN_OUTPUTS,
+    GROUP,
+    TESTS_DIR,
+    FakeEngine,
+    _completed_chain,
+    _config,
+    _decisions,
+    _engine,
+    _milestone,
+    _plan,
+    _run,
+    _workspace,
+    git_workspace,  # noqa: F401 - pytest fixture
+)
 
 import kriya.workflow.workflow_controller as workflow_controller_module
 from kriya.agents.contracts import MilestoneV2
-from kriya.config.config import AppConfig
 from kriya.control.commit_state import UncertainWorkspaceStateError
 from kriya.control.persistence import load_run_record, run_record_path, save_run_record, scan_run_records
 from kriya.control.recovery import (
@@ -38,9 +51,7 @@ from kriya.control.retention import prune_run_state
 from kriya.control.run_coordinator import begin_mutating_run
 from kriya.control.run_record import RunLifecycle, RunRecord
 from kriya.control.workspace_identity import ownership_metadata
-from kriya.core import LLMClient
-from kriya.core.kernel import Kernel
-from kriya.workflow.edit_safety import commit_evidence_dir, read_file_revision
+from kriya.workflow.edit_safety import commit_evidence_dir
 from kriya.workflow.milestone_completion import (
     COMMIT_EVIDENCE_MISSING,
     COMPLETION_PROOF_MISSING,
@@ -58,121 +69,11 @@ from kriya.workflow.milestone_completion import (
     UPSTREAM_INVALIDATED,
     assess_completed_milestone_reuse,
 )
-from kriya.workflow.milestone_validation import topological_order
 from kriya.workflow.milestones import (
     load_milestone_run_state,
     load_or_resume_milestone_run_state,
-    run_milestones,
 )
-from kriya.workflow.terminal_commit import CandidateFile, commit_terminal_candidate, materialize_candidate
-from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
-from kriya.workflow.workflow import WorkflowEngine
 from kriya.workflow.workflow_controller import WorkflowController
-
-ROOT = Path(__file__).resolve().parents[1]
-GROUP = "grp"
-
-
-# ---------------------------------------------------------------- harness
-
-def _milestone(mid, depends_on=()):
-    return MilestoneV2(
-        id=mid, goal=f"build {mid}", success_criterion=f"{mid} works", depends_on=list(depends_on),
-    )
-
-
-def _plan(milestones):
-    return {"group_id": GROUP, "original_goal": "the goal", "milestones": [m.model_dump() for m in milestones]}
-
-
-def _workspace(tmp_path):
-    workspace = tmp_path / "ws"
-    workspace.mkdir()
-    return Path(os.path.realpath(workspace))
-
-
-def _apply(workspace_path, changes):
-    """Commit ``changes`` ({relpath: bytes | (bytes, mode) | None=delete})
-    through the real terminal commit seam, as a verified candidate would be."""
-    candidate = Path(tempfile.mkdtemp())
-    files = []
-    for relpath, spec in sorted(changes.items()):
-        target = os.path.join(workspace_path, relpath)
-        if spec is None:
-            files.append(CandidateFile(relpath, read_file_revision(target), delete=True))
-            continue
-        data, mode = spec if isinstance(spec, tuple) else (spec, 0o644)
-        path = candidate / relpath
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
-        os.chmod(path, mode)
-        files.append(CandidateFile(relpath, read_file_revision(target)))
-    outcome = commit_terminal_candidate(
-        materialize_candidate(str(candidate), str(workspace_path), files),
-        workspace_path=str(workspace_path), transaction_id=uuid.uuid4().hex,
-    )
-    assert outcome.committed, outcome.failure_payload()
-
-
-def _route():
-    return EngineeringRoute(
-        kind=ChangeKind.MILESTONE, impact=ImpactVector(),
-        initial_risk_class=RiskClass.LOW, current_risk_class=RiskClass.LOW,
-        max_observed_risk_class=RiskClass.LOW, execution_weight=ExecutionWeight.LIGHT,
-    )
-
-
-class FakeEngine:
-    """Model work replaced by fixed outputs; the commit is real."""
-
-    def __init__(self, milestones, outputs, integration=None):
-        self.order = [milestone.id for milestone in topological_order(milestones)]
-        self.outputs = outputs
-        self.integration = integration or {}
-        self.calls = []
-        self.run_verifier = MagicMock()
-        self.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
-        self.engineering_triage = MagicMock()
-        self.engineering_triage.classify = AsyncMock(return_value=_route())
-
-    async def run_generation_workflow(self, goal, workspace_path, milestone_index=None, **_):
-        name = self.order[milestone_index - 1] if milestone_index <= len(self.order) else "INTEGRATION"
-        self.calls.append(name)
-        changes = self.integration if name == "INTEGRATION" else self.outputs.get(name, {})
-        if changes:
-            _apply(workspace_path, changes)
-        return {
-            "quality_gates_passed": True, "design": "d",
-            "files": sorted(path for path, spec in changes.items() if spec is not None),
-        }
-
-
-def _run(workspace, milestones, engine, **kwargs):
-    """One `generate --from-milestones` invocation: state reloaded from the
-    plan + sidecar, a fresh run owning the workspace."""
-    state = load_or_resume_milestone_run_state(str(workspace), _plan(milestones))
-    result = asyncio.run(run_milestones(engine, state, str(workspace), **kwargs))
-    return result, state
-
-
-def _decisions(result):
-    return {
-        item["milestone_id"]: (item["status"], [reason["code"] for reason in item["reasons"]])
-        for item in result["milestone_reuse"]["decisions"]
-    }
-
-
-CHAIN = [_milestone("M1"), _milestone("M2", ["M1"])]
-CHAIN_OUTPUTS = {"M1": {"m1.py": b"M1 = 1\n"}, "M2": {"m2.py": b"M2 = 1\n"}}
-
-
-def _completed_chain(tmp_path, outputs=CHAIN_OUTPUTS, milestones=CHAIN):
-    workspace = _workspace(tmp_path)
-    result, state = _run(workspace, milestones, FakeEngine(milestones, outputs))
-    assert result["status"] == "success"
-    assert state.completed_milestone_ids == [m.id for m in topological_order(milestones)]
-    return workspace
-
 
 # ---------------------------------------------------------------- A: the gate
 
@@ -205,32 +106,6 @@ def test_a_execute_milestones_refuses_an_uncertain_workspace_exactly_like_direct
 
 # ---------------------------------------------------------------- B: resume inside a milestone
 
-@pytest.fixture
-def git_workspace(tmp_path):
-    workspace = _workspace(tmp_path)
-    for args in (["init", "-q"], ["config", "user.email", "t@example.invalid"], ["config", "user.name", "T"]):
-        subprocess.run(["git", *args], cwd=workspace, check=True)
-    (workspace / "README.md").write_text("seed\n")
-    subprocess.run(["git", "add", "README.md"], cwd=workspace, check=True)
-    subprocess.run(["git", "commit", "-qm", "seed"], cwd=workspace, check=True)
-    return workspace
-
-
-def _config():
-    cfg = AppConfig()
-    cfg.autonomy.mode = "guardrails"
-    cfg.autonomy.run_verification_enabled = False
-    return cfg
-
-
-def _engine(cfg, responses):
-    llm = LLMClient(cfg)
-    llm.complete = AsyncMock(side_effect=responses)
-    engine = WorkflowEngine(Kernel(config=cfg), llm)
-    engine.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
-    return engine, llm
-
-
 _M1_AFTER_PLAN = [
     "Design: Write math.py",
     '[{"filepath": "math.py", "content": "def add(a,b):\\n    return a+b"}]',
@@ -244,7 +119,7 @@ _INTEGRATION = [
 ]
 
 
-def _crash_after_plan_checkpoint(git_workspace, cfg, milestones):
+def _crash_after_plan_checkpoint(git_workspace, cfg, milestones):  # noqa: F811
     engine, _ = _engine(cfg, ["Step 1 (from the first run)", RuntimeError("architect crashed")])
     with pytest.raises(RuntimeError, match="architect crashed"):
         _run(git_workspace, milestones, engine)
@@ -252,7 +127,7 @@ def _crash_after_plan_checkpoint(git_workspace, cfg, milestones):
 
 
 @pytest.mark.parametrize("workspace_changed", [False, True])
-def test_b_resume_inside_a_milestone_uses_the_prd008_validator(git_workspace, workspace_changed):
+def test_b_resume_inside_a_milestone_uses_the_prd008_validator(git_workspace, workspace_changed):  # noqa: F811
     cfg = _config()
     milestones = [_milestone("M1")]
     first_runs = _crash_after_plan_checkpoint(git_workspace, cfg, milestones)
@@ -286,7 +161,7 @@ def test_b_resume_inside_a_milestone_uses_the_prd008_validator(git_workspace, wo
 _CRASH_SCRIPT = r'''
 import asyncio, os, sys
 sys.path.insert(0, sys.argv[3])
-from tests.test_prd008_s4b_milestone_completion import CHAIN, FakeEngine, _plan, _apply
+from _milestone_proof_harness import CHAIN, FakeEngine, _plan
 from kriya.workflow.milestones import load_or_resume_milestone_run_state, run_milestones
 
 workspace, crash_at = sys.argv[1], sys.argv[2]
@@ -323,8 +198,8 @@ os._exit(0)
 def test_c_recovery_across_milestone_commit_cycles(tmp_path, crash_at, expected_status, m2_decision):
     workspace = _workspace(tmp_path)
     crashed = subprocess.run(
-        [sys.executable, "-c", _CRASH_SCRIPT, str(workspace), crash_at, str(ROOT)],
-        env=dict(os.environ, PYTHONPATH=str(ROOT)), capture_output=True, text=True, timeout=120,
+        [sys.executable, "-c", _CRASH_SCRIPT, str(workspace), crash_at, TESTS_DIR],
+        env=dict(os.environ, PYTHONPATH=TESTS_DIR), capture_output=True, text=True, timeout=120,
     )
     assert crashed.returncode == 9, crashed.stderr
     m1_proof = load_milestone_run_state(str(workspace), GROUP).completion_proofs["M1"]
@@ -399,7 +274,7 @@ def test_g_recreating_a_path_the_milestone_deleted_is_detected(tmp_path):
     assert _decisions(result)["M1"] == ("CHANGED", [DELETED_PATH_RECREATED])
 
 
-def test_h_workspace_reset_to_before_the_milestone_is_not_skipped(git_workspace):
+def test_h_workspace_reset_to_before_the_milestone_is_not_skipped(git_workspace):  # noqa: F811
     (git_workspace / "app.py").write_bytes(b"APP = 0\n")
     subprocess.run(["git", "add", "app.py"], cwd=git_workspace, check=True)
     subprocess.run(["git", "commit", "-qm", "base"], cwd=git_workspace, check=True)
