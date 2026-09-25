@@ -158,6 +158,15 @@ check existed the server silently truncated it.
   - disabling the trace drain or the `num_ctx` switch fails 4 adaptive tests;
   - disabling the patch fallback or the single-stage refusal guard fails 2;
   - disabling the sibling reduction fails 1.
+- User full pytest run (2026-09-25, code at `881da7e`): 5582 passed, 3 failed, 14 deselected. The plain-runner
+  failures above (`test_workflow`, enforce, agents, DEV-INV, resume fingerprints) all pass under pytest. The 3 failures
+  were suites the plain runner had not covered:
+  - `test_review_command` (2): the fixtures lowered only `context_window`; the served window is the `num_ctx` sent
+    (packaged 32768), which the allocator now uses. The fixtures set `num_ctx` too (7000 and 1500), with the same
+    assertions.
+  - `test_generation_time_budget` (1): its minimal fake context had no `worktree_path`/`workspace_path`, which the
+    grounded output expectation reads (every real `AttemptContext` has both). The fake now carries them as None.
+  Both files pass in the plain runner after the fix; awaiting the pytest re-run.
 
 ## Live test
 In `tests/test_live_prd013_016_model_runtime.py` (command in the PRD-014 handover):

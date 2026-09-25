@@ -21,6 +21,8 @@ def _context(config, developer=None):
         kernel=Kernel(config=config),
         developer=developer,
         expected_files_upfront=["A.java", "B.java"],
+        worktree_path=None,
+        workspace_path=None,
     )
 
 

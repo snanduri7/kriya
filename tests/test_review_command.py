@@ -179,9 +179,13 @@ def test_review_single_file_exceeding_budget_is_truncated_with_warning(tmp_path)
     non-review response, and Kriya still reported success with no warning
     whatsoever. Must now: warn the user, and mark the truncation explicitly in
     what's sent to the model too, rather than truncate invisibly."""
-    (tmp_path / "kriya.yaml").write_text("llm:\n  context_window: 500\n")
-    # ~800 words - estimate_tokens (~1.3x word count) puts this well over the
-    # budget (500 * 0.75 = 375 tokens).
+    # The served window is the num_ctx sent (PRD-016), not context_window alone.
+    # 7000 tokens with the 16384 output reserve capped at half leaves a review
+    # budget of ~1500 allocator tokens: the first 150-line chunk fits, the whole
+    # ~1880-token file does not.
+    (tmp_path / "kriya.yaml").write_text(
+        "llm:\n  context_window: 7000\n  extra_body:\n    options:\n      num_ctx: 7000\n"
+    )
     big_content = "\n".join(f"x_{i} = {i}  # padding line number {i}" for i in range(200))
     (tmp_path / "big.py").write_text(big_content)
 
@@ -203,10 +207,13 @@ def test_review_multiple_files_over_budget_splits_into_batches(tmp_path):
     to multiple separate review calls (each within budget) rather than either
     silently truncating the combined prompt or crashing - every file must
     actually reach the model in some call, clearly labeled which batch."""
-    (tmp_path / "kriya.yaml").write_text("llm:\n  context_window: 310\n")
     # ~30 lines, one file's wrapped review blob estimates to ~157 tokens -
-    # comfortably under the 232-token budget (0.75 * 310) alone, but two of
-    # them combined (~314) exceed it.
+    # under the ~216-token review budget of a 1500-token served window (0.75
+    # of its prompt allocation window, PRD-016) alone, but two of them
+    # combined (~314) exceed it.
+    (tmp_path / "kriya.yaml").write_text(
+        "llm:\n  context_window: 1500\n  extra_body:\n    options:\n      num_ctx: 1500\n"
+    )
     padding = "\n".join(f"x_{i} = {i}  # padding" for i in range(30))
     (tmp_path / "a.py").write_text(padding)
     (tmp_path / "b.py").write_text(padding.replace("x_", "y_"))
