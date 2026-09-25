@@ -44,6 +44,8 @@ _REAL_FAILURE_TYPES = {
     "time_budget_exhausted": FailureCategory.RESOURCE,
     "context_budget_unsatisfiable": FailureCategory.RESOURCE,
     "output_budget_unsatisfiable": FailureCategory.RESOURCE,
+    # PRD-017: a fallback model that cannot serve the attempt.
+    "fallback_incompatible": FailureCategory.RESOURCE,
     "internal_framework_error": FailureCategory.INTERNAL,
     "general_error": FailureCategory.UNCLASSIFIED,
 }

@@ -419,6 +419,14 @@ def binding_object(config: Any, model: str) -> Any:
     return next((candidate for candidate in candidates if candidate.model.casefold() == target), None)
 
 
+def binding_output_tokens(config: Any, binding: Any = None) -> int:
+    """PRD-017: the output budget (max_tokens) a call to ``binding`` asks for
+    before any reasoning floor: the binding's own value, or the primary
+    llm.max_tokens when the binding is the primary or leaves it unset."""
+    value = getattr(binding, "max_tokens", None) if binding is not None else None
+    return int(value) if value is not None else int(config.llm.max_tokens)
+
+
 def _binding_for(config: Any, model: str) -> Dict[str, Any]:
     target = (model or "").casefold()
     if config.llm.model.casefold() == target:

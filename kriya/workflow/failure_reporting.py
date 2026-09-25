@@ -124,6 +124,8 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
     # PRD-016: the prompt plus the minimum output cannot fit the served window.
     "context_budget_unsatisfiable": FailureCategory.RESOURCE,
     "output_budget_unsatisfiable": FailureCategory.RESOURCE,
+    # PRD-017: a fallback model that cannot serve the attempt it was chosen for.
+    "fallback_incompatible": FailureCategory.RESOURCE,
 
     # INTERNAL - Kriya's own implementation broke, not the application
     "internal_framework_error": FailureCategory.INTERNAL,

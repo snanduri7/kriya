@@ -611,6 +611,7 @@ def allocation_window(config: Any, binding: Any = None) -> int:
     same served window, output budget and counting ratio LLMClient's dispatch
     check uses for that call (kriya/core/llm.py::complete_result)."""
     from kriya.core.llm import REASONING_MIN_MAX_TOKENS
+    from kriya.core.model_runtime import binding_output_tokens
 
     binding = binding if binding is not None else config.llm
     window = binding.context_window
@@ -627,7 +628,7 @@ def allocation_window(config: Any, binding: Any = None) -> int:
         ratio = measured_limits_for(fingerprint, config).get("bytes_per_token_floor")
     except Exception as error:  # never blocks context assembly
         logger.debug("Allocation window for %s uses the configured window: %s", binding.model, error)
-    output = config.llm.max_tokens
+    output = binding_output_tokens(config, binding)
     if binding.reasoning:
         output = max(output, REASONING_MIN_MAX_TOKENS)
     return prompt_allocation_window(window, output, bytes_per_token=ratio)

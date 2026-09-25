@@ -4602,6 +4602,12 @@ class WorkflowEngine:
                 bool(state.environment_failure)
                 and state.environment_failure.startswith("REGRESSION_UNATTRIBUTED:")
             )
+            # PRD-017: same message-prefix convention - a fallback model that
+            # cannot serve the attempt (kriya/workflow/model_transition.py).
+            is_fallback_incompatible_stop = (
+                bool(state.environment_failure)
+                and state.environment_failure.startswith("FALLBACK_MODEL_INCOMPATIBLE:")
+            )
             failure_category = (
                 "plan_scope_revision_required" if state.plan_scope_conflict
                 else "unauthorized_generation_target" if is_scope_defect_stop
@@ -4609,6 +4615,7 @@ class WorkflowEngine:
                 else "generation_budget_exhausted" if is_generation_budget_exhausted_stop
                 else "containment_setup_failed" if is_containment_setup_failed_stop
                 else "regression_unattributed" if is_regression_unattributed_stop
+                else "fallback_model_incompatible" if is_fallback_incompatible_stop
                 else "environment_failure" if state.environment_failure
                 else "quality_gates_exhausted"
             )

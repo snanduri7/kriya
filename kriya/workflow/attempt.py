@@ -761,8 +761,16 @@ def _prepare_retry_context(
     # gives it the target-reachability fix and C3 member-hint resolution
     # (a strict improvement), just not the new no-progress termination path.
     if enable_no_progress_gate:
+        # PRD-017: keyed on the model's whole request profile (runtime,
+        # capabilities, edit protocol, windows, output budget), not its alias,
+        # so a fallback hop that changes any of them is new progress
+        # opportunity by construction.
+        request_profile = _developer_request_profile(
+            ctx, None if model_identity == ctx.kernel.config.llm.model else model_identity,
+        )
         fingerprint = _compute_retry_evidence_fingerprint(
-            state, target_files, state.last_attempt_mode, model_identity, retry_member_hints,
+            state, target_files, state.last_attempt_mode,
+            f"{model_identity}@{request_profile.digest}", retry_member_hints,
         )
         # Only a deterministic-verdict failure (see _DETERMINISTIC_VERDICT_
         # FAILURE_TYPES' own docstring) with at least one real, grounded
@@ -793,6 +801,7 @@ def _prepare_retry_context(
             details={
                 "mode": state.last_attempt_mode,
                 "model": model_identity,
+                "request_profile": request_profile.digest,
                 "target_files": sorted(set(target_files or ())),
                 "no_progress": no_progress,
                 "fingerprint_hash": content_revision(repr(fingerprint)),
@@ -1492,6 +1501,98 @@ def _lower_output_protocol_retry(
     return {**kwargs, "operation_by_file": operations, "expected_output_by_file": expectations}
 
 
+def _developer_request_profile(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
+    """PRD-017: the request profile of a Developer call with ``model_override``
+    (None = the primary)."""
+    from kriya.workflow.model_transition import resolve_request_profile
+
+    binding = _chain_binding(ctx, model_override) or ctx.kernel.config.llm
+    return resolve_request_profile(ctx.kernel.config, binding)
+
+
+def _patch_required_files(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> List[str]:
+    """Existing files this Developer call may only patch: the completeness
+    gate (D1) downgraded their whole-file operation because no complete,
+    exact current source was shown, so a whole-file answer would be rejected
+    after the call."""
+    required = []
+    for path, operation in (kwargs.get("operation_by_file") or {}).items():
+        if operation != CodeOperation.REPAIR_WITH_PATCH or not _target_exists(ctx, path):
+            continue
+        gated, mandatory = _completeness_gated_operation(
+            path, CodeOperation.REPAIR_WITH_FULL_FILE, file_exists=True, ctx=ctx, state=state,
+        )
+        if mandatory and gated == CodeOperation.REPAIR_WITH_PATCH:
+            required.append(path)
+    return required
+
+
+def _enter_developer_model(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> None:
+    """PRD-017: resolve the request profile of the model this Developer call
+    goes to. A change from the previous call is recorded field by field (the
+    model.transition run event); a fallback that cannot serve this attempt
+    ends it with the typed FALLBACK_MODEL_INCOMPATIBLE failure before any
+    request is sent (terminal: the retry loop does not re-send it)."""
+    from kriya.workflow.model_transition import (
+        FALLBACK_MODEL_INCOMPATIBLE,
+        fallback_incompatibilities,
+        profile_changes,
+    )
+
+    model_override = kwargs.get("model_override")
+    profile = _developer_request_profile(ctx, model_override)
+    previous = state.last_developer_request_profile
+    is_fallback = _chain_binding(ctx, model_override) is not None
+    if previous is None or previous.digest != profile.digest:
+        changes = profile_changes(previous, profile)
+        state.record_event(RunEvent(
+            kind="model.transition",
+            attempt=state.attempt_number,
+            source="attempt._run_developer_generation",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                f"Developer request profile for {profile.model}"
+                + ("" if previous is None else f" (was {previous.model}): {', '.join(sorted(changes))} changed")
+            ),
+            details={
+                "initial": previous is None,
+                "fallback": is_fallback,
+                "from": previous.to_dict() if previous is not None else None,
+                "to": profile.to_dict(),
+                "changes": changes,
+            },
+        ))
+    state.last_developer_request_profile = profile
+    if not is_fallback:
+        return
+    reasons = fallback_incompatibilities(
+        ctx.kernel.config, profile, patch_required_files=_patch_required_files(state, ctx, kwargs),
+    )
+    if not reasons:
+        return
+    message = f"{FALLBACK_MODEL_INCOMPATIBLE}: fallback model {profile.model} cannot serve this attempt: " + "; ".join(
+        reasons
+    )
+    state.record_event(RunEvent(
+        kind="model.fallback_incompatible",
+        attempt=state.attempt_number,
+        source="attempt._run_developer_generation",
+        authority=EventAuthority.ADVISORY,
+        message=message,
+        details={"reason_code": FALLBACK_MODEL_INCOMPATIBLE, "model": profile.model, "reasons": reasons,
+                 "profile": profile.to_dict()},
+    ))
+    logger.error(message)
+    raise QualityGateFailure(Failure(
+        type="fallback_incompatible",
+        message=message,
+        raw_output=message,
+        source="orchestrator",
+        attempt=state.attempt_number,
+        diagnostics={"reason_code": FALLBACK_MODEL_INCOMPATIBLE, "model": profile.model, "reasons": reasons},
+    ))
+
+
 def _chain_binding(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
     """The llm_chain entry a Developer call with ``model_override`` goes to,
     or None for the primary model."""
@@ -1506,6 +1607,7 @@ async def _run_developer_generation(
     targets = kwargs.get("known_target_files")
     file_count = len(targets or ctx.expected_files_upfront or state.all_files_written or [None])
     active_model = kwargs.get("model_override") or ctx.kernel.config.llm.model
+    _enter_developer_model(state, ctx, kwargs)
     _ensure_generation_time_budget(
         state, ctx, file_count=file_count, active_model=active_model,
     )

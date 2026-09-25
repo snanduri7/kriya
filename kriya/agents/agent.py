@@ -16,6 +16,7 @@ from kriya.agents.contracts import (
 )
 from kriya.config.config import FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
+from kriya.core.model_runtime import binding_output_tokens
 from kriya.core.token_budget import ContextBudgetUnsatisfiableError, OutputBudgetUnsatisfiableError
 
 logger = logging.getLogger(__name__)
@@ -288,9 +289,10 @@ async def call_with_escalation(
                     **({"max_tokens_override": max_tokens_override} if max_tokens_override is not None else {}),
                 )
             else:
+                own_max_tokens = binding_output_tokens(llm.config, cand)
                 candidate_max_tokens = (
-                    min(cand.max_tokens, max_tokens_override)
-                    if max_tokens_override is not None else cand.max_tokens
+                    min(own_max_tokens, max_tokens_override)
+                    if max_tokens_override is not None else own_max_tokens
                 )
                 response = await llm.complete(
                     system_prompt, prompt, stream_callback=stream_callback, json_mode=json_mode,
@@ -2252,6 +2254,7 @@ class DeveloperAgent(BaseAgent):
         base_url_override: Optional[str] = None,
         api_key_override: Optional[str] = None,
         extra_body_override: Optional[Dict[str, Any]] = None,
+        json_mode: Optional[bool] = None,
     ) -> Tuple[Optional[List[Dict[str, Any]]], str]:
         """Runs run_generation()'s Step 1 - "which files do I need" - as its own
         method, both for run_generation() itself and for anything (e.g. a
@@ -2282,10 +2285,17 @@ class DeveloperAgent(BaseAgent):
             f"=== Task ===\n{task_description}\n\n"
             "Please return the JSON file list."
         )
+        if json_mode is None:
+            # PRD-017: JSON mode only for a model whose capability profile has
+            # it (a fallback hop must not inherit the primary's structured-
+            # output strategy); the text extraction below handles the rest.
+            from kriya.core.model_capabilities import generation_protocol_for_model
+
+            json_mode = generation_protocol_for_model(self.llm.config, model_override or self.llm.model).json_mode
         response_str = await self.llm.complete(
             system_list_prompt,
             list_prompt,
-            json_mode=True,
+            json_mode=json_mode,
             model_override=model_override,
             base_url_override=base_url_override,
             api_key_override=api_key_override,
@@ -2397,7 +2407,7 @@ class DeveloperAgent(BaseAgent):
         try:
             file_entries, _source = await self._resolve_step1_file_list(
                 task_description, design_context, model_override, base_url_override, api_key_override,
-                extra_body_override,
+                extra_body_override, json_mode=generation_protocol.json_mode,
             )
             if file_entries:
                 return await self._fill_missing_content(

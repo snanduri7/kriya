@@ -738,7 +738,10 @@ class FallbackModelConfig(BaseModel):
     base_url: str = Field(default="http://localhost:11434/v1")
     api_key: str = Field(default="local-key")
     temperature: float = Field(default=0.2)
-    max_tokens: int = Field(default=4096)
+    # PRD-017: this model's own output budget. None (unset) inherits the
+    # primary llm.max_tokens; every call to this model uses it (the Developer
+    # retry hop used to reuse the primary's value whatever this said).
+    max_tokens: Optional[int] = Field(default=None, ge=1)
     capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     reasoning: bool = Field(default=False)
     # Mirrors LLMConfig.extra_body (below) - a fallback model can need request

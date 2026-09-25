@@ -511,6 +511,10 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             # of Developer regeneration can resolve an aggregate-level delta
             # that names no specific test.
             "regression_unattributed",
+            # PRD-017: the fallback model cannot serve this attempt (evidence:
+            # failed qualification, a required patch it cannot return, no
+            # prompt room). Re-sending it cannot change that.
+            "fallback_incompatible",
         }
         else classify_environment_failure(
             raw_error_context,

@@ -162,7 +162,7 @@ class LLMClient:
         cfg = self.config
         if cfg.llm.model.casefold() == target:
             return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning,
-                    "context_policy": cfg.llm.context_policy}
+                    "context_policy": cfg.llm.context_policy, "max_tokens": self.max_tokens}
         candidates = list(cfg.llm_chain)
         for role in ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance"):
             role_cfg = getattr(cfg.agent_llms, role, None)
@@ -173,10 +173,12 @@ class LLMClient:
             candidates.extend(role_cfg.llm_chain)
         for candidate in candidates:
             if candidate.model.casefold() == target:
+                own = getattr(candidate, "max_tokens", None)
                 return {"context_window": candidate.context_window, "reasoning": candidate.reasoning,
-                        "context_policy": candidate.context_policy}
+                        "context_policy": candidate.context_policy,
+                        "max_tokens": int(own) if own is not None else self.max_tokens}
         return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning,
-                "context_policy": cfg.llm.context_policy}
+                "context_policy": cfg.llm.context_policy, "max_tokens": self.max_tokens}
 
     async def _runtime_fingerprint(self, model: str, base_url: str, api_key: str,
                                    extra_body: Optional[Dict[str, Any]]):
@@ -453,7 +455,9 @@ class LLMClient:
                         break
 
         temperature = temperature_override if temperature_override is not None else self.temperature
-        base_max_tokens = max_tokens_override if max_tokens_override is not None else self.max_tokens
+        base_max_tokens = (
+            max_tokens_override if max_tokens_override is not None else self._binding(model)["max_tokens"]
+        )
         max_tokens = max(base_max_tokens, REASONING_MIN_MAX_TOKENS) if is_reasoning else base_max_tokens
         if extra_body_override is not None:
             extra_body = extra_body_override or None
@@ -792,7 +796,7 @@ class LLMClient:
             )
 
         temperature = temperature_override if temperature_override is not None else self.temperature
-        max_tokens = max_tokens_override if max_tokens_override is not None else self.max_tokens
+        max_tokens = max_tokens_override if max_tokens_override is not None else self._binding(model)["max_tokens"]
         if extra_body_override is not None:
             extra_body = extra_body_override or None
         else:

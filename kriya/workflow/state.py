@@ -392,6 +392,10 @@ class GenerationState:
     # counter so a later attempt always starts fresh without needing an
     # explicit reset call anywhere.
     investigation_turns_used_by_attempt: Dict[int, int] = field(default_factory=dict)
+    # PRD-017: the request profile (kriya/workflow/model_transition.py) of the
+    # last Developer call, so a model change between attempts is recorded
+    # field by field as a model.transition run event.
+    last_developer_request_profile: Optional[Any] = None
     # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/
     # validation_baseline.py) - the PRE-candidate authoritative record(s),
     # captured against workspace_path (never worktree_path/sandbox) before
