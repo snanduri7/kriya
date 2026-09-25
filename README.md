@@ -146,10 +146,10 @@ required containment cannot fall back to the host, egress (policy, registry
 allowlist, and every model endpoint local), local-model connectivity, embeddings,
 optional LSP, role-model independence, the semantic-region precision boundary,
 and release integrity. The PRD-009 fixed guarantees are derived from the checks
-that verify them. The exact runtime fingerprint and qualification are reported
-`UNAVAILABLE` until exact-runtime qualification (PRD-013/014) exists, so no
-deployment is production-ready before then: a model name is never a
-qualification. If the configuration cannot load, `--json` still emits a report
+that verify them. The model checks require the exact runtime fingerprint of the
+served model (PRD-013) and a current qualification record for every model each
+production role can call (PRD-014, `kriya model qualify`): a model name is never
+a qualification. If the configuration cannot load, `--json` still emits a report
 (a single failing `config.load` check). The doctor never changes configuration,
 installs tools, pulls images, or creates workspace state.
 

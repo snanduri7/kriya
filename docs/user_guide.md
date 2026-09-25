@@ -315,6 +315,63 @@ Repository text and model output can ask for a destination, but they never autho
 - **The doctors never probe a refused endpoint.** Under `local_only`, a non-local model URL is reported as an error
   and is never contacted, and the API key is never sent.
 
+### 2.0e Model runtime identity, qualification and budgets
+
+**Exact runtime (PRD-013).** A tag such as `qwen3-coder:30b` is not an identity: the weights, quantization, chat
+renderer, tool-call parser, tokenizer, runtime parameters and server version can change while the tag stays the
+same. Kriya fingerprints the exact runtime from what the configured endpoint reports (Ollama `/api/version`,
+`/api/tags`, `/api/show`, next to its `/v1` API; never the internet, and never a non-local endpoint under
+`local_only`). A component the server does not report is recorded as `unavailable`, never guessed from the name. The
+fingerprint also covers the Kriya side of the protocol: the resolved capability profile, the served context window
+(`num_ctx`) and Kriya's protocol-adapter version. It is *exact* only when the artifact digest and server version are
+known.
+
+Every model call records its fingerprint (`last_call_metrics`, the Developer's `model_use` run event), each run's
+RunRecord lists the fingerprint ids it used, the run's `model.runtime` event carries the primary model's full
+fingerprint, and each exact fingerprint is stored once under `<state dir>/model_runtimes/<digest>.json`.
+```bash
+kriya model fingerprint [--model <name>] [--json]
+```
+
+**Qualification (PRD-014).** A model name, benchmark or campaign reputation is never a qualification. `kriya model
+qualify` runs the protocol cases Kriya relies on against the exact runtime: plain completion, stop finish reason,
+structured and multi-line JSON, native, multiple and argument-exact tool calls, streaming assembly, truncation
+detection, hidden reasoning, raw full-file content, the anchored edit protocol, malformed-output recovery, timeout,
+cancellation, endpoint errors and tokenizer measurement. Each case is PASS, FAIL or UNAVAILABLE with its evidence
+(UNAVAILABLE is never PASS; endpoint restart is not exercised live and is always UNAVAILABLE). Model output is never
+executed on the host during qualification.
+```bash
+kriya model qualify [--model <name>] [--json] [--out report.json]   # a --case subset is reported, never saved
+kriya model status [--json]                                          # every role's models and their state
+```
+Records live outside any workspace (`~/.kriya/qualifications/<fingerprint>.json`, or `KRIYA_QUALIFICATION_HOME`), so a
+repository can never ship its own. A record is **stale** when the runtime fingerprint, Kriya's protocol adapter or the
+qualification policy version changes. Each role requires the cases for the protocols Kriya uses with it: always
+completion, stop, truncation detection, reasoning handling and endpoint errors; the Developer also full-file content,
+the anchored edit protocol and malformed-output recovery; the Planner malformed-output recovery; and every role the
+tool-call, JSON, multi-line JSON and streaming cases its resolved capability profile enables. `kriya doctor
+--production` fails `model.qualification` unless every model each role can call (its binding and escalation chain)
+has a current record with those cases passing.
+
+**Normalized completion results (PRD-015).** Provider quirks are handled at the LLM boundary. Every call produces a
+normalized result with a status: `OK`, `EMPTY_CONTENT`, `MALFORMED_STRUCTURED_OUTPUT`, `OUTPUT_TRUNCATED`,
+`BACKEND_ERROR`, `TIMEOUT` or `CANCELLED`, plus the finish reason, token usage, reasoning presence (never its text),
+normalized tool calls (native, or Hermes/Qwen-XML text the server's parser did not convert) and the runtime
+fingerprint. A Developer answer the provider cut off at its output budget is never written as a file, even when the
+partial text would compile; the attempt fails with `OUTPUT_TRUNCATED` and retries.
+
+**Dispatch budgets (PRD-016).** Context assembly still plans with a `len/4` estimate. The final check before a
+request leaves Kriya counts the whole dispatch (system and user prompts, every message, tool schemas and framing)
+against the served window: it reduces `max_tokens` to what fits (recorded), or refuses with
+`CONTEXT_BUDGET_UNSATISFIABLE` before any inference when the prompt plus a minimum output (1024 tokens, plus a
+reasoning allowance for reasoning models) cannot fit. A local server that is sent an over-long prompt may silently
+drop part of it; Kriya never lets that happen. Counting uses an exact tokenizer when one is registered for the
+runtime's tokenizer (none is by default: Ollama 0.34 has no tokenize endpoint and Kriya downloads nothing), else the
+qualified ratios measured for that tokenizer, else a documented approximation (2.5 ASCII bytes and 1.5 non-ASCII bytes
+per token). Every call records which method was used and compares its prediction with the provider's reported usage.
+The window is the served `num_ctx` when known, otherwise `llm.context_window` as a declared assumption; set
+`llm.extra_body.options.num_ctx` so the two agree.
+
 ### 2.1 Per-Role Model Selection (`agent_llms`)
 Planner, Architect, Developer, Reviewer, RunVerifier, and SkillGapAgent (skill-gap extraction and conflict-checking) don't have to share one model - each is independently configurable, with its own optional escalation chain.
 
