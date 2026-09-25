@@ -144,7 +144,8 @@ def test_a_failed_integration_check_reports_the_milestones_it_leaves_committed(t
     cfg, result = _run(tmp_path, monkeypatch, transport, requirement_unknown_policy="block")
 
     assert result.exit_code != 0
-    assert "Already committed and still applied (not rolled back): M1, M2" in result.output
+    assert ("Committed and still applied (not rolled back): M1, M2. "
+            "integration failed before its changes were applied.") in result.output
     payload = json.loads(result.output[result.output.index("{", result.output.index("=== Milestone sequence")):])
     assert payload["status"] == "integration_failed"
     assert payload["committed_work_units"] == ["M1", "M2"] and payload["committed_changes_retained"] is True
@@ -171,3 +172,23 @@ def test_only_settled_committed_cycles_count_as_committed_units():
         {"work_unit": {"kind": "milestone", "milestone_id": "M1"}, "result": COMMIT_COMMITTED},
     ]
     assert RunRecord.committed_work_units(SimpleNamespace(commits=commits)) == ["M1", "integration"]
+
+
+def test_a_milestone_that_fails_after_its_own_commit_is_reported_as_applied(tmp_path, monkeypatch):
+    """The dependency-drop guard runs after M2's changes were committed: M2
+    fails, and the CLI names it as applied rather than implying otherwise."""
+    calls = []
+
+    def dropped(workspace, established):
+        calls.append(1)
+        return ["com.example:lib:1"] if len(calls) >= 2 else []
+
+    with patch("kriya.workflow.milestones.check_dependency_regression", new=dropped):
+        cfg, result = _run(tmp_path, monkeypatch, Transport())
+
+    assert result.exit_code != 0
+    payload = json.loads(result.output[result.output.index("{", result.output.index("=== Milestone sequence")):])
+    assert payload["status"] == "milestone_failed" and payload["milestone_id"] == "M2"
+    assert payload["committed_work_units"] == ["M1", "M2"]
+    assert "M2 failed after its changes were committed; they remain applied." in result.output
+    assert "before its changes were applied" not in result.output

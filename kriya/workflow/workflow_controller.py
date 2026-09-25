@@ -6451,6 +6451,25 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         )
                         if closures:
                             logger.info("Original requirement closure by named tests: %s", closures)
+                        # The terminal migration gate just judged this same final
+                        # candidate; a requirement stating the migration itself
+                        # is closed by it (attempt._close_requirements_by_migration_gate).
+                        if not global_migration_gap and requirement_set.requirements:
+                            from types import SimpleNamespace
+
+                            from kriya.workflow.attempt import _close_requirements_by_migration_gate
+                            from kriya.workflow.requirements import requirement_obligation_id
+
+                            verdict = obligation_ledger.current(
+                                requirement_obligation_id(requirement_set.requirements[0].id))
+                            terminal_fingerprint = (verdict.evidence or {}).get("evidence_id") if verdict else None
+                            if terminal_fingerprint:
+                                _close_requirements_by_migration_gate(
+                                    SimpleNamespace(attempt_number="terminal"),
+                                    SimpleNamespace(requirement_set=requirement_set,
+                                                    obligation_ledger=obligation_ledger),
+                                    terminal_fingerprint,
+                                )
                     blocking = blocking_requirements(
                         obligation_ledger, requirement_set,
                         unknown_policy=getattr(autonomy_policy, "requirement_unknown_policy", "record"),

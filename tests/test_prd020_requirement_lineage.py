@@ -778,3 +778,66 @@ async def test_enforce_terminal_gate_closes_cannot_confirm_only_by_the_named_tes
         assert not gap, gap
     else:
         assert "REQ-2 (unverified)" in gap and result.legacy_result["quality_gates_passed"] is False
+
+
+@pytest.mark.asyncio
+async def test_enforce_terminal_migration_gate_closes_the_migration_requirement(tmp_path, monkeypatch):
+    """Production runs are enforce runs, whose subtasks carry no requirement
+    set: the migration-gate closure must happen at the terminal gate, on the
+    same final candidate the terminal migration check just judged."""
+    from kriya.workflow import workflow_controller as wc
+    from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus
+    from kriya.workflow.obligations import ObligationAuthority, ObligationRecord
+    from kriya.workflow.plan_validation import PlanValidationResult
+    from kriya.workflow.triage import EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
+
+    goal = "Migrate the JSON layer from gson to jackson-databind.\n- Keep the run() entry point in app.py\n"
+    (tmp_path / "app.py").write_text("original\n")
+    monkeypatch.setattr(wc, "create_git_worktree", lambda workspace: workspace)
+    monkeypatch.setattr(wc, "resolve_migration_resolution", lambda goal, workspace: MigrationResolution(
+        MigrationResolutionStatus.RESOLVED, obligation=MagicMock()))
+
+    def terminal_migration_check(obligation, root, *, obligation_ledger, revision, source, **kwargs):
+        obligation_ledger.record(ObligationRecord(
+            id="migration.gson", kind=ObligationKind.MIGRATION_COMPLETION, status=ObligationStatus.SATISFIED,
+            authority=ObligationAuthority.DETERMINISTIC, description="gson -> jackson-databind", source=source,
+            revision=revision, evidence={"source_identity": "gson", "target_identity": "jackson-databind"}))
+        return None
+
+    monkeypatch.setattr(wc, "find_migration_incomplete", terminal_migration_check)
+    plan = EngineeringPlan(plan_id="prd020", kind=ChangeKind.TASK, subtasks=[Subtask(
+        id="s1", description="migrate", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="app.py", action=FileAction.MODIFY)], requirement_ids=["REQ-1"],
+    )])
+    cfg = AppConfig()
+    cfg.autonomy.spec_compliance_enabled = True
+    cfg.autonomy.requirement_unknown_policy = "block"
+    cfg.autonomy.requirement_unverified_policy = "block"
+    we = MagicMock()
+    we.engineering_triage.classify = AsyncMock(return_value=EngineeringRoute(
+        kind=ChangeKind.TASK, impact=ImpactVector(), initial_risk_class=RiskClass.LOW,
+        current_risk_class=RiskClass.LOW, max_observed_risk_class=RiskClass.LOW,
+        execution_weight=ExecutionWeight.LIGHT,
+    ))
+    we.kernel = SimpleNamespace(config=cfg)
+
+    async def check(**kwargs):
+        prompt = "\n".join(f"{r.id}: {r.text}" for r in kwargs["requirements"].requirements)
+        return json.loads(_verdicts_json(prompt, unverifiable=("REQ-1",)))
+
+    we.spec_compliance.check = check
+
+    async def fake_run(**kwargs):
+        (tmp_path / "app.py").write_text("def run():\n    pass\n")
+        return {"status": "success", "quality_gates_passed": True, "files": ["app.py"]}
+
+    we.run_generation_workflow = fake_run
+    we.planner.run = AsyncMock(return_value="fake plan text")
+    with patch.object(wc, "parse_planner_structured_output", return_value=(MagicMock(), None)), \
+         patch.object(wc, "build_engineering_plan_from_planner_output", return_value=plan), \
+         patch.object(wc, "validate_plan", new=AsyncMock(return_value=PlanValidationResult(valid=True))):
+        result = await wc.WorkflowController(we).execute(goal, str(tmp_path), migration_mode="enforce")
+
+    outcomes = result.legacy_result["requirements"]["outcomes"]
+    assert outcomes == {"REQ-1": "closed_by_evidence", "REQ-2": "satisfied"}
+    assert not result.legacy_result.get("global_requirement_gap")

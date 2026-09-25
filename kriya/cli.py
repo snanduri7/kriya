@@ -2099,12 +2099,17 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             )
             committed_units = milestone_result.get("committed_work_units")
             if status != "success" and committed_units:
-                # Units commit incrementally; the plan failing later does not undo them.
-                click.secho(
-                    "Already committed and still applied (not rolled back): " + ", ".join(committed_units)
-                    + ". The plan is not successful; the failed unit's changes and anything after it were "
-                    "not applied.", fg="yellow",
-                )
+                # Units commit incrementally; the plan failing later does not
+                # undo them. Built from the result only: a unit can fail after
+                # its own commit (a dropped dependency, the artifact registry).
+                failed_unit = milestone_result.get("milestone_id") or (
+                    "integration" if status == "integration_failed" else None)
+                note = "Committed and still applied (not rolled back): " + ", ".join(committed_units) + "."
+                if failed_unit in committed_units:
+                    note += f" {failed_unit} failed after its changes were committed; they remain applied."
+                elif failed_unit:
+                    note += f" {failed_unit} failed before its changes were applied."
+                click.secho(note + " The plan is not successful.", fg="yellow")
             click.echo(json.dumps(milestone_result, indent=2, default=str))
         sys.exit(0 if milestone_result.get("status") == "success" else 1)
 
