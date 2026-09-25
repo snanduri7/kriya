@@ -64,6 +64,15 @@ from kriya.workflow.resume_fingerprints import (
     workspace_fingerprint,
 )
 from kriya.workflow.plan_executor import WorkUnitInvocation
+from kriya.workflow.ownership_findings import (
+    find_ownership_findings,
+    findings_prompt_block,
+    grounded_owner_candidates,
+    owner_candidates_prompt_block,
+    parse_ownership_justifications,
+    record_findings,
+    settle_findings,
+)
 from kriya.workflow.requirements import (
     REQUIREMENTS_UNRESOLVED,
     blocking_requirements,
@@ -2246,6 +2255,24 @@ class WorkflowEngine:
         if state.error_context:
             plan_prompt = f"Fix the following compile/test error:\n{state.error_context}\n\n" + plan_prompt
         plan_prompt += convention_prompt
+        # PRD-021: on a brownfield change (the routes the deterministic owner
+        # rules apply to), existing files whose responsibility the goal names
+        # are shown before planning - a suspicion, never a rule.
+        owner_candidates = []
+        if (
+            engineering_route is not None
+            and engineering_route.kind in (ChangeKind.TASK, ChangeKind.ENHANCEMENT)
+            and predetermined_plan is None
+        ):
+            try:
+                owner_candidates = await asyncio.to_thread(grounded_owner_candidates, workspace_path, goal)
+            except Exception as exc:
+                logger.warning(f"Grounded owner candidates unavailable: {exc}")
+        owner_block = owner_candidates_prompt_block(
+            owner_candidates, where="as a key of the JSON file-list block")
+        if owner_block:
+            plan_prompt += "\n\n" + owner_block
+        ownership_findings = []
         if requirement_set is not None:
             plan_prompt += "\n\n" + requirements_prompt_block(requirement_set, instruction=(
                 "Mark each plan step with the REQ ids it serves, e.g. (REQ-2). Never drop, merge or "
@@ -2556,6 +2583,8 @@ class WorkflowEngine:
                 "These are the user's requirements; the plan above does not replace them. Name the "
                 "REQ ids each design decision serves, and design for every one of them."
             ))
+        if owner_block:
+            design_prompt += "\n\n" + owner_block
         # SME review finding (2026-08-15): same gap as Planner's finding 2 -
         # Architect receives the identical convention_prompt content Planner
         # does, but nothing told it to actually use that content either.
@@ -2648,6 +2677,30 @@ class WorkflowEngine:
             architect_files = await asyncio.to_thread(
                 include_response_construction_owners, architect_files, goal, workspace_path,
             )
+            # PRD-021: files still new after the deterministic owner rules
+            # above, against the grounded candidates shown before planning.
+            if owner_candidates:
+                new_files = [p for p in architect_files if not os.path.exists(os.path.join(workspace_path, p))]
+                design_lines = str(design or "").splitlines()
+                ownership_findings = settle_findings(
+                    find_ownership_findings(
+                        [(path, None, "\n".join(line for line in design_lines
+                                                 if os.path.basename(path) in line))
+                         for path in new_files],
+                        owner_candidates,
+                        touched_paths=[p for p in architect_files if p not in new_files],
+                    ),
+                    goal=goal, justifications=parse_ownership_justifications(str(design or "")),
+                )
+                for finding in ownership_findings:
+                    state.record_event(RunEvent(
+                        kind="ownership.finding", attempt=0, source="workflow.architect_file_resolution",
+                        authority=EventAuthority.ADVISORY,
+                        message=f"{finding.planned_path} may duplicate {finding.candidate_owner} ({finding.status})",
+                        details=finding.to_dict(),
+                    ))
+                state.ownership_findings = list(ownership_findings)
+                skills_prompt += "\n\n" + findings_prompt_block(ownership_findings)
         if step_callback:
             step_callback("Design", design)
 
@@ -3154,6 +3207,9 @@ class WorkflowEngine:
             # PRD-020: every original requirement is tracked (PENDING until the
             # verifier records an outcome); idempotent over a restored ledger.
             seed_requirement_obligations(resolved_obligation_ledger, requirement_set)
+        if ownership_findings:
+            record_findings(resolved_obligation_ledger, ownership_findings, revision=0,
+                            source="workflow.architect_file_resolution")
         # PRV-17 (2026-09-08, P7 efficiency finding) - kriya/workflow/
         # deterministic_failure_diagnostic.py. Same "resolved once, reused
         # across every bounded-subtask call, or created fresh for a plain
@@ -4885,6 +4941,9 @@ class WorkflowEngine:
             "review": review,
             "review_included_in_approval": state.pre_approval_review is not None,
             "run_id": run_id,
+            # PRD-021: grounded ownership findings (advisory evidence).
+            **({"ownership_findings": [f.to_dict() for f in state.ownership_findings]}
+               if state.ownership_findings else {}),
             # PRD-020: the original requirements and each one's authoritative
             # outcome (the verifier's; PENDING when no verdict was recorded).
             **({"requirements": {

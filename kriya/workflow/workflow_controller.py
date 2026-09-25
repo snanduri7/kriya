@@ -190,6 +190,14 @@ from kriya.workflow.terminal_commit import (
     materialize_candidate,
 )
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
+from kriya.workflow.ownership_findings import (
+    find_ownership_findings,
+    findings_prompt_block,
+    grounded_owner_candidates,
+    owner_candidates_prompt_block,
+    record_findings,
+    settle_findings,
+)
 from kriya.workflow.requirements import (
     REQUIREMENTS_UNRESOLVED,
     RequirementSet,
@@ -4022,6 +4030,20 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # PRD-020: the user's original requirements, fixed from the goal
         # before any model sees it; subtasks map to them by id (lineage
         # only), and the terminal gate settles each from verifier evidence.
+        # PRD-021: existing owners whose responsibility the goal names, from
+        # the same bounded candidates and graph edges as the evidence above.
+        try:
+            owner_candidates = grounded_owner_candidates(
+                workspace_path, goal, candidate_paths=planning_repository_candidates,
+                resolved_edges=structural_resolved_edges,
+            )
+        except Exception as error:
+            logger.warning("Grounded owner candidates unavailable: %s", error)
+            owner_candidates = []
+        owner_block = owner_candidates_prompt_block(
+            owner_candidates, where="set on the subtask that creates the file")
+        if owner_block:
+            authoritative_planner_request += "\n\n" + owner_block
         requirement_set = derive_requirements(goal)
         authoritative_planner_request += "\n\n" + requirements_prompt_block(requirement_set, instruction=(
             "Set requirement_ids on each subtask to the REQ ids it serves, using only these ids. "
@@ -4662,6 +4684,26 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             ),
         )
         control_state = _persist_control_state(control_state)
+        # PRD-021: files the approved plan still creates although an existing
+        # owner's responsibility is named - GROUNDED findings, recorded and
+        # shown to the subtask that creates the file; never a denial.
+        planned_actions = [(st, pf) for st in plan.subtasks for pf in st.planned_files]
+        ownership_findings = settle_findings(
+            find_ownership_findings(
+                [(pf.path, st.id, st.description) for st, pf in planned_actions
+                 if pf.action == FileAction.CREATE],
+                owner_candidates,
+                touched_paths=[pf.path for _, pf in planned_actions if pf.action == FileAction.MODIFY],
+            ),
+            goal=goal,
+            justifications={path: reason for st in plan.subtasks
+                            for path, reason in st.ownership_justification.items()},
+            removed_paths=[pf.path for _, pf in planned_actions if pf.action == FileAction.DELETE],
+        )
+        record_findings(obligation_ledger, ownership_findings, revision=repair_attempts,
+                        source="workflow_controller.approved_plan")
+        for finding in ownership_findings:
+            logger.warning("Grounded ownership finding (%s): %s", finding.status, finding.to_dict())
         # The authoritative plan is one transaction. Individual subtask
         # workflows may apply only into this plan-level sandbox; the user
         # workspace remains unchanged until every subtask and any bounded
@@ -4808,6 +4850,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     build_subtask_semantic_context(plan, target),
                     render_established_file_context(established_file_context),
                     target_context_text,
+                    findings_prompt_block([f for f in ownership_findings if f.subtask_id == target.id]),
                 ))),
                 # Recovery Execution Contract (PRV-06, 2026-08-29): NO LONGER
                 # folded into supplementary_context above - a live incident

@@ -405,6 +405,10 @@ class GenerationState:
     # profile without QUALIFIED, no prompt room) -> their reasons. Fallback
     # selection skips them in configured order (attribution.resolve_fallback_model).
     incompatible_fallbacks: Dict[str, List[str]] = field(default_factory=dict)
+    # PRD-021: grounded ownership findings for this run's planned new files
+    # (kriya/workflow/ownership_findings.py) - advisory evidence for the
+    # Developer and the Reviewer, never a gate.
+    ownership_findings: List[Any] = field(default_factory=list)
     # PRD-018: whether this run's model.role_metrics event has been recorded.
     role_metrics_recorded: bool = False
     # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/

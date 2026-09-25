@@ -248,6 +248,11 @@ class ObligationKind(str, Enum):
     # the requirement policy's decision (requirements.blocking_requirements),
     # which is why unresolved_terminal_obligations() leaves this kind to it.
     ORIGINAL_REQUIREMENT = "original_requirement"
+    # PRD-021 (kriya/workflow/ownership_findings.py): a planned new file that
+    # may duplicate an existing owner's responsibility. GROUNDED suspicion,
+    # never terminal: it informs planning, generation and review; it never
+    # denies a plan.
+    GROUNDED_OWNERSHIP = "grounded_ownership"
 
 
 class ObligationStatus(str, Enum):

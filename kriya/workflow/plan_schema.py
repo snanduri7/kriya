@@ -560,6 +560,10 @@ class Subtask(BaseModel):
     # only: mapping a requirement never satisfies it, and leaving one out
     # never removes it.
     requirement_ids: List[str] = Field(default_factory=list)
+    # PRD-021: why a planned new file is not the grounded existing owner of
+    # its responsibility ({planned path: reason}). It acknowledges a
+    # grounded ownership finding; it never satisfies one.
+    ownership_justification: Dict[str, str] = Field(default_factory=dict)
 
     @field_validator("id")
     @classmethod
