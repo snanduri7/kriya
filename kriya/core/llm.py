@@ -163,6 +163,8 @@ class LLMClient:
     def _binding(self, model: str) -> Dict[str, Any]:
         """Config for ``model``: primary llm, an llm_chain entry or an
         agent_llms binding (the first exact, case-folded match)."""
+        from kriya.core.model_runtime import binding_output_tokens
+
         target = (model or "").casefold()
         cfg = self.config
         if cfg.llm.model.casefold() == target:
@@ -178,10 +180,9 @@ class LLMClient:
             candidates.extend(role_cfg.llm_chain)
         for candidate in candidates:
             if candidate.model.casefold() == target:
-                own = getattr(candidate, "max_tokens", None)
                 return {"context_window": candidate.context_window, "reasoning": candidate.reasoning,
                         "context_policy": candidate.context_policy,
-                        "max_tokens": int(own) if own is not None else self.max_tokens}
+                        "max_tokens": binding_output_tokens(cfg, candidate)}
         return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning,
                 "context_policy": cfg.llm.context_policy, "max_tokens": self.max_tokens}
 

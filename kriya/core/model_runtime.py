@@ -421,10 +421,16 @@ def binding_object(config: Any, model: str) -> Any:
 
 def binding_output_tokens(config: Any, binding: Any = None) -> int:
     """PRD-017: the output budget (max_tokens) a call to ``binding`` asks for
-    before any reasoning floor: the binding's own value, or the primary
-    llm.max_tokens when the binding is the primary or leaves it unset."""
-    value = getattr(binding, "max_tokens", None) if binding is not None else None
-    return int(value) if value is not None else int(config.llm.max_tokens)
+    before any reasoning floor and before PRD-016's per-call budgeting: the
+    binding's own value; the primary llm.max_tokens for the primary (None);
+    the shared DEFAULT_OUTPUT_TOKENS for a binding that leaves it unset -
+    never the primary's own override."""
+    from kriya.config.config import DEFAULT_OUTPUT_TOKENS
+
+    if binding is None:
+        return int(config.llm.max_tokens)
+    value = getattr(binding, "max_tokens", None)
+    return int(value) if value is not None else DEFAULT_OUTPUT_TOKENS
 
 
 def _binding_for(config: Any, model: str) -> Dict[str, Any]:

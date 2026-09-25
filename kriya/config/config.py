@@ -733,14 +733,22 @@ class SearchConfig(BaseModel):
     # terms never receive unattended auto-approval.
     public_terms: List[str] = Field(default_factory=list)
 
+# The shared output budget (the packaged llm.max_tokens in default_config.yaml,
+# pinned by a test): what a model binding that leaves max_tokens unset asks for.
+DEFAULT_OUTPUT_TOKENS = 16384
+
+
 class FallbackModelConfig(BaseModel):
     model: str
     base_url: str = Field(default="http://localhost:11434/v1")
     api_key: str = Field(default="local-key")
     temperature: float = Field(default=0.2)
-    # PRD-017: this model's own output budget. None (unset) inherits the
-    # primary llm.max_tokens; every call to this model uses it (the Developer
-    # retry hop used to reuse the primary's value whatever this said).
+    # PRD-017: this model's own output budget; every call to this model uses
+    # it (the Developer retry hop used to reuse the primary's value whatever
+    # this said). None (unset) means the shared default DEFAULT_OUTPUT_TOKENS,
+    # never the primary's own llm.max_tokens: that is the primary binding's
+    # setting, not a chain-wide one. PRD-016 still bounds the final per-call
+    # output by the model's window and max_output_tokens.
     max_tokens: Optional[int] = Field(default=None, ge=1)
     capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     reasoning: bool = Field(default=False)

@@ -13,7 +13,7 @@ from openai.resources.chat.completions import AsyncCompletions
 
 from kriya.agents.agent import DeveloperAgent
 from kriya.config import AppConfig
-from kriya.config.config import FallbackModelConfig, ModelCapabilities
+from kriya.config.config import DEFAULT_OUTPUT_TOKENS, FallbackModelConfig, ModelCapabilities
 from kriya.core import model_qualification as mq
 from kriya.core import model_runtime
 from kriya.core.kernel import Kernel
@@ -150,10 +150,53 @@ def test_request_profile_is_resolved_for_the_model_actually_called():
     assert profile_changes(primary, primary) == {}
 
 
-def test_an_unset_fallback_output_budget_inherits_the_primary():
+def test_the_shared_output_default_is_the_packaged_llm_max_tokens():
+    import os
+
+    import yaml
+
+    import kriya.config as config_package
+
+    with open(os.path.join(os.path.dirname(config_package.__file__), "default_config.yaml")) as handle:
+        packaged = yaml.safe_load(handle)
+    assert packaged["llm"]["max_tokens"] == DEFAULT_OUTPUT_TOKENS
+
+
+def test_an_unset_fallback_output_budget_is_the_shared_default_not_the_primary_override():
     cfg = _cfg(max_tokens=None)
-    assert resolve_request_profile(cfg, cfg.llm_chain[0]).output_tokens == 16384
-    assert allocation_window(cfg, cfg.llm_chain[0]) == prompt_allocation_window(8192, 16384)
+    cfg.llm.max_tokens = 32000  # the primary binding's own override
+    fallback = cfg.llm_chain[0]
+    assert resolve_request_profile(cfg, fallback).output_tokens == DEFAULT_OUTPUT_TOKENS
+    assert allocation_window(cfg, fallback) == prompt_allocation_window(8192, DEFAULT_OUTPUT_TOKENS)
+    assert LLMClient(cfg)._binding(FALLBACK)["max_tokens"] == DEFAULT_OUTPUT_TOKENS
+    assert LLMClient(cfg)._binding(PRIMARY)["max_tokens"] == 32000
+
+
+def test_an_explicit_fallback_output_budget_wins():
+    cfg = _cfg(max_tokens=3000)
+    cfg.llm.max_tokens = 32000
+    assert resolve_request_profile(cfg, cfg.llm_chain[0]).output_tokens == 3000
+    assert LLMClient(cfg)._binding(FALLBACK)["max_tokens"] == 3000
+
+
+@pytest.mark.asyncio
+async def test_a_role_chain_entry_follows_the_same_output_budget_rule():
+    from kriya.agents.agent import call_with_escalation
+    from kriya.config.config import AgentModelConfig
+
+    cfg = _cfg()
+    cfg.llm.max_tokens = 32000
+    cfg.agent_llms.reviewer = AgentModelConfig(llm_chain=[_fallback(
+        model="role-chain:7b", max_tokens=None, context_window=65536, extra_body={"options": {"num_ctx": 65536}},
+    )])
+    llm = LLMClient(cfg)
+    create = AsyncMock(side_effect=[_response("not json"), _response('{"ok": true}')])
+    with patch.object(AsyncCompletions, "create", new=create):
+        await call_with_escalation(llm, "s", "u", [None, *cfg.agent_llms.reviewer.llm_chain], json_mode=True,
+                                   is_failure=lambda text: not text.strip().startswith("{"))
+    sent = [call[1] for call in create.call_args_list]
+    assert sent[0]["max_tokens"] == 32000  # the primary binding's own value
+    assert (sent[1]["model"], sent[1]["max_tokens"]) == ("role-chain:7b", DEFAULT_OUTPUT_TOKENS)
 
 
 @pytest.mark.asyncio
