@@ -18,6 +18,8 @@ dependencies = [
     "httpx>=0.24.0",
     "numpy>=1.24.0",
     "prompt_toolkit>=3.0.0",
+    # stdlib tomllib is 3.11+; kriya/core/tomlcompat.py uses this backport on 3.10.
+    "tomli>=1.1.0; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]

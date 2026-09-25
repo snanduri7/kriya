@@ -12,8 +12,7 @@ import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, replace
 from typing import Any, Dict, Optional, Sequence, Tuple
 
-import tomllib
-
+from kriya.core.tomlcompat import tomllib
 from kriya.tools.containment import BackendUnavailableError
 
 

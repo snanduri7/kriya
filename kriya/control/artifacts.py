@@ -189,8 +189,9 @@ def derive_python_artifact(workspace_path: str, milestone_id: str) -> Optional[A
     pyproject_path = os.path.join(workspace_path, "pyproject.toml")
     if not os.path.isfile(pyproject_path):
         return None
+    from kriya.core.tomlcompat import tomllib
+
     try:
-        import tomllib
         with open(pyproject_path, "rb") as f:
             data = tomllib.load(f)
     except Exception:

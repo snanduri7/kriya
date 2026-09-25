@@ -165,12 +165,10 @@ def _pyproject_dependencies(pyproject_path: str) -> List[str]:
     "infrastructure problem, not a code retry's job" posture for venv
     resolution: a caller that gets [] here falls through to sys.executable
     exactly as it did before this function existed, never a hard failure.
-    tomllib is stdlib-only from Python 3.11 - on an older interpreter this
-    always returns [], the same as no pyproject.toml existing at all."""
-    try:
-        import tomllib
-    except ImportError:
-        return []
+    Parsed with kriya/core/tomlcompat.py, so a 3.10 interpreter reads the
+    same dependencies as 3.11+."""
+    from kriya.core.tomlcompat import tomllib
+
     try:
         with open(pyproject_path, "rb") as fh:
             data = tomllib.load(fh)
