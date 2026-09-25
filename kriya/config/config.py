@@ -553,6 +553,21 @@ class AutonomyConfig(BaseModel):
     # requirement always blocks. Production seals the unknown policy to
     # "block". SECURITY_AUTHORITY under SEC-009: a repository must not be
     # able to relax either.
+    # PRD-023 (kriya/workflow/contract_classification.py): whether an
+    # evidence-backed POTENTIALLY_DERIVED/INDETERMINATE public contract change
+    # may be offered to a human ("human"; needs a human-in-the-loop run with
+    # an approval callback, otherwise it stays blocked) or is always blocked
+    # ("deny", the default). A clearly unauthorized change is never offered.
+    # SECURITY_AUTHORITY under SEC-009.
+    contract_change_escalation: str = Field(default="deny")
+
+    @field_validator("contract_change_escalation")
+    @classmethod
+    def _contract_change_escalation_must_be_known(cls, v: str) -> str:
+        if v not in ("deny", "human"):
+            raise ValueError(f"autonomy.contract_change_escalation must be 'deny' or 'human', got {v!r}")
+        return v
+
     requirement_unknown_policy: str = Field(default="record")
     requirement_unverified_policy: str = Field(default="record")
 

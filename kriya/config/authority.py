@@ -198,6 +198,8 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     ("autonomy", "shell_network"),
     # PRD-020: "record" lets an unverified/unknown original requirement pass.
     ("autonomy", "requirement_unknown_policy"), ("autonomy", "requirement_unverified_policy"),
+    # PRD-023: "human" opens a human authorization path for contract changes.
+    ("autonomy", "contract_change_escalation"),
     # widens what ambient host env a repo's OWN sandboxed build/test command sees
     ("autonomy", "sandbox_env_allowlist"),
     ("autonomy", "egress_policy"), ("autonomy", "acquisition_registry_hosts"),

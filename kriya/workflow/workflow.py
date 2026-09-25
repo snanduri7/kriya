@@ -4346,6 +4346,11 @@ class WorkflowEngine:
                         grounding_goal, structured_plan,
                     )
                     if authorization.legal_scope.get("subtask_id") == current_subtask_id
+                ] + [
+                    # PRD-023: a human-approved change passed the per-attempt
+                    # gate with the same authority; never re-rejected here.
+                    authorization for authorization in state.human_contract_authorizations
+                    if authorization.legal_scope.get("subtask_id") == current_subtask_id
                 ]
                 api_violations = find_brownfield_public_api_changes(
                     workspace_path,

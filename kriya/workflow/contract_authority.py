@@ -47,6 +47,9 @@ class AuthorizationProvenance(str, Enum):
     # docstring. Reserved here only so a future implementation does not need
     # to change this enum's own shape.
     DERIVED = "derived"
+    # PRD-023 (contract_classification.py): created only by an explicit human
+    # approval of an evidence-backed POTENTIALLY_DERIVED/INDETERMINATE change.
+    HUMAN = "human"
 
 
 class AuthorizationAuthority(str, Enum):
@@ -54,6 +57,8 @@ class AuthorizationAuthority(str, Enum):
     # Not produced by this module (DIRECT records are always AUTHORITATIVE).
     # Reserved for a future DERIVED implementation.
     DETERMINISTIC_DERIVED = "deterministic_derived"
+    # PRD-023: a human approved exactly this owner/symbol/category change.
+    HUMAN_APPROVED = "human_approved"
 
 
 class ChangeCategory(str, Enum):
@@ -157,6 +162,40 @@ def _find_named_owner(clause: str, candidate_owners: Dict[str, str]) -> Optional
         if re.search(rf"(?<!\w){re.escape(name)}(?!\w)", clause):
             return path
     return None
+
+
+def human_contract_authorization(
+    *, owner: str, symbol: str, category: ChangeCategory, source_requirement_id: str,
+    subtask_id: Optional[str], plan_revision: str, evidence: Dict[str, Any],
+) -> ContractEvolutionAuthorization:
+    """PRD-023: the one other way an authorization is minted - an explicit
+    human approval of one evidence-backed POTENTIALLY_DERIVED/INDETERMINATE
+    change (kriya/workflow/contract_classification.py decides what may be
+    offered). Revision-bound: the id and record carry the plan revision it
+    was granted for, and its scope is exactly one owner/symbol/category in
+    one subtask. Never produced from model prose."""
+    import hashlib
+
+    authorization_id = (
+        f"human::{owner}::{symbol}::{category.value}::"
+        + hashlib.sha256(plan_revision.encode("utf-8")).hexdigest()[:12]
+    )
+    return ContractEvolutionAuthorization(
+        authorization_id=authorization_id,
+        source_requirement_id=source_requirement_id,
+        provenance=AuthorizationProvenance.HUMAN,
+        authority=AuthorizationAuthority.HUMAN_APPROVED,
+        source_contract_owner=owner,
+        source_symbol=symbol,
+        source_change_category=category,
+        affected_owner=owner,
+        affected_symbol=symbol,
+        allowed_change_category=category,
+        derivation_evidence=evidence,
+        parent_authorization_id=None,
+        legal_scope={"owner": owner, "subtask_id": subtask_id},
+        plan_revision=plan_revision,
+    )
 
 
 def derive_direct_contract_authorizations(

@@ -253,6 +253,11 @@ class ObligationKind(str, Enum):
     # never terminal: it informs planning, generation and review; it never
     # denies a plan.
     GROUNDED_OWNERSHIP = "grounded_ownership"
+    # PRD-023 (kriya/workflow/contract_classification.py): how a public
+    # contract change was classified (authorized direct/human, unauthorized,
+    # potentially derived, indeterminate) and on what evidence. Never
+    # terminal: the gate that found the change decides.
+    CONTRACT_CHANGE_CLASSIFICATION = "contract_change_classification"
 
 
 class ObligationStatus(str, Enum):

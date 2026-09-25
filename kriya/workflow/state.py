@@ -416,6 +416,9 @@ class GenerationState:
     # Developer writes them again (attempt.py), so a retry that fixes the
     # owner is not rejected for evidence it had no authority to repair.
     ownership_redirect_recovery: Dict[str, List[str]] = field(default_factory=dict)
+    # PRD-023: human-approved, revision-bound contract change authorizations
+    # created during this run (contract_classification.human_authorization).
+    human_contract_authorizations: List[Any] = field(default_factory=list)
     # PRD-018: whether this run's model.role_metrics event has been recorded.
     role_metrics_recorded: bool = False
     # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/

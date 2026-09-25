@@ -5238,6 +5238,69 @@ def _stage_ownership_redirect_restoration(
         ))
 
 
+async def _classify_and_escalate_contract_changes(
+    state: GenerationState, ctx: "AttemptContext", violations: List[Dict[str, Any]],
+    baseline_contents: Dict[str, str], candidate_contents: Dict[str, str],
+    run_direct_authorizations: List[Any], authorized_changes: List[Dict[str, Any]] = (),
+) -> Tuple[List[Dict[str, Any]], List[Any], Optional[str]]:
+    """PRD-023: classify every public contract change the detector reported,
+    then offer only the evidence-backed POTENTIALLY_DERIVED/INDETERMINATE
+    ones to a human - when ``autonomy.contract_change_escalation`` is
+    ``human`` and a human-in-the-loop approval callback exists. An approval
+    creates revision-bound authorizations and drops exactly those changes;
+    otherwise every change stays a violation (fail closed). Returns the
+    remaining violations, the classifications and the escalation reason code."""
+    from kriya.workflow.contract_classification import (
+        CONTRACT_ESCALATION_DECLINED,
+        CONTRACT_ESCALATION_UNAVAILABLE,
+        ESCALATABLE,
+        classify_api_violations,
+        escalation_prompt,
+        human_authorization,
+        record_classifications,
+    )
+
+    classifications = classify_api_violations(
+        violations, original_contents=baseline_contents, final_contents=candidate_contents,
+        run_authorizations=run_direct_authorizations,
+        human_authorizations=state.human_contract_authorizations, authorized_changes=authorized_changes,
+    )
+    record_classifications(ctx.obligation_ledger, classifications, revision=state.attempt_number,
+                           subtask_id=ctx.current_subtask_id)
+    escalatable = [c for c in classifications if c.status in ESCALATABLE]
+    autonomy = ctx.kernel.config.autonomy
+    if not escalatable or autonomy.contract_change_escalation != "human":
+        return violations, classifications, None
+    if autonomy.mode != "human-in-the-loop" or not ctx.approval_callback:
+        logger.warning("Contract change needs human authorization but none can be asked - blocked: %s",
+                       [c.id for c in escalatable])
+        return violations, classifications, CONTRACT_ESCALATION_UNAVAILABLE
+    approved = ctx.approval_callback([], escalation_prompt(escalatable))
+    if asyncio.iscoroutine(approved):
+        approved = await approved
+    if not approved:
+        return violations, classifications, CONTRACT_ESCALATION_DECLINED
+    plan_revision = (getattr(ctx.structured_plan, "plan_id", None)
+                     or hashlib.sha256((ctx.grounding_goal or ctx.goal).encode("utf-8")).hexdigest())
+    granted = [human_authorization(c, subtask_id=ctx.current_subtask_id, plan_revision=plan_revision)
+               for c in escalatable]
+    state.human_contract_authorizations.extend(granted)
+    for authorization in granted:
+        state.record_event(RunEvent(
+            kind="contract.human_authorization", attempt=state.attempt_number, source="attempt.contract_gate",
+            authority=EventAuthority.AUXILIARY,
+            message=f"human authorized {authorization.affected_owner}::{authorization.affected_symbol} "
+                    f"({authorization.allowed_change_category.value})",
+            details={"authorization_id": authorization.authorization_id,
+                     "plan_revision": authorization.plan_revision,
+                     "legal_scope": authorization.legal_scope,
+                     "evidence": authorization.derivation_evidence},
+        ))
+    approved_keys = {(c.owner, c.signature) for c in escalatable}
+    remaining = [v for v in violations if (v["owner"], v["removed_signature"]) not in approved_keys]
+    return remaining, classifications, None
+
+
 def _settled_goal_spec_requirement(
     ledger: Optional[ObligationLedger], obligation_id: Optional[str], fingerprint: str,
 ) -> Optional[ObligationRecord]:
@@ -6328,17 +6391,45 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # unmediated user request) and ctx.structured_plan - filtered here to
         # exactly this subtask's own legal_scope, never a wider allowlist.
         # See kriya/workflow/contract_authority.py's own module docstring.
+        run_direct_authorizations = derive_direct_contract_authorizations(
+            ctx.grounding_goal, ctx.structured_plan,
+        )
         direct_authorizations = [
-            authorization
-            for authorization in derive_direct_contract_authorizations(
-                ctx.grounding_goal, ctx.structured_plan,
-            )
+            authorization for authorization in run_direct_authorizations
+            if authorization.legal_scope.get("subtask_id") == ctx.current_subtask_id
+        ]
+        # PRD-023: a human-approved change of this subtask's scope is
+        # authorized exactly like a DIRECT one (same per owner/symbol/category
+        # match inside the detector).
+        human_authorizations = [
+            authorization for authorization in state.human_contract_authorizations
             if authorization.legal_scope.get("subtask_id") == ctx.current_subtask_id
         ]
         early_api_violations = find_brownfield_public_api_changes(
             ctx.workspace_path, baseline_contents, candidate_contents, ctx.goal,
-            direct_authorizations,
+            direct_authorizations + human_authorizations,
         )
+        contract_classifications: List[Any] = []
+        escalation_reason_code: Optional[str] = None
+        # PRD-023: the changes an authorization covered are classified too
+        # (AUTHORIZED_DIRECT/AUTHORIZED_HUMAN evidence), found as the
+        # difference against the same detector without authorizations.
+        authorized_api_changes: List[Dict[str, Any]] = []
+        if direct_authorizations or human_authorizations:
+            remaining_keys = {(v["owner"], v["removed_signature"]) for v in early_api_violations}
+            authorized_api_changes = [
+                v for v in find_brownfield_public_api_changes(
+                    ctx.workspace_path, baseline_contents, candidate_contents, ctx.goal, [],
+                )
+                if (v["owner"], v["removed_signature"]) not in remaining_keys
+            ]
+        if early_api_violations or authorized_api_changes:
+            early_api_violations, contract_classifications, escalation_reason_code = (
+                await _classify_and_escalate_contract_changes(
+                    state, ctx, early_api_violations, baseline_contents, candidate_contents,
+                    run_direct_authorizations, authorized_api_changes,
+                )
+            )
         if early_api_violations:
             state.all_original_contents.update(baseline_contents)
             for evidence_path in sorted({
@@ -6372,6 +6463,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 likely_files=sorted({item["owner"] for item in early_api_violations}),
                 diagnostics={
                     "api_contract_recovery": {"violations": early_api_violations},
+                    # PRD-023: how each change was classified, and why no
+                    # escalation authorized it.
+                    "contract_classifications": [c.to_dict() for c in contract_classifications],
+                    **({"reason_code": escalation_reason_code} if escalation_reason_code else {}),
                 },
                 attempt=state.attempt_number,
             )
