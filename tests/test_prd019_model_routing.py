@@ -596,3 +596,21 @@ def test_the_workflow_command_refuses_a_resume_whose_route_no_longer_holds(tmp_p
         _workflow_config(cfg, resume=True, workspace=str(workspace))
     assert stopped.value.code == 1
     assert mr.ROUTE_RESUME_MISMATCH in capsys.readouterr().err
+
+
+def test_a_direct_resume_never_takes_routes_from_another_runs_newer_checkpoint(tmp_path, monkeypatch):
+    from kriya.cli import _workflow_config
+    from kriya.workflow.checkpoint import save_checkpoint
+
+    _exact_ollama(monkeypatch)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cfg = _routing_cfg(tmp_path)
+    _qualify_placed(cfg, "reviewer", "cand-a")
+    digest_b = _qualify_placed(cfg, "reviewer", "cand-b")
+    _saved_checkpoint(workspace, mr.resume_routes_from(mr.plan_routes(cfg)))  # the direct run: cand-a
+    save_checkpoint(str(workspace), "milestone-run", {"stage": "plan", "milestone_group_id": "g", "model_routes": {
+        "version": 1, "table_digest": None,
+        "routes": {"reviewer": {"model": "cand-b", "runtime_digest": digest_b, "source": "evidence"}}}})
+    resumed = _workflow_config(cfg, resume=True, workspace=str(workspace))
+    assert resumed.agent_llms.reviewer.llm.model == "cand-a"

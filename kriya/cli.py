@@ -770,26 +770,41 @@ def _model_cfg(ctx: click.Context) -> AppConfig:
     return ctx.obj['config']
 
 
-def _resumed_model_routes(workspace: Optional[str], resume: bool, resume_id: Optional[str]) -> Optional[dict]:
-    """PRD-019: the routes recorded by the checkpoint a resume will continue
-    (the same selection as the engine: resume_id, else the latest one), or
-    None (nothing to resume, or recorded before routing)."""
+def _resumed_model_routes(workspace: Optional[str], resume: bool, resume_id: Optional[str],
+                          milestone_plan: Optional[str] = None) -> Optional[dict]:
+    """PRD-019: the routes recorded by the run a resume continues, or None
+    (nothing to resume, or recorded before routing). Only that run's own
+    checkpoints count, the way the engine selects them
+    (plan_executor.select_work_unit_checkpoint): ``resume_id``'s checkpoint;
+    for ``--from-milestones``, the newest checkpoint of that plan's
+    milestone group; for a direct goal, the newest direct-run checkpoint.
+    A newer checkpoint of another run in the workspace never lends its
+    routes."""
     if not (resume or resume_id) or not workspace:
         return None
-    from kriya.workflow.checkpoint import find_latest_checkpoint, load_checkpoint
+    from kriya.workflow.checkpoint import list_checkpoints, load_checkpoint
 
     workspace = os.path.abspath(workspace)
     try:
-        target = resume_id or find_latest_checkpoint(workspace)
-        checkpoint = load_checkpoint(workspace, target) if target else None
-    except Exception as error:  # the engine reports an unreadable checkpoint itself
+        if resume_id:
+            checkpoint = load_checkpoint(workspace, resume_id)
+        else:
+            group = None
+            if milestone_plan:
+                with open(milestone_plan, "r", encoding="utf-8") as handle:
+                    group = json.load(handle).get("group_id")
+            own = [item for item in list_checkpoints(workspace)
+                   if (item.get("milestone_group_id") == group if milestone_plan
+                       else not item.get("milestone_group_id"))]
+            checkpoint = max(own, key=lambda item: item.get("saved_at", 0)) if own else None
+    except Exception as error:  # the engine reports an unreadable checkpoint or plan itself
         logger.warning("Could not read the checkpoint to resume for its model routes: %s", error)
         return None
     return (checkpoint or {}).get("model_routes")
 
 
 def _workflow_config(cfg: AppConfig, *, resume: bool = False, resume_id: Optional[str] = None,
-                     workspace: Optional[str] = None) -> AppConfig:
+                     workspace: Optional[str] = None, milestone_plan: Optional[str] = None) -> AppConfig:
     """The configuration a workflow command (generate, fix, proposal
     execution) runs with, decided before any model call.
 
@@ -808,7 +823,8 @@ def _workflow_config(cfg: AppConfig, *, resume: bool = False, resume_id: Optiona
         from kriya.core.model_routing import RoutingError, apply_routes, plan_routes
 
         try:
-            plan = plan_routes(cfg, resume_routes=_resumed_model_routes(workspace, resume, resume_id))
+            plan = plan_routes(cfg, resume_routes=_resumed_model_routes(workspace, resume, resume_id,
+                                                                        milestone_plan))
         except RoutingError as error:
             click.secho(f"[{error.reason_code}] model routing refused this run: {error}", fg="red", err=True)
             sys.exit(1)
@@ -1875,7 +1891,8 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             click.secho("Error: Missing argument 'GOAL' or '--file' option.", fg="red")
             sys.exit(1)
 
-    cfg: AppConfig = _workflow_config(ctx.obj['config'], resume=resume, resume_id=resume_id, workspace=os.getcwd())
+    cfg: AppConfig = _workflow_config(ctx.obj['config'], resume=resume, resume_id=resume_id, workspace=os.getcwd(),
+                                      milestone_plan=from_milestones)
 
     llm = LLMClient(cfg)
     kernel = Kernel(config=cfg)
