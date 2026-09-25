@@ -485,13 +485,15 @@ def upstream_proof_identity(milestone: Any, proofs: Mapping[str, Any]) -> str:
     return hashlib.sha256(json.dumps(upstream, sort_keys=True).encode()).hexdigest()
 
 
-def current_toolchain_identity() -> Dict[str, Any]:
-    """PRD-008's toolchain fingerprint - the one source direct resume uses.
-    UNAVAILABLE until PRD-011 binds a canonical toolchain identity; never a
-    second, milestone-only approximation."""
+def current_toolchain_identity(workspace_path: Optional[str], autonomy_cfg: Any) -> Dict[str, Any]:
+    """PRD-008's toolchain fingerprint - the one source direct resume uses
+    (PRD-011: the attested contained toolchain; UNAVAILABLE in host mode),
+    never a second, milestone-only approximation. No goal is passed: a
+    milestone's no-change evidence is bound to the repository-declared
+    toolchain, at recording and at assessment alike."""
     from kriya.workflow import resume_fingerprints
 
-    return resume_fingerprints.toolchain_fingerprint().to_dict()
+    return resume_fingerprints.toolchain_fingerprint(workspace_path, autonomy_cfg).to_dict()
 
 
 def _toolchain_value(identity: Any) -> Optional[str]:
@@ -602,7 +604,7 @@ def no_change_verification(
         "zero_mutations": True,
         # Every coverage kind is test/build/runtime evidence: it depends on
         # the toolchain that produced it.
-        "toolchain": current_toolchain_identity(),
+        "toolchain": current_toolchain_identity(workspace_path, getattr(config, "autonomy", None)),
         # Deterministic repository verification only - no model-produced
         # evidence authorizes this result.
         "model_runtime": FingerprintStatus.NOT_APPLICABLE.value,
@@ -838,6 +840,7 @@ def assess_completed_milestone_reuse(
     *,
     legacy_state: bool = False,
     verification_policy: Optional[str] = None,
+    autonomy_cfg: Any = None,
 ) -> MilestoneReuseAssessment:
     """Decide, for every completed milestone, whether it may be skipped.
 
@@ -868,6 +871,7 @@ def assess_completed_milestone_reuse(
         workspace=workspace, entries=entries, failures=failures, owner=owner,
         unverified_after=unverified_after, legacy_state=legacy_state,
         malformed_ledger=bool(malformed), proofs=proofs, verification_policy=verification_policy,
+        autonomy_cfg=autonomy_cfg,
     )
 
     by_id = {milestone.id: milestone for milestone in milestones}
@@ -957,6 +961,7 @@ class _AssessmentContext:
     malformed_ledger: bool
     proofs: Mapping[str, Any]
     verification_policy: Optional[str]
+    autonomy_cfg: Any = None
     _content_hash: Any = None
 
     def content_hash(self) -> Optional[str]:
@@ -1111,7 +1116,8 @@ def _assess_no_change(
         decision.status = FingerprintStatus.CHANGED
         decision.reasons.append(_reason(VERIFIED_NO_CHANGE_INVALIDATED, "; ".join(invalid)))
         return decision
-    recorded, now = _toolchain_value(binding.get("toolchain")), _toolchain_value(current_toolchain_identity())
+    recorded = _toolchain_value(binding.get("toolchain"))
+    now = _toolchain_value(current_toolchain_identity(context.workspace, context.autonomy_cfg))
     if recorded is None or now is None:
         decision.reasons.append(_reason(
             TOOLCHAIN_IDENTITY_UNAVAILABLE,

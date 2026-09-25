@@ -196,6 +196,20 @@ def _inspect_image_digest(docker_path: str, image: str) -> Optional[str]:
     return digest if digest.startswith("sha256:") else None
 
 
+def local_image_content_digest(image: str) -> Optional[str]:
+    """The immutable content digest of an ALREADY-PRESENT local image, or
+    None when Docker or the image is unavailable. Never pulls and never runs
+    a container: resume-fingerprint and doctor callers must not change what
+    they observe."""
+    docker_path = shutil.which("docker")
+    if docker_path is None:
+        return None
+    try:
+        return _inspect_image_digest(docker_path, image)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def _attest_toolchain_image(
     docker_path: str, image: str, identity: ToolchainIdentity, *, allow_pull: bool,
 ) -> ToolchainIdentity:

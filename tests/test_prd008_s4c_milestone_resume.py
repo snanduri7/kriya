@@ -130,7 +130,8 @@ def toolchain_bound(monkeypatch):
     Mutate ``identity["value"]`` to model a toolchain change."""
     identity = {"value": "toolchain-1"}
     monkeypatch.setattr(
-        resume_fingerprints, "toolchain_fingerprint", lambda: Fingerprint(identity["value"], "test-toolchain"),
+        resume_fingerprints, "toolchain_fingerprint",
+        lambda *_args, **_kwargs: Fingerprint(identity["value"], "test-toolchain"),
     )
     return identity
 
@@ -762,3 +763,40 @@ def test_gate_evidence_never_counts_a_test_run_that_executed_zero_tests():
         {"type": "compile", "passed": False, "status": "FAILED", "attempt": 1},
         {"type": "regression_test", "passed": None, "status": "NO_TESTS_EXECUTED", "attempt": 1},
     ]
+
+
+@pytest.mark.parametrize("image_changed", [False, True])
+def test_prd011_contained_no_change_proof_binds_the_real_toolchain_identity(
+    git_workspace, monkeypatch, image_changed,  # noqa: F811
+):
+    """PRD-011 replaces the toolchain_bound stand-in: under contained
+    execution the no-change proof records the attested-image fingerprint
+    (profile + local content digest), a later run with the same image reuses
+    it, and a different image content invalidates it."""
+    from kriya.tools import containment_oci
+
+    (git_workspace / "app.py").write_text("APP = 1\n")
+    subprocess.run(["git", "add", "app.py"], cwd=git_workspace, check=True)
+    subprocess.run(["git", "commit", "-qm", "app"], cwd=git_workspace, check=True)
+    digests = {"python:3.12-slim": "sha256:" + "a" * 64}
+    monkeypatch.setattr(containment_oci, "local_image_content_digest", lambda image: digests.get(image))
+    config = AppConfig()
+    config.autonomy.contained_execution_required = True
+    config.autonomy.containment_backend = "oci"
+
+    _run(git_workspace, ACCEPTED_CHAIN, _no_op_engine(config=config))
+    proof = _proof(git_workspace, "M1")
+    assert proof["kind"] == VERIFIED_NO_CHANGE
+    assert proof["verification"]["toolchain"]["basis"] == "contained-toolchain-image"
+    assert proof["verification"]["toolchain"]["value"] != "UNAVAILABLE"
+
+    if image_changed:
+        digests["python:3.12-slim"] = "sha256:" + "b" * 64
+    engine = _no_op_engine(config=config)
+    result, _ = _run(git_workspace, ACCEPTED_CHAIN, engine)
+    if image_changed:
+        assert _decisions(result)["M1"] == ("CHANGED", [VERIFIED_NO_CHANGE_INVALIDATED])
+        assert "M1" in engine.calls
+    else:
+        assert _decisions(result) == {"M1": ("MATCH", []), "M2": ("MATCH", [])}
+        assert engine.calls == ["INTEGRATION"]

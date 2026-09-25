@@ -581,6 +581,7 @@ def compute_resume_fingerprints(
     workspace: Optional[Fingerprint] = None,
     input_obligation_fingerprint: Optional[Fingerprint] = None,
     effective_obligation_fingerprint: Optional[Fingerprint] = None,
+    toolchain: Optional[Fingerprint] = None,
 ) -> Dict[str, Fingerprint]:
     """Every fingerprint in FINGERPRINT_NAMES. ``workspace`` and
     ``input_obligation_fingerprint`` may be passed precomputed: a run fixes
@@ -604,7 +605,7 @@ def compute_resume_fingerprints(
         "skills": skills_fingerprint(skill_source_dirs),
         "model_runtime": Fingerprint.unavailable("model runtime identity is not bound until PRD-013"),
         "containment": Fingerprint(_digest(owned["containment"]), "containment-config"),
-        "toolchain": toolchain_fingerprint(),
+        "toolchain": toolchain if toolchain is not None else toolchain_fingerprint(),
         "verification_policy": Fingerprint(
             _digest({"config": owned["verification_policy"], "run": dict(verification_inputs)}),
             "verification-policy",
@@ -614,10 +615,45 @@ def compute_resume_fingerprints(
     }
 
 
-def toolchain_fingerprint() -> Fingerprint:
+def toolchain_fingerprint(
+    workspace_path: Optional[str] = None, autonomy_cfg: Any = None, *, goal: Optional[str] = None,
+) -> Fingerprint:
     """The toolchain identity every reuse decision compares (direct resume
-    and milestone VERIFIED_NO_CHANGE alike). UNAVAILABLE until PRD-011."""
-    return Fingerprint.unavailable("toolchain identity is not bound until PRD-011")
+    and milestone VERIFIED_NO_CHANGE alike).
+
+    Bound only where PRD-011 makes it provable: with contained execution
+    required, the versioned profile PolymorphicValidator resolves for the
+    workspace (including a goal-stated JDK, exactly as the attempt applies
+    it) plus the local image's immutable content digest. Deterministic from
+    those inputs and side-effect free (inspects, never pulls or runs), so a
+    checkpoint and its resume compute it identically. The same content
+    digest always attests the same runtime, so observed versions add
+    nothing. Host execution has no attested identity: UNAVAILABLE, which
+    every reuse decision treats as UNVERIFIED, never a match."""
+    if workspace_path is None or getattr(autonomy_cfg, "contained_execution_required", False) is not True:
+        return Fingerprint.unavailable("host toolchain has no attested identity (containment not required)")
+    from kriya.tools.containment import ContainmentSetupError
+    from kriya.tools.containment_oci import local_image_content_digest
+    from kriya.tools.validate import PolymorphicValidator
+
+    try:
+        validator = PolymorphicValidator(workspace_path, autonomy_cfg=autonomy_cfg)
+        if goal and validator.stack == "java":
+            from kriya.workflow.toolchain import _resolve_java_home_override
+
+            validator.java_home_override = _resolve_java_home_override(goal)
+    except ContainmentSetupError as exc:
+        return Fingerprint.unavailable(f"toolchain requirement unresolvable: {exc}")
+    identity = validator.toolchain_identity
+    if identity is None:
+        return Fingerprint.unavailable(f"no versioned toolchain profile for stack {validator.stack!r}")
+    digest = local_image_content_digest(identity.containment_image)
+    if digest is None:
+        return Fingerprint.unavailable(f"toolchain image {identity.containment_image!r} is not present locally")
+    declared = identity.to_dict()
+    for evidence_only in ("image_digest", "observed_runtime_version", "observed_build_tool_version"):
+        declared.pop(evidence_only, None)
+    return Fingerprint(_digest({"declared": declared, "image_digest": digest}), "contained-toolchain-image")
 
 
 def generation_resume_fingerprints(
@@ -692,6 +728,7 @@ def generation_resume_fingerprints(
             effective_obligation_ledger if effective_obligation_ledger is not None else obligation_ledger
         ),
         skill_source_dirs=skill_dirs,
+        toolchain=toolchain_fingerprint(workspace_path, config.autonomy, goal=goal),
         authority_inputs={
             "allowed_write_relpaths": allowed_write_relpaths,
             "authorized_semantic_regions": authorized_semantic_regions,

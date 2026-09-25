@@ -461,6 +461,7 @@ def revalidate_completed_milestones(
         run_state.completion_proofs, run_state.commit_ledger,
         legacy_state=run_state.completion_schema_version is None,
         verification_policy=verification_policy_fingerprint(config),
+        autonomy_cfg=getattr(config, "autonomy", None),
     )
     assessment.run_id = run_id
     assessment.events = events
