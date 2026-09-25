@@ -206,6 +206,7 @@ from kriya.workflow.requirements import (
     derive_requirements,
     parse_requirement_verdicts,
     record_requirement_verdicts,
+    requirement_evidence,
     requirement_outcomes,
     requirements_prompt_block,
     seed_requirement_obligations,
@@ -6440,10 +6441,25 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             self.workflow_engine.spec_compliance, requirement_set, goal,
                             plan_workspace_path, _terminal_candidate_paths(plan), obligation_ledger,
                         )
+                        # "Do not modify any other file": decided from what this
+                        # final candidate (and the run's committed history)
+                        # actually changed, against the files the goal names.
+                        from kriya.workflow.workflow import (
+                            close_requirements_by_mutation_scope,
+                            close_requirements_with_named_tests,
+                        )
+
+                        scope_closures = await asyncio.to_thread(
+                            close_requirements_by_mutation_scope, obligation_ledger, requirement_set,
+                            plan_workspace_path, workspace_path,
+                            candidate_paths=[planned.path for subtask in plan.subtasks
+                                             for planned in subtask.planned_files],
+                            revision="terminal",
+                        )
+                        if scope_closures:
+                            logger.info("Original requirement mutation-scope evidence: %s", scope_closures)
                         # An UNVERIFIED requirement naming existing tests: run
                         # exactly those on this candidate (never a model citation).
-                        from kriya.workflow.workflow import close_requirements_with_named_tests
-
                         closures = await asyncio.to_thread(
                             close_requirements_with_named_tests, autonomy_policy, obligation_ledger,
                             requirement_set, plan_workspace_path, workspace_path,
@@ -6623,6 +6639,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 **requirement_set.to_dict(),
                 "outcomes": {rid: outcome.value for rid, outcome in
                              requirement_outcomes(obligation_ledger, requirement_set).items()},
+                "evidence": requirement_evidence(obligation_ledger, requirement_set),
             }
         except Exception as error:
             logger.warning(f"Original requirement outcomes unavailable for the result: {error}")

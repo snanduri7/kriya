@@ -294,6 +294,14 @@ def _create_scoped_snapshot_sandbox(workspace_path: str) -> str:
     return sandbox_path
 
 
+def git_read_lines(cwd: str, *args: str) -> List[str]:
+    """A read-only git query (``rev-parse``, ``ls-tree``, ``diff --name-only``,
+    ``ls-files``) in ``cwd``: its non-empty output lines. Raises on failure,
+    so a caller that needs the answer can fail closed."""
+    completed = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True, timeout=60)
+    return [line for line in completed.stdout.splitlines() if line.strip()]
+
+
 def create_git_worktree(repo_path: str) -> str:
     # 1. Quick pre-check: Is this a git repository?
     try:

@@ -35,6 +35,14 @@ user's text, verbatim:
   verdict's own, so evidence about an earlier candidate never closes a later
   one. The closed outcome is CLOSED_BY_EVIDENCE, distinct from the
   verifier's SATISFIED. VIOLATED and UNKNOWN are never closed this way.
+- Mutation-scope requirements ("do not modify any other file", recognized
+  only as a whole statement, ``is_mutation_scope_requirement``) are decided
+  from Kriya's own mutation record (``close_mutation_scope_requirements``):
+  authorized paths = the repository files the goal itself names
+  (``authorized_mutation_paths``), actual paths = what the candidate and the
+  run's committed history changed. In scope with nothing foreign closes it
+  (MUTATION_SCOPE evidence); a path outside the set is deterministic VIOLATED
+  evidence whatever the verifier said; no referent leaves it unresolved.
 
 A plan that paraphrases or omits a requirement cannot remove it: the set is
 derived from the goal, not from the plan, and the terminal decision reads
@@ -327,18 +335,22 @@ def record_requirement_verdicts(
 def record_requirement_closure(
     ledger: ObligationLedger, requirements: RequirementSet, requirement_id: str, *,
     evidence_id: str, method: str, detail: Dict[str, Any], source: str, revision: Any,
+    violated: bool = False,
 ) -> None:
-    """Record positive deterministic evidence that ``requirement_id`` holds
-    for the candidate identified by ``evidence_id`` (the verifier verdict's
-    own evidence id). It closes the requirement only while the verifier's
-    current verdict is UNVERIFIED for that same evidence id
-    (``requirement_outcomes``); it never touches the verdict record."""
+    """Record deterministic evidence about ``requirement_id`` for the
+    candidate identified by ``evidence_id`` (the verifier verdict's own
+    evidence id). Positive evidence closes the requirement only while the
+    verifier's current verdict is UNVERIFIED for that same evidence id
+    (``requirement_outcomes``); ``violated`` evidence (a deterministic
+    counter-proof, e.g. a mutation outside the authorized scope) makes it
+    VIOLATED whatever the verifier said. It never touches the verdict record."""
     requirement = requirements.get(requirement_id)
     if requirement is None:
         raise ValueError(f"unknown requirement id {requirement_id!r}")
     ledger.record(ObligationRecord(
         id=requirement_closure_id(requirement_id), kind=ObligationKind.ORIGINAL_REQUIREMENT,
-        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC,
+        status=ObligationStatus.VIOLATED if violated else ObligationStatus.SATISFIED,
+        authority=ObligationAuthority.DETERMINISTIC,
         description=requirement.text, source=source, revision=revision,
         evidence={"requirement_set_digest": requirements.digest, "evidence_id": evidence_id,
                   "method": method, **detail},
@@ -360,10 +372,28 @@ def requirement_closure(
     return None
 
 
+def requirement_counter_evidence(
+    ledger: ObligationLedger, requirement_id: str, evidence_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Deterministic VIOLATED evidence recorded for ``requirement_id`` on the
+    candidate ``evidence_id``, if any."""
+    if not evidence_id:
+        return None
+    for record in reversed(ledger.history(requirement_closure_id(requirement_id))):
+        evidence = record.evidence or {}
+        if record.status is ObligationStatus.VIOLATED and evidence.get("evidence_id") == evidence_id:
+            return evidence
+    return None
+
+
 def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet) -> Dict[str, RequirementOutcome]:
     """Each requirement's authoritative outcome (PENDING until a verdict).
-    UNVERIFIED becomes CLOSED_BY_EVIDENCE only with closure evidence for the
-    exact candidate the verdict judged; nothing else is ever closed."""
+    Deterministic counter-evidence for the candidate the verdict judged makes
+    it VIOLATED, whatever the verdict. UNVERIFIED becomes CLOSED_BY_EVIDENCE
+    only with closure evidence for that exact candidate; a SATISFIED verdict
+    does too when the evidence is a deterministic proof of the requirement
+    itself (MUTATION_SCOPE), so the outcome names what actually proved it.
+    VIOLATED, UNKNOWN and PENDING verdicts are never closed."""
     outcomes: Dict[str, RequirementOutcome] = {}
     for requirement in requirements.requirements:
         record = ledger.current(requirement_obligation_id(requirement.id))
@@ -375,11 +405,131 @@ def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet)
             outcome = RequirementOutcome.UNKNOWN
         if outcome is RequirementOutcome.CLOSED_BY_EVIDENCE:
             outcome = RequirementOutcome.UNKNOWN  # only derived here, never a recorded verdict
-        if (outcome is RequirementOutcome.UNVERIFIED
-                and requirement_closure(ledger, requirement.id, evidence.get("evidence_id")) is not None):
+        evidence_id = evidence.get("evidence_id")
+        closure = requirement_closure(ledger, requirement.id, evidence_id)
+        if requirement_counter_evidence(ledger, requirement.id, evidence_id) is not None:
+            outcome = RequirementOutcome.VIOLATED
+        elif closure is not None and (
+                outcome is RequirementOutcome.UNVERIFIED
+                or (outcome is RequirementOutcome.SATISFIED and closure.get("kind") == MUTATION_SCOPE)):
             outcome = RequirementOutcome.CLOSED_BY_EVIDENCE
         outcomes[requirement.id] = outcome
     return outcomes
+
+
+def requirement_evidence(ledger: ObligationLedger, requirements: RequirementSet) -> Dict[str, Dict[str, Any]]:
+    """The deterministic evidence behind each requirement's current outcome
+    (counter-evidence first, then closure evidence), bound to the candidate
+    its verdict judged; requirements without any are left out."""
+    found: Dict[str, Dict[str, Any]] = {}
+    for requirement in requirements.requirements:
+        record = ledger.current(requirement_obligation_id(requirement.id))
+        evidence_id = (record.evidence or {}).get("evidence_id") if record is not None else None
+        evidence = (requirement_counter_evidence(ledger, requirement.id, evidence_id)
+                    or requirement_closure(ledger, requirement.id, evidence_id))
+        if evidence is not None:
+            found[requirement.id] = dict(evidence)
+    return found
+
+
+# ------------------------------------------------------------ mutation scope
+
+MUTATION_SCOPE = "MUTATION_SCOPE"
+
+# A requirement that forbids modifying any file other than the ones the goal
+# itself names. Matched against the whole requirement, never a fragment: a
+# requirement about other *methods*, or "keep the change small", is not a
+# file-boundary statement and is never treated as one.
+_MUTATION_SCOPE_REQUIREMENT = re.compile(
+    r"(?:do not|don't|must not|mustn't|should not|shouldn't|shall not|never)\s+"
+    r"(?:modify|change|edit|touch|alter)\s+any\s+other\s+files?"
+    r"(?:\s+in\s+(?:the|this)\s+(?:repository|repo|project|codebase|workspace))?\s*[.!]?",
+    re.IGNORECASE,
+)
+_PATH_TOKEN = re.compile(r"`([^`]+)`|([\w./-]+)")
+
+
+def is_mutation_scope_requirement(text: str) -> bool:
+    """Whether a requirement is, in its entirety, the file-boundary statement
+    "do not modify any other file (in the repository)"."""
+    return bool(_MUTATION_SCOPE_REQUIREMENT.fullmatch(_clean(text or "")))
+
+
+def authorized_mutation_paths(requirements: RequirementSet, tracked_paths: Iterable[str]) -> List[str]:
+    """The files the user's own goal names - the only deterministic referent
+    of "any other file". A token counts only when it is exactly a path the
+    repository tracks at the run's base (no basename, stem or fuzzy match);
+    the Planner's or Developer's file choices are never an input. Empty
+    means "other" has no authoritative referent."""
+    tracked = set(tracked_paths)
+    named: List[str] = []
+    for requirement in requirements.requirements:
+        for code, bare in _PATH_TOKEN.findall(requirement.text):
+            token = (code or bare).strip().strip("'\"").rstrip(".,;:!?)").lstrip("(").removeprefix("./")
+            if token in tracked and token not in named:
+                named.append(token)
+    return sorted(named)
+
+
+def close_mutation_scope_requirements(
+    ledger: ObligationLedger, requirements: RequirementSet, *,
+    tracked_paths: Iterable[str], scope_evidence: Optional[Mapping[str, Any]], source: str, revision: Any,
+) -> List[Dict[str, Any]]:
+    """Decide every mutation-scope requirement from Kriya's own record of
+    what the run changed (``scope_evidence``: ``actual_paths`` - every path
+    the candidate changed plus the run's committed history - ``foreign_paths``
+    - changes present that the run cannot attribute to itself - and the
+    candidate/run identity). ``actual_paths ⊆ authorized`` with nothing
+    foreign closes the requirement for the candidate its verdict judged; any
+    actual path outside the authorized set is deterministic VIOLATED
+    evidence. No referent, no verdict to bind to, unavailable evidence or a
+    foreign change leaves it as the verifier left it (fail closed)."""
+    authorized = authorized_mutation_paths(requirements, tracked_paths)
+    attempts: List[Dict[str, Any]] = []
+    for requirement in requirements.requirements:
+        if not is_mutation_scope_requirement(requirement.text):
+            continue
+        record = ledger.current(requirement_obligation_id(requirement.id))
+        verdict = (record.evidence or {}) if record is not None else {}
+        evidence_id = verdict.get("evidence_id")
+        closable = verdict.get("outcome") in (RequirementOutcome.SATISFIED.value,
+                                              RequirementOutcome.UNVERIFIED.value)
+        entry: Dict[str, Any] = {"requirement": requirement.id, "kind": MUTATION_SCOPE, "closed": False,
+                                 "authorized_paths": authorized}
+        if not authorized:
+            entry["reason"] = "the goal names no repository file, so 'other' has no authoritative referent"
+        elif not evidence_id:
+            entry["reason"] = "no verifier verdict on this candidate to bind the evidence to"
+        elif not scope_evidence or scope_evidence.get("unavailable"):
+            entry["reason"] = "mutation evidence unavailable: " + str(
+                (scope_evidence or {}).get("unavailable") or "not collected")
+        else:
+            actual = sorted(set(scope_evidence.get("actual_paths") or ()))
+            foreign = sorted(set(scope_evidence.get("foreign_paths") or ()))
+            outside = [path for path in actual if path not in set(authorized)]
+            detail = {
+                "kind": MUTATION_SCOPE, "requirement": requirement.id, "authorized_paths": authorized,
+                "actual_paths": actual, "out_of_scope_paths": outside, "foreign_paths": foreign,
+                **{key: scope_evidence.get(key) for key in ("run_id", "base_revision", "candidate_revision", "committed_history")},
+            }
+            entry.update(detail)
+            if outside:
+                record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
+                                           method="mutation_scope", detail=detail, source=source,
+                                           revision=revision, violated=True)
+                entry["reason"] = f"changed outside the authorized paths: {', '.join(outside)}"
+                entry["violated"] = True
+            elif foreign:
+                entry["reason"] = f"changes present that the run did not make: {', '.join(foreign)}"
+            elif not closable:
+                entry["reason"] = f"the verifier's verdict is {verdict.get('outcome')}, which evidence never closes"
+            else:
+                record_requirement_closure(ledger, requirements, requirement.id, evidence_id=evidence_id,
+                                           method="mutation_scope", detail=detail, source=source,
+                                           revision=revision)
+                entry["closed"] = True
+        attempts.append(entry)
+    return attempts
 
 
 _TEST_REFERENCE = re.compile(r"[\w./-]+")

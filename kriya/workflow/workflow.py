@@ -81,6 +81,7 @@ from kriya.workflow.requirements import (
     cited_requirement_ids,
     derive_requirements,
     requirement_lineage,
+    requirement_evidence,
     requirement_outcomes,
     requirements_prompt_block,
     seed_requirement_obligations,
@@ -738,6 +739,88 @@ def close_requirements_with_named_tests(
         run_tests=lambda paths: validator.run_tests(target_test=list(paths)),
         confirms_execution=output_confirms_nonzero_test_execution,
         source="requirement_closure.named_test_run", revision=revision,
+    )
+
+
+def _run_committed_paths(workspace_path: str) -> Tuple[Optional[str], Optional[str], List[str]]:
+    """(run_id, base revision, every path the owning run has committed to the
+    real workspace so far), from the RunRecord's settled COMMITTED cycles and
+    each transaction's own commit evidence (byte state before != after) -
+    never from a workflow's reported file list. Raises when a committed
+    cycle's evidence cannot be read: the history is then unknown."""
+    from kriya.control.run_coordinator import owning_run
+    from kriya.control.run_record import COMMIT_COMMITTED
+    from kriya.workflow.edit_safety import commit_evidence_dir, load_commit_evidence
+
+    context = owning_run(workspace_path)
+    if context is None or context._lease.record is None:
+        return None, None, []
+    paths: List[str] = []
+    for cycle in context._lease.record.commits:
+        if cycle.get("result") != COMMIT_COMMITTED:
+            continue
+        evidence = load_commit_evidence(os.path.join(
+            commit_evidence_dir(workspace_path), f"{cycle['transaction_id']}.json"))
+        for operation in evidence.operations:
+            if operation.get("before") != operation.get("after") and operation["target_path"] not in paths:
+                paths.append(operation["target_path"])
+    return context.run_id, context.base_revision, paths
+
+
+def mutation_scope_evidence(
+    candidate_root: str, workspace_path: str, *, candidate_paths: Iterable[str],
+) -> Tuple[List[str], Dict[str, Any]]:
+    """PRD-020: what the run actually changed, for mutation-scope requirements
+    - (paths tracked at the run's base, evidence).
+
+    ``actual_paths`` = the candidate's own changes (``candidate_paths`` that
+    git reports changed in ``candidate_root`` against the base) plus the
+    run's committed path history (earlier milestones). ``foreign_paths`` =
+    anything else git reports changed or untracked (``.kriya/`` and ignored
+    files excluded): present, but not attributable to the run. Evidence is
+    ``unavailable`` when the candidate is not at the run's base revision or
+    git/commit evidence cannot be read."""
+    from kriya.workflow.worktree import git_read_lines as _git_lines
+
+    try:
+        run_id, base, committed = _run_committed_paths(workspace_path)
+        head = _git_lines(candidate_root, "rev-parse", "HEAD")[0]
+        if base and head != base:
+            return [], {"unavailable": f"candidate is at {head[:12]}, not the run base {base[:12]}"}
+        base = base or head
+        tracked = _git_lines(candidate_root, "ls-tree", "-r", "--name-only", base)
+        changed = {
+            path for path in (
+                _git_lines(candidate_root, "diff", "--name-only", "--no-renames", "--relative", base)
+                + _git_lines(candidate_root, "ls-files", "--others", "--exclude-standard")
+            ) if not (path == ".kriya" or path.startswith(".kriya/"))
+        }
+    except Exception as exc:
+        return [], {"unavailable": f"{type(exc).__name__}: {exc}"}
+    actual = (set(candidate_paths) & changed) | set(committed)
+    return tracked, {
+        "run_id": run_id, "base_revision": base, "candidate_revision": head,
+        "actual_paths": sorted(actual), "committed_history": sorted(committed),
+        "foreign_paths": sorted(changed - actual),
+    }
+
+
+def close_requirements_by_mutation_scope(
+    ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
+    candidate_paths: Iterable[str], revision: Any,
+) -> List[Dict[str, Any]]:
+    """PRD-020: decides every "do not modify any other file" requirement from
+    the run's own mutation record (requirements.close_mutation_scope_requirements).
+    Shared by the direct/milestone pre-apply boundary and enforce's terminal
+    gate; a goal without such a requirement costs nothing."""
+    from kriya.workflow.requirements import close_mutation_scope_requirements, is_mutation_scope_requirement
+
+    if not any(is_mutation_scope_requirement(r.text) for r in requirement_set.requirements):
+        return []
+    tracked, evidence = mutation_scope_evidence(candidate_root, workspace_path, candidate_paths=candidate_paths)
+    return close_mutation_scope_requirements(
+        ledger, requirement_set, tracked_paths=tracked, scope_evidence=evidence,
+        source="requirement_closure.mutation_scope", revision=revision,
     )
 
 
@@ -3521,6 +3604,18 @@ class WorkflowEngine:
                 # non-satisfied outcome does is the requirement policy's call.
                 if requirement_set is not None:
                     autonomy_policy = self.kernel.config.autonomy
+                    # "Do not modify any other file": decided from what the run
+                    # actually changed (this candidate plus the run's committed
+                    # history) against the files the goal itself names.
+                    try:
+                        scope_closures = await asyncio.to_thread(
+                            close_requirements_by_mutation_scope, resolved_obligation_ledger, requirement_set,
+                            worktree_path, workspace_path, candidate_paths=state.all_files_written,
+                            revision=state.attempt_number,
+                        )
+                    except Exception as exc:
+                        scope_closures = []
+                        logger.warning(f"Requirement mutation-scope evidence unavailable: {exc}")
                     # An UNVERIFIED (cannot confirm from code) requirement whose
                     # own text names existing tests is closed only by running
                     # exactly those tests on this candidate.
@@ -3534,6 +3629,7 @@ class WorkflowEngine:
                     except Exception as exc:
                         closures = []
                         logger.warning(f"Requirement closure by named tests unavailable: {exc}")
+                    closures = scope_closures + closures
                     if closures:
                         state.record_event(RunEvent(
                             kind="requirement.closure", attempt=state.attempt_number,
@@ -5190,5 +5286,6 @@ class WorkflowEngine:
                 **requirement_set.to_dict(),
                 "outcomes": {rid: outcome.value for rid, outcome in
                              requirement_outcomes(resolved_obligation_ledger, requirement_set).items()},
+                "evidence": requirement_evidence(resolved_obligation_ledger, requirement_set),
             }} if requirement_set is not None else {}),
         }
