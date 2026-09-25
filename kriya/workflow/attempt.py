@@ -131,6 +131,34 @@ from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untrac
 logger = logging.getLogger(__name__)
 
 
+def _final_line_ending(path: str) -> str:
+    """The line ending the file at ``path`` ends with ("\r\n", "\n" or "").
+    Read as bytes: text mode turns a final CRLF into "\n"."""
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - 2))
+            tail = fh.read()
+    except OSError:
+        return ""
+    if tail.endswith(b"\r\n"):
+        return "\r\n"
+    return "\n" if tail.endswith(b"\n") else ""
+
+
+def _keep_final_newline(prior_ending: str, content: str) -> str:
+    """A full-file rewrite of an existing file keeps that file's final line
+    ending (``prior_ending``, from _final_line_ending). Fence extraction
+    (DeveloperAgent._strip_markdown_fences) trims the newlines around a
+    fenced block, so a fenced full-file answer arrives without one, and the
+    rewrite used to drop it (seen live in demo-03: a one-line fix whose diff
+    also removed the file's final newline). A new file, or an existing file
+    without a final newline, is left as given."""
+    if not content or not prior_ending or content.endswith(("\n", "\r")):
+        return content
+    return content + prior_ending
+
+
 def _target_exists(ctx: "AttemptContext", filepath: str) -> bool:
     return os.path.exists(os.path.join(ctx.worktree_path, filepath)) or os.path.exists(
         os.path.join(ctx.workspace_path, filepath)
@@ -6764,6 +6792,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             if os.path.exists(current_file_path):
                 with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
                     prior_content = fh.read()
+            if not file_is_new:
+                content = _keep_final_newline(_final_line_ending(current_file_path), content)
 
             structural_problem = find_structural_corruption(filepath, content)
             if structural_problem:
