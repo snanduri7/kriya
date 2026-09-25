@@ -409,5 +409,29 @@ never CWD-anchored:
 
 **Focused command:**
 ```bash
-.venv/bin/pytest -ra tests/test_logging_location.py tests/test_production_doctor.py tests/test_doctor_command.py tests/test_sec009_config_authority.py tests/test_sec009_p2_authority_approval.py tests/test_config.py tests/test_config_command.py tests/test_generate_json_contract.py tests/test_prd008_recovery.py tests/test_run_ownership.py tests/test_bootstrap_contract.py tests/test_cli_smoke.py tests/test_repl.py
+.venv/bin/pytest -ra tests/test_logging_location.py tests/test_production_doctor.py tests/test_doctor_command.py tests/test_sec009_config_authority.py tests/test_sec009_p2_authority_approval.py tests/test_config.py tests/test_config_command.py tests/test_generate_json_contract.py tests/test_prd008_recovery.py tests/test_run_ownership.py tests/test_bootstrap_contract.py tests/test_cli_smoke.py tests/test_repl.py tests/test_distribution_integrity.py
 ```
+
+**Open decision for the user: `traces.db` still follows `paths.logs`.**
+- An auto-discovered repo `kriya.yaml` with `paths.logs: ./logs` resolves against the repo, which is the CWD. So
+  `traces.db` still lands in `<repo>/logs/`. `~/kriya-live-validation/ma6_generate_check/logs/traces.db` is a real
+  example.
+- It was not moved in this change: `paths.logs` has its own SEC-009 path classification, and `traces.db` is persistent
+  run history, not the logging service.
+- The README, user guide and CLAUDE.md now say precisely that the guarantee covers `kriya.log` and the run logs.
+- Whether `traces.db` should come under the same rule is left to the user as a follow-up decision.
+
+**Other notes:**
+- **Real-config check.** The verbatim `logging` block from `~/kriya-live-validation/ignite_qpid_protocol/kriya.yaml`
+  (`file: ./logs/kriya.log`) ran with `kriya plugins` from a scratch folder:
+  - exit 0 and the deprecation warning;
+  - the application log was written to the configured `KRIYA_LOG_DIR`;
+  - the folder held only `kriya.yaml`.
+  - The real `ignite_qpid_protocol` config itself is unapproved under SEC-009, so it is denied before logging starts,
+    and its existing `logs/kriya.log` was verified unchanged (same mtime and size).
+- **`--json`:** an invalid or unwritable log directory fails before any subcommand, with exit 1 and stderr only. That
+  is the same shape as the existing config-load failure, so `--json` stdout is never partially written.
+- **Plain-runner disclosure:** `tests/conftest.py` now exists. Its only effect is setting `KRIYA_LOG_DIR`. The plain
+  runner sets HOME and `KRIYA_LOG_DIR` itself to compensate, so the earlier "no conftest" note is superseded.
+- **PRD-002:** `tests/test_distribution_integrity.py` 30/0 on the plain runner, with the new module and conftest in
+  place.

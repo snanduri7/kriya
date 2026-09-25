@@ -116,7 +116,7 @@ autonomy:
 paths:
   skills: "./skills"                       # Path to engineering skills
   memory: "./memory"                       # Path to databases and indexes
-  logs: "./logs"                           # Logs folder
+  logs: "./logs"                           # traces.db (run history for `kriya traces`) - not kriya.log, see 2.0a
 
 # Set both false for a reproducible plain-Kriya run. paths.skills above
 # remains the one explicit project skill directory.
@@ -176,7 +176,9 @@ agent_llms:
 ```
 
 ### 2.0a Where logs go (`logging`)
-Kriya never writes log files into the directory you run it from.
+`kriya.log` and the per-run logs never land in the directory you run Kriya from. The trace database
+(`traces.db`, shown by `kriya traces`) is separate: it follows `paths.logs`, resolved against the config file's
+directory.
 
 ```yaml
 logging:

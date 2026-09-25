@@ -397,7 +397,7 @@ plugins:
 paths:
   skills: "./skills"
   memory: "./memory"
-  logs: "./logs"
+  logs: "./logs"      # traces.db (`kriya traces`), resolved against this file's directory - not kriya.log
 
 # Set both false for a reproducible plain-Kriya run using only paths.skills above -
 # load_global also pulls in Kriya's own shared skill library, load_cwd pulls in any
@@ -406,11 +406,12 @@ skills:
   load_global: true
   load_cwd: true
 
-# Kriya never writes logs into the directory you run it from. Log directory:
+# kriya.log and run logs never land in the directory you run from. Log directory:
 # KRIYA_LOG_DIR env var > logging.directory (absolute path) > ~/.kriya/logs.
 # Application log: <dir>/kriya.log; each mutating run also gets
 # <dir>/runs/<run_id>/kriya.log. `logging.file` is deprecated and ignored.
 # Existing ./logs directories are left in place, never migrated or deleted.
+# (paths.logs above still holds traces.db.)
 logging:
   level: "INFO"
   directory: null
