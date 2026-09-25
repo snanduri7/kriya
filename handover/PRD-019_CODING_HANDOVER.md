@@ -1,7 +1,7 @@
 # PRD-019 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION (batch 4: PRD-017 to PRD-019, one pytest stop for the whole batch).
+VERIFIED at `da64fcc` (batch 4). Focused batch-4 pytest green; full `.venv/bin/pytest` 5685 passed, 1 failed at `0a2e7cd` (`test_bootstrap_contract` counted a method pydantic injects for `AppConfig._routing_plan`; test scoped to kriya-defined methods in `da64fcc`, re-run green); live `tests/test_live_prd017_019_model_roles.py` 3/3 passed, evidence in `handover/evidence/BATCH4/user-live/`.
 
 ## Source identity
 - Base revision: PRD-018 commit `261c187`; PRD-019 is `6302ea4`.
