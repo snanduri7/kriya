@@ -550,6 +550,25 @@ Which unit verifies the requirements:
 The result's `requirements` field, and the `requirement.derived`, `requirement.lineage` and `requirement.verdicts`
 run events, record everything. A resumed run derives the same ids from the goal again.
 
+### 2.1c Existing owners of a responsibility (PRD-021)
+
+On a brownfield change, Kriya looks for existing files whose responsibility your goal names, for example
+`order_validator.py` for "reject orders ... during checkout validation". The name's role word or a member such as
+`validate()` must match; a shared noun like *order* is not enough. It shows those files to the Planner (and the
+Architect) before planning, as a suspicion, not a rule.
+
+A planned new file that still overlaps such an owner becomes a grounded ownership finding. The finding is recorded
+in the run's obligation ledger and the result's `ownership_findings`, and shown to the Developer with advice to reuse
+the owner. It never rejects a plan.
+
+A structured `ownership_justification` from the Planner (on the subtask) or the Architect (in its JSON file-list
+block) marks a finding acknowledged, never satisfied. Only these mark it satisfied:
+- your goal explicitly asking for a new artifact;
+- the plan removing the old owner;
+- a human approval.
+
+Kriya's exact-name and name-containment owner rules still apply first.
+
 ### 2.2 Control Plane, Policy, and Structured Execution
 
 A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.

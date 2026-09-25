@@ -182,7 +182,13 @@ PRD-012 normalizes every channel's network authority into one vocabulary, `kriya
 - **Outcomes.** Only the verifier records one: the `SpecComplianceAgent.check(requirements=)` per-id verdicts, via `attempt._record_original_requirement_verdicts` and enforce's `_verify_original_requirements`. They are recorded as `ObligationKind.ORIGINAL_REQUIREMENT`, seeded PENDING at JUDGMENT so the verdict becomes authoritative.
 - **Terminal decision.** `blocking_requirements()` makes VIOLATED always block; `autonomy.requirement_unknown_policy`/`requirement_unverified_policy` (SECURITY_AUTHORITY; production seals unknown=block) decide the rest. It is enforced at the pre-apply boundary (terminal `requirements_unresolved`, `REQUIREMENTS_UNRESOLVED`) and at enforce's `original_requirements` gate. `unresolved_terminal_obligations()` skips this kind on purpose.
 
-### Storage (`kriya/core/db.py`, `kriya/memory/`)
+### Grounded ownership findings (`kriya/workflow/ownership_findings.py`) — PRD-021
+- **Scope.** Runs only on planned files still NEW after `prefer_existing_artifact_owners` (which keeps precedence).
+- **Candidates.** `grounded_owner_candidates()` reuses planning's bounded goal-ranked candidates, `build_planning_structural_evidence` edges and an in-memory `DependencyGraph` (no second index). A candidate needs the goal to name its responsibility (the name's role word or a member verb) plus one more shared term; a domain noun alone never qualifies.
+- **Findings.** `OwnershipFinding` records are GROUNDED and never deny a plan.
+- **Status.** A structured `ownership_justification` (`Subtask` field / Architect file-list JSON key) only ACKNOWLEDGES. SATISFIED only via goal intent, the plan removing the owner, or human approval.
+- **Where they appear.** Candidates go to the Planner (enforce; direct Planner+Architect on TASK/ENHANCEMENT) and findings to the Developer. They are recorded as non-terminal `GROUNDED_OWNERSHIP` obligations and `ownership.finding` events, and kept on `state.ownership_findings` for review.
+
 All persistent state lives in SQLite databases under `paths.memory` (`vector_index.db`, `web_knowledge.db`, `dependency_graph.db`, `knowledge_cache.db`) and the state directory (`traces.db`, `kriya/core/state_paths.py`), opened with WAL journal mode and a busy timeout for concurrent-safe access. `vector_index.db` mixes code-index vectors and a separate `learned_knowledge` table (from `kriya learn`) — keep those namespaces distinct, the workflow relies on querying them separately with different trust levels.
 
 ### CLI (`kriya/cli.py`)
