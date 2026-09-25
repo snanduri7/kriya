@@ -9,8 +9,10 @@
   compared with the raw HTTP response of the same request shape.
 - PRD-016: the default estimator against the real tokenizer's counts on each
   content class; a request near the served window is accepted and one that
-  cannot fit is refused before dispatch. The window is kept at 8192 tokens to
-  bound hardware load.
+  cannot fit is refused before dispatch; under the adaptive policy a request
+  that needs more than the preferred 8192 is sent with a declared 16384-token
+  tier (the only larger window this test ever uses) and the server really
+  serves it. Windows are kept at 8192/16384 tokens to bound hardware load.
 
 Run:
     KRIYA_BATCH3_EVIDENCE_DIR=handover/evidence/BATCH3/user-live \\
@@ -91,7 +93,8 @@ def test_prd014_full_qualification_campaign_reports_every_case(cfg):
     assert statuses["endpoint_restart_semantics"] == mq.UNAVAILABLE
     # Protocol behaviour of the runtime itself (not model quality):
     for capability in ("plain_completion", "output_truncation", "endpoint_error_semantics",
-                       "timeout_semantics", "cancellation_semantics", "tokenizer_measurement"):
+                       "timeout_semantics", "cancellation_semantics", "tokenizer_measurement",
+                       "context_capacity"):
         assert statuses[capability] == mq.PASS, (capability, record["cases"])
     assert record["measured_limits"]["bytes_per_token_floor"] > 0
     assert os.path.exists(path)
@@ -176,3 +179,21 @@ def test_prd016_budget_against_the_real_tokenizer_and_the_served_window(cfg):
     assert refused_in < 5, "an unsatisfiable request must be refused before any inference"
     _evidence("prd016-window.json", {"accepted_budget": accepted.budget, "accepted_prompt_tokens": accepted.prompt_tokens,
                                      "refused_seconds": round(refused_in, 3)})
+
+
+def test_prd016_adaptive_policy_serves_a_declared_larger_tier(cfg):
+    """Preferred 8192, declared-safe 16384: a ~10K-real-token prompt is sent with
+    num_ctx 16384 and the server reports more prompt tokens than the
+    preferred window holds; the expansion is recorded."""
+    cfg.llm.context_policy.declared_safe_context_tiers = [16384]
+    llm = LLMClient(cfg)
+    # ~13K tokens by the default bound (no qualification in this test's
+    # store): about 10K real tokens - more than 8192, less than 16384.
+    prompt = "def f():\n    return 1\n" * int(13000 * tb.DEFAULT_BYTES_PER_TOKEN / 24)
+    result = asyncio.run(llm.complete_result("You are terse.", prompt + "\nReply OK.", max_tokens_override=256))
+    assert result.budget["context_expanded"] and result.budget["selected_context_window"] == 16384
+    assert result.status is not CompletionStatus.BACKEND_ERROR
+    assert result.prompt_tokens > 8192, "the server must actually have served the larger window"
+    [event] = llm.budget_expansions
+    _evidence("prd016-adaptive-tier.json", {"budget": result.budget, "prompt_tokens": result.prompt_tokens,
+                                            "event": event})

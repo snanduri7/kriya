@@ -123,6 +123,7 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
     "time_budget_exhausted": FailureCategory.RESOURCE,
     # PRD-016: the prompt plus the minimum output cannot fit the served window.
     "context_budget_unsatisfiable": FailureCategory.RESOURCE,
+    "output_budget_unsatisfiable": FailureCategory.RESOURCE,
 
     # INTERNAL - Kriya's own implementation broke, not the application
     "internal_framework_error": FailureCategory.INTERNAL,

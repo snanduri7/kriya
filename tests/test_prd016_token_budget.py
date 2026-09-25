@@ -16,7 +16,7 @@ from kriya.core.model_runtime import ModelRuntimeFingerprint
 
 # The comparison of the bound with a real tokenizer's exact counts on each
 # content class (Java, Python, XML, JSON, Unicode, stack traces) is made
-# against the real runtime: tests/test_live_prd016_token_budget.py, and the
+# against the real runtime: tests/test_live_prd013_016_model_runtime.py, and the
 # PRD-014 tokenizer_measurement case that records the measured ratio. These
 # deterministic tests pin the estimator's own properties.
 

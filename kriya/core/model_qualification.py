@@ -19,6 +19,13 @@ version. It is never inferred from a model's name or benchmark reputation.
   them (``required_capabilities``); ``kriya doctor --production`` blocks a
   role whose exact runtime lacks a current PASS for any of them.
 
+- A larger context window (PRD-016 adaptive budget tier) is a different
+  runtime input, so a different fingerprint: ``kriya model qualify
+  --context-window N`` qualifies it, and it counts as a qualified tier only
+  when that record is current and passes ``context_capacity`` (a real
+  near-window request whose first and last markers both survive) plus
+  every case the model's roles require.
+
 Offline fixture conformance (``model_capabilities.validate_tool_call_sample``
 and the fixture tests of this module's evaluators) stays separate from live
 qualification, which only ``run_qualification`` against a real endpoint
@@ -38,7 +45,7 @@ from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tup
 
 from kriya.core.model_runtime import MODEL_PROTOCOL_ADAPTER_VERSION, ModelRuntimeFingerprint
 
-QUALIFICATION_POLICY_VERSION = "kriya-qualification/1"
+QUALIFICATION_POLICY_VERSION = "kriya-qualification/2"
 QUALIFICATION_SCHEMA_VERSION = 1
 QUALIFICATION_HOME_ENV = "KRIYA_QUALIFICATION_HOME"
 
@@ -72,7 +79,11 @@ CAPABILITIES: Tuple[str, ...] = (
     "endpoint_error_semantics",
     "endpoint_restart_semantics",
     "tokenizer_measurement",
+    "context_capacity",
 )
+
+# A larger context tier additionally needs a passing near-window probe.
+CONTEXT_TIER_REQUIREMENTS: Tuple[str, ...] = ("context_capacity",)
 
 _BASE_REQUIREMENTS = ("plain_completion", "finish_reason_stop", "output_truncation", "reasoning_behavior",
                       "endpoint_error_semantics")
@@ -137,6 +148,116 @@ def role_models(config: Any) -> Dict[str, List[str]]:
         chain = [c.model for c in role_cfg.llm_chain] if role_cfg is not None else []
         result[role] = [primary, *chain]
     return {role: list(dict.fromkeys(models)) for role, models in result.items()}
+
+
+def context_tier_requirements(config: Any, model: str) -> Tuple[str, ...]:
+    """What a larger context tier of ``model`` must pass: every case any role
+    that calls ``model`` requires, plus the near-window capacity probe."""
+    required: List[str] = []
+    for role, models in role_models(config).items():
+        if any(m.casefold() == model.casefold() for m in models):
+            required.extend(required_capabilities(config, role, model))
+    if not required:
+        required.extend(_BASE_REQUIREMENTS)
+    return tuple(dict.fromkeys([*required, *CONTEXT_TIER_REQUIREMENTS]))
+
+
+def recorded_context_sizes(fingerprint: ModelRuntimeFingerprint) -> List[int]:
+    """Context windows other than ``fingerprint``'s own that have a
+    qualification record for the same served artifact at the same endpoint
+    (candidates only: each is re-verified against its own current
+    fingerprint before use)."""
+    home = qualification_home()
+    sizes = set()
+    try:
+        names = os.listdir(home)
+    except OSError:
+        return []
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(home, name), encoding="utf-8") as stream:
+                recorded = (json.load(stream) or {}).get("fingerprint") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        size = recorded.get("configured_context_window")
+        if (isinstance(size, int) and size != fingerprint.configured_context_window
+                and recorded.get("artifact_digest") == fingerprint.artifact_digest
+                and recorded.get("endpoint") == fingerprint.endpoint
+                and str(recorded.get("alias", "")).casefold() == fingerprint.alias.casefold()):
+            sizes.add(size)
+    return sorted(sizes)
+
+
+@dataclass(frozen=True)
+class ContextTierOffer:
+    """PRD-016: the larger context windows a request to one runtime may be
+    sent with, the hard context ceiling, why anything was excluded, and the
+    evidence of each considered size (bound into the resume fingerprint)."""
+    tiers: Tuple[Any, ...]
+    ceiling: Optional[int]
+    note: str
+    evidence: Tuple[Dict[str, Any], ...] = ()
+
+
+def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFingerprint, policy: Any, *,
+                          base_url: str, api_key: str) -> ContextTierOffer:
+    """A tier is offered when this exact runtime at that num_ctx has a
+    current qualification record passing every case the model's roles need
+    plus context_capacity, or - while no qualification data exists for it -
+    when the operator declared it safe; a NOT_QUALIFIED or STALE record
+    overrides a declaration. Never above the policy ceiling or the model's
+    trained length. The window can only be chosen per request on an exact
+    Ollama runtime (num_ctx is an Ollama request option); anywhere else the
+    adaptive policy behaves like strict and says so."""
+    from kriya.core.model_runtime import resolve_model_runtime
+    from kriya.core.token_budget import (
+        POLICY_ADAPTIVE,
+        TIER_SOURCE_OPERATOR_DECLARED,
+        TIER_SOURCE_QUALIFICATION_RECORD,
+        ContextTier,
+    )
+
+    limits = [value for value in (policy.max_context_tokens, fingerprint.model_context_length) if value]
+    ceiling = min(limits) if limits else None
+    if policy.mode != POLICY_ADAPTIVE:
+        return ContextTierOffer((), ceiling, "strict policy: the preferred window is the limit")
+    declared = set(policy.declared_safe_context_tiers)
+    sizes = set(declared)
+    if fingerprint.exact:
+        sizes |= set(recorded_context_sizes(fingerprint))
+    if not sizes:
+        return ContextTierOffer((), ceiling, "")
+    if not fingerprint.exact or fingerprint.provider != "ollama":
+        return ContextTierOffer((), ceiling, "no larger tier: the context window can only be chosen per request "
+                                             "on an exact Ollama runtime")
+    preferred = fingerprint.effective_context_window or 0
+    tiers, notes, evidence = [], [], []
+    for size in sorted(sizes):
+        if size <= preferred:
+            continue
+        if ceiling is not None and size > ceiling:
+            notes.append(f"{size}: above the ceiling {ceiling}")
+            evidence.append({"tokens": size, "status": "above_ceiling"})
+            continue
+        tier_runtime = resolve_model_runtime(
+            base_url=base_url, model=model, api_key=api_key, egress_policy=config.autonomy.egress_policy,
+            configured_context=size, kriya_protocol=fingerprint.kriya_protocol, config=config,
+        )
+        assessment = assess(tier_runtime, context_tier_requirements(config, model))
+        source = None
+        if assessment.status == QUALIFIED:
+            source = TIER_SOURCE_QUALIFICATION_RECORD
+        elif assessment.status == MISSING and size in declared:
+            source = TIER_SOURCE_OPERATOR_DECLARED
+        else:
+            notes.append(f"{size}: {assessment.status}")
+        if source:
+            tiers.append(ContextTier(size, source))
+        evidence.append({"tokens": size, "status": assessment.status, "source": source,
+                         "runtime_fingerprint": tier_runtime.digest if tier_runtime.exact else None})
+    return ContextTierOffer(tuple(tiers), ceiling, "; ".join(notes), tuple(evidence))
 
 
 # --------------------------------------------------------------------------
@@ -683,12 +804,76 @@ async def case_tokenizer_measurement(llm, model, ctx):
     })
 
 
+_CAPACITY_UNIT = "alpha beta gamma delta epsilon zeta eta theta iota kappa. "
+# Room left for the reply and the chat template around the filler.
+_CAPACITY_HEADROOM_TOKENS = 384
+
+
+@_case("context_capacity")
+async def case_context_capacity(llm, model, ctx):
+    """A near-window request actually fits the served window: the filler's
+    real token rate is measured on two small probes, a prompt of about
+    (window - headroom) real tokens is sent with a marker in the system
+    message and another at the end, and both must come back. A server that
+    silently drops the front of an over-long prompt loses the first marker.
+    The request goes straight to the endpoint (this probes the server, not
+    Kriya's own dispatch estimate) with the qualification binding's num_ctx."""
+    import secrets
+
+    window = ctx.get("context_window")
+    if not window:
+        return CaseResult("", UNAVAILABLE, {"reason": "the served context window (num_ctx) is not known"})
+    client = llm.client
+    extra_body = ctx.get("extra_body") or None
+
+    async def send(messages, max_tokens):
+        return await client.chat.completions.create(
+            model=model, messages=messages, max_tokens=max_tokens, temperature=0.0, extra_body=extra_body,
+        )
+
+    def prompt_tokens(response) -> Optional[int]:
+        usage = getattr(response, "usage", None)
+        value = getattr(usage, "prompt_tokens", None)
+        return value if isinstance(value, int) and value > 0 else None
+
+    small = prompt_tokens(await send([{"role": "user", "content": _CAPACITY_UNIT * 40}], 1))
+    large = prompt_tokens(await send([{"role": "user", "content": _CAPACITY_UNIT * 80}], 1))
+    if not small or not large or large <= small:
+        return CaseResult("", UNAVAILABLE, {"reason": "the endpoint did not report prompt token usage",
+                                            "probe_prompt_tokens": [small, large]})
+    per_unit = (large - small) / 40
+    fixed = small - 40 * per_unit
+    target = int(window) - _CAPACITY_HEADROOM_TOKENS
+    units = max(1, int((target - fixed) / per_unit))
+    head, tail = secrets.token_hex(4), secrets.token_hex(4)
+    response = await send([
+        {"role": "system", "content": f"The first code is {head}. Remember it."},
+        {"role": "user", "content": _CAPACITY_UNIT * units
+         + f"\nThe second code is {tail}. Reply with the first code, then the second code, separated by one "
+           "space, and nothing else."},
+    ], 64)
+    reported = prompt_tokens(response)
+    choice = response.choices[0]
+    content = str(getattr(choice.message, "content", "") or "")
+    evidence = {
+        "context_window": int(window), "target_prompt_tokens": target, "reported_prompt_tokens": reported,
+        "fill_ratio": round(reported / int(window), 4) if reported else None,
+        "first_marker_recalled": head in content, "last_marker_recalled": tail in content,
+        "finish_reason": getattr(choice, "finish_reason", None),
+    }
+    if reported is None:
+        return CaseResult("", UNAVAILABLE, {"reason": "the endpoint did not report prompt token usage", **evidence})
+    ok = (head in content and tail in content and reported >= int(0.9 * target) and reported <= int(window))
+    return CaseResult("", PASS if ok else FAIL, evidence)
+
+
 ALL_CASES: Tuple[CaseFn, ...] = (
     case_plain_completion, case_finish_reason_stop, case_structured_json, case_multiline_json,
     case_native_tool_calls, case_multiple_tool_calls, case_tool_argument_integrity, case_streaming_assembly,
     case_output_truncation, case_reasoning_behavior, case_full_file_raw_content, case_anchored_edit_protocol,
     case_malformed_output_recovery, case_timeout_semantics, case_cancellation_semantics,
     case_endpoint_error_semantics, case_endpoint_restart_semantics, case_tokenizer_measurement,
+    case_context_capacity,
 )
 assert tuple(case.capability for case in ALL_CASES) == CAPABILITIES  # type: ignore[attr-defined]
 
@@ -714,14 +899,21 @@ async def run_qualification(
     fingerprint: Optional[ModelRuntimeFingerprint] = None,
     only: Optional[Iterable[str]] = None,
     progress: Optional[Callable[[CaseResult], None]] = None,
+    context_window: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Run the protocol cases against the configured endpoint for one exact
-    runtime and return the record (the caller saves it)."""
+    runtime and return the record (the caller saves it).
+
+    ``context_window`` qualifies the model at that num_ctx instead of its
+    configured one (a PRD-016 context tier). Every case is sent with the
+    binding's own request options and a strict budget policy, so a case is
+    never itself sent with a different window."""
     from kriya.core.llm import LLMClient
     from kriya.core.model_capabilities import capabilities_for_model
-    from kriya.core.model_runtime import resolve_configured_model_runtime
+    from kriya.core.model_runtime import configured_context_window, resolve_configured_model_runtime
 
     model = model or config.llm.model
+    config = qualification_config(config, model, context_window)
     fingerprint = fingerprint or resolve_configured_model_runtime(config, model, fresh=True)
     if not fingerprint.exact:
         raise QualificationError(
@@ -746,6 +938,8 @@ async def run_qualification(
     ctx: Dict[str, Any] = {
         "native_tool_calls_enabled": capabilities_for_model(config, model).native_tool_calls,
         "client_factory": client_factory or default_factory,
+        "extra_body": config.llm.extra_body,
+        "context_window": fingerprint.effective_context_window or configured_context_window(config.llm.extra_body),
     }
     wanted = set(only) if only else None
     results: List[CaseResult] = []
@@ -757,6 +951,30 @@ async def run_qualification(
         if progress is not None:
             progress(result)
     return build_record(fingerprint, results)
+
+
+def qualification_config(config: Any, model: str, context_window: Optional[int] = None) -> Any:
+    """A copy of ``config`` for qualifying ``model``: optionally at another
+    num_ctx (set on the model's own binding, which is what its fingerprint
+    is built from), every request carrying that binding's own request
+    options (LLMClient otherwise sends the primary binding's), and a strict
+    budget policy so no case is itself sent with a different window."""
+    from kriya.core.model_runtime import binding_object
+
+    copy = config.model_copy(deep=True)
+    binding = binding_object(copy, model) or copy.llm
+    if context_window is not None:
+        extra_body = dict(getattr(binding, "extra_body", None) or {})
+        extra_body["options"] = {**dict(extra_body.get("options") or {}), "num_ctx": int(context_window)}
+        binding.extra_body = extra_body
+        binding.context_window = int(context_window)
+    if binding is not copy.llm:
+        copy.llm.extra_body = dict(getattr(binding, "extra_body", None) or {})
+    for policy_owner in (binding, copy.llm):
+        policy = getattr(policy_owner, "context_policy", None)
+        if policy is not None:
+            policy.mode = "strict"
+    return copy
 
 
 def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult]) -> Dict[str, Any]:
@@ -781,7 +999,8 @@ __all__ = [
     "ALL_CASES", "CAPABILITIES", "CaseResult", "FAIL", "MISSING", "NOT_EXACT", "NOT_QUALIFIED", "PASS",
     "QUALIFICATION_HOME_ENV", "QUALIFICATION_POLICY_VERSION", "QUALIFIED", "QualificationAssessment",
     "QualificationError", "QualificationPathInsideWorkspaceError", "ROLES", "STALE", "TOKENIZER_CORPORA",
-    "UNAVAILABLE", "assess", "build_record", "load_record", "measured_limits", "measured_limits_for",
-    "qualification_home", "record_is_current", "record_path", "required_capabilities", "role_models",
+    "CONTEXT_TIER_REQUIREMENTS", "ContextTierOffer", "UNAVAILABLE", "offered_context_tiers", "assess", "build_record", "context_tier_requirements",
+    "load_record", "measured_limits", "measured_limits_for", "qualification_config", "qualification_home",
+    "record_is_current", "record_path", "recorded_context_sizes", "required_capabilities", "role_models",
     "run_qualification", "save_record",
 ]

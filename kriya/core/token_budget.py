@@ -213,6 +213,8 @@ class DispatchBudget:
     policy_mode: str = POLICY_ADAPTIVE
     safety_margin: int = 0
     considered_tiers: Tuple[Dict[str, Any], ...] = ()
+    # Why a configured/recorded larger tier was not offered, if any was.
+    tier_note: str = ""
 
     @property
     def approximate(self) -> bool:
@@ -257,6 +259,7 @@ class DispatchBudget:
             "hard_output_ceiling": self.hard_output_ceiling,
             "safety_margin": self.safety_margin,
             "considered_tiers": [dict(tier) for tier in self.considered_tiers],
+            "tier_note": self.tier_note,
         }
 
 

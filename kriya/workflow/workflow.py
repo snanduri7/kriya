@@ -685,6 +685,14 @@ class WorkflowEngine:
         # docstring for why the other 5 real callers still don't).
         self.execution_policy = ExecutionPolicy(sensitive_path_patterns=kernel.config.autonomy.sensitive_paths)
 
+    def _trace_run_events(self, state: GenerationState) -> List[Dict[str, Any]]:
+        """The run's events for the trace, after moving any automatic budget
+        expansion recorded by a model client into them (PRD-016)."""
+        state.drain_budget_expansions(
+            self.llm, self.planner.llm, self.architect.llm, self.developer.llm, self.reviewer.llm,
+        )
+        return [event.to_dict() for event in state.run_events]
+
     def _audit_approval_rules(
         self, files_written: Iterable[str], workspace_path: str,
         control: Optional[WorkflowControlContext],
@@ -3463,7 +3471,7 @@ class WorkflowEngine:
                             milestone_group_id=milestone_group_id,
                             milestone_index=milestone_index,
                             milestone_total=milestone_total,
-                            run_events=[event.to_dict() for event in state.run_events],
+                            run_events=self._trace_run_events(state),
                             evidence_records=[record.to_dict() for record in state.evidence_records],
                             generation_metrics=state.generation_metrics(
                                 total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
@@ -4374,7 +4382,7 @@ class WorkflowEngine:
                 milestone_group_id=milestone_group_id,
                 milestone_index=milestone_index,
                 milestone_total=milestone_total,
-                run_events=[event.to_dict() for event in state.run_events],
+                run_events=self._trace_run_events(state),
                 evidence_records=[record.to_dict() for record in state.evidence_records],
                 generation_metrics=state.generation_metrics(
                     total_wall_seconds=time.monotonic() - state.generation_started_monotonic,
@@ -4651,7 +4659,7 @@ class WorkflowEngine:
                 milestone_group_id=milestone_group_id,
                 milestone_index=milestone_index,
                 milestone_total=milestone_total,
-                run_events=[event.to_dict() for event in state.run_events],
+                run_events=self._trace_run_events(state),
                 evidence_records=[record.to_dict() for record in state.evidence_records],
                 generation_metrics=state.generation_metrics(
                     total_wall_seconds=time.monotonic() - state.generation_started_monotonic,

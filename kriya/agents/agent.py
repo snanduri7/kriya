@@ -16,6 +16,7 @@ from kriya.agents.contracts import (
 )
 from kriya.config.config import FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
+from kriya.core.token_budget import ContextBudgetUnsatisfiableError
 
 logger = logging.getLogger(__name__)
 
@@ -1562,6 +1563,7 @@ class DeveloperAgent(BaseAgent):
         operation_by_file: Optional[Dict[str, Any]] = None,
         default_operation: Optional[Any] = None,
         generation_protocol: Optional[Any] = None,
+        expected_output_by_file: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, str]]:
         """Passes through any entry that already has real content/edits unchanged (no
         extra call), and individually generates content for any entry that doesn't -
@@ -2084,21 +2086,33 @@ class DeveloperAgent(BaseAgent):
                 f"{fix_analysis_instruction}"
             )
 
-            content = await self.llm.complete(
-                file_sys_prompt,
-                file_prompt,
-                stream_callback=(
-                    stream_callback
-                    if generation_protocol is None or generation_protocol.streaming
-                    else None
-                ),
-                json_mode=False,
-                model_override=model_override,
-                base_url_override=base_url_override,
-                api_key_override=api_key_override,
-                extra_body_override=extra_body_override,
-                temperature_override=retry_temperature if apply_fix_analysis else None,
-            )
+            # PRD-016: a full-file answer for an existing file is expected to
+            # be about that file's size (a grounded expectation the caller
+            # measured); an anchored patch is not.
+            expected_output = None if prefer_anchored_edit else (expected_output_by_file or {}).get(filepath)
+            try:
+                content = await self.llm.complete(
+                    file_sys_prompt,
+                    file_prompt,
+                    stream_callback=(
+                        stream_callback
+                        if generation_protocol is None or generation_protocol.streaming
+                        else None
+                    ),
+                    json_mode=False,
+                    model_override=model_override,
+                    base_url_override=base_url_override,
+                    api_key_override=api_key_override,
+                    extra_body_override=extra_body_override,
+                    temperature_override=retry_temperature if apply_fix_analysis else None,
+                    expected_output=expected_output,
+                )
+            except ContextBudgetUnsatisfiableError as refusal:
+                # Which file could not be budgeted, for the caller's fallback
+                # (a lower-output protocol for that file) and its evidence.
+                refusal.filepath = filepath
+                refusal.anchored_edit = prefer_anchored_edit
+                raise
 
             # DEBUG, not INFO - fires on every per-file completion in this loop, so
             # would flood a long run's log at the default level. Added specifically
@@ -2281,6 +2295,7 @@ class DeveloperAgent(BaseAgent):
         sibling_content_budget: Optional[int] = None,
         operation_by_file: Optional[Dict[str, Any]] = None,
         default_operation: Optional[Any] = None,
+        expected_output_by_file: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design. Prefers
         per-file generation for reliability (filling in only what's missing), falling
@@ -2339,7 +2354,7 @@ class DeveloperAgent(BaseAgent):
                 extra_body_override,
                 prior_error_context, implicated_files, error_source_context, retry_temperature,
                 extra_fix_instruction, files_with_current_content, sibling_content_budget,
-                operation_by_file, default_operation, generation_protocol,
+                operation_by_file, default_operation, generation_protocol, expected_output_by_file,
             )
 
         try:
@@ -2354,9 +2369,13 @@ class DeveloperAgent(BaseAgent):
                     extra_body_override,
                     prior_error_context, implicated_files, error_source_context, retry_temperature,
                     extra_fix_instruction, files_with_current_content, sibling_content_budget,
-                    operation_by_file, default_operation, generation_protocol,
+                    operation_by_file, default_operation, generation_protocol, expected_output_by_file,
                 )
 
+        except ContextBudgetUnsatisfiableError:
+            # A budget refusal is a typed outcome, never a reason to retry the
+            # whole batch as one (larger) single-stage request.
+            raise
         except Exception as e:
             logger.warning(f"Failed to resolve file list from Developer Agent: {e}. Falling back to single-stage generation.")
 

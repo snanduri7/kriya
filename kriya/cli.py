@@ -797,15 +797,20 @@ def model_fingerprint(ctx: click.Context, model_name: Optional[str], json_output
 @click.option("--json", "json_output", is_flag=True, help="Emit the qualification record as JSON.")
 @click.option("--out", "out_path", type=click.Path(dir_okay=False), default=None,
               help="Also write the record (JSON) to this file, e.g. for a handover.")
+@click.option("--context-window", "context_window", type=click.IntRange(min=1024), default=None,
+              help="Qualify the model at this num_ctx instead of its configured one: a larger context tier the "
+                   "adaptive budget policy may then select (it must also pass context_capacity).")
 @click.pass_context
 def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, json_output: bool,
-                  out_path: Optional[str]) -> None:
+                  out_path: Optional[str], context_window: Optional[int]) -> None:
     """Run the protocol qualification cases against the exact served runtime.
 
     The record is keyed by the runtime fingerprint and stored outside the
     workspace (~/.kriya/qualifications, or KRIYA_QUALIFICATION_HOME). It
     becomes stale when the runtime, Kriya's protocol adapter or the
-    qualification policy changes."""
+    qualification policy changes. With --context-window the runtime is the
+    same model at that num_ctx (a different fingerprint); context_capacity
+    then sends one near-window request, which loads the model at that size."""
     from kriya.core.model_qualification import CAPABILITIES, QualificationError, run_qualification, save_record
 
     cfg = _model_cfg(ctx)
@@ -820,9 +825,11 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
             click.secho(f"  {result.capability:<28} {result.status:<11} {result.elapsed_seconds:>7.2f}s", fg=color)
 
     if not json_output:
-        click.secho(f"Qualifying {model_name or cfg.llm.model} ...", bold=True)
+        window_note = f" at num_ctx {context_window}" if context_window else ""
+        click.secho(f"Qualifying {model_name or cfg.llm.model}{window_note} ...", bold=True)
     try:
-        record = asyncio.run(run_qualification(cfg, model_name, only=cases or None, progress=progress))
+        record = asyncio.run(run_qualification(cfg, model_name, only=cases or None, progress=progress,
+                                               context_window=context_window))
     except QualificationError as error:
         click.secho(str(error), fg="red", err=True)
         ctx.exit(1)
@@ -2517,6 +2524,7 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
             return
 
         click.secho(f"Reviewing {len(files_to_review)} file(s)...", fg="cyan", err=True)
+        from kriya.workflow.context_budget import review_batch_budget
         from kriya.workflow.review_context import build_review_batches
 
         # Budget-aware batching (kriya/workflow/review_context.py - shared with the
@@ -2527,8 +2535,6 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
         # received an unlabeled fragment of raw code with no indication it was even
         # being asked to review anything, produced a confused non-review response, and
         # Kriya still reported success (exit 0) with no warning at all.
-        from kriya.workflow.context_budget import review_batch_budget
-
         budget = review_batch_budget(cfg)
         file_contents: List[Tuple[str, str]] = []
         for rel, full in files_to_review:

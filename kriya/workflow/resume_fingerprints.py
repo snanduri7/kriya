@@ -624,11 +624,12 @@ def model_runtime_resume_fingerprint(config: Any) -> Fingerprint:
     (the Developer's llm + llm_chain, each agent_llms binding), plus the
     config fields this owner owns. Available only when EVERY runtime is
     exact; otherwise UNAVAILABLE, which never matches."""
-    from kriya.core.model_qualification import role_models
-    from kriya.core.model_runtime import resolve_configured_model_runtime
+    from kriya.core.model_qualification import offered_context_tiers, role_models
+    from kriya.core.model_runtime import _binding_for, binding_object, resolve_configured_model_runtime
 
     models = list(dict.fromkeys(m for chain in role_models(config).values() for m in chain))
     digests = {}
+    tiers = {}
     for model in models:
         fingerprint = resolve_configured_model_runtime(config, model)
         if not fingerprint.exact:
@@ -637,8 +638,19 @@ def model_runtime_resume_fingerprint(config: Any) -> Fingerprint:
                 f"({'; '.join(fingerprint.probe_errors) or ', '.join(fingerprint.missing_components)})"
             )
         digests[model.casefold()] = fingerprint.digest
+        # PRD-016: which larger context windows this runtime may be sent
+        # with (and each tier's own runtime digest) - a qualification added
+        # or revoked since the checkpoint changes what a request would use.
+        binding = binding_object(config, model) or config.llm
+        address = _binding_for(config, model)
+        offer = offered_context_tiers(
+            config, model, fingerprint, binding.context_policy,
+            base_url=address.get("base_url") or config.llm.base_url,
+            api_key=address.get("api_key") or config.llm.api_key,
+        )
+        tiers[model.casefold()] = [dict(item) for item in offer.evidence if item.get("source")]
     owned = split_config_by_owner(config.model_dump())["model_runtime"]
-    return Fingerprint(_digest({"runtimes": digests, "config": owned}), "model-runtime")
+    return Fingerprint(_digest({"runtimes": digests, "context_tiers": tiers, "config": owned}), "model-runtime")
 
 
 def _declaration_mutable(write_scope_mode: Any, allowed_write_relpaths: Any, structured_plan: Any) -> bool:

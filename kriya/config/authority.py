@@ -203,6 +203,9 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # "human-in-the-loop" -> a more permissive mode removes the approval gate
     ("autonomy", "mode"),
     ("llm", "base_url"), ("embedding", "base_url"), ("search", "base_url"),
+    # PRD-016: which larger context windows a request may be sent with, and
+    # the hard context/output ceilings - resource authority over the host.
+    ("llm", "context_policy"),
     (None, "llm_chain"),  # each entry carries its own base_url
     ("workflow_controller", "enabled"), ("workflow_controller", "mode"),
     ("engineering_triage", "shadow_mode"),

@@ -19,6 +19,39 @@ class ModelCapabilities(BaseModel):
     max_tool_argument_chars: int = Field(default=8192, ge=256)
     preferred_edit_protocol: str = Field(default="small_native_tools")
 
+class ContextPolicyConfig(BaseModel):
+    """PRD-016 adaptive budget policy of one model binding. The binding's
+    context window (the num_ctx it sends) and max_tokens are its PREFERRED
+    operating values. ``adaptive`` lets a request that does not fit be sent
+    with the smallest larger context tier that is qualified for this exact
+    runtime (a current ``kriya model qualify --context-window N`` record with
+    a passing near-window capacity probe), or - while no qualification data
+    exists for that tier - one listed in ``declared_safe_context_tiers``; and
+    lets the output grow above max_tokens for a grounded expectation.
+    ``strict`` never exceeds the preferred values. Ceilings are hard limits
+    for either. SECURITY_AUTHORITY under SEC-009: a repository cannot grant
+    itself a larger window."""
+
+    mode: str = Field(default="adaptive")
+    declared_safe_context_tiers: List[int] = Field(default_factory=list)
+    max_context_tokens: Optional[int] = Field(default=None, ge=1024)
+    max_output_tokens: Optional[int] = Field(default=None, ge=256)
+
+    @field_validator("mode")
+    @classmethod
+    def _known_mode(cls, value: str) -> str:
+        if value not in ("adaptive", "strict"):
+            raise ValueError("context_policy.mode must be 'adaptive' or 'strict'")
+        return value
+
+    @field_validator("declared_safe_context_tiers")
+    @classmethod
+    def _positive_tiers(cls, value: List[int]) -> List[int]:
+        if any(tier < 1024 for tier in value):
+            raise ValueError("context_policy.declared_safe_context_tiers entries must be at least 1024 tokens")
+        return sorted(set(value))
+
+
 class LLMConfig(BaseModel):
     provider: str = Field(default="openai")
     model: str = Field(default="llama3")
@@ -68,6 +101,7 @@ class LLMConfig(BaseModel):
     # just to change one sampling parameter.
     reviewer_temperature: Optional[float] = Field(default=None)
     capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
+    context_policy: ContextPolicyConfig = Field(default_factory=ContextPolicyConfig)
 
 class PluginsConfig(BaseModel):
     directory: str = Field(default="./plugins")
@@ -721,6 +755,7 @@ class FallbackModelConfig(BaseModel):
     context_window: int = Field(default=32768)
     knowledge_cutoff: str = Field(default="2023-12-01")
     knowledge_cutoff_confidence: str = Field(default="estimated")
+    context_policy: ContextPolicyConfig = Field(default_factory=ContextPolicyConfig)
 
 class AgentModelConfig(BaseModel):
     # llm=None means "use the top-level llm config" (today's single-model behavior) -

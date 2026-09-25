@@ -27,6 +27,7 @@ from kriya.agents.contracts import (
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
 )
 from kriya.core.kernel import Kernel
+from kriya.core.token_budget import OutputBudgetUnsatisfiableError
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode, is_within_scope, make_workspace_scope, normalize_workspace_relpath
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
@@ -1379,6 +1380,90 @@ async def _maybe_run_developer_investigation(
         kwargs["existing_code_context"] = str(kwargs.get("existing_code_context") or "") + rendered
 
 
+# A full-file answer is expected to be about the current file's size plus
+# room for the change itself.
+_FULL_FILE_OUTPUT_GROWTH = 1.1
+_FULL_FILE_OUTPUT_SLACK_TOKENS = 256
+
+
+def _grounded_output_expectations(ctx: "AttemptContext", paths: Optional[Iterable[str]],
+                                  binding: Any = None) -> Dict[str, Any]:
+    """PRD-016: the output a full-file rewrite of each EXISTING target is
+    expected to need, grounded in the file's current size (counted like the
+    dispatch check counts, with the runtime's qualified ratio when known).
+    New files have no grounding and get none. The Developer applies an
+    expectation only to a full-file request, never to an anchored patch."""
+    from kriya.core.token_budget import OutputExpectation, count_tokens
+
+    ratio = None
+    try:
+        from kriya.core.model_qualification import measured_limits_for
+        from kriya.core.model_runtime import resolve_configured_model_runtime
+
+        target = binding if binding is not None else ctx.kernel.config.llm
+        fingerprint = resolve_configured_model_runtime(
+            ctx.kernel.config, target.model, base_url=target.base_url, api_key=target.api_key,
+            extra_body=target.extra_body or {},
+        )
+        ratio = measured_limits_for(fingerprint, ctx.kernel.config).get("bytes_per_token_floor")
+    except Exception as error:  # the default bound is the conservative fallback
+        logger.debug("Output expectations use the default token bound: %s", error)
+    expectations: Dict[str, Any] = {}
+    for path in paths or ():
+        for root in (ctx.worktree_path, ctx.workspace_path):
+            full = os.path.join(root, path) if root else None
+            if full and os.path.isfile(full):
+                break
+        else:
+            continue
+        try:
+            with open(full, "r", encoding="utf-8", errors="replace") as stream:
+                current = count_tokens(stream.read(), qualified_bytes_per_token=ratio).tokens
+        except OSError:
+            continue
+        expected = int(current * _FULL_FILE_OUTPUT_GROWTH) + _FULL_FILE_OUTPUT_SLACK_TOKENS
+        expectations[path] = OutputExpectation(
+            expected, f"full-file rewrite of {path} (~{current} tokens now)",
+        )
+    return expectations
+
+
+def _lower_output_protocol_retry(
+    state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any], refusal: Exception,
+    active_model: str,
+) -> Optional[Dict[str, Any]]:
+    """PRD-016 fallback when a full-file answer cannot fit any allowed output
+    budget: ask for an anchored patch of that file instead (the existing
+    D1 repair_with_patch operation), once. Only for an existing file and a
+    model whose capability profile accepts patches; otherwise None (the
+    typed OUTPUT_BUDGET_UNSATISFIABLE failure stands)."""
+    from kriya.core.model_capabilities import capabilities_for_model
+
+    path = getattr(refusal, "filepath", None)
+    if not path or getattr(refusal, "anchored_edit", False) or not _target_exists(ctx, path):
+        return None
+    protocol = capabilities_for_model(ctx.kernel.config, active_model).preferred_edit_protocol
+    if protocol in {"full_file", "full_file_text"}:
+        return None
+    operations = dict(kwargs.get("operation_by_file") or {})
+    operations[path] = CodeOperation.REPAIR_WITH_PATCH
+    expectations = dict(kwargs.get("expected_output_by_file") or {})
+    expectations.pop(path, None)
+    decision = getattr(refusal, "decision", None)
+    state.record_event(RunEvent(
+        kind="model.output_budget_protocol_fallback",
+        attempt=state.attempt_number,
+        source="attempt._run_developer_generation",
+        authority=EventAuthority.ADVISORY,
+        message=f"{path}: the full-file answer does not fit any allowed output budget; requesting an anchored patch.",
+        details={"file": path, "reason_code": getattr(refusal, "reason_code", None),
+                 "budget": decision.to_dict() if decision is not None else None},
+    ))
+    logger.warning("Developer: %s cannot be rewritten whole within the output budget; asking for an anchored patch.",
+                   path)
+    return {**kwargs, "operation_by_file": operations, "expected_output_by_file": expectations}
+
+
 def _chain_binding(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
     """The llm_chain entry a Developer call with ``model_override`` goes to,
     or None for the primary model."""
@@ -1397,13 +1482,24 @@ async def _run_developer_generation(
         state, ctx, file_count=file_count, active_model=active_model,
     )
     await _maybe_run_developer_investigation(state, ctx, kwargs, active_model)
+    if "expected_output_by_file" not in kwargs:
+        kwargs["expected_output_by_file"] = _grounded_output_expectations(
+            ctx, kwargs.get("known_target_files"), _chain_binding(ctx, kwargs.get("model_override")),
+        )
     started = time.monotonic()
     succeeded = False
     try:
-        result = await ctx.developer.run_generation(**kwargs)
+        try:
+            result = await ctx.developer.run_generation(**kwargs)
+        except OutputBudgetUnsatisfiableError as refusal:
+            retry_kwargs = _lower_output_protocol_retry(state, ctx, kwargs, refusal, active_model)
+            if retry_kwargs is None:
+                raise
+            result = await ctx.developer.run_generation(**retry_kwargs)
         succeeded = True
         return result
     finally:
+        state.drain_budget_expansions(getattr(ctx.developer, "llm", None))
         duration = time.monotonic() - started
         # R1 Deliverable 5 (2026-09-08) - observational only, read AFTER the
         # await above already returned/raised; never influences kwargs,

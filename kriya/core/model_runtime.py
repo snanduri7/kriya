@@ -401,6 +401,24 @@ def resolve_configured_model_runtime(config: Any, model: Optional[str] = None, *
     )
 
 
+def binding_object(config: Any, model: str) -> Any:
+    """The config object that binds ``model`` (the primary llm, an llm_chain
+    entry or an agent_llms role's llm/llm_chain entry; first exact,
+    case-folded match), or None."""
+    target = (model or "").casefold()
+    if config.llm.model.casefold() == target:
+        return config.llm
+    candidates = list(config.llm_chain)
+    for role in ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance"):
+        role_cfg = getattr(config.agent_llms, role, None)
+        if role_cfg is None:
+            continue
+        if role_cfg.llm is not None:
+            candidates.append(role_cfg.llm)
+        candidates.extend(role_cfg.llm_chain)
+    return next((candidate for candidate in candidates if candidate.model.casefold() == target), None)
+
+
 def _binding_for(config: Any, model: str) -> Dict[str, Any]:
     target = (model or "").casefold()
     if config.llm.model.casefold() == target:

@@ -22463,13 +22463,14 @@ async def test_workflow_wires_hybrid_match_scores_into_graph_rag_context_degrada
     # always loads Kriya's own global skill library too, which would inflate
     # convention_prompt unpredictably and throw off the tuned budget below.
     cfg.paths.skills = str(tmp_path / "skills")
-    # NOTE: _reserve_graph_context_budget() floors its return value at
-    # _MIN_GRAPH_CONTEXT_BUDGET (1000 tokens) regardless of context_window,
-    # so the effective budget here is exactly 1000, not 0.75*context_window -
-    # fixture sizes below (64 lines/8 words -> ~655 tokens full, ~161
-    # signatures) are chosen against THAT floor: two-full (~1310) exceeds it,
+    # The graph budget is 0.60 of the prompt allocation window (PRD-016): a
+    # 5910-token window with the default 4096-token output budget reserves
+    # half the window for output and leaves ~999 tokens of graph context.
+    # Fixture sizes below (64 lines/8 words -> ~655 tokens full, ~161
+    # signatures) are chosen against that: two-full (~1310) exceeds it,
     # one-full-one-signatures (~816) comfortably doesn't.
-    cfg.llm.context_window = 1000
+    cfg.llm.context_window = 5910
+    assert 816 < _reserve_graph_context_budget(allocation_window(cfg)) < 1310
     os.makedirs(cfg.paths.memory, exist_ok=True)
 
     _write_deterministic_text_file(tmp_path / "HighRel.txt", lines=64)

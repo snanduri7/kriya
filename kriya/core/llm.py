@@ -119,6 +119,12 @@ class LLMClient:
         # of the most recent call, set before the call returns or raises;
         # None while a call is in flight. Same single-flight convention.
         self.last_completion = None
+        # PRD-016: one entry per call whose context window or output budget
+        # was automatically enlarged (adaptive budget policy), appended when
+        # the call finishes. A workflow drains these into RunEvents so they
+        # persist in the run trace (kriya/workflow/state.py
+        # drain_budget_expansions); each is also logged.
+        self.budget_expansions: List[Dict[str, Any]] = []
 
     def _audit_llm_network_access(self, url: str) -> None:
         """MA4.3 - audit-only ExecutionPolicy consultation, wired in front of
@@ -155,7 +161,8 @@ class LLMClient:
         target = (model or "").casefold()
         cfg = self.config
         if cfg.llm.model.casefold() == target:
-            return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning}
+            return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning,
+                    "context_policy": cfg.llm.context_policy}
         candidates = list(cfg.llm_chain)
         for role in ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance"):
             role_cfg = getattr(cfg.agent_llms, role, None)
@@ -166,8 +173,10 @@ class LLMClient:
             candidates.extend(role_cfg.llm_chain)
         for candidate in candidates:
             if candidate.model.casefold() == target:
-                return {"context_window": candidate.context_window, "reasoning": candidate.reasoning}
-        return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning}
+                return {"context_window": candidate.context_window, "reasoning": candidate.reasoning,
+                        "context_policy": candidate.context_policy}
+        return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning,
+                "context_policy": cfg.llm.context_policy}
 
     async def _runtime_fingerprint(self, model: str, base_url: str, api_key: str,
                                    extra_body: Optional[Dict[str, Any]]):
@@ -203,27 +212,85 @@ class LLMClient:
         return fingerprint
 
     def _dispatch_budget(self, *, model: str, fingerprint, messages: List[Dict[str, Any]],
-                         tools: Optional[List[Dict[str, Any]]], max_tokens: int, is_reasoning: bool):
-        """PRD-016: plan this request's output budget against the served
-        window. Raises ContextBudgetUnsatisfiableError before any inference."""
+                         tools: Optional[List[Dict[str, Any]]], max_tokens: int, is_reasoning: bool,
+                         base_url: str, api_key: str, expected_output=None):
+        """PRD-016: choose this request's context window and output budget
+        (kriya/core/token_budget.py plan_dispatch). Raises
+        ContextBudgetUnsatisfiableError / OutputBudgetUnsatisfiableError
+        before any inference."""
+        from dataclasses import replace
+
         from kriya.core.model_qualification import measured_limits_for
         from kriya.core.token_budget import DEFAULT_REASONING_ALLOWANCE_TOKENS, plan_dispatch
 
+        binding = self._binding(model)
+        policy = binding["context_policy"]
         limits = measured_limits_for(fingerprint, self.config) if fingerprint.exact else {}
         if fingerprint.effective_context_window:
             window, source = fingerprint.effective_context_window, "served_num_ctx"
         else:
-            window, source = self._binding(model).get("context_window"), "config_declared"
+            window, source = binding.get("context_window"), "config_declared"
         reasoning = 0
         if is_reasoning:
             reasoning = int(limits.get("reasoning_tokens_max") or DEFAULT_REASONING_ALLOWANCE_TOKENS)
         tokenizer = fingerprint.tokenizer_digest if fingerprint.tokenizer_digest != "unavailable" else None
-        return plan_dispatch(
-            messages=messages, tools=tools, requested_max_tokens=max_tokens,
-            context_window=window, window_source=source, tokenizer_digest=tokenizer,
-            qualified_bytes_per_token=limits.get("bytes_per_token_floor"),
-            qualified_non_ascii_bytes_per_token=limits.get("non_ascii_bytes_per_token_floor"),
-            reasoning_allowance=reasoning,
+        from kriya.core.model_qualification import offered_context_tiers
+
+        offer = offered_context_tiers(self.config, model, fingerprint, policy, base_url=base_url, api_key=api_key)
+        tiers, ceiling, note = offer.tiers, offer.ceiling, offer.note
+        try:
+            decision = plan_dispatch(
+                messages=messages, tools=tools, requested_max_tokens=max_tokens,
+                context_window=window, window_source=source, tokenizer_digest=tokenizer,
+                qualified_bytes_per_token=limits.get("bytes_per_token_floor"),
+                qualified_non_ascii_bytes_per_token=limits.get("non_ascii_bytes_per_token_floor"),
+                reasoning_allowance=reasoning, tiers=tiers, policy_mode=policy.mode,
+                expected_output=expected_output, hard_context_ceiling=ceiling,
+                hard_output_ceiling=policy.max_output_tokens,
+            )
+        except Exception as refusal:
+            if note and getattr(refusal, "decision", None) is not None:
+                refusal.decision = replace(refusal.decision, tier_note=note)
+            raise
+        return replace(decision, tier_note=note) if note else decision
+
+    def _request_options(self, extra_body: Optional[Dict[str, Any]], budget) -> Optional[Dict[str, Any]]:
+        """The request's extra_body with num_ctx set to the selected context
+        tier (a copy; the configured extra_body is never changed)."""
+        if not budget.context_expanded:
+            return extra_body
+        options = dict((extra_body or {}).get("options") or {})
+        options["num_ctx"] = budget.context_window
+        return {**(extra_body or {}), "options": options}
+
+    def _note_budget_expansion(self, result, budget, *, reason: Optional[str] = None) -> None:
+        """Evidence for an automatic enlargement (appended to
+        budget_expansions and logged)."""
+        event = {
+            "model": result.model,
+            "reason": reason or budget.selection_reason,
+            "policy_mode": budget.policy_mode,
+            "preferred_context_window": budget.preferred_context_window,
+            "selected_context_window": budget.context_window,
+            "preferred_output_tokens": budget.requested_max_tokens,
+            "selected_output_tokens": result.max_tokens,
+            "required_prompt_tokens": budget.prompt_tokens,
+            "expected_output_tokens": budget.expected_output_tokens,
+            "output_grounding": budget.output_grounding,
+            "qualification_source": budget.qualification_source,
+            "hard_context_ceiling": budget.hard_context_ceiling,
+            "hard_output_ceiling": budget.hard_output_ceiling,
+            "runtime_fingerprint": result.runtime_fingerprint,
+            "elapsed_seconds": round(result.elapsed_seconds, 3),
+            "status": result.status.value,
+        }
+        self.budget_expansions.append(event)
+        logger.warning(
+            "Adaptive budget (%s): %s context %s -> %s, output %s -> %s (prompt ~%s tokens, expected output %s, "
+            "tier source %s).",
+            event["reason"], result.model, event["preferred_context_window"], event["selected_context_window"],
+            event["preferred_output_tokens"], event["selected_output_tokens"], event["required_prompt_tokens"],
+            event["expected_output_tokens"], event["qualification_source"],
         )
 
     def _finish(self, result, *, started: float, budget) -> None:
@@ -241,6 +308,10 @@ class LLMClient:
             comparison = compare_with_usage(result.budget, result.prompt_tokens, model=result.model)
             if comparison:
                 result.budget.update(comparison)
+            if budget.expanded:
+                self._note_budget_expansion(result, budget)
+            if (result.protocol or {}).get("empty_content_floor_retry"):
+                self._note_budget_expansion(result, budget, reason="empty_content_floor_retry")
         self.last_completion = result
         if result.error is None:
             click.secho(
@@ -279,6 +350,7 @@ class LLMClient:
         max_tokens_override: Optional[int] = None,
         reasoning_override: Optional[bool] = None,
         extra_body_override: Optional[Dict[str, Any]] = None,
+        expected_output=None,
     ) -> str:
         """Call the local LLM server and return the text completion (supporting streaming and JSON mode).
 
@@ -305,7 +377,7 @@ class LLMClient:
             model_override=model_override, base_url_override=base_url_override,
             api_key_override=api_key_override, temperature_override=temperature_override,
             max_tokens_override=max_tokens_override, reasoning_override=reasoning_override,
-            extra_body_override=extra_body_override,
+            extra_body_override=extra_body_override, expected_output=expected_output,
         )
         if result.error is not None:
             logger.error(f"Local LLM call failed: {result.error}", exc_info=result.error)
@@ -330,12 +402,20 @@ class LLMClient:
         max_tokens_override: Optional[int] = None,
         reasoning_override: Optional[bool] = None,
         extra_body_override: Optional[Dict[str, Any]] = None,
+        expected_output=None,
     ):
         """PRD-015: one completion as a normalized ``CompletionResult``.
 
-        Raises only for policy refusals (egress, CONTEXT_BUDGET_UNSATISFIABLE)
-        and cancellation (recorded as CANCELLED first, never swallowed); a
-        backend error or timeout is returned as BACKEND_ERROR/TIMEOUT."""
+        Raises only for policy refusals (egress, CONTEXT_BUDGET_UNSATISFIABLE,
+        OUTPUT_BUDGET_UNSATISFIABLE) and cancellation (recorded as CANCELLED
+        first, never swallowed); a backend error or timeout is returned as
+        BACKEND_ERROR/TIMEOUT.
+
+        ``expected_output`` (token_budget.OutputExpectation) is a caller's
+        GROUNDED estimate of the output this request needs (e.g. the size of
+        a file being rewritten); under the adaptive budget policy it may
+        enlarge the output budget and select a larger qualified context
+        window (PRD-016). Without it the output never grows."""
         import asyncio
         import time
 
@@ -395,11 +475,18 @@ class LLMClient:
             model, url_to_check, api_key_override or self.config.llm.api_key, extra_body,
         )
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+        api_key = api_key_override or self.config.llm.api_key
         budget = self._dispatch_budget(
             model=model, fingerprint=fingerprint, messages=messages, tools=None,
-            max_tokens=max_tokens, is_reasoning=is_reasoning,
+            max_tokens=max_tokens, is_reasoning=is_reasoning, base_url=url_to_check, api_key=api_key,
+            expected_output=expected_output,
         )
         max_tokens = budget.max_tokens
+        if budget.context_expanded:
+            # The selected tier is a different runtime input (num_ctx), so a
+            # different fingerprint: the call is attributed to it.
+            extra_body = self._request_options(extra_body, budget)
+            fingerprint = await self._runtime_fingerprint(model, url_to_check, api_key, extra_body)
 
         logger.info(f"Sending completion request to local LLM [Model: {model}, Stream: {stream_callback is not None}, JSON Mode: {json_mode}, Reasoning: {is_reasoning}]")
         start_time = time.time()
@@ -440,7 +527,7 @@ class LLMClient:
                     raise
 
             content, hidden = split_reasoning(raw["content"], anywhere=is_reasoning)
-            if not is_reasoning and json_mode and not content and max_tokens < 12288:
+            if not is_reasoning and json_mode and not content and max_tokens < REASONING_MIN_MAX_TOKENS:
                 # Some models emit hidden <think>...</think> reasoning before ever
                 # committing to JSON regardless of Kriya's own is_reasoning
                 # classification for them (a static per-model config guess, not a
@@ -458,9 +545,14 @@ class LLMClient:
                     f"max_tokens={max_tokens} (likely silent reasoning) - retrying once "
                     "with a 12288-token floor."
                 )
-                floor = 12288
+                # An ungrounded enlargement: bounded by the selected window
+                # and the hard output ceiling, and recorded as an expansion.
+                floor = REASONING_MIN_MAX_TOKENS
                 if budget.context_window:
-                    floor = min(floor, max(max_tokens, budget.context_window - budget.prompt_tokens))
+                    floor = min(floor, max(max_tokens, budget.context_window - budget.prompt_tokens
+                                           - budget.safety_margin))
+                if budget.hard_output_ceiling is not None:
+                    floor = min(floor, max(max_tokens, budget.hard_output_ceiling))
                 result.protocol["empty_content_floor_retry"] = True
                 result.max_tokens = floor
                 raw = await self._request_once(
@@ -711,11 +803,15 @@ class LLMClient:
         fingerprint = await self._runtime_fingerprint(
             model, url_to_check, api_key_override or self.config.llm.api_key, extra_body,
         )
+        api_key = api_key_override or self.config.llm.api_key
         budget = self._dispatch_budget(
             model=model, fingerprint=fingerprint, messages=messages, tools=tools,
-            max_tokens=max_tokens, is_reasoning=False,
+            max_tokens=max_tokens, is_reasoning=False, base_url=url_to_check, api_key=api_key,
         )
         max_tokens = budget.max_tokens
+        if budget.context_expanded:
+            extra_body = self._request_options(extra_body, budget)
+            fingerprint = await self._runtime_fingerprint(model, url_to_check, api_key, extra_body)
         start_time = time.time()
         result = CompletionResult(
             status=CompletionStatus.OK, model=model,

@@ -352,11 +352,16 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # minimum output cannot fit the served window. Typed, with its reason
     # code; the retry may still succeed on a fallback model with its own
     # window (the context allocator re-runs against it).
-    from kriya.core.token_budget import ContextBudgetUnsatisfiableError
+    from kriya.core.token_budget import OUTPUT_BUDGET_UNSATISFIABLE, ContextBudgetUnsatisfiableError
 
     budget_failure = (
         Failure(
-            type="context_budget_unsatisfiable", message=str(e), raw_output=str(e), source="orchestrator",
+            type=(
+                "output_budget_unsatisfiable"
+                if getattr(e, "reason_code", None) == OUTPUT_BUDGET_UNSATISFIABLE
+                else "context_budget_unsatisfiable"
+            ),
+            message=str(e), raw_output=str(e), source="orchestrator",
             diagnostics={"reason_code": e.reason_code, "budget": e.decision.to_dict()},
         )
         if attached_failure is None and not scope_denial_failure and isinstance(e, ContextBudgetUnsatisfiableError)
