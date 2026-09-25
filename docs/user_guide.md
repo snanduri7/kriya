@@ -600,6 +600,33 @@ creates an authorization for exactly that owner, symbol and change, in that plan
 approver the change stays blocked (`CONTRACT_ESCALATION_UNAVAILABLE`). Classifications are recorded in the
 obligation ledger.
 
+### 2.1f Brownfield regression baseline (PRD-024)
+
+With `autonomy.brownfield_full_regression_baseline_policy: auto`, the default, Kriya decides deterministically, before
+changing anything, whether to run your full test suite once on the untouched repository first. All of the
+following must hold:
+- the change is a brownfield task, enhancement or refactor, as classified by engineering triage;
+- the workspace is a git repository;
+- the repository has tests;
+- the plan changes existing source.
+
+On top of that, at least one risk signal must be present:
+- medium or high risk;
+- a standard or heavy change;
+- a refactor;
+- a contract, dependency, build, persistence, security or entry-point impact;
+- or a changed file that your tests name.
+
+A trivial change skips it. `required` always captures the baseline (the production profile seals this), and
+`disabled` never does. When the baseline is captured, every failure after the change is classified against it:
+`PRE_EXISTING_FAILURE` (not blamed on the change), `NEW_FAILURE`/`CHANGED_FAILURE` (block), `RESOLVED_FAILURE`
+(fixed), `NOT_COMPARABLE`.
+
+Both runs record their environment (execution mode and the toolchain identity). If the change alters the toolchain,
+the runs are not comparable and the result blocks. If the baseline cannot be captured when it is needed, the run
+stops before generation (`baseline_indeterminate`). When the test output has no per-test parser, the result says so
+instead of reporting no failures.
+
 ### 2.2 Control Plane, Policy, and Structured Execution
 
 A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.

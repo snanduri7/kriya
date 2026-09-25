@@ -206,6 +206,12 @@ PRD-012 normalizes every channel's network authority into one vocabulary, `kriya
 - **Approval record.** An approval mints `contract_authority.human_contract_authorization` (the only other minting site; CORR-016's constructed-only-here and single-derivation-call structural tests still hold). The record is revision-bound, with provenance HUMAN, and is kept on `state.human_contract_authorizations`, which is honoured by the pre-write gate and the terminal re-check.
 - **Persistence.** Classifications are `CONTRACT_CHANGE_CLASSIFICATION` obligations.
 
+### Brownfield baseline `auto` policy (`kriya/workflow/baseline_policy.py`) — PRD-024
+- **Trigger.** `decide_auto_baseline(route, planned_files, workspace, workspace_revision=)` is the deterministic `auto` trigger. Preconditions: a brownfield route, a git identity, existing tests, a planned change to existing source. Then any risk signal. `effective_baseline_policy` turns `auto` into `required`/`disabled`, evaluated in `run_generation_workflow` before capture (`validation_baseline.policy` event). A triggered baseline is as binding as `required`, and its hard stop names the trigger reasons.
+- **Environment identity.** `baseline_environment_identity` (execution mode + PRD-011 `toolchain_fingerprint`) is recorded as the invocation's `environment_fingerprint` PRE, and recomputed POST over the candidate's toolchain declarations. `classify_baseline_delta(post_environment=)` returns NOT_COMPARABLE (blocking) on mismatch.
+- **Per-test availability.** `BaselineDeltaResult.level2_available`/`level2_unavailable_reason` make an unparsed per-test comparison explicit. RESOLVED_FAILURE is FIXED.
+- **Purity.** `validation_baseline.py` stays a pure comparison library.
+
 ### Storage (`kriya/core/db.py`, `kriya/memory/`)
 All persistent state lives in SQLite databases under `paths.memory` (`vector_index.db`, `web_knowledge.db`, `dependency_graph.db`, `knowledge_cache.db`) and the state directory (`traces.db`, `kriya/core/state_paths.py`), opened with WAL journal mode and a busy timeout for concurrent-safe access. `vector_index.db` mixes code-index vectors and a separate `learned_knowledge` table (from `kriya learn`) — keep those namespaces distinct, the workflow relies on querying them separately with different trust levels.
 
