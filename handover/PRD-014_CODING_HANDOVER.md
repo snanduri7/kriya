@@ -25,8 +25,13 @@ Versioned qualification campaign keyed by the PRD-013 fingerprint (`kriya/core/m
   - A tier is offered to the adaptive budget only with a current record passing `context_capacity` and every case
     the model's roles need (`context_tier_requirements`).
   - Adding the case bumped `QUALIFICATION_POLICY_VERSION` to `kriya-qualification/2`, so earlier records are stale.
-  - Qualification requests now carry the qualified binding's own `extra_body`. Before this, a chain model was
-    qualified with the primary's request options while its fingerprint used its own.
+  - Qualification requests now carry the qualified binding's own `extra_body` (request options such as `num_ctx`).
+    Before this, a chain model was qualified with the primary's options while its fingerprint used its own.
+    `context_capacity` and the timeout case use the model binding's own endpoint and key. The other cases still send
+    through the primary client's `base_url` (pre-existing), so a chain model on a different endpoint is only fully
+    qualified once that is changed.
+  - `context_capacity` sends straight to the endpoint, bypassing LLMClient's egress check, so it refuses a
+    non-local endpoint itself.
 - **Evidence**: PASS/FAIL/UNAVAILABLE per case with evidence and measured limits (verified tool-argument size,
   reasoning tokens, ASCII and non-ASCII bytes-per-token floors). UNAVAILABLE is never PASS; a crashing case is FAIL.
   Model output is never executed on the host (structural checks only).

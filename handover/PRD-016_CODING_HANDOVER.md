@@ -80,9 +80,12 @@ check existed the server silently truncated it.
   - the new `OUTPUT_BUDGET_UNSATISFIABLE` (a subclass, so every existing handler catches it; typed failure
     `output_budget_unsatisfiable`, RESOURCE).
 - Fallback order when nothing fits:
-  1. Optional context is already sized to the preferred window, so it never forces a tier.
-  2. For a full-file rewrite, the attempt asks once for an anchored patch of that file (D1 `repair_with_patch`), for
-     models whose profile accepts patches. Recorded as `model.output_budget_protocol_fallback`.
+  1. Reduce optional context. Optional context is sized to the preferred window, so it never forces a tier. When a
+     Developer file's request is still refused for the context budget, it is sent once more with the already-written
+     siblings named but not shown (`model.optional_context_reduced`). See decision 6 for what this does not cover.
+  2. For a grounded full-file rewrite that cannot fit (`OUTPUT_BUDGET_UNSATISFIABLE`), the attempt asks once for an
+     anchored patch of that file (D1 `repair_with_patch`), for models whose profile accepts patches. Recorded as
+     `model.output_budget_protocol_fallback`.
   3. Otherwise the typed failure.
 - A budget refusal inside the Developer's file-list path is no longer swallowed into the single-stage batch fallback
   (a larger request).
@@ -115,6 +118,12 @@ check existed the server silently truncated it.
 5. **No exact tokenizer by default.** Unchanged: Ollama 0.34.2 has no tokenize endpoint and nothing is downloaded. The
    deterministic "exact Ollama count" fixtures were dropped. The comparison with the real tokenizer is made live
    (`prd016-estimator-vs-tokenizer.json`); pin those counts after the live run.
+6. **Fallback 1 covers the sibling section only.** It is the one optional section the Developer call owns. Graph,
+   known-target, retry and investigation text are already merged into `existing_code_context` by the time a request
+   is refused, and reducing them would mean rebuilding context at the attempt level. That was not done. At 32K/16384
+   these sections together are about half the prompt window, so a refusal caused by very large mandatory text (task,
+   plan, design, skills) can still carry optional context whose removal would have let it fit. In that case the
+   typed refusal stands, and the attempt's normal retry path (a fallback model with its own window) applies.
 
 ## Files
 - Changed:
@@ -125,14 +134,14 @@ check existed the server silently truncated it.
     `state.py`, `retry_strategy.py`, `failure_reporting.py`, `resume_fingerprints.py`;
   - `kriya/agents/agent.py`, `kriya/cli.py`.
 - Tests:
-  - New: `tests/test_prd016_allocation.py` (16), `tests/test_prd016_adaptive_budget.py` (31).
+  - New: `tests/test_prd016_allocation.py` (16), `tests/test_prd016_adaptive_budget.py` (35).
   - Extended: `tests/test_prd016_token_budget.py` (+11 selector tests).
   - Updated: `tests/test_workflow.py` (shares/floors; the hybrid-score fixture window retuned to the new semantics,
     assertions unchanged), `tests/test_val001_g1r3_retry_context.py` (`prompt_window=`),
     `tests/test_failure_reporting.py` (pinned vocabulary).
 
 ## Evidence (plain runner; you run pytest)
-- `test_prd016_allocation` 16/0, `test_prd016_adaptive_budget` 31/0, `test_prd016_token_budget` 36/0.
+- `test_prd016_allocation` 16/0, `test_prd016_adaptive_budget` 35/0, `test_prd016_token_budget` 36/0.
 - `test_prd014` 43/0, `test_prd013` 28/0, `test_prd015` 24/0, `test_llm_extra` 30/0, `test_production_doctor` 57/0.
 - `test_config` 31/0, `test_sec009_config_authority` 52/0, `test_sec009_p2` 35/0, `test_failure_reporting` 35/0.
 - `test_context_budget` 30/0, `test_review_context` 69/0, `test_val001_g1r3` 23/0, `test_val001_g1_remediation` 53/0.
@@ -142,11 +151,13 @@ check existed the server silently truncated it.
   - `test_dev_inv_001` 85/2;
   - `test_prd008_resume_fingerprints` 97/1;
   - `test_workflow_controller_enforce` 219/53 (identical names).
-- `test_workflow`: see the batch READY message.
+- `test_workflow` 862/6, the same six names as HEAD, on `a9a3563`. The final commit is re-verified in the batch
+  READY message.
 - Mutation checks:
   - disabling the omission bound fails 7 allocation tests;
   - disabling the trace drain or the `num_ctx` switch fails 4 adaptive tests;
-  - disabling the patch fallback or the single-stage refusal guard fails 2.
+  - disabling the patch fallback or the single-stage refusal guard fails 2;
+  - disabling the sibling reduction fails 1.
 
 ## Live test
 In `tests/test_live_prd013_016_model_runtime.py` (command in the PRD-014 handover):
@@ -155,7 +166,15 @@ In `tests/test_live_prd013_016_model_runtime.py` (command in the PRD-014 handove
   prompt must be sent with `num_ctx` 16384, the server must report more than 8192 prompt tokens, and the expansion
   event is written to `prd016-adaptive-tier.json`.
 
-Windows stay at 8192/16384 to bound hardware load; no 64K run is part of this batch. Qualifying a 64K tier is
+Windows stay at 8192/16384 to bound hardware load; no 64K run is part of this batch.
+
+**Proposed live check (needs your approval; about 10-20 min).** The largest behavioural change, the smaller retrieved
+context at 32K/16384, is not exercised by any model-level test. Run the demo-03 brownfield generate once
+(`~/kriya-live-demo/demo-03-brownfield`, as its `run-demo.sh` does) and compare it with its last green run. If context
+starvation shows, the levers are:
+- a lower `max_tokens` in that config;
+- `kriya model qualify` (raises the counting ratio about 19%);
+- a qualified 64K tier (`kriya model qualify --context-window 65536`), for requests whose mandatory content needs it. Qualifying a 64K tier is
 `kriya model qualify --context-window 65536`, on the operator's machine.
 
 ## Residuals

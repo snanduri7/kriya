@@ -401,8 +401,9 @@ ceilings and the call's elapsed time. Ollama sizes a model's context when it loa
 `num_ctx` can make it reload the model (check with `ollama ps` on your host): an expansion can cost a reload and more
 memory, and calls alternating between windows can repeat it. Qualify a tier only if the host can hold it.
 
-When nothing allowed fits, the request is refused before inference: `CONTEXT_BUDGET_UNSATISFIABLE` when the prompt
-itself cannot fit, `OUTPUT_BUDGET_UNSATISFIABLE` when the prompt fits but the grounded output cannot. For a full-file
+When nothing allowed fits, a Developer file request is first sent once more without the contents of the files already
+written in the same batch (names only; `model.optional_context_reduced`). If it still cannot fit it is refused before
+inference: `CONTEXT_BUDGET_UNSATISFIABLE` when the prompt itself cannot fit, `OUTPUT_BUDGET_UNSATISFIABLE` when the prompt fits but the grounded output cannot. For a full-file
 rewrite of an existing file the Developer then asks once for an anchored patch instead (models whose capability profile
 accepts patches), recorded as `model.output_budget_protocol_fallback`; otherwise the attempt fails with the typed
 reason. An answer the provider cuts off is `OUTPUT_TRUNCATED` and is never written; a retry does not enlarge the output
