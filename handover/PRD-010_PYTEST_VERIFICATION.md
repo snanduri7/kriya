@@ -20,7 +20,15 @@ PYTEST_VERIFIED, LIVE_VERIFIED
 - **Real CLI run** (`~/kriya-live-validation/prd010-doctor-live`, Maven/JDK 17, `runtime_profile: production`, SEC-009-approved):
   - `exit=1`, the JSON parsed, and every infrastructure check passed.
   - It surfaced the two defects fixed in edef49e.
-  - A post-fix CLI re-run was not separately reported.
+- **Post-fix real CLI re-run** (same workspace, at edef49e):
+  - `exit=1`.
+  - The non-PASS checks were exactly:
+    - `model.runtime_fingerprint` UNAVAILABLE;
+    - `model.qualification` UNAVAILABLE;
+    - `models.role_independence` WARN;
+    - `semantic.precision_boundary` WARN.
+  - `ls -a` afterwards showed only `.git kriya.yaml pom.xml`: nothing was created, and log lines went to stderr only.
+  - Both live-CLI defects are confirmed fixed on the real command path.
 - Exact test counts were not reported.
 
 ## Conclusion
