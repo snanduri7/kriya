@@ -17,9 +17,9 @@ PRD-013,Exact Local Model Runtime Fingerprint,Wave 4,P0,PRD-012,REQUIRED,VERIFIE
 PRD-014,Local Model Qualification Framework,Wave 4,P0,PRD-013,REQUIRED,VERIFIED,see PRD-014_CODING_HANDOVER.md,PYTEST_VERIFIED@19572e9 (5582/3 at 881da7e; 3 fixture failures fixed in 19572e9 and re-run green),LIVE_VERIFIED@19572e9 (live-model tier + demo-03 brownfield)
 PRD-015,Normalized LLM Completion and Protocol Result,Wave 4,P1,PRD-014,REQUIRED,VERIFIED,see PRD-015_CODING_HANDOVER.md,PYTEST_VERIFIED@19572e9 (5582/3 at 881da7e; 3 fixture failures fixed in 19572e9 and re-run green),LIVE_VERIFIED@19572e9 (live-model tier + demo-03 brownfield)
 PRD-016,Tokenizer-Aware Context and Output Budgeting,Wave 4,P1,PRD-015,REQUIRED,VERIFIED,see PRD-016_CODING_HANDOVER.md,PYTEST_VERIFIED@19572e9 (5582/3 at 881da7e; 3 fixture failures fixed in 19572e9 and re-run green),LIVE_VERIFIED@19572e9 (live-model tier + demo-03 brownfield)
-PRD-017,Capability-Aware Fallback Model Transition,Wave 4,P1,PRD-016,REQUIRED,NOT_STARTED,,,
-PRD-018,Role-Model Independence Visibility and Per-Role Metrics,Wave 4,P2,PRD-017,REQUIRED,NOT_STARTED,,,
-PRD-019,Evidence-Based Model Routing,Wave 4,P2,PRD-018,REQUIRED,NOT_STARTED,,,
+PRD-017,Capability-Aware Fallback Model Transition,Wave 4,P1,PRD-016,REQUIRED,READY_FOR_PYTEST_VERIFICATION,see PRD-017_CODING_HANDOVER.md,,
+PRD-018,Role-Model Independence Visibility and Per-Role Metrics,Wave 4,P2,PRD-017,REQUIRED,READY_FOR_PYTEST_VERIFICATION,see PRD-018_CODING_HANDOVER.md,,
+PRD-019,Evidence-Based Model Routing,Wave 4,P2,PRD-018,REQUIRED,READY_FOR_PYTEST_VERIFICATION,see PRD-019_CODING_HANDOVER.md,,
 PRD-020,Immutable Requirement and Obligation Lineage,Wave 5,P0,PRD-019,REQUIRED,NOT_STARTED,,,
 PRD-021,Plan-Time Grounded Existing-Responsibility Ownership,Wave 5,P1,PRD-020,REQUIRED,NOT_STARTED,,,
 PRD-022,First-Occurrence Ownership Recovery and Reviewer Evidence,Wave 5,P1,PRD-021,REQUIRED,NOT_STARTED,,,

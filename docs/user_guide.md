@@ -434,6 +434,84 @@ What counts as "failure" differs by role, deliberately conservative so a legitim
 - **Planner, Architect, Reviewer** (free text): only a hard call failure - connection error, timeout, HTTP error, an `local_only` egress block. A brief plan or review is never retried just for being brief.
 - **RunVerifier, SkillGapAgent** (JSON-mode): the same hard-call-failure signal, plus an unparseable response - if the first model doesn't even return valid JSON, the next candidate is tried before falling back to that role's existing safe-default behavior.
 
+### 2.1a Fallback transitions, role independence and model routing (`model_policy`)
+
+**Fallback transitions (PRD-017).** When the Developer's retry moves to an `llm_chain` model, everything the request
+depends on is resolved again for that model: its exact runtime and Developer qualification, its capability profile
+(native tools, JSON mode, edit protocol, streaming), reasoning, its served and prompt-allocation windows and its own
+output budget. A chain entry's `max_tokens` is now used for every call to it; leave it unset to inherit
+`llm.max_tokens`. Each change of model is recorded field by field as a `model.transition` run event. A fallback that
+cannot serve the attempt ends it with `FALLBACK_MODEL_INCOMPATIBLE` before any request is sent, and the run stops
+instead of retrying it (`failure_category: fallback_model_incompatible`). That happens when:
+- a qualification record for its exact runtime has a failed Developer case;
+- `runtime_profile: production` is set and the runtime is not QUALIFIED;
+- the attempt may only patch an existing file (no complete current source was shown) and the model's profile returns
+  whole files only;
+- its window leaves no room for a prompt.
+
+A runtime that has never been qualified is recorded, not refused. The chain order is never changed and a larger model
+is never assumed to be more capable.
+
+**Role independence and per-role metrics (PRD-018).** By default every role may share the Developer's model, which
+is the fast local setup. Roles that share one runtime also share its errors, so `kriya doctor --production` reports
+which roles share an exact runtime (`models.role_independence`, WARN) by fingerprint, not by model name. To require
+independence for selected roles:
+```yaml
+model_policy:
+  independent_roles: [run_verifier, spec_compliance]   # each must run on a runtime distinct from the Developer's
+agent_llms:
+  run_verifier:
+    llm: {model: "qwen3.5:9B", base_url: "http://localhost:11434/v1"}
+  spec_compliance:
+    llm: {model: "qwen3.5:9B", base_url: "http://localhost:11434/v1"}
+```
+`generate`, `fix` and proposal execution refuse to start (`ROLE_INDEPENDENCE_REQUIRED`) when a listed role shares the
+Developer's exact runtime, or when either runtime cannot be identified exactly. The doctor row then becomes blocking.
+A second model's opinion is still never verification evidence: only the deterministic gates decide whether an
+attempt passed.
+
+Every call is counted per role and exact runtime:
+- calls and latency;
+- tokens;
+- protocol failures (empty, malformed, truncated, backend error, timeout);
+- schema failures (a response the role could not use, e.g. JSON that fails its contract);
+- for the Developer, its attempts, first-pass successes and the retries its failed attempts triggered.
+
+Each run stores its rows as a `model.role_metrics` event. `kriya model metrics [--json]` aggregates them over the
+runs in `traces.db`.
+
+**Evidence-based routing (PRD-019, opt-in).** Routing picks, per role, one runtime from candidates you configure:
+```yaml
+model_policy:
+  routing:
+    mode: evidence            # off (default) | evidence | frozen
+    candidates:
+      - {model: "qwen3-coder:30b", base_url: "http://localhost:11434/v1"}
+      - {model: "qwen3.5:9B", base_url: "http://localhost:11434/v1"}
+    roles:
+      reviewer: ["qwen3-coder:30b", "qwen3.5:9B"]     # operator preference order
+    min_calls: 5              # fewer measured calls than this = unmeasured
+    # table_path: /abs/path/model_routing_table.json  (default: the state directory)
+    # frozen_routes_path: /abs/path/frozen_routes.json (required for mode: frozen)
+```
+A candidate is eligible only when its runtime is exactly identified and QUALIFIED for that role *as routed*, since
+a model's runtime identity depends on the binding it is placed in. Qualify it for its route with
+`kriya model qualify --model <candidate> --role <role>`. A JSON role needs a JSON-mode profile, and a candidate's
+window may not be smaller than the role's configured one (or `min_context_window`). An explicit
+`agent_llms.<role>.llm` wins whenever it is qualified.
+
+Among eligible candidates, routing ranks by Kriya's own measured outcomes for that role on that exact runtime: the
+Developer by the share of attempts that passed the gates, other roles by the share of calls with no protocol or
+schema failure. Measured candidates come first; ties go to operator order, then alias. Model names, sizes and
+model judgments are never inputs. With no eligible candidate the role keeps its configured binding.
+
+The metrics come from a table you refresh between runs with `kriya model metrics --write-table`; a run only reads
+it, never updates it. Every decision is recorded as a `model.route` run event: the candidates, each rejection
+reason and the final route. `kriya model routes` shows the decisions without running anything.
+`kriya model routes --freeze <path>` records them, and `mode: frozen` then replays exactly those runtimes for
+reproducible certification, refusing the run (`ROUTE_FROZEN_MISMATCH`) if any runtime changed or is no longer
+qualified. `model_policy` is SECURITY_AUTHORITY: a repository cannot set or relax it.
+
 ### 2.2 Control Plane, Policy, and Structured Execution
 
 A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.

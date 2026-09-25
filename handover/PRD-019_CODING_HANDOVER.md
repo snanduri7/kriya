@@ -4,7 +4,7 @@
 READY_FOR_PYTEST_VERIFICATION (batch 4: PRD-017 to PRD-019, one pytest stop for the whole batch).
 
 ## Source identity
-- Base revision: PRD-018 commit (see `git log`).
+- Base revision: PRD-018 commit `261c187`; PRD-019 is `6302ea4`.
 - Branch: `milestone-decomposition`, local and unpushed.
 
 ## Scope
@@ -52,7 +52,17 @@ routed to that role.
   - frozen replay and drift refusal;
   - config validation and classification;
   - an end-to-end run through the CLI boundary and `WorkflowEngine`: the reviewer's calls go to the routed candidate, `model.route` lands in `traces.db`, and the table is not written.
-- Counts and mutation checks: see the batch-4 summary in the tracker notes and the PRD-019 section of the final message.
+- 28 passed.
+- Mutation checks, each caught:
+  - apply is a no-op fails 3;
+  - qualification ignored fails the unqualified-runtime test;
+  - frozen mode ignoring runtime drift fails the drift test (tightened so the drifted runtime is itself qualified and only the digest check can refuse it);
+  - score ignored fails 1;
+  - no route events fails 1;
+  - protocol needs ignored fails 1.
+- Regression, plain runner, all at baseline:
+  - the config, authority, doctor, qualification, proposal and milestone suites;
+  - `test_repl` is 19/12 with and without this change (plain-runner TTY/capsys limits).
 
 ## Decisions to review
 1. **Routing requires QUALIFIED in every mode, not only production.** Routing is itself an evidence claim. Choosing an unqualified runtime because of a score is exactly what the PRD forbids.
