@@ -16,7 +16,7 @@ from kriya.agents.contracts import (
 )
 from kriya.config.config import FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
-from kriya.core.token_budget import ContextBudgetUnsatisfiableError
+from kriya.core.token_budget import ContextBudgetUnsatisfiableError, OutputBudgetUnsatisfiableError
 
 logger = logging.getLogger(__name__)
 
@@ -1718,6 +1718,14 @@ class DeveloperAgent(BaseAgent):
             sibling_content_section = "".join(included_blocks)
             not_yet_written = [p for p in sibling_paths if p not in already_written]
             sibling_section = sibling_content_section
+            # PRD-016 fallback 1 (reduce optional context): the same section
+            # with every already-written sibling named but none shown, used
+            # only if this file's request is refused for the context budget.
+            reduced_sibling_section = (
+                "=== Already-Written Files This Batch (contents omitted - context budget; filenames only): "
+                f"{', '.join(sp for sp in sibling_paths if sp in already_written)} ===\n\n"
+                if included_blocks else None
+            )
             if omitted_for_budget:
                 # Distinct from "not yet written" below - these files DO exist
                 # and have real content, it just didn't fit the budget. Telling
@@ -1731,10 +1739,13 @@ class DeveloperAgent(BaseAgent):
                     f"{', '.join(omitted_for_budget)} ===\n\n"
                 )
             if not_yet_written:
-                sibling_section += (
+                not_yet_written_block = (
                     f"=== Other Files In This Batch, Not Yet Written (context only - do NOT output "
                     f"their content here) ===\n{', '.join(not_yet_written)}\n\n"
                 )
+                sibling_section += not_yet_written_block
+                if reduced_sibling_section is not None:
+                    reduced_sibling_section += not_yet_written_block
 
             # Only present on a retry that's directly responding to a real prior
             # Quality Gate failure (targeted retries, and full-set retries after
@@ -2073,11 +2084,12 @@ class DeveloperAgent(BaseAgent):
                 "printing \"[VERIFICATION] PASS\" or \"[VERIFICATION] FAIL: <reason>\"."
                 if classify_file_role(filepath) is FileRole.ENTRYPOINT else ""
             )
-            file_prompt = (
+            prompt_head = (
                 f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
                 f"=== Architecture Design ===\n{design_context}\n\n"
                 f"=== Task ===\n{task_description}\n\n"
-                f"{sibling_section}"
+            )
+            prompt_tail = (
                 f"{generation_directive}"
                 f"{verification_reminder}"
                 f"{skill_reminder}"
@@ -2085,28 +2097,53 @@ class DeveloperAgent(BaseAgent):
                 f"{source_context_block}"
                 f"{fix_analysis_instruction}"
             )
+            file_prompt = prompt_head + sibling_section + prompt_tail
 
             # PRD-016: a full-file answer for an existing file is expected to
             # be about that file's size (a grounded expectation the caller
             # measured); an anchored patch is not.
-            expected_output = None if prefer_anchored_edit else (expected_output_by_file or {}).get(filepath)
+            completion_options = dict(
+                stream_callback=(
+                    stream_callback
+                    if generation_protocol is None or generation_protocol.streaming
+                    else None
+                ),
+                json_mode=False,
+                model_override=model_override,
+                base_url_override=base_url_override,
+                api_key_override=api_key_override,
+                extra_body_override=extra_body_override,
+                temperature_override=retry_temperature if apply_fix_analysis else None,
+                expected_output=(
+                    None if prefer_anchored_edit else (expected_output_by_file or {}).get(filepath)
+                ),
+            )
             try:
-                content = await self.llm.complete(
-                    file_sys_prompt,
-                    file_prompt,
-                    stream_callback=(
-                        stream_callback
-                        if generation_protocol is None or generation_protocol.streaming
-                        else None
-                    ),
-                    json_mode=False,
-                    model_override=model_override,
-                    base_url_override=base_url_override,
-                    api_key_override=api_key_override,
-                    extra_body_override=extra_body_override,
-                    temperature_override=retry_temperature if apply_fix_analysis else None,
-                    expected_output=expected_output,
-                )
+                try:
+                    content = await self.llm.complete(file_sys_prompt, file_prompt, **completion_options)
+                except ContextBudgetUnsatisfiableError as refusal:
+                    # PRD-016 fallback 1: the prompt itself does not fit any
+                    # allowed window. The already-written siblings' contents
+                    # are the one optional section this call owns: send the
+                    # request once more with their names only. A grounded
+                    # output refusal is not a context problem - it goes to
+                    # the caller's lower-output-protocol fallback instead.
+                    if reduced_sibling_section is None or isinstance(refusal, OutputBudgetUnsatisfiableError):
+                        raise
+                    logger.warning(
+                        "Developer: '%s' does not fit the context budget with sibling contents; retrying with "
+                        "sibling filenames only.", filepath,
+                    )
+                    record = getattr(self.llm, "budget_expansions", None)
+                    if isinstance(record, list):
+                        record.append({
+                            "event_kind": "model.optional_context_reduced", "model": model_override,
+                            "reason": "sibling_contents_omitted", "file": filepath,
+                            "required_prompt_tokens": refusal.decision.prompt_tokens,
+                            "selected_context_window": refusal.decision.context_window,
+                        })
+                    file_prompt = prompt_head + reduced_sibling_section + prompt_tail
+                    content = await self.llm.complete(file_sys_prompt, file_prompt, **completion_options)
             except ContextBudgetUnsatisfiableError as refusal:
                 # Which file could not be budgeted, for the caller's fallback
                 # (a lower-output protocol for that file) and its evidence.

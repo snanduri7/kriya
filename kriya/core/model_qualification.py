@@ -820,10 +820,21 @@ async def case_context_capacity(llm, model, ctx):
     Kriya's own dispatch estimate) with the qualification binding's num_ctx."""
     import secrets
 
+    from kriya.core.llm import is_local_url
+
     window = ctx.get("context_window")
     if not window:
         return CaseResult("", UNAVAILABLE, {"reason": "the served context window (num_ctx) is not known"})
-    client = llm.client
+    base_url = ctx.get("base_url")
+    if base_url and not is_local_url(base_url):
+        # This case talks to the endpoint directly (not through LLMClient's
+        # egress check), so it refuses a non-local endpoint itself.
+        return CaseResult("", UNAVAILABLE, {"reason": "context capacity is only probed on a local endpoint",
+                                            "endpoint": base_url})
+    # The model's own endpoint and key (the timeout case's client factory),
+    # not necessarily the primary binding's.
+    factory = ctx.get("client_factory")
+    client = factory(600.0).client if factory is not None else llm.client
     extra_body = ctx.get("extra_body") or None
 
     async def send(messages, max_tokens):
@@ -910,7 +921,7 @@ async def run_qualification(
     never itself sent with a different window."""
     from kriya.core.llm import LLMClient
     from kriya.core.model_capabilities import capabilities_for_model
-    from kriya.core.model_runtime import configured_context_window, resolve_configured_model_runtime
+    from kriya.core.model_runtime import _binding_for, configured_context_window, resolve_configured_model_runtime
 
     model = model or config.llm.model
     config = qualification_config(config, model, context_window)
@@ -926,8 +937,6 @@ async def run_qualification(
     def default_factory(timeout: float) -> Any:
         from openai import AsyncOpenAI
 
-        from kriya.core.model_runtime import _binding_for
-
         binding = _binding_for(config, model)
         probe = LLMClient(config)
         probe.client = AsyncOpenAI(api_key=binding.get("api_key") or config.llm.api_key,
@@ -939,6 +948,7 @@ async def run_qualification(
         "native_tool_calls_enabled": capabilities_for_model(config, model).native_tool_calls,
         "client_factory": client_factory or default_factory,
         "extra_body": config.llm.extra_body,
+        "base_url": (_binding_for(config, model).get("base_url") or config.llm.base_url),
         "context_window": fingerprint.effective_context_window or configured_context_window(config.llm.extra_body),
     }
     wanted = set(only) if only else None

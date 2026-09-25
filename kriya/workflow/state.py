@@ -612,10 +612,11 @@ class GenerationState:
             self.failure_ledger.record(event)
 
     def drain_budget_expansions(self, *clients: Any) -> None:
-        """PRD-016: move each client's recorded automatic budget expansions
-        (LLMClient.budget_expansions) into this run's events, which the run
-        trace persists. A client is drained once per expansion, whichever
-        caller gets there first."""
+        """PRD-016: move each client's recorded automatic budget adjustments
+        (LLMClient.budget_expansions: expansions, and optional-context
+        reductions tagged with their own ``event_kind``) into this run's
+        events, which the run trace persists. A client is drained once per
+        entry, whichever caller gets there first."""
         seen = set()
         for client in clients:
             expansions = getattr(client, "budget_expansions", None)
@@ -623,18 +624,19 @@ class GenerationState:
                 continue
             seen.add(id(expansions))
             while expansions:
-                expansion = expansions.pop(0)
-                self.record_event(RunEvent(
-                    kind="model.budget_expansion",
-                    attempt=self.attempt_number,
-                    source="llm.adaptive_budget",
-                    authority=EventAuthority.AUXILIARY,
-                    message=(
+                expansion = dict(expansions.pop(0))
+                kind = str(expansion.pop("event_kind", None) or "model.budget_expansion")
+                if kind == "model.budget_expansion":
+                    message = (
                         f"{expansion.get('model')}: context {expansion.get('preferred_context_window')} -> "
                         f"{expansion.get('selected_context_window')}, output {expansion.get('preferred_output_tokens')}"
                         f" -> {expansion.get('selected_output_tokens')} ({expansion.get('reason')})"
-                    ),
-                    details=dict(expansion),
+                    )
+                else:
+                    message = f"{expansion.get('file')}: optional context reduced ({expansion.get('reason')})"
+                self.record_event(RunEvent(
+                    kind=kind, attempt=self.attempt_number, source="llm.adaptive_budget",
+                    authority=EventAuthority.AUXILIARY, message=message, details=expansion,
                 ))
 
     def final_workflow_quality_passed(self) -> bool:

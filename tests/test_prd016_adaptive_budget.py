@@ -565,3 +565,74 @@ def test_the_resume_fingerprint_binds_the_offered_context_tiers(monkeypatch):
     assert after.value != before.value
     cfg.llm.context_policy.mode = "strict"
     assert model_runtime_resume_fingerprint(cfg).value != after.value
+
+
+def _sibling_run(monkeypatch, *, design_tokens=0):
+    from kriya.agents.agent import DeveloperAgent
+
+    _exact_ollama(monkeypatch)
+    cfg = _cfg(max_tokens=1024)
+    cfg.llm.extra_body = {"options": {"num_ctx": 8192}}
+    cfg.llm.context_window = 8192
+    llm = LLMClient(cfg)
+    prompts = []
+    body = "x = 1\n" * int(4000 * tb.DEFAULT_BYTES_PER_TOKEN / 6)  # ~4000 counted tokens per file
+
+    async def request_once(client, model, system_prompt, user_prompt, *a, **k):
+        prompts.append(user_prompt)
+        return {"content": body, "reasoning_chars": 0, "prompt_tokens": 10, "completion_tokens": 5,
+                "finish_reason": "stop", "provider_metadata": {}}
+
+    llm._request_once = request_once
+    files = asyncio.run(DeveloperAgent("developer", llm).run_generation(
+        "task", "design " + "d" * int(design_tokens * tb.DEFAULT_BYTES_PER_TOKEN), "context",
+        known_target_files=["a.py", "b.py", "c.py"], sibling_content_budget=10 ** 6,
+    ))
+    return files, prompts, llm
+
+
+def test_optional_sibling_contents_are_dropped_before_a_context_refusal(monkeypatch):
+    """Fallback 1 (reduce optional context): c.py's prompt with a.py and
+    b.py in full does not fit 8192; it is sent once more with their names
+    only, and the reduction is recorded."""
+    from kriya.workflow.state import GenerationState
+
+    files, prompts, llm = _sibling_run(monkeypatch)
+    assert len(files) == 3 and len(prompts) == 3
+    assert "=== Already-Written File This Batch" in prompts[1]  # b.py still sees a.py in full
+    assert "contents omitted - context budget; filenames only): a.py, b.py" in prompts[2]
+    assert "=== Already-Written File This Batch (for cross-file" not in prompts[2]
+    state = GenerationState()
+    state.drain_budget_expansions(llm)
+    reduced = [e for e in state.run_events if e.kind == "model.optional_context_reduced"]
+    assert reduced and reduced[0].details["file"] == "c.py"
+
+
+def test_a_prompt_that_does_not_fit_even_without_optional_context_is_refused(monkeypatch):
+    with pytest.raises(tb.ContextBudgetUnsatisfiableError) as refused:
+        _sibling_run(monkeypatch, design_tokens=7500)
+    assert refused.value.filepath == "a.py"
+
+
+def test_context_capacity_refuses_a_non_local_endpoint():
+    result = asyncio.run(mq.case_context_capacity(
+        _capacity_client(), MODEL,
+        {"context_window": 8192, "base_url": "https://api.example.com/v1", "extra_body": {}},
+    ))
+    assert result.status == mq.UNAVAILABLE and "local endpoint" in result.evidence["reason"]
+
+
+def test_context_capacity_uses_the_model_binding_client_when_one_is_given():
+    used = []
+    probe = _capacity_client()
+
+    def factory(timeout):
+        used.append(timeout)
+        return probe
+
+    result = asyncio.run(mq.case_context_capacity(
+        MagicMock(), MODEL,
+        {"context_window": 8192, "base_url": "http://localhost:11434/v1", "client_factory": factory,
+         "extra_body": {"options": {"num_ctx": 8192}}},
+    ))
+    assert used and result.status == mq.PASS
