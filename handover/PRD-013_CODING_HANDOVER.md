@@ -1,7 +1,8 @@
 # PRD-013 Coding Agent Handover
 
 ## Status
-IN_PROGRESS: the PRD-016 allocator/dispatch reconciliation is open (see PRD-016 handover); not ready for pytest.. This is batch 3 (PRD-013 to PRD-016), with one pytest stop for the whole batch.
+READY_FOR_PYTEST_VERIFICATION (batch 3: PRD-013 to PRD-016, one pytest stop for the whole batch; the PRD-016
+allocator/dispatch reconciliation and adaptive budget are in - see the PRD-016 handover).
 
 ## Scope
 Exact local model runtime fingerprint (`kriya/core/model_runtime.py`).
@@ -18,8 +19,11 @@ Exact local model runtime fingerprint (`kriya/core/model_runtime.py`).
 The doctor's earlier PRD-010 fingerprint hashed `modified_at` and the raw `/v1/models` entry (`created`): it could change
 with no runtime change. It is replaced by this fingerprint (`probe_llm_runtime` now returns it).
 
-Probing: once per process per runtime input (only exact results are cached), 5 s timeout, never for a non-local
-endpoint under `local_only`. `KRIYA_MODEL_RUNTIME_PROBE=0` disables it; `tests/conftest.py` sets that for every
+Probing: once per process per runtime input (every result is cached, exact or not, so an unpulled chain model or a
+non-Ollama server costs one probe, not one per call; doctor/qualify/status re-probe), 5 s timeout, never for a
+non-local endpoint under any egress policy (no identity request or API key ever goes to a remote host). A PRD-016
+context tier is a different runtime input (its `num_ctx`), so it has its own fingerprint; a call sent with a larger
+tier is attributed to that fingerprint. `KRIYA_MODEL_RUNTIME_PROBE=0` disables it; `tests/conftest.py` sets that for every
 non-`live_model` test, so the mocked suite can never reach a developer's running Ollama (probe tests inject a
 transport).
 

@@ -1,7 +1,8 @@
 # PRD-015 Coding Agent Handover
 
 ## Status
-IN_PROGRESS: the PRD-016 allocator/dispatch reconciliation is open (see PRD-016 handover); not ready for pytest. (batch 3).
+READY_FOR_PYTEST_VERIFICATION (batch 3: PRD-013 to PRD-016, one pytest stop for the whole batch; the PRD-016
+allocator/dispatch reconciliation and adaptive budget are in - see the PRD-016 handover).
 
 ## Scope
 Normalized completion result at the LLM boundary (`kriya/core/completion.py`, `LLMClient.complete_result` /

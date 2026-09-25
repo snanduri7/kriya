@@ -1,19 +1,32 @@
 # PRD-014 Coding Agent Handover
 
 ## Status
-IN_PROGRESS: the PRD-016 allocator/dispatch reconciliation is open (see PRD-016 handover); not ready for pytest. (batch 3).
+READY_FOR_PYTEST_VERIFICATION (batch 3: PRD-013 to PRD-016, one pytest stop for the whole batch; the PRD-016
+allocator/dispatch reconciliation and adaptive budget are in - see the PRD-016 handover).
 
 ## Scope
 Versioned qualification campaign keyed by the PRD-013 fingerprint (`kriya/core/model_qualification.py`,
 `kriya model qualify|status`).
 
-- **18 cases** (every one the spec lists): plain completion, stop finish reason, structured JSON, multi-line JSON,
+- **19 cases** (every one the spec lists, plus `context_capacity` for PRD-016 context tiers): plain completion, stop finish reason, structured JSON, multi-line JSON,
   native tool calls, multiple tool calls, tool-argument integrity (quotes, backslash, newline, tab, unicode),
   streaming assembly (deltas vs normalized content), output truncation, reasoning/hidden-think behaviour, raw
   full-file content, the anchored SEARCH/REPLACE protocol (parsed with the real `_split_fix_analysis_edit` and
   applied with the real `apply_anchored_edits`), malformed-output recovery (the real `_extract_json_value`), timeout,
   cancellation (cancel mid-stream, recorded, endpoint healthy afterwards), endpoint error semantics, endpoint restart
-  (always UNAVAILABLE live: restarting the operator's server is out of scope; fixture-covered), tokenizer measurement.
+  (always UNAVAILABLE live: restarting the operator's server is out of scope; fixture-covered), tokenizer measurement,
+  and near-window context capacity. That case measures its filler's real token rate on two small probes, then sends
+  one request of about (window - 384) real tokens straight to the endpoint with the binding's `num_ctx`. Markers
+  sit in the system message and at the end, and both must come back (a server that drops the front of an over-long
+  prompt loses the first one).
+- **Context tiers (PRD-016)**:
+  - `kriya model qualify --context-window N` qualifies the same model at `num_ctx` N. That is its own fingerprint;
+    requests carry the model binding's own options, and the run's budget policy is strict.
+  - A tier is offered to the adaptive budget only with a current record passing `context_capacity` and every case
+    the model's roles need (`context_tier_requirements`).
+  - Adding the case bumped `QUALIFICATION_POLICY_VERSION` to `kriya-qualification/2`, so earlier records are stale.
+  - Qualification requests now carry the qualified binding's own `extra_body`. Before this, a chain model was
+    qualified with the primary's request options while its fingerprint used its own.
 - **Evidence**: PASS/FAIL/UNAVAILABLE per case with evidence and measured limits (verified tool-argument size,
   reasoning tokens, ASCII and non-ASCII bytes-per-token floors). UNAVAILABLE is never PASS; a crashing case is FAIL.
   Model output is never executed on the host (structural checks only).
@@ -56,8 +69,8 @@ KRIYA_LIVE_BASE_URL=http://localhost:11434/v1 KRIYA_LIVE_LLM_MODEL=qwen3-coder:3
   2>&1 | tee handover/evidence/BATCH3/user-live/batch3-live.log
 ```
 The PRD-014 test writes the full record to `prd014-qualification.json` (the report to hand over). It asserts the
-runtime-protocol cases (completion, truncation, endpoint error, timeout, cancellation, tokenizer) and records the
-rest; whether the model then qualifies for the Developer role is evidence, not asserted.
+runtime-protocol cases (completion, truncation, endpoint error, timeout, cancellation, tokenizer, context capacity at
+8192) and records the rest; whether the model then qualifies for the Developer role is evidence, not asserted.
 To qualify your real deployment afterwards: `kriya model qualify --out report.json` for each role model
 (`kriya model status` lists them).
 

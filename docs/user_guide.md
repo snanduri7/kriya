@@ -320,8 +320,8 @@ Repository text and model output can ask for a destination, but they never autho
 **Exact runtime (PRD-013).** A tag such as `qwen3-coder:30b` is not an identity: the weights, quantization, chat
 renderer, tool-call parser, tokenizer, runtime parameters and server version can change while the tag stays the
 same. Kriya fingerprints the exact runtime from what the configured endpoint reports (Ollama `/api/version`,
-`/api/tags`, `/api/show`, next to its `/v1` API; never the internet, and never a non-local endpoint under
-`local_only`). A component the server does not report is recorded as `unavailable`, never guessed from the name. The
+`/api/tags`, `/api/show`, next to its `/v1` API; never the internet, and never a non-local endpoint under any
+egress policy). A component the server does not report is recorded as `unavailable`, never guessed from the name. The
 fingerprint also covers the Kriya side of the protocol: the resolved capability profile, the served context window
 (`num_ctx`) and Kriya's protocol-adapter version. It is *exact* only when the artifact digest and server version are
 known.
@@ -337,7 +337,9 @@ kriya model fingerprint [--model <name>] [--json]
 qualify` runs the protocol cases Kriya relies on against the exact runtime: plain completion, stop finish reason,
 structured and multi-line JSON, native, multiple and argument-exact tool calls, streaming assembly, truncation
 detection, hidden reasoning, raw full-file content, the anchored edit protocol, malformed-output recovery, timeout,
-cancellation, endpoint errors and tokenizer measurement. Each case is PASS, FAIL or UNAVAILABLE with its evidence
+cancellation, endpoint errors, tokenizer measurement and near-window context capacity (one request filling the
+served window to within a few hundred tokens, with markers at its start and end that must both come back). Each case
+is PASS, FAIL or UNAVAILABLE with its evidence
 (UNAVAILABLE is never PASS; endpoint restart is not exercised live and is always UNAVAILABLE). Model output is never
 executed on the host during qualification.
 ```bash
@@ -360,17 +362,52 @@ normalized tool calls (native, or Hermes/Qwen-XML text the server's parser did n
 fingerprint. A Developer answer the provider cut off at its output budget is never written as a file, even when the
 partial text would compile; the attempt fails with `OUTPUT_TRUNCATED` and retries.
 
-**Dispatch budgets (PRD-016).** Context assembly still plans with a `len/4` estimate. The final check before a
-request leaves Kriya counts the whole dispatch (system and user prompts, every message, tool schemas and framing)
-against the served window: it reduces `max_tokens` to what fits (recorded), or refuses with
-`CONTEXT_BUDGET_UNSATISFIABLE` before any inference when the prompt plus a minimum output (1024 tokens, plus a
-reasoning allowance for reasoning models) cannot fit. A local server that is sent an over-long prompt may silently
-drop part of it; Kriya never lets that happen. Counting uses an exact tokenizer when one is registered for the
-runtime's tokenizer (none is by default: Ollama 0.34 has no tokenize endpoint and Kriya downloads nothing), else the
-qualified ratios measured for that tokenizer, else a documented approximation (2.5 ASCII bytes and 1.5 non-ASCII bytes
-per token). Every call records which method was used and compares its prediction with the provider's reported usage.
-The window is the served `num_ctx` when known, otherwise `llm.context_window` as a declared assumption; set
+**Prompt allocation and dispatch budgets (PRD-016, CTX-001).** Context assembly plans with a `len/4` estimate, but
+it sizes every section against the call's *prompt allocation window*: the served window minus the output budget
+(`max_tokens`, at most half the window), the request framing and a 256-token safety margin, converted with the same
+counting ratio the final check uses. Within it the graph pool (skills, learned knowledge, retrieved code, known-target
+and member source; the design and plan are reserved first) gets 0.60, retry evidence 0.15, already-written sibling
+files 0.15, and opt-in investigation evidence at most 0.10. When even the signature-level form of the retrieved files
+does not fit, the lowest-ranked files are left out, recorded as `budget_exhausted` and named in the prompt; nothing is
+cut silently. A fully allocated Developer prompt at 32K/16384 therefore keeps its whole output budget. Retrieved
+context is smaller than before this change: the old fractions of the raw window produced prompts larger than the
+window itself, which the server truncated.
+
+The final check before a request leaves Kriya counts the whole dispatch (system and user prompts, every message, tool
+schemas and framing). Counting uses an exact tokenizer when one is registered for the runtime's tokenizer (none is by
+default: Ollama 0.34 has no tokenize endpoint and Kriya downloads nothing), else the qualified ratios measured for that
+tokenizer, else a documented approximation (2.5 ASCII bytes and 1.5 non-ASCII bytes per token). Every call records
+which method was used and compares its prediction with the provider's reported usage. The preferred window is the
+served `num_ctx` when known, otherwise `llm.context_window` as a declared assumption; set
 `llm.extra_body.options.num_ctx` so the two agree.
+
+**Adaptive budget.** The configured window and `max_tokens` are *preferred* values. With
+`llm.context_policy.mode: adaptive` (the default) a request that does not fit its preferred window is sent with the
+**smallest larger context tier that is qualified** for the exact runtime, and nothing larger:
+```bash
+kriya model qualify --context-window 65536   # qualifies the same model at num_ctx 65536 (its own fingerprint)
+```
+A tier counts only with a current record at that `num_ctx` that passes `context_capacity` and every case the model's
+roles need. While no qualification data exists for a size, `llm.context_policy.declared_safe_context_tiers` may name it;
+a failed or stale record overrides that declaration. A tier is never above `llm.context_policy.max_context_tokens` or
+the model's trained length, is never chosen because the machine has spare memory, and can only be selected on an exact
+Ollama runtime (elsewhere adaptive behaves like strict and records why). The output budget grows above `max_tokens`
+only for a *grounded* expectation (the Developer's full-file rewrite of an existing file is expected to be about that
+file's size), never because a model produced more than expected, and never above
+`llm.context_policy.max_output_tokens`. `strict` never exceeds the preferred values. Every automatic enlargement
+(context or output) is logged and recorded as a `model.budget_expansion` run event in the trace, with the preferred and
+selected window and output, the prompt and expected output tokens, the reason, the tier's qualification source and the
+ceilings and the call's elapsed time. Ollama sizes a model's context when it loads it, so a request with a different
+`num_ctx` can make it reload the model (check with `ollama ps` on your host): an expansion can cost a reload and more
+memory, and calls alternating between windows can repeat it. Qualify a tier only if the host can hold it.
+
+When nothing allowed fits, the request is refused before inference: `CONTEXT_BUDGET_UNSATISFIABLE` when the prompt
+itself cannot fit, `OUTPUT_BUDGET_UNSATISFIABLE` when the prompt fits but the grounded output cannot. For a full-file
+rewrite of an existing file the Developer then asks once for an anchored patch instead (models whose capability profile
+accepts patches), recorded as `model.output_budget_protocol_fallback`; otherwise the attempt fails with the typed
+reason. An answer the provider cuts off is `OUTPUT_TRUNCATED` and is never written; a retry does not enlarge the output
+unless the expectation is grounded. `llm.context_policy` is SECURITY_AUTHORITY: a repository cannot grant itself a
+larger window.
 
 ### 2.1 Per-Role Model Selection (`agent_llms`)
 Planner, Architect, Developer, Reviewer, RunVerifier, and SkillGapAgent (skill-gap extraction and conflict-checking) don't have to share one model - each is independently configurable, with its own optional escalation chain.
