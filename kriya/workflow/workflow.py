@@ -24,6 +24,7 @@ from kriya.agents.contracts import parse_planner_structured_output
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.core.model_routing import resume_routes_from
 from kriya.core.state_paths import trace_db_path
 from kriya.control.persistence import UnreadableRunRecordError, load_run_record
 from kriya.control.run_coordinator import (
@@ -2165,6 +2166,10 @@ class WorkflowEngine:
             save_checkpoint(workspace_path, run_id, {
                 "stage": stage,
                 RESUME_FINGERPRINTS_KEY: resume_fingerprint_block,
+                # PRD-019: the routes this run uses, so a resume reuses them
+                # (kriya/cli.py::_workflow_config) instead of re-routing on
+                # a metrics table that changed since; None without routing.
+                "model_routes": resume_routes_from(getattr(self.kernel.config, "_routing_plan", None)),
                 "workspace_fingerprint": checkpoint_ws_fp,
                 "workspace_content_hash": checkpoint_content_hash,
                 "config_fingerprint": checkpoint_cfg_fp,

@@ -34,6 +34,7 @@ from kriya.core.role_metrics import METRICS_TABLE_VERSION, metrics_digest
 # The routing table is the PRD-018 metrics table (role_metrics.aggregate_role_metrics).
 ROUTING_TABLE_VERSION = METRICS_TABLE_VERSION
 ROUTE_FROZEN_MISMATCH = "ROUTE_FROZEN_MISMATCH"
+ROUTE_RESUME_MISMATCH = "ROUTE_RESUME_MISMATCH"
 ROUTING_CANDIDATE_ALIAS_CONFLICT = "ROUTING_CANDIDATE_ALIAS_CONFLICT"
 ROUTING_TABLE_INVALID = "ROUTING_TABLE_INVALID"
 
@@ -174,26 +175,62 @@ def choose_route(role: str, candidates: Sequence[CandidateEvidence], *, min_call
 
 
 def frozen_route(role: str, frozen: Dict[str, Any], candidates: Sequence[CandidateEvidence], *,
-                 table_digest: Optional[str]) -> RouteDecision:
+                 table_digest: Optional[str], reason_code: str = ROUTE_FROZEN_MISMATCH,
+                 label: str = "frozen") -> RouteDecision:
     """Frozen mode: exactly the recorded runtime, still qualified, or a
-    typed refusal."""
+    typed refusal. Resume replays a checkpoint's routes the same way
+    (``resumed_route``)."""
     from kriya.core.model_qualification import QUALIFIED
 
     entry = (frozen.get("routes") or {}).get(role)
     if entry is None:
-        raise RoutingError(ROUTE_FROZEN_MISMATCH, f"the frozen route table has no route for {role}")
+        raise RoutingError(reason_code, f"the {label} route table has no route for {role}")
     match = next((c for c in candidates if c.model == entry.get("model")), None)
     if match is None:
-        raise RoutingError(ROUTE_FROZEN_MISMATCH,
-                           f"{role}: frozen model {entry.get('model')} is no longer a configured candidate")
+        raise RoutingError(reason_code,
+                           f"{role}: {label} model {entry.get('model')} is no longer a configured candidate")
     if not match.runtime_exact or match.runtime_digest != entry.get("runtime_digest"):
-        raise RoutingError(ROUTE_FROZEN_MISMATCH,
+        raise RoutingError(reason_code,
                            f"{role}: {match.model} is now runtime {match.runtime_digest or 'unavailable'}, "
-                           f"frozen as {entry.get('runtime_digest')}")
+                           f"{label} as {entry.get('runtime_digest')}")
     if match.qualification != QUALIFIED:
-        raise RoutingError(ROUTE_FROZEN_MISMATCH, f"{role}: frozen runtime {match.model} is {match.qualification}")
+        raise RoutingError(reason_code, f"{role}: {label} runtime {match.model} is {match.qualification}")
     return RouteDecision(role, "frozen", match.model, match.runtime_digest, "frozen_table",
                          "replayed from the frozen route table", table_digest=table_digest)
+
+
+def resumed_route(role: str, saved: Dict[str, Any], candidates: Sequence[CandidateEvidence], *,
+                  default_model: str) -> RouteDecision:
+    """Resume: the route the checkpoint's run used for ``role``, if it still
+    holds (the same model on the same exact, still QUALIFIED runtime; a role
+    that kept its configured binding keeps it), or ROUTE_RESUME_MISMATCH.
+    The current metrics table is not consulted."""
+    entry = (saved.get("routes") or {}).get(role)
+    if entry is None:
+        raise RoutingError(ROUTE_RESUME_MISMATCH, f"the resumed run recorded no route for {role}")
+    if entry.get("source") == "configured_default":
+        if entry.get("model") != default_model:
+            raise RoutingError(ROUTE_RESUME_MISMATCH,
+                               f"{role}: the resumed run kept {entry.get('model')}, now configured {default_model}")
+        return RouteDecision(role, "resume", default_model, None, "configured_default",
+                             "kept the configured binding, as the resumed run did")
+    replay = frozen_route(role, saved, candidates, table_digest=saved.get("table_digest"),
+                          reason_code=ROUTE_RESUME_MISMATCH, label="the resumed run's")
+    return RouteDecision(role, "resume", replay.model, replay.runtime_digest, entry.get("source") or "evidence",
+                         "reused the resumed run's route", table_digest=saved.get("table_digest"))
+
+
+def resume_routes_from(plan: Optional["RoutingPlan"]) -> Optional[Dict[str, Any]]:
+    """What a checkpoint records so a resume reuses the run's routes: each
+    routed role's model, exact runtime and source (None without routing)."""
+    if plan is None or not plan.decisions:
+        return None
+    return {
+        "version": FROZEN_ROUTES_VERSION,
+        "routes": {role: {"model": d.model, "runtime_digest": d.runtime_digest, "source": d.source}
+                   for role, d in sorted(plan.decisions.items())},
+        "table_digest": plan.table_digest,
+    }
 
 
 # --- the between-run metrics table ---------------------------------------------------------------
@@ -322,10 +359,14 @@ def candidate_evidence(config: Any, role: str, model: str, *, order: int, explic
     )
 
 
-def plan_routes(config: Any, *, mode: Optional[str] = None) -> RoutingPlan:
+def plan_routes(config: Any, *, mode: Optional[str] = None,
+                resume_routes: Optional[Dict[str, Any]] = None) -> RoutingPlan:
     """The route of every role listed in ``model_policy.routing.roles``.
     ``mode`` overrides the configured mode (``kriya model routes`` shows the
-    evidence decision even while routing is off)."""
+    evidence decision even while routing is off). ``resume_routes`` (the
+    routes a resumed checkpoint's run used, ``resume_routes_from``) makes
+    evidence routing sticky across the resume: each role gets exactly its
+    saved route or the resume is refused (ROUTE_RESUME_MISMATCH)."""
     from kriya.config.config import routing_alias_conflicts
     from kriya.core.model_runtime import resolve_configured_model_runtime
 
@@ -337,10 +378,17 @@ def plan_routes(config: Any, *, mode: Optional[str] = None) -> RoutingPlan:
     conflicts = routing_alias_conflicts(config)  # also a config error; checked again for configs built in code
     if conflicts:
         raise RoutingError(ROUTING_CANDIDATE_ALIAS_CONFLICT, "; ".join(conflicts))
-    table = load_table(routing_table_path(config))
+    resuming = resume_routes is not None and mode == "evidence"
+    # A resume never consults the current metrics table (its routes are the run's).
+    table = ({"rows": [], "digest": resume_routes.get("table_digest")} if resuming
+             else load_table(routing_table_path(config)))
     plan.table_digest = table.get("digest")
     frozen = load_frozen_routes(routing.frozen_routes_path) if mode == "frozen" else None
     by_alias = {candidate.model: candidate for candidate in routing.candidates}
+    if resuming and set(resume_routes.get("routes") or {}) != set(routing.roles):
+        raise RoutingError(ROUTE_RESUME_MISMATCH,
+                           f"the resumed run routed {sorted(resume_routes.get('routes') or {})}, "
+                           f"the configuration routes {sorted(routing.roles)}")
     for role, aliases in sorted(routing.roles.items()):
         default = role_binding(config, role)
         evidence: List[CandidateEvidence] = []
@@ -353,6 +401,9 @@ def plan_routes(config: Any, *, mode: Optional[str] = None) -> RoutingPlan:
             evidence.append(candidate_evidence(placed, role, alias, order=order, explicit=False, table=table))
         if frozen is not None:
             plan.decisions[role] = frozen_route(role, frozen, evidence, table_digest=frozen.get("digest"))
+            continue
+        if resuming:
+            plan.decisions[role] = resumed_route(role, resume_routes, evidence, default_model=default.model)
             continue
         need = routing.min_context_window
         if need is None:

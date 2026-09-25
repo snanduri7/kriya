@@ -442,12 +442,20 @@ def test_the_workflow_command_applies_routes_and_the_run_records_them(tmp_path, 
                 "finish_reason": "stop", "provider_metadata": {}}
 
     llm._request_once = request_once
+    import kriya.workflow.workflow as workflow_module
+
+    checkpoints = []
+    real_save = workflow_module.save_checkpoint
+    monkeypatch.setattr(workflow_module, "save_checkpoint",
+                        lambda ws, run_id, data: (checkpoints.append(data), real_save(ws, run_id, data)))
     engine = WorkflowEngine(Kernel(config=routed), llm)
     engine.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
     asyncio.run(engine.run_generation_workflow(goal="create mathx.py with sub(a, b)",
                                                workspace_path=str(workspace)))
 
     assert "cand-b" in models_called
+    # Every checkpoint carries the run's routes, so a resume reuses them.
+    assert checkpoints and all(c["model_routes"]["routes"]["reviewer"]["model"] == "cand-b" for c in checkpoints)
     with sqlite3.connect(trace_db_path(routed)) as db:
         (events_json,) = db.execute("SELECT run_events FROM runs").fetchone()
     routes = [e["details"] for e in json.loads(events_json) if e["kind"] == "model.route"]
@@ -480,3 +488,111 @@ def test_a_candidate_aliasing_another_binding_with_other_settings_is_refused(tmp
 def test_a_candidate_identical_to_the_binding_it_aliases_is_accepted():
     AppConfig(llm_chain=[{"model": "same", "context_window": 8192}],
               model_policy={"routing": {"candidates": [{"model": "same", "context_window": 8192}]}})
+
+
+# --- resume: routes are sticky within a run ----------------------------------------------------
+
+def _measured_table(cfg, digest_a, digest_b):
+    table = rm.aggregate_role_metrics([("r1", [
+        _metrics_row("reviewer", "cand-a", digest_a, calls=20, schema_failures=8),
+        _metrics_row("reviewer", "cand-b", digest_b, calls=20, schema_failures=1),
+    ])])
+    mr.write_table(cfg.model_policy.routing.table_path, table)
+
+
+def test_a_resume_reuses_the_run_route_even_when_the_table_now_prefers_another(tmp_path, monkeypatch):
+    _exact_ollama(monkeypatch)
+    cfg = _routing_cfg(tmp_path)
+    digest_a = _qualify_placed(cfg, "reviewer", "cand-a")
+    digest_b = _qualify_placed(cfg, "reviewer", "cand-b")
+    saved = mr.resume_routes_from(mr.plan_routes(cfg))  # the run: unmeasured, operator order
+    assert saved["routes"]["reviewer"] == {"model": "cand-a", "runtime_digest": digest_a, "source": "evidence"}
+
+    _measured_table(cfg, digest_a, digest_b)  # between run and resume the evidence changes
+    assert mr.plan_routes(cfg).decisions["reviewer"].model == "cand-b"  # a fresh run would switch
+
+    resumed = mr.plan_routes(cfg, resume_routes=saved).decisions["reviewer"]
+    assert (resumed.model, resumed.runtime_digest, resumed.mode, resumed.source) == (
+        "cand-a", digest_a, "resume", "evidence")
+    assert mr.apply_routes(cfg, mr.plan_routes(cfg, resume_routes=saved)).agent_llms.reviewer.llm.model == "cand-a"
+
+
+def test_a_resume_whose_saved_runtime_drifted_is_refused(tmp_path, monkeypatch):
+    _exact_ollama(monkeypatch)
+    cfg = _routing_cfg(tmp_path)
+    _qualify_placed(cfg, "reviewer", "cand-a")
+    saved = mr.resume_routes_from(mr.plan_routes(cfg))
+
+    def drifted(**kw):  # cand-a was re-pulled: a different artifact
+        return ModelRuntimeFingerprint(
+            alias=kw["model"], endpoint="http://localhost:11434/v1", provider="ollama", provider_version="0.34.2",
+            artifact_digest=f"sha256:{kw['model']}-v2", tokenizer_digest="sha256:tok", model_context_length=262144,
+            configured_context_window=kw["configured_context"], effective_context_window=kw["configured_context"],
+            kriya_protocol=kw["kriya_protocol"],
+        )
+
+    monkeypatch.setattr(model_runtime, "probe_model_runtime", drifted)
+    model_runtime.clear_model_runtime_cache()
+    with pytest.raises(mr.RoutingError) as refused:
+        mr.plan_routes(cfg, resume_routes=saved)
+    assert refused.value.reason_code == mr.ROUTE_RESUME_MISMATCH
+    assert "cand-a" in str(refused.value)
+
+
+def test_a_resume_keeps_a_configured_default_and_refuses_a_changed_role_set(tmp_path, monkeypatch):
+    _exact_ollama(monkeypatch)
+    cfg = _routing_cfg(tmp_path)  # nothing qualified: the reviewer keeps its binding
+    saved = mr.resume_routes_from(mr.plan_routes(cfg))
+    assert saved["routes"]["reviewer"]["source"] == "configured_default"
+    _qualify_placed(cfg, "reviewer", "cand-a")  # now eligible, but the run kept its binding
+    kept = mr.plan_routes(cfg, resume_routes=saved).decisions["reviewer"]
+    assert (kept.source, kept.model, kept.mode) == ("configured_default", "dev-model", "resume")
+
+    cfg.model_policy.routing.roles = {"reviewer": ["cand-a"], "planner": ["cand-a"]}
+    with pytest.raises(mr.RoutingError) as refused:
+        mr.plan_routes(cfg, resume_routes=saved)
+    assert refused.value.reason_code == mr.ROUTE_RESUME_MISMATCH
+
+
+def _saved_checkpoint(workspace, routes):
+    from kriya.workflow.checkpoint import save_checkpoint
+
+    save_checkpoint(str(workspace), "run-1", {"stage": "plan", "model_routes": routes})
+
+
+def test_the_workflow_command_replays_the_resumed_checkpoint_routes(tmp_path, monkeypatch):
+    from kriya.cli import _workflow_config
+
+    _exact_ollama(monkeypatch)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cfg = _routing_cfg(tmp_path)
+    digest_a = _qualify_placed(cfg, "reviewer", "cand-a")
+    digest_b = _qualify_placed(cfg, "reviewer", "cand-b")
+    _saved_checkpoint(workspace, mr.resume_routes_from(mr.plan_routes(cfg)))
+    _measured_table(cfg, digest_a, digest_b)
+
+    assert _workflow_config(cfg).agent_llms.reviewer.llm.model == "cand-b"  # a fresh run
+    resumed = _workflow_config(cfg, resume=True, workspace=str(workspace))
+    assert resumed.agent_llms.reviewer.llm.model == "cand-a"
+    assert resumed._routing_plan.decisions["reviewer"].mode == "resume"
+    by_id = _workflow_config(cfg, resume_id="run-1", workspace=str(workspace))
+    assert by_id.agent_llms.reviewer.llm.model == "cand-a"
+
+
+def test_the_workflow_command_refuses_a_resume_whose_route_no_longer_holds(tmp_path, monkeypatch, capsys):
+    from kriya.cli import _workflow_config
+
+    _exact_ollama(monkeypatch)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    cfg = _routing_cfg(tmp_path)
+    _qualify_placed(cfg, "reviewer", "cand-a")
+    saved = mr.resume_routes_from(mr.plan_routes(cfg))
+    saved["routes"]["reviewer"]["runtime_digest"] = "0" * 64  # the run used a runtime no longer served
+    _saved_checkpoint(workspace, saved)
+    # _workflow_config runs before generate/fix build any model client.
+    with pytest.raises(SystemExit) as stopped:
+        _workflow_config(cfg, resume=True, workspace=str(workspace))
+    assert stopped.value.code == 1
+    assert mr.ROUTE_RESUME_MISMATCH in capsys.readouterr().err

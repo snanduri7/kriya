@@ -770,14 +770,36 @@ def _model_cfg(ctx: click.Context) -> AppConfig:
     return ctx.obj['config']
 
 
-def _workflow_config(cfg: AppConfig) -> AppConfig:
+def _resumed_model_routes(workspace: Optional[str], resume: bool, resume_id: Optional[str]) -> Optional[dict]:
+    """PRD-019: the routes recorded by the checkpoint a resume will continue
+    (the same selection as the engine: resume_id, else the latest one), or
+    None (nothing to resume, or recorded before routing)."""
+    if not (resume or resume_id) or not workspace:
+        return None
+    from kriya.workflow.checkpoint import find_latest_checkpoint, load_checkpoint
+
+    workspace = os.path.abspath(workspace)
+    try:
+        target = resume_id or find_latest_checkpoint(workspace)
+        checkpoint = load_checkpoint(workspace, target) if target else None
+    except Exception as error:  # the engine reports an unreadable checkpoint itself
+        logger.warning("Could not read the checkpoint to resume for its model routes: %s", error)
+        return None
+    return (checkpoint or {}).get("model_routes")
+
+
+def _workflow_config(cfg: AppConfig, *, resume: bool = False, resume_id: Optional[str] = None,
+                     workspace: Optional[str] = None) -> AppConfig:
     """The configuration a workflow command (generate, fix, proposal
     execution) runs with, decided before any model call.
 
     PRD-019: with model_policy.routing enabled, each routed role is bound to
     its chosen candidate (a routed copy; the loaded configuration is not
     changed) and the plan travels with it for the run's model.route events;
-    a frozen route that no longer holds refuses the command.
+    a frozen route that no longer holds refuses the command. Routes are
+    sticky within a run: a resume replays the routes its checkpoint
+    recorded (never re-routing on a metrics table that changed since) and is
+    refused (ROUTE_RESUME_MISMATCH) when one no longer holds.
     PRD-018: when model_policy.independent_roles requires roles to run on a
     runtime distinct from the Developer's, it is checked on the routed
     configuration and the command is refused if the exact runtimes do not
@@ -786,7 +808,7 @@ def _workflow_config(cfg: AppConfig) -> AppConfig:
         from kriya.core.model_routing import RoutingError, apply_routes, plan_routes
 
         try:
-            plan = plan_routes(cfg)
+            plan = plan_routes(cfg, resume_routes=_resumed_model_routes(workspace, resume, resume_id))
         except RoutingError as error:
             click.secho(f"[{error.reason_code}] model routing refused this run: {error}", fg="red", err=True)
             sys.exit(1)
@@ -1853,7 +1875,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             click.secho("Error: Missing argument 'GOAL' or '--file' option.", fg="red")
             sys.exit(1)
 
-    cfg: AppConfig = _workflow_config(ctx.obj['config'])
+    cfg: AppConfig = _workflow_config(ctx.obj['config'], resume=resume, resume_id=resume_id, workspace=os.getcwd())
 
     llm = LLMClient(cfg)
     kernel = Kernel(config=cfg)
@@ -3655,7 +3677,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         click.secho("Error: Non-TTY (piped) input detected. You must specify the '--yes' (-y) flag to auto-approve patch application.", fg="red")
         sys.exit(1)
             
-    cfg: AppConfig = _workflow_config(ctx.obj['config'])
+    cfg: AppConfig = _workflow_config(ctx.obj['config'], resume=resume, resume_id=resume_id, workspace=workspace)
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     we = WorkflowEngine(kernel, llm)
