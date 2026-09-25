@@ -522,6 +522,34 @@ qualified. Routes are sticky within a run: each checkpoint records them, and `--
 exactly the resumed run's own routes instead of routing again on a table that changed since, or refuses the resume
 (`ROUTE_RESUME_MISMATCH`) if a recorded runtime changed or is no longer qualified. `model_policy` is SECURITY_AUTHORITY: a repository cannot set or relax it.
 
+### 2.1b Your original requirements (PRD-020)
+
+Kriya fixes your goal's own statements before any model reads them. Each list item, and otherwise each sentence,
+becomes a requirement `REQ-1`, `REQ-2`, ... with your text verbatim. The split is deterministic, and no model
+rewords it. The Planner and the Architect are shown the list and asked to cite the ids they serve; the enforce
+Planner maps subtasks to them (`requirement_ids`). A plan that paraphrases or leaves one out cannot remove it.
+
+Only the verifier (the Goal Spec Compliance check, after the compile/test gates passed) records an outcome, bound
+to the exact files it judged:
+- `satisfied`;
+- `violated`: a concrete, literally-named requirement is missing, so the attempt fails and the retry is told
+  `REQ-n: <your text>`;
+- `unverified`: behaviour that cannot be confirmed from source;
+- `unknown`: no verdict.
+
+A violated requirement always blocks success. `autonomy.requirement_unknown_policy` and
+`autonomy.requirement_unverified_policy` (`record`, the default, or `block`) decide the other two. `block` stops
+before anything is applied, with `[REQUIREMENTS UNRESOLVED]`. The production profile seals the unknown policy to
+`block`. Both fields are SECURITY_AUTHORITY.
+
+Which unit verifies the requirements:
+- a direct run;
+- a milestone plan's final integration unit, against the plan's original goal (a milestone verifies only its own goal);
+- enforce mode's terminal `original_requirements` gate.
+
+The result's `requirements` field, and the `requirement.derived`, `requirement.lineage` and `requirement.verdicts`
+run events, record everything. A resumed run derives the same ids from the goal again.
+
 ### 2.2 Control Plane, Policy, and Structured Execution
 
 A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.
