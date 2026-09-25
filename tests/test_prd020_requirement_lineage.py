@@ -772,6 +772,8 @@ async def test_enforce_terminal_gate_closes_cannot_confirm_only_by_the_named_tes
 
     assert ["tests/test_legacy.py"] in runs
     gap = result.legacy_result.get("global_requirement_gap")
+    outcomes = result.legacy_result["requirements"]["outcomes"]
+    assert outcomes["REQ-2"] == ("closed_by_evidence" if passes else "unverified")
     if passes:
         assert not gap, gap
     else:

@@ -206,6 +206,7 @@ from kriya.workflow.requirements import (
     derive_requirements,
     parse_requirement_verdicts,
     record_requirement_verdicts,
+    requirement_outcomes,
     requirements_prompt_block,
     seed_requirement_obligations,
 )
@@ -6596,6 +6597,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             if value:
                 aggregated[key] = value
                 logger.error("WorkflowController enforce run %r: %s", run_id, value)
+        # PRD-020: every original requirement's outcome, as the direct path
+        # reports it (the verifier's verdict, or closed by evidence).
+        try:
+            aggregated["requirements"] = {
+                **requirement_set.to_dict(),
+                "outcomes": {rid: outcome.value for rid, outcome in
+                             requirement_outcomes(obligation_ledger, requirement_set).items()},
+            }
+        except Exception as error:
+            logger.warning(f"Original requirement outcomes unavailable for the result: {error}")
         if artifact_error:
             logger.error(
                 "WorkflowController enforce run %r: candidate artifact derivation failed: %s",
