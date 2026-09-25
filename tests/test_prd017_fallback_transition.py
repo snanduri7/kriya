@@ -400,3 +400,187 @@ def test_the_change_record_is_json_serializable():
     changes = profile_changes(resolve_request_profile(cfg), resolve_request_profile(cfg, cfg.llm_chain[0]))
     json.dumps(changes)
     json.dumps(resolve_request_profile(cfg).to_dict())
+
+
+# --- skipping incompatible fallbacks in configured order ----------------------------------------
+
+SECOND = "fallback-second:14b"
+
+
+def _two_fallback_cfg(first=None, second=None):
+    cfg = _cfg(**(first or {}))
+    cfg.llm_chain.append(_fallback(
+        model=SECOND, context_window=16384, extra_body={"options": {"num_ctx": 16384}},
+        capabilities=ModelCapabilities(native_tool_calls=False, json_mode=False, streaming=False,
+                                       preferred_edit_protocol="text_markers"),
+        **(second or {}),
+    ))
+    return cfg
+
+
+def test_an_incompatible_first_fallback_is_skipped_for_the_next_configured_one(tmp_path, monkeypatch):
+    from kriya.workflow.attempt import _select_developer_fallback
+    from kriya.workflow.attribution import resolve_fallback_model
+
+    _exact_ollama(monkeypatch)
+    cfg = _two_fallback_cfg()
+    _qualify(cfg, FALLBACK, full_file_raw_content=mq.FAIL)
+    ctx = _ctx(str(tmp_path), cfg, DeveloperAgent("developer", LLMClient(cfg)))
+    state = GenerationState()
+    state.attempt_number = 2
+
+    selected = _select_developer_fallback(state, ctx, 1)
+
+    assert selected.model == SECOND
+    assert list(state.incompatible_fallbacks) == [FALLBACK]
+    (event,) = [e for e in state.run_events if e.kind == "model.fallback_selection"]
+    assert (event.details["requested"], event.details["selected"]) == (FALLBACK, SECOND)
+    (rejection,) = event.details["rejected"]
+    assert rejection["model"] == FALLBACK and "full_file_raw_content" in rejection["reasons"][0]
+    # The configured order is kept: the ladder never goes back to the skipped one,
+    # and triage (which rides the generation model) follows the same skip.
+    assert _select_developer_fallback(state, ctx, 2).model == SECOND  # its own turn: nothing skipped
+    assert resolve_fallback_model(1, ctx.chain, state.incompatible_fallbacks).model == SECOND
+    assert len([e for e in state.run_events if e.kind == "model.fallback_selection"]) == 1
+    # A later escalation that would land on the skipped one again records the skip again.
+    assert _select_developer_fallback(state, ctx, 1).model == SECOND
+    assert len([e for e in state.run_events if e.kind == "model.fallback_selection"]) == 2
+
+
+def test_a_compatible_fallback_is_never_reordered(tmp_path, monkeypatch):
+    from kriya.workflow.attempt import _select_developer_fallback
+
+    _exact_ollama(monkeypatch)
+    cfg = _two_fallback_cfg()
+    _qualify(cfg, SECOND)  # a better-evidenced second fallback does not jump the queue
+    ctx = _ctx(str(tmp_path), cfg, DeveloperAgent("developer", LLMClient(cfg)))
+    state = GenerationState()
+    assert _select_developer_fallback(state, ctx, 1).model == FALLBACK
+    assert not [e for e in state.run_events if e.kind == "model.fallback_selection"]
+
+
+def test_every_fallback_incompatible_is_a_typed_failure_with_every_reason(tmp_path, monkeypatch):
+    from kriya.workflow.attempt import _select_developer_fallback
+
+    _exact_ollama(monkeypatch)
+    cfg = _two_fallback_cfg()
+    cfg.runtime_profile = "production"
+    _qualify(cfg, FALLBACK, anchored_edit_protocol=mq.FAIL)
+    ctx = _ctx(str(tmp_path), cfg, DeveloperAgent("developer", LLMClient(cfg)))
+    state = GenerationState()
+    state.attempt_number = 2
+    with pytest.raises(QualityGateFailure) as refused:
+        _select_developer_fallback(state, ctx, 1)
+    failure = refused.value.failure
+    assert failure.type == "fallback_incompatible"
+    assert failure.diagnostics["reason_code"] == FALLBACK_MODEL_INCOMPATIBLE
+    rejected = {item["model"]: item["reasons"] for item in failure.diagnostics["rejected"]}
+    assert set(rejected) == {FALLBACK, SECOND}
+    assert any("anchored_edit_protocol" in reason for reason in rejected[FALLBACK])
+    assert any("production runtime profile" in reason for reason in rejected[SECOND])
+    assert FALLBACK in failure.message and SECOND in failure.message
+
+
+@pytest.mark.asyncio
+async def test_a_required_patch_moves_the_call_to_the_next_patch_capable_fallback(tmp_path, monkeypatch):
+    """The first fallback returns whole files only and this attempt may only
+    patch Service.java: the call goes to the second fallback, and the first
+    receives no request at all."""
+    _exact_ollama(monkeypatch)
+    _existing_target(tmp_path)
+    cfg = _two_fallback_cfg()
+    developer = DeveloperAgent("developer", LLMClient(cfg))
+    ctx = _ctx(str(tmp_path), cfg, developer)
+    state = GenerationState()
+    state.attempt_number = 2
+    state.model_hops = [FALLBACK]
+    create = AsyncMock(return_value=_response(
+        "FILE: Service.java\nSEARCH:\n    void run() {}\nREPLACE:\n    void run() { }\n"
+    ))
+    with patch.object(AsyncCompletions, "create", new=create):
+        await _run_developer_generation(
+            state, ctx, known_target_files=["Service.java"],
+            operation_by_file={"Service.java": CodeOperation.REPAIR_WITH_PATCH},
+            **_fallback_kwargs(cfg),
+        )
+
+    sent = [call[1] for call in create.call_args_list]
+    assert sent and all(request["model"] == SECOND for request in sent)
+    assert all(request["extra_body"]["options"]["num_ctx"] == 16384 for request in sent)
+    (event,) = [e for e in state.run_events if e.kind == "model.fallback_selection"]
+    assert event.details["phase"] == "call"
+    assert (event.details["requested"], event.details["selected"]) == (FALLBACK, SECOND)
+    assert "may only patch Service.java" in event.details["rejected"][0]["reasons"][0]
+    assert state.last_model_override == SECOND and state.model_hops == [SECOND]
+    assert state.last_developer_request_profile.model == SECOND
+    assert FALLBACK not in state.incompatible_fallbacks  # attempt-specific, not a run-wide verdict
+
+
+@pytest.mark.asyncio
+async def test_the_run_escalates_past_an_incompatible_fallback_without_calling_it(tmp_path, monkeypatch):
+    """End to end through WorkflowEngine: fallback-1 failed a Developer
+    qualification case, so the escalation goes to fallback-2 and
+    fallback-1 is sent nothing; the skip is in the run's trace."""
+    import json
+    import sqlite3
+
+    from kriya.core.state_paths import trace_db_path
+    from kriya.workflow.workflow import WorkflowEngine
+
+    _exact_ollama(monkeypatch)
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.llm_chain = [FallbackModelConfig(model="fallback-1"), FallbackModelConfig(model="fallback-2")]
+    cfg.paths.skills = str(tmp_path / "skills")
+    _qualify(cfg, "fallback-1", anchored_edit_protocol=mq.FAIL)
+    llm = LLMClient(cfg)
+    model_overrides = []
+
+    async def mock_complete(*args, **kwargs):
+        model_overrides.append(kwargs.get("model_override"))
+        n = len(model_overrides)
+        if n == 1:
+            return "Step 1: Write code"
+        if n == 2:
+            return "Design: Write math.py"
+        if n == 3:
+            return "def add(a,b)\n    return a+b"
+        if n in (4, 5, 6, 7):
+            return "FILE CONTENT:\ndef add(a,b)\n    return a+b"
+        if n == 8:
+            return "FILE CONTENT:\ndef add(a,b):\n    return a+b"
+        return "Review: Approved"
+
+    llm.complete = mock_complete
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    res = await WorkflowEngine(Kernel(config=cfg), llm).run_generation_workflow(
+        goal="Create math library with fallback chain", workspace_path=str(workspace),
+    )
+
+    assert res["quality_gates_passed"] is True
+    assert "fallback-1" not in model_overrides
+    assert model_overrides[6] == "fallback-2"  # one-shot fallback-targeted fix
+    assert model_overrides[7] == "fallback-2"  # full-set escalation
+    with sqlite3.connect(trace_db_path(cfg)) as db:
+        (events_json,) = db.execute("SELECT run_events FROM runs").fetchone()
+    selections = [e for e in json.loads(events_json) if e["kind"] == "model.fallback_selection"]
+    assert selections and selections[0]["details"]["selected"] == "fallback-2"
+    # Chosen at escalation, before the prompt was built for its window.
+    assert {e["details"]["phase"] for e in selections} == {"escalation"}
+    assert selections[0]["details"]["rejected"][0]["model"] == "fallback-1"
+
+
+@pytest.mark.asyncio
+async def test_triage_rides_the_same_fallback_the_generation_escalated_to():
+    from kriya.workflow.attribution import _tier_triage
+    from kriya.workflow.failure import Failure
+
+    cfg = _two_fallback_cfg()
+    llm = MagicMock()
+    llm.complete = AsyncMock(return_value="{}")
+    failure = Failure(type="test_failure", message="boom", raw_output="boom", source="tests", attempt=2)
+    await _tier_triage(failure, ["A.java", "B.java"], 1, cfg.llm_chain, llm, lambda path: "class X {}",
+                       skip_fallbacks=(FALLBACK,))
+    assert llm.complete.call_args[1]["model_override"] == SECOND

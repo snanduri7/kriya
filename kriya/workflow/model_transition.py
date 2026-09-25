@@ -18,9 +18,13 @@ a FAILED Developer case, when the production runtime profile requires a
 QUALIFIED runtime and it is not, or when the attempt needs an anchored patch
 (the completeness gate authorized nothing wider) and the fallback's profile
 can only return whole files. A larger model is never assumed to be more
-capable, and the escalation order (attribution.resolve_fallback_model) is
-not changed: an incompatible fallback ends the attempt with a typed reason
-instead of being skipped or silently degraded.
+capable. The escalation order (attribution.resolve_fallback_model) is kept:
+an incompatible fallback is skipped, with its reasons recorded, for the
+next configured one that can serve the attempt (attempt.py
+_select_developer_fallback before the prompt is built,
+_substitute_for_required_patch at the call), never reordered by preference
+or metrics; the attempt ends with the typed FALLBACK_MODEL_INCOMPATIBLE
+failure only when no remaining configured fallback can.
 """
 from __future__ import annotations
 

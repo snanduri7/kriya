@@ -400,6 +400,11 @@ class GenerationState:
     # attempt's gate outcome is charged to the runtime that generated it
     # (never to one it did not call, e.g. a refused fallback).
     last_developer_call_attempt: Optional[int] = None
+    # PRD-017: llm_chain fallbacks proven unable to serve this run whatever
+    # the attempt (a failed Developer qualification case, the production
+    # profile without QUALIFIED, no prompt room) -> their reasons. Fallback
+    # selection skips them in configured order (attribution.resolve_fallback_model).
+    incompatible_fallbacks: Dict[str, List[str]] = field(default_factory=dict)
     # PRD-018: whether this run's model.role_metrics event has been recorded.
     role_metrics_recorded: bool = False
     # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/

@@ -1537,22 +1537,159 @@ def _patch_required_files(state: GenerationState, ctx: "AttemptContext", kwargs:
     return required
 
 
-def _enter_developer_model(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> None:
+def _fallback_rejection(profile: Any, reasons: List[str]) -> Dict[str, Any]:
+    return {"model": profile.model, "reasons": list(reasons), "profile_digest": profile.digest}
+
+
+def _record_fallback_selection(state: GenerationState, *, phase: str, requested: str, selected: Optional[str],
+                               rejected: List[Dict[str, Any]]) -> None:
+    """PRD-017: why configured fallbacks were skipped and which one serves
+    the attempt (the model.fallback_selection run event)."""
+    from kriya.workflow.model_transition import FALLBACK_MODEL_INCOMPATIBLE
+
+    state.record_event(RunEvent(
+        kind="model.fallback_selection",
+        attempt=state.attempt_number,
+        source="attempt.fallback_selection",
+        authority=EventAuthority.ADVISORY,
+        message=(
+            f"Fallback {requested} skipped ({', '.join(r['model'] for r in rejected)} incompatible); "
+            + (f"{selected} selected" if selected else "no configured fallback remains")
+        ),
+        details={"phase": phase, "requested": requested, "selected": selected, "rejected": rejected,
+                 "reason_code": FALLBACK_MODEL_INCOMPATIBLE},
+    ))
+
+
+def _raise_fallback_incompatible(state: GenerationState, requested: str, rejected: List[Dict[str, Any]]) -> None:
+    """The terminal typed failure: no remaining configured fallback can
+    serve this attempt; every skipped fallback's reasons are carried."""
+    from kriya.workflow.model_transition import FALLBACK_MODEL_INCOMPATIBLE
+
+    detail = "; ".join(f"{r['model']}: {'; '.join(r['reasons'])}" for r in rejected)
+    message = (f"{FALLBACK_MODEL_INCOMPATIBLE}: no remaining configured fallback from {requested} can serve "
+               f"this attempt - {detail}")
+    reasons = [reason for r in rejected for reason in r["reasons"]]
+    state.record_event(RunEvent(
+        kind="model.fallback_incompatible",
+        attempt=state.attempt_number,
+        source="attempt.fallback_selection",
+        authority=EventAuthority.ADVISORY,
+        message=message,
+        details={"reason_code": FALLBACK_MODEL_INCOMPATIBLE, "model": requested, "reasons": reasons,
+                 "rejected": rejected},
+    ))
+    logger.error(message)
+    raise QualityGateFailure(Failure(
+        type="fallback_incompatible",
+        message=message,
+        raw_output=message,
+        source="orchestrator",
+        attempt=state.attempt_number,
+        diagnostics={"reason_code": FALLBACK_MODEL_INCOMPATIBLE, "model": requested, "reasons": reasons,
+                     "rejected": rejected},
+    ))
+
+
+def _select_developer_fallback(state: GenerationState, ctx: "AttemptContext", retry_count: int) -> Any:
+    """PRD-017: the llm_chain fallback this attempt escalates to, chosen
+    before its prompt is built (the prompt is sized for the chosen model's
+    window). The configured order is kept (resolve_fallback_model); a
+    fallback proven unable to serve the run - a failed Developer
+    qualification case, the production profile without QUALIFIED, no
+    prompt room - is skipped with its reasons (never re-evaluated or sent a
+    request), and the next configured one is taken. None for the primary;
+    the typed terminal failure when no configured fallback remains."""
+    from kriya.workflow.model_transition import fallback_incompatibilities
+
+    if retry_count <= 0 or not ctx.chain:
+        return None
+    start = min(retry_count - 1, len(ctx.chain) - 1)
+    requested = ctx.chain[start]
+    newly_rejected: List[Dict[str, Any]] = []
+    for binding in ctx.chain[start:]:
+        if binding.model in state.incompatible_fallbacks:
+            continue
+        profile = _developer_request_profile(ctx, binding.model)
+        reasons = fallback_incompatibilities(ctx.kernel.config, profile)
+        if not reasons:
+            break
+        state.incompatible_fallbacks[binding.model] = reasons
+        newly_rejected.append(_fallback_rejection(profile, reasons))
+    selected = resolve_fallback_model(retry_count, ctx.chain, state.incompatible_fallbacks)
+    if selected is requested:
+        return selected
+    evaluated_now = {item["model"]: item for item in newly_rejected}
+    rejected: Dict[str, Dict[str, Any]] = {}
+    for binding in ctx.chain[start:]:
+        if binding.model in state.incompatible_fallbacks and binding.model not in rejected:
+            rejected[binding.model] = evaluated_now.get(binding.model) or {
+                "model": binding.model, "reasons": list(state.incompatible_fallbacks[binding.model]),
+            }
+    rejected = list(rejected.values())
+    _record_fallback_selection(state, phase="escalation", requested=requested.model,
+                               selected=selected.model if selected is not None else None, rejected=rejected)
+    if selected is None:
+        _raise_fallback_incompatible(state, requested.model, rejected)
+    return selected
+
+
+def _substitute_for_required_patch(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any],
+                                   profile: Any, reasons: List[str]) -> Tuple[Dict[str, Any], Any]:
+    """PRD-017: the fallback this call goes to cannot return what the
+    attempt may write (an anchored patch the completeness gate requires, a
+    fact of the prompt already built). The next configured fallback after
+    it that can (skipping those already proven incompatible) serves the
+    call instead - no request is sent to the incompatible one; the typed
+    terminal failure when none remains. The prompt was sized for the
+    requested fallback's window; PRD-016's dispatch check still refuses it
+    before inference if it does not fit the substitute's."""
+    from kriya.workflow.model_transition import fallback_incompatibilities
+
+    current = _chain_binding(ctx, kwargs.get("model_override"))
+    patch_files = _patch_required_files(state, ctx, kwargs)
+    rejected = [_fallback_rejection(profile, reasons)]
+    index = next(i for i, binding in enumerate(ctx.chain) if binding is current)
+    for binding in ctx.chain[index + 1:]:
+        if binding.model in state.incompatible_fallbacks:
+            rejected.append({"model": binding.model, "reasons": list(state.incompatible_fallbacks[binding.model])})
+            continue
+        candidate = _developer_request_profile(ctx, binding.model)
+        candidate_reasons = fallback_incompatibilities(ctx.kernel.config, candidate, patch_required_files=patch_files)
+        if candidate_reasons:
+            rejected.append(_fallback_rejection(candidate, candidate_reasons))
+            continue
+        _record_fallback_selection(state, phase="call", requested=current.model, selected=binding.model,
+                                   rejected=rejected)
+        if state.model_hops and state.model_hops[-1] == current.model:
+            state.model_hops[-1] = binding.model
+        substituted = {**kwargs, "model_override": binding.model, "base_url_override": binding.base_url,
+                       "api_key_override": binding.api_key, "extra_body_override": binding.extra_body}
+        return substituted, candidate
+    _record_fallback_selection(state, phase="call", requested=current.model, selected=None, rejected=rejected)
+    _raise_fallback_incompatible(state, current.model, rejected)
+    raise AssertionError("unreachable")
+
+
+def _enter_developer_model(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """PRD-017: resolve the request profile of the model this Developer call
-    goes to. A change from the previous call is recorded field by field (the
-    model.transition run event); a fallback that cannot serve this attempt
-    ends it with the typed FALLBACK_MODEL_INCOMPATIBLE failure before any
-    request is sent (terminal: the retry loop does not re-send it)."""
-    from kriya.workflow.model_transition import (
-        FALLBACK_MODEL_INCOMPATIBLE,
-        fallback_incompatibilities,
-        profile_changes,
-    )
+    goes to and return the call's kwargs. A fallback that cannot serve this
+    call is replaced by the next configured one that can
+    (_substitute_for_required_patch), or the attempt ends with the typed
+    FALLBACK_MODEL_INCOMPATIBLE failure before any request (terminal). A
+    change of profile from the previous call is recorded field by field
+    (the model.transition run event)."""
+    from kriya.workflow.model_transition import fallback_incompatibilities, profile_changes
 
     model_override = kwargs.get("model_override")
     profile = _developer_request_profile(ctx, model_override)
-    previous = state.last_developer_request_profile
     is_fallback = _chain_binding(ctx, model_override) is not None
+    reasons = fallback_incompatibilities(
+        ctx.kernel.config, profile, patch_required_files=_patch_required_files(state, ctx, kwargs),
+    ) if is_fallback else []
+    if reasons:
+        kwargs, profile = _substitute_for_required_patch(state, ctx, kwargs, profile, reasons)
+    previous = state.last_developer_request_profile
     if previous is None or previous.digest != profile.digest:
         changes = profile_changes(previous, profile)
         state.record_event(RunEvent(
@@ -1573,33 +1710,14 @@ def _enter_developer_model(state: GenerationState, ctx: "AttemptContext", kwargs
             },
         ))
     state.last_developer_request_profile = profile
-    reasons = fallback_incompatibilities(
-        ctx.kernel.config, profile, patch_required_files=_patch_required_files(state, ctx, kwargs),
-    ) if is_fallback else []
-    if not reasons:
-        state.last_developer_call_attempt = state.attempt_number
-        return
-    message = f"{FALLBACK_MODEL_INCOMPATIBLE}: fallback model {profile.model} cannot serve this attempt: " + "; ".join(
-        reasons
-    )
-    state.record_event(RunEvent(
-        kind="model.fallback_incompatible",
-        attempt=state.attempt_number,
-        source="attempt._run_developer_generation",
-        authority=EventAuthority.ADVISORY,
-        message=message,
-        details={"reason_code": FALLBACK_MODEL_INCOMPATIBLE, "model": profile.model, "reasons": reasons,
-                 "profile": profile.to_dict()},
-    ))
-    logger.error(message)
-    raise QualityGateFailure(Failure(
-        type="fallback_incompatible",
-        message=message,
-        raw_output=message,
-        source="orchestrator",
-        attempt=state.attempt_number,
-        diagnostics={"reason_code": FALLBACK_MODEL_INCOMPATIBLE, "model": profile.model, "reasons": reasons},
-    ))
+    state.last_developer_call_attempt = state.attempt_number
+    # The model this attempt's generation actually went to (read by the
+    # attempt's own bookkeeping and the next attempt's triage).
+    state.last_model_override = kwargs.get("model_override")
+    state.last_base_url_override = kwargs.get("base_url_override")
+    state.last_api_key_override = kwargs.get("api_key_override")
+    state.last_extra_body_override = kwargs.get("extra_body_override")
+    return kwargs
 
 
 def _chain_binding(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
@@ -1626,8 +1744,8 @@ async def _run_developer_generation_as_developer(
 ) -> List[Dict[str, str]]:
     targets = kwargs.get("known_target_files")
     file_count = len(targets or ctx.expected_files_upfront or state.all_files_written or [None])
+    kwargs = _enter_developer_model(state, ctx, kwargs)
     active_model = kwargs.get("model_override") or ctx.kernel.config.llm.model
-    _enter_developer_model(state, ctx, kwargs)
     _ensure_generation_time_budget(
         state, ctx, file_count=file_count, active_model=active_model,
     )
@@ -5442,7 +5560,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # never cause this to be retried in a loop.
         state.budgets.fallback_targeted_attempted = True
         state.budgets.fallback_targeted_requested = False
-        fallback = ctx.chain[0]
+        fallback = _select_developer_fallback(state, ctx, 1)
         current_limit = _reserve_graph_context_budget(
             allocation_window(ctx.kernel.config, fallback), ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan
         )
@@ -5613,7 +5731,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         extra_body_override = None
 
         active_prompt_window = allocation_window(ctx.kernel.config)
-        fallback = resolve_fallback_model(state.budgets.retry_count, ctx.chain)
+        fallback = _select_developer_fallback(state, ctx, state.budgets.retry_count)
         if fallback is not None:
             model_override = fallback.model
             base_url_override = fallback.base_url
@@ -5899,10 +6017,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # Recorded now, not derived by the caller afterward - see the fields'
     # own docstring in kriya/workflow/state.py. Every branch above sets all
     # four of these (to None for the primary model, or a fallback's values).
-    state.last_model_override = model_override
-    state.last_base_url_override = base_url_override
-    state.last_api_key_override = api_key_override
-    state.last_extra_body_override = extra_body_override
+    if state.last_developer_call_attempt != state.attempt_number:
+        # No Developer call this attempt; otherwise _enter_developer_model
+        # already recorded the model the call actually went to (PRD-017).
+        state.last_model_override = model_override
+        state.last_base_url_override = base_url_override
+        state.last_api_key_override = api_key_override
+        state.last_extra_body_override = extra_body_override
 
     # Normalize filepaths before anything downstream uses them - the
     # Developer Agent occasionally returns an absolute path instead of a

@@ -156,7 +156,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, FrozenSet, List, Literal, Optional, Tuple
+from typing import Any, Callable, Collection, Dict, FrozenSet, List, Literal, Optional, Tuple
 
 from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
 from kriya.workflow.edit_safety import normalize_whitespace, _strip_java_comments_and_strings
@@ -321,7 +321,7 @@ def classify_retry_scope(scope: SubtaskRetryScope) -> RetryScopeVerdict:
     return RetryScopeVerdict.INTEGRATION_LEVEL
 
 
-def resolve_fallback_model(retry_count: int, chain: list) -> Optional[Any]:
+def resolve_fallback_model(retry_count: int, chain: list, skip: Collection[str] = ()) -> Optional[Any]:
     """Same escalation-ladder formula as attempt.py's full-set branch
     (`chain[min(retry_count - 1, len(chain) - 1)]` once retry_count > 0),
     extracted here so both call sites share one implementation instead of
@@ -336,11 +336,16 @@ def resolve_fallback_model(retry_count: int, chain: list) -> Optional[Any]:
     the same wrong path on a given failure, and handing a fast
     classification question to that same stuck model risks inheriting the
     same bias - so triage rides whatever model generation is already on,
-    never a separately-chosen "fast" model."""
+    never a separately-chosen "fast" model.
+
+    PRD-017: ``skip`` names fallbacks proven unable to serve the run
+    (GenerationState.incompatible_fallbacks); the ladder moves on to the
+    next configured entry after the formula's, in configured order, never
+    back to an earlier one. None when every remaining entry is skipped."""
     if retry_count <= 0 or not chain:
         return None
     idx = min(retry_count - 1, len(chain) - 1)
-    return chain[idx]
+    return next((fallback for fallback in chain[idx:] if fallback.model not in skip), None)
 
 
 def extract_self_diagnosed_files(files: List[dict], known_files: List[str]) -> List[str]:
@@ -975,8 +980,9 @@ async def _tier_triage(
     chain: list,
     llm,
     file_content_provider: Callable[[str], Optional[str]],
+    skip_fallbacks: Collection[str] = (),
 ) -> Optional[AttributionResult]:
-    fallback = resolve_fallback_model(retry_count, chain)
+    fallback = resolve_fallback_model(retry_count, chain, skip_fallbacks)
     model_override = fallback.model if fallback else None
     base_url_override = fallback.base_url if fallback else None
     api_key_override = fallback.api_key if fallback else None
@@ -1038,6 +1044,7 @@ async def attribute_failure(
     self_diagnosed_files: Optional[List[str]] = None,
     plan: Optional[EngineeringPlan] = None,
     original_contents: Optional[Dict[str, str]] = None,
+    skip_fallbacks: Collection[str] = (),
 ) -> AttributionResult:
     """The one entry point every retry site should call instead of
     independently re-deriving "which file". Always returns a result - the
@@ -1186,7 +1193,8 @@ async def attribute_failure(
     # about at all, not that triage would find something a cheaper check
     # missed.
     if len(known_files) > 1:
-        result = await _tier_triage(failure, known_files, retry_count, chain, llm, file_content_provider)
+        result = await _tier_triage(failure, known_files, retry_count, chain, llm, file_content_provider,
+                                    skip_fallbacks)
         if result:
             return result
 
