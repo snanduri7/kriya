@@ -14,9 +14,8 @@ merely because Kriya ran there.
   attached by kriya/control/run_coordinator.py::begin_mutating_run for the
   lifetime of one mutating run.
 
-``logging.file`` is deprecated and never opened (it used to resolve against
-the CWD for the packaged default); it stays in the schema so existing configs
-load and its SEC-009 classification is unchanged.
+There is no per-file path setting; the retired one is rejected at load with
+a typed error (kriya/config/config.py::REMOVED_LOGGING_FILE_MESSAGE).
 """
 from __future__ import annotations
 
@@ -140,12 +139,6 @@ def configure_logging(cfg, file_logging: bool = True) -> None:
 
     logging.basicConfig(level=level, handlers=handlers)
     _run_log_settings = settings
-    if cfg.logging.file:
-        logging.getLogger(__name__).warning(
-            "logging.file is deprecated and ignored; logs are written under %s "
-            "(set logging.directory or %s to change it).",
-            settings.log_dir if settings else "the Kriya log directory", ENV_LOG_DIR,
-        )
 
 
 def reset_logging_state() -> None:

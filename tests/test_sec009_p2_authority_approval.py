@@ -443,56 +443,49 @@ def test_24_unknown_future_security_field_not_covered_by_older_approval(tmp_path
             load_config()
 
 
-# --- 25/26/27: logging.file approval cycle (SEC-009 bypass-closure fix, ----
-# 2026-09-12) - mirrors the MCP approve/deny/invalidate cycle above (tests
-# 1-4), plus the no-grandfathering case unique to this fix: an approval
-# whose security subset never included logging.file (because it was
-# in-workspace, i.e. not a violation at all, at approval time) must not
-# silently authorize it once it becomes an escaping, SECURITY_AUTHORITY
-# target - Option A's whole-set digest (compute_set_digest()) makes this
+# --- 25/26/27: log-location approval cycle (SEC-009 bypass-closure fix of ----
+# 2026-09-12, carried over to logging.directory when the per-file setting was
+# removed) - mirrors the MCP approve/deny/invalidate cycle above (tests 1-4),
+# plus the no-grandfathering case: an approval whose security subset never
+# included logging.directory must not silently authorize it once a repository
+# adds one - Option A's whole-set digest (compute_set_digest()) makes this
 # automatic, this test proves it rather than just inferring it.
 
-def test_25_exact_logging_file_approval_succeeds(tmp_path):
+def test_25_exact_logging_directory_approval_succeeds(tmp_path):
     ws = tmp_path / "ws"
     outside_dir = tmp_path / "log25_outside"
-    target = outside_dir / "kriya.log"
     with _cwd(ws):
-        _write_yaml(ws / "kriya.yaml", {"logging": {"file": str(target)}})
-        with pytest.raises(ConfigAuthorityError, match="logging.file"):
+        _write_yaml(ws / "kriya.yaml", {"logging": {"directory": str(outside_dir)}})
+        with pytest.raises(ConfigAuthorityError, match="logging.directory"):
             load_config()
         _approve()
         cfg = load_config()
-        assert os.path.realpath(cfg.logging.file) == os.path.realpath(str(target))
+        assert cfg.logging.directory == os.path.realpath(str(outside_dir))
+    assert not outside_dir.exists()  # approval authorizes; it creates nothing
 
 
-def test_26_logging_file_target_change_invalidates(tmp_path):
+def test_26_logging_directory_change_invalidates(tmp_path):
     ws = tmp_path / "ws"
     outside_dir = tmp_path / "log26_outside"
-    target = outside_dir / "kriya.log"
     with _cwd(ws):
-        _write_yaml(ws / "kriya.yaml", {"logging": {"file": str(target)}})
+        _write_yaml(ws / "kriya.yaml", {"logging": {"directory": str(outside_dir)}})
         _approve()
         load_config()  # sanity - works before change
-        target2 = outside_dir / "renamed.log"
-        _write_yaml(ws / "kriya.yaml", {"logging": {"file": str(target2)}})
-        with pytest.raises(ConfigAuthorityError, match="logging.file"):
+        _write_yaml(ws / "kriya.yaml", {"logging": {"directory": str(outside_dir / "renamed")}})
+        with pytest.raises(ConfigAuthorityError, match="logging.directory"):
             load_config()
 
 
-def test_27_older_approval_without_logging_file_in_security_subset_does_not_grandfather_it(tmp_path):
-    """The requirement-11 case: approve a config where logging.file resolves
-    INSIDE the workspace (so it is REPOSITORY_SAFE, not part of the
-    approved security subset at all - only `mcp.hostile` is), then flip
-    logging.file to an escaping target without re-approving. The old
-    approval's set_digest was computed over {mcp.hostile} only, so it
-    cannot possibly match the new set {mcp.hostile, logging.file} -
-    Option A denies the whole thing, not just the new field."""
+def test_27_older_approval_without_logging_directory_in_security_subset_does_not_grandfather_it(tmp_path):
+    """Approve a config whose only security field is `mcp.hostile` (the log
+    directory left at its null default), then add an outside
+    logging.directory without re-approving. The old approval's set_digest
+    covers {mcp.hostile} only, so the whole configuration is denied."""
     ws = tmp_path / "ws"
     outside_dir = tmp_path / "log27_outside"
-    target = outside_dir / "kriya.log"
     with _cwd(ws):
         _write_yaml(ws / "kriya.yaml", {
-            "logging": {"file": "logs/kriya.log"},  # in-workspace: not a violation
+            "logging": {"directory": None},
             "mcp": {"hostile": {"command": "/bin/sh"}},
         })
         _approve()
@@ -500,10 +493,10 @@ def test_27_older_approval_without_logging_file_in_security_subset_does_not_gran
         assert cfg.mcp["hostile"].command == "/bin/sh"
 
         _write_yaml(ws / "kriya.yaml", {
-            "logging": {"file": str(target)},  # now escapes - newly SECURITY_AUTHORITY
+            "logging": {"directory": str(outside_dir)},
             "mcp": {"hostile": {"command": "/bin/sh"}},
         })
-        with pytest.raises(ConfigAuthorityError, match="logging.file"):
+        with pytest.raises(ConfigAuthorityError, match="logging.directory"):
             load_config()
     assert not outside_dir.exists()
 
@@ -514,7 +507,7 @@ def test_cli_logging_directory_approval_reaches_configure_logging_end_to_end(tmp
     target: proves the SIDE_EFFECT invariant in both directions through the
     actual entry point - denied means no directory/file, approved means the
     real log target is created. `kriya plugins` never reaches an LLM call.
-    (PRD-010 logging closure: moved from the now-ignored logging.file to
+    (PRD-010 logging closure: moved from the since-removed per-file setting to
     logging.directory, the field that decides where logs are written.)"""
     monkeypatch.delenv("KRIYA_LOG_DIR", raising=False)  # config, not env, must decide
     home = tmp_path / "_home"
@@ -541,23 +534,6 @@ def test_cli_logging_directory_approval_reaches_configure_logging_end_to_end(tmp
     assert code2 == 0, err2
     assert target.exists(), "approved logging.directory must actually receive the application log"
     assert not (ws / "logs").exists()
-
-
-@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
-def test_cli_deprecated_logging_file_is_never_opened(tmp_path, monkeypatch):
-    """An approved, in-workspace logging.file loads (existing configs keep
-    working) but is ignored: nothing is written into the workspace."""
-    log_dir = tmp_path / "canonical_logs"
-    monkeypatch.setenv("KRIYA_LOG_DIR", str(log_dir))
-    ws = tmp_path / "repo"
-    ws.mkdir()
-    _write_yaml(ws / "kriya.yaml", {"logging": {"file": "./logs/kriya.log"}})
-
-    code, out, err = _run_cli(["plugins"], cwd=str(ws), extra_env={"HOME": str(tmp_path / "_user_home")})
-    assert code == 0, err
-    assert not (ws / "logs").exists()
-    assert (log_dir / "kriya.log").exists()
-    assert "logging.file is deprecated and ignored" in err
 
 
 # --- Resume: same authority resolver, no stale-approval inheritance --------

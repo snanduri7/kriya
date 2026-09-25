@@ -21,6 +21,7 @@ from kriya.cli import _mark_run_in_progress, main
 from kriya.config import AppConfig
 from kriya.config.authority import ConfigAuthorityError
 from kriya.config.config import (
+    REMOVED_LOGGING_FILE_MESSAGE,
     REMOVED_PATHS_LOGS_MESSAGE,
     PathsConfig,
     RemovedConfigFieldError,
@@ -118,17 +119,37 @@ def test_programmatic_paths_logs_is_rejected_too():
         AppConfig().paths.logs = "/tmp/logs"
 
 
-def test_no_production_code_reads_paths_logs():
-    """Repository guard: the only mention left in kriya/ is the removal message."""
+# Removed configuration fields and aliases that must never come back in kriya/.
+# The only permitted mentions are the removal messages themselves.
+_REMOVED_FIELD_PATTERNS = (
+    r"paths\.logs\b",
+    r"\blogs_path\b",
+    r"logging\.file\b(?!_)",
+    r"\(\s*[\"']paths[\"']\s*,\s*[\"']logs[\"']\s*\)",
+    r"\(\s*[\"']logging[\"']\s*,\s*[\"']file[\"']\s*\)",
+    r"paths\[[\"']logs[\"']\]",
+)
+
+
+def test_no_production_code_references_removed_config_fields():
+    """Repository guard for paths.logs, logs_path and logging.file."""
     root = Path(kriya.__file__).parent
+    allowed = (REMOVED_PATHS_LOGS_MESSAGE[:24], REMOVED_LOGGING_FILE_MESSAGE[:24])
     offenders = []
     for path in list(root.rglob("*.py")) + list(root.rglob("*.yaml")):
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-            if re.search(r"paths\.logs|\.paths\.logs\b|paths\[[\"']logs[\"']\]", line) and REMOVED_PATHS_LOGS_MESSAGE[:24] not in line:
-                offenders.append(f"{path.relative_to(root.parent)}:{number}: {line.strip()}")
-            if re.search(r"\blogs_path\b", line):
+            if any(text in line for text in allowed):
+                continue
+            if any(re.search(pattern, line) for pattern in _REMOVED_FIELD_PATTERNS):
                 offenders.append(f"{path.relative_to(root.parent)}:{number}: {line.strip()}")
     assert offenders == []
+
+
+def test_the_guard_patterns_catch_each_removed_form():
+    for sample in ("cfg.paths.logs", "logs_path=x", "cfg.logging.file", '("paths", "logs")',
+                   "('logging', 'file')", 'data["paths"]["logs"]'.replace('data["paths"]', 'paths')):
+        assert any(re.search(pattern, sample) for pattern in _REMOVED_FIELD_PATTERNS), sample
+    assert not any(re.search(pattern, "cfg.logging.file_enabled") for pattern in _REMOVED_FIELD_PATTERNS)
 
 
 # --- each setting controls exactly one thing, never the CWD ---------------------------------

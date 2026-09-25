@@ -76,6 +76,10 @@ class PluginsConfig(BaseModel):
 REMOVED_PATHS_LOGS_MESSAGE = (
     "paths.logs was removed; use logging.directory for logs or paths.state for trace state."
 )
+REMOVED_LOGGING_FILE_MESSAGE = (
+    "logging.file was removed; use logging.directory to configure the log directory "
+    "(or logging.file_enabled: false to turn the application log off)."
+)
 
 
 class RemovedConfigFieldError(ValueError):
@@ -106,13 +110,18 @@ class SkillsConfig(BaseModel):
 class LoggingConfig(BaseModel):
     """Log locations are owned by kriya/core/logging_setup.py: the directory is
     KRIYA_LOG_DIR > `directory` (absolute; canonicalized once at load) >
-    ~/.kriya/logs, never the process CWD. `file` is deprecated and ignored
-    (kept so existing configs load and its SEC-009 classification holds)."""
+    ~/.kriya/logs, never the process CWD."""
     level: str = Field(default="INFO")
     directory: Optional[str] = Field(default=None)
     file_enabled: bool = Field(default=True)
     run_file_enabled: bool = Field(default=True)
-    file: Optional[str] = Field(default=None)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "file" in data:
+            raise RemovedConfigFieldError(REMOVED_LOGGING_FILE_MESSAGE)
+        return data
 
 class MCPCapabilityConfig(BaseModel):
     """TOOL-003 P1 (2026-09-13): the operator-controlled MAXIMUM
@@ -1245,6 +1254,8 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                     # resolves symlinks in the resulting path, not just abspath).
                     if isinstance(user_data.get("paths"), dict) and "logs" in user_data["paths"]:
                         raise RemovedConfigFieldError(f"{config_path}: {REMOVED_PATHS_LOGS_MESSAGE}")
+                    if isinstance(user_data.get("logging"), dict) and "file" in user_data["logging"]:
+                        raise RemovedConfigFieldError(f"{config_path}: {REMOVED_LOGGING_FILE_MESSAGE}")
                     if "paths" in user_data:
                         for k, v in user_data["paths"].items():
                             if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
@@ -1271,28 +1282,6 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                         if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
                             user_data["plugins"]["directory"] = os.path.realpath(os.path.join(config_dir, v))
 
-                    # logging.file - SEC-009 bypass-closure fix (2026-09-12).
-                    # Canonicalize to ONE resolved absolute realpath (anchored
-                    # to config_dir, not process CWD) BEFORE classification
-                    # and BEFORE configure_logging() ever sees it, so the
-                    # value authority resolution inspects and the value
-                    # execution actually opens are always identical - unlike
-                    # paths.*/plugins.directory above (which only rewrite a
-                    # "./"-or-"../"-prefixed value), this resolves ANY string
-                    # value (bare-relative, absolute, or already "./"-
-                    # prefixed) uniformly, because configure_logging()'s own
-                    # os.path.abspath() would otherwise anchor a bare-relative
-                    # value to CWD instead of config_dir - the exact
-                    # classify-here/execute-there split this fix must not
-                    # introduce. A value of `null`/non-string (explicitly
-                    # disabling file logging) is left untouched here and
-                    # handled directly in the classification_overrides block
-                    # below - disabling a feature grants no authority.
-                    if isinstance(user_data.get("logging"), dict) and isinstance(user_data["logging"].get("file"), str):
-                        lf = user_data["logging"]["file"]
-                        resolved_lf = lf if os.path.isabs(lf) else os.path.join(config_dir, lf)
-                        user_data["logging"]["file"] = os.path.realpath(resolved_lf)
-
                     # logging.directory - canonicalized ONCE here (expand ~,
                     # realpath) so the value SEC-009 digests is exactly the
                     # directory kriya/core/logging_setup.py opens. A relative
@@ -1307,15 +1296,15 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                     # TOOL-003 P1: MCP capability filesystem paths - resolved
                     # and escape-checked HERE, anchored to config_dir (same
                     # anchor and same realpath-based idiom as paths.*/
-                    # logging.file above, for the identical reason: the value
+                    # logging.directory above, for the identical reason: the value
                     # SEC-009 authority resolution digests below and the
                     # value kriya/mcp/capability.py's resolve_mcp_capability_
                     # profile() eventually binds to a real MCPClient must be
                     # the SAME single resolved value, computed ONCE, never
                     # independently re-resolved later against a possibly-
                     # different CWD (the exact classify-here/execute-there
-                    # split the logging.file bypass fix exists to prevent -
-                    # see this function's own module-level precedent above).
+                    # split the SEC-009 bypass-closure fix of 2026-09-12 exists to
+                    # prevent).
                     # A `capabilities` key is unconditionally backfilled to
                     # `{}` for every configured server (even one that never
                     # mentions `capabilities` at all) so an omitted key and
@@ -1408,21 +1397,6 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                         for role, role_val in user_data["agent_llms"].items():
                             classification_overrides[("agent_llms", role)] = agent_role_field_classification(role_val)
 
-                    # logging.file classification - same value-sensitive
-                    # containment check as paths.* above, now that the value
-                    # (if a string) has already been canonicalized to a
-                    # single resolved realpath anchored at config_dir. An
-                    # explicit `null` (disable file logging entirely) is
-                    # REPOSITORY_SAFE outright - it grants no filesystem
-                    # authority, it removes a capability.
-                    if isinstance(user_data.get("logging"), dict) and "file" in user_data["logging"]:
-                        lf = user_data["logging"]["file"]
-                        if isinstance(lf, str):
-                            classification_overrides[("logging", "file")] = path_field_classification(
-                                "file", lf, config_dir
-                            )
-                        else:
-                            classification_overrides[("logging", "file")] = FieldClassification.REPOSITORY_SAFE
                     # logging.directory: null (the canonical default) grants
                     # nothing; any directory is a filesystem write target and
                     # falls to its static SECURITY_AUTHORITY entry.

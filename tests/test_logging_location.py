@@ -19,6 +19,7 @@ from click.testing import CliRunner
 
 from kriya.cli import main
 from kriya.config import AppConfig
+from kriya.config.config import LoggingConfig, RemovedConfigFieldError
 from kriya.config.authority import ConfigAuthorityError
 from kriya.config.config import load_config, resolve_config_state
 from kriya.control.run_coordinator import begin_mutating_run
@@ -179,11 +180,12 @@ def test_disabling_log_files_and_a_null_directory_are_repository_safe(tmp_path, 
 
 def test_packaged_default_names_no_relative_log_file():
     cfg = AppConfig()
-    assert cfg.logging.file is None and cfg.logging.directory is None
+    assert "file" not in LoggingConfig.model_fields
+    assert cfg.logging.directory is None
     with open(os.path.join(os.path.dirname(logging_setup.__file__), "..", "config", "default_config.yaml"),
               encoding="utf-8") as f:
         packaged = yaml.safe_load(f)["logging"]
-    assert "file" not in packaged
+    assert "file" not in packaged  # the retired per-file setting
     assert packaged["directory"] is None
 
 
@@ -194,7 +196,7 @@ def test_application_log_goes_to_the_canonical_directory_not_the_cwd(home, tmp_p
     cwd.mkdir()
     monkeypatch.chdir(cwd)
     with _fresh_root_logging():
-        configure_logging(_cfg(file="./logs/kriya.log"))
+        configure_logging(_cfg())
         logging.getLogger("kriya.test").warning("application-line")
         for handler in logging.getLogger().handlers:
             handler.flush()
@@ -289,7 +291,7 @@ def test_generate_bootstrap_creates_no_cwd_logs(home, tmp_path, monkeypatch):
     cwd = _git_workspace(tmp_path / "repo")
     monkeypatch.chdir(cwd)
     before = _tree(cwd)
-    cfg = _cfg(file="./logs/kriya.log")
+    cfg = _cfg()
     cfg.paths.memory = str(tmp_path / "memory")
     kernel = MagicMock(start=AsyncMock(), stop=AsyncMock())
     with _fresh_root_logging(), \
@@ -357,3 +359,29 @@ def test_runs_status_and_authority_inspect_leave_the_workspace_byte_tree_unchang
     assert inspect.exit_code == 0, inspect.output
     assert _tree(workspace) == before
     assert not (home / ".kriya" / "logs").exists()
+
+
+# --- the retired per-file setting --------------------------------------------------------
+
+def test_logging_file_is_rejected_with_an_actionable_typed_error(home, tmp_path, monkeypatch):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "kriya.yaml").write_text(yaml.safe_dump({"logging": {"file": "./logs/kriya.log"}}), encoding="utf-8")
+    monkeypatch.chdir(workspace)
+    with pytest.raises(RemovedConfigFieldError,
+                       match="logging.file was removed; use logging.directory to configure the log directory"):
+        load_config()
+    with _fresh_root_logging():
+        result = CliRunner().invoke(main, ["plugins"])
+    assert result.exit_code == 1
+    assert "logging.file was removed" in result.stderr
+    assert sorted(os.listdir(workspace)) == ["kriya.yaml"]
+
+
+def test_programmatic_logging_file_is_rejected_too():
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError, match="logging.file was removed"):
+        AppConfig(logging={"file": "/tmp/kriya.log"})
+    with pytest.raises(ValueError):
+        AppConfig().logging.file = "/tmp/kriya.log"

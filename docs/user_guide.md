@@ -198,8 +198,7 @@ logging:
   (`persistence.logs`) without creating it.
 - **Errors:** an invalid or unwritable log directory stops the command with an "Error configuring logging" message.
   Kriya never falls back to `./logs`.
-- **`logging.file` is deprecated and ignored.** It still loads, and a warning names the real location. Existing
-  `./logs` directories are left alone, never migrated or deleted.
+- **Existing `./logs` directories** are left alone, never migrated or deleted.
 
 ### 2.0b Where run history goes (`paths.state`)
 `traces.db` is the run history behind `kriya traces`. It is persistent state, not log output, so it has its own
@@ -219,11 +218,11 @@ location: independent of the log settings, and never derived from the directory 
 - **Not affected:** each workspace's own run control state (`.kriya/`: the run lock, run records, checkpoints) stays in
   the workspace, because crash recovery (`kriya runs status|recover`) depends on it.
 
-#### Migrating from `paths.logs` (removed)
-- **The setting is gone.** Older Kriya versions had a `paths.logs` setting that held both the log file and
-  `traces.db`. A config that still names it fails to load with "paths.logs was removed; use logging.directory for
-  logs or paths.state for trace state." Delete the line, and set `logging.directory` and/or `paths.state` if you want
-  non-default locations.
+#### Migrating from `paths.logs` and `logging.file` (removed)
+- **Both settings are gone.** Older Kriya versions had `paths.logs` (the log directory and `traces.db`) and
+  `logging.file` (the log file path). A config that still names either fails to load with a message naming the
+  replacement. Delete the line, then set `logging.directory` and/or `paths.state` if you want non-default locations.
+  To turn the application log off, use `logging.file_enabled: false`.
 - **Copying old run history.** To keep a `traces.db` from before the move, run
   `kriya traces --migrate-legacy --legacy-path /absolute/path/to/old/traces.db`.
   - Without `--legacy-path`, it uses the old default location, `<Kriya install dir>/logs/traces.db`.

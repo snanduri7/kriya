@@ -50,7 +50,6 @@ logging:
   # Log files never land in the current directory. Directory precedence:
   # KRIYA_LOG_DIR > logging.directory (absolute path) > ~/.kriya/logs.
   # Application log: <dir>/kriya.log; per-run log: <dir>/runs/<run_id>/kriya.log.
-  # `logging.file` is deprecated and ignored.
   directory: null
   file_enabled: true
   run_file_enabled: true

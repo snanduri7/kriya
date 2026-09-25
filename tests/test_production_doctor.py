@@ -603,7 +603,6 @@ def test_production_doctor_cli_never_opens_a_log_file_in_the_workspace(tmp_path,
     import logging
 
     cfg = _production_cfg(tmp_path)
-    cfg.logging.file = "./logs/kriya.log"
     workspace = _git_workspace(tmp_path / "workspace")
     monkeypatch.chdir(workspace)
     report = ProductionDoctorReport(schema_version=1, production_ready=False, checks=())

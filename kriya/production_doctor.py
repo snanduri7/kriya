@@ -538,7 +538,6 @@ def _check_logs(ctx: _Context) -> DoctorCheck:
     base = {
         "file_enabled": logging_cfg.file_enabled,
         "run_file_enabled": logging_cfg.run_file_enabled,
-        "deprecated_logging_file_ignored": logging_cfg.file,
     }
     try:
         log_dir, source = resolve_log_directory(ctx.cfg)

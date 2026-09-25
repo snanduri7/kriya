@@ -651,3 +651,92 @@ actionable error. They were not edited automatically; one is the deliberately ho
 ```bash
 .venv/bin/pytest -ra tests/test_state_location.py tests/test_logging_location.py tests/test_traces_command.py tests/test_production_doctor.py tests/test_doctor_command.py tests/test_sec009_config_authority.py tests/test_sec009_p2_authority_approval.py tests/test_config.py tests/test_config_command.py tests/test_tools.py tests/test_d1_operation_mode_authority.py tests/test_milestones.py tests/test_milestone3_4.py tests/test_validation_baseline.py tests/test_cli_smoke.py tests/test_run_events.py tests/test_generate_json_contract.py tests/test_prd008_recovery.py tests/test_run_ownership.py tests/test_bootstrap_contract.py tests/test_repl.py tests/test_distribution_integrity.py tests/test_workflow.py
 ```
+
+## Final config cleanup: `logging.file` removed (2026-09-25)
+
+This is the same treatment as `paths.logs`, per the user's decision.
+
+**Final ownership:**
+
+| Setting | Owns |
+|---|---|
+| `logging.directory` | the log location |
+| `logging.level`, `file_enabled`, `run_file_enabled` | logging behaviour |
+| `paths.state` | persistent state and `traces.db` |
+| `<workspace>/.kriya` | workspace run, control and recovery state |
+
+**Removal:**
+- `LoggingConfig.file` is gone.
+  - A config file naming it, even with `null`, fails in `resolve_config_state()` before SEC-009 classification with
+    `RemovedConfigFieldError`. The message is `REMOVED_LOGGING_FILE_MESSAGE`: "logging.file was removed; use
+    logging.directory to configure the log directory (or logging.file_enabled: false to turn the application log
+    off)."
+  - Programmatic construction hits a `LoggingConfig` before-validator; attribute assignment is rejected by pydantic.
+- Also removed:
+  - its canonicalization and classification blocks in `resolve_config_state()`;
+  - its `_SECURITY_AUTHORITY_FIELDS` entry and comments;
+  - the deprecation warning in `logging_setup.configure_logging()`;
+  - the doctor's `deprecated_logging_file_ignored` evidence key;
+  - the packaged-default comment.
+
+**Guard:** `test_no_production_code_references_removed_config_fields` scans `kriya/**/*.py` and `*.yaml`.
+- It rejects `paths.logs`, `logs_path`, `logging.file` (but not `logging.file_enabled`), and the tuple/subscript forms
+  `("paths","logs")`, `("logging","file")`, `paths["logs"]`.
+- It allows only lines carrying the two removal messages.
+- `test_the_guard_patterns_catch_each_removed_form` proves the patterns match each form.
+
+**SEC-009 coverage carried over, not deleted.**
+- The `logging.file` containment tests of the 2026-09-12 bypass closure now run on `logging.directory`:
+  - the retired field is rejected with the actionable error (3 values, including `null`), with nothing created;
+  - an inside-workspace directory is still SECURITY_AUTHORITY;
+  - an outside directory is denied and never created;
+  - relative and traversal values are typed `LogDirectoryError`, not CWD-anchored;
+  - a symlink is classified by its real target (the value SEC-009 digests);
+  - null and disabled flags are repository-safe;
+  - the level-only negative control;
+  - the CLI denies end-to-end and never creates the directory;
+  - the CLI shows the actionable message for the retired field.
+- P2 tests 25/26/27 were ported the same way: exact approval succeeds and creates nothing; a directory change
+  invalidates; an older approval without `logging.directory` in its subset is not grandfathered.
+- `test_cli_deprecated_logging_file_is_never_opened` was removed; its behaviour no longer exists.
+
+**Other test updates:**
+- `test_logging_location.py` adds load-and-CLI and programmatic rejection tests. The schema test checks the model
+  fields.
+- `test_generate_json_contract` used `logging.file = None` to mean "no file log". It now sets both enabled flags
+  false, which is the same intent.
+- One assignment was removed in `test_production_doctor`.
+
+**Behaviour preserved:**
+- log precedence, state precedence, and log/state independence;
+- the `.kriya/` rule for repo-local state;
+- explicit-only legacy migration;
+- the historical `logs/`/`memory/` analyzer ignores.
+
+**Outside the repo, not edited:** `~/kriya-live-validation/ignite_qpid_protocol` and `protocol_encoder_java` set
+`logging.file` and will now fail to load with the actionable message.
+
+**Evidence:**
+- Mutation checks:
+  - silently accepting `logging.file` fails 5 tests;
+  - a reappearing `cfg.logging.file` in `kriya/` fails the guard.
+- No new ruff F findings versus HEAD in touched files; compileall and diff-check are clean.
+- Plain-runner:
+
+| Suite | Result |
+|---|---|
+| `test_state_location` | 35/0 |
+| `test_logging_location` | 25/0 |
+| `test_sec009_config_authority` | 52/0 |
+| `test_sec009_p2_authority_approval` | 35/0 |
+| `test_production_doctor` | 53/0 |
+| `test_doctor_command` | 8/0 |
+| `test_generate_json_contract` | 17/0 |
+| `test_config` | 31/0 |
+| `test_config_command` | 4/0 |
+| `test_traces_command` | 7/0 |
+| `test_cli_smoke` | 65/0 |
+| `test_bootstrap_contract` | 18/0 |
+| `test_distribution_integrity` | 30/0 |
+
+The focused command is unchanged from the previous section; it already includes every touched suite.

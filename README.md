@@ -410,7 +410,7 @@ skills:
 # kriya.log and run logs never land in the directory you run from. Log directory:
 # KRIYA_LOG_DIR env var > logging.directory (absolute path) > ~/.kriya/logs.
 # Application log: <dir>/kriya.log; each mutating run also gets
-# <dir>/runs/<run_id>/kriya.log. `logging.file` is deprecated and ignored.
+# <dir>/runs/<run_id>/kriya.log.
 # Existing ./logs directories are left in place, never migrated or deleted.
 # Run history (traces.db, `kriya traces`) is state, not logs: it lives in the
 # state directory (paths.state above), independent of logging settings.

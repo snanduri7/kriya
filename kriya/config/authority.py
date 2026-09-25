@@ -141,19 +141,10 @@ _REPOSITORY_SAFE_FIELDS: frozenset = frozenset({
     ("autonomy", "acquisition_cpu_seconds"), ("autonomy", "acquisition_memory_mb"),
     ("skills", "load_global"), ("skills", "load_cwd"),
     ("logging", "level"),
-    # Turning log files off removes a capability (same reasoning as
-    # `logging.file: null`); logging.directory is value-sensitive - see below.
+    # Turning log files off removes a capability; logging.directory is
+    # value-sensitive - see _SECURITY_AUTHORITY_FIELDS below. (The retired
+    # per-file path setting is rejected by config.py before classification.)
     ("logging", "file_enabled"), ("logging", "run_file_enabled"),
-    # logging.file is NOT listed here - its classification depends on a
-    # resolved value (in-workspace vs. escaping), exactly like
-    # paths.{skills,memory,state} below. config.py always supplies an
-    # explicit classification_overrides entry for it via
-    # path_field_classification() (SEC-009 bypass-closure fix,
-    # 2026-09-12: a repository could set an arbitrary outside-workspace
-    # logging.file and configure_logging() would mkdir/open it
-    # unconditionally - see kriya/cli.py::configure_logging()). Deliberately
-    # absent from this static table so a skipped override fails CLOSED
-    # (_SECURITY_AUTHORITY_FIELDS below), not open.
     ("embedding", "model"),
     ("routing", "enabled"), ("routing", "embed_model"),
     ("routing", "reject_threshold"), ("routing", "ask_margin"),
@@ -215,12 +206,6 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     ("engineering_triage", "shadow_mode"),
     # paths escaping the workspace (see containment check note above)
     ("paths", "skills"), ("paths", "memory"), ("paths", "state"),
-    # logging.file escaping the workspace - same containment treatment as
-    # paths.* above (see the _REPOSITORY_SAFE_FIELDS comment for this
-    # field). Listed here too, purely for accurate is_known_field()
-    # labeling and as the fail-closed static fallback if config.py's
-    # runtime override were ever skipped by a bug.
-    ("logging", "file"),
     # logging.directory (PRD-010 logging closure): any configured directory
     # is a filesystem write target; config.py overrides only an explicit
     # null to REPOSITORY_SAFE.
@@ -230,7 +215,7 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # ceiling reopens exactly the hang/leak/resource-exhaustion classes
     # SEC-004 exists to close. Only the packaged default (PACKAGED_DEFAULT,
     # trusted) may set these; no runtime value-based override exists here
-    # (unlike paths.*/logging.file) - EVERY repository-equivalent source
+    # (unlike paths.*/logging.directory) - EVERY repository-equivalent source
     # is denied outright, regardless of the value, since there is no
     # "safe" direction to weaken any of these bounds toward.
     ("mcp_lifecycle", "startup_timeout_seconds"),

@@ -18,7 +18,8 @@ def invoke(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     cfg = AppConfig()
     cfg.paths.memory = str(tmp_path / "memory")
-    cfg.logging.file = None
+    cfg.logging.file_enabled = False
+    cfg.logging.run_file_enabled = False
     kernel = MagicMock(start=AsyncMock(), stop=AsyncMock())
 
     def run(payload=None, args=(), input_text=None, setup_error=None, workflow_error=None):
