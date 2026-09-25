@@ -25,7 +25,7 @@ New module: `kriya/workflow/baseline_policy.py`. `kriya/workflow/validation_base
 1. **`auto` needs the engineering route.** With engineering triage disabled there is no route signal, and `auto` stays `disabled`. The packaged config enables triage; `AppConfig()` defaults it off, so the mocked suites keep their behaviour.
 2. **A triggered `auto` is as binding as `required`**, including stopping before generation when the baseline cannot be captured. The trigger's preconditions (git identity, existing tests) exclude the cases where capture could never work.
 3. **A toolchain change makes PRE and POST not comparable.** Nothing is excused as pre-existing across two toolchains: any failure blocks, but a green suite passes. This keeps PRD-011 migrations possible under production's sealed `required`.
-4. **Trigger breadth (please decide).** "A changed source that an existing test names" triggers on its own. In a well-tested repository nearly every brownfield change, even a LOW/LIGHT docstring edit, therefore pays one full PRE suite run (the live case shows exactly that), and milestone units and enforce subtasks pay it per unit. The PRD warns against a full baseline for every trivial task. If that cost is unwanted, drop this signal and keep risk, weight, refactor and impact, which is a one-line change.
+4. **Trigger breadth - RESOLVED by the final review (see below).** Was: "A changed source that an existing test names" triggers on its own. In a well-tested repository nearly every brownfield change, even a LOW/LIGHT docstring edit, therefore pays one full PRE suite run (the live case shows exactly that), and milestone units and enforce subtasks pay it per unit. The PRD warns against a full baseline for every trivial task. If that cost is unwanted, drop this signal and keep risk, weight, refactor and impact, which is a one-line change.
 5. **Production stays sealed to `required`**, which is stricter than `auto`.
 
 ## Tests (plain runner; you run pytest)
@@ -61,3 +61,35 @@ Regression, plain runner:
 
 ## Live test
 `tests/test_live_prd020_024_batch5.py::test_prd024_pre_existing_failure_is_not_a_new_regression`: a real small brownfield Python repository with one known pre-existing failing test, and a real local model making an unrelated change. It proves the pre-existing failure is not blamed on the change.
+
+## Final review corrections (before pytest/live verification)
+1. **Trigger.** An existing test naming a changed source is supporting evidence (`signals.supporting.tested_changed_sources`, and a "supporting:" reason when a real signal triggers), never a trigger by itself. The trigger needs a deterministic regression-risk signal, mapped onto what triage already computes:
+   - API/contract → `public_contract_change`;
+   - build/dependency/toolchain → `build_system_change`, `dependency_change`;
+   - runtime/config → `configuration_change` (newly counted);
+   - shared owner → `shared_entrypoint_change`;
+   - persistence and security → as before;
+   - existing high-risk classification → risk ≥ MEDIUM, a non-LIGHT weight, a refactor;
+   - broad existing-code change → **new**: `BROAD_EXISTING_CHANGE_FILES` (3) or more existing sources.
+
+   Cross-module consumers stay folded into triage's own risk class; no second signal was added for them.
+2. **Reuse.** The applied candidate's terminal full-suite result is kept on the engine (`full_suite_evidence_for_reuse`), keyed by the workspace content hash *after* apply. That is the next run's exact starting state, and the same `compute_workspace_content_hash` the PRE capture compares. It is offered to `capture_brownfield_baselines(prior_full_regression=)` and reused by the existing `is_baseline_reusable` rule. It must match:
+   - the content hash;
+   - the command and selection (the full suite only);
+   - the environment identity, which now also carries `verification_policy_identity`: the validator's containment/sandbox/limits/egress settings and `BASELINE_COMPARISON_VERSION`.
+
+   A prior run that did not complete is never reused; resume keeps its own rule. It works under `required` too, so a production milestone plan pays M1's PRE plus one POST per unit, not two runs per unit. Engine-scoped (in memory), not persisted in the workspace, so a repository cannot ship forged "pre-existing failure" evidence. Recorded as `validation_baseline.full_regression_source` (`captured`/`resume`/`prior_full_suite`).
+3. **Environment identity change (disclosed).** Adding the verification policy changes the environment string. A baseline checkpointed before this change is therefore captured again on resume, once (the fail-safe direction).
+4. **Live test.** The PRD-024 live case uses a docstring goal, so under the new trigger it no longer takes a baseline. It now runs under `required` (what production seals) to prove pre-existing-failure handling. A new live case records how `auto` handles a docstring edit: disabled, or triggered only by a real non-supporting signal from the real route.
+
+Tests (plain runner): `test_prd024_baseline_auto_policy.py`, 35 passed, 14 of them new or changed:
+- trigger cases: API, config, shared owner, broad, and tested-source-alone (not triggered);
+- supporting evidence recorded;
+- exact prior result reused, not rerun;
+- a changed workspace, environment or selection is not reused, nor is an incomplete run;
+- the policy is part of the environment identity;
+- two consecutive engine runs: one reuse;
+- a changed workspace or policy between runs: captured again;
+- the real CLI milestone driver under `required`: `captured`, then `prior_full_suite` twice, with 4 full-suite runs in total.
+
+Mutations, each caught: tested source triggering again, reuse disabled, policy dropped from the environment, an incomplete prior reused, the broad signal dropped, `configuration_change` dropped.

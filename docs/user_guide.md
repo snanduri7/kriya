@@ -534,14 +534,29 @@ to the exact files it judged:
 - `satisfied`;
 - `violated`: a concrete, literally-named requirement is missing, so the attempt fails and the retry is told
   `REQ-n: <your text>`;
-- `unverified`: behaviour that cannot be confirmed from source;
+- `unverified`: behaviour that cannot be confirmed from source (never counted as satisfied);
 - `unknown`: no verdict.
+
+An `unverified` requirement can still be closed by other deterministic evidence for that exact requirement and
+that exact candidate, recorded as `closed_by_evidence` (distinct from `satisfied`):
+- tests your requirement's own text names (a path, file name or test name such as `test_legacy` or
+  `PricingTest`), if the change did not write or edit them, run on the candidate the verifier judged, and executed
+  and passed;
+- the migration gate, for a requirement naming both the migration's source and its target, once every migration
+  obligation is satisfied.
+
+A `violated` or `unknown` requirement is never closed this way, and evidence about an earlier candidate never
+closes a later one.
 
 A violated requirement always blocks success. `autonomy.requirement_unknown_policy` and
 `autonomy.requirement_unverified_policy` (`record`, the default, or `block`) decide the other two. `block` stops
-that unit before its changes are applied, with `[REQUIREMENTS UNRESOLVED]`. In a milestone plan the check runs in
-the final integration unit, so earlier milestones are already committed; the plan is not reported successful. The production profile seals the unknown policy to
-`block`. Both fields are SECURITY_AUTHORITY.
+that unit before its changes are applied, with `[REQUIREMENTS UNRESOLVED]`, and is not retried (the Developer
+cannot supply a verdict). The production profile seals both to `block`. Both fields are SECURITY_AUTHORITY.
+
+In a milestone plan the check runs in the final integration unit, so earlier milestones are already committed
+when it runs. If it fails, the plan is not successful, and the result's `committed_work_units` (with
+`committed_changes_retained`), the RunRecord's commit cycles and the CLI all name the units whose changes are
+committed and still applied. Nothing is rolled back.
 
 Which unit verifies the requirements:
 - a direct run;
@@ -616,10 +631,18 @@ On top of that, at least one risk signal must be present:
 - medium or high risk;
 - a standard or heavy change;
 - a refactor;
-- a contract, dependency, build, persistence, security or entry-point impact;
-- or a changed file that your tests name.
+- a contract/API, dependency, build, configuration, persistence, security or shared entry-point impact;
+- or a broad change (three or more existing source files).
 
-A trivial change skips it. `required` always captures the baseline (the production profile seals this), and
+An existing test that names a changed file is recorded as supporting evidence but never triggers the baseline on
+its own, so a docstring-sized edit to a well-tested file skips it. A trivial change skips it.
+
+A full suite run is not repeated when an earlier one describes exactly this starting state. After a change is
+applied, its final full-suite run is kept against the workspace content it left. The next run starting from that
+exact content (the next milestone, say), with the same test command and the same environment (execution mode,
+toolchain, and the validator's execution policy), uses it as its baseline instead of running the suite again. A
+changed workspace, toolchain, policy or command, or a run that did not complete, is never reused. The
+`validation_baseline.full_regression_source` run event says which (`captured`, `resume` or `prior_full_suite`). `required` always captures the baseline (the production profile seals this), and
 `disabled` never does. When the baseline is captured, every failure after the change is classified against it:
 `PRE_EXISTING_FAILURE` (not blamed on the change), `NEW_FAILURE`/`CHANGED_FAILURE` (block), `RESOLVED_FAILURE`
 (fixed), `NOT_COMPARABLE`.

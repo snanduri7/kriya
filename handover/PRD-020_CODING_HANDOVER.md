@@ -45,7 +45,7 @@ exists.
 Requirements are seeded PENDING at JUDGMENT, the lowest authority, so the verifier's verdict becomes the authoritative state. `ObligationLedger.current` keeps the latest record of same-or-higher authority. `unresolved_terminal_obligations()` skips this kind, because the requirement policy, which knows UNVERIFIED from VIOLATED, aggregates it.
 
 ## Decisions to review
-1. **Policy defaults.** VIOLATED always blocks. UNKNOWN and UNVERIFIED default to `record`: reported in the result and the run events, not blocking. Blocking by default would change every existing run. Production seals `requirement_unknown_policy: block`. `requirement_unverified_policy` is not sealed, because a behavioural requirement ("make it faster") usually cannot be confirmed from source, and sealing it would turn most production runs into NEEDS_REVIEW. Both fields are SECURITY_AUTHORITY under SEC-009, so a repository cannot relax them.
+1. **Policy defaults** (superseded for production by the final-review corrections below). VIOLATED always blocks. UNKNOWN and UNVERIFIED default to `record`: reported in the result and the run events, not blocking. Blocking by default would change every existing run. Production seals `requirement_unknown_policy: block`. `requirement_unverified_policy` is not sealed, because a behavioural requirement ("make it faster") usually cannot be confirmed from source, and sealing it would turn most production runs into NEEDS_REVIEW. Both fields are SECURITY_AUTHORITY under SEC-009, so a repository cannot relax them.
 2. **The verifier may mark a behavioural requirement satisfied.** Its per-id verdict is bound to the exact candidate content and runs only after every deterministic gate passed. "missing" is limited to concrete, literally-named requirements, so the gate stays as narrow as before and cannot burn retries on vague prose. A requirement the verifier cannot confirm is UNVERIFIED.
 3. **Accepted human clarifications.** The data model supports them (`REQ-C<n>`, source `clarification`), but Kriya has no clarification producer today; the REPL's clarify step is command routing. None is invented here.
 4. **Coverage gaps are not plan errors.** A requirement no subtask maps to stays terminally active. Rejecting the plan would add repair loops without making the requirement any safer.
@@ -95,3 +95,32 @@ The ledger now carries requirement records and `Subtask` has a new field. A stru
 
 ## Live test
 `tests/test_live_prd020_024_batch5.py::test_prd020_lineage_survives_model_paraphrase` (see the batch-5 live command in the PRD-024 handover).
+
+## Final review corrections (before pytest/live verification)
+1. **Production blocks VIOLATED, NO_VERDICT and CANNOT_CONFIRM_FROM_CODE.** The production profile now seals `requirement_unverified_policy: block` as well as unknown. Decision 1 above no longer holds for production; the non-production default stays `record`.
+2. **CANNOT_CONFIRM_FROM_CODE (UNVERIFIED) is never SATISFIED.** It can be closed only by another authoritative verifier's positive evidence for that exact REQ on that exact candidate. Closure is a separate DETERMINISTIC record (`requirement.REQ-n.closure`), never written on the verdict's own id: `ObligationLedger.current` keeps the newest same-or-higher-authority record, so a DETERMINISTIC record there would hide a later VIOLATED verdict about different code. `requirement_outcomes` reports CLOSED_BY_EVIDENCE (distinct from SATISFIED) only when the closure's `evidence_id` equals the current verdict's. VIOLATED and NO_VERDICT are never closed. REQ ids, text, digest and derivation are unchanged.
+3. **Two producers, both bound by the user's own words, never a model citation:**
+   - **Named tests** (`workflow.close_requirements_with_named_tests`): tests the REQ's own text names (path, file name or stem, e.g. `test_legacy`, `PricingTest`). The candidate must not have written or edited them; they run on the exact candidate the verifier judged, before anything changes it, and must execute (non-zero tests) and pass. Direct/milestone pre-apply boundary (a `requirement.closure` run event) and enforce's terminal gate alike.
+   - **Migration gate** (`attempt._close_requirements_by_migration_gate`): a REQ naming both the migration's source and its target, once every current migration obligation is SATISFIED for that candidate. A REQ naming only one side (e.g. how the target library is used) is a different claim and stays UNVERIFIED.
+4. **Disclosed consequences under production:**
+   - A verifier "missing" claim suppressed because it names a Planner-only identifier, or a "missing" claim about a requirement naming nothing concrete, is recorded UNVERIFIED and now blocks production unless one of the producers closes it. This is the reviewer's rule (CANNOT_CONFIRM blocks without other authoritative evidence), not a regression, but it can end a production run as REQUIREMENTS_UNRESOLVED where it previously passed.
+   - A `requirements_unresolved` stop is not retried (already in the non-retryable set): the Developer cannot supply a verdict.
+   - There is no runtime (run-verification) producer yet: the run verifier judges the goal as a whole, with no per-REQ binding. A behavioural requirement with neither named tests nor a migration binding blocks production.
+5. **Milestone final verification.** Units still commit incrementally. When the integration unit's check fails, the plan is not successful, and:
+   - the plan result carries `committed_work_units` and `committed_changes_retained`;
+   - `RunRecord.committed_work_units()` derives the same from the record's own commit cycles (`commits[].work_unit` plus the settled result). There is no schema change and no new lifecycle enum;
+   - the CLI prints "Already committed and still applied (not rolled back): M1, M2".
+
+   Tested through the real CLI and milestone driver, and on the files on disk.
+
+Tests added (plain runner):
+- `test_prd020_requirement_lineage.py`: 40 passed, 16 of them new. They cover:
+  - the production blocking matrix: NO_VERDICT, CANNOT_CONFIRM and VIOLATED;
+  - CANNOT_CONFIRM with no other evidence blocks, end to end;
+  - closure bound to the exact candidate;
+  - VIOLATED and NO_VERDICT never closed;
+  - the named-test conditions: unmodified, executed, passing;
+  - the direct engine and the enforce terminal gate, each with a passing and a failing named test;
+  - the migration binding.
+- `test_prd020_milestone_requirements.py`: 4 passed, 2 of them new: the committed units via the CLI, the result and the RunRecord, and only settled COMMITTED cycles counting.
+- Mutations, each caught: closure not bound to the candidate, closure closing VIOLATED/UNKNOWN, a modified test accepted, execution not confirmed, production seal dropped, direct closure skipped, enforce closure skipped, migration single-term binding, committed units not reported, unsettled cycles counted.
