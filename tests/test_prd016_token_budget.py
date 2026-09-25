@@ -133,6 +133,115 @@ def test_under_prediction_is_detected_after_the_call():
     assert tb.compare_with_usage(decision, None, model="m") is None
 
 
+# --- adaptive context/output selection (pure) ----------------------------------------------------
+_TIERS_64 = (tb.ContextTier(65536, tb.TIER_SOURCE_QUALIFICATION_RECORD),)
+
+
+def _prompt_for(tokens):
+    """A one-message request the default bound counts as ``tokens``."""
+    return int(2.5 * (tokens - tb.REQUEST_OVERHEAD_TOKENS - tb.PER_MESSAGE_OVERHEAD_TOKENS))
+
+
+def test_32k_preferred_grows_to_a_qualified_64k_tier_when_the_prompt_requires_it():
+    decision = _plan(_prompt_for(41000), 32768, max_tokens=16384, tiers=_TIERS_64)
+    assert decision.context_window == 65536 and decision.context_expanded
+    assert decision.preferred_context_window == 32768
+    assert decision.selection_reason == "prompt_exceeds_preferred_window"
+    assert decision.qualification_source == tb.TIER_SOURCE_QUALIFICATION_RECORD
+    assert decision.max_tokens == 16384 and not decision.output_expanded
+    assert decision.prompt_tokens + decision.max_tokens + decision.safety_margin <= 65536
+
+
+def test_32k_stays_selected_when_it_is_sufficient():
+    decision = _plan(_prompt_for(10000), 32768, max_tokens=16384, tiers=_TIERS_64)
+    assert decision.context_window == 32768 and not decision.expanded
+    assert decision.selection_reason == "fits_preferred"
+    assert decision.qualification_source == tb.TIER_SOURCE_PREFERRED
+
+
+def test_only_offered_tiers_are_ever_selected():
+    """An unverified 128K window is simply not a tier: the caller offers only
+    qualified or operator-declared tiers, so a prompt that needs it is
+    refused rather than sent with an unverified window."""
+    with pytest.raises(tb.ContextBudgetUnsatisfiableError) as refused:
+        _plan(_prompt_for(100000), 32768, max_tokens=4096, tiers=_TIERS_64)
+    assert refused.value.decision.context_window == 65536
+    assert [t["tokens"] for t in refused.value.decision.considered_tiers] == [32768, 65536]
+
+
+def test_the_smallest_sufficient_qualified_tier_is_selected():
+    tiers = (tb.ContextTier(131072, tb.TIER_SOURCE_QUALIFICATION_RECORD),
+             tb.ContextTier(65536, tb.TIER_SOURCE_OPERATOR_DECLARED))
+    decision = _plan(_prompt_for(41000), 32768, max_tokens=16384, tiers=tiers)
+    assert decision.context_window == 65536
+    assert decision.qualification_source == tb.TIER_SOURCE_OPERATOR_DECLARED
+    bigger = _plan(_prompt_for(100000), 32768, max_tokens=16384, tiers=tiers)
+    assert bigger.context_window == 131072
+
+
+def test_the_hard_context_ceiling_excludes_larger_tiers():
+    tiers = (tb.ContextTier(65536, tb.TIER_SOURCE_QUALIFICATION_RECORD),
+             tb.ContextTier(131072, tb.TIER_SOURCE_QUALIFICATION_RECORD))
+    with pytest.raises(tb.ContextBudgetUnsatisfiableError):
+        _plan(_prompt_for(100000), 32768, max_tokens=4096, tiers=tiers, hard_context_ceiling=65536)
+
+
+def test_strict_mode_never_exceeds_the_preferred_window():
+    with pytest.raises(tb.ContextBudgetUnsatisfiableError):
+        _plan(_prompt_for(41000), 32768, max_tokens=4096, tiers=_TIERS_64, policy_mode=tb.POLICY_STRICT)
+
+
+def test_a_grounded_large_output_exceeds_the_normal_output_budget_within_qualified_limits():
+    expected = tb.OutputExpectation(24000, "full-file rewrite of Big.java (~20000 tokens)")
+    decision = _plan(_prompt_for(12000), 32768, max_tokens=16384, tiers=_TIERS_64, expected_output=expected)
+    # 12000 + 24000 does not fit 32K: the smallest qualified tier that holds
+    # both is chosen and the output allowance grows to the expectation.
+    assert decision.context_window == 65536
+    assert decision.max_tokens == 24000 and decision.output_expanded
+    assert decision.selection_reason == "grounded_output_exceeds_preferred_window"
+    assert decision.expected_output_tokens == 24000 and "Big.java" in decision.output_grounding
+    # When it fits the preferred window, only the output grows.
+    small = _plan(_prompt_for(2000), 32768, max_tokens=16384, tiers=_TIERS_64,
+                  expected_output=tb.OutputExpectation(20000, "rewrite"))
+    assert small.context_window == 32768 and small.max_tokens == 20000
+    assert small.selection_reason == "grounded_output_exceeds_preferred_output"
+
+
+def test_ungrounded_output_never_grows_and_never_triggers_expansion():
+    decision = _plan(_prompt_for(20000), 32768, max_tokens=16384, tiers=_TIERS_64)
+    # The prompt fits 32K with the minimum output: the output is reduced,
+    # the context is not expanded just to restore the full max_tokens.
+    assert decision.context_window == 32768 and decision.output_reduced
+    assert decision.max_tokens < 16384 and not decision.output_expanded
+
+
+def test_expected_output_above_the_hard_output_ceiling_is_refused_before_dispatch():
+    with pytest.raises(tb.OutputBudgetUnsatisfiableError) as refused:
+        _plan(_prompt_for(2000), 32768, max_tokens=16384, tiers=_TIERS_64,
+              expected_output=tb.OutputExpectation(40000, "rewrite"), hard_output_ceiling=24000)
+    assert refused.value.reason_code == tb.OUTPUT_BUDGET_UNSATISFIABLE
+    assert isinstance(refused.value, tb.ContextBudgetUnsatisfiableError)
+    assert "hard output ceiling 24000" in str(refused.value)
+
+
+def test_strict_mode_refuses_a_grounded_output_above_the_preferred_output():
+    with pytest.raises(tb.OutputBudgetUnsatisfiableError) as refused:
+        _plan(_prompt_for(2000), 32768, max_tokens=4096, expected_output=tb.OutputExpectation(8000, "rewrite"),
+              policy_mode=tb.POLICY_STRICT)
+    assert "strict" in str(refused.value)
+
+
+def test_the_selection_evidence_is_complete():
+    decision = _plan(_prompt_for(41000), 32768, max_tokens=16384, tiers=_TIERS_64, hard_context_ceiling=65536)
+    evidence = decision.to_dict()
+    for key in ("preferred_context_window", "selected_context_window", "preferred_output_tokens",
+                "selected_output_tokens", "prompt_tokens", "expected_output_tokens", "selection_reason",
+                "qualification_source", "hard_context_ceiling", "hard_output_ceiling", "policy_mode",
+                "considered_tiers"):
+        assert key in evidence, key
+    assert evidence["selected_context_window"] == 65536 and evidence["hard_context_ceiling"] == 65536
+
+
 # --- the LLM boundary ---------------------------------------------------------------------------
 
 def _response(content="ok"):
