@@ -297,7 +297,11 @@ def test_containment_and_verification_changes_are_their_own_fingerprints(git_rep
 def test_model_runtime_and_toolchain_are_declared_unavailable(git_repo):
     fingerprints = generation_resume_fingerprints(_config(), str(git_repo), goal=GOAL)
     assert not fingerprints["model_runtime"].available and "PRD-013" in fingerprints["model_runtime"].basis
-    assert not fingerprints["toolchain"].available and "PRD-011" in fingerprints["toolchain"].basis
+    # PRD-011 binds the toolchain only under contained execution (see
+    # tests/test_prd011_toolchain_fingerprint.py); a host-mode run still has
+    # no attested identity, so it stays UNAVAILABLE (never a match).
+    assert not fingerprints["toolchain"].available
+    assert "containment not required" in fingerprints["toolchain"].basis
     assert set(fingerprints) == set(FINGERPRINT_NAMES)
 
 
