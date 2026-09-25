@@ -168,3 +168,82 @@ identically at HEAD. Mutation checks were each caught:
 
 **First pytest run:** the real-Docker test pulls `maven:3.9-eclipse-temurin-8` and `gradle:8-jdk17` if they are
 absent.
+
+
+## Final-review correction: toolchain conflict semantics (2026-09-25)
+
+The batch 2 final review corrected one PRD-011 rule. A repository-declared version that differs from the goal is not
+a failure when the run is authorized to change the declaration.
+
+**Model** (`kriya/tools/toolchain_identity.py::resolve_toolchain_selection`)
+- The **baseline** is the pre-mutation workspace declaration (the validator's `original_workspace_path`).
+- The **target** is the candidate's declaration. Under authority, it can also be a goal-stated JDK that differs from
+  it; the migration may not have landed yet.
+- The **candidate verification toolchain** is the target. Its attested identity carries
+  `selection = {baseline, target, basis, declaration_mutable}`.
+- **Bases:**
+  - `repository_declaration`;
+  - `authorized_declaration_change`;
+  - `authorized_goal_requirement`;
+  - `goal_requirement_undeclared` (nothing declares a version; unchanged behaviour).
+- **Conflict:** without authority, either of these is `ToolchainRequirementConflictError` (reason code
+  `TOOLCHAIN_REQUIREMENT_CONFLICT`, a ContainmentSetupError):
+  - a declaration change;
+  - a goal requirement that contradicts the declaration.
+
+  It is raised before any candidate command runs. The failure keeps the reason code in
+  `Failure.diagnostics`, and the run's `environment_failure` starts
+  `CONTAINMENT_SETUP_FAILED: TOOLCHAIN_REQUIREMENT_CONFLICT:`.
+- **Python:** the same model. A `requires-python`/`.python-version` edit that changes the resolved
+  interpreter or constraint is a migration; one that resolves to the same toolchain is not. Python has no goal-stated
+  requirement channel.
+
+**Authority** (`kriya/workflow/toolchain.py::toolchain_declaration_mutable`)
+- The authority is structured and reused, never inferred from goal wording. It is the run's write scope (the value
+  AuthorizedFileWriter enforces) plus the approved plan's planned files.
+- An unrestricted direct run is mutable.
+- An allowlist or planned run is mutable only if the root declaration file is in its allowed files, in some subtask's
+  planned files, or in the owner's authorized files (owner recovery).
+- DENY_ALL scope doesn't count; only the plan does.
+- **Wired into:** the attempt validators, terminal regression, owner-recovery self-correction, and the resume
+  fingerprint.
+- No new keyword detection was added. The goal-stated JDK is the pre-existing host-JDK mechanism. It can only confirm
+  the declaration, select the target under authority, or fail closed.
+
+**Resume**
+- `toolchain_fingerprint(..., candidate_files, declaration_mutable)` overlays a candidate checkpoint's own
+  declaration files on the workspace. The fingerprint therefore describes the target that the candidate's gates ran
+  under: selection plus the target image digest.
+- Save and check use the same checkpointed `final_files`.
+- A migration's gates are reused only while the target image and selection are unchanged. A change to the baseline
+  image is irrelevant. An unauthorized selection is UNAVAILABLE and never a match.
+- This closes the earlier disclosed residual, where the fingerprint described only the base workspace.
+
+**Tests** (`tests/test_prd011_toolchain_migration.py`, 11 cases)
+- authority derivation;
+- an ordinary task keeps the repository version;
+- an authorized 17 → 21 migration, both by declaration and by goal before the edit lands;
+- an end-to-end direct run whose contained gates all run in the Java 21 image with a recorded 17 → 21 selection;
+- the typed conflict, from a goal requirement and from a declaration change;
+- an end-to-end scoped run that stops with `TOOLCHAIN_REQUIREMENT_CONFLICT` and nothing executed;
+- Python migration and conflict, plus a spec edit that keeps the toolchain;
+- migration resume: the target image matches, the baseline image is irrelevant, a target image change is caught,
+  and an unauthorized selection is unavailable.
+
+Mutation checks, each caught:
+- always authorized;
+- a goal never authorized;
+- the fingerprint ignoring the candidate;
+- a direct run not authorized.
+
+The old end-to-end test `test_goal_stated_jdk_contradicting_the_pom_stops_the_run_before_any_execution` (direct
+run) encoded the superseded rule. A direct run may change `pom.xml`, so it is now an authorized migration. The typed
+stop is proven by the scoped-run test instead.
+
+Unchanged:
+- supported-version validation;
+- the observed patch check;
+- execution by image ID;
+- Gradle/JDK/Python attestation;
+- evidence persistence;
+- containment fingerprinting.

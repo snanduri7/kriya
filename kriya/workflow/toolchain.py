@@ -352,3 +352,38 @@ def _pin_exec_plugin_executable_to_resolved_jdk(worktree_path: str, java_home_ov
 # kriya/workflow/attribution.py on 2026-08-14, alongside the rest of the
 # "which file does this concern" checks - see that module's own docstring
 # taxonomy.
+
+
+def toolchain_declaration_mutable(
+    write_scope_mode: Any, allowed_write_relpaths: Optional[Iterable[str]],
+    structured_plan: Any = None, extra_relpaths: Iterable[str] = (),
+) -> bool:
+    """PRD-011: whether this run has structured authority to change the
+    repository's toolchain declaration (pom.xml / build.gradle[.kts] /
+    pyproject.toml / .python-version at the workspace root) - the authority
+    a toolchain migration needs. Derived only from the run's write scope
+    (the same value AuthorizedFileWriter enforces) and the approved plan's
+    planned files, never from goal wording:
+    - an unrestricted direct run may write the declaration;
+    - otherwise the declaration must be in the allowed write scope, in some
+      subtask's planned files of the approved plan, or in ``extra_relpaths``
+      (an owner's authorized files).
+    ``write_scope_mode`` None means what run_generation_workflow means by
+    it: an allowlist when allowed paths are given, else unrestricted."""
+    from kriya.tools.toolchain_identity import ALL_TOOLCHAIN_DECLARATION_FILES
+
+    allowed = [path for path in (allowed_write_relpaths or ()) if path]
+    mode = getattr(write_scope_mode, "value", write_scope_mode)
+    if mode is None:
+        mode = "allowlist" if allowed else "unrestricted"
+    if mode == "unrestricted":
+        return True
+    paths = list(extra_relpaths)
+    if mode != "deny_all":
+        paths.extend(allowed)
+    for subtask in getattr(structured_plan, "subtasks", None) or ():
+        paths.extend(planned.path for planned in getattr(subtask, "planned_files", None) or ())
+    return any(
+        os.path.normpath(path).replace(os.sep, "/") in ALL_TOOLCHAIN_DECLARATION_FILES
+        for path in paths if isinstance(path, str)
+    )

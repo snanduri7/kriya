@@ -241,8 +241,26 @@ falls back to the host's tools.
 | Python | `pyproject.toml` `requires-python`, else `.python-version` (minor version) | `python:<3.10-3.14>-slim` |
 
 - **Defaults.** With no declared version: JDK 21 for Java and Python 3.12.
-- **Goal-stated JDK.** When a goal names a Java version and Kriya selects that JDK because the host's `java` and `mvn`
-  disagree, its version is used here too. A repository that declares a different version is refused.
+- **Baseline and target toolchains.**
+  - The repository's declaration is the *baseline*.
+  - A toolchain change is a *migration*, and its candidate gates run under the *target*.
+- **Authority for a migration** comes only from the run's write scope, never from goal wording. The run must be
+  allowed to modify the root `pom.xml`/`build.gradle[.kts]`/`pyproject.toml`/`.python-version`:
+  - an unrestricted `kriya generate` is;
+  - a scoped or planned run is if the file is in its allowed files or in the approved plan.
+- **Outcomes:**
+  - **Ordinary task:** the candidate keeps the declaration, so gates run under the repository's version.
+  - **Authorized migration:**
+    - the candidate changes the declaration (e.g. Java 17 → 21), so gates run under the target;
+    - a goal-stated JDK that differs from the declaration (Kriya selects it when the host's `java` and `mvn` disagree)
+      is also used as the target, even before the declaration edit lands.
+  - **No authority:**
+    - a scoped subtask that cannot touch `pom.xml` but whose goal needs Java 21 on a Java 17 repository stops before
+      any candidate command runs, with `TOOLCHAIN_REQUIREMENT_CONFLICT`;
+    - so does a candidate that changed the declaration without authority.
+- **Evidence:** each gate's `toolchain_identity` records `selection`: the baseline, the target, the basis, and whether
+  the declaration was mutable. For a candidate checkpoint, the resume fingerprint follows the candidate's own
+  declaration. A migration's gates are reused only while the target image is unchanged.
 - **Python specs.** `requires-python` supports the usual PEP 440 forms: `>=`, `<`, `!=`, `~=`, `==X.Y.*`,
   major-only bounds such as `<4`, and patch bounds. Kriya keeps 3.12 if the spec allows it, otherwise it picks the
   nearest allowed minor. If only some patch releases of that minor satisfy the spec (e.g. `>=3.11.4,<3.12`), the

@@ -2291,9 +2291,17 @@ async def _attempt_owner_recovery_self_correction(
     if not active_code_context_parts:
         return None
 
+    from kriya.workflow.toolchain import toolchain_declaration_mutable
+
     validator = PolymorphicValidator(
         plan_workspace_path, original_workspace_path=workspace_path,
         autonomy_cfg=kernel.config.autonomy,
+        # PRD-011: the owner's own authorized files are the authority to
+        # change a toolchain declaration here.
+        toolchain_declaration_mutable=toolchain_declaration_mutable(
+            "allowlist", [], None,
+            extra_relpaths=list(required_owner_files) + [p.path for p in owner.planned_files],
+        ),
     )
     result = await run_self_correction_loop(
         llm=developer_llm,

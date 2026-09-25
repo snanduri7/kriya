@@ -127,50 +127,8 @@ async def test_host_mode_gate_outcomes_never_claim_a_toolchain_identity(tmp_path
     assert all("toolchain_identity" not in o for o in outcomes)
 
 
-@pytest.mark.asyncio
-async def test_goal_stated_jdk_contradicting_the_pom_stops_the_run_before_any_execution(tmp_path, monkeypatch):
-    """The production shape end to end: the attempt picks the goal-stated JDK
-    AFTER building its validator. Under containment that JDK contradicts the
-    pom's Java 17, so the run must end as a containment_setup_failed stop -
-    never a crash, an internal_framework_error, a retry, or a PASS - and no
-    command may run in any container."""
-    (tmp_path / "pom.xml").write_text(
-        "<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>a</artifactId>"
-        "<version>1</version><properties><maven.compiler.release>17</maven.compiler.release>"
-        "</properties></project>"
-    )
-    jdk21 = tmp_path / "jdk21"
-    jdk21.mkdir()
-    (jdk21 / "release").write_text('JAVA_VERSION="21.0.4"\n')
-    monkeypatch.setattr("kriya.workflow.attempt._resolve_java_home_override", lambda goal: str(jdk21))
-    monkeypatch.setattr("kriya.workflow.attempt._check_java_toolchain_mismatch", lambda stack: None)
-    ran = []
-    monkeypatch.setattr(
-        "kriya.tools.validate.ProcessController.run", lambda *a, **k: ran.append(a) or _contained_run(),
-    )
 
-    cfg = AppConfig()
-    cfg.autonomy.mode = "guardrails"
-    cfg.autonomy.run_verification_enabled = False
-    cfg.autonomy.contained_execution_required = True
-    cfg.autonomy.containment_backend = "oci"
-    kernel = Kernel(config=cfg)
-    llm = LLMClient(cfg)
-    llm.complete = AsyncMock(side_effect=[
-        "Step 1: Write code",
-        "Design: Write src/main/java/App.java",
-        '[{"filepath": "src/main/java/App.java", "content": "public class App {}"}]',
-    ] + ["Review: Approved"] * 5)
-    we = WorkflowEngine(kernel, llm)
-    we.reviewer.run = AsyncMock(return_value="Review: Approved")
-
-    res = await we.run_generation_workflow(goal="Add App on Java 21", workspace_path=str(tmp_path))
-
-    assert res["quality_gates_passed"] is False
-    conn = sqlite3.connect(trace_db_path(cfg))
-    try:
-        category = conn.execute("SELECT failure_category FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()[0]
-    finally:
-        conn.close()
-    assert category == "containment_setup_failed"
-    assert ran == []
+# The goal-stated-JDK conflict stop moved to test_prd011_toolchain_migration.py
+# (final review semantics): an unrestricted direct run may change pom.xml, so
+# there it is an authorized migration; the typed stop needs a scope without
+# that authority.

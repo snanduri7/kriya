@@ -32,7 +32,7 @@ from kriya.tools.dependency_execution import (
 )
 from kriya.tools.process import ProcessController
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
-from kriya.tools.toolchain_identity import resolve_toolchain_identity
+from kriya.tools.toolchain_identity import resolve_toolchain_selection
 
 logger = logging.getLogger(__name__)
 
@@ -210,13 +210,19 @@ class PolymorphicValidator:
         autonomy_cfg: Optional[AutonomyConfig] = None,
         java_home_override: Optional[str] = None,
         authorized_dependency_removals: Optional[Iterable[str]] = None,
+        toolchain_declaration_mutable: bool = False,
     ) -> None:
         self.workspace_path = os.path.abspath(workspace_path)
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
         self.stack = self._detect_stack()
         self.toolchain_identity = None
-        # Assigning the property resolves the toolchain identity (below).
+        # Whether this run may change the repository's toolchain declaration
+        # (the caller's structured write scope - see
+        # kriya/workflow/toolchain.py::toolchain_declaration_mutable). Set
+        # before java_home_override, whose assignment resolves the identity.
+        self._toolchain_declaration_mutable = toolchain_declaration_mutable
+        self._java_home_override = None
         self.java_home_override = java_home_override
         # 'group:artifact' keys the caller has already determined are
         # explicitly authorized for removal by the goal (kriya/workflow/
@@ -733,6 +739,15 @@ class PolymorphicValidator:
         self._java_home_override = value
         self._resolve_toolchain_identity()
 
+    @property
+    def toolchain_declaration_mutable(self) -> bool:
+        return self._toolchain_declaration_mutable
+
+    @toolchain_declaration_mutable.setter
+    def toolchain_declaration_mutable(self, value: bool) -> None:
+        self._toolchain_declaration_mutable = bool(value)
+        self._resolve_toolchain_identity()
+
     def _resolve_toolchain_identity(self) -> None:
         """PRD-011: stack ownership remains in _detect_stack(); contained
         execution only resolves a versioned OCI profile from that one
@@ -740,8 +755,10 @@ class PolymorphicValidator:
         and raises (a ContainmentSetupError) for unsupported/conflicting
         requirements - never a host-tool fallback."""
         self.toolchain_identity = (
-            resolve_toolchain_identity(
-                self.workspace_path, self.stack, java_home_override=self._java_home_override,
+            resolve_toolchain_selection(
+                self.workspace_path, self.stack, baseline_path=self.original_workspace_path,
+                java_home_override=self._java_home_override,
+                declaration_mutable=self._toolchain_declaration_mutable,
             )
             if self.autonomy_cfg.contained_execution_required else None
         )

@@ -24,6 +24,31 @@ class ToolchainMismatchError(BackendUnavailableError):
     """A selected image does not contain the toolchain it claims to contain."""
 
 
+TOOLCHAIN_REQUIREMENT_CONFLICT = "TOOLCHAIN_REQUIREMENT_CONFLICT"
+
+
+class ToolchainRequirementConflictError(ToolchainResolutionError):
+    """The run needs a toolchain other than the repository declares, and has
+    no authority to change that declaration. Raised before any candidate
+    command runs; never resolved by picking one side."""
+
+    reason_code = TOOLCHAIN_REQUIREMENT_CONFLICT
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(f"{TOOLCHAIN_REQUIREMENT_CONFLICT}: {detail}")
+
+
+# The files that declare a stack's toolchain. Changing one is a toolchain
+# change, authorized only through the run's write authority over that file.
+TOOLCHAIN_DECLARATION_FILES: Dict[str, Tuple[str, ...]] = {
+    "java": ("pom.xml", "build.gradle", "build.gradle.kts"),
+    "python": ("pyproject.toml", ".python-version"),
+}
+ALL_TOOLCHAIN_DECLARATION_FILES: Tuple[str, ...] = tuple(
+    name for names in TOOLCHAIN_DECLARATION_FILES.values() for name in names
+)
+
+
 @dataclass(frozen=True)
 class ToolchainIdentity:
     language: str
@@ -40,6 +65,13 @@ class ToolchainIdentity:
     # (e.g. requires-python ">=3.11.4" on the 3.11 profile): the exact
     # runtime version observed at attestation must satisfy it.
     runtime_constraint: Optional[str] = None
+    # How the verification toolchain was chosen: the repository's baseline
+    # declaration, the target, the basis (repository_declaration,
+    # authorized_declaration_change, authorized_goal_requirement,
+    # goal_requirement_undeclared) and whether the run may change the
+    # declaration. Part of the identity: a resumed run reuses gate evidence
+    # only for the same baseline -> target selection.
+    selection: Optional[Dict[str, Any]] = None
 
     def with_runtime_evidence(
         self, *, image_digest: str, observed_runtime_version: str,
@@ -124,31 +156,20 @@ def _java_home_major(java_home: str) -> int:
     return int(match.group(1))
 
 
-def _resolve_java(workspace_path: str, java_home_override: Optional[str] = None) -> ToolchainIdentity:
+def _java_declaration(workspace_path: str) -> Tuple[Optional[int], str, Optional[str], Optional[str]]:
+    """(declared version or None, its source, build tool, build-tool version)."""
     if os.path.isfile(os.path.join(workspace_path, "pom.xml")):
         version, source = _pom_java_version(workspace_path)
-        build_tool = "maven"
-        build_version = "3.9"
-    elif os.path.isfile(os.path.join(workspace_path, "build.gradle")) or os.path.isfile(
+        return version, source, "maven", "3.9"
+    if os.path.isfile(os.path.join(workspace_path, "build.gradle")) or os.path.isfile(
         os.path.join(workspace_path, "build.gradle.kts")
     ):
         version, source = _gradle_java_version(workspace_path)
-        build_tool = "gradle"
-        build_version = None
-    else:
-        version, source = None, "default:standalone-java"
-        build_tool = None
-        build_version = None
-    if java_home_override:
-        override_version = _java_home_major(java_home_override)
-        if version is not None and version != override_version:
-            raise ToolchainResolutionError(
-                f"Repository requires Java {version} via {source}, but the selected host toolchain "
-                f"{java_home_override!r} is Java {override_version}; refusing ambiguous containment."
-            )
-        if version is None:
-            version, source = override_version, f"JAVA_HOME:{java_home_override}/release"
-    version = version or _DEFAULT_JAVA
+        return version, source, "gradle", "8"
+    return None, "default:standalone-java", None, None
+
+
+def _java_identity(version: int, source: str, build_tool: Optional[str], build_version: Optional[str]) -> ToolchainIdentity:
     if version not in _SUPPORTED_JAVA:
         raise ToolchainResolutionError(
             f"Java {version} is required by {source}, but production containment supports exactly "
@@ -156,10 +177,14 @@ def _resolve_java(workspace_path: str, java_home_override: Optional[str] = None)
         )
     if build_tool == "gradle":
         image = f"gradle:8-jdk{version}"
-        build_version = "8"
     else:
         image = f"maven:3.9-eclipse-temurin-{version}"
     return ToolchainIdentity("java", "jdk", str(version), build_tool, build_version, image, source)
+
+
+def _resolve_java(workspace_path: str) -> ToolchainIdentity:
+    version, source, build_tool, build_version = _java_declaration(workspace_path)
+    return _java_identity(version or _DEFAULT_JAVA, source, build_tool, build_version)
 
 
 _SPECIFIER = re.compile(r"(===|==|!=|~=|>=|<=|>|<)\s*(\d+(?:\.\d+){0,2})(\.\*)?")
@@ -290,12 +315,98 @@ def _resolve_python(workspace_path: str) -> ToolchainIdentity:
     )
 
 
+def _summary(identity: ToolchainIdentity) -> Dict[str, Any]:
+    return {
+        "runtime_version": identity.runtime_version, "runtime_constraint": identity.runtime_constraint,
+        "requirement_source": identity.requirement_source, "containment_image": identity.containment_image,
+    }
+
+
+def _same_toolchain(a: ToolchainIdentity, b: ToolchainIdentity) -> bool:
+    return (a.runtime_version, a.runtime_constraint, a.build_tool) == (b.runtime_version, b.runtime_constraint, b.build_tool)
+
+
+def resolve_toolchain_selection(
+    candidate_path: str, detected_stack: str, *, baseline_path: Optional[str] = None,
+    java_home_override: Optional[str] = None, declaration_mutable: bool = False,
+) -> Optional[ToolchainIdentity]:
+    """The toolchain candidate verification runs under.
+
+    - baseline: what the repository (``baseline_path``, the pre-mutation
+      workspace) declares; target: what the candidate is verified under.
+    - A candidate whose toolchain declaration differs from the baseline is a
+      toolchain migration. It is honoured only when the run may change the
+      declaration (``declaration_mutable``: the declaration file is inside
+      the run's authorized write scope) - the declaration can only have
+      changed through that governed write path; otherwise it is a
+      TOOLCHAIN_REQUIREMENT_CONFLICT.
+    - A goal-stated JDK (``java_home_override``) that differs from the
+      declaration becomes the target only under that same authority (the
+      migration may not have landed in the candidate yet), or when nothing
+      declares a version at all. Otherwise it is a conflict. It never
+      authorizes a change by itself.
+
+    Authority is never inferred from goal wording here: it is the caller's
+    structured write scope."""
+    if detected_stack == "python":
+        target = _resolve_python(candidate_path)
+        baseline = _resolve_python(baseline_path) if baseline_path else None
+        basis = "repository_declaration"
+        if baseline is not None and not _same_toolchain(baseline, target):
+            if not declaration_mutable:
+                raise ToolchainRequirementConflictError(
+                    f"the candidate changes the Python toolchain from {baseline.runtime_version} "
+                    f"({baseline.requirement_source}) to {target.runtime_version} without authority to modify "
+                    f"{'/'.join(TOOLCHAIN_DECLARATION_FILES['python'])}."
+                )
+            basis = "authorized_declaration_change"
+        return replace(target, selection={
+            "baseline": _summary(baseline) if baseline is not None else None,
+            "target": _summary(target), "basis": basis, "declaration_mutable": declaration_mutable,
+        })
+    if detected_stack != "java":
+        return None
+
+    declared, source, build_tool, build_version = _java_declaration(candidate_path)
+    target = _java_identity(declared or _DEFAULT_JAVA, source, build_tool, build_version)
+    baseline = None
+    baseline_declared = None
+    basis = "repository_declaration"
+    if baseline_path:
+        baseline_declared, baseline_source, baseline_tool, baseline_build = _java_declaration(baseline_path)
+        baseline = _java_identity(baseline_declared or _DEFAULT_JAVA, baseline_source, baseline_tool, baseline_build)
+        if not _same_toolchain(baseline, target):
+            if not declaration_mutable:
+                raise ToolchainRequirementConflictError(
+                    f"the candidate changes the Java toolchain from {baseline.runtime_version} "
+                    f"({baseline.requirement_source}) to {target.runtime_version} ({source}) without authority "
+                    f"to modify {'/'.join(TOOLCHAIN_DECLARATION_FILES['java'])}."
+                )
+            basis = "authorized_declaration_change"
+    if java_home_override:
+        goal_version = _java_home_major(java_home_override)
+        if goal_version != int(target.runtime_version):
+            goal_source = f"JAVA_HOME:{java_home_override}/release"
+            if declared is None and baseline_declared is None:
+                basis = "goal_requirement_undeclared"
+            elif declaration_mutable:
+                basis = "authorized_goal_requirement"
+            else:
+                raise ToolchainRequirementConflictError(
+                    f"the goal-stated JDK {java_home_override!r} is Java {goal_version}, but the repository "
+                    f"requires Java {target.runtime_version} via {target.requirement_source} and this run has no "
+                    f"authority to modify {'/'.join(TOOLCHAIN_DECLARATION_FILES['java'])}."
+                )
+            target = _java_identity(goal_version, goal_source, build_tool, build_version)
+    return replace(target, selection={
+        "baseline": _summary(baseline) if baseline is not None else None,
+        "target": _summary(target), "basis": basis, "declaration_mutable": declaration_mutable,
+    })
+
+
 def resolve_toolchain_identity(
     workspace_path: str, detected_stack: str, *, java_home_override: Optional[str] = None,
 ) -> Optional[ToolchainIdentity]:
-    """Resolve a versioned profile from the validator's existing stack decision."""
-    if detected_stack == "java":
-        return _resolve_java(workspace_path, java_home_override)
-    if detected_stack == "python":
-        return _resolve_python(workspace_path)
-    return None
+    """The repository's own toolchain (no baseline comparison, no authority
+    to change the declaration)."""
+    return resolve_toolchain_selection(workspace_path, detected_stack, java_home_override=java_home_override)

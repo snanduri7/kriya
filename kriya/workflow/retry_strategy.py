@@ -363,6 +363,12 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
                 if is_internal_framework_bug else raw_error_context
             ),
             raw_output=raw_error_context, source="orchestrator",
+            # PRD-011: a typed containment refusal (e.g.
+            # TOOLCHAIN_REQUIREMENT_CONFLICT) keeps its reason code.
+            diagnostics=(
+                {"reason_code": e.reason_code}
+                if is_containment_setup_failure and getattr(e, "reason_code", None) else None
+            ),
         )
     )
     failure_detail = (

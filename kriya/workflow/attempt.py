@@ -114,7 +114,7 @@ from kriya.workflow.acceptance import (
     runtime_verification_infrastructure_reason,
     subtask_owns_test_obligation,
 )
-from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
+from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags, toolchain_declaration_mutable
 from kriya.workflow.verification_contract import ContractVerdictState, classify_contract_verdict
 from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope, find_migration_incomplete
@@ -3391,6 +3391,7 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
     validator = PolymorphicValidator(
         ctx.worktree_path, original_workspace_path=ctx.workspace_path,
         autonomy_cfg=ctx.kernel.config.autonomy,
+        toolchain_declaration_mutable=_ctx_toolchain_declaration_mutable(ctx),
     )
     known_files = sorted(set(ctx.established_files))
 
@@ -7047,6 +7048,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         validator = PolymorphicValidator(
             ctx.worktree_path, original_workspace_path=ctx.workspace_path,
             autonomy_cfg=ctx.kernel.config.autonomy,
+            toolchain_declaration_mutable=_ctx_toolchain_declaration_mutable(ctx),
             # PRV-05 (2026-08-28, run 5): the dependency-preservation check
             # below used to unconditionally reject ANY pom.xml dependency
             # removal, restoring Gson every time the subtask that owns
@@ -8798,3 +8800,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         "CANDIDATE GATES", "PASSED", state.attempt_number,
         scope=ctx.execution_scope,
     )
+
+
+def _ctx_toolchain_declaration_mutable(ctx: "AttemptContext") -> bool:
+    """PRD-011: this attempt's structured authority to change the toolchain
+    declaration (its write scope and the approved plan)."""
+    return toolchain_declaration_mutable(ctx.write_scope_mode, ctx.allowed_write_relpaths, ctx.structured_plan)

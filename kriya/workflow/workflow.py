@@ -207,6 +207,7 @@ from kriya.workflow.failure_grounding import (
     extract_implicated_files,
 )
 from kriya.workflow.toolchain import (
+    toolchain_declaration_mutable,
     _JAVA_VERSION_MENTION_PATTERN,
     _JDK_INCOMPATIBLE_JVM_FLAGS,
     _check_java_toolchain_mismatch,
@@ -1187,9 +1188,13 @@ class WorkflowEngine:
         def _resume_fingerprints(
             effective_obligation_ledger: Any, workspace: Any = None,
             effective_obligation_fingerprint: Optional[Fingerprint] = None,
+            candidate_files: Optional[Dict[str, str]] = None,
         ) -> Dict[str, Any]:
+            # candidate_files: a candidate checkpoint's exact files, so the
+            # toolchain fingerprint describes the toolchain its gates ran
+            # under (PRD-011: the target of an authorized migration).
             return generation_resume_fingerprints(
-                self.kernel.config, workspace_path, workspace=workspace,
+                self.kernel.config, workspace_path, workspace=workspace, candidate_files=candidate_files,
                 input_obligation_fingerprint=entry_obligation_fingerprint,
                 effective_obligation_fingerprint=effective_obligation_fingerprint,
                 goal=goal, error_context=state.error_context,
@@ -1246,6 +1251,10 @@ class WorkflowEngine:
                         resume_restored_ledger, ledger_problem = restore_effective_ledger(candidate)
                         current_resume_fingerprints = _resume_fingerprints(
                             obligation_ledger,
+                            candidate_files=(
+                                candidate.get("final_files")
+                                if isinstance(candidate.get("final_files"), dict) else None
+                            ),
                             effective_obligation_fingerprint=(
                                 ledger_fingerprint(resume_restored_ledger)
                                 if resume_restored_ledger is not None
@@ -2054,6 +2063,7 @@ class WorkflowEngine:
             try:
                 resume_fingerprint_block: Optional[Dict[str, Any]] = fingerprint_block(_resume_fingerprints(
                     effective_obligation_ledger, workspace=checkpoint_workspace_identity,
+                    candidate_files=extra.get("final_files") if isinstance(extra.get("final_files"), dict) else None,
                 ))
             except Exception as error:
                 logger.warning(
@@ -3620,6 +3630,9 @@ class WorkflowEngine:
                 validator = PolymorphicValidator(
                     worktree_path, original_workspace_path=workspace_path,
                     autonomy_cfg=self.kernel.config.autonomy,
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(
+                        write_scope_mode, allowed_write_relpaths, structured_plan,
+                    ),
                 )
 
                 if not state.toolchain_checked:

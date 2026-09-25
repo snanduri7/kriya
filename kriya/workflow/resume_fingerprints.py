@@ -615,38 +615,75 @@ def compute_resume_fingerprints(
     }
 
 
+def _declaration_mutable(write_scope_mode: Any, allowed_write_relpaths: Any, structured_plan: Any) -> bool:
+    from kriya.workflow.toolchain import toolchain_declaration_mutable
+
+    return toolchain_declaration_mutable(write_scope_mode, allowed_write_relpaths, structured_plan)
+
+
 def toolchain_fingerprint(
     workspace_path: Optional[str] = None, autonomy_cfg: Any = None, *, goal: Optional[str] = None,
+    candidate_files: Optional[Mapping[str, str]] = None, declaration_mutable: bool = False,
 ) -> Fingerprint:
     """The toolchain identity every reuse decision compares (direct resume
     and milestone VERIFIED_NO_CHANGE alike).
 
     Bound only where PRD-011 makes it provable: with contained execution
-    required, the versioned profile PolymorphicValidator resolves for the
-    workspace (including a goal-stated JDK, exactly as the attempt applies
-    it) plus the local image's immutable content digest. Deterministic from
-    those inputs and side-effect free (inspects, never pulls or runs), so a
-    checkpoint and its resume compute it identically. The same content
-    digest always attests the same runtime, so observed versions add
-    nothing. Host execution has no attested identity: UNAVAILABLE, which
-    every reuse decision treats as UNVERIFIED, never a match."""
+    required, the verification toolchain PolymorphicValidator selects - the
+    repository's baseline declaration, a goal-stated JDK exactly as the
+    attempt applies it, and, for a checkpointed candidate
+    (``candidate_files``), the candidate's own toolchain declaration, i.e.
+    the target of an authorized toolchain migration - plus that image's
+    immutable local content digest. Deterministic from those inputs and
+    side-effect free (inspects, never pulls or runs), so a checkpoint and
+    its resume compute it identically. The same content digest always
+    attests the same runtime, so observed versions add nothing. Host
+    execution, an unresolvable or conflicting requirement, or an absent image
+    is UNAVAILABLE, which every reuse decision treats as UNVERIFIED."""
     if workspace_path is None or getattr(autonomy_cfg, "contained_execution_required", False) is not True:
         return Fingerprint.unavailable("host toolchain has no attested identity (containment not required)")
+    import shutil
+    import tempfile
+
     from kriya.tools.containment import ContainmentSetupError
     from kriya.tools.containment_oci import local_image_content_digest
+    from kriya.tools.toolchain_identity import ALL_TOOLCHAIN_DECLARATION_FILES
     from kriya.tools.validate import PolymorphicValidator
 
+    declarations = {
+        path: text for path, text in (candidate_files or {}).items() if path in ALL_TOOLCHAIN_DECLARATION_FILES
+    }
+    overlay = None
     try:
-        validator = PolymorphicValidator(workspace_path, autonomy_cfg=autonomy_cfg)
-        if goal and validator.stack == "java":
+        stack = PolymorphicValidator(workspace_path).stack
+        if declarations:
+            # The candidate's toolchain declaration over the baseline's.
+            overlay = tempfile.mkdtemp(prefix="kriya-toolchain-")
+            for name in ALL_TOOLCHAIN_DECLARATION_FILES:
+                source = os.path.join(workspace_path, name)
+                if name in declarations:
+                    with open(os.path.join(overlay, name), "w", encoding="utf-8") as stream:
+                        stream.write(declarations[name])
+                elif os.path.isfile(source):
+                    shutil.copyfile(source, os.path.join(overlay, name))
+        from kriya.tools.toolchain_identity import resolve_toolchain_selection
+
+        override = None
+        if goal and stack == "java":
             from kriya.workflow.toolchain import _resolve_java_home_override
 
-            validator.java_home_override = _resolve_java_home_override(goal)
+            override = _resolve_java_home_override(goal)
+        identity = resolve_toolchain_selection(
+            overlay or workspace_path, stack, baseline_path=workspace_path if overlay else None,
+            java_home_override=override, declaration_mutable=declaration_mutable,
+        )
     except ContainmentSetupError as exc:
         return Fingerprint.unavailable(f"toolchain requirement unresolvable: {exc}")
-    identity = validator.toolchain_identity
+    finally:
+        if overlay is not None:
+            shutil.rmtree(overlay, ignore_errors=True)
     if identity is None:
-        return Fingerprint.unavailable(f"no versioned toolchain profile for stack {validator.stack!r}")
+        return Fingerprint.unavailable(f"no versioned toolchain profile for stack {stack!r}")
     digest = local_image_content_digest(identity.containment_image)
     if digest is None:
         return Fingerprint.unavailable(f"toolchain image {identity.containment_image!r} is not present locally")
@@ -687,6 +724,7 @@ def generation_resume_fingerprints(
     workspace: Optional[Fingerprint] = None,
     input_obligation_fingerprint: Optional[Fingerprint] = None,
     effective_obligation_fingerprint: Optional[Fingerprint] = None,
+    candidate_files: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, Fingerprint]:
     """The fingerprints of one run_generation_workflow() call, from its own
     arguments (same names, same defaults). The workflow uses this both to
@@ -728,7 +766,10 @@ def generation_resume_fingerprints(
             effective_obligation_ledger if effective_obligation_ledger is not None else obligation_ledger
         ),
         skill_source_dirs=skill_dirs,
-        toolchain=toolchain_fingerprint(workspace_path, config.autonomy, goal=goal),
+        toolchain=toolchain_fingerprint(
+            workspace_path, config.autonomy, goal=goal, candidate_files=candidate_files,
+            declaration_mutable=_declaration_mutable(write_scope_mode, allowed_write_relpaths, structured_plan),
+        ),
         authority_inputs={
             "allowed_write_relpaths": allowed_write_relpaths,
             "authorized_semantic_regions": authorized_semantic_regions,
