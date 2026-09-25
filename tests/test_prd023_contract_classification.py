@@ -203,8 +203,10 @@ async def test_an_approval_creates_a_revision_bound_record_for_only_the_offered_
         return True
 
     ctx = _ctx(repo, escalation="human", mode="human-in-the-loop", callback=approve)
-    state, remaining, classes, reason = await _escalate(repo, ctx, candidate)
-    del ORIGINAL[old]
+    try:
+        state, remaining, classes, reason = await _escalate(repo, ctx, candidate)
+    finally:
+        del ORIGINAL[old]  # module-level fixture data: never leak into other tests
 
     assert reason is None
     assert [v["owner"] for v in remaining] == [old]  # the clear violation still blocks

@@ -1016,8 +1016,13 @@ class WorkflowEngine:
         completed_subtask_ids: Optional[FrozenSet[str]] = None,
         deterministic_failure_diagnostics: Optional["DeterministicFailureDiagnosticStore"] = None,
         work_unit: Optional[WorkUnitInvocation] = None,
+        requirements_from_goal: bool = True,
     ) -> Dict[str, Any]:
         """Runs the complete Planner -> Architect -> Developer -> Quality Gates -> Reviewer loop (supporting streaming).
+
+        requirements_from_goal (PRD-020): False when ``goal`` is Kriya's own
+        wording rather than the user's (``kriya fix``); no original
+        requirement set is derived then.
 
         work_unit (PRD-008A): None means this call is a new user intent - a
         direct goal - so it becomes a one-unit ExecutionPlan and runs through
@@ -1319,7 +1324,11 @@ class WorkflowEngine:
         # PRD-020: the user's original requirements, fixed once from the goal
         # this unit verifies (kriya/workflow/requirements.py). None for a
         # unit that verifies something narrower (a milestone, a subtask).
-        requirement_goal = getattr(work_unit, "requirement_goal", None)
+        # requirements_from_goal=False: the goal is Kriya's own wording (e.g.
+        # `kriya fix`'s "Fix compilation/test failure" around an error log),
+        # not the user's statements - there is nothing to fix as a
+        # requirement.
+        requirement_goal = getattr(work_unit, "requirement_goal", None) if requirements_from_goal else None
         requirement_set = derive_requirements(requirement_goal) if requirement_goal else None
         if requirement_set is not None:
             state.record_event(RunEvent(

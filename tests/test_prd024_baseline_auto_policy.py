@@ -118,6 +118,37 @@ def test_a_different_environment_is_not_comparable_and_blocks():
     assert result.blocking and result.blocking_reasons == ("environment_not_comparable",)
 
 
+POM = ("<project><properties><maven.compiler.release>{release}</maven.compiler.release></properties>"
+       "<dependencies>{deps}</dependencies></project>\n")
+DEP = "<dependency><groupId>g</groupId><artifactId>a</artifactId><version>1</version></dependency>"
+
+
+def test_under_contained_execution_only_a_real_toolchain_change_alters_the_environment(tmp_path):
+    """PRE and POST identities are computed over the same declaration
+    overlay: a dependency added to pom.xml is the same environment; a
+    changed Java release is not."""
+    from kriya.workflow.baseline_policy import baseline_environment_identity
+
+    (tmp_path / "pom.xml").write_text(POM.format(release=17, deps=""))
+    cfg = AppConfig()
+    cfg.autonomy.contained_execution_required = True
+    with patch("kriya.tools.containment_oci.local_image_content_digest", return_value="sha256:image"):
+        pre = baseline_environment_identity(str(tmp_path), cfg.autonomy)
+        same = baseline_environment_identity(str(tmp_path), cfg.autonomy,
+                                             candidate_files={"pom.xml": POM.format(release=17, deps=DEP)})
+        migrated = baseline_environment_identity(str(tmp_path), cfg.autonomy,
+                                                 candidate_files={"pom.xml": POM.format(release=21, deps="")})
+    assert json.loads(pre)["toolchain"] is not None and json.loads(pre)["execution"] == "contained"
+    assert pre == same
+    assert pre != migrated
+
+
+def test_a_toolchain_migration_excuses_no_failure_but_a_green_suite_passes():
+    green = classify_baseline_delta(_baseline(FAILING), build_validation_outcome(
+        {"success": True, "output": "========== 4 passed in 0.10s ==========\n"}), post_environment="env-B")
+    assert green.level1.classification is DeltaClassification.NOT_COMPARABLE and not green.blocking
+
+
 def test_an_unavailable_per_test_comparison_is_stated_never_read_as_no_failures():
     result = classify_baseline_delta(_baseline("mvn: BUILD FAILURE in module core\n"),
                                      build_validation_outcome({"success": False, "output": "mvn: BUILD FAILURE in module core\n"}),

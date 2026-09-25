@@ -474,3 +474,45 @@ async def test_enforce_terminal_gate_holds_a_requirement_no_subtask_mapped(tmp_p
     assert result.legacy_result["quality_gates_passed"] is False
     assert "REQ-2 (violated): Log every call to run()" in result.legacy_result["global_requirement_gap"]
     assert checked and checked[0]["files_written"] == ["app.py"]
+
+
+@pytest.mark.asyncio
+async def test_kriyas_own_placeholder_goal_derives_no_requirements(tmp_path):
+    """`kriya fix` runs with Kriya's own wording around an error log; the
+    run carries no original requirement set (nothing to verify or block)."""
+    cfg, engine, calls = _engine(tmp_path, lambda n, prompt: _verdict_json(prompt), requirement_unknown_policy="block")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    p1, p2 = _gates_pass()
+    with p1, p2:
+        res = await engine.run_generation_workflow(goal="Fix compilation/test failure", workspace_path=str(workspace),
+                                                   requirements_from_goal=False)
+
+    assert "requirements" not in res and _events(cfg, "requirement.derived") == []
+    assert all("Original Requirements" not in p for p in calls["planner"] + calls["spec"])
+
+
+def test_the_fix_command_marks_its_goal_as_kriyas_own():
+    from click.testing import CliRunner
+
+    from kriya.cli import main
+
+    captured = {}
+
+    class Engine:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def run_generation_workflow(self, **kwargs):
+            captured.update(kwargs)
+            return {"quality_gates_passed": True, "files": [], "review": "ok", "plan": "", "design": ""}
+
+    kernel = MagicMock()
+    kernel.start = AsyncMock()
+    kernel.stop = AsyncMock()
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        with patch("kriya.cli.WorkflowEngine", Engine), patch("kriya.cli.Kernel", return_value=kernel), \
+             patch("kriya.cli.LLMClient"):
+            runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
+    assert captured.get("requirements_from_goal") is False

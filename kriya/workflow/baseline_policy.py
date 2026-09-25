@@ -135,10 +135,25 @@ def baseline_environment_identity(
 ) -> str:
     """What a validation run executes under: the execution mode and the
     PRD-011 toolchain fingerprint (value and basis; UNAVAILABLE on the host,
-    stated as such rather than guessed)."""
+    stated as such rather than guessed).
+
+    PRE and POST are computed the same way - over the workspace's own
+    toolchain declarations, overlaid with ``candidate_files`` (POST's
+    changed declarations; none for PRE) - so a candidate that edits
+    ``pom.xml`` without changing the toolchain (a new dependency) has the
+    same identity as PRE; only a real toolchain change differs."""
+    from kriya.tools.toolchain_identity import ALL_TOOLCHAIN_DECLARATION_FILES
     from kriya.workflow.resume_fingerprints import toolchain_fingerprint
 
-    fingerprint = toolchain_fingerprint(workspace_path, autonomy_cfg, goal=goal, candidate_files=candidate_files)
+    declarations: Dict[str, str] = {}
+    for name in ALL_TOOLCHAIN_DECLARATION_FILES:
+        path = os.path.join(workspace_path, name)
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                declarations[name] = handle.read()
+    declarations.update({k: v for k, v in (candidate_files or {}).items() if k in ALL_TOOLCHAIN_DECLARATION_FILES})
+    fingerprint = toolchain_fingerprint(workspace_path, autonomy_cfg, goal=goal,
+                                        candidate_files=declarations or None, declaration_mutable=True)
     mode = ("contained" if getattr(autonomy_cfg, "contained_execution_required", False) is True
             else "sandbox" if getattr(autonomy_cfg, "sandbox_execution", False) else "host")
     return json.dumps({"execution": mode, "toolchain": fingerprint.value, "basis": fingerprint.basis},

@@ -625,9 +625,11 @@ def classify_baseline_delta(
 
     PRD-024: ``post_environment`` is the POST run's environment identity
     (``baseline_environment_identity``). When the baseline recorded one and
-    they differ, the runs are NOT_COMPARABLE and that blocks: a PRE
-    baseline from a different toolchain environment proves nothing about
-    which POST failures are pre-existing."""
+    they differ (e.g. an authorized PRD-011 toolchain migration), the runs
+    are NOT_COMPARABLE: a PRE baseline from another toolchain proves nothing
+    about which POST failures are pre-existing, so none is excused - every
+    POST failure blocks, exactly as with no baseline, and a fully passing
+    POST suite does not."""
     if baseline.status != "captured" or baseline.outcome is None:
         raise ValueError("classify_baseline_delta requires a captured baseline with a real outcome")
     pre = baseline.outcome
@@ -636,8 +638,9 @@ def classify_baseline_delta(
         return BaselineDeltaResult(
             level1=Level1Delta(DeltaClassification.NOT_COMPARABLE, pre.failure_fingerprint,
                                post.failure_fingerprint),
-            level2={}, aggregate_drop_detected=False, blocking=True,
-            blocking_reasons=("environment_not_comparable",), level2_available=False,
+            level2={}, aggregate_drop_detected=False, blocking=not post.success,
+            blocking_reasons=() if post.success else ("environment_not_comparable",),
+            level2_available=False,
             level2_unavailable_reason="PRE and POST ran in different recorded environments",
         )
     level1 = classify_level1_delta(pre, post)

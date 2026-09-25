@@ -3745,7 +3745,9 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             approval_callback=approval_cb,
             error_context=error,
             resume=resume,
-            resume_id=resume_id
+            resume_id=resume_id,
+            # PRD-020: the goal is Kriya's placeholder, not the user's words.
+            requirements_from_goal=False,
         )
         if res.get("toolchain_warning"):
             click.secho(f"\n[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")

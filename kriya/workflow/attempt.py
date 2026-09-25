@@ -5180,6 +5180,12 @@ def _downgrade_suppressed_requirement_claims(
     )
 
 
+def _structured_plan_paths(ctx: "AttemptContext") -> set:
+    """Every path an approved structured plan declares (any subtask)."""
+    plan = getattr(ctx, "structured_plan", None)
+    return {pf.path for st in (getattr(plan, "subtasks", None) or []) for pf in (st.planned_files or [])}
+
+
 def _stage_ownership_redirect_restoration(
     state: GenerationState, ctx: "AttemptContext", staged_writes: List[StagedFileWrite],
 ) -> None:
@@ -5191,7 +5197,10 @@ def _stage_ownership_redirect_restoration(
     the retry redundant by construction. Like the RESTORE_PUBLIC_CONTRACT
     evidence restoration above, they are restored deterministically in the
     same guarded batch: each redirected test back to its exact baseline, and
-    each parallel file this run created removed. Anything the Developer
+    each parallel file this run created removed - unless an approved
+    structured plan declares that file (the enforce terminal commit
+    materializes every planned path), in which case it stays and the
+    restored test alone ends the redirect. Anything the Developer
     writes again in this attempt is left as written, so a repeated choice
     still recurs and still counts toward ARCHITECTURE_CHOICE_INVALIDATED."""
     recovery = state.ownership_redirect_recovery
@@ -5219,6 +5228,7 @@ def _stage_ownership_redirect_restoration(
     for candidate in recovery.get("abandoned_candidates", []):
         target = os.path.join(ctx.worktree_path, candidate)
         if (target in staged_targets or state.all_original_contents.get(candidate)
+                or candidate in _structured_plan_paths(ctx)
                 or os.path.exists(os.path.join(ctx.workspace_path, candidate)) or not os.path.isfile(target)):
             continue  # written again this attempt, or not a file this run created
         with open(target, "r", encoding="utf-8", errors="replace") as handle:
@@ -7579,7 +7589,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # second independent regex pass over the design's prose.
         # PRD-022: a parallel file a deterministic ownership violation
         # abandoned is no longer an expected output, whatever the design said.
-        abandoned = set(state.ownership_redirect_recovery.get("abandoned_candidates", []))
+        abandoned = (set(state.ownership_redirect_recovery.get("abandoned_candidates", []))
+                     - _structured_plan_paths(ctx))
         expected_files = {os.path.basename(f) for f in ctx.architect_files if f not in abandoned}
         missing_files = find_missing_expected_files(expected_files, state.all_files_written, goal=ctx.goal)
         if missing_files:

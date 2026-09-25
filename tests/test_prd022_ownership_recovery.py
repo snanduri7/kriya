@@ -236,3 +236,44 @@ async def test_a_human_approver_sees_the_finding_as_evidence_not_a_denial(tmp_pa
 
     assert res["quality_gates_passed"] is True
     assert reasons and "src/order_rules.py may duplicate existing src/order_validator.py" in reasons[0]
+
+
+def test_a_parallel_file_the_approved_plan_declares_is_kept_and_only_the_test_restored(tmp_path):
+    """Enforce: the terminal commit materializes every planned path, so a
+    plan-declared parallel file is never deleted; restoring the redirected
+    test already ends the redirect."""
+    from types import SimpleNamespace
+
+    from kriya.workflow.attempt import _stage_ownership_redirect_restoration
+    from kriya.workflow.plan_schema import (
+        ChangeKind, EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask,
+    )
+    from kriya.workflow.state import GenerationState
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src" / "discount_pricing.py").write_text(PARALLEL[0]["content"])
+    (tmp_path / "tests" / "test_pricing.py").write_text(PARALLEL[1]["content"])
+    state = GenerationState()
+    state.all_original_contents = {"tests/test_pricing.py": TEST, "src/discount_pricing.py": ""}
+    state.ownership_redirect_recovery = {"redirected_tests": ["tests/test_pricing.py"],
+                                         "abandoned_candidates": ["src/discount_pricing.py"],
+                                         "owners": ["src/pricing.py"]}
+
+    def ctx(plan):
+        return SimpleNamespace(worktree_path=str(tmp_path), workspace_path=str(tmp_path / "pristine"),
+                               structured_plan=plan)
+
+    plan = EngineeringPlan(plan_id="p", kind=ChangeKind.TASK, subtasks=[Subtask(
+        id="s1", description="d", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="src/discount_pricing.py", action=FileAction.CREATE),
+                       PlannedFile(path="tests/test_pricing.py", action=FileAction.MODIFY)])])
+    staged = []
+    _stage_ownership_redirect_restoration(state, ctx(plan), staged)
+    assert [(os.path.relpath(s.target_path, tmp_path), s.delete) for s in staged] == [("tests/test_pricing.py", False)]
+    assert staged[0].content == TEST
+
+    direct = []
+    _stage_ownership_redirect_restoration(state, ctx(None), direct)
+    assert sorted((os.path.relpath(s.target_path, tmp_path), s.delete) for s in direct) == [
+        ("src/discount_pricing.py", True), ("tests/test_pricing.py", False)]
