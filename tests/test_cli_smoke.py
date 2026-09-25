@@ -10,6 +10,7 @@ from click.testing import CliRunner
 # List[...]/Dict[...] type annotations without importing them from `typing`,
 # which raised NameError at module-import time on every Python version except
 # 3.14 (where PEP 649 made annotation evaluation lazy by default).
+from kriya.core.state_paths import trace_db_path
 from kriya.cli import _mark_run_in_progress, main
 
 TOP_LEVEL_COMMANDS = [
@@ -448,7 +449,7 @@ def test_mark_run_in_progress_writes_honest_status(tmp_path):
 
     _mark_run_in_progress(cfg, "run-123", "some goal")
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs WHERE run_id = ?", ("run-123",)).fetchone()
@@ -468,7 +469,7 @@ def test_mark_run_in_progress_noop_when_run_id_missing(tmp_path):
     _mark_run_in_progress(cfg, None, "some goal")
 
     # No traces.db should even be created - nothing to write without a run_id.
-    assert not os.path.exists(os.path.join(cfg.paths.logs, "traces.db"))
+    assert not os.path.exists(trace_db_path(cfg))
 
 
 def test_generate_marks_in_progress_before_knowledge_gap_retry_runs(runner, tmp_path):

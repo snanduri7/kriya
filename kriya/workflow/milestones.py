@@ -752,7 +752,7 @@ def _build_plan_correction_feedback(result: MilestoneValidationResult) -> str:
 
 
 def _log_milestone_plan_telemetry(
-    logs_path: Optional[str],
+    trace_db: Optional[str],
     group_id: str,
     status: str,
     milestones: List[MilestoneV2],
@@ -760,17 +760,17 @@ def _log_milestone_plan_telemetry(
     validation_failures: List[str],
     topology: RepositoryTopology,
 ) -> None:
-    """MA3.9 - no-op when logs_path isn't supplied (kriya plan-milestones
-    passes config.paths.logs; a caller that doesn't care about telemetry,
+    """MA3.9 - no-op when trace_db isn't supplied (kriya plan-milestones
+    passes the canonical trace database, kriya/core/state_paths.py; a caller that doesn't care about telemetry,
     e.g. most of this module's own tests, gets zero I/O). Lazy import + a
     fresh TraceLogger per call, same convention as every trace-logging call
     site in kriya/workflow/workflow.py."""
-    if not logs_path:
+    if not trace_db:
         return
     from kriya.core.trace import TraceLogger
 
     structure = plan_structure_telemetry(milestones)
-    trace_logger = TraceLogger(os.path.join(logs_path, "traces.db"))
+    trace_logger = TraceLogger(trace_db)
     try:
         trace_logger.log_milestone_plan(
             group_id=group_id,
@@ -798,7 +798,7 @@ async def plan_milestones(
     workspace_path: str,
     stream_callback: Optional[Callable[[str], None]] = None,
     max_planning_attempts: int = _MAX_MILESTONE_PLANNING_ATTEMPTS,
-    logs_path: Optional[str] = None,
+    trace_db: Optional[str] = None,
 ) -> Tuple[Optional[MilestoneRunState], Optional[str]]:
     """Runs the Milestone Planner and returns a fresh, nothing-executed-yet
     MilestoneRunState, or (None, error). Caller (kriya plan-milestones)
@@ -835,8 +835,8 @@ async def plan_milestones(
     run_milestones() sees the fully-correct dependency graph without
     re-deriving it.
 
-    MA3.9: when logs_path is supplied (kriya plan-milestones passes
-    config.paths.logs), one milestone_plans row (kriya/core/trace.py) is
+    MA3.9: when trace_db is supplied (kriya plan-milestones passes
+    the canonical trace database), one milestone_plans row (kriya/core/trace.py) is
     recorded for this call REGARDLESS of outcome - accepted, rejected after
     exhausting max_planning_attempts, or malformed_output - keyed by the
     SAME group_id a resulting MilestoneRunState would carry, so an accepted
@@ -862,7 +862,7 @@ async def plan_milestones(
         _raw, milestones = await milestone_planner.run_with_milestone_list(prompt, stream_callback=stream_callback)
         if milestones is None:
             _log_milestone_plan_telemetry(
-                logs_path, group_id, "malformed_output", [], attempt, accumulated_failure_codes, topology,
+                trace_db, group_id, "malformed_output", [], attempt, accumulated_failure_codes, topology,
             )
             return None, "Milestone Planner output did not produce a valid milestone list."
 
@@ -870,7 +870,7 @@ async def plan_milestones(
         validation_result = validator.validate(milestones, repository_topology=topology, goal_text=goal)
         if validation_result.valid:
             _log_milestone_plan_telemetry(
-                logs_path, group_id, "accepted", validation_result.milestones,
+                trace_db, group_id, "accepted", validation_result.milestones,
                 attempt, accumulated_failure_codes, topology,
             )
             return MilestoneRunState(
@@ -885,7 +885,7 @@ async def plan_milestones(
         correction_feedback = _build_plan_correction_feedback(validation_result)
 
     _log_milestone_plan_telemetry(
-        logs_path, group_id, "rejected", last_attempted_milestones,
+        trace_db, group_id, "rejected", last_attempted_milestones,
         max(1, max_planning_attempts), accumulated_failure_codes, topology,
     )
     return None, last_error

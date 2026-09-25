@@ -4,6 +4,7 @@ from click.testing import CliRunner
 
 from kriya.cli import main
 from kriya.config import AppConfig
+from kriya.core.state_paths import trace_db_path
 from kriya.core.trace import TraceLogger
 
 
@@ -30,13 +31,10 @@ def test_traces_uses_shared_wal_connection_helper(tmp_path):
     got none of that protection - a concurrent `generate` run writing to the same
     traces.db could make `kriya traces` raise 'database is locked' instead of
     just waiting briefly like every other DB access path in this app."""
-    logs_dir = tmp_path / "logs"
-    logs_dir.mkdir()
-    db_path = str(logs_dir / "traces.db")
+    db_path = trace_db_path(AppConfig())
     _seed_traces(db_path, 1)
 
     cfg = AppConfig()
-    cfg.paths.logs = str(logs_dir)
 
     runner = CliRunner()
     with patch("kriya.cli.load_config", return_value=cfg), \
@@ -57,13 +55,10 @@ def test_traces_default_limit_truncates_and_shows_footer(tmp_path):
     which produced a 485KB, 1000+ row terminal dump for a single `kriya traces`
     call. Default output must be capped with a clear note of how many rows were
     hidden."""
-    logs_dir = tmp_path / "logs"
-    logs_dir.mkdir()
-    db_path = str(logs_dir / "traces.db")
+    db_path = trace_db_path(AppConfig())
     _seed_traces(db_path, 30)
 
     cfg = AppConfig()
-    cfg.paths.logs = str(logs_dir)
 
     runner = CliRunner()
     with patch("kriya.cli.load_config", return_value=cfg):
@@ -75,13 +70,10 @@ def test_traces_default_limit_truncates_and_shows_footer(tmp_path):
 
 
 def test_traces_all_flag_shows_every_row_with_no_footer(tmp_path):
-    logs_dir = tmp_path / "logs"
-    logs_dir.mkdir()
-    db_path = str(logs_dir / "traces.db")
+    db_path = trace_db_path(AppConfig())
     _seed_traces(db_path, 30)
 
     cfg = AppConfig()
-    cfg.paths.logs = str(logs_dir)
 
     runner = CliRunner()
     with patch("kriya.cli.load_config", return_value=cfg):
@@ -93,13 +85,10 @@ def test_traces_all_flag_shows_every_row_with_no_footer(tmp_path):
 
 
 def test_traces_custom_limit_option(tmp_path):
-    logs_dir = tmp_path / "logs"
-    logs_dir.mkdir()
-    db_path = str(logs_dir / "traces.db")
+    db_path = trace_db_path(AppConfig())
     _seed_traces(db_path, 30)
 
     cfg = AppConfig()
-    cfg.paths.logs = str(logs_dir)
 
     runner = CliRunner()
     with patch("kriya.cli.load_config", return_value=cfg):
@@ -117,9 +106,7 @@ def test_traces_shows_kind_column_from_failure_report(tmp_path):
     the persisted failure_report JSON) actually renders, additive to the
     pre-existing CATEGORY column which test_traces_shows_failure_category_column
     above already locks in and which this must NOT disturb."""
-    logs_dir = tmp_path / "logs"
-    logs_dir.mkdir()
-    db_path = str(logs_dir / "traces.db")
+    db_path = trace_db_path(AppConfig())
     logger = TraceLogger(db_path)
     logger.log_run(
         run_id="run-kind-1",
@@ -137,7 +124,6 @@ def test_traces_shows_kind_column_from_failure_report(tmp_path):
     )
 
     cfg = AppConfig()
-    cfg.paths.logs = str(logs_dir)
 
     runner = CliRunner()
     with patch("kriya.cli.load_config", return_value=cfg):
@@ -152,13 +138,10 @@ def test_traces_shows_kind_column_from_failure_report(tmp_path):
 def test_traces_kind_column_blank_for_rows_predating_failure_report(tmp_path):
     """A row from before this field existed (or a clean success, which
     never populates failure_report) must render a blank KIND, not crash."""
-    logs_dir = tmp_path / "logs"
-    logs_dir.mkdir()
-    db_path = str(logs_dir / "traces.db")
+    db_path = trace_db_path(AppConfig())
     _seed_traces(db_path, 1)
 
     cfg = AppConfig()
-    cfg.paths.logs = str(logs_dir)
 
     runner = CliRunner()
     with patch("kriya.cli.load_config", return_value=cfg):
@@ -171,13 +154,10 @@ def test_traces_shows_failure_category_column(tmp_path):
     """failure_category is persisted (kriya/core/trace.py) so an eval harness
     reading traces.db can aggregate by it - confirm `kriya traces` itself
     surfaces it too, not just the raw DB."""
-    logs_dir = tmp_path / "logs"
-    logs_dir.mkdir()
-    db_path = str(logs_dir / "traces.db")
+    db_path = trace_db_path(AppConfig())
     _seed_traces(db_path, 2, failure_category="quality_gates_exhausted")
 
     cfg = AppConfig()
-    cfg.paths.logs = str(logs_dir)
 
     runner = CliRunner()
     with patch("kriya.cli.load_config", return_value=cfg):

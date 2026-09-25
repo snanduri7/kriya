@@ -24,6 +24,7 @@ from kriya.control.commit_state import UncertainWorkspaceStateError
 from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
 from kriya.core.logging_setup import LogDirectoryError, configure_logging
+from kriya.core.state_paths import trace_db_path
 from kriya.plugins.plugin import PluginManager
 from kriya.prompt import PromptEngine
 from kriya.skills import SkillEngine
@@ -222,12 +223,19 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
     
     # 1. Check directories
     click.echo("\nChecking directories:")
+    from kriya.core.logging_setup import resolve_log_directory
+    from kriya.core.state_paths import resolve_state_directory
+
     dirs = {
         "Plugins Directory": cfg.plugins.directory,
         "Skills Directory": cfg.paths.skills,
         "Memory Directory": cfg.paths.memory,
-        "Logs Directory": cfg.paths.logs,
     }
+    for name, resolver in (("Logs Directory", resolve_log_directory), ("State Directory (traces.db)", resolve_state_directory)):
+        try:
+            dirs[name] = resolver(cfg)[0]
+        except ValueError as error:
+            click.secho(f"  - {name}: [ERROR] {error}", fg="red")
     for name, path in dirs.items():
         resolved = os.path.abspath(path)
         exists = os.path.exists(resolved)
@@ -1531,8 +1539,7 @@ def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> N
         return
     try:
         from kriya.core.trace import TraceLogger
-        trace_db = os.path.join(cfg.paths.logs, "traces.db")
-        TraceLogger(trace_db).log_run(
+        TraceLogger(trace_db_path(cfg)).log_run(
             run_id=run_id,
             goal=goal,
             duration_sec=0.0,
@@ -2249,7 +2256,7 @@ def plan_milestones_cmd(ctx: click.Context, goal: Optional[str], file: Optional[
         from kriya.workflow.milestones import plan_milestones
         await kernel.start()
         result = await plan_milestones(
-            we.milestone_planner, goal, os.getcwd(), stream_callback=on_stream, logs_path=cfg.paths.logs,
+            we.milestone_planner, goal, os.getcwd(), stream_callback=on_stream, trace_db=trace_db_path(cfg),
         )
         await kernel.stop()
         return result
@@ -3560,19 +3567,54 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
 @main.command(name="traces")
 @click.option("-n", "--limit", type=int, default=20, show_default=True, help="Maximum number of most-recent runs to show. Use --all to show every run.")
 @click.option("--all", "show_all", is_flag=True, help="Show all recorded runs, ignoring --limit.")
+@click.option("--migrate-legacy", is_flag=True,
+              help="Copy a legacy <paths.logs>/traces.db to the canonical state location. Refused if the "
+              "canonical database already exists (histories are never merged); the legacy file is kept.")
 @click.pass_context
-def traces(ctx: click.Context, limit: int, show_all: bool) -> None:
+def traces(ctx: click.Context, limit: int, show_all: bool, migrate_legacy: bool) -> None:
     """Show persistent run trace logs and metrics of past runs."""
+    from kriya.core.state_paths import (
+        LegacyTraceMigrationError,
+        StateDirectoryError,
+        legacy_trace_db_path,
+        migrate_legacy_trace_db,
+    )
+
     cfg: AppConfig = ctx.obj['config']
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
-    if not os.path.exists(db_path):
+    try:
+        if migrate_legacy:
+            try:
+                migration = migrate_legacy_trace_db(cfg)
+            except LegacyTraceMigrationError as error:
+                click.secho(f"Migration refused: {error}", fg="red", err=True)
+                sys.exit(1)
+            click.echo(f"Copied {migration.runs} run(s) from {migration.source} to {migration.target}. "
+                       "The legacy file was left in place.")
+            return
+        db_path = trace_db_path(cfg)
+        legacy = legacy_trace_db_path(cfg)
+    except StateDirectoryError as error:
+        click.secho(f"Error: {error}", fg="red", err=True)
+        sys.exit(1)
+
+    def _legacy_notice() -> None:
+        if legacy is not None:
+            click.secho(
+                f"Note: an older trace database exists at {legacy} (run history now lives in {db_path}). "
+                "Run `kriya traces --migrate-legacy` to copy it.", fg="yellow", err=True,
+            )
+
+    if not os.path.exists(db_path):  # read-only: never creates the database
         click.echo("No run traces recorded yet.")
+        _legacy_notice()
         return
 
     from kriya.core.db import get_connection
     conn = get_connection(db_path)
     cursor = conn.cursor()
     total = cursor.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+    if total == 0:
+        _legacy_notice()
     query = (
         "SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified, "
         "failure_category, failure_report FROM runs ORDER BY timestamp DESC"

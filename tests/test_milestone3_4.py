@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from kriya.core.state_paths import trace_db_path
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
@@ -93,5 +94,5 @@ async def test_staged_skill_accrual(tmp_path):
     assert any("Always use print with" in fact["value"] for fact in staged_facts)
     
     # Verify trace logger wrote SQLite log
-    trace_db = tmp_path / "logs" / "traces.db"
+    trace_db = trace_db_path(cfg)
     assert os.path.exists(trace_db) is True

@@ -482,7 +482,45 @@ def _check_checkpoints(ctx: _Context) -> DoctorCheck:
 
 
 def _check_traces(ctx: _Context) -> DoctorCheck:
-    return _store_check("persistence.traces", os.path.realpath(ctx.cfg.paths.logs))
+    """The trace database's state directory (KRIYA_STATE_DIR > paths.state >
+    ~/.kriya/state), independent of the log directory: valid, creatable or
+    writable, and an existing traces.db readable and writable. A legacy
+    <paths.logs>/traces.db is a WARN with the explicit migration command."""
+    from kriya.core.state_paths import (
+        StateDirectoryError,
+        legacy_trace_db_path,
+        resolve_state_directory,
+        trace_db_path,
+    )
+
+    remediation = (
+        "Set paths.state (or KRIYA_STATE_DIR) to a writable directory, "
+        "or make the default ~/.kriya/state writable."
+    )
+    try:
+        state_dir, source = resolve_state_directory(ctx.cfg)
+    except StateDirectoryError as error:
+        return _check("persistence.traces", CheckStatus.FAIL, evidence={"error": str(error)}, remediation=remediation)
+    trace_db = trace_db_path(ctx.cfg)
+    evidence: Dict[str, Any] = {"source": source, "trace_db": trace_db}
+    try:
+        evidence.update(_store_probe(state_dir))
+        if os.path.exists(trace_db) and not os.access(trace_db, os.R_OK | os.W_OK):
+            raise PermissionError(f"{trace_db} exists and is not readable and writable")
+    except OSError as error:
+        return _check("persistence.traces", CheckStatus.FAIL,
+                      evidence={**evidence, "path": state_dir, "error": str(error)}, remediation=remediation)
+    legacy = legacy_trace_db_path(ctx.cfg)
+    if legacy is not None:
+        evidence["legacy_trace_db"] = legacy
+        return _check(
+            "persistence.traces", CheckStatus.WARN, evidence=evidence,
+            remediation=(
+                f"A legacy trace database exists at {legacy}. Run `kriya traces --migrate-legacy` to copy it "
+                "to the canonical location (refused if one already exists; the legacy file is never removed)."
+            ),
+        )
+    return _check("persistence.traces", CheckStatus.PASS, evidence=evidence, remediation=remediation)
 
 
 def _check_logs(ctx: _Context) -> DoctorCheck:

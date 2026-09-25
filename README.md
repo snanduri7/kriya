@@ -397,7 +397,8 @@ plugins:
 paths:
   skills: "./skills"
   memory: "./memory"
-  logs: "./logs"      # traces.db (`kriya traces`), resolved against this file's directory - not kriya.log
+  logs: "./logs"      # legacy - controls nothing now (see logging below and paths.state)
+  state: null         # run history (traces.db): KRIYA_STATE_DIR > paths.state > ~/.kriya/state
 
 # Set both false for a reproducible plain-Kriya run using only paths.skills above -
 # load_global also pulls in Kriya's own shared skill library, load_cwd pulls in any
@@ -411,7 +412,11 @@ skills:
 # Application log: <dir>/kriya.log; each mutating run also gets
 # <dir>/runs/<run_id>/kriya.log. `logging.file` is deprecated and ignored.
 # Existing ./logs directories are left in place, never migrated or deleted.
-# (paths.logs above still holds traces.db.)
+# Run history (traces.db, `kriya traces`) is state, not logs: it lives in the
+# state directory (paths.state above). An old <paths.logs>/traces.db is reported
+# and copied only by `kriya traces --migrate-legacy`, never moved or merged.
+# Workspace run control state (.kriya/: run lock, run records, checkpoints)
+# stays in the workspace - crash recovery depends on it.
 logging:
   level: "INFO"
   directory: null

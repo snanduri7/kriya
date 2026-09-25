@@ -1,12 +1,16 @@
-"""Suite-wide isolation: every Kriya log (application and per-run) written
-while the suite runs, including by CLI subprocesses, which inherit the
-environment, goes to a temporary directory, never the real ~/.kriya/logs.
-Tests of the precedence rules unset KRIYA_LOG_DIR themselves."""
+"""Suite-wide isolation, inherited by CLI subprocesses through the environment:
+- every Kriya log (application and per-run) goes to one session temp dir,
+  never the real ~/.kriya/logs;
+- every test gets its own fresh state directory (traces.db), never the real
+  ~/.kriya/state: tests read trace rows back, so one shared database would leak
+  rows between tests. Locate it with kriya.core.state_paths.trace_db_path().
+Tests of the precedence rules unset KRIYA_LOG_DIR / KRIYA_STATE_DIR themselves."""
 import os
 
 import pytest
 
 from kriya.core.logging_setup import ENV_LOG_DIR
+from kriya.core.state_paths import ENV_STATE_DIR
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -18,3 +22,8 @@ def _isolated_kriya_log_dir(tmp_path_factory):
         os.environ.pop(ENV_LOG_DIR, None)
     else:
         os.environ[ENV_LOG_DIR] = previous
+
+
+@pytest.fixture(autouse=True)
+def _isolated_kriya_state_dir(tmp_path_factory, monkeypatch):
+    monkeypatch.setenv(ENV_STATE_DIR, str(tmp_path_factory.mktemp("kriya-state")))

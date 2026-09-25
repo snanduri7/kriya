@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from kriya.core.state_paths import trace_db_path
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
@@ -945,7 +946,7 @@ def _init_git_repo_val001(repo):
     _run_git(["commit", "-q", "-m", "initial"], repo)
 
 
-def _latest_trace_run_events(logs_dir):
+def _latest_trace_run_events(cfg):
     """Same pattern test_workflow.py's own _latest_trace_row() uses - the
     only way to observe state.run_events from OUTSIDE a full
     run_generation_workflow() call, since it is not part of the returned
@@ -953,7 +954,7 @@ def _latest_trace_run_events(logs_dir):
     import json
     import sqlite3
 
-    db_path = os.path.join(logs_dir, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT run_events FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -1014,7 +1015,7 @@ async def test_targeted_post_replays_frozen_multi_target_selection_and_does_not_
 
     # PRE captured the exact ordered tuple.
     targeted_delta_events = [
-        e for e in _latest_trace_run_events(cfg.paths.logs)
+        e for e in _latest_trace_run_events(cfg)
         if e.get("kind") == "validation_baseline.targeted_delta"
     ]
     assert len(targeted_delta_events) == 1
@@ -1100,7 +1101,7 @@ async def test_targeted_post_new_failure_blocks_and_prevents_quality_gates_passe
 
     assert result["quality_gates_passed"] is False
     targeted_delta_events = [
-        e for e in _latest_trace_run_events(cfg.paths.logs)
+        e for e in _latest_trace_run_events(cfg)
         if e.get("kind") == "validation_baseline.targeted_delta"
     ]
     # One per retry attempt that reached the full-regression gate (every

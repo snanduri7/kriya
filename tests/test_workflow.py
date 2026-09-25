@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from kriya.core.state_paths import trace_db_path
 from kriya.agents.agent import DeveloperAgent
 from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
@@ -8114,7 +8115,7 @@ async def test_workflow_self_correction_loop_resolves_compile_failure(tmp_path):
     assert we.developer.run_generation.call_count == 1  # never reached a second, full-set regeneration
     mock_loop.assert_called_once()
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -8172,7 +8173,7 @@ async def test_workflow_self_correction_loop_exhausts_falls_through_unchanged(tm
     # transcript must still be persisted, not silently discarded the moment
     # execution falls through to the ordinary QualityGateFailure path -
     # found live (2026-08-12 eval harness batch) that it previously wasn't.
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -8679,11 +8680,11 @@ async def test_workflow_sanitizes_batch_json_edits_before_applying(tmp_path):
     assert written == "def main():\n    new()\n"
 
 
-def _latest_trace_row(logs_dir):
-    """Read back the most recent row from a test-isolated traces.db (cfg.paths.logs
-    pointed at tmp_path), as a dict keyed by column name - avoids every trace-related
+def _latest_trace_row(cfg):
+    """Read back the most recent row from a test-isolated traces.db (the
+    per-test KRIYA_STATE_DIR from tests/conftest.py), as a dict keyed by column name - avoids every trace-related
     test needing to know the runs table's raw column order."""
-    db_path = os.path.join(logs_dir, "traces.db")
+    db_path = trace_db_path(cfg)
     if not os.path.exists(db_path):
         return None
     conn = sqlite3.connect(db_path)
@@ -8723,7 +8724,7 @@ async def test_workflow_persists_intermediate_trace_checkpoint_before_reviewer(t
     checkpoint_seen = {}
 
     async def reviewer_run(*args, **kwargs):
-        checkpoint_seen["row"] = _latest_trace_row(cfg.paths.logs)
+        checkpoint_seen["row"] = _latest_trace_row(cfg)
         return "Review: Approved"
 
     we.reviewer.run = AsyncMock(side_effect=reviewer_run)
@@ -8742,7 +8743,7 @@ async def test_workflow_persists_intermediate_trace_checkpoint_before_reviewer(t
     checkpoint_gate_outcomes = json.loads(checkpoint_row["gate_outcomes"])
     assert any(g["type"] == "compile" for g in checkpoint_gate_outcomes)
 
-    final_row = _latest_trace_row(cfg.paths.logs)
+    final_row = _latest_trace_row(cfg)
     assert final_row["status"] == "success"
     assert final_row["run_id"] == checkpoint_row["run_id"]
 
@@ -8927,7 +8928,7 @@ async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_pa
     assert "JVM failed during its own startup" in res["environment_failure"]
     assert mock_compile.call_count == 1
     assert res["failure_category"] == "environment_failure"
-    trace_row = _latest_trace_row(cfg.paths.logs)
+    trace_row = _latest_trace_row(cfg)
     assert trace_row is not None
     assert trace_row["status"] == "failure"
     assert trace_row["failure_category"] == "environment_failure"
@@ -8972,7 +8973,7 @@ async def test_workflow_failure_category_quality_gates_exhausted(tmp_path):
     assert res["quality_gates_passed"] is False
     assert res["environment_failure"] is None
     assert res["failure_category"] == "quality_gates_exhausted"
-    trace_row = _latest_trace_row(cfg.paths.logs)
+    trace_row = _latest_trace_row(cfg)
     assert trace_row is not None
     assert trace_row["status"] == "failure"
     assert trace_row["failure_category"] == "quality_gates_exhausted"
@@ -9024,7 +9025,7 @@ async def test_workflow_stops_retrying_immediately_on_unrecoverable_scope_denial
     assert res["environment_failure"] is not None
     assert "UNAUTHORIZED_GENERATION_TARGET" in res["environment_failure"]
     assert res["failure_category"] == "unauthorized_generation_target"
-    trace_row = _latest_trace_row(cfg.paths.logs)
+    trace_row = _latest_trace_row(cfg)
     assert trace_row is not None
     assert trace_row["status"] == "failure"
     assert trace_row["failure_category"] == "unauthorized_generation_target"
@@ -9063,7 +9064,7 @@ async def test_workflow_failure_report_wires_real_failures_through_categorize_fa
         assert entry["failure_type"]
         assert entry["category"]
 
-    trace_row = _latest_trace_row(cfg.paths.logs)
+    trace_row = _latest_trace_row(cfg)
     assert trace_row is not None
     persisted = json.loads(trace_row["failure_report"])
     assert persisted == res["failure_report"]
@@ -9104,7 +9105,7 @@ async def test_workflow_traces_knowledge_gap(tmp_path):
         res = await we.run_generation_workflow(goal="Use somelib 9.9.9", workspace_path=str(tmp_path))
 
     assert res["status"] == "knowledge_gap"
-    trace_row = _latest_trace_row(cfg.paths.logs)
+    trace_row = _latest_trace_row(cfg)
     assert trace_row is not None
     assert trace_row["status"] == "knowledge_gap"
     assert trace_row["failure_category"] == "knowledge_gap"
@@ -9164,7 +9165,7 @@ async def test_workflow_retry_after_knowledge_gap_supersedes_the_transient_trace
         )
     assert second_res["quality_gates_passed"] is True
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     rows = conn.execute("SELECT * FROM runs").fetchall()
@@ -9213,7 +9214,7 @@ async def test_workflow_approval_required_but_no_callback_never_applies_changes(
     assert "approval was required" in res["review"]
     # The file must never have been written to the real workspace.
     assert not os.path.exists(os.path.join(str(tmp_path), "app.py"))
-    trace_row = _latest_trace_row(cfg.paths.logs)
+    trace_row = _latest_trace_row(cfg)
     assert trace_row is not None
     assert trace_row["status"] == "approval_required"
     assert trace_row["failure_category"] == "approval_required"
@@ -9258,7 +9259,7 @@ async def test_workflow_traces_human_rejected(tmp_path):
 
     assert res["quality_gates_passed"] is False
     assert res["review"] == "Rejected by user during approval gate review."
-    trace_row = _latest_trace_row(cfg.paths.logs)
+    trace_row = _latest_trace_row(cfg)
     assert trace_row is not None
     assert trace_row["status"] == "human_rejected"
     assert trace_row["failure_category"] == "human_rejected"
@@ -9299,7 +9300,7 @@ async def test_workflow_human_rejected_preserves_full_forensic_trace(tmp_path):
     )
 
     assert res["quality_gates_passed"] is False
-    trace_row = _latest_trace_row(cfg.paths.logs)
+    trace_row = _latest_trace_row(cfg)
     assert trace_row is not None
     assert trace_row["status"] == "human_rejected"
 
@@ -10226,7 +10227,7 @@ async def test_workflow_run_verification_gate_outcome_records_graded_by_contract
         )
 
     assert res["quality_gates_passed"] is True
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -10281,7 +10282,7 @@ async def test_workflow_run_verification_gate_outcome_records_graded_by_llm(tmp_
 
     assert res["quality_gates_passed"] is True
     we.run_verifier.grade.assert_called_once()
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -10341,7 +10342,7 @@ async def test_workflow_run_verification_gate_outcome_records_distrusted_provena
         )
 
     assert res["quality_gates_passed"] is False
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -10769,7 +10770,7 @@ async def test_quiet_successful_maven_compile_uses_process_authority(tmp_path):
 
     assert res["quality_gates_passed"] is True
     we.run_verifier.grade.assert_not_called()
-    conn = sqlite3.connect(os.path.join(cfg.paths.logs, "traces.db"))
+    conn = sqlite3.connect(trace_db_path(cfg))
     row = conn.execute("SELECT gate_outcomes FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
     conn.close()
     outcomes = json.loads(row[0])
@@ -16047,7 +16048,7 @@ async def test_workflow_scopes_retry_to_grader_likely_files_on_run_verification_
     # grader's likely_files made it through at all, not exclusivity.
     assert "helper.py" in second_call_kwargs["implicated_files"]
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -16132,7 +16133,7 @@ async def test_workflow_run_verification_timeout_grades_captured_output_as_succe
     assert "never exited on its own" in second_call_kwargs["task_description"]
     assert "Fix the resource lifecycle" in second_call_kwargs["task_description"]
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -16188,7 +16189,7 @@ async def test_workflow_run_verification_timeout_with_genuine_failure_stays_plai
         )
 
     assert res["quality_gates_passed"] is False
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -20892,7 +20893,7 @@ async def test_workflow_anchored_edit_failure_captures_filepath(tmp_path):
 
     assert res["quality_gates_passed"] is True
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -20966,7 +20967,7 @@ async def test_workflow_anchored_edit_failure_redirects_to_the_real_target_file(
 
     assert res["quality_gates_passed"] is True
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -21827,7 +21828,7 @@ async def test_workflow_unaddressed_error_location_defers_to_the_real_compiler(t
     assert res["quality_gates_passed"] is True
     assert mock_compile.call_count == 3  # attempt 2's edit now genuinely reaches the compiler
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -21898,7 +21899,7 @@ async def test_workflow_unaddressed_error_location_bypass_lets_a_companion_edit_
     assert res["quality_gates_passed"] is True
     assert mock_compile.call_count == 2  # no wasted third compile - the fix genuinely worked first try
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -22786,7 +22787,7 @@ async def test_workflow_heavy_process_profile_records_telemetry_only(tmp_path):
     assert res["quality_gates_passed"] is True
     assert res["files"] == ["AuthService.java"]
 
-    trace_row = _latest_trace_row(cfg.paths.logs)
+    trace_row = _latest_trace_row(cfg)
     assert trace_row is not None
     metrics = json.loads(trace_row["generation_metrics"])
     profile = metrics["process_profile"]
@@ -23271,7 +23272,7 @@ async def test_workflow_structural_corruption_rejects_before_compiling(tmp_path)
     assert res["quality_gates_passed"] is True
     assert mock_compile.call_count == 2  # attempt 2's rejection never reached compile
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -23989,7 +23990,7 @@ async def test_workflow_gate_outcome_records_attribution_tier(tmp_path):
     second_call_kwargs = we.developer.run_generation.call_args_list[1].kwargs
     assert second_call_kwargs["known_target_files"] == ["App.java"]
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -24054,7 +24055,7 @@ async def test_workflow_self_diagnosis_redirects_after_confirmed_repeat_failure(
     third_call_kwargs = we.developer.run_generation.call_args_list[2].kwargs
     assert third_call_kwargs["known_target_files"] == ["B.java"]
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
@@ -24245,7 +24246,7 @@ async def test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file(tmp_p
     third_call_kwargs = we.developer.run_generation.call_args_list[2].kwargs
     assert third_call_kwargs["known_target_files"] == ["A.java"]
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()

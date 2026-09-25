@@ -412,7 +412,7 @@ never CWD-anchored:
 .venv/bin/pytest -ra tests/test_logging_location.py tests/test_production_doctor.py tests/test_doctor_command.py tests/test_sec009_config_authority.py tests/test_sec009_p2_authority_approval.py tests/test_config.py tests/test_config_command.py tests/test_generate_json_contract.py tests/test_prd008_recovery.py tests/test_run_ownership.py tests/test_bootstrap_contract.py tests/test_cli_smoke.py tests/test_repl.py tests/test_distribution_integrity.py
 ```
 
-**Open decision for the user: `traces.db` still follows `paths.logs`.**
+**`traces.db` still follows `paths.logs`** (resolved by the storage follow-up below):
 - An auto-discovered repo `kriya.yaml` with `paths.logs: ./logs` resolves against the repo, which is the CWD. So
   `traces.db` still lands in `<repo>/logs/`. `~/kriya-live-validation/ma6_generate_check/logs/traces.db` is a real
   example.
@@ -435,3 +435,107 @@ never CWD-anchored:
   runner sets HOME and `KRIYA_LOG_DIR` itself to compensate, so the earlier "no conftest" note is superseded.
 - **PRD-002:** `tests/test_distribution_integrity.py` 30/0 on the plain runner, with the new module and conftest in
   place.
+
+## traces.db storage follow-up (2026-09-25)
+
+The user decided that `traces.db` is persistent run history, not log output, so it moves out of `paths.logs`.
+
+**Design** (`kriya/core/state_paths.py`, the one owner of the trace location):
+
+**State directory,** first match wins:
+1. `KRIYA_STATE_DIR` (absolute);
+2. `paths.state` (new, default null);
+   - Any relative value resolves once, in `resolve_config_state()`, against the setting config file's directory,
+     never the CWD. `~` expands.
+   - It is SEC-009-classified like the other `paths.*`: REPOSITORY_SAFE inside the workspace, SECURITY_AUTHORITY on an
+     escape, REPOSITORY_SAFE when null.
+   - A relative value reaching the resolver outside config loading is a typed `StateDirectoryError`.
+3. `~/.kriya/state`.
+
+**Consumers:** the trace database is always `trace_db_path(cfg)` = `<state>/traces.db`. That covers all 6
+`workflow.py` sites, `_mark_run_in_progress`, `kriya traces`, and milestone planning, whose `logs_path` parameter is
+renamed `trace_db`.
+
+**`paths.logs` no longer controls anything.**
+- File logs are `logging.directory`; run history is `paths.state`. The field stays so existing configs load.
+- It was deliberately not made a second log-location setting: `paths.logs` is REPOSITORY_SAFE inside a workspace,
+  while `logging.directory` is always SECURITY_AUTHORITY, so honoring it would let a repository route logs into itself
+  without approval. It would also bring logs back into the scratch repos that set `paths.logs: ./logs`.
+- This is the reversible reading of "paths.logs controls only file logs" (the advisor concurred). It is flagged to the
+  user.
+
+**Legacy database:** `<paths.logs>/traces.db`, for an absolute `paths.logs` only. A relative one is never probed
+against the CWD. The user's real legacy database is the packaged-default install-dir `logs/traces.db`, about 106 MB.
+- **Detected** when it exists and is not the current database.
+- **Reported:**
+  - `kriya traces` prints a note on stderr while the new history is absent or empty;
+  - `doctor --production` gives `persistence.traces` WARN, with the migration command as remediation.
+- **Copied** only by the explicit `kriya traces --migrate-legacy`:
+  - it uses the SQLite online backup (a WAL-safe consistent copy) into `<target>.migrating`, then an atomic replace;
+  - it refuses when the target already exists, so it never merges;
+  - it never moves or deletes the legacy file.
+- **Read-only:** `kriya traces` never creates the database.
+
+**Doctor:** `persistence.traces` now checks the state directory: resolve, probe without creating, and an existing
+database must be readable and writable. It is separate from `persistence.logs` (the log directory). Trace
+retention/security code is unchanged and independent of logging.
+
+**Scope:** workspace run control state (`.kriya/`: run lock, RunRecords, checkpoints) is unchanged and stays in the
+workspace, because PRD-008 recovery depends on it. The docs say so explicitly.
+
+**Tests:**
+- `tests/test_state_location.py` (22):
+  - the default is stable across CWDs;
+  - `paths.logs`, `logging.directory` and `KRIYA_LOG_DIR` changes leave the trace database unchanged;
+  - an explicit directory and the env override work;
+  - relative config and env values are typed errors;
+  - a relative `paths.state` resolves against the config file's directory from two CWDs;
+  - a repository state directory outside the workspace needs security authority, and null is safe;
+  - writes land in the state directory, not `paths.logs` or the CWD;
+  - legacy detection works: present and distinct only, and a relative `paths.logs` is never CWD-probed;
+  - `kriya traces` reports the legacy database and creates nothing;
+  - migration copies and keeps the original, refuses to merge into an existing database, and refuses when there is no
+    legacy database; the CLI migration is explicit and a second run is refused;
+  - the doctor check is independent of logs, WARNs on a legacy database, and FAILs on invalid or unwritable
+    directories;
+  - read-only `traces` from a repository creates no database anywhere.
+- `tests/conftest.py`: each test gets its own `KRIYA_STATE_DIR`, because tests read trace rows back and a shared
+  database would leak between tests. Log isolation is unchanged.
+
+**Assertion-location log.** Every change moves where the database is found; no assertion is weakened.
+- About 40 test sites that located the database as `cfg.paths.logs/traces.db` now use `trace_db_path(cfg)`: in
+  `test_workflow.py` (the `_latest_trace_row(cfg)` helper plus direct sites), `test_cli_smoke.py`,
+  `test_validation_baseline.py` (`_latest_trace_run_events(cfg)`), `test_milestone3_4.py` and
+  `test_traces_command.py`.
+- `test_milestones.py` now passes `trace_db=`. The no-I/O test was renamed.
+
+**Evidence:**
+- Mutation checks, each caught:
+  - the trace path derived from `paths.logs`;
+  - migration allowed to merge;
+  - `kriya traces` creating the database (2 tests fail).
+- Plain-runner, with a per-test `KRIYA_STATE_DIR` emulating the conftest:
+
+| Suite | Result |
+|---|---|
+| `test_state_location` | 22/0 |
+| `test_workflow` (all 28 trace-reading tests) | 28/0 |
+| `test_traces_command` | 7/0 |
+| `test_cli_smoke` | 65/0 |
+| `test_validation_baseline` | 54/0 |
+| `test_milestones` | 68/0 |
+| `test_production_doctor` | 53/0 |
+| `test_logging_location` | 23/0 |
+| `test_config` | 31/0 |
+| `test_sec009_config_authority` | 51/0 |
+| `test_distribution_integrity` | 30/0 |
+| `test_run_events` | 5/0 |
+
+- `test_milestone3_4::test_staged_skill_accrual` fails under the plain runner at an unrelated line (a staged-knowledge
+  file), identically at HEAD in a clean worktree. It is a runner limitation, so its trace line is verified by pytest
+  only.
+
+**Focused command:**
+```bash
+.venv/bin/pytest -ra tests/test_state_location.py tests/test_logging_location.py tests/test_traces_command.py tests/test_production_doctor.py tests/test_doctor_command.py tests/test_sec009_config_authority.py tests/test_sec009_p2_authority_approval.py tests/test_config.py tests/test_config_command.py tests/test_milestones.py tests/test_milestone3_4.py tests/test_validation_baseline.py tests/test_cli_smoke.py tests/test_run_events.py tests/test_generate_json_contract.py tests/test_prd008_recovery.py tests/test_run_ownership.py tests/test_bootstrap_contract.py tests/test_repl.py tests/test_distribution_integrity.py tests/test_workflow.py
+```

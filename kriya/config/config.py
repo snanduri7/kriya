@@ -74,9 +74,15 @@ class PluginsConfig(BaseModel):
     enabled: List[str] = Field(default_factory=list)
 
 class PathsConfig(BaseModel):
+    """`state` holds persistent run history (traces.db): KRIYA_STATE_DIR >
+    `state` (a relative value resolves against the config file's directory at
+    load) > ~/.kriya/state - see kriya/core/state_paths.py. `logs` no longer
+    controls anything (file logs: logging.directory; traces: state); it stays
+    so existing configs load, and a legacy <logs>/traces.db is only reported."""
     skills: str = Field(default="./skills")
     memory: str = Field(default="./memory")
     logs: str = Field(default="./logs")
+    state: Optional[str] = Field(default=None)
 
 
 class SkillsConfig(BaseModel):
@@ -1227,6 +1233,16 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                         for k, v in user_data["paths"].items():
                             if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
                                 user_data["paths"][k] = os.path.realpath(os.path.join(config_dir, v))
+                        # paths.state: ANY relative value (not only "./"-
+                        # prefixed) anchors to config_dir, never the CWD; "~"
+                        # expands; resolved once so SEC-009 classifies exactly
+                        # the directory kriya/core/state_paths.py opens.
+                        state_value = user_data["paths"].get("state")
+                        if isinstance(state_value, str):
+                            expanded = os.path.expanduser(state_value)
+                            user_data["paths"]["state"] = os.path.realpath(
+                                expanded if os.path.isabs(expanded) else os.path.join(config_dir, expanded)
+                            )
                     if "plugins" in user_data and "directory" in user_data["plugins"]:
                         v = user_data["plugins"]["directory"]
                         if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
@@ -1352,11 +1368,14 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                     # somewhere else.
                     if isinstance(user_data.get("paths"), dict):
                         for k, v in user_data["paths"].items():
-                            if k in ("skills", "memory", "logs") and isinstance(v, str):
+                            if k in ("skills", "memory", "logs", "state") and isinstance(v, str):
                                 resolved = v if os.path.isabs(v) else os.path.join(config_dir, v)
                                 classification_overrides[("paths", k)] = path_field_classification(
                                     k, resolved, config_dir
                                 )
+                            elif k == "state" and v is None:
+                                # null = the canonical default location; grants nothing
+                                classification_overrides[("paths", k)] = FieldClassification.REPOSITORY_SAFE
 
                     # agent_llms.<role> is one atomic merge unit (see
                     # agent_role_field_classification()'s docstring) -

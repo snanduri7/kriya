@@ -1525,7 +1525,7 @@ async def test_plan_milestones_logs_telemetry_when_accepted():
     milestones = [mkv2("M1", goal="g1", success_criterion="c1"), mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"])]
     planner.run_with_milestone_list = AsyncMock(return_value=("raw", milestones))
     with tempfile.TemporaryDirectory() as tmp, tempfile.TemporaryDirectory() as logs:
-        state, err = await plan_milestones(planner, "goal", tmp, logs_path=logs)
+        state, err = await plan_milestones(planner, "goal", tmp, trace_db=os.path.join(logs, "traces.db"))
         assert err is None
         conn = sqlite3.connect(os.path.join(logs, "traces.db"))
         row = conn.execute(
@@ -1540,8 +1540,8 @@ async def test_plan_milestones_logs_telemetry_when_accepted():
 
 
 @pytest.mark.asyncio
-async def test_plan_milestones_without_logs_path_does_no_io():
-    """logs_path defaults to None - a caller that doesn't pass it (most of
+async def test_plan_milestones_without_trace_db_does_no_io():
+    """trace_db defaults to None - a caller that doesn't pass it (most of
     this module's own tests, any pre-MA3.9 caller) gets zero telemetry I/O,
     not an error."""
     planner = MagicMock()

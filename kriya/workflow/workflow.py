@@ -24,6 +24,7 @@ from kriya.agents.contracts import parse_planner_structured_output
 from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.core.state_paths import trace_db_path
 from kriya.control.persistence import UnreadableRunRecordError, load_run_record
 from kriya.control.run_coordinator import (
     annotate_run,
@@ -1376,7 +1377,7 @@ class WorkflowEngine:
                 step_callback("knowledge_gap", gap_report.format_report())
             try:
                 from kriya.core.trace import TraceLogger
-                trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+                trace_db = trace_db_path(self.kernel.config)
                 trace_logger = TraceLogger(trace_db)
                 trace_logger.log_run(
                     run_id=trace_id,
@@ -2355,7 +2356,7 @@ class WorkflowEngine:
                 step_callback(status, plan_issue)
             try:
                 from kriya.core.trace import TraceLogger
-                trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+                trace_db = trace_db_path(self.kernel.config)
                 trace_logger = TraceLogger(trace_db)
                 trace_logger.log_run(
                     run_id=trace_id,
@@ -2915,7 +2916,7 @@ class WorkflowEngine:
             logger.error(f"Brownfield validation baseline REQUIRED but indeterminate: {baseline_capture.hard_stop_reason}")
             try:
                 from kriya.core.trace import TraceLogger
-                trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+                trace_db = trace_db_path(self.kernel.config)
                 TraceLogger(trace_db).log_run(
                     run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
                     attempts=0, status="baseline_indeterminate", files_modified=[],
@@ -3372,7 +3373,7 @@ class WorkflowEngine:
                     delete_checkpoint(workspace_path, run_id)
                     try:
                         from kriya.core.trace import TraceLogger
-                        trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+                        trace_db = trace_db_path(self.kernel.config)
                         trace_logger = TraceLogger(trace_db)
                         # Same derivation the terminal success/failure path uses below
                         # (this method's own trailing trace_logger.log_run() call) -
@@ -4299,7 +4300,7 @@ class WorkflowEngine:
         # carrying the same gate_outcomes/model_hops a post-mortem needs.
         try:
             from kriya.core.trace import TraceLogger
-            trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+            trace_db = trace_db_path(self.kernel.config)
             trace_logger = TraceLogger(trace_db)
             trace_logger.log_run(
                 run_id=trace_id,
@@ -4570,7 +4571,7 @@ class WorkflowEngine:
         # Write persistent trace log
         try:
             from kriya.core.trace import TraceLogger
-            trace_db = os.path.join(self.kernel.config.paths.logs, "traces.db")
+            trace_db = trace_db_path(self.kernel.config)
             trace_logger = TraceLogger(trace_db)
             duration = time.time() - start_time
             trace_logger.log_run(

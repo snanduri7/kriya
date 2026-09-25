@@ -35,7 +35,13 @@ plugins:
 paths:
   skills: "./skills"
   memory: "./memory"
+  # Legacy: no longer controls anything. File logs follow logging.directory;
+  # run history (traces.db) follows paths.state. An old <logs>/traces.db is
+  # reported by `kriya traces` and copied only by `kriya traces --migrate-legacy`.
   logs: "./logs"
+  # Run history (traces.db): KRIYA_STATE_DIR > paths.state > ~/.kriya/state.
+  # A relative value resolves against this config file's directory, never the CWD.
+  state: null
 
 skills:
   load_global: true

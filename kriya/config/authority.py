@@ -214,7 +214,7 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     ("workflow_controller", "enabled"), ("workflow_controller", "mode"),
     ("engineering_triage", "shadow_mode"),
     # paths escaping the workspace (see containment check note above)
-    ("paths", "skills"), ("paths", "memory"), ("paths", "logs"),
+    ("paths", "skills"), ("paths", "memory"), ("paths", "logs"), ("paths", "state"),
     # logging.file escaping the workspace - same containment treatment as
     # paths.* above (see the _REPOSITORY_SAFE_FIELDS comment for this
     # field). Listed here too, purely for accurate is_known_field()
