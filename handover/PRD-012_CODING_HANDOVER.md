@@ -1,7 +1,7 @@
 # PRD-012 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION. This is batch 2 (PRD-011 + PRD-012), with one pytest stop for the whole batch.
+VERIFIED @ 99c2340 (full suite 5399/0; live test passed, see PRD-012_LIVE_VERIFICATION.md).
 
 ## Scope
 Production egress and MCP containment enforcement: deny-by-default, configuration-owned authority. Before any

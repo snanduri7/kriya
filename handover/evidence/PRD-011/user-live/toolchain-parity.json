@@ -1,0 +1,104 @@
+{
+  "java17": {
+    "compile": {
+      "build_tool": "maven",
+      "build_tool_version": "3.9",
+      "containment_image": "maven:3.9-eclipse-temurin-17",
+      "image_digest": "sha256:f0be3f7442b426f4bc8238fcb0fc5545be96d3266511aed07f767fd51b78a09e",
+      "language": "java",
+      "observed_build_tool_version": "3.9.16",
+      "observed_runtime_version": "17",
+      "requirement_source": "pom.xml",
+      "runtime": "jdk",
+      "runtime_constraint": null,
+      "runtime_version": "17",
+      "selection": {
+        "baseline": null,
+        "basis": "repository_declaration",
+        "declaration_mutable": false,
+        "target": {
+          "containment_image": "maven:3.9-eclipse-temurin-17",
+          "requirement_source": "pom.xml",
+          "runtime_constraint": null,
+          "runtime_version": "17"
+        }
+      }
+    },
+    "run": {
+      "build_tool": "maven",
+      "build_tool_version": "3.9",
+      "containment_image": "maven:3.9-eclipse-temurin-17",
+      "image_digest": "sha256:f0be3f7442b426f4bc8238fcb0fc5545be96d3266511aed07f767fd51b78a09e",
+      "language": "java",
+      "observed_build_tool_version": "3.9.16",
+      "observed_runtime_version": "17",
+      "requirement_source": "pom.xml",
+      "runtime": "jdk",
+      "runtime_constraint": null,
+      "runtime_version": "17",
+      "selection": {
+        "baseline": null,
+        "basis": "repository_declaration",
+        "declaration_mutable": false,
+        "target": {
+          "containment_image": "maven:3.9-eclipse-temurin-17",
+          "requirement_source": "pom.xml",
+          "runtime_constraint": null,
+          "runtime_version": "17"
+        }
+      }
+    },
+    "stdout": "java17-ok"
+  },
+  "python312": {
+    "compile": {
+      "build_tool": "pip",
+      "build_tool_version": null,
+      "containment_image": "python:3.12-slim",
+      "image_digest": "sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786",
+      "language": "python",
+      "observed_build_tool_version": null,
+      "observed_runtime_version": "3.12.14",
+      "requirement_source": "pyproject.toml:project.requires-python",
+      "runtime": "cpython",
+      "runtime_constraint": null,
+      "runtime_version": "3.12",
+      "selection": {
+        "baseline": null,
+        "basis": "repository_declaration",
+        "declaration_mutable": false,
+        "target": {
+          "containment_image": "python:3.12-slim",
+          "requirement_source": "pyproject.toml:project.requires-python",
+          "runtime_constraint": null,
+          "runtime_version": "3.12"
+        }
+      }
+    },
+    "run": {
+      "build_tool": "pip",
+      "build_tool_version": null,
+      "containment_image": "python:3.12-slim",
+      "image_digest": "sha256:4f8d1afed6d58037c680221ca6dd9fb4737b7ecfa7d4809ca809fdc0c7d9b786",
+      "language": "python",
+      "observed_build_tool_version": null,
+      "observed_runtime_version": "3.12.14",
+      "requirement_source": "pyproject.toml:project.requires-python",
+      "runtime": "cpython",
+      "runtime_constraint": null,
+      "runtime_version": "3.12",
+      "selection": {
+        "baseline": null,
+        "basis": "repository_declaration",
+        "declaration_mutable": false,
+        "target": {
+          "containment_image": "python:3.12-slim",
+          "requirement_source": "pyproject.toml:project.requires-python",
+          "runtime_constraint": null,
+          "runtime_version": "3.12"
+        }
+      }
+    },
+    "stdout": "python312-ok"
+  }
+}

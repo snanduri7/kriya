@@ -1,11 +1,17 @@
 # PRD-011 Pytest Verification
 
 ## Verdict
-PENDING: superseded by the PRD-011 reopen (see `PRD-011_CODING_HANDOVER.md`, "Reopen closure"). The record below
-verified the pre-reopen revision (54ad798/d6b775e), which `PRD-001_011_INDEPENDENT_REVIEW.md` found BLOCKING. It is
-kept for provenance and is not evidence for the reopened code.
+PYTEST_VERIFIED @ 99c2340 (reopen closure + final-review correction 6568f11).
 
-## Superseded record
+## Result (user's terminal)
+- Focused suite (the batch-2 list, including `tests/test_prd011_toolchain_migration.py`): green. One earlier
+  focused run had a single failure in `test_enforce_loop_dispatches_tool_subtasks_only_through_subtask_executor`;
+  it was a stale-source artifact (that pytest process imported `workflow_controller.py` before 6568f11 added 8
+  lines above `_run_structured_enforce`, so `inspect.getsource` read the new file at the old line number). It
+  passes against the committed code and in the full run below. No code change.
+- Full suite `.venv/bin/pytest`: **5399 passed, 0 failed, 9 deselected, 148 warnings** in 1126.32s (0:18:46).
+
+## Superseded record (pre-reopen revision)
 
 ### Verdict (superseded)
 PYTEST_VERIFIED

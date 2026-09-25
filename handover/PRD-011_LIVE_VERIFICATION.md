@@ -1,11 +1,20 @@
 # PRD-011 Live Verification
 
 ## Verdict
-PENDING: superseded by the PRD-011 reopen (see `PRD-011_CODING_HANDOVER.md`, "Reopen closure"). The record below
-verified the pre-reopen revision (54ad798/d6b775e), which `PRD-001_011_INDEPENDENT_REVIEW.md` found BLOCKING. It is
-kept for provenance and is not evidence for the reopened code.
+LIVE_VERIFIED @ 99c2340.
 
-## Superseded record
+## Evidence
+- Command: `KRIYA_PRD011_EVIDENCE_DIR=handover/evidence/PRD-011/user-live .venv/bin/pytest -m live_model -ra -s tests/test_live_prd011_toolchain_parity.py` - passed.
+- Record: `handover/evidence/PRD-011/user-live/toolchain-parity.json`.
+- Java 17 repository: compile and run gates both ran in `maven:3.9-eclipse-temurin-17`, pinned by image digest
+  `sha256:f0be3f74...`; observed runtime `17`, observed Maven `3.9.16`; selection basis `repository_declaration`.
+- Python 3.12 repository: compile and run gates both ran in `python:3.12-slim`; observed runtime `3.12.14`
+  (checked against the declared constraint); selection basis `repository_declaration`.
+- Baseline/target migration semantics (authorized Java 17 -> 21, unauthorized conflict, Python equivalent,
+  migration resume) are proven deterministically by `tests/test_prd011_toolchain_migration.py` (pytest above);
+  the live test proves the image/attestation path against real Docker.
+
+## Superseded record (pre-reopen revision)
 
 ### Verdict (superseded)
 LIVE_VERIFIED

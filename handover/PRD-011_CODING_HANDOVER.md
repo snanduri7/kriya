@@ -1,7 +1,7 @@
 # PRD-011 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION (reopen closure below; supersedes the original record)
+VERIFIED @ 99c2340 (full suite 5399/0; live parity passed). Reopen closure and final-review correction below supersede the original record.
 
 ## Source identity
 - Base revision: `6b91072aac92b6ef5c8cc7a30f10b71af44ce1a5`
