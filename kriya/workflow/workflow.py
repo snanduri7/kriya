@@ -64,6 +64,7 @@ from kriya.workflow.resume_fingerprints import (
 )
 from kriya.workflow.plan_executor import WorkUnitInvocation
 from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
+from kriya.workflow.egress_authority import egress_authority_details
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.validation_baseline import (
     build_validation_outcome,
@@ -229,7 +230,7 @@ from kriya.workflow.retry_prompts import (
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
 )
-from kriya.tools.validate import PolymorphicValidator, toolchain_evidence
+from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.review_context import build_candidate_diff_context, build_review_batches, build_reviewer_verified_evidence
@@ -1150,6 +1151,18 @@ class WorkflowEngine:
             engineering_route=engineering_route,
             process_profile=control.process_profile if control is not None else None,
         )
+        # PRD-012: every outbound channel's configured authority (capability
+        # class, destinations, the trusted field they come from, the
+        # containment they run under) is persisted with the run. Telemetry
+        # only: each channel's own owner still enforces its decision.
+        try:
+            state.record_event(RunEvent(
+                kind="egress.authority", attempt=0, source="workflow.run_generation_workflow",
+                authority=EventAuthority.AUXILIARY, message="configured outbound-network authority",
+                details=egress_authority_details(self.kernel.config),
+            ))
+        except Exception as exc:  # never blocks the run; the gap is logged loudly
+            logger.warning(f"Could not record the run's egress authority: {exc}")
         generation_budget = self.kernel.config.autonomy.generation_time_budget_seconds
         if generation_budget is None:
             logger.info(
@@ -1823,7 +1836,8 @@ class WorkflowEngine:
                 from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
                 embed_client = OllamaEmbeddingClient(
                     base_url=self.kernel.config.embedding.base_url,
-                    model=self.kernel.config.embedding.model
+                    model=self.kernel.config.embedding.model,
+                    egress_policy=self.kernel.config.autonomy.egress_policy,
                 )
                 vector_store = LocalVectorStore(vector_index_path)
                 
@@ -1978,7 +1992,8 @@ class WorkflowEngine:
                 from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
                 embed_client = OllamaEmbeddingClient(
                     base_url=self.kernel.config.embedding.base_url,
-                    model=self.kernel.config.embedding.model
+                    model=self.kernel.config.embedding.model,
+                    egress_policy=self.kernel.config.autonomy.egress_policy,
                 )
                 vector_store = LocalVectorStore(vector_index_path)
                 query_emb = await embed_client.get_embedding(goal, is_query=True)
@@ -3934,7 +3949,7 @@ class WorkflowEngine:
                         "success": True,
                         "output": full_test_res.get("output", ""),
                         "deferred_to_future_owner": deferral.future_owner_id,
-                        **toolchain_evidence(full_test_res),
+                        **execution_evidence(full_test_res),
                     })
                     # Falls through to the same post-regression checks and
                     # success path below, exactly as a genuinely passing
@@ -4094,7 +4109,7 @@ class WorkflowEngine:
                     "type": "regression_test",
                     "success": True,
                     "output": full_test_res.get("output", ""),
-                    **toolchain_evidence(full_test_res),
+                    **execution_evidence(full_test_res),
                 })
                 state.terminal_regression_succeeded = True
                 if obligation_ledger is not None and current_subtask_id:

@@ -180,13 +180,24 @@ def _pyproject_dependencies(pyproject_path: str) -> List[str]:
     return [dep for dep in dependencies if isinstance(dep, str) and dep.strip()]
 
 
-def toolchain_evidence(result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """PRD-011: the attested contained toolchain (image, content digest,
-    declared and observed runtime/build-tool versions) a validator result
-    carries, as the gate-outcome fields that persist it with the verdict.
-    Empty for an uncontained result - host mode never claims an identity."""
-    identity = result.get("toolchain_identity") if isinstance(result, dict) else None
-    return {"toolchain_identity": identity} if identity is not None else {}
+_EXECUTION_EVIDENCE_KEYS = (
+    # PRD-011: the attested contained toolchain (image, content digest,
+    # declared and observed runtime/build-tool versions).
+    "toolchain_identity",
+    # PRD-012: the outbound-network authority the process ran under
+    # (capability class, destinations, authority source, backend).
+    "egress",
+)
+
+
+def execution_evidence(result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The containment evidence a validator/process result carries, as the
+    gate-outcome fields that persist it with the verdict. Empty for an
+    uncontained result - host mode never claims an identity or a network
+    decision it did not make."""
+    if not isinstance(result, dict):
+        return {}
+    return {key: result[key] for key in _EXECUTION_EVIDENCE_KEYS if result.get(key) is not None}
 
 
 class PolymorphicValidator:
@@ -869,8 +880,7 @@ class PolymorphicValidator:
     def _validation_result(success: bool, output: str, command_result: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Keep attested contained-toolchain evidence with the gate verdict."""
         result: Dict[str, Any] = {"success": success, "output": output}
-        if command_result and command_result.get("toolchain_identity") is not None:
-            result["toolchain_identity"] = command_result["toolchain_identity"]
+        result.update(execution_evidence(command_result))
         return result
 
     _MAVEN_ACQUISITION_INCOMPLETE_MARKER = "MAVEN_ACQUISITION_INCOMPLETE:"
@@ -1818,9 +1828,9 @@ class PolymorphicValidator:
             steps.append({
                 "command": list(command), "exit_code": res["returncode"],
                 "stdout": res["stdout"], "stderr": res["stderr"],
-                "timed_out": res["timeout"], **toolchain_evidence(res),
+                "timed_out": res["timeout"], **execution_evidence(res),
             })
-            sequence_toolchain = toolchain_evidence(res) or sequence_toolchain
+            sequence_toolchain = execution_evidence(res) or sequence_toolchain
             last_returncode = res["returncode"]
             if res["timeout"]:
                 any_timed_out = True

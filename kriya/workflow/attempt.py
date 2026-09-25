@@ -75,7 +75,7 @@ from kriya.workflow.context_source import (
 # Annotation-only names, imported at runtime so typing.get_type_hints() on
 # this module's dataclasses and functions resolves (PRD-001; none of these
 # modules imports attempt.py, so there is no cycle).
-from kriya.tools.validate import PolymorphicValidator, toolchain_evidence
+from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.context_package import ContextItem
 from kriya.workflow.plan_schema import EngineeringPlan
 from kriya.workflow.resume_fingerprints import ResumePlan
@@ -1303,6 +1303,7 @@ async def _maybe_run_developer_investigation(
         from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
         embed_client = OllamaEmbeddingClient(
             base_url=ctx.kernel.config.embedding.base_url, model=ctx.kernel.config.embedding.model,
+            egress_policy=ctx.kernel.config.autonomy.egress_policy,
         )
         query_emb = await embed_client.get_embedding(query, is_query=True)
         store = LocalVectorStore(vector_index_path)
@@ -3407,7 +3408,7 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
                 state.gate_outcomes.append({
                     "attempt": state.attempt_number, "type": "compile",
                     "success": compile_result["success"], "output": compile_result.get("output", ""),
-                    **toolchain_evidence(compile_result),
+                    **execution_evidence(compile_result),
                 })
                 if not compile_result["success"]:
                     failure = Failure(
@@ -3422,7 +3423,7 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
         state.gate_outcomes.append({
             "attempt": state.attempt_number, "type": outcome_type,
             "success": result["success"], "output": result.get("output", ""),
-            **toolchain_evidence(result),
+            **execution_evidence(result),
         })
         if not result["success"]:
             failure = Failure(
@@ -3916,7 +3917,7 @@ async def _execute_managed_service_verification(
         "output": output + f"\n\n[Managed service probe]: {result.reasoning}",
         "graded_by": "managed_service_probe", "commands": [spec.service_command],
         "managed_service_outcome": result.outcome.value, "deterministic_result": "PASS",
-        **toolchain_evidence(result.to_dict()),
+        **execution_evidence(result.to_dict()),
     })
 
 
@@ -4366,7 +4367,7 @@ async def _execute_runtime_verification_directly(
         "graded_by": verification_authority, "commands": resolved_run_commands,
         "steps": run_res.get("steps", []),
         "deterministic_result": _deterministic_result_provenance_field(verification_authority),
-        **toolchain_evidence(run_res),
+        **execution_evidence(run_res),
     })
 
 
@@ -7377,7 +7378,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 "type": "compile",
                 "success": True,
                 "output": compile_res.get("output", ""),
-                **toolchain_evidence(compile_res),
+                **execution_evidence(compile_res),
             })
 
         # A successful real compile is the authority for cross-file signature,
@@ -7442,7 +7443,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "success": True,
                     "output": test_res.get("output", ""),
                     "selection_fallback": True,
-                    **toolchain_evidence(test_res),
+                    **execution_evidence(test_res),
                 })
                 accepted_test_output = test_res.get("output", "")
 
@@ -7515,7 +7516,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "type": "targeted_test",
                     "success": True,
                     "output": test_res.get("output", ""),
-                    **toolchain_evidence(test_res),
+                    **execution_evidence(test_res),
                 })
             if target_test:
                 accepted_test_output = test_res.get("output", "")
@@ -7542,7 +7543,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "type": "test",
                     "success": True,
                     "output": test_res.get("output", ""),
-                    **toolchain_evidence(test_res),
+                    **execution_evidence(test_res),
                 })
                 accepted_test_output = test_res.get("output", "")
 

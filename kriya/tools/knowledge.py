@@ -118,6 +118,14 @@ class KnowledgeCache:
                 (ecosystem.lower(), package.lower(), version.lower()),
             )
 
+# PRD-012: the fixed platform hosts KnowledgeGuard's release-metadata lookups
+# reach (package names come from the goal text; the hosts never do).
+REGISTRY_METADATA_HOSTS = (
+    "search.maven.org", "pypi.org", "registry.npmjs.org", "rubygems.org",
+    "proxy.golang.org", "crates.io", "api.nuget.org",
+)
+
+
 class RegistryAdapter(abc.ABC):
     """Abstract base class for ecosystem registries."""
     @abc.abstractmethod

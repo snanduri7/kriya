@@ -19,7 +19,7 @@ from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.core.state_paths import trace_db_path
 from kriya.tools.process import ProcessResult
-from kriya.tools.validate import PolymorphicValidator, toolchain_evidence
+from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.workflow import WorkflowEngine
 
 ATTESTED = {
@@ -44,10 +44,10 @@ def _latest_gate_outcomes(cfg):
     return json.loads(row[0])
 
 
-def test_toolchain_evidence_is_empty_for_host_mode_results():
-    assert toolchain_evidence({"success": True, "output": ""}) == {}
-    assert toolchain_evidence(None) == {}
-    assert toolchain_evidence({"success": True, "toolchain_identity": ATTESTED}) == {"toolchain_identity": ATTESTED}
+def test_execution_evidence_is_empty_for_host_mode_results():
+    assert execution_evidence({"success": True, "output": ""}) == {}
+    assert execution_evidence(None) == {}
+    assert execution_evidence({"success": True, "toolchain_identity": ATTESTED}) == {"toolchain_identity": ATTESTED}
 
 
 def test_contained_compile_result_carries_the_attested_identity(tmp_path):

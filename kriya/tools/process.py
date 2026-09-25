@@ -30,6 +30,7 @@ from kriya.tools.containment import (
     ContainmentBackend,
     ContainmentProfile,
     ContainmentSetupError,
+    NetworkAuthority,
     PreparedContainment,
 )
 
@@ -43,6 +44,9 @@ class ProcessResult:
     stdout_truncated: bool = False
     stderr_truncated: bool = False
     toolchain_identity: Optional[Dict[str, object]] = None
+    # PRD-012: the outbound-network authority this contained process ran
+    # under (see egress_evidence_for). None for an uncontained host process.
+    egress: Optional[Dict[str, object]] = None
 
     def to_dict(self) -> Dict[str, object]:
         result = {
@@ -55,7 +59,33 @@ class ProcessResult:
         }
         if self.toolchain_identity is not None:
             result["toolchain_identity"] = self.toolchain_identity
+        if self.egress is not None:
+            result["egress"] = self.egress
         return result
+
+
+# Where each NetworkAuthority's destinations come from. Kriya-owned: never
+# the command, the repository or model output.
+_EGRESS_AUTHORITY_SOURCE = {
+    NetworkAuthority.DENIED: "containment profile (no network)",
+    NetworkAuthority.DEPENDENCY_REGISTRY_ONLY: "autonomy.acquisition_registry_hosts",
+    NetworkAuthority.UNRESTRICTED: "privileged: the execution environment's network",
+}
+
+
+def egress_evidence_for(profile: ContainmentProfile, backend: ContainmentBackend) -> Dict[str, object]:
+    """PRD-012: the recorded egress decision of one contained process -
+    capability class, destinations, the trusted source they come from, and
+    the backend enforcing it."""
+    from kriya.policy.egress import capability_for
+
+    return {
+        "capability": capability_for(profile.network).value,
+        "network_authority": profile.network.value,
+        "destinations": list(profile.network_destinations),
+        "authority_source": _EGRESS_AUTHORITY_SOURCE[profile.network],
+        "backend": type(backend).__name__,
+    }
 
 
 def _bounded_tail(value: str, limit: int) -> tuple[str, bool]:
@@ -203,6 +233,7 @@ class _ResolvedExecution:
     cleanup: Optional[Callable[[], None]] = None
     exec_target: Optional[List[str]] = None
     toolchain_identity: Optional[Dict[str, object]] = None
+    egress: Optional[Dict[str, object]] = None
 
 
 def _prepare_env_and_preexec(
@@ -243,6 +274,7 @@ def _prepare_env_and_preexec(
         env=prepared.env, preexec_fn=prepared.preexec_fn, command=effective_command, cleanup=prepared.cleanup,
         exec_target=prepared.exec_target,
         toolchain_identity=(prepared.toolchain_identity.to_dict() if prepared.toolchain_identity else None),
+        egress=egress_evidence_for(containment_profile, containment_backend),
     )
 
 
@@ -350,6 +382,7 @@ class ProcessController:
             stdout_truncated=stdout_truncated,
             stderr_truncated=stderr_truncated,
             toolchain_identity=resolved.toolchain_identity,
+            egress=resolved.egress,
         )
 
     async def run_async(
@@ -418,6 +451,7 @@ class ProcessController:
             stdout_truncated=stdout_truncated,
             stderr_truncated=stderr_truncated,
             toolchain_identity=resolved.toolchain_identity,
+            egress=resolved.egress,
         )
 
     def start_managed(
