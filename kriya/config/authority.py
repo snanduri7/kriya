@@ -209,6 +209,8 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # PRD-018: which roles must run on a runtime distinct from the
     # Developer's - a repository must not be able to relax the operator's.
     ("model_policy", "independent_roles"),
+    # PRD-019: which runtime each role is routed to, and the evidence tables.
+    ("model_policy", "routing"),
     (None, "llm_chain"),  # each entry carries its own base_url
     ("workflow_controller", "enabled"), ("workflow_controller", "mode"),
     ("engineering_triage", "shadow_mode"),

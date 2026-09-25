@@ -1247,6 +1247,16 @@ class WorkflowEngine:
             ))
         except Exception as exc:
             logger.warning(f"Could not record the run's role-runtime assignment: {exc}")
+        # PRD-019: the routes the workflow command applied (candidates,
+        # rejections, final route), one event per routed role.
+        routing_plan = getattr(self.kernel.config, "_routing_plan", None)
+        for decision in (routing_plan.to_events() if routing_plan is not None else []):
+            state.record_event(RunEvent(
+                kind="model.route", attempt=0, source="workflow.run_generation_workflow",
+                authority=EventAuthority.AUXILIARY,
+                message=f"{decision['role']} routed to {decision['model']} ({decision['source']})",
+                details=decision,
+            ))
         generation_budget = self.kernel.config.autonomy.generation_time_budget_seconds
         if generation_budget is None:
             logger.info(

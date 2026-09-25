@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -763,6 +763,54 @@ class FallbackModelConfig(BaseModel):
 _POLICY_ROLES = ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance")
 
 
+class ModelRoutingConfig(BaseModel):
+    """PRD-019: opt-in evidence-based model routing (kriya/core/model_routing.py).
+    ``roles`` maps a role (developer or an agent_llms role) to candidate
+    aliases in operator preference order; a candidate is eligible only when
+    its exact runtime is QUALIFIED for that role as routed. ``table_path``
+    is the between-run metrics table (``kriya model metrics --write-table``;
+    default: the state directory); ``frozen_routes_path`` the table
+    ``kriya model routes --freeze`` wrote, replayed by ``mode: frozen``."""
+
+    mode: str = Field(default="off")
+    candidates: List[FallbackModelConfig] = Field(default_factory=list)
+    roles: Dict[str, List[str]] = Field(default_factory=dict)
+    min_calls: int = Field(default=5, ge=1)
+    min_context_window: Optional[int] = Field(default=None, ge=1)
+    table_path: Optional[str] = Field(default=None)
+    frozen_routes_path: Optional[str] = Field(default=None)
+
+    @field_validator("mode")
+    @classmethod
+    def _known_mode(cls, mode: str) -> str:
+        if mode not in ("off", "evidence", "frozen"):
+            raise ValueError(f"model_policy.routing.mode must be off, evidence or frozen, got {mode!r}")
+        return mode
+
+    @field_validator("table_path", "frozen_routes_path")
+    @classmethod
+    def _absolute_path(cls, path: Optional[str]) -> Optional[str]:
+        if path is not None and not os.path.isabs(os.path.expanduser(path)):
+            raise ValueError(f"model_policy.routing paths must be absolute, got {path!r}")
+        return os.path.realpath(os.path.expanduser(path)) if path is not None else None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "ModelRoutingConfig":
+        aliases = [candidate.model for candidate in self.candidates]
+        if len(set(aliases)) != len(aliases):
+            raise ValueError("model_policy.routing.candidates: aliases must be unique")
+        unknown_roles = sorted(set(self.roles) - {"developer", *_POLICY_ROLES})
+        if unknown_roles:
+            raise ValueError(f"model_policy.routing.roles: unknown role(s) {unknown_roles}")
+        for role, role_aliases in self.roles.items():
+            missing = sorted(set(role_aliases) - set(aliases))
+            if missing:
+                raise ValueError(f"model_policy.routing.roles.{role}: {missing} are not configured candidates")
+        if self.mode == "frozen" and not self.frozen_routes_path:
+            raise ValueError("model_policy.routing.mode frozen requires frozen_routes_path")
+        return self
+
+
 class ModelPolicyConfig(BaseModel):
     """PRD-018: role-model independence policy. By default every role may
     share the Developer's model (the local single-model setup); the
@@ -773,6 +821,7 @@ class ModelPolicyConfig(BaseModel):
     verification evidence. SECURITY_AUTHORITY: a repository cannot relax it."""
 
     independent_roles: List[str] = Field(default_factory=list)
+    routing: ModelRoutingConfig = Field(default_factory=ModelRoutingConfig)
 
     @field_validator("independent_roles")
     @classmethod
@@ -1126,6 +1175,10 @@ class AppConfig(BaseModel):
     execution_policy: ExecutionPolicyConfig = Field(default_factory=ExecutionPolicyConfig)
     workflow_controller: WorkflowControllerConfig = Field(default_factory=WorkflowControllerConfig)
     runtime_profile: Optional[str] = Field(default=None)
+    # PRD-019: the routing plan a workflow command applied to this (routed)
+    # configuration, recorded by the run as model.route events. Not a
+    # configuration field.
+    _routing_plan: Any = PrivateAttr(default=None)
 
     @field_validator("runtime_profile")
     @classmethod

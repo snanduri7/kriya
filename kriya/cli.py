@@ -772,10 +772,32 @@ def _model_cfg(ctx: click.Context) -> AppConfig:
 
 def _workflow_config(cfg: AppConfig) -> AppConfig:
     """The configuration a workflow command (generate, fix, proposal
-    execution) runs with. PRD-018: when model_policy.independent_roles
-    requires roles to run on a runtime distinct from the Developer's, it is
-    checked here, before any model call, and the command is refused if the
-    exact runtimes do not show it."""
+    execution) runs with, decided before any model call.
+
+    PRD-019: with model_policy.routing enabled, each routed role is bound to
+    its chosen candidate (a routed copy; the loaded configuration is not
+    changed) and the plan travels with it for the run's model.route events;
+    a frozen route that no longer holds refuses the command.
+    PRD-018: when model_policy.independent_roles requires roles to run on a
+    runtime distinct from the Developer's, it is checked on the routed
+    configuration and the command is refused if the exact runtimes do not
+    show it."""
+    if cfg.model_policy.routing.mode != "off":
+        from kriya.core.model_routing import RoutingError, apply_routes, plan_routes
+
+        try:
+            plan = plan_routes(cfg)
+        except RoutingError as error:
+            click.secho(f"[{error.reason_code}] model routing refused this run: {error}", fg="red", err=True)
+            sys.exit(1)
+        routed = apply_routes(cfg, plan)
+        if routed is cfg:
+            routed = cfg.model_copy(deep=True)
+        routed._routing_plan = plan
+        for decision in plan.decisions.values():
+            click.secho(f"Model route: {decision.role} -> {decision.model} ({decision.source}: {decision.reason})",
+                        fg="cyan", err=True)
+        cfg = routed
     if cfg.model_policy.independent_roles:
         from kriya.core.role_metrics import ROLE_INDEPENDENCE_REQUIRED, independence_violations, role_runtimes
 
@@ -791,8 +813,10 @@ def _workflow_config(cfg: AppConfig) -> AppConfig:
 
 @model_group.command(name="metrics")
 @click.option("--json", "json_output", is_flag=True, help="Emit the aggregated table as JSON.")
+@click.option("--write-table", "write_table", is_flag=True,
+              help="Also write it as the routing table model_policy.routing reads (PRD-019; runs never write it).")
 @click.pass_context
-def model_metrics(ctx: click.Context, json_output: bool) -> None:
+def model_metrics(ctx: click.Context, json_output: bool, write_table: bool) -> None:
     """Per-role model metrics aggregated over the finished runs in traces.db.
 
     One row per (role, model, exact runtime): calls, protocol and schema
@@ -805,6 +829,12 @@ def model_metrics(ctx: click.Context, json_output: bool) -> None:
 
     cfg = _model_cfg(ctx)
     table = aggregate_role_metrics(runs_with_role_metrics(trace_db_path(cfg)))
+    if write_table:
+        from kriya.core import model_routing
+
+        path = model_routing.routing_table_path(cfg)
+        model_routing.write_table(path, table)
+        click.secho(f"Routing table written: {path} (digest {table['digest'][:12]})", fg="green", err=True)
     if json_output:
         click.echo(json.dumps(table, indent=2, sort_keys=True))
         return
@@ -821,6 +851,44 @@ def model_metrics(ctx: click.Context, json_output: bool) -> None:
                      f"first_pass={row['first_pass_successes']}/{row['first_pass_runs']} "
                      f"retries_triggered={row['retries_triggered']}")
         click.echo(line)
+
+
+@model_group.command(name="routes")
+@click.option("--json", "json_output", is_flag=True, help="Emit the route decisions as JSON.")
+@click.option("--freeze", "freeze_path", type=click.Path(dir_okay=False), default=None,
+              help="Write these decisions as a frozen route table (for model_policy.routing.mode: frozen).")
+@click.pass_context
+def model_routes(ctx: click.Context, json_output: bool, freeze_path: Optional[str]) -> None:
+    """Show the evidence-based route of every role in model_policy.routing.roles
+    (PRD-019): each candidate's evidence, every rejection reason and the final
+    route. Runs nothing; shows the evidence decision even while routing is
+    off (in frozen mode, the replayed routes)."""
+    from kriya.core.model_routing import RoutingError, frozen_routes_from, plan_routes, write_table
+
+    cfg = _model_cfg(ctx)
+    mode = "frozen" if cfg.model_policy.routing.mode == "frozen" else "evidence"
+    try:
+        plan = plan_routes(cfg, mode=mode)
+        frozen = frozen_routes_from(plan) if freeze_path else None
+    except RoutingError as error:
+        click.secho(f"[{error.reason_code}] {error}", fg="red", err=True)
+        ctx.exit(1)
+        return
+    if frozen is not None:
+        write_table(os.path.abspath(freeze_path), frozen)
+        click.secho(f"Frozen route table written: {os.path.abspath(freeze_path)}", fg="green", err=True)
+    events = plan.to_events()
+    if json_output:
+        click.echo(json.dumps({"mode": mode, "table_digest": plan.table_digest, "routes": events},
+                              indent=2, sort_keys=True))
+        return
+    if not events:
+        click.echo("No role is listed in model_policy.routing.roles.")
+    for decision in events:
+        click.secho(f"  {decision['role']:<16} -> {decision['model']}  ({decision['source']}: {decision['reason']})",
+                    bold=True)
+        for rejected in decision["rejected"]:
+            click.echo(f"      rejected {rejected['model']}: {'; '.join(rejected['reasons'])}")
 
 
 @model_group.command(name="fingerprint")
@@ -853,9 +921,12 @@ def model_fingerprint(ctx: click.Context, model_name: Optional[str], json_output
 @click.option("--context-window", "context_window", type=click.IntRange(min=1024), default=None,
               help="Qualify the model at this num_ctx instead of its configured one: a larger context tier the "
                    "adaptive budget policy may then select (it must also pass context_capacity).")
+@click.option("--role", "route_role", default=None,
+              help="Qualify a model_policy.routing candidate exactly as it runs when routed to this role "
+                   "(PRD-019: a runtime's identity depends on the binding it is placed in).")
 @click.pass_context
 def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, json_output: bool,
-                  out_path: Optional[str], context_window: Optional[int]) -> None:
+                  out_path: Optional[str], context_window: Optional[int], route_role: Optional[str]) -> None:
     """Run the protocol qualification cases against the exact served runtime.
 
     The record is keyed by the runtime fingerprint and stored outside the
@@ -868,6 +939,13 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
 
     cfg = _model_cfg(ctx)
     _bootstrap_logging(cfg, file_logging=False)
+    if route_role:
+        from kriya.core.model_routing import place_candidate
+
+        candidate = next((c for c in cfg.model_policy.routing.candidates if c.model == model_name), None)
+        if candidate is None:
+            raise click.UsageError(f"--role needs --model to name a model_policy.routing candidate; {model_name!r} is not")
+        cfg = place_candidate(cfg, route_role, candidate)
     unknown = sorted(set(cases) - set(CAPABILITIES))
     if unknown:
         raise click.UsageError(f"unknown case(s) {unknown}; known: {', '.join(CAPABILITIES)}")
