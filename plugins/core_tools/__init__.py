@@ -268,7 +268,14 @@ class ShellTool(BaseTool):
         # package manager (npm/Bundler/RubyGems/Cargo/Gradle - no
         # registry-host authority declared for these today) fails CLOSED to
         # DENIED, never UNRESTRICTED.
-        network = NetworkAuthority.UNRESTRICTED
+        #
+        # PRD-012: autonomy.shell_network "denied" (forced by the production
+        # profile) removes the privileged default - anything that is not a
+        # recognized, registry-scoped package-manager command gets no
+        # network. With a non-network-capable backend that is a refusal
+        # (BackendUnavailableError), never a host run with the network.
+        shell_denied = self.autonomy_cfg.shell_network == "denied"
+        network = NetworkAuthority.DENIED if shell_denied else NetworkAuthority.UNRESTRICTED
         network_destinations: Tuple[str, ...] = ()
         if self.autonomy_cfg.contained_execution_required:
             acquisition_kind = classify_shell_acquisition_command(parsed_command) if parsed_command else None
@@ -279,7 +286,12 @@ class ShellTool(BaseTool):
                 network = NetworkAuthority.DENIED
         profile = None
         backend = None
-        if self.autonomy_cfg.sandbox_execution:
+        # Required containment is never skipped because sandbox_execution is
+        # off: that combination used to run the command on the host.
+        if (
+            self.autonomy_cfg.sandbox_execution or self.autonomy_cfg.contained_execution_required
+            or shell_denied
+        ):
             profile = ContainmentProfile(
                 trust_class=TrustClass.UNTRUSTED_EXECUTION,
                 workspace_path=os.getcwd(),
@@ -304,11 +316,14 @@ class ShellTool(BaseTool):
         except Exception as e:
             raise ToolExecutionError(f"Shell command execution failed: {e}") from e
 
-        return {
+        output = {
             "exit_code": result.returncode,
             "stdout": result.stdout,
             "stderr": result.stderr,
         }
+        if result.egress is not None:
+            output["egress"] = result.egress  # PRD-012: the network authority it ran under
+        return output
 
 
 class GitTool(BaseTool):

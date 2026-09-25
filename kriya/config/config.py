@@ -493,6 +493,22 @@ class AutonomyConfig(BaseModel):
     # command primitive in this codebase (ProcessController.run(), used by
     # PolymorphicValidator/service_runtime) always has one.
     shell_command_timeout_seconds: int = Field(default=300)
+    # PRD-012: network authority for ShellTool commands that are not a
+    # recognized package-manager invocation (SEC-005 classifies those).
+    # "unrestricted" (the default, SEC-005's documented behavior) is the
+    # explicitly privileged class: such a command keeps its execution
+    # environment's network. "denied" gives it no network at all, and a
+    # recognized package manager still gets SEC-006 registry-scoped
+    # authority when contained. The production runtime profile forces
+    # "denied". SECURITY_AUTHORITY under SEC-009.
+    shell_network: str = Field(default="unrestricted")
+
+    @field_validator("shell_network")
+    @classmethod
+    def _shell_network_must_be_known(cls, v: str) -> str:
+        if v not in ("unrestricted", "denied"):
+            raise ValueError(f"autonomy.shell_network must be 'unrestricted' or 'denied', got {v!r}")
+        return v
     # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/
     # validation_baseline.py): both fields default to a complete no-op for
     # every existing caller - zero new subprocess invocation, zero behavior
@@ -1136,6 +1152,12 @@ def runtime_profile_preset_fields(profile: Optional[str]) -> Dict[Any, Any]:
             # always captures the pristine full-suite baseline and fails closed
             # if that baseline is indeterminate.
             ("autonomy", "brownfield_full_regression_baseline_policy"): "required",
+            # PRD-012 deny-by-default: an arbitrary shell command gets no
+            # network (package managers stay registry-scoped), and
+            # KnowledgeGuard never sends goal-named library names to public
+            # registries (cached release metadata only).
+            ("autonomy", "shell_network"): "denied",
+            ("knowledge", "offline_mode"): True,
         }
     return {}
 
