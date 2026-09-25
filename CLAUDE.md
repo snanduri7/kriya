@@ -189,6 +189,15 @@ PRD-012 normalizes every channel's network authority into one vocabulary, `kriya
 - **Status.** A structured `ownership_justification` (`Subtask` field / Architect file-list JSON key) only ACKNOWLEDGES. SATISFIED only via goal intent, the plan removing the owner, or human approval.
 - **Where they appear.** Candidates go to the Planner (enforce; direct Planner+Architect on TASK/ENHANCEMENT) and findings to the Developer. They are recorded as non-terminal `GROUNDED_OWNERSHIP` obligations and `ownership.finding` events, and kept on `state.ownership_findings` for review.
 
+### Ownership recovery and reviewer evidence — PRD-022
+- **Retry scope.** After a deterministic `brownfield_ownership_redirect` violation, the retry targets only the grounded owner (patch authority, exact current source; proved and protected, not re-implemented).
+- **Restoration.** `state.ownership_redirect_recovery` keeps the violation's evidence. In the next attempt's guarded staged batch, `attempt._stage_ownership_redirect_restoration` restores the redirected tests to baseline and removes the run-created parallel file (`RESTORE_PUBLIC_CONTRACT` precedent).
+  - Anything the Developer writes again is kept, so repeats still reach `INVALIDATION_REPEAT_THRESHOLD` (2, unchanged).
+  - An abandoned file leaves the expected-files set.
+- **Post-generation findings.** `_record_post_generation_ownership_findings` adds findings for files a candidate actually created.
+- **Advisory evidence only.** `ownership_review_evidence(ledger, files)` feeds open GROUNDED findings from the ledger to the pre-approval and final Reviewer and to the approval reason. They never gate, and the Reviewer cannot change a finding.
+
+### Storage (`kriya/core/db.py`, `kriya/memory/`)
 All persistent state lives in SQLite databases under `paths.memory` (`vector_index.db`, `web_knowledge.db`, `dependency_graph.db`, `knowledge_cache.db`) and the state directory (`traces.db`, `kriya/core/state_paths.py`), opened with WAL journal mode and a busy timeout for concurrent-safe access. `vector_index.db` mixes code-index vectors and a separate `learned_knowledge` table (from `kriya learn`) — keep those namespaces distinct, the workflow relies on querying them separately with different trust levels.
 
 ### CLI (`kriya/cli.py`)
