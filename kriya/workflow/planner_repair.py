@@ -512,6 +512,14 @@ def build_structured_plan_repair_prompt(
             "id of the subtask it was meant to reference, or remove the reference if no such "
             "subtask is actually needed.\n"
         )
+    if "PLAN_REQUIREMENT_ID_UNKNOWN" in reason_codes:
+        # PRD-020: requirement ids are Kriya's, derived from the user's goal.
+        targeted_correction += (
+            "- The errors name a subtask whose requirement_ids contains an id that is not one of "
+            "the user's original requirements (the exact id is given in the error text). Use only "
+            "the REQ ids listed under Original Requirements in the request; remove any other id. "
+            "Do not invent, renumber or split a requirement.\n"
+        )
     if "SUBTASK_DEPENDENCY_CYCLE" in reason_codes:
         targeted_correction += (
             "- The subtask dependency graph (depends_on edges) contains a cycle. Break it by "

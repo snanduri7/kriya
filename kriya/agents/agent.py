@@ -3110,8 +3110,17 @@ class SpecComplianceAgent(BaseAgent):
         files_written: List[str],
         file_contents: Dict[str, str],
         authoritative_context: Optional[str] = None,
+        requirements: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """authoritative_context (MA8 spec §31, 2026-08-28): an optional
+        """requirements (PRD-020): the run's RequirementSet (kriya/workflow/
+        requirements.py) when this check is the verifier of the user's
+        original requirements. The model then also returns one verdict per
+        REQ id ("requirement_verdicts", passed back raw for the caller to
+        parse and record); a REQ it reports missing is added to
+        missing_requirements with its id and original text, so a retry names
+        exactly the unresolved requirement.
+
+        authoritative_context (MA8 spec §31, 2026-08-28): an optional
         prose block naming requirements a stronger-authority deterministic
         producer has ALREADY established, injected ahead of the goal/files
         so the model doesn't re-litigate an already-settled fact in the
@@ -3128,9 +3137,23 @@ class SpecComplianceAgent(BaseAgent):
             if path in file_contents
         )
         context_block = f"{authoritative_context}\n\n" if authoritative_context else ""
+        requirement_items = list(getattr(requirements, "requirements", None) or ())
+        requirements_block = ""
+        if requirement_items:
+            from kriya.workflow.requirements import requirements_prompt_block
+            requirements_block = requirements_prompt_block(requirements, instruction=(
+                "For EVERY id above, add one entry to \"requirement_verdicts\" in your JSON: "
+                '{"id": "REQ-n", "verdict": "satisfied" | "missing" | "unverifiable", '
+                '"evidence": "file and identifier, or why"}. satisfied: the code visibly implements '
+                "it. missing: ONLY a concrete, literally-named requirement (the rules above) that "
+                "is absent from the code. unverifiable: behaviour, quality or process that cannot "
+                "be confirmed from source text alone. Never report a requirement missing because "
+                "it is stated in general terms."
+            )) + "\n"
         prompt = (
             f"{context_block}"
             f"=== Goal ===\n{goal}\n\n"
+            f"{requirements_block}"
             f"=== Files Generated ===\n{files_block}\n\n"
             "Does this code satisfy every concrete, literally-named requirement in the "
             "goal, per the rules above?"
@@ -3179,6 +3202,24 @@ class SpecComplianceAgent(BaseAgent):
             if isinstance(raw_missing, list) else []
         )
         compliant = _coerce_bool_field(parsed.get("compliant"), "compliant", "Spec Compliance check()")
+        requirement_verdicts = parsed.get("requirement_verdicts") if requirement_items else None
+        if requirement_items and isinstance(requirement_verdicts, list):
+            # PRD-020: a REQ reported missing is a named missing requirement
+            # (id plus the user's own text), whatever the aggregate said -
+            # only when the requirement names something concrete. A missing
+            # claim about general prose is not a fact the gate may fail on
+            # (it is recorded unverified by the caller), whatever the prompt
+            # asked the model to do.
+            from kriya.workflow.requirements import names_a_concrete_literal
+            by_id = {r.id: r for r in requirement_items}
+            for entry in requirement_verdicts:
+                if (isinstance(entry, dict) and entry.get("id") in by_id
+                        and str(entry.get("verdict", "")).strip().lower() == "missing"
+                        and names_a_concrete_literal(by_id[entry["id"]].text)):
+                    named = f"{entry['id']}: {by_id[entry['id']].text}"
+                    if named not in missing_requirements:
+                        missing_requirements.append(named)
+                    compliant = False
         # Found live, 2026-08-25 (protocol_encoder_java, 3 separate rounds of the same
         # run): a goal with zero concrete/literal requirements got compliant=false with
         # an EMPTY missing_requirements list, while the model's own reasoning correctly
@@ -3213,12 +3254,14 @@ class SpecComplianceAgent(BaseAgent):
                 "compliant": False, "status": "indeterminate",
                 "reasoning": parsed.get("reasoning") or "",
                 "missing_requirements": [], "likely_files": likely_files,
+                "requirement_verdicts": requirement_verdicts,
             }
         return {
             "compliant": compliant,
             "reasoning": parsed.get("reasoning") or "",
             "missing_requirements": missing_requirements,
             "likely_files": likely_files,
+            "requirement_verdicts": requirement_verdicts,
         }
 
 

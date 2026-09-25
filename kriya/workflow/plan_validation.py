@@ -377,6 +377,7 @@ async def validate_plan(
     stack_contract: Optional[StackContract] = None,
     obligation_ledger: Optional[ObligationLedger] = None,
     revision: object = None,
+    known_requirement_ids: Optional[Iterable[str]] = None,
 ) -> PlanValidationResult:
     """available_tool_names=None SKIPS the tool-registry check entirely -
     only safe for contexts guaranteed not to contain TOOL-tagged subtasks
@@ -997,6 +998,18 @@ async def validate_plan(
     uncovered = sorted(acceptance_ids - covered_ids)
     if uncovered:
         errors.append(f"acceptance criteria not covered by any subtask: {uncovered}")
+
+    # PRD-020: a subtask may only map itself to the user's original
+    # requirements Kriya derived (kriya/workflow/requirements.py); an id the
+    # Planner invents is rejected. A requirement no subtask maps to is not
+    # an error here - it stays terminally active whatever the plan says.
+    if known_requirement_ids is not None:
+        known_requirements = set(known_requirement_ids)
+        for st in plan.subtasks:
+            unknown = [rid for rid in st.requirement_ids if rid not in known_requirements]
+            if unknown:
+                errors.append(f"subtask {st.id!r} references unknown requirement id(s) {unknown}")
+                reason_codes.append("PLAN_REQUIREMENT_ID_UNKNOWN")
 
     # MA7.8 fix (2026-08-24, real live-validation finding, protocol_encoder_java):
     # a genuinely EMPTY workspace (zero commits, nothing established) has

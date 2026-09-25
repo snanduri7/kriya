@@ -543,6 +543,25 @@ class AutonomyConfig(BaseModel):
         if v not in ("unrestricted", "denied"):
             raise ValueError(f"autonomy.shell_network must be 'unrestricted' or 'denied', got {v!r}")
         return v
+
+    # PRD-020 (kriya/workflow/requirements.py): what an original requirement
+    # (REQ-n, the user's own goal statement) without a verifier verdict
+    # (unknown) or with a verdict that it cannot be confirmed from source
+    # (unverified) does to the terminal decision. "record" reports it in
+    # the result and the run's events; "block" refuses success
+    # (REQUIREMENTS_UNRESOLVED) before anything is applied. A violated
+    # requirement always blocks. Production seals the unknown policy to
+    # "block". SECURITY_AUTHORITY under SEC-009: a repository must not be
+    # able to relax either.
+    requirement_unknown_policy: str = Field(default="record")
+    requirement_unverified_policy: str = Field(default="record")
+
+    @field_validator("requirement_unknown_policy", "requirement_unverified_policy")
+    @classmethod
+    def _requirement_policy_must_be_known(cls, v: str) -> str:
+        if v not in ("record", "block"):
+            raise ValueError(f"requirement policies must be 'record' or 'block', got {v!r}")
+        return v
     # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/
     # validation_baseline.py): both fields default to a complete no-op for
     # every existing caller - zero new subprocess invocation, zero behavior
@@ -1341,6 +1360,9 @@ def runtime_profile_preset_fields(profile: Optional[str]) -> Dict[Any, Any]:
             # registries (cached release metadata only).
             ("autonomy", "shell_network"): "denied",
             ("knowledge", "offline_mode"): True,
+            # PRD-020: an original requirement with no verifier verdict never
+            # lets a production run succeed.
+            ("autonomy", "requirement_unknown_policy"): "block",
         }
     return {}
 

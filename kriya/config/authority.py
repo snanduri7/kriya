@@ -196,6 +196,8 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     ("autonomy", "sandbox_execution"),
     # PRD-012: "unrestricted" grants arbitrary shell commands network access.
     ("autonomy", "shell_network"),
+    # PRD-020: "record" lets an unverified/unknown original requirement pass.
+    ("autonomy", "requirement_unknown_policy"), ("autonomy", "requirement_unverified_policy"),
     # widens what ambient host env a repo's OWN sandboxed build/test command sees
     ("autonomy", "sandbox_env_allowlist"),
     ("autonomy", "egress_policy"), ("autonomy", "acquisition_registry_hosts"),

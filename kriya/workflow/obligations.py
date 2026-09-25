@@ -241,6 +241,13 @@ class ObligationKind(str, Enum):
     FUTURE_OWNER_VERIFICATION = "future_owner_verification"
     CROSS_SUBTASK_INTEGRATION = "cross_subtask_integration"
     RUNTIME_PLAN_GAP = "runtime_plan_gap"
+    # PRD-020 (kriya/workflow/requirements.py): one of the user's own goal
+    # statements (REQ-n), derived deterministically at run start. Its
+    # outcome (satisfied/violated/unverified/unknown) is recorded only by
+    # the verifier stage; whether a non-satisfied outcome blocks success is
+    # the requirement policy's decision (requirements.blocking_requirements),
+    # which is why unresolved_terminal_obligations() leaves this kind to it.
+    ORIGINAL_REQUIREMENT = "original_requirement"
 
 
 class ObligationStatus(str, Enum):
@@ -535,7 +542,13 @@ class ObligationLedger:
         result: List[ObligationRecord] = []
         for oid in self._history:
             rec = self.current(oid)
-            if rec is not None and rec.terminal_required and rec.status != ObligationStatus.SATISFIED:
+            if rec is None or rec.kind == ObligationKind.ORIGINAL_REQUIREMENT:
+                # PRD-020: original requirements are terminal-required under
+                # the requirement policy, which knows UNVERIFIED from
+                # VIOLATED; requirements.blocking_requirements aggregates
+                # them wherever this is consulted.
+                continue
+            if rec.terminal_required and rec.status != ObligationStatus.SATISFIED:
                 result.append(rec)
         return result
 

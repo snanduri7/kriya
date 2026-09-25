@@ -1,0 +1,401 @@
+"""PRD-020: immutable original requirements and their lineage.
+
+A user's goal passes through Planner, Architect, Developer and Reviewer
+prose. Each of those may paraphrase, narrow or drop what the user asked for.
+This module fixes the user's own statements once, at the start of a run, as
+revision-bound requirement records (REQ-1, REQ-2, ...) whose text is the
+user's text, verbatim:
+
+- Derivation is deterministic and conservative (``derive_requirements``): the
+  goal is split only on its own explicit structure (list items, then
+  sentences). No model is involved, so no model can reword a requirement;
+  the same goal always yields the same ids (``REQUIREMENT_DERIVATION_VERSION``
+  is part of the set's identity).
+- Each requirement is an ``ORIGINAL_REQUIREMENT`` obligation in the run's
+  ObligationLedger, seeded PENDING at the lowest authority so that the
+  verifier's evidence (not the seed) becomes its authoritative state.
+- Only the verifier stage records an outcome (``record_requirement_verdicts``):
+  the Goal Spec Compliance gate, which runs after the deterministic gates
+  passed and judges the exact candidate files (fingerprinted). Planner,
+  Architect, Developer and Reviewer text never writes an outcome; citing a
+  requirement id in a plan or design is lineage, not evidence.
+- Outcomes: SATISFIED (the verifier found the requirement in the code),
+  VIOLATED (a concrete, literally-named requirement is absent - the gate
+  fails and the retry names the REQ id and its original text), UNVERIFIED
+  (the requirement describes behaviour the verifier cannot confirm from
+  source text), UNKNOWN (no verdict at all). ``blocking_requirements``
+  applies the policy: VIOLATED always blocks success; UNKNOWN and
+  UNVERIFIED block when ``autonomy.requirement_unknown_policy`` /
+  ``requirement_unverified_policy`` say ``block`` (production seals
+  UNKNOWN to ``block``).
+
+A plan that paraphrases or omits a requirement cannot remove it: the set is
+derived from the goal, not from the plan, and the terminal decision reads
+the set.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from dataclasses import asdict, dataclass
+from enum import Enum
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+
+from kriya.workflow.obligations import (
+    ObligationAuthority,
+    ObligationKind,
+    ObligationLedger,
+    ObligationRecord,
+    ObligationStatus,
+)
+
+REQUIREMENT_DERIVATION_VERSION = 1
+
+REQUIREMENTS_UNRESOLVED = "REQUIREMENTS_UNRESOLVED"
+REQUIREMENT_OBLIGATION_PREFIX = "requirement."
+
+_REQ_ID = re.compile(r"\bREQ-(?:C)?\d+\b")
+_LIST_ITEM = re.compile(r"^\s*(?:[-*•]|\d{1,3}[.)]|[a-zA-Z][.)])\s+(?P<text>\S.*)$")
+_FENCE = re.compile(r"^\s*(```|~~~)")
+# A sentence ends at . ! or ? followed by whitespace and an upper-case letter,
+# a digit, a quote or a backtick. Common abbreviations are not ends.
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9`\"'(\[])")
+_ABBREVIATIONS = ("e.g.", "i.e.", "etc.", "vs.", "cf.", "approx.", "incl.", "no.", "fig.")
+_CONSTRAINT_CUE = re.compile(
+    r"\b(do not|don't|must not|mustn't|never|should not|shouldn't|shall not|without|"
+    r"no longer|avoid|unchanged|preserve|keep\b[^.]*\bas is)\b",
+    re.IGNORECASE,
+)
+
+
+# A concrete, literally-named thing the verifier can find absent from source:
+# a code span, a quoted literal, a call, a dotted name (file.py, a.b), a
+# camelCase / PascalCase-with-two-humps / snake_case identifier, a number.
+# An acronym alone ("API") is not a literal.
+_CONCRETE_LITERAL = re.compile(
+    r"`[^`]+`|'[^']+'|\"[^\"]+\"|\b\w+\(|\b\w+\.\w+\b|\b[a-z]+[A-Z]\w*|\b[A-Z][a-z0-9]+[A-Z]\w*"
+    r"|\b[A-Za-z]\w*_\w+|\b\d+(?:\.\d+)?\b"
+)
+
+
+def names_a_concrete_literal(text: str) -> bool:
+    """Whether a requirement names something concrete enough that its
+    absence from the code is a fact, not an opinion (the Goal Spec
+    Compliance gate's own mandate). A requirement stated only in general
+    terms can be confirmed but never reported missing: that claim is
+    recorded UNVERIFIED and does not fail the gate."""
+    return bool(_CONCRETE_LITERAL.search(text or ""))
+
+
+class RequirementOutcome(str, Enum):
+    PENDING = "pending"
+    SATISFIED = "satisfied"
+    VIOLATED = "violated"
+    UNVERIFIED = "unverified"
+    UNKNOWN = "unknown"
+
+
+_OUTCOME_STATUS = {
+    RequirementOutcome.PENDING: ObligationStatus.PENDING,
+    RequirementOutcome.SATISFIED: ObligationStatus.SATISFIED,
+    RequirementOutcome.VIOLATED: ObligationStatus.VIOLATED,
+    RequirementOutcome.UNVERIFIED: ObligationStatus.INDETERMINATE,
+    RequirementOutcome.UNKNOWN: ObligationStatus.PENDING,
+}
+
+
+@dataclass(frozen=True)
+class Requirement:
+    id: str
+    text: str
+    kind: str  # "requirement" | "constraint" (metadata; both are enforced alike)
+    source: str  # "goal" | "clarification"
+    ordinal: int
+
+
+@dataclass(frozen=True)
+class RequirementSet:
+    goal_digest: str
+    version: int
+    requirements: Tuple[Requirement, ...]
+
+    @property
+    def digest(self) -> str:
+        payload = json.dumps(
+            {"version": self.version, "goal_digest": self.goal_digest,
+             "requirements": [asdict(r) for r in self.requirements]},
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @property
+    def ids(self) -> List[str]:
+        return [r.id for r in self.requirements]
+
+    def get(self, requirement_id: str) -> Optional[Requirement]:
+        return next((r for r in self.requirements if r.id == requirement_id), None)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "version": self.version, "goal_digest": self.goal_digest, "digest": self.digest,
+            "requirements": [asdict(r) for r in self.requirements],
+        }
+
+
+def _goal_digest(goal: str) -> str:
+    return hashlib.sha256(goal.encode("utf-8")).hexdigest()
+
+
+def _clean(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _meaningful(text: str) -> bool:
+    return bool(re.search(r"[A-Za-z0-9]", text))
+
+
+def _split_sentences(paragraph: str) -> List[str]:
+    """Sentences of one paragraph; text inside backticks is never split."""
+    protected: List[str] = []
+
+    def _protect(match: "re.Match[str]") -> str:
+        protected.append(match.group(0))
+        return f"\x00{len(protected) - 1}\x00"
+
+    masked = re.sub(r"`[^`]*`", _protect, paragraph)
+    for index, abbreviation in enumerate(_ABBREVIATIONS):
+        masked = re.sub(re.escape(abbreviation), f"\x01{index}\x01", masked, flags=re.IGNORECASE)
+    parts = _SENTENCE_END.split(masked)
+
+    def _restore(text: str) -> str:
+        text = re.sub(r"\x01(\d+)\x01", lambda m: _ABBREVIATIONS[int(m.group(1))], text)
+        return re.sub(r"\x00(\d+)\x00", lambda m: protected[int(m.group(1))], text)
+
+    return [_restore(part) for part in parts]
+
+
+def _segments(goal: str) -> List[str]:
+    """The goal's explicit statements, in order: every list item is one
+    statement (its continuation lines included); text outside lists is split
+    into sentences; a fenced block belongs to the statement before it."""
+    segments: List[str] = []
+    paragraph: List[str] = []
+    item: Optional[List[str]] = None
+    in_fence = False
+
+    def _flush_paragraph() -> None:
+        if paragraph:
+            segments.extend(_split_sentences(" ".join(paragraph)))
+            paragraph.clear()
+
+    def _flush_item() -> None:
+        nonlocal item
+        if item is not None:
+            segments.append(" ".join(item))
+            item = None
+
+    for line in goal.splitlines():
+        if _FENCE.match(line):
+            in_fence = not in_fence
+            target = item if item is not None else paragraph
+            target.append(line.strip())
+            continue
+        if in_fence:
+            (item if item is not None else paragraph).append(line.rstrip())
+            continue
+        match = _LIST_ITEM.match(line)
+        if match:
+            _flush_paragraph()
+            _flush_item()
+            item = [match.group("text")]
+        elif not line.strip():
+            _flush_item()
+            _flush_paragraph()
+        elif item is not None and line[:1].isspace():
+            item.append(line.strip())
+        else:
+            _flush_item()
+            paragraph.append(line.strip())
+    _flush_item()
+    _flush_paragraph()
+    return [_clean(s) for s in segments if _meaningful(s)]
+
+
+def derive_requirements(goal: str, clarifications: Sequence[str] = ()) -> RequirementSet:
+    """The immutable requirement set of ``goal`` (plus accepted human
+    clarifications, which no producer supplies yet). Pure: the same inputs
+    always give the same ids and text. A goal with no separable statements
+    is one requirement, the whole goal."""
+    statements = _segments(goal) or ([_clean(goal)] if _meaningful(goal) else [])
+    requirements: List[Requirement] = []
+    for index, text in enumerate(statements, start=1):
+        requirements.append(Requirement(
+            id=f"REQ-{index}", text=text,
+            kind="constraint" if _CONSTRAINT_CUE.search(text) else "requirement",
+            source="goal", ordinal=index,
+        ))
+    for index, raw in enumerate(clarifications, start=1):
+        text = _clean(raw)
+        if _meaningful(text):
+            requirements.append(Requirement(
+                id=f"REQ-C{index}", text=text,
+                kind="constraint" if _CONSTRAINT_CUE.search(text) else "requirement",
+                source="clarification", ordinal=len(statements) + index,
+            ))
+    return RequirementSet(
+        goal_digest=_goal_digest(goal + "\x00" + "\x00".join(clarifications)),
+        version=REQUIREMENT_DERIVATION_VERSION,
+        requirements=tuple(requirements),
+    )
+
+
+def requirement_obligation_id(requirement_id: str) -> str:
+    return f"{REQUIREMENT_OBLIGATION_PREFIX}{requirement_id}"
+
+
+def seed_requirement_obligations(ledger: ObligationLedger, requirements: RequirementSet) -> None:
+    """Record every requirement PENDING, once. Seeded at JUDGMENT (the
+    lowest authority) so the verifier's verdict, not the seed, becomes the
+    authoritative state (ObligationLedger.current keeps the latest record of
+    same-or-higher authority). Idempotent: a restored or shared ledger that
+    already tracks a requirement keeps its history."""
+    for requirement in requirements.requirements:
+        obligation_id = requirement_obligation_id(requirement.id)
+        if ledger.current(obligation_id) is not None:
+            continue
+        ledger.record(ObligationRecord(
+            id=obligation_id, kind=ObligationKind.ORIGINAL_REQUIREMENT,
+            status=ObligationStatus.PENDING, authority=ObligationAuthority.JUDGMENT,
+            description=requirement.text, source="requirements.derive_requirements",
+            revision=0,
+            evidence={"requirement_set_digest": requirements.digest, "kind": requirement.kind,
+                      "source": requirement.source, "outcome": RequirementOutcome.PENDING.value},
+            terminal_required=True,
+        ))
+
+
+def record_requirement_verdicts(
+    ledger: ObligationLedger, requirements: RequirementSet,
+    verdicts: Mapping[str, Tuple[RequirementOutcome, str]], *,
+    revision: Any, evidence_fingerprint: str, source: str, gate_evidence: Iterable[str] = (),
+    only: Optional[Iterable[str]] = None,
+) -> Dict[str, RequirementOutcome]:
+    """Record the verifier's outcome for every requirement (or just the ids
+    in ``only``). A requirement the verifier gave no verdict for is UNKNOWN.
+    Returns id -> outcome for what was recorded."""
+    gate_evidence = list(gate_evidence)
+    selected = set(only) if only is not None else None
+    outcomes: Dict[str, RequirementOutcome] = {}
+    for requirement in requirements.requirements:
+        if selected is not None and requirement.id not in selected:
+            continue
+        outcome, detail = verdicts.get(requirement.id, (RequirementOutcome.UNKNOWN, "no verdict"))
+        outcomes[requirement.id] = outcome
+        ledger.record(ObligationRecord(
+            id=requirement_obligation_id(requirement.id), kind=ObligationKind.ORIGINAL_REQUIREMENT,
+            status=_OUTCOME_STATUS[outcome], authority=ObligationAuthority.JUDGMENT,
+            description=requirement.text, source=source, revision=revision,
+            evidence={
+                "requirement_set_digest": requirements.digest, "outcome": outcome.value,
+                "detail": detail, "evidence_id": evidence_fingerprint, "gate_evidence": gate_evidence,
+            },
+            terminal_required=True,
+        ))
+    return outcomes
+
+
+def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet) -> Dict[str, RequirementOutcome]:
+    """Each requirement's authoritative outcome (PENDING until a verdict)."""
+    outcomes: Dict[str, RequirementOutcome] = {}
+    for requirement in requirements.requirements:
+        record = ledger.current(requirement_obligation_id(requirement.id))
+        raw = (record.evidence or {}).get("outcome") if record is not None else None
+        try:
+            outcomes[requirement.id] = RequirementOutcome(raw) if raw else RequirementOutcome.PENDING
+        except ValueError:
+            outcomes[requirement.id] = RequirementOutcome.UNKNOWN
+    return outcomes
+
+
+def blocking_requirements(
+    ledger: ObligationLedger, requirements: RequirementSet, *,
+    unknown_policy: str = "record", unverified_policy: str = "record",
+) -> List[Tuple[Requirement, RequirementOutcome]]:
+    """The requirements that forbid a successful terminal state. VIOLATED
+    always blocks; PENDING and UNKNOWN (no verdict) block under
+    ``unknown_policy == "block"``; UNVERIFIED under ``unverified_policy``."""
+    blocking: List[Tuple[Requirement, RequirementOutcome]] = []
+    outcomes = requirement_outcomes(ledger, requirements)
+    for requirement in requirements.requirements:
+        outcome = outcomes[requirement.id]
+        if (outcome is RequirementOutcome.VIOLATED
+                or (outcome in (RequirementOutcome.PENDING, RequirementOutcome.UNKNOWN)
+                    and unknown_policy == "block")
+                or (outcome is RequirementOutcome.UNVERIFIED and unverified_policy == "block")):
+            blocking.append((requirement, outcome))
+    return blocking
+
+
+def cited_requirement_ids(text: str, requirements: RequirementSet) -> List[str]:
+    """Requirement ids a plan or design cites (lineage, never evidence);
+    ids the set does not contain are ignored."""
+    known = set(requirements.ids)
+    return [rid for rid in dict.fromkeys(_REQ_ID.findall(text or "")) if rid in known]
+
+
+def requirement_lineage(requirements: RequirementSet, stage: str, cited: Sequence[str]) -> Dict[str, Any]:
+    """A stage's mapping onto the original requirements: which ids it cites
+    and which it leaves out. An omitted requirement stays active."""
+    cited_set = set(cited)
+    return {
+        "stage": stage, "requirement_set_digest": requirements.digest,
+        "cited": [rid for rid in requirements.ids if rid in cited_set],
+        "omitted": [rid for rid in requirements.ids if rid not in cited_set],
+    }
+
+
+def requirements_prompt_block(requirements: RequirementSet, *, instruction: str = "") -> str:
+    """The original requirements as a prompt section: ids and the user's own
+    text. ``instruction`` says what the reader should do with them."""
+    if not requirements.requirements:
+        return ""
+    lines = "\n".join(f"{r.id}: {r.text}" for r in requirements.requirements)
+    tail = f"\n{instruction}" if instruction else ""
+    return (
+        "=== Original Requirements (the user's own words; immutable) ===\n"
+        f"{lines}{tail}\n"
+    )
+
+
+def parse_requirement_verdicts(
+    raw: Any, requirements: RequirementSet,
+) -> Tuple[Dict[str, Tuple[RequirementOutcome, str]], List[str]]:
+    """The verifier's per-requirement verdicts. Accepts a list of
+    {"id", "verdict", "evidence"}; verdict satisfied|missing|unverifiable.
+    Unknown ids and unreadable entries are returned as findings and ignored;
+    a requirement without a readable verdict stays absent (UNKNOWN)."""
+    mapping = {"satisfied": RequirementOutcome.SATISFIED, "missing": RequirementOutcome.VIOLATED,
+               "unverifiable": RequirementOutcome.UNVERIFIED}
+    verdicts: Dict[str, Tuple[RequirementOutcome, str]] = {}
+    findings: List[str] = []
+    if not isinstance(raw, list):
+        return verdicts, (["requirement_verdicts missing or not a list"] if raw is not None else [])
+    known = set(requirements.ids)
+    for entry in raw:
+        if not isinstance(entry, dict):
+            findings.append(f"unreadable verdict entry {entry!r}")
+            continue
+        rid, verdict = entry.get("id"), str(entry.get("verdict", "")).strip().lower()
+        if rid not in known:
+            findings.append(f"verdict for unknown requirement id {rid!r}")
+            continue
+        if verdict not in mapping:
+            findings.append(f"{rid}: unreadable verdict {verdict!r}")
+            continue
+        outcome = mapping[verdict]
+        if outcome is RequirementOutcome.VIOLATED and not names_a_concrete_literal(requirements.get(rid).text):
+            findings.append(f"{rid}: missing claim for a requirement naming nothing concrete; unverified")
+            outcome = RequirementOutcome.UNVERIFIED
+        verdicts[rid] = (outcome, str(entry.get("evidence") or ""))
+    return verdicts, findings

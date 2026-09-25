@@ -76,10 +76,26 @@ class WorkUnitInvocation:
     plan_id: str
     work_unit_id: str
     plan_fingerprint: Optional[str] = None
+    # PRD-020: the user's own goal text whose original requirements this
+    # unit verifies (kriya/workflow/requirements.py) - a direct plan's one
+    # unit, or a milestone plan's integration unit (the plan's original
+    # goal). None for every other unit: a milestone or a subtask verifies
+    # something narrower than the whole request.
+    requirement_goal: Optional[str] = None
 
     @classmethod
     def for_unit(cls, plan: ExecutionPlan, unit: WorkUnit) -> "WorkUnitInvocation":
-        return cls(plan.source_kind, plan.plan_id, unit.id, plan.fingerprint)
+        return cls(plan.source_kind, plan.plan_id, unit.id, plan.fingerprint,
+                   requirement_goal=requirement_goal_of(plan, unit))
+
+
+def requirement_goal_of(plan: ExecutionPlan, unit: WorkUnit) -> Optional[str]:
+    """The goal whose original requirements ``unit`` is the verifier of."""
+    if plan.source_kind is PlanSourceKind.DIRECT:
+        return unit.goal
+    if plan.source_kind is PlanSourceKind.MILESTONE and unit.role is WorkUnitRole.INTEGRATION:
+        return unit.provenance_dict().get("original_goal")
+    return None
 
 
 class PlanDriver:

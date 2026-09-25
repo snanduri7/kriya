@@ -516,6 +516,10 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             # failed qualification, a required patch it cannot return, no
             # prompt room). Re-sending it cannot change that.
             "fallback_incompatible",
+            # PRD-020: an original requirement without accepted evidence under
+            # a blocking policy. The Developer cannot supply the verifier's
+            # missing verdict or confirm an unverifiable requirement.
+            "requirements_unresolved",
         }
         else classify_environment_failure(
             raw_error_context,

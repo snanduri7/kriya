@@ -125,6 +125,12 @@ from kriya.workflow.migration import MigrationResolution, MigrationResolutionSta
 from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
 from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationLedger, ObligationRecord, ObligationStatus
 from kriya.workflow.plan_schema import RequirementOwnershipRelation
+from kriya.workflow.requirements import (
+    RequirementOutcome,
+    RequirementSet,
+    parse_requirement_verdicts,
+    record_requirement_verdicts,
+)
 from kriya.workflow.repair_contract import RepairContractStatus, build_repair_contract, derive_process_boundary_participants
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
@@ -2025,6 +2031,11 @@ class AttemptContext:
     # reuse and gate-skip decisions: resume_state is checkpoint data and can
     # never grant either. None for every non-resumed run.
     resume_plan: Optional["ResumePlan"] = None
+    # PRD-020 (kriya/workflow/requirements.py): the user's original
+    # requirements when this attempt's spec-compliance check is their
+    # verifier (a direct goal, a milestone plan's integration unit). None
+    # for units that verify something narrower (a milestone, a subtask).
+    requirement_set: Optional["RequirementSet"] = None
 
 
 def _process_boundary_obligation_id(subtask_id: str) -> str:
@@ -5112,6 +5123,61 @@ def _goal_spec_evidence_fingerprint(goal: str, file_contents: Dict[str, str]) ->
         f"{path}\x01{file_contents[path]}" for path in sorted(file_contents)
     )
     return content_revision(blob)
+
+
+def _record_original_requirement_verdicts(
+    state: GenerationState, ctx: "AttemptContext", spec_result: Dict[str, Any], fingerprint: str,
+) -> None:
+    """PRD-020: record the verifier's per-requirement outcome for the exact
+    candidate it judged (the evidence id is the fingerprint of the goal and
+    every checked file). Runs only here, after every deterministic gate of
+    this attempt passed; a requirement without a readable verdict is
+    UNKNOWN. The event is the run's durable lineage record."""
+    requirements = ctx.requirement_set
+    if requirements is None or ctx.obligation_ledger is None:
+        return
+    status = spec_result.get("status")
+    verdicts, findings = ({}, [f"verifier status {status}"]) if status == "unknown" else (
+        parse_requirement_verdicts(spec_result.get("requirement_verdicts"), requirements)
+    )
+    outcomes = record_requirement_verdicts(
+        ctx.obligation_ledger, requirements, verdicts,
+        revision=state.attempt_number, evidence_fingerprint=fingerprint,
+        source="attempt.goal_spec_compliance",
+        gate_evidence=[f"attempt {state.attempt_number}: deterministic gates passed"],
+    )
+    state.record_event(RunEvent(
+        kind="requirement.verdicts", attempt=state.attempt_number, source="attempt.goal_spec_compliance",
+        authority=EventAuthority.ADVISORY,
+        message="original requirement outcomes: " + ", ".join(
+            f"{rid}={outcome.value}" for rid, outcome in outcomes.items()),
+        details={"requirement_set_digest": requirements.digest, "evidence_id": fingerprint,
+                 "outcomes": {rid: outcome.value for rid, outcome in outcomes.items()},
+                 "evidence": {rid: detail for rid, (_, detail) in verdicts.items()},
+                 "findings": findings},
+    ))
+
+
+def _downgrade_suppressed_requirement_claims(
+    state: GenerationState, ctx: "AttemptContext", suppressed: List[str], fingerprint: str,
+) -> None:
+    """PRD-020: a verifier claim that REQ-n is missing, suppressed because it
+    contradicts stronger authority (a SATISFIED deterministic obligation, or
+    an identifier only the Planner named), is not evidence either way: the
+    requirement is recorded UNVERIFIED rather than left VIOLATED."""
+    requirements = ctx.requirement_set
+    if requirements is None or ctx.obligation_ledger is None:
+        return
+    claimed = {text.split(":", 1)[0].strip() for text in suppressed if ":" in text}
+    ids = [rid for rid in requirements.ids if rid in claimed]
+    if not ids:
+        return
+    verdicts = {rid: (RequirementOutcome.UNVERIFIED, "missing claim contradicts stronger authority; suppressed")
+                for rid in ids}
+    record_requirement_verdicts(
+        ctx.obligation_ledger, requirements, verdicts, revision=state.attempt_number,
+        evidence_fingerprint=fingerprint, source="attempt.goal_spec_compliance.arbitration", only=ids,
+    )
 
 
 def _settled_goal_spec_requirement(
@@ -8914,9 +8980,13 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         settled_goal_spec = _settled_goal_spec_requirement(
             ctx.obligation_ledger, goal_spec_obligation_id, goal_spec_evidence_fingerprint,
         )
+        # PRD-020: the original requirements ride along only when this check
+        # is their verifier (never passed otherwise, so existing callers and
+        # test doubles see the same call).
+        requirement_kwargs = {"requirements": ctx.requirement_set} if ctx.requirement_set is not None else {}
         spec_result = await ctx.spec_compliance.check(
             goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
-            authoritative_context=authoritative_context,
+            authoritative_context=authoritative_context, **requirement_kwargs,
         )
         if spec_result.get("status") == "indeterminate":
             # SpecComplianceAgent.check() returns this when the model's own
@@ -8932,7 +9002,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # authority) in the opposite direction.
             spec_result = await ctx.spec_compliance.check(
                 goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
-                authoritative_context=authoritative_context,
+                authoritative_context=authoritative_context, **requirement_kwargs,
+            )
+        if ctx.requirement_set is not None:
+            _record_original_requirement_verdicts(
+                state, ctx, spec_result, goal_spec_evidence_fingerprint,
             )
         if spec_result.get("status") == "indeterminate":
             if _migration_obligations_all_satisfied(ctx.obligation_ledger):
@@ -9072,6 +9146,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             kept_requirements = []
             arbitrated_contradictions = []
             planner_only_requirements = []
+        if ctx.requirement_set is not None and (arbitrated_contradictions or planner_only_requirements):
+            _downgrade_suppressed_requirement_claims(
+                state, ctx, arbitrated_contradictions + planner_only_requirements,
+                goal_spec_evidence_fingerprint,
+            )
         if not spec_result["compliant"] and kept_requirements:
             missing_desc = "; ".join(kept_requirements)
             message = (

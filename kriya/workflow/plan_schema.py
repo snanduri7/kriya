@@ -555,6 +555,11 @@ class Subtask(BaseModel):
     # References GlobalInvariant.id, never restated invariant text - see
     # GlobalInvariant's own docstring for why (PRV-06).
     relevant_global_invariant_ids: List[str] = Field(default_factory=list)
+    # PRD-020: the user's original requirements (REQ-n, derived by Kriya from
+    # the goal - kriya/workflow/requirements.py) this subtask serves. Lineage
+    # only: mapping a requirement never satisfies it, and leaving one out
+    # never removes it.
+    requirement_ids: List[str] = Field(default_factory=list)
 
     @field_validator("id")
     @classmethod

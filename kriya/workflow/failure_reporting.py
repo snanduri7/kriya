@@ -102,6 +102,8 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
     "run_verification_hung": FailureCategory.VERIFICATION,
     "regression_test": FailureCategory.VERIFICATION,
     "goal_spec_compliance": FailureCategory.VERIFICATION,
+    # PRD-020: an original requirement without accepted evidence.
+    "requirements_unresolved": FailureCategory.VERIFICATION,
     "test_acceptance": FailureCategory.VERIFICATION,
 
     # GENERATION_COMPLETENESS - the response itself was wrong-shaped

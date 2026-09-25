@@ -64,6 +64,16 @@ from kriya.workflow.resume_fingerprints import (
     workspace_fingerprint,
 )
 from kriya.workflow.plan_executor import WorkUnitInvocation
+from kriya.workflow.requirements import (
+    REQUIREMENTS_UNRESOLVED,
+    blocking_requirements,
+    cited_requirement_ids,
+    derive_requirements,
+    requirement_lineage,
+    requirement_outcomes,
+    requirements_prompt_block,
+    seed_requirement_obligations,
+)
 from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
 from kriya.workflow.egress_authority import egress_authority_details
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -1256,6 +1266,32 @@ class WorkflowEngine:
                 message=f"{decision['role']} routed to {decision['model']} ({decision['source']})",
                 details=decision,
             ))
+        # PRD-020: the user's original requirements, fixed once from the goal
+        # this unit verifies (kriya/workflow/requirements.py). None for a
+        # unit that verifies something narrower (a milestone, a subtask).
+        requirement_goal = getattr(work_unit, "requirement_goal", None)
+        requirement_set = derive_requirements(requirement_goal) if requirement_goal else None
+        if requirement_set is not None:
+            state.record_event(RunEvent(
+                kind="requirement.derived", attempt=0, source="workflow.run_generation_workflow",
+                authority=EventAuthority.AUXILIARY,
+                message=f"{len(requirement_set.requirements)} original requirement(s): "
+                        + ", ".join(requirement_set.ids),
+                details=requirement_set.to_dict(),
+            ))
+
+        def _record_requirement_lineage(stage: str, text: Any) -> None:
+            if requirement_set is None:
+                return
+            lineage = requirement_lineage(
+                requirement_set, stage, cited_requirement_ids(str(text or ""), requirement_set))
+            state.record_event(RunEvent(
+                kind="requirement.lineage", attempt=0, source="workflow.run_generation_workflow",
+                authority=EventAuthority.AUXILIARY,
+                message=f"{stage} cites {lineage['cited']}; omitted (still active) {lineage['omitted']}",
+                details=lineage,
+            ))
+
         generation_budget = self.kernel.config.autonomy.generation_time_budget_seconds
         if generation_budget is None:
             logger.info(
@@ -2210,6 +2246,11 @@ class WorkflowEngine:
         if state.error_context:
             plan_prompt = f"Fix the following compile/test error:\n{state.error_context}\n\n" + plan_prompt
         plan_prompt += convention_prompt
+        if requirement_set is not None:
+            plan_prompt += "\n\n" + requirements_prompt_block(requirement_set, instruction=(
+                "Mark each plan step with the REQ ids it serves, e.g. (REQ-2). Never drop, merge or "
+                "reword a requirement; one you cannot plan for stays open, it is not removed."
+            ))
         # SME review finding 2 (2026-08-15): Planner receives the identical
         # convention_prompt content Architect/Developer do, but - unlike
         # Developer's own skill_reminder in _fill_missing_content() - nothing
@@ -2504,9 +2545,17 @@ class WorkflowEngine:
 
         if step_callback:
             step_callback("Plan", plan)
+        _record_requirement_lineage("plan", plan)
 
         # 3. Architect
         design_prompt = f"Plan:\n{plan}\n\nWorkspace Context:\n{repo_context}" + convention_prompt
+        if requirement_set is not None:
+            # PRD-020: the Architect otherwise sees only the Planner's prose,
+            # so a requirement the plan dropped would never reach the design.
+            design_prompt += "\n\n" + requirements_prompt_block(requirement_set, instruction=(
+                "These are the user's requirements; the plan above does not replace them. Name the "
+                "REQ ids each design decision serves, and design for every one of them."
+            ))
         # SME review finding (2026-08-15): same gap as Planner's finding 2 -
         # Architect receives the identical convention_prompt content Planner
         # does, but nothing told it to actually use that content either.
@@ -2539,6 +2588,7 @@ class WorkflowEngine:
             state.architect_calls += 1
             state.architect_llm_seconds += time.monotonic() - _architect_started
             _save_stage_checkpoint("design", plan=plan, design=design, architect_files=architect_files)
+        _record_requirement_lineage("design", design)
         # predetermined_architect_files=[] (an EMPTY list, not None) is a
         # deliberate zero-file plan, not a broken one - a bounded subtask
         # execution_role=verification subtask (kriya/workflow/plan_schema.py)
@@ -3100,6 +3150,10 @@ class WorkflowEngine:
         # restored in place because callers share one ledger object.
         if resume_plan is not None and resume_plan.reuse_candidate and resume_restored_ledger is not None:
             resolved_obligation_ledger.restore_from(resume_restored_ledger)
+        if requirement_set is not None:
+            # PRD-020: every original requirement is tracked (PENDING until the
+            # verifier records an outcome); idempotent over a restored ledger.
+            seed_requirement_obligations(resolved_obligation_ledger, requirement_set)
         # PRV-17 (2026-09-08, P7 efficiency finding) - kriya/workflow/
         # deterministic_failure_diagnostic.py. Same "resolved once, reused
         # across every bounded-subtask call, or created fresh for a plain
@@ -3189,6 +3243,7 @@ class WorkflowEngine:
             completed_subtask_ids=completed_subtask_ids or frozenset(),
             deterministic_failure_diagnostics=resolved_deterministic_failure_diagnostics,
             resume_plan=resume_plan,
+            requirement_set=requirement_set,
         )
 
         from kriya.workflow.retry_policy import decide_for_state
@@ -3252,6 +3307,36 @@ class WorkflowEngine:
                     )
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
+
+                # PRD-020: the user's original requirements are part of the
+                # pre-apply success boundary. Only the verifier's recorded
+                # outcomes count (never plan/design/review prose); what a
+                # non-satisfied outcome does is the requirement policy's call.
+                if requirement_set is not None:
+                    autonomy_policy = self.kernel.config.autonomy
+                    blocking = blocking_requirements(
+                        resolved_obligation_ledger, requirement_set,
+                        unknown_policy=autonomy_policy.requirement_unknown_policy,
+                        unverified_policy=autonomy_policy.requirement_unverified_policy,
+                    )
+                    if blocking:
+                        detail = "; ".join(
+                            f"{req.id} ({outcome.value}): {req.text}" for req, outcome in blocking)
+                        message = (
+                            f"{REQUIREMENTS_UNRESOLVED}: original requirement(s) without accepted "
+                            f"evidence - {detail}"
+                        )
+                        failure = Failure(
+                            type="requirements_unresolved", message=message, raw_output=message,
+                            source="orchestrator", attempt=state.attempt_number,
+                            diagnostics={
+                                "reason_code": REQUIREMENTS_UNRESOLVED,
+                                "requirement_set_digest": requirement_set.digest,
+                                "blocking": {req.id: outcome.value for req, outcome in blocking},
+                            },
+                        )
+                        state.gate_outcomes.append(failure.to_gate_outcome())
+                        raise QualityGateFailure(failure)
 
                 # Candidate-only checkpoint: generation and inner gates passed, but
                 # terminal regression and application have not. Its name and payload
@@ -4670,6 +4755,12 @@ class WorkflowEngine:
                 bool(state.environment_failure)
                 and state.environment_failure.startswith("FALLBACK_MODEL_INCOMPATIBLE:")
             )
+            # PRD-020: same convention - an original requirement without
+            # accepted evidence under a blocking policy (requirements.py).
+            is_requirements_unresolved_stop = (
+                bool(state.environment_failure)
+                and state.environment_failure.startswith(f"{REQUIREMENTS_UNRESOLVED}:")
+            )
             failure_category = (
                 "plan_scope_revision_required" if state.plan_scope_conflict
                 else "unauthorized_generation_target" if is_scope_defect_stop
@@ -4678,6 +4769,7 @@ class WorkflowEngine:
                 else "containment_setup_failed" if is_containment_setup_failed_stop
                 else "regression_unattributed" if is_regression_unattributed_stop
                 else "fallback_model_incompatible" if is_fallback_incompatible_stop
+                else "requirements_unresolved" if is_requirements_unresolved_stop
                 else "environment_failure" if state.environment_failure
                 else "quality_gates_exhausted"
             )
@@ -4793,4 +4885,11 @@ class WorkflowEngine:
             "review": review,
             "review_included_in_approval": state.pre_approval_review is not None,
             "run_id": run_id,
+            # PRD-020: the original requirements and each one's authoritative
+            # outcome (the verifier's; PENDING when no verdict was recorded).
+            **({"requirements": {
+                **requirement_set.to_dict(),
+                "outcomes": {rid: outcome.value for rid, outcome in
+                             requirement_outcomes(resolved_obligation_ledger, requirement_set).items()},
+            }} if requirement_set is not None else {}),
         }

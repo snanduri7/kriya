@@ -180,6 +180,7 @@ from kriya.workflow.recovery_plan import (
 )
 from kriya.workflow.edit_safety import (
     StagedFileWrite,
+    content_revision,
     read_file_revision,
 )
 from kriya.workflow.terminal_commit import (
@@ -189,6 +190,16 @@ from kriya.workflow.terminal_commit import (
     materialize_candidate,
 )
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
+from kriya.workflow.requirements import (
+    REQUIREMENTS_UNRESOLVED,
+    RequirementSet,
+    blocking_requirements,
+    derive_requirements,
+    parse_requirement_verdicts,
+    record_requirement_verdicts,
+    requirements_prompt_block,
+    seed_requirement_obligations,
+)
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.static_checks import derive_stack_contract, log_stack_contract_boundary, validate_stack_contract_artifacts
 from kriya.workflow.planning_diagnostics import (
@@ -484,6 +495,53 @@ def build_subtask_plan_text(subtask: Subtask) -> str:
     gracefully to an ordinary fresh Developer generation call when it finds
     nothing - exactly the behavior a bounded subtask needs."""
     return f"Implement: {subtask.description}"
+
+
+def _terminal_candidate_paths(plan: EngineeringPlan) -> List[str]:
+    """Every path the plan leaves in the candidate (its final action is
+    not a delete), in plan order."""
+    final_action: Dict[str, FileAction] = {}
+    for subtask in plan.subtasks:
+        for planned in subtask.planned_files:
+            final_action[planned.path] = planned.action
+    return [path for path, action in final_action.items() if action != FileAction.DELETE]
+
+
+async def _verify_original_requirements(
+    spec_compliance: Any, requirements: RequirementSet, goal: str, candidate_root: str,
+    paths: List[str], ledger: ObligationLedger,
+) -> List[str]:
+    """PRD-020: one verifier pass over the whole candidate, recording each
+    original requirement's outcome (UNKNOWN when the verifier gave none)
+    with the candidate's content fingerprint as its evidence id. Returns
+    the verifier findings (an unavailable verdict, e.g. a call PRD-016
+    refused for size, invented ids) for the gate's message."""
+    contents: Dict[str, str] = {}
+    for path in paths:
+        full = os.path.join(candidate_root, path)
+        if os.path.isfile(full):
+            with open(full, "r", encoding="utf-8", errors="replace") as handle:
+                contents[path] = handle.read()
+    files = sorted(contents)
+    fingerprint = content_revision(
+        goal + "\x00" + "\x00".join(f"{path}\x01{contents[path]}" for path in files))
+    result = await spec_compliance.check(
+        goal=goal, files_written=files, file_contents=contents, requirements=requirements,
+    )
+    status = (result or {}).get("status")
+    verdicts, findings = ({}, [f"verifier status {status}"]) if status == "unknown" else (
+        parse_requirement_verdicts((result or {}).get("requirement_verdicts"), requirements)
+    )
+    if status == "unknown":
+        findings.append(str((result or {}).get("reasoning") or "no reason given"))
+    if findings:
+        logger.warning("Original requirement verification findings: %s", findings)
+    record_requirement_verdicts(
+        ledger, requirements, verdicts, revision="terminal", evidence_fingerprint=fingerprint,
+        source="workflow_controller.terminal_requirements",
+        gate_evidence=["enforce terminal gates: every subtask verified"],
+    )
+    return findings
 
 
 AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
@@ -3961,6 +4019,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             repository_candidates=planning_repository_candidates,
             structural_evidence=structural_evidence_text,
         )
+        # PRD-020: the user's original requirements, fixed from the goal
+        # before any model sees it; subtasks map to them by id (lineage
+        # only), and the terminal gate settles each from verifier evidence.
+        requirement_set = derive_requirements(goal)
+        authoritative_planner_request += "\n\n" + requirements_prompt_block(requirement_set, instruction=(
+            "Set requirement_ids on each subtask to the REQ ids it serves, using only these ids. "
+            "Never drop, merge or reword a requirement: one no subtask serves stays open."
+        ))
         planning_repository_evidence = bounded_repository_evidence(
             workspace_path, planning_repository_candidates,
         )
@@ -3982,6 +4048,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # everywhere in one run. See this module's own docstring for the two
         # concrete run #8 defects this closes.
         obligation_ledger = ObligationLedger()
+        seed_requirement_obligations(obligation_ledger, requirement_set)
         # PRV-17 (2026-09-08, P7 efficiency finding) - kriya/workflow/
         # deterministic_failure_diagnostic.py. One store for the whole run,
         # deliberately separate from obligation_ledger above (see that
@@ -4077,6 +4144,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         runtime_verification_required=goal_requires_runtime_behavior(goal),
                         stack_contract=derive_stack_contract(goal),
                         obligation_ledger=obligation_ledger, revision=repair_attempts,
+                        known_requirement_ids=requirement_set.ids,
                     )
                     errors.extend(validation.errors)
                     reason_codes.extend(validation.reason_codes)
@@ -4950,6 +5018,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         require_semantic_contracts=True,
                         runtime_verification_required=goal_requires_runtime_behavior(goal),
                         stack_contract=derive_stack_contract(goal),
+                        known_requirement_ids=requirement_set.ids,
                     )
                     if prerequisite_validation.valid:
                         prior_hash = current_plan_hash
@@ -6092,6 +6161,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         global_stack_contract_gap: Optional[str] = None
         global_preserved_reference_gap: Optional[str] = None
         global_terminal_obligation_gap: Optional[str] = None
+        global_requirement_gap: Optional[str] = None
         artifact_error: Optional[str] = None
         candidate_derived_artifacts = ()
         terminal_observability_errors: List[Dict[str, str]] = []
@@ -6313,6 +6383,39 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     global_terminal_obligation_gap,
                 )
 
+                # PRD-020: the user's original requirements, judged against the
+                # whole verified candidate by the verifier (never by the plan's
+                # own acceptance text), then the requirement policy decides.
+                try:
+                    autonomy_policy = getattr(getattr(
+                        getattr(self.workflow_engine, "kernel", None), "config", None), "autonomy", None)
+                    verifier_findings: List[str] = []
+                    if autonomy_policy is not None and autonomy_policy.spec_compliance_enabled:
+                        verifier_findings = await _verify_original_requirements(
+                            self.workflow_engine.spec_compliance, requirement_set, goal,
+                            plan_workspace_path, _terminal_candidate_paths(plan), obligation_ledger,
+                        )
+                    blocking = blocking_requirements(
+                        obligation_ledger, requirement_set,
+                        unknown_policy=getattr(autonomy_policy, "requirement_unknown_policy", "record"),
+                        unverified_policy=getattr(autonomy_policy, "requirement_unverified_policy", "record"),
+                    )
+                    if blocking:
+                        global_requirement_gap = f"{REQUIREMENTS_UNRESOLVED}: " + "; ".join(
+                            f"{req.id} ({outcome.value}): {req.text}" for req, outcome in blocking)
+                        if verifier_findings:
+                            global_requirement_gap += " [verifier: " + "; ".join(verifier_findings) + "]"
+                except Exception as error:
+                    global_requirement_gap = (
+                        f"{REQUIREMENTS_UNRESOLVED}: original requirement verification failed "
+                        f"({type(error).__name__}: {error}); refusing success without it."
+                    )
+                await _emit_gate_outcome(
+                    "original_requirements",
+                    "failed" if global_requirement_gap else "passed",
+                    global_requirement_gap,
+                )
+
                 try:
                     milestone_id = control_state.current_milestone_id or run_id
                     artifact_registry = load_artifact_registry(workspace_path)
@@ -6331,6 +6434,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     global_stack_contract_gap,
                     global_preserved_reference_gap,
                     global_terminal_obligation_gap,
+                    global_requirement_gap,
                     artifact_error,
                 ))
 
@@ -6432,6 +6536,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             ("global_stack_contract_gap", global_stack_contract_gap),
             ("global_preserved_reference_gap", global_preserved_reference_gap),
             ("global_terminal_obligation_gap", global_terminal_obligation_gap),
+            ("global_requirement_gap", global_requirement_gap),
         ):
             if value:
                 aggregated[key] = value

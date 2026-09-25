@@ -103,6 +103,7 @@ from kriya.workflow.workflow import (
     _settle_future_owner_verification_obligations,
 )
 from kriya.workflow.edit_safety import read_file_revision
+from kriya.workflow.requirements import RequirementOutcome
 
 
 @pytest.fixture(autouse=True)
@@ -7798,6 +7799,8 @@ _CODES_WITH_TARGETED_GUIDANCE = {
     "DUPLICATE_SUBTASK_ID",
     "SUBTASK_DEPENDS_ON_UNKNOWN_ID",
     "SUBTASK_DEPENDENCY_CYCLE",
+    # PRD-020: a subtask mapped to a requirement id Kriya did not derive.
+    "PLAN_REQUIREMENT_ID_UNKNOWN",
 }
 
 # Bucket 2: codes structurally incapable of ever reaching build_structured_
@@ -10214,6 +10217,7 @@ async def test_enforce_accepts_targeted_provides_change_for_implicated_subtask(t
         ("stack_contract", "global_stack_contract_gap", "failed"),
         ("preserved_references", "global_preserved_reference_gap", "failed"),
         ("terminal_obligations", "global_terminal_obligation_gap", "failed"),
+        ("original_requirements", "global_requirement_gap", "failed"),
         ("artifact_registry", "artifact_error", "needs_review"),
     ],
 )
@@ -10298,6 +10302,13 @@ async def test_enforce_terminal_gate_failure_discards_candidate_before_commit(
         elif failing_gate == "terminal_obligations":
             stack.enter_context(patch.object(
                 ObligationLedger, "unresolved_terminal_obligations", return_value=[unresolved],
+            ))
+        elif failing_gate == "original_requirements":
+            # PRD-020: an original requirement the verifier reported missing.
+            stack.enter_context(patch(
+                "kriya.workflow.workflow_controller.blocking_requirements",
+                side_effect=lambda ledger, requirements, **_: [
+                    (requirements.requirements[0], RequirementOutcome.VIOLATED)],
             ))
         elif failing_gate == "artifact_registry":
             stack.enter_context(patch(
@@ -10423,12 +10434,13 @@ async def test_enforce_terminal_events_and_gate_inputs_precede_one_commit(tmp_pa
         "terminal_gate_outcome",
         "terminal_gate_outcome",
         "terminal_gate_outcome",
+        "terminal_gate_outcome",
         "commit_eligible",
         "workspace_commit_completed",
     ]
     assert [payload["gate"] for name, payload in events if name == "terminal_gate_outcome"] == [
         "migration", "stack_contract", "preserved_references",
-        "terminal_obligations", "artifact_registry",
+        "terminal_obligations", "original_requirements", "artifact_registry",
     ]
 
 
