@@ -52,7 +52,18 @@ boundary (the same checkpoint selection as the engine: `--resume-id`, else the l
 the current table: the same model on the same exact, still QUALIFIED runtime; a role that kept its configured binding
 keeps it. Anything else refuses the resume before any model call with `ROUTE_RESUME_MISMATCH`: a drifted runtime, a
 candidate no longer configured, a changed routed-role set. A checkpoint without recorded routes (routing was off, or
-it predates this change) is routed fresh; the resume fingerprint still refuses a different runtime. `kriya model qualify --model <candidate> --role <role>` qualifies a candidate exactly as it runs when
+it predates this change) is routed fresh; the resume fingerprint still refuses a different runtime.
+
+**Milestone parity (final pre-pytest closure).** `tests/test_prd019_milestone_route_resume.py` drives the real
+`generate --from-milestones` CLI, milestone driver, engine and `LLMClient` (only the transport and the runtime probe
+are stand-ins). M1 passes, M2 fails its gates and leaves checkpoints recording the reviewer on cand-a. Between run and
+resume, the table is rewritten so a fresh run would pick cand-b. The resume reuses cand-a on its exact runtime: every
+`model.route` event is `mode: resume`, and the reviewer's calls go to cand-a, never cand-b. With cand-a's runtime
+drifted, the resume exits 1 with `ROUTE_RESUME_MISMATCH` and zero model requests. The test exposed a real defect,
+now fixed: the command boundary read routes from the newest checkpoint in the workspace, so a newer checkpoint of an
+unrelated direct run lent its routes to the milestone resume. Routes now come only from the resumed run's own
+checkpoints, selected the way the engine selects them: `--resume-id`'s; the newest of the plan's milestone group for
+`--from-milestones`; the newest direct-run one otherwise. A direct-path test proves the reverse case. `kriya model qualify --model <candidate> --role <role>` qualifies a candidate exactly as it runs when
 routed to that role.
 
 ## Config
@@ -70,7 +81,7 @@ routed to that role.
   - frozen replay and drift refusal;
   - config validation and classification;
   - an end-to-end run through the CLI boundary and `WorkflowEngine`: the reviewer's calls go to the routed candidate, `model.route` lands in `traces.db`, and the table is not written.
-- 30 passed originally; 39 after the review corrections (qualification scope 4, resume 5; the placement output budget and "checkpoints carry the routes" are assertions added to existing tests). The CLI resume-refusal test uses `capsys`, which the plain runner lacks; it passed through a shim.
+- 30 passed originally; 40 after the review corrections (qualification scope 4, resume 5, direct-path checkpoint selection 1; the placement output budget and "checkpoints carry the routes" are assertions added to existing tests). The CLI resume-refusal test uses `capsys`, which the plain runner lacks; it passed through a shim. `test_prd019_milestone_route_resume`: 2 passed; reverting the checkpoint selection fails the sticky-route test.
 - Review-correction mutations, each caught: the role's required cases ignored (2 tests), resume routes ignored by `plan_routes` (3) or by the command boundary (2).
 - Mutation checks, each caught:
   - apply is a no-op fails 3;

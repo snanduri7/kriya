@@ -518,8 +518,8 @@ it, never updates it. Every decision is recorded as a `model.route` run event: t
 reason and the final route. `kriya model routes` shows the decisions without running anything.
 `kriya model routes --freeze <path>` records them, and `mode: frozen` then replays exactly those runtimes for
 reproducible certification, refusing the run (`ROUTE_FROZEN_MISMATCH`) if any runtime changed or is no longer
-qualified. Routes are sticky within a run: each checkpoint records them, and `--resume`/`--resume-id` reuses exactly
-those routes instead of routing again on a table that changed since, or refuses the resume
+qualified. Routes are sticky within a run: each checkpoint records them, and `--resume`/`--resume-id` (direct or `--from-milestones`) reuses
+exactly the resumed run's own routes instead of routing again on a table that changed since, or refuses the resume
 (`ROUTE_RESUME_MISMATCH`) if a recorded runtime changed or is no longer qualified. `model_policy` is SECURITY_AUTHORITY: a repository cannot set or relax it.
 
 ### 2.2 Control Plane, Policy, and Structured Execution
