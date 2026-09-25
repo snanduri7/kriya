@@ -55,7 +55,6 @@ def _production_cfg(tmp_path):
     for (top, leaf), value in runtime_profile_preset_fields("production").items():
         setattr(getattr(cfg, top), leaf, value)
     cfg.plugins.directory = str(tmp_path / "plugins")
-    cfg.paths.logs = str(tmp_path / "logs")
     core = tmp_path / "plugins" / "core_tools"
     core.mkdir(parents=True)
     (core / "__init__.py").write_text("", encoding="utf-8")

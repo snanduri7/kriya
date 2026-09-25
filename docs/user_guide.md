@@ -116,8 +116,7 @@ autonomy:
 paths:
   skills: "./skills"                       # Path to engineering skills
   memory: "./memory"                       # Path to databases and indexes
-  logs: "./logs"                           # legacy: controls nothing now (logs: 2.0a, run history: 2.0b)
-  state: null                              # run history (traces.db), see 2.0b
+  state: null                              # persistent state (traces.db), see 2.0b; file logs: see 2.0a
 
 # Set both false for a reproducible plain-Kriya run. paths.skills above
 # remains the one explicit project skill directory.
@@ -204,25 +203,32 @@ logging:
 
 ### 2.0b Where run history goes (`paths.state`)
 `traces.db` is the run history behind `kriya traces`. It is persistent state, not log output, so it has its own
-location: independent of `paths.logs` and the log directory, and never derived from the directory you run from.
+location: independent of the log settings, and never derived from the directory you run from.
 
 - **Which directory wins:** the `KRIYA_STATE_DIR` environment variable (absolute), then `paths.state`, then
   `~/.kriya/state`. The database is `<state>/traces.db`.
 - **A relative `paths.state`** resolves against the directory of the config file that sets it, never the CWD.
-  - For example, `paths.state: .kriya-state` in a repository's `kriya.yaml` explicitly keeps run history in that
+  - Inside a repository it must sit beneath `.kriya/`. `paths.state: .kriya/state` keeps run history in that
     repository.
-  - Like the other `paths.*` settings, a value that points outside the repository needs `kriya authority approve`.
-- **`paths.logs` no longer controls anything.** It is still accepted, so existing configs load.
-- **An older `<paths.logs>/traces.db`** is not moved, deleted or merged.
-  - `kriya traces` mentions it while the new history is empty.
-  - `kriya doctor --production` reports it as a warning.
-  - `kriya traces --migrate-legacy` copies it to the new location. It refuses if a database already exists there, and
-    leaves the old file in place.
+  - `./state` or `./logs` are rejected with a clear error, so Kriya state never mixes with the repository's own
+    files.
+  - A value that points outside the repository needs `kriya authority approve`, like the other `paths.*` settings.
 - **Read-only:** `kriya traces` never creates the database.
 - **`kriya doctor --production`** checks the state directory (`persistence.traces`) separately from the log directory
   (`persistence.logs`).
 - **Not affected:** each workspace's own run control state (`.kriya/`: the run lock, run records, checkpoints) stays in
   the workspace, because crash recovery (`kriya runs status|recover`) depends on it.
+
+#### Migrating from `paths.logs` (removed)
+- **The setting is gone.** Older Kriya versions had a `paths.logs` setting that held both the log file and
+  `traces.db`. A config that still names it fails to load with "paths.logs was removed; use logging.directory for
+  logs or paths.state for trace state." Delete the line, and set `logging.directory` and/or `paths.state` if you want
+  non-default locations.
+- **Copying old run history.** To keep a `traces.db` from before the move, run
+  `kriya traces --migrate-legacy --legacy-path /absolute/path/to/old/traces.db`.
+  - Without `--legacy-path`, it uses the old default location, `<Kriya install dir>/logs/traces.db`.
+  - The copy is refused if a database already exists at the new location, and the old file is never deleted.
+  - `kriya traces` and `kriya doctor --production` both point this out while an old database is present.
 
 ### 2.1 Per-Role Model Selection (`agent_llms`)
 Planner, Architect, Developer, Reviewer, RunVerifier, and SkillGapAgent (skill-gap extraction and conflict-checking) don't have to share one model - each is independently configurable, with its own optional escalation chain.

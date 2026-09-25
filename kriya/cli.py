@@ -3568,10 +3568,13 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
 @click.option("-n", "--limit", type=int, default=20, show_default=True, help="Maximum number of most-recent runs to show. Use --all to show every run.")
 @click.option("--all", "show_all", is_flag=True, help="Show all recorded runs, ignoring --limit.")
 @click.option("--migrate-legacy", is_flag=True,
-              help="Copy a legacy <paths.logs>/traces.db to the canonical state location. Refused if the "
-              "canonical database already exists (histories are never merged); the legacy file is kept.")
+              help="Copy a pre-state-directory traces.db to the canonical state location. Refused if the "
+              "canonical database already exists (histories are never merged); the source is kept.")
+@click.option("--legacy-path", type=click.Path(), default=None,
+              help="With --migrate-legacy: the exact traces.db to copy (absolute). Without it, only the "
+              "historical default <install dir>/logs/traces.db is considered.")
 @click.pass_context
-def traces(ctx: click.Context, limit: int, show_all: bool, migrate_legacy: bool) -> None:
+def traces(ctx: click.Context, limit: int, show_all: bool, migrate_legacy: bool, legacy_path: Optional[str]) -> None:
     """Show persistent run trace logs and metrics of past runs."""
     from kriya.core.state_paths import (
         LegacyTraceMigrationError,
@@ -3581,10 +3584,12 @@ def traces(ctx: click.Context, limit: int, show_all: bool, migrate_legacy: bool)
     )
 
     cfg: AppConfig = ctx.obj['config']
+    if legacy_path is not None and not migrate_legacy:
+        raise click.UsageError("--legacy-path is only used with --migrate-legacy")
     try:
         if migrate_legacy:
             try:
-                migration = migrate_legacy_trace_db(cfg)
+                migration = migrate_legacy_trace_db(cfg, legacy_path)
             except LegacyTraceMigrationError as error:
                 click.secho(f"Migration refused: {error}", fg="red", err=True)
                 sys.exit(1)
@@ -3601,7 +3606,7 @@ def traces(ctx: click.Context, limit: int, show_all: bool, migrate_legacy: bool)
         if legacy is not None:
             click.secho(
                 f"Note: an older trace database exists at {legacy} (run history now lives in {db_path}). "
-                "Run `kriya traces --migrate-legacy` to copy it.", fg="yellow", err=True,
+                "Run `kriya traces --migrate-legacy` to copy it (never merged or deleted).", fg="yellow", err=True,
             )
 
     if not os.path.exists(db_path):  # read-only: never creates the database

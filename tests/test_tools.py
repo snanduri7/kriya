@@ -375,7 +375,6 @@ def _execution_policy_app_config(cfg_dir, mode: str) -> "AppConfig":
     return AppConfig(
         execution_policy={"enabled": True, "mode": mode},
         paths={
-            "logs": str(cfg_dir / "logs"),
             "memory": str(cfg_dir / "memory"),
             "skills": str(cfg_dir / "skills"),
         },

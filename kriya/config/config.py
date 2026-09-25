@@ -73,16 +73,30 @@ class PluginsConfig(BaseModel):
     directory: str = Field(default="./plugins")
     enabled: List[str] = Field(default_factory=list)
 
+REMOVED_PATHS_LOGS_MESSAGE = (
+    "paths.logs was removed; use logging.directory for logs or paths.state for trace state."
+)
+
+
+class RemovedConfigFieldError(ValueError):
+    """A configuration names a field Kriya has removed; never reinterpreted."""
+
+
 class PathsConfig(BaseModel):
     """`state` holds persistent run history (traces.db): KRIYA_STATE_DIR >
-    `state` (a relative value resolves against the config file's directory at
-    load) > ~/.kriya/state - see kriya/core/state_paths.py. `logs` no longer
-    controls anything (file logs: logging.directory; traces: state); it stays
-    so existing configs load, and a legacy <logs>/traces.db is only reported."""
+    `state` > ~/.kriya/state - see kriya/core/state_paths.py. A relative value
+    resolves against the config file's directory at load; inside the workspace
+    it must sit beneath <workspace>/.kriya/. File logs are logging.directory."""
     skills: str = Field(default="./skills")
     memory: str = Field(default="./memory")
-    logs: str = Field(default="./logs")
     state: Optional[str] = Field(default=None)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "logs" in data:
+            raise RemovedConfigFieldError(REMOVED_PATHS_LOGS_MESSAGE)
+        return data
 
 
 class SkillsConfig(BaseModel):
@@ -1229,6 +1243,8 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                 if user_data:
                     # Resolve relative paths in user config to config_dir (realpath -
                     # resolves symlinks in the resulting path, not just abspath).
+                    if isinstance(user_data.get("paths"), dict) and "logs" in user_data["paths"]:
+                        raise RemovedConfigFieldError(f"{config_path}: {REMOVED_PATHS_LOGS_MESSAGE}")
                     if "paths" in user_data:
                         for k, v in user_data["paths"].items():
                             if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
@@ -1239,9 +1255,16 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                         # the directory kriya/core/state_paths.py opens.
                         state_value = user_data["paths"].get("state")
                         if isinstance(state_value, str):
+                            from kriya.core.state_paths import require_workspace_local_state_under_kriya_dir
                             expanded = os.path.expanduser(state_value)
                             user_data["paths"]["state"] = os.path.realpath(
                                 expanded if os.path.isabs(expanded) else os.path.join(config_dir, expanded)
+                            )
+                            # Inside the workspace, state lives only beneath
+                            # <workspace>/.kriya/ (never a repository-visible
+                            # ./state or ./logs); outside it, SEC-009 below.
+                            require_workspace_local_state_under_kriya_dir(
+                                user_data["paths"]["state"], workspace_root, state_value,
                             )
                     if "plugins" in user_data and "directory" in user_data["plugins"]:
                         v = user_data["plugins"]["directory"]
@@ -1368,7 +1391,7 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                     # somewhere else.
                     if isinstance(user_data.get("paths"), dict):
                         for k, v in user_data["paths"].items():
-                            if k in ("skills", "memory", "logs", "state") and isinstance(v, str):
+                            if k in ("skills", "memory", "state") and isinstance(v, str):
                                 resolved = v if os.path.isabs(v) else os.path.join(config_dir, v)
                                 classification_overrides[("paths", k)] = path_field_classification(
                                     k, resolved, config_dir
@@ -1423,7 +1446,8 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                                 provenance[(None, key)] = source
         except Exception as e:
             from kriya.core.logging_setup import LogDirectoryError
-            if isinstance(e, LogDirectoryError):
+            from kriya.core.state_paths import StateDirectoryError
+            if isinstance(e, (LogDirectoryError, StateDirectoryError, RemovedConfigFieldError)):
                 raise  # already typed and names the field
             raise ValueError(f"Failed to load configuration at {config_path}: {e}") from e
 

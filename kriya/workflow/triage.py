@@ -588,10 +588,11 @@ def _workspace_appears_empty(workspace_path: str) -> bool:
     both the same shape: this function counted Kriya's OWN files as
     "established project content."
 
-    1. "logs"/"memory" are Kriya's own PACKAGED DEFAULT paths.logs/
-       paths.memory basenames (kriya/config/default_config.yaml) - project-
-       local, sibling to the real workspace root, same as this function's
-       existing .kriya exclusion. Without excluding them, the mere act of
+    1. "logs"/"memory" are basenames of directories Kriya itself wrote into
+       workspaces (the former packaged-default log/trace directory, which
+       older runs left behind, and paths.memory) - project-local, sibling to
+       the real workspace root, same as this function's existing .kriya
+       exclusion. Without excluding them, the mere act of
        Kriya running once (even a run that writes zero real source files -
        just its own log/trace state) made every SUBSEQUENT call to this
        function report "not empty."

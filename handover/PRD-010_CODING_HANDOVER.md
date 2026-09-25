@@ -539,3 +539,115 @@ workspace, because PRD-008 recovery depends on it. The docs say so explicitly.
 ```bash
 .venv/bin/pytest -ra tests/test_state_location.py tests/test_logging_location.py tests/test_traces_command.py tests/test_production_doctor.py tests/test_doctor_command.py tests/test_sec009_config_authority.py tests/test_sec009_p2_authority_approval.py tests/test_config.py tests/test_config_command.py tests/test_milestones.py tests/test_milestone3_4.py tests/test_validation_baseline.py tests/test_cli_smoke.py tests/test_run_events.py tests/test_generate_json_contract.py tests/test_prd008_recovery.py tests/test_run_ownership.py tests/test_bootstrap_contract.py tests/test_repl.py tests/test_distribution_integrity.py tests/test_workflow.py
 ```
+
+## Final state and logging cleanup: `paths.logs` removed (2026-09-25)
+
+The user's decision replaces the inert `paths.logs` of the previous step. The final model is:
+- `logging.directory` for file logs (`KRIYA_LOG_DIR` > `logging.directory` > `~/.kriya/logs`);
+- `paths.state` for persistent state and `traces.db` (`KRIYA_STATE_DIR` > `paths.state` > `~/.kriya/state`);
+- `<workspace>/.kriya` for locks, RunRecords, checkpoints and recovery data.
+
+**Removal:**
+- `PathsConfig.logs` is gone, from the packaged default and from the SEC-009 static table.
+- Any config naming it fails with a typed error, never reinterpreted:
+  - `RemovedConfigFieldError` (a `ValueError`) with `REMOVED_PATHS_LOGS_MESSAGE`: "paths.logs was removed; use
+    logging.directory for logs or paths.state for trace state."
+  - A config file hits it in `resolve_config_state()`, before SEC-009. It is passed through untyped-wrapping and
+    becomes the CLI's "Error loading configuration" with exit 1.
+  - Programmatic `AppConfig(paths={"logs": ...})` hits a `PathsConfig` before-validator.
+  - Attribute assignment is rejected by pydantic.
+- No production code reads it. A repository guard test fails if `paths.logs` or `logs_path` reappears anywhere in
+  `kriya/` beyond the removal message.
+
+**Workspace-local state:**
+- `require_workspace_local_state_under_kriya_dir()` runs at load, after canonicalization. A `paths.state` resolving
+  inside the workspace (the config loader's `workspace_root`) must be strictly beneath `<workspace>/.kriya/`.
+  Otherwise it raises `StateDirectoryError`.
+- Valid: `.kriya/state`. Rejected: `./state`, `./logs`, `state`, `.kriya` itself, `src/.kriya/state`.
+- Outside the workspace, SEC-009 path authority applies: denied until `kriya authority approve`, then it works.
+- No analysis-ignore rules were added. The pre-existing static `logs`/`memory` ignore entries in triage, analyzer and
+  workflow_controller stay: they skip `logs/` folders that older Kriya runs left in real workspaces, and removing them
+  would change repository analysis there. Only the wording that named `paths.logs` changed.
+
+**Legacy migration without `paths.logs`:** `kriya traces --migrate-legacy [--legacy-path <abs traces.db>]`.
+- `--legacy-path` migrates exactly that file; it must be absolute and exist.
+- Without it, only the one well-defined historical default is auto-detected: the packaged `./logs` against the
+  install dir, i.e. `<install>/logs/traces.db`, via `historical_default_trace_db()`.
+- It uses the SQLite online backup, refuses an existing destination, never merges, and never deletes the source.
+- `--legacy-path` without `--migrate-legacy` is a usage error.
+- `kriya traces` and the doctor stay read-only.
+- The user's real database is exactly that historical default. `kriya doctor --production` reports it as
+  `persistence.traces` WARN, which also makes `runtime.fixed_guarantees` WARN (non-blocking) until it is migrated.
+
+**Test isolation:** `tests/conftest.py` also points `historical_default_trace_db` at a non-existent per-test path.
+Without that, the developer's real `<install>/logs/traces.db` made the doctor healthy-run test machine-dependent;
+this was found on the plain runner.
+
+**Other repository callers:**
+- `spikes/eval_harness` now shares `paths.state` (`runs/<batch>/state`) and `logging.directory` (`runs/<batch>/logs`)
+  per batch.
+- `report.py` gains `--state-dir` and still reads older batches' `logs/traces.db`.
+- The README is updated.
+
+**Not edited:** 15 kriya.yaml files outside the repository still set `paths.logs` and will now fail to load with the
+actionable error. They were not edited automatically; one is the deliberately hostile `mcp-security-probe` fixture.
+- `~/kriya-live-validation/{delete, ma6_generate_check, ma6_milestone_check, milestone_task_cli}`
+- `~/kriya-live-validation/sec001-adversarial-live-01..04`, `sec006-live-01`
+- `~/kriya-live-validation/{ver005-py-multipkg-live-01, ver005-py-multipkg-live-02-run4, ver005-recv002-live-01,
+  ver006-adversarial-e2}`
+- `~/kriya-live-validation/graphify-poc/spring-boot-application-example`
+- `~/kriya-live-validation/mcp-security-probe/hostile_repo`
+
+**Tests:**
+- `tests/test_state_location.py` was rewritten (34):
+  - schema; actionable error through load, CLI and programmatic paths;
+  - repository guard;
+  - default stable across CWDs; each setting controls only its own location; env overrides independent;
+  - typed errors for relative values;
+  - `.kriya/*` valid (3 cases, relative to the config file from a sub-CWD); arbitrary workspace-local rejected
+    (5 cases, nothing created);
+  - external state denied, then approved and working, with nothing created;
+  - historical default formula; only the historical default auto-detected;
+  - `--legacy-path` migration copies and keeps the source; destination-exists refuses without merging; bad legacy
+    paths refused; CLI flow plus misuse;
+  - read-only `traces` and doctor create no database or state directory; doctor independent of logs, WARN on a
+    historical database, FAIL on invalid or unwritable.
+- 61 test lines that set `cfg.paths.logs = ...` were removed. They existed only for trace isolation, which the conftest
+  now provides. `paths` dict entries were removed in `test_tools` and `test_live_smoke`.
+- No new ruff F findings in any touched file versus HEAD.
+- **Mutation checks,** each caught:
+  - dropping the `.kriya/` rule;
+  - silently dropping `paths.logs`;
+  - ignoring `--legacy-path` (3 tests fail).
+- **Plain-runner:**
+
+| Suite | Result |
+|---|---|
+| `test_state_location` | 34/0 |
+| `test_logging_location` | 23/0 |
+| `test_traces_command` | 7/0 |
+| `test_production_doctor` | 53/0, 2 Docker-skipped under the fake HOME |
+| `test_doctor_command` | 8/0 |
+| `test_config` | 31/0 |
+| `test_config_command` | 4/0 |
+| `test_sec009_config_authority` | 51/0 |
+| `test_sec009_p2_authority_approval` | 36/0 |
+| `test_tools` | 24/0 |
+| `test_generate_json_contract` | 17/0 |
+| `test_cli_smoke` | 65/0 |
+| `test_validation_baseline` | 54/0 |
+| `test_milestones` | 68/0 |
+| `test_distribution_integrity` | 30/0 |
+| `test_bootstrap_contract` | 18/0 |
+| `test_run_events` | 5/0 |
+| `test_prd008_recovery` | 23/0 |
+| `test_run_ownership` | 33/0 |
+| `test_workflow` (trace tests plus the fallback chain) | 29/0 |
+
+- `test_d1_operation_mode_authority` is class-based, so it was not collected by the plain runner; it had only a
+  line deletion.
+
+**Focused command:**
+```bash
+.venv/bin/pytest -ra tests/test_state_location.py tests/test_logging_location.py tests/test_traces_command.py tests/test_production_doctor.py tests/test_doctor_command.py tests/test_sec009_config_authority.py tests/test_sec009_p2_authority_approval.py tests/test_config.py tests/test_config_command.py tests/test_tools.py tests/test_d1_operation_mode_authority.py tests/test_milestones.py tests/test_milestone3_4.py tests/test_validation_baseline.py tests/test_cli_smoke.py tests/test_run_events.py tests/test_generate_json_contract.py tests/test_prd008_recovery.py tests/test_run_ownership.py tests/test_bootstrap_contract.py tests/test_repl.py tests/test_distribution_integrity.py tests/test_workflow.py
+```

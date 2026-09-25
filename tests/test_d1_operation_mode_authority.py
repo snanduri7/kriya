@@ -977,7 +977,6 @@ class TestApprovalNeverReached:
         cfg = AppConfig()
         cfg.autonomy.mode = "human-in-the-loop"
         cfg.autonomy.run_verification_enabled = False
-        cfg.paths.logs = str(tmp_path / "logs")
         # A small, EXPLICIT context_window (rather than a huge multi-hundred-
         # KB fixture) keeps this test fast and deterministic - the known-
         # target budget (context_window * 0.75, in tokens) is what attempt

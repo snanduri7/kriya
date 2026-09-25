@@ -146,7 +146,7 @@ _REPOSITORY_SAFE_FIELDS: frozenset = frozenset({
     ("logging", "file_enabled"), ("logging", "run_file_enabled"),
     # logging.file is NOT listed here - its classification depends on a
     # resolved value (in-workspace vs. escaping), exactly like
-    # paths.{skills,memory,logs} below. config.py always supplies an
+    # paths.{skills,memory,state} below. config.py always supplies an
     # explicit classification_overrides entry for it via
     # path_field_classification() (SEC-009 bypass-closure fix,
     # 2026-09-12: a repository could set an arbitrary outside-workspace
@@ -167,7 +167,7 @@ _REPOSITORY_SAFE_FIELDS: frozenset = frozenset({
     # repository setting these can make Kriya more cautious, never less.
     ("process_profiles", "enabled"), ("process_profiles", "enforce_approval"),
     ("process_profiles", "enforce_context_depth"), ("process_profiles", "enforce_verification_depth"),
-    # paths.{skills,memory,logs} are NOT listed here even though they can be
+    # paths.{skills,memory,state} are NOT listed here even though they can be
     # safe - their classification depends on a resolved value (in-workspace
     # vs. escaping), not the field name alone, so config.py always supplies
     # an explicit classification_overrides entry for them via
@@ -214,7 +214,7 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     ("workflow_controller", "enabled"), ("workflow_controller", "mode"),
     ("engineering_triage", "shadow_mode"),
     # paths escaping the workspace (see containment check note above)
-    ("paths", "skills"), ("paths", "memory"), ("paths", "logs"), ("paths", "state"),
+    ("paths", "skills"), ("paths", "memory"), ("paths", "state"),
     # logging.file escaping the workspace - same containment treatment as
     # paths.* above (see the _REPOSITORY_SAFE_FIELDS comment for this
     # field). Listed here too, purely for accurate is_known_field()
@@ -288,7 +288,7 @@ def is_known_field(top_key: Optional[str], leaf_key: str) -> bool:
 
 
 def path_field_classification(leaf_key: str, resolved_value: str, container_root: str) -> FieldClassification:
-    """paths.{skills,memory,logs} - REPOSITORY_SAFE only if the value's real
+    """paths.{skills,memory,state} - REPOSITORY_SAFE only if the value's real
     target stays inside `container_root`; SECURITY_AUTHORITY (escape)
     otherwise. `container_root` is the directory the SETTING config file
     itself lives in (config_dir), not necessarily the process's CWD - for an
@@ -391,7 +391,7 @@ def compute_violations(
 
     `classification_overrides` lets the caller supply a runtime-resolved
     classification for fields whose safety depends on a resolved value, not
-    just the field name - specifically paths.{skills,memory,logs} and
+    just the field name - specifically paths.{skills,memory,state} and
     agent_llms.<role>, whose classification depends on a resolved value
     (see path_field_classification()/agent_role_field_classification()).
     Static fields are classified via classify_field() as usual.

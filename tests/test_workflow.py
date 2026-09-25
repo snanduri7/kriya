@@ -8080,7 +8080,6 @@ async def test_workflow_self_correction_loop_resolves_compile_failure(tmp_path):
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.self_correction_loop_enabled = True
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     cfg.paths.skills = str(tmp_path / "skills")
@@ -8138,7 +8137,6 @@ async def test_workflow_self_correction_loop_exhausts_falls_through_unchanged(tm
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.self_correction_loop_enabled = True
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -8193,7 +8191,6 @@ async def test_workflow_self_correction_loop_disabled_by_default_zero_new_code_p
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     assert cfg.autonomy.self_correction_loop_enabled is False  # sanity: default, not explicitly set
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -8710,7 +8707,6 @@ async def test_workflow_persists_intermediate_trace_checkpoint_before_reviewer(t
     complete, final status."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -8761,7 +8757,6 @@ async def test_reviewer_prompt_includes_already_verified_evidence_after_a_passin
     verified_evidence() unit (see tests/test_review_context.py)."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -8854,7 +8849,6 @@ async def test_run_generation_workflow_refuses_to_overwrite_the_protected_goal_f
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -8893,7 +8887,6 @@ async def test_workflow_stops_retrying_immediately_on_environment_failure(tmp_pa
     identically across 3 real retry attempts before a human had to intervene."""
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -8960,7 +8953,6 @@ async def test_workflow_failure_category_quality_gates_exhausted(tmp_path):
     which specific failure mode it was."""
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=(
@@ -8997,7 +8989,6 @@ async def test_workflow_stops_retrying_immediately_on_unrecoverable_scope_denial
     not an unrelated architect/developer file-list disagreement."""
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -9045,7 +9036,6 @@ async def test_workflow_failure_report_wires_real_failures_through_categorize_fa
     kept failing' answer now coexist on the same result."""
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=(
@@ -9093,7 +9083,6 @@ async def test_workflow_traces_knowledge_gap(tmp_path):
     from kriya.tools.knowledge import GapReport
 
     cfg = AppConfig()
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     we = WorkflowEngine(kernel, llm)
@@ -9134,7 +9123,6 @@ async def test_workflow_retry_after_knowledge_gap_supersedes_the_transient_trace
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     we = WorkflowEngine(kernel, llm)
@@ -9191,7 +9179,6 @@ async def test_workflow_approval_required_but_no_callback_never_applies_changes(
     cfg = AppConfig()
     cfg.autonomy.mode = "human-in-the-loop"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -9236,7 +9223,6 @@ async def test_workflow_traces_human_rejected(tmp_path):
     cfg = AppConfig()
     cfg.autonomy.mode = "human-in-the-loop"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -9282,7 +9268,6 @@ async def test_workflow_human_rejected_preserves_full_forensic_trace(tmp_path):
     cfg = AppConfig()
     cfg.autonomy.mode = "human-in-the-loop"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -9429,7 +9414,6 @@ async def test_workflow_heavy_process_profile_requires_approval(tmp_path):
     cfg.engineering_triage.shadow_mode = False
     cfg.process_profiles.enabled = True
     cfg.process_profiles.enforce_approval = True
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -9477,7 +9461,6 @@ async def test_workflow_process_profiles_disabled_by_default_does_not_add_approv
     cfg.engineering_triage.enabled = True
     cfg.engineering_triage.shadow_mode = False
     # process_profiles left at its default: enabled=False, enforce_approval=False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -10182,7 +10165,6 @@ async def test_workflow_run_verification_gate_outcome_records_graded_by_contract
     diagnosing the underlying grader-reliability gap required this session."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -10244,7 +10226,6 @@ async def test_workflow_run_verification_gate_outcome_records_graded_by_llm(tmp_
     value."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -10302,7 +10283,6 @@ async def test_workflow_run_verification_gate_outcome_records_distrusted_provena
     both queryable directly from traces.db, not just in-memory."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -10365,7 +10345,6 @@ async def test_workflow_run_verification_gate_outcome_records_distrusted_provena
 async def test_workflow_rejected_candidate_reviewer_gets_disposition_override(tmp_path):
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -10409,7 +10388,6 @@ async def test_workflow_accepted_candidate_reviewer_gets_no_disposition_override
     letting ReviewerAgent.run() fall back to its own plain system_prompt."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -10464,7 +10442,6 @@ async def test_workflow_rejected_candidate_review_excludes_run_instructions_via_
     extraction function in isolation - keeps it out of res["review"]."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=["Step 1: Write code", "Design: Write app.py"])
@@ -10516,7 +10493,6 @@ async def test_workflow_rejected_candidate_review_suppresses_live_streaming(tmp_
     stream emits none; final output contains only the diagnostic."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=["Step 1: Write code", "Design: Write app.py"])
@@ -10562,7 +10538,6 @@ async def test_workflow_rejected_candidate_missing_markers_suppresses_live_strea
     output (already covered by tests/test_agents.py's own unit test)."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=["Step 1: Write code", "Design: Write app.py"])
@@ -10602,7 +10577,6 @@ async def test_workflow_accepted_candidate_streaming_unchanged(tmp_path):
     only)."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=["Step 1: Write code", "Design: Write app.py"])
@@ -10650,7 +10624,6 @@ async def test_workflow_time_budget_exhausted_is_not_environment_failure_categor
     plumbing detail, not evidence this is a toolchain problem."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     cfg.autonomy.generation_time_budget_seconds = 1  # trips on attempt 1's own preflight check
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -10714,7 +10687,6 @@ async def test_quiet_successful_maven_compile_uses_process_authority(tmp_path):
     """A quiet build success must not become a speculative behavioral failure."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -16006,7 +15978,6 @@ async def test_workflow_scopes_retry_to_grader_likely_files_on_run_verification_
     via the old stringify-into-the-message-then-regex-re-extract round-trip."""
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -16077,7 +16048,6 @@ async def test_workflow_run_verification_timeout_grades_captured_output_as_succe
     (type="run_verification_hung") with a message pointing at the resource
     lifecycle, not application logic."""
     cfg = AppConfig()
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -16150,7 +16120,6 @@ async def test_workflow_run_verification_timeout_with_genuine_failure_stays_plai
     framing/category is only for a genuinely non-binary outcome, not every
     timeout."""
     cfg = AppConfig()
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -20703,7 +20672,6 @@ async def test_workflow_passes_error_source_context_scoped_to_implicated_file(tm
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -20753,7 +20721,6 @@ async def test_workflow_passes_error_source_context_for_junit_stack_trace_test_f
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -20860,7 +20827,6 @@ async def test_workflow_anchored_edit_failure_captures_filepath(tmp_path):
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -20931,7 +20897,6 @@ async def test_workflow_anchored_edit_failure_redirects_to_the_real_target_file(
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -21786,7 +21751,6 @@ async def test_workflow_unaddressed_error_location_defers_to_the_real_compiler(t
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -21860,7 +21824,6 @@ async def test_workflow_unaddressed_error_location_bypass_lets_a_companion_edit_
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -22768,7 +22731,6 @@ async def test_workflow_heavy_process_profile_records_telemetry_only(tmp_path):
     cfg.autonomy.run_verification_enabled = False
     cfg.engineering_triage.enabled = True
     cfg.engineering_triage.shadow_mode = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -23236,7 +23198,6 @@ async def test_workflow_structural_corruption_rejects_before_compiling(tmp_path)
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -23963,7 +23924,6 @@ async def test_workflow_gate_outcome_records_attribution_tier(tmp_path):
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -24015,7 +23975,6 @@ async def test_workflow_self_diagnosis_redirects_after_confirmed_repeat_failure(
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -24091,7 +24050,6 @@ async def test_workflow_self_diagnosis_redirects_to_an_established_file_this_run
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -24201,7 +24159,6 @@ async def test_workflow_diagnosis_mismatch_redirects_back_to_the_same_file(tmp_p
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[

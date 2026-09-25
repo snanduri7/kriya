@@ -445,7 +445,6 @@ def test_mark_run_in_progress_writes_honest_status(tmp_path):
     from kriya.config import AppConfig
 
     cfg = AppConfig()
-    cfg.paths.logs = str(tmp_path / "logs")
 
     _mark_run_in_progress(cfg, "run-123", "some goal")
 
@@ -464,7 +463,6 @@ def test_mark_run_in_progress_noop_when_run_id_missing(tmp_path):
     from kriya.config import AppConfig
 
     cfg = AppConfig()
-    cfg.paths.logs = str(tmp_path / "logs")
 
     _mark_run_in_progress(cfg, None, "some goal")
 

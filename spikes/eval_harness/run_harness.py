@@ -121,14 +121,15 @@ def _init_git_repo(path):
 
 
 def _write_config(
-    workspace_path, shared_logs_dir, model, embed_model, base_url,
+    workspace_path, shared_state_dir, shared_logs_dir, model, embed_model, base_url,
     fallback_model, search_base_url, self_correction, best_of_n, log_level,
     llm_temperature, reasoning_effort, presence_penalty, timeout_per_goal,
 ):
     # paths.skills/memory stay relative (resolved against this config file's own
     # directory, i.e. per-goal-isolated - see CLAUDE.md's config-resolution note)
-    # so one goal's skill/RAG state can never leak into another's. paths.logs is
-    # deliberately an ABSOLUTE path shared across every goal in the batch, so the
+    # so one goal's skill/RAG state can never leak into another's. paths.state
+    # (run history) and logging.directory (kriya.log + per-run logs) are
+    # deliberately ABSOLUTE paths shared across every goal in the batch, so the
     # whole batch lands in one traces.db that report.py can read as a unit.
     llm_section = {
         "provider": "openai", "model": model, "base_url": base_url,
@@ -190,13 +191,13 @@ def _write_config(
         # see LIVE_SEARCH_BASE_URL's own comment above for why this was missing
         # entirely until now.
         "search": {"base_url": search_base_url, "top_k": 3},
-        "paths": {"skills": "./skills", "memory": "./memory", "logs": shared_logs_dir},
+        "paths": {"skills": "./skills", "memory": "./memory", "state": shared_state_dir},
         # kriya/config/default_config.yaml's own packaged default is "INFO" - only
         # written here at all so --log-level DEBUG (see that flag's own help text)
         # can override it per batch; every prior batch got this by omission anyway,
         # so passing the same "INFO" back through when unset is a no-op, not a
         # behavior change.
-        "logging": {"level": log_level},
+        "logging": {"level": log_level, "directory": shared_logs_dir},
     }
     (workspace_path / "kriya.yaml").write_text(yaml.dump(config))
 
@@ -212,8 +213,8 @@ def _approve_authority(workspace_path):
     # an explicit --config path (inside OR outside the workspace) requires
     # durable, digest-bound approval for security-authority fields before
     # `generate` can use them - this harness's own per-goal kriya.yaml sets
-    # llm/llm_chain/autonomy.mode/search.base_url/paths.logs (the last one
-    # because shared_logs_dir is a batch-level sibling of workspaces/<goal>,
+    # llm/llm_chain/autonomy.mode/search.base_url/paths.state/logging.directory
+    # (the last two because they are batch-level siblings of workspaces/<goal>,
     # not inside the individual goal's own workspace root), all of which are
     # security-authority regardless of the config file's own location. Real
     # one-time operator action per goal workspace, not a workaround - mirrors
@@ -322,7 +323,9 @@ def main():
     batch_ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     batch_dir = os.path.abspath(args.batch_dir or os.path.join(HARNESS_DIR, "runs", batch_ts))
     logs_dir = os.path.join(batch_dir, "logs")
+    state_dir = os.path.join(batch_dir, "state")
     os.makedirs(logs_dir, exist_ok=True)
+    os.makedirs(state_dir, exist_ok=True)
 
     llm_tuning_desc = (
         f"temperature={args.llm_temperature} | reasoning_effort="
@@ -356,7 +359,7 @@ def main():
         f"Harness source: {Path(__file__).resolve()}",
         f"Internal Kriya generation deadline: {internal_deadline}s "
         "(80% of external timeout)",
-        f"traces.db: {os.path.join(logs_dir, 'traces.db')}",
+        f"traces.db: {os.path.join(state_dir, 'traces.db')}",
         "",
     ]
 
@@ -365,7 +368,7 @@ def main():
         goal_dir.mkdir(parents=True, exist_ok=True)
         _init_git_repo(goal_dir)
         _write_config(
-            goal_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model,
+            goal_dir, state_dir, logs_dir, args.model, args.embed_model, args.base_url, args.fallback_model,
             args.search_base_url, args.self_correction, args.best_of_n, args.log_level,
             args.llm_temperature, args.reasoning_effort, args.presence_penalty,
             args.timeout_per_goal,
@@ -398,7 +401,7 @@ def main():
         fh.write("\n".join(summary_lines) + "\n")
 
     print(f"\nBatch complete. Summary: {summary_path}")
-    print(f"Run the report with:\n  .venv/bin/python spikes/eval_harness/report.py --logs-dir {logs_dir}")
+    print(f"Run the report with:\n  .venv/bin/python spikes/eval_harness/report.py --state-dir {state_dir}")
 
 
 if __name__ == "__main__":

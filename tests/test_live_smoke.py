@@ -48,7 +48,7 @@ def _write_config(path):
         "autonomy": {
             "mode": "guardrails", "run_verification_enabled": False, "web_lookup_enabled": False,
         },
-        "paths": {"skills": "./skills", "memory": "./memory", "logs": "./logs"},
+        "paths": {"skills": "./skills", "memory": "./memory"},
     }
     (path / "kriya.yaml").write_text(yaml.dump(config))
     (path / "skills").mkdir(exist_ok=True)

@@ -484,8 +484,9 @@ def _check_checkpoints(ctx: _Context) -> DoctorCheck:
 def _check_traces(ctx: _Context) -> DoctorCheck:
     """The trace database's state directory (KRIYA_STATE_DIR > paths.state >
     ~/.kriya/state), independent of the log directory: valid, creatable or
-    writable, and an existing traces.db readable and writable. A legacy
-    <paths.logs>/traces.db is a WARN with the explicit migration command."""
+    writable, and an existing traces.db readable and writable. A traces.db
+    left at the historical default location is a WARN with the explicit
+    migration command."""
     from kriya.core.state_paths import (
         StateDirectoryError,
         legacy_trace_db_path,

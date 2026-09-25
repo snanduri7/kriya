@@ -291,7 +291,6 @@ def test_generate_bootstrap_creates_no_cwd_logs(home, tmp_path, monkeypatch):
     before = _tree(cwd)
     cfg = _cfg(file="./logs/kriya.log")
     cfg.paths.memory = str(tmp_path / "memory")
-    cfg.paths.logs = str(tmp_path / "traces")
     kernel = MagicMock(start=AsyncMock(), stop=AsyncMock())
     with _fresh_root_logging(), \
          patch("kriya.cli.load_config", return_value=cfg), \
@@ -337,7 +336,6 @@ def test_plain_doctor_leaves_the_workspace_byte_tree_unchanged(home, tmp_path, m
     before = _tree(workspace)
     cfg = _cfg()
     cfg.paths.memory = str(tmp_path / "memory")
-    cfg.paths.logs = str(tmp_path / "traces")
     with _fresh_root_logging(), \
          patch("kriya.cli.load_config", return_value=cfg), \
          patch("urllib.request.urlopen", side_effect=urllib.error.URLError("offline")), \

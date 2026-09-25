@@ -863,7 +863,6 @@ async def test_1_baseline_captured_before_first_developer_call(tmp_path, monkeyp
 
     cfg = AppConfig()
     cfg.autonomy.run_verification_enabled = False
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
 
@@ -989,7 +988,6 @@ async def test_targeted_post_replays_frozen_multi_target_selection_and_does_not_
     cfg.autonomy.spec_compliance_enabled = False
     cfg.autonomy.brownfield_full_regression_baseline_policy = "required"
     cfg.autonomy.brownfield_baseline_target_test = ["test_a.py", "test_b.py"]
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
@@ -1056,7 +1054,6 @@ async def test_targeted_post_new_failure_blocks_and_prevents_quality_gates_passe
     cfg.autonomy.spec_compliance_enabled = False
     cfg.autonomy.brownfield_full_regression_baseline_policy = "required"
     cfg.autonomy.brownfield_baseline_target_test = ["test_a.py", "test_b.py"]
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     # The candidate is genuinely rejected every attempt (the targeted suite
@@ -1144,7 +1141,6 @@ async def test_full_regression_unattributed_stops_after_one_developer_call(tmp_p
     cfg.autonomy.run_verification_enabled = False
     cfg.autonomy.spec_compliance_enabled = False
     cfg.autonomy.brownfield_full_regression_baseline_policy = "required"
-    cfg.paths.logs = str(tmp_path / "logs")
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     _developer_json = '[{"filepath": "greet.py", "content": "def greet(name):\\n    return f\\"hi {name}\\"\\n"}]'

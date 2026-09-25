@@ -1,22 +1,24 @@
 """The one place Kriya decides where its persistent run history (traces.db)
-lives. It is state, not log output, so it never follows ``paths.logs`` or the
-log directory, and never derives from the process CWD.
+lives. It is state, not log output: independent of the log directory, and
+never derived from the process CWD.
 
 State directory, first match wins:
 - ``KRIYA_STATE_DIR`` (operator environment; must be absolute);
 - ``paths.state`` (config): canonicalized once at config load by
   kriya/config/config.py::resolve_config_state, where a relative value
-  resolves against the config file's own directory, and SEC-009-classified
-  like every other ``paths.*`` field;
+  resolves against the config file's own directory. Inside the workspace it
+  must sit beneath ``<workspace>/.kriya/``; outside it, SEC-009 path authority
+  applies like every other ``paths.*`` field;
 - ``~/.kriya/state``.
 
-The trace database is ``<state>/traces.db``. A pre-existing
-``<paths.logs>/traces.db`` is a *legacy* database: reported by ``kriya
-traces`` and ``kriya doctor --production``, and copied only by the explicit
-``kriya traces --migrate-legacy``. It is never moved, deleted, or merged.
+The trace database is ``<state>/traces.db``. A pre-existing database from
+before this move is copied only by the explicit ``kriya traces
+--migrate-legacy [--legacy-path <traces.db>]``; the one location detected
+without ``--legacy-path`` is the historical packaged default,
+``<install dir>/logs/traces.db``. Nothing is ever moved, deleted, or merged.
 
-Workspace run control state (``.kriya/``: run lock, RunRecords, checkpoints)
-is deliberately not affected: recovery depends on it living in the workspace.
+Workspace run control state (``<workspace>/.kriya/``: run lock, RunRecords,
+checkpoints) is separate and stays in the workspace: recovery depends on it.
 """
 from __future__ import annotations
 
@@ -75,22 +77,62 @@ def trace_db_path(cfg) -> str:
     return os.path.join(resolve_state_directory(cfg)[0], TRACE_DB_FILENAME)
 
 
-def legacy_trace_db_path(cfg) -> Optional[str]:
-    """``<paths.logs>/traces.db`` when it exists and is not the current trace
-    database; None otherwise. Only an absolute ``paths.logs`` is considered
-    (a relative one would be CWD-anchored)."""
-    logs = getattr(cfg.paths, "logs", None)
-    if not isinstance(logs, str) or not os.path.isabs(os.path.expanduser(logs)):
-        return None
-    legacy = os.path.realpath(os.path.join(os.path.expanduser(logs), TRACE_DB_FILENAME))
-    if not os.path.isfile(legacy):
-        return None
+WORKSPACE_STATE_PARENT = ".kriya"
+
+
+def require_workspace_local_state_under_kriya_dir(resolved: str, workspace_root: str, original: str) -> None:
+    """A state directory inside the workspace must be beneath
+    ``<workspace>/.kriya/`` (e.g. ``.kriya/state``); ``./state`` or ``./logs``
+    would put Kriya state among the repository's own files."""
+    workspace = os.path.realpath(workspace_root)
+    target = os.path.realpath(resolved)
+    if os.path.commonpath([workspace, target]) != workspace:
+        return  # outside the workspace: SEC-009 path authority decides
+    kriya_dir = os.path.join(workspace, WORKSPACE_STATE_PARENT)
+    if target != kriya_dir and os.path.commonpath([kriya_dir, target]) == kriya_dir:
+        return
+    raise StateDirectoryError(
+        f"paths.state {original!r} resolves inside the workspace ({target}) but not beneath "
+        f"{kriya_dir}/; use e.g. '.kriya/state', or a directory outside the workspace."
+    )
+
+
+def kriya_install_dir() -> str:
+    """The directory the packaged default config's relative paths resolved
+    against (kriya/config/config.py's KRIYA_INSTALL_DIR)."""
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def historical_default_trace_db_for(install_dir: str) -> str:
+    return os.path.realpath(os.path.join(install_dir, "logs", TRACE_DB_FILENAME))
+
+
+def historical_default_trace_db() -> str:
+    """Where traces.db lived before it moved to the state directory: the
+    packaged default ``./logs`` resolved against the install directory."""
+    return historical_default_trace_db_for(kriya_install_dir())
+
+
+def legacy_trace_db_path(cfg, legacy_path: Optional[str] = None) -> Optional[str]:
+    """The legacy database to report or migrate, or None.
+
+    With ``legacy_path``, exactly that file (it must exist). Without it, only
+    the historical packaged default is considered. Never the current trace
+    database itself, and never a CWD-relative guess."""
+    if legacy_path is not None:
+        candidate = os.path.realpath(os.path.expanduser(legacy_path))
+        if not os.path.isabs(os.path.expanduser(legacy_path)):
+            raise LegacyTraceMigrationError(f"--legacy-path must be an absolute path (got {legacy_path!r}).")
+        if not os.path.isfile(candidate):
+            raise LegacyTraceMigrationError(f"No trace database at {candidate}.")
+    else:
+        candidate = historical_default_trace_db()
+        if not os.path.isfile(candidate):
+            return None
     current = trace_db_path(cfg)
-    if os.path.exists(current) and os.path.samefile(legacy, current):
+    if os.path.realpath(current) == candidate or (os.path.exists(current) and os.path.samefile(candidate, current)):
         return None
-    if os.path.realpath(current) == legacy:
-        return None
-    return legacy
+    return candidate
 
 
 @dataclass(frozen=True)
@@ -100,16 +142,20 @@ class LegacyTraceMigration:
     runs: int
 
 
-def migrate_legacy_trace_db(cfg) -> LegacyTraceMigration:
+def migrate_legacy_trace_db(cfg, legacy_path: Optional[str] = None) -> LegacyTraceMigration:
     """Copy the legacy trace database to the canonical location.
 
-    Explicit only. Refuses when there is no legacy database or when the target
+    Explicit only. ``legacy_path`` names the exact source; otherwise the
+    historical packaged default. Refuses when there is no legacy database or when the target
     already exists (two histories are never merged). Copies with SQLite's
     online backup so a WAL-mode database is copied consistently; the legacy
     file is left exactly where it was."""
-    source = legacy_trace_db_path(cfg)
+    source = legacy_trace_db_path(cfg, legacy_path)
     if source is None:
-        raise LegacyTraceMigrationError("No legacy trace database found under paths.logs.")
+        raise LegacyTraceMigrationError(
+            f"No legacy trace database found at {historical_default_trace_db()}; "
+            "pass --legacy-path <traces.db> for any other location."
+        )
     target = trace_db_path(cfg)
     if os.path.exists(target):
         raise LegacyTraceMigrationError(
