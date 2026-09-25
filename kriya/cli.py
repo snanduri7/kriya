@@ -2097,6 +2097,14 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                 f"\n=== Milestone sequence: {status} ===", bold=True,
                 fg="green" if status == "success" else "red"
             )
+            committed_units = milestone_result.get("committed_work_units")
+            if status != "success" and committed_units:
+                # Units commit incrementally; the plan failing later does not undo them.
+                click.secho(
+                    "Already committed and still applied (not rolled back): " + ", ".join(committed_units)
+                    + ". The plan is not successful; the failed unit's changes and anything after it were "
+                    "not applied.", fg="yellow",
+                )
             click.echo(json.dumps(milestone_result, indent=2, default=str))
         sys.exit(0 if milestone_result.get("status") == "success" else 1)
 

@@ -21,7 +21,7 @@ from __future__ import annotations
 import contextvars
 import logging
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, Iterable, Mapping, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from kriya.control.run_coordinator import annotate_run, require_mutating_run
 from kriya.workflow.execution_plan import (
@@ -455,7 +455,26 @@ def _terminal(lifecycle: _Lifecycle, result: Dict[str, Any]) -> Dict[str, Any]:
         # reasons included). A one-unit plan's result is its unit's own
         # result, unchanged.
         result = {**result, "work_unit_states": _state_payload(lifecycle)}
+        if not _claims_success(result):
+            # Units commit incrementally; a later failure (a milestone, the
+            # integration unit's original-requirement check) leaves the
+            # earlier units' committed changes in place. Say which, from the
+            # RunRecord's own commit cycles - never implied rolled back.
+            committed = _committed_work_units(lifecycle.workspace_path)
+            if committed is not None:
+                result = {**result, "committed_work_units": committed,
+                          "committed_changes_retained": bool(committed)}
     return result
+
+
+def _committed_work_units(workspace_path: str) -> Optional[List[str]]:
+    from kriya.control.run_coordinator import owning_run_committed_work_units
+
+    try:
+        return owning_run_committed_work_units(workspace_path)
+    except Exception as error:
+        logger.warning(f"Committed work units unavailable: {error}")
+        return None
 
 
 def _state_payload(lifecycle: _Lifecycle) -> Dict[str, Any]:

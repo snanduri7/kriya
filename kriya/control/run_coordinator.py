@@ -172,6 +172,15 @@ def record_model_runtime_use(fingerprint_id: str) -> None:
         logger.warning("Run %s: model runtime fingerprint not persisted: %s", context.run_id, error)
 
 
+def owning_run_committed_work_units(workspace_path: str) -> Optional[List[str]]:
+    """RunRecord.committed_work_units() of the run owning ``workspace_path``
+    (None outside a run)."""
+    context = owning_run(workspace_path)
+    if context is None or context._lease.record is None:
+        return None
+    return context._lease.record.committed_work_units()
+
+
 def owning_run_commits(workspace_path: str) -> Optional[Tuple[str, List[Dict[str, Any]]]]:
     """(run_id, a copy of its commit cycles) for the run that owns
     ``workspace_path``, else None. Read-only: callers that attribute commits

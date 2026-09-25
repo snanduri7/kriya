@@ -408,6 +408,20 @@ class RunRecord:
             recovery=recovery,
         )
 
+    def committed_work_units(self) -> List[str]:
+        """The work units whose changes this run committed to the workspace,
+        in commit order - derived from ``commits`` (each cycle carries its
+        ``work_unit`` from the moment its intent was durable, and its
+        settled ``result``). A plan that fails after earlier units committed
+        keeps those changes: nothing here or anywhere rolls them back."""
+        units: List[str] = []
+        for cycle in self.commits:
+            unit = cycle.get("work_unit") or {}
+            name = unit.get("work_unit_id") or unit.get("milestone_id") or unit.get("kind")
+            if cycle.get("result") == COMMIT_COMMITTED and name and name not in units:
+                units.append(name)
+        return units
+
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
         payload["lifecycle_state"] = self.lifecycle_state.value

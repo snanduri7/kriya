@@ -128,3 +128,46 @@ def test_a_milestone_plan_is_not_successful_with_an_unverified_original_requirem
     assert any("Original Requirements" in p for p in transport.spec_prompts), result.output
     assert "REQUIREMENTS_UNRESOLVED" in result.output
     assert result.exit_code != 0
+
+
+def test_a_failed_integration_check_reports_the_milestones_it_leaves_committed(tmp_path, monkeypatch):
+    """Milestones commit incrementally. When the integration unit's original
+    requirement check then fails, the plan is not successful, and the
+    result, the RunRecord and the CLI all say which units are committed and
+    still applied - none of it reads as rolled back."""
+    import glob
+    import os
+
+    from kriya.control.run_record import RunRecord
+
+    transport = Transport(omit_verdicts=True)
+    cfg, result = _run(tmp_path, monkeypatch, transport, requirement_unknown_policy="block")
+
+    assert result.exit_code != 0
+    assert "Already committed and still applied (not rolled back): M1, M2" in result.output
+    payload = json.loads(result.output[result.output.index("{", result.output.index("=== Milestone sequence")):])
+    assert payload["status"] == "integration_failed"
+    assert payload["committed_work_units"] == ["M1", "M2"] and payload["committed_changes_retained"] is True
+    assert payload["work_unit_states"]["M1"]["status"] == "VERIFIED"
+    workspace = tmp_path / "ws"
+    assert (workspace / "m1.py").exists() and (workspace / "m2.py").exists()  # really still applied
+    [path] = glob.glob(os.path.join(str(workspace), ".kriya", "control", "runs", "*.json"))
+    with open(path, encoding="utf-8") as handle:
+        record = RunRecord.from_dict(json.load(handle))
+    assert record.committed_work_units() == ["M1", "M2"]
+    assert record.terminal_status != "SUCCESS"
+
+
+def test_only_settled_committed_cycles_count_as_committed_units():
+    from types import SimpleNamespace
+
+    from kriya.control.run_record import COMMIT_COMMITTED, RunRecord
+
+    commits = [
+        {"work_unit": {"kind": "milestone", "milestone_id": "M1"}, "result": COMMIT_COMMITTED},
+        {"work_unit": {"kind": "milestone", "milestone_id": "M2"}, "result": "NOT_COMMITTED"},
+        {"work_unit": {"kind": "milestone", "milestone_id": "M3"}, "result": None},  # still open
+        {"work_unit": {"kind": "integration", "milestone_id": None}, "result": COMMIT_COMMITTED},
+        {"work_unit": {"kind": "milestone", "milestone_id": "M1"}, "result": COMMIT_COMMITTED},
+    ]
+    assert RunRecord.committed_work_units(SimpleNamespace(commits=commits)) == ["M1", "integration"]
