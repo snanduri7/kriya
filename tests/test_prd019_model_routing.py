@@ -187,7 +187,7 @@ def test_a_missing_table_is_empty(tmp_path):
 # --- planning and applying routes on a real configuration ----------------------------------------
 
 from kriya.config import AppConfig  # noqa: E402
-from kriya.config.config import FallbackModelConfig, ModelCapabilities  # noqa: E402
+from kriya.config.config import DEFAULT_OUTPUT_TOKENS, FallbackModelConfig, ModelCapabilities  # noqa: E402
 from kriya.core import model_runtime  # noqa: E402
 from kriya.core.model_runtime import ModelRuntimeFingerprint  # noqa: E402
 
@@ -229,6 +229,72 @@ def _qualify_placed(cfg, role, alias):
     return runtime.digest
 
 
+def _qualify_placed_with(cfg, role, alias, **statuses):
+    """Like _qualify_placed, with chosen case statuses (PASS otherwise)."""
+    placed = mr.place_candidate(cfg, role, next(c for c in cfg.model_policy.routing.candidates if c.model == alias))
+    runtime = model_runtime.resolve_configured_model_runtime(placed, alias)
+    mq.save_record(mq.build_record(runtime, [mq.CaseResult(c, statuses.get(c, mq.PASS)) for c in mq.CAPABILITIES]))
+    return runtime.digest
+
+
+# --- qualification scope: the role's required cases, from one record for the exact runtime -----
+
+def test_one_qualification_record_is_reused_by_every_role_its_evidence_satisfies(tmp_path, monkeypatch):
+    _exact_ollama(monkeypatch)
+    cfg = _routing_cfg(tmp_path, roles={"reviewer": ["cand-a"], "spec_compliance": ["cand-a"], "planner": ["cand-a"]})
+    digest = _qualify_placed(cfg, "reviewer", "cand-a")  # qualified once
+    plan = mr.plan_routes(cfg)
+    for role in ("reviewer", "spec_compliance", "planner"):
+        decision = plan.decisions[role]
+        assert (decision.model, decision.source, decision.runtime_digest) == ("cand-a", "evidence", digest), role
+    assert mq.load_record(digest) is not None and len({d.runtime_digest for d in plan.decisions.values()}) == 1
+
+
+def test_a_record_covers_a_role_only_when_it_has_every_case_that_role_requires(tmp_path, monkeypatch):
+    _exact_ollama(monkeypatch)
+    cfg = _routing_cfg(tmp_path, roles={"reviewer": ["cand-a"], "planner": ["cand-a"]})
+    # One record for the one runtime: the planner additionally requires malformed_output_recovery.
+    _qualify_placed_with(cfg, "reviewer", "cand-a", malformed_output_recovery=mq.FAIL)
+    plan = mr.plan_routes(cfg)
+    assert (plan.decisions["reviewer"].model, plan.decisions["reviewer"].source) == ("cand-a", "evidence")
+    planner = plan.decisions["planner"]
+    assert planner.source == "configured_default"
+    (rejection,) = planner.rejected
+    assert any("malformed_output_recovery: FAIL" in reason for reason in rejection["reasons"])
+
+
+def test_a_runtime_lacking_a_developer_case_is_not_routed_to_the_developer(tmp_path, monkeypatch):
+    _exact_ollama(monkeypatch)
+    cfg = _routing_cfg(tmp_path, roles={"developer": ["cand-a"], "planner": ["cand-a"], "reviewer": ["cand-a"]})
+    _qualify_placed(cfg, "planner", "cand-a")
+    # The Developer placement has its own record: every case passes except the
+    # Developer's own anchored_edit_protocol, so it is not rejected for a
+    # missing record but for exactly that capability.
+    _qualify_placed_with(cfg, "developer", "cand-a", anchored_edit_protocol=mq.FAIL)
+    plan = mr.plan_routes(cfg)
+    assert plan.decisions["planner"].source == "evidence"
+    assert plan.decisions["reviewer"].source == "evidence"
+    developer = plan.decisions["developer"]
+    assert (developer.source, developer.model) == ("configured_default", "dev-model")
+    (rejection,) = developer.rejected
+    assert rejection["qualification"] == mq.NOT_QUALIFIED
+    assert any("anchored_edit_protocol: FAIL" in reason for reason in rejection["reasons"])
+    assert mr.apply_routes(cfg, plan).llm.model == "dev-model"
+
+
+def test_an_unqualified_placed_runtime_stays_ineligible(tmp_path, monkeypatch):
+    _exact_ollama(monkeypatch)
+    cfg = _routing_cfg(tmp_path, roles={"reviewer": ["cand-a"]})
+    table = {"version": mr.ROUTING_TABLE_VERSION, "runs": [], "rows": [
+        {"role": "reviewer", "model": "cand-a", "runtime_digest": "x", "calls": 100}]}
+    table["digest"] = mr.table_digest(table)
+    mr.write_table(cfg.model_policy.routing.table_path, table)
+    decision = mr.plan_routes(cfg).decisions["reviewer"]
+    assert decision.source == "configured_default"
+    (rejection,) = decision.rejected
+    assert rejection["qualification"] == mq.MISSING
+
+
 def test_routing_off_changes_nothing(tmp_path, monkeypatch):
     _exact_ollama(monkeypatch)
     cfg = _routing_cfg(tmp_path, mode="off")
@@ -261,10 +327,14 @@ def test_without_an_eligible_candidate_the_role_keeps_its_binding(tmp_path, monk
 def test_the_developer_can_be_routed(tmp_path, monkeypatch):
     _exact_ollama(monkeypatch)
     cfg = _routing_cfg(tmp_path, roles={"developer": ["cand-a"]})
+    cfg.llm.max_tokens = 32000  # the primary binding's own override
     _qualify_placed(cfg, "developer", "cand-a")
     routed = mr.apply_routes(cfg, mr.plan_routes(cfg))
     assert routed.llm.model == "cand-a"
-    assert routed.llm.max_tokens == cfg.llm.max_tokens  # unset candidate fields keep the primary's
+    # An unset candidate max_tokens is the shared default, never the primary's override.
+    assert routed.llm.max_tokens == DEFAULT_OUTPUT_TOKENS
+    placed = mr.place_candidate(cfg, "reviewer", cfg.model_policy.routing.candidates[0])
+    assert placed.agent_llms.reviewer.llm.max_tokens == DEFAULT_OUTPUT_TOKENS
 
 
 def test_measured_outcomes_from_the_table_decide_between_qualified_candidates(tmp_path, monkeypatch):

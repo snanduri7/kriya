@@ -263,15 +263,18 @@ def routing_table_path(config: Any) -> str:
 def place_candidate(config: Any, role: str, candidate: Any) -> Any:
     """A copy of ``config`` with ``candidate`` (a FallbackModelConfig-shaped
     binding) as ``role``'s own model: the primary ``llm`` for the Developer,
-    ``agent_llms.<role>.llm`` otherwise. Unset candidate fields (max_tokens)
-    keep the primary's. The runtime identity of a model depends on where it
+    ``agent_llms.<role>.llm`` otherwise. An unset ``max_tokens`` is the shared
+    DEFAULT_OUTPUT_TOKENS (as for any binding), never the primary's own
+    value; other unset fields keep the primary's. The runtime identity of a model depends on where it
     is bound (its capability-profile provenance), so a candidate is always
     assessed, qualified and run in this placement."""
     from kriya.config.config import AgentModelConfig
+    from kriya.core.model_runtime import binding_output_tokens
 
     placed = config.model_copy(deep=True)
     update = {name: getattr(candidate, name) for name in type(candidate).model_fields
               if getattr(candidate, name) is not None}
+    update["max_tokens"] = binding_output_tokens(config, candidate)
     binding = placed.llm.model_copy(update=update, deep=True)
     if role == "developer":
         placed.llm = binding
