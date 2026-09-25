@@ -606,12 +606,16 @@ class AutonomyConfig(BaseModel):
     # CHANGED_FAILURE block, PRE_EXISTING_FAILURE does not. "disabled":
     # today's exact unmodified behavior (the full suite still runs
     # post-approval as it always has; no PRE baseline, no delta - any
-    # failure blocks, matching current behavior byte-for-byte). "auto":
-    # reserved for a future risk-based trigger ("follow existing risk/
-    # validation policy") - currently behaves identically to "disabled"
-    # (no such existing policy signal exists yet to hook into) - stated
-    # honestly here rather than silently activating baselining as a new
-    # default behavior no compatibility analysis has covered.
+    # failure blocks, matching current behavior byte-for-byte). "auto"
+    # (PRD-024, kriya/workflow/baseline_policy.py): "required" exactly when
+    # a deterministic trigger fires - a brownfield route (task/enhancement/
+    # refactor) with a git identity, an existing test suite and a planned
+    # change to an existing source, plus any risk signal (risk >= MEDIUM,
+    # a non-LIGHT weight, a refactor, a risky impact component, or a changed
+    # source an existing test names); "disabled" otherwise. Engineering
+    # triage must be enabled for the route signal. A triggered baseline is
+    # as binding as "required" (indeterminate stops the run before
+    # generation).
     brownfield_full_regression_baseline_policy: str = Field(default="auto")
 
     @field_validator("brownfield_full_regression_baseline_policy")
@@ -1365,9 +1369,9 @@ def runtime_profile_preset_fields(profile: Optional[str]) -> Dict[Any, Any]:
             ("autonomy", "containment_backend"): "oci",
             ("autonomy", "contained_execution_required"): True,
             ("autonomy", "mcp_contained_execution_required"): True,
-            # Until PRD-024 gives `auto` a safe risk-derived meaning, production
-            # always captures the pristine full-suite baseline and fails closed
-            # if that baseline is indeterminate.
+            # Production always captures the pristine full-suite baseline and
+            # fails closed if it is indeterminate - stricter than PRD-024's
+            # risk-derived `auto`, which skips trivial changes.
             ("autonomy", "brownfield_full_regression_baseline_policy"): "required",
             # PRD-012 deny-by-default: an arbitrary shell command gets no
             # network (package managers stay registry-scoped), and

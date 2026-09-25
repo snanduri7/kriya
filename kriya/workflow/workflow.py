@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import difflib
 import hashlib
 import json
@@ -3147,10 +3148,45 @@ class WorkflowEngine:
         # baselines() normalizes it once; this call site passes it straight
         # through unmodified either way.
         autonomy_baseline_cfg = self.kernel.config.autonomy
+        # PRD-024 (kriya/workflow/baseline_policy.py): `auto` is decided here,
+        # deterministically, from the route, the planned files and the
+        # repository's tests - before the first Developer mutation. A
+        # triggered `auto` is as binding as `required`.
+        from kriya.workflow.baseline_policy import (
+            baseline_environment_identity,
+            decide_auto_baseline,
+            effective_baseline_policy,
+        )
+        configured_baseline_policy = autonomy_baseline_cfg.brownfield_full_regression_baseline_policy
+        auto_baseline_decision = None
+        if configured_baseline_policy == "auto":
+            try:
+                auto_baseline_decision = await asyncio.to_thread(
+                    decide_auto_baseline, engineering_route, architect_files or [], workspace_path,
+                    workspace_revision=compute_workspace_content_hash(workspace_path),
+                )
+            except Exception as exc:
+                logger.warning(f"Brownfield baseline auto policy could not be evaluated: {exc}")
+        full_regression_policy = effective_baseline_policy(configured_baseline_policy, auto_baseline_decision)
+        state.record_event(RunEvent(
+            kind="validation_baseline.policy", attempt=0, source="workflow.run_generation_workflow",
+            authority=EventAuthority.AUXILIARY,
+            message=f"brownfield full-regression baseline: {configured_baseline_policy} -> {full_regression_policy}",
+            details={"configured": configured_baseline_policy, "effective": full_regression_policy,
+                     "auto_decision": auto_baseline_decision.to_dict() if auto_baseline_decision else None},
+        ))
+        baseline_environment = None
+        if full_regression_policy == "required" or autonomy_baseline_cfg.brownfield_baseline_target_test:
+            try:
+                baseline_environment = baseline_environment_identity(
+                    workspace_path, autonomy_baseline_cfg, goal=goal)
+            except Exception as exc:
+                logger.warning(f"Baseline environment identity unavailable: {exc}")
         baseline_capture = capture_brownfield_baselines(
             run_id=run_id,
             target_test=autonomy_baseline_cfg.brownfield_baseline_target_test,
-            full_regression_policy=autonomy_baseline_cfg.brownfield_full_regression_baseline_policy,
+            full_regression_policy=full_regression_policy,
+            environment_identity=baseline_environment,
             run_validator=lambda target_test: PolymorphicValidator(
                 workspace_path, original_workspace_path=workspace_path,
                 autonomy_cfg=autonomy_baseline_cfg,
@@ -3172,6 +3208,13 @@ class WorkflowEngine:
                     "Brownfield PRE-mutation targeted validation baseline is INDETERMINATE: "
                     f"{baseline_capture.targeted.indeterminate_reason}"
                 )
+        if baseline_capture.hard_stop_reason is not None and auto_baseline_decision is not None:
+            # PRD-024: say which deterministic signals made the baseline required.
+            baseline_capture = dataclasses.replace(baseline_capture, hard_stop_reason=(
+                "the 'auto' baseline policy required a pristine PRE baseline for this change ("
+                + "; ".join(auto_baseline_decision.reasons) + ") - "
+                + baseline_capture.hard_stop_reason
+            ))
         if baseline_capture.hard_stop_reason is not None:
             # FAILURE_BEHAVIOR: never silently proceed assuming a green
             # baseline - an explicit, distinct terminal status, same shape
@@ -3968,8 +4011,30 @@ class WorkflowEngine:
                     and state.validation_baseline_full_regression.status == "captured"
                 ):
                     _post_regression_outcome = build_validation_outcome(full_test_res)
+                    # PRD-024: POST's own environment, over the candidate's
+                    # toolchain declarations; a different one is not comparable.
+                    _post_environment = None
+                    if state.validation_baseline_full_regression.invocation.environment_fingerprint is not None:
+                        from kriya.tools.toolchain_identity import ALL_TOOLCHAIN_DECLARATION_FILES
+                        from kriya.workflow.baseline_policy import baseline_environment_identity
+                        _declarations = {}
+                        for _path in ALL_TOOLCHAIN_DECLARATION_FILES:
+                            if _path in state.all_files_written:
+                                try:
+                                    with open(os.path.join(worktree_path, _path), "r", encoding="utf-8") as _fh:
+                                        _declarations[_path] = _fh.read()
+                                except OSError:
+                                    pass
+                        try:
+                            _post_environment = baseline_environment_identity(
+                                workspace_path, self.kernel.config.autonomy, goal=goal,
+                                candidate_files=_declarations or None,
+                            )
+                        except Exception as exc:
+                            logger.warning(f"POST environment identity unavailable: {exc}")
                     _baseline_delta_result = classify_baseline_delta(
                         state.validation_baseline_full_regression, _post_regression_outcome,
+                        post_environment=_post_environment,
                     )
                     _regression_should_block = _baseline_delta_result.blocking
                     state.record_event(RunEvent(
@@ -3987,6 +4052,13 @@ class WorkflowEngine:
                             "aggregate_drop_detected": _baseline_delta_result.aggregate_drop_detected,
                             "blocking": _baseline_delta_result.blocking,
                             "blocking_reasons": list(_baseline_delta_result.blocking_reasons),
+                            # PRD-024: per-test comparison availability, never
+                            # an empty result read as "no failures".
+                            "level2_available": _baseline_delta_result.level2_available,
+                            "level2_unavailable_reason": _baseline_delta_result.level2_unavailable_reason,
+                            "pre_environment": (
+                                state.validation_baseline_full_regression.invocation.environment_fingerprint),
+                            "post_environment": _post_environment,
                         },
                     ))
                     if not _regression_should_block and not full_test_res["success"]:

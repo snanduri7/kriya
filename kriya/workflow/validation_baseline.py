@@ -596,24 +596,50 @@ class BaselineDeltaResult:
     """The full comparison result the caller (workflow.py) actually acts
     on. `blocking` is the single boolean decision point - True whenever
     ANY classification (level1 or any level2 entry) is in
-    TERMINAL_BLOCKING_CLASSIFICATIONS."""
+    TERMINAL_BLOCKING_CLASSIFICATIONS, or the PRE and POST environments are
+    not comparable (PRD-024).
+
+    PRD-024: `level2_available` says whether per-test classification was
+    possible at all; when it was not, `level2_unavailable_reason` says why
+    (no structured parser recognized the output) - an empty `level2` is
+    never silently read as "no per-test failures". RESOLVED_FAILURE is the
+    FIXED classification."""
 
     level1: Level1Delta
     level2: Dict[str, DeltaClassification]
     aggregate_drop_detected: bool
     blocking: bool
     blocking_reasons: Tuple[str, ...]
+    level2_available: bool = False
+    level2_unavailable_reason: Optional[str] = None
 
 
-def classify_baseline_delta(baseline: ValidationBaseline, post: ValidationOutcome) -> BaselineDeltaResult:
+def classify_baseline_delta(
+    baseline: ValidationBaseline, post: ValidationOutcome, *, post_environment: Optional[str] = None,
+) -> BaselineDeltaResult:
     """The one entry point kriya/workflow/workflow.py calls. Requires
     baseline.status == "captured" and baseline.outcome is not None - a
     caller must check baseline-indeterminate BEFORE calling this (see
     FAILURE_BEHAVIOR: indeterminate is a distinct terminal outcome, never
-    routed through delta comparison at all)."""
+    routed through delta comparison at all).
+
+    PRD-024: ``post_environment`` is the POST run's environment identity
+    (``baseline_environment_identity``). When the baseline recorded one and
+    they differ, the runs are NOT_COMPARABLE and that blocks: a PRE
+    baseline from a different toolchain environment proves nothing about
+    which POST failures are pre-existing."""
     if baseline.status != "captured" or baseline.outcome is None:
         raise ValueError("classify_baseline_delta requires a captured baseline with a real outcome")
     pre = baseline.outcome
+    pre_environment = baseline.invocation.environment_fingerprint
+    if pre_environment is not None and post_environment is not None and pre_environment != post_environment:
+        return BaselineDeltaResult(
+            level1=Level1Delta(DeltaClassification.NOT_COMPARABLE, pre.failure_fingerprint,
+                               post.failure_fingerprint),
+            level2={}, aggregate_drop_detected=False, blocking=True,
+            blocking_reasons=("environment_not_comparable",), level2_available=False,
+            level2_unavailable_reason="PRE and POST ran in different recorded environments",
+        )
     level1 = classify_level1_delta(pre, post)
 
     level2: Dict[str, DeltaClassification] = {}
@@ -657,9 +683,16 @@ def classify_baseline_delta(baseline: ValidationBaseline, post: ValidationOutcom
         blocking = True
         reasons.append("aggregate_count_drop")
 
+    level2_available = pre.test_outcomes is not None and post.test_outcomes is not None
     return BaselineDeltaResult(
         level1=level1, level2=level2, aggregate_drop_detected=aggregate_drop,
-        blocking=blocking, blocking_reasons=tuple(reasons),
+        blocking=blocking, blocking_reasons=tuple(reasons), level2_available=level2_available,
+        level2_unavailable_reason=None if level2_available else (
+            "no structured per-test parser recognized the "
+            + ("PRE and POST" if pre.test_outcomes is None and post.test_outcomes is None
+               else "PRE" if pre.test_outcomes is None else "POST")
+            + " output; only the whole-invocation (level 1) comparison applies"
+        ),
     )
 
 
@@ -827,11 +860,12 @@ def _selection_identity_for_targets(targets: Optional[Tuple[str, ...]]) -> str:
 def _capture_single_baseline(
     *, run_id: str, target_test: Optional[Tuple[str, ...]],
     run_validator: Callable[[Optional[Tuple[str, ...]]], Dict[str, Any]],
-    compute_revision: Callable[[], Optional[str]],
+    compute_revision: Callable[[], Optional[str]], environment_identity: Optional[str] = None,
 ) -> ValidationBaseline:
     invocation = ValidationInvocation(
         command_identity="polymorphic_validator.run_tests",
         selection_identity=_selection_identity_for_targets(target_test),
+        environment_fingerprint=environment_identity,
         target_test=target_test,
     )
     workspace_revision = compute_revision()
@@ -862,11 +896,12 @@ def _reuse_or_capture(
     *, run_id: str, target_test: Optional[Tuple[str, ...]],
     resume_baseline: Optional[Dict[str, Any]],
     run_validator: Callable[[Optional[Tuple[str, ...]]], Dict[str, Any]],
-    compute_revision: Callable[[], Optional[str]],
+    compute_revision: Callable[[], Optional[str]], environment_identity: Optional[str] = None,
 ) -> ValidationBaseline:
     invocation = ValidationInvocation(
         command_identity="polymorphic_validator.run_tests",
         selection_identity=_selection_identity_for_targets(target_test),
+        environment_fingerprint=environment_identity,
         target_test=target_test,
     )
     if resume_baseline is not None:
@@ -881,6 +916,7 @@ def _reuse_or_capture(
     return _capture_single_baseline(
         run_id=run_id, target_test=target_test,
         run_validator=run_validator, compute_revision=compute_revision,
+        environment_identity=environment_identity,
     )
 
 
@@ -892,6 +928,7 @@ def capture_brownfield_baselines(
     compute_revision: Callable[[], Optional[str]],
     resume_baseline_targeted: Optional[Dict[str, Any]] = None,
     resume_baseline_full_regression: Optional[Dict[str, Any]] = None,
+    environment_identity: Optional[str] = None,
 ) -> BrownfieldBaselineCaptureResult:
     """`run_validator(target_test) -> {"success": bool, "output": str}` and
     `compute_revision() -> Optional[str]` are the caller's own thin wrappers
@@ -929,6 +966,7 @@ def capture_brownfield_baselines(
             run_id=run_id, target_test=normalized_target_test,
             resume_baseline=resume_baseline_targeted,
             run_validator=run_validator, compute_revision=compute_revision,
+            environment_identity=environment_identity,
         )
 
     full_regression = None
@@ -938,6 +976,7 @@ def capture_brownfield_baselines(
             run_id=run_id, target_test=None,
             resume_baseline=resume_baseline_full_regression,
             run_validator=run_validator, compute_revision=compute_revision,
+            environment_identity=environment_identity,
         )
         if full_regression.status == "baseline_indeterminate":
             hard_stop_reason = (
