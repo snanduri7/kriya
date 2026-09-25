@@ -195,17 +195,9 @@ class PolymorphicValidator:
         self.original_workspace_path = os.path.abspath(original_workspace_path) if original_workspace_path else None
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
         self.stack = self._detect_stack()
+        self.toolchain_identity = None
+        # Assigning the property resolves the toolchain identity (below).
         self.java_home_override = java_home_override
-        # PRD-011: stack ownership remains in _detect_stack(); contained
-        # execution only resolves a versioned OCI profile from that one
-        # decision. Resolution happens before any subprocess can start and
-        # raises fail-closed for unsupported/conflicting requirements.
-        self.toolchain_identity = (
-            resolve_toolchain_identity(
-                self.workspace_path, self.stack, java_home_override=self.java_home_override,
-            )
-            if self.autonomy_cfg.contained_execution_required else None
-        )
         # 'group:artifact' keys the caller has already determined are
         # explicitly authorized for removal by the goal (kriya/workflow/
         # migration.py::resolve_authorized_dependency_removals) - excluded
@@ -707,6 +699,33 @@ class PolymorphicValidator:
             env["PATH"] = os.path.join(self.java_home_override, "bin") + os.pathsep + env.get("PATH", "")
         return env, preexec_fn
 
+    @property
+    def java_home_override(self) -> Optional[str]:
+        return self._java_home_override
+
+    @java_home_override.setter
+    def java_home_override(self, value: Optional[str]) -> None:
+        """Production callers pick the goal-stated JDK AFTER construction
+        (workflow.py/attempt.py assign this attribute), so the contained
+        toolchain identity is re-resolved on every assignment - otherwise a
+        goal-stated JDK would be ignored under containment and the
+        repository-vs-JDK mismatch refusal could never fire."""
+        self._java_home_override = value
+        self._resolve_toolchain_identity()
+
+    def _resolve_toolchain_identity(self) -> None:
+        """PRD-011: stack ownership remains in _detect_stack(); contained
+        execution only resolves a versioned OCI profile from that one
+        decision plus the selected JDK. Runs before any subprocess can start
+        and raises (a ContainmentSetupError) for unsupported/conflicting
+        requirements - never a host-tool fallback."""
+        self.toolchain_identity = (
+            resolve_toolchain_identity(
+                self.workspace_path, self.stack, java_home_override=self._java_home_override,
+            )
+            if self.autonomy_cfg.contained_execution_required else None
+        )
+
     def build_containment_profile_and_backend(
         self, *, network: NetworkAuthority = NetworkAuthority.DENIED,
         dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
@@ -1132,10 +1151,7 @@ class PolymorphicValidator:
         # established stack decisions remain stable.
         if self.stack == "unknown":
             self.stack = self._detect_stack()
-            if self.autonomy_cfg.contained_execution_required:
-                self.toolchain_identity = resolve_toolchain_identity(
-                    self.workspace_path, self.stack, java_home_override=self.java_home_override,
-                )
+            self._resolve_toolchain_identity()
 
         if self.stack == "python":
             if self.autonomy_cfg.contained_execution_required:

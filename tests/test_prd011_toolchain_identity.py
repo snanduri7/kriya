@@ -120,3 +120,53 @@ def test_oci_prepare_uses_resolved_image_and_persists_digest(tmp_path, monkeypat
     prepared = backend.prepare(profile, ["mvn", "test"])
     assert "example/java17" in prepared.command_prefix
     assert prepared.toolchain_identity.image_digest == "sha256:resolved"
+
+
+# --- PRD-011 reopen: production callers assign java_home_override AFTER
+# construction (workflow.py / attempt.py). The identity must follow it.
+
+def _contained_cfg():
+    return AutonomyConfig(contained_execution_required=True, containment_backend="oci")
+
+
+def _jdk_home(tmp_path, name, java_version):
+    home = tmp_path / name
+    home.mkdir()
+    (home / "release").write_text(f'JAVA_VERSION="{java_version}"\n')
+    return str(home)
+
+
+def test_goal_stated_jdk_assigned_after_construction_selects_the_contained_image(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project/>")
+    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg())
+    assert validator.toolchain_identity.runtime_version == "21"  # packaged default before the goal JDK
+    validator.java_home_override = _jdk_home(tmp_path, "jdk17", "17.0.12")
+    profile, _ = validator.build_containment_profile_and_backend()
+    assert profile.toolchain_identity.runtime_version == "17"
+    assert profile.toolchain_identity.containment_image == "maven:3.9-eclipse-temurin-17"
+    assert profile.toolchain_identity.requirement_source.startswith("JAVA_HOME:")
+
+
+def test_goal_stated_jdk_contradicting_the_repository_is_refused_on_assignment(tmp_path):
+    (tmp_path / "pom.xml").write_text(_pom(17))
+    validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg())
+    with pytest.raises(ToolchainResolutionError, match="requires Java 17"):
+        validator.java_home_override = _jdk_home(tmp_path, "jdk21", "21.0.4")
+
+
+def test_clearing_the_override_restores_the_repository_identity(tmp_path):
+    (tmp_path / "pom.xml").write_text("<project/>")
+    validator = PolymorphicValidator(
+        str(tmp_path), autonomy_cfg=_contained_cfg(), java_home_override=_jdk_home(tmp_path, "jdk17", "17"),
+    )
+    assert validator.toolchain_identity.runtime_version == "17"
+    validator.java_home_override = None
+    assert validator.toolchain_identity.runtime_version == "21"
+
+
+def test_uncontained_validator_never_resolves_a_toolchain_on_assignment(tmp_path):
+    (tmp_path / "pom.xml").write_text(_pom(17))
+    validator = PolymorphicValidator(str(tmp_path))
+    validator.java_home_override = _jdk_home(tmp_path, "jdk21", "21")  # host mode: no containment identity
+    assert validator.toolchain_identity is None
+    assert validator.java_home_override.endswith("jdk21")
