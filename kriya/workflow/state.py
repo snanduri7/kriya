@@ -396,6 +396,15 @@ class GenerationState:
     # last Developer call, so a model change between attempts is recorded
     # field by field as a model.transition run event.
     last_developer_request_profile: Optional[Any] = None
+    # PRD-018: the attempt in which the Developer last sent a request, so an
+    # attempt's gate outcome is charged to the runtime that generated it
+    # (never to one it did not call, e.g. a refused fallback).
+    last_developer_call_attempt: Optional[int] = None
+    # PRD-018: the engine's role-metrics snapshot when this run started
+    # (kriya/core/role_metrics.py RoleMetrics.since), and whether the run's
+    # model.role_metrics event has been recorded.
+    role_metrics_baseline: Optional[Dict[Any, Any]] = None
+    role_metrics_recorded: bool = False
     # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/
     # validation_baseline.py) - the PRE-candidate authoritative record(s),
     # captured against workspace_path (never worktree_path/sandbox) before
@@ -614,6 +623,22 @@ class GenerationState:
         self.run_events.append(event)
         if event.failure_type:
             self.failure_ledger.record(event)
+
+    def record_developer_attempt_outcome(self, client: Any, *, passed: bool) -> None:
+        """PRD-018: charge this attempt's deterministic gate outcome to the
+        Developer runtime that generated its candidate (only when the
+        Developer sent a request in this attempt)."""
+        from kriya.core.role_metrics import RoleMetrics
+
+        profile = self.last_developer_request_profile
+        metrics = getattr(client, "role_metrics", None)
+        if (profile is None or not isinstance(metrics, RoleMetrics)
+                or self.last_developer_call_attempt != self.attempt_number):
+            return
+        metrics.record_attempt(
+            role="developer", model=profile.model, runtime_digest=profile.runtime_digest,
+            runtime_exact=profile.runtime_exact, attempt_number=self.attempt_number, passed=passed,
+        )
 
     def drain_budget_expansions(self, *clients: Any) -> None:
         """PRD-016: move each client's recorded automatic budget adjustments

@@ -125,6 +125,11 @@ class LLMClient:
         # persist in the run trace (kriya/workflow/state.py
         # drain_budget_expansions); each is also logged.
         self.budget_expansions: List[Dict[str, Any]] = []
+        # PRD-018: per-role, per-runtime counters of every call through this
+        # client (the role comes from kriya.core.role_metrics.model_role).
+        from kriya.core.role_metrics import RoleMetrics
+
+        self.role_metrics = RoleMetrics()
 
     def _audit_llm_network_access(self, url: str) -> None:
         """MA4.3 - audit-only ExecutionPolicy consultation, wired in front of
@@ -305,6 +310,14 @@ class LLMClient:
         from kriya.core.token_budget import compare_with_usage
 
         result.elapsed_seconds = time.time() - started
+        role_metrics = getattr(self, "role_metrics", None)
+        if role_metrics is not None:
+            role_metrics.record_call(
+                model=result.model, runtime_digest=result.runtime_fingerprint,
+                runtime_exact=result.runtime_fingerprint_exact, status=result.status.value,
+                latency_seconds=result.elapsed_seconds, prompt_tokens=result.prompt_tokens or 0,
+                completion_tokens=result.completion_tokens or 0, tokens_estimated=bool(result.tokens_estimated),
+            )
         if budget is not None:
             result.budget = budget.to_dict()
             comparison = compare_with_usage(result.budget, result.prompt_tokens, model=result.model)

@@ -1501,6 +1501,16 @@ def _lower_output_protocol_retry(
     return {**kwargs, "operation_by_file": operations, "expected_output_by_file": expectations}
 
 
+async def _as_developer(awaitable: Any) -> Any:
+    """Await ``awaitable`` with its model calls attributed to the developer
+    role (PRD-018): the compile/test self-correction loop is the Developer's
+    repair, run outside _run_developer_generation."""
+    from kriya.core.role_metrics import model_role
+
+    with model_role("developer"):
+        return await awaitable
+
+
 def _developer_request_profile(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
     """PRD-017: the request profile of a Developer call with ``model_override``
     (None = the primary)."""
@@ -1563,12 +1573,11 @@ def _enter_developer_model(state: GenerationState, ctx: "AttemptContext", kwargs
             },
         ))
     state.last_developer_request_profile = profile
-    if not is_fallback:
-        return
     reasons = fallback_incompatibilities(
         ctx.kernel.config, profile, patch_required_files=_patch_required_files(state, ctx, kwargs),
-    )
+    ) if is_fallback else []
     if not reasons:
+        state.last_developer_call_attempt = state.attempt_number
         return
     message = f"{FALLBACK_MODEL_INCOMPATIBLE}: fallback model {profile.model} cannot serve this attempt: " + "; ".join(
         reasons
@@ -1602,6 +1611,17 @@ def _chain_binding(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
 
 
 async def _run_developer_generation(
+    state: GenerationState, ctx: "AttemptContext", **kwargs,
+) -> List[Dict[str, str]]:
+    """Every Developer generation goes through here; its model calls are
+    attributed to the developer role (PRD-018)."""
+    from kriya.core.role_metrics import model_role
+
+    with model_role("developer"):
+        return await _run_developer_generation_as_developer(state, ctx, **kwargs)
+
+
+async def _run_developer_generation_as_developer(
     state: GenerationState, ctx: "AttemptContext", **kwargs,
 ) -> List[Dict[str, str]]:
     targets = kwargs.get("known_target_files")
@@ -7446,7 +7466,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "Compile gate failed - attempting bounded self-correction "
                     "micro-loop before raising QualityGateFailure."
                 )
-                self_correction_result = await run_self_correction_loop(
+                self_correction_result = await _as_developer(run_self_correction_loop(
                     llm=ctx.developer.llm,
                     worktree_path=ctx.worktree_path,
                     validator=validator,
@@ -7468,7 +7488,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     authorized_semantic_regions=ctx.authorized_semantic_regions,
                     strict_existing_java_files=ctx.kernel.config.autonomy.semantic_region_enforcement_required,
                     baseline_contents=state.all_original_contents,
-                )
+                ))
                 _record_self_correction_scope_conflict(
                     state, ctx, self_correction_result, "compile",
                 )
@@ -8387,7 +8407,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             run_verification_known_files = sorted(
                                 set(state.all_files_written) | set(ctx.established_files)
                             )
-                            self_correction_result = await run_self_correction_loop(
+                            self_correction_result = await _as_developer(run_self_correction_loop(
                                 llm=ctx.developer.llm,
                                 worktree_path=ctx.worktree_path,
                                 validator=validator,
@@ -8409,7 +8429,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 authorized_semantic_regions=ctx.authorized_semantic_regions,
                                 strict_existing_java_files=ctx.kernel.config.autonomy.semantic_region_enforcement_required,
                                 baseline_contents=state.all_original_contents,
-                            )
+                            ))
                             _record_self_correction_scope_conflict(
                                 state, ctx, self_correction_result, "run_verification",
                             )

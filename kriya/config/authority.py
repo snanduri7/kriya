@@ -206,6 +206,9 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # PRD-016: which larger context windows a request may be sent with, and
     # the hard context/output ceilings - resource authority over the host.
     ("llm", "context_policy"),
+    # PRD-018: which roles must run on a runtime distinct from the
+    # Developer's - a repository must not be able to relax the operator's.
+    ("model_policy", "independent_roles"),
     (None, "llm_chain"),  # each entry carries its own base_url
     ("workflow_controller", "enabled"), ("workflow_controller", "mode"),
     ("engineering_triage", "shadow_mode"),

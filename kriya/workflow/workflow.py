@@ -261,6 +261,30 @@ _UNRESOLVED_GATE_MARKERS = (
 )
 
 
+def _role_metrics_of(client: Any) -> Any:
+    """The client's PRD-018 RoleMetrics, or None (a test double)."""
+    from kriya.core.role_metrics import RoleMetrics
+
+    metrics = getattr(client, "role_metrics", None)
+    return metrics if isinstance(metrics, RoleMetrics) else None
+
+
+def _role_independence_details(cfg: Any) -> Dict[str, Any]:
+    """PRD-018: each role's exact runtime, the roles grouped by shared
+    runtime, and the independence policy with any violation."""
+    from kriya.core.role_metrics import independence_violations, role_runtimes, shared_runtime_groups
+
+    runtimes = role_runtimes(cfg)
+    return {
+        "roles": {role: {"model": model, "runtime_digest": digest, "runtime_exact": exact}
+                  for role, (model, digest, exact) in sorted(runtimes.items())},
+        "groups": shared_runtime_groups(runtimes),
+        "independent_roles_required": list(cfg.model_policy.independent_roles),
+        "violations": independence_violations(cfg, runtimes),
+        "second_opinion_is_verification": False,
+    }
+
+
 async def _primary_model_runtime_details(cfg: Any) -> Dict[str, Any]:
     """PRD-013/014: the primary model's runtime fingerprint and the
     Developer role's qualification assessment, for the ``model.runtime``
@@ -691,6 +715,16 @@ class WorkflowEngine:
         state.drain_budget_expansions(
             self.llm, self.planner.llm, self.architect.llm, self.developer.llm, self.reviewer.llm,
         )
+        metrics = _role_metrics_of(self.developer.llm)
+        if metrics is not None and not state.role_metrics_recorded:
+            # PRD-018: this run's calls per (role, model, exact runtime).
+            state.role_metrics_recorded = True
+            state.record_event(RunEvent(
+                kind="model.role_metrics", attempt=state.attempt_number, source="workflow",
+                authority=EventAuthority.AUXILIARY,
+                message="per-role model metrics of this run (observations, not verification evidence)",
+                details={"rows": metrics.since(state.role_metrics_baseline)},
+            ))
         return [event.to_dict() for event in state.run_events]
 
     def _audit_approval_rules(
@@ -1199,6 +1233,20 @@ class WorkflowEngine:
             ))
         except Exception as exc:
             logger.warning(f"Could not record the run's model runtime identity: {exc}")
+        # PRD-018: which roles share which exact runtime (visibility; the
+        # independence policy itself is enforced before the workflow starts,
+        # kriya/cli.py _workflow_config), and the metrics baseline this
+        # run's model.role_metrics event is measured from.
+        metrics = _role_metrics_of(self.developer.llm)
+        state.role_metrics_baseline = metrics.snapshot() if metrics is not None else None
+        try:
+            state.record_event(RunEvent(
+                kind="model.role_independence", attempt=0, source="workflow.run_generation_workflow",
+                authority=EventAuthority.AUXILIARY, message="role to exact-runtime assignment",
+                details=await asyncio.to_thread(_role_independence_details, self.kernel.config),
+            ))
+        except Exception as exc:
+            logger.warning(f"Could not record the run's role-runtime assignment: {exc}")
         generation_budget = self.kernel.config.autonomy.generation_time_budget_seconds
         if generation_budget is None:
             logger.info(
@@ -4253,6 +4301,7 @@ class WorkflowEngine:
                     )
 
                 state.overall_attempt_succeeded = True
+                state.record_developer_attempt_outcome(self.developer.llm, passed=True)
                 state.record_event(RunEvent(
                     kind="attempt.passed",
                     attempt=state.attempt_number,

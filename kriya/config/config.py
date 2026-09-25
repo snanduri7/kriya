@@ -760,6 +760,30 @@ class FallbackModelConfig(BaseModel):
     knowledge_cutoff_confidence: str = Field(default="estimated")
     context_policy: ContextPolicyConfig = Field(default_factory=ContextPolicyConfig)
 
+_POLICY_ROLES = ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance")
+
+
+class ModelPolicyConfig(BaseModel):
+    """PRD-018: role-model independence policy. By default every role may
+    share the Developer's model (the local single-model setup); the
+    operator can require selected roles (typically the verifier roles
+    run_verifier, spec_compliance, reviewer) to run on an exact runtime
+    distinct from the Developer's. Enforced before a workflow starts and by
+    ``doctor --production``. A second model's opinion is still never
+    verification evidence. SECURITY_AUTHORITY: a repository cannot relax it."""
+
+    independent_roles: List[str] = Field(default_factory=list)
+
+    @field_validator("independent_roles")
+    @classmethod
+    def _known_roles(cls, roles: List[str]) -> List[str]:
+        unknown = sorted(set(roles) - set(_POLICY_ROLES))
+        if unknown:
+            raise ValueError(f"model_policy.independent_roles: unknown role(s) {unknown}; "
+                             f"expected any of {list(_POLICY_ROLES)}")
+        return list(dict.fromkeys(roles))
+
+
 class AgentModelConfig(BaseModel):
     # llm=None means "use the top-level llm config" (today's single-model behavior) -
     # every field here is opt-in, so a project that never touches agent_llms sees zero
@@ -1095,6 +1119,7 @@ class AppConfig(BaseModel):
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     agent_llms: AgentRolesConfig = Field(default_factory=AgentRolesConfig)
+    model_policy: ModelPolicyConfig = Field(default_factory=ModelPolicyConfig)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
     engineering_triage: EngineeringTriageConfig = Field(default_factory=EngineeringTriageConfig)
     process_profiles: ProcessProfilesConfig = Field(default_factory=ProcessProfilesConfig)

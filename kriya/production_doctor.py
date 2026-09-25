@@ -16,7 +16,7 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 from kriya.config.config import PRODUCTION_FIXED_RUNTIME_GUARANTEES, AppConfig
 
@@ -883,19 +883,51 @@ def _check_lsp(ctx: _Context) -> DoctorCheck:
     )
 
 
+def _role_independence_required(cfg: AppConfig) -> bool:
+    """PRD-018: the row blocks readiness only when the operator's policy
+    requires role independence; otherwise it is informational."""
+    return bool(cfg.model_policy.independent_roles)
+
+
 def _check_role_independence(ctx: _Context) -> DoctorCheck:
-    role_models = {"primary": ctx.cfg.llm.model}
-    for role in _ROLES:
-        binding = getattr(ctx.cfg.agent_llms, role)
-        if binding.llm is not None:
-            role_models[role] = binding.llm.model
-    independent = len(set(role_models.values())) > 1
+    """PRD-018: which roles share the same EXACT runtime (not the same model
+    name). WARN when roles share one (the default local setup) or a runtime
+    cannot be identified exactly; FAIL, blocking, only when
+    model_policy.independent_roles requires a role to be independent of
+    the Developer and it is not (or cannot be shown to be)."""
+    from kriya.core.role_metrics import independence_violations, role_runtimes, shared_runtime_groups
+
+    required_roles = list(ctx.cfg.model_policy.independent_roles)
+    runtimes = role_runtimes(ctx.cfg, fresh=True)
+    groups = shared_runtime_groups(runtimes)
+    shared = [group for group in groups if len(group["roles"]) > 1]
+    unverified = [group for group in groups if group["identity"] != "exact"]
+    violations = independence_violations(ctx.cfg, runtimes)
+    if required_roles:
+        status = CheckStatus.FAIL if violations else CheckStatus.PASS
+    else:
+        status = CheckStatus.WARN if shared or unverified else CheckStatus.PASS
+    evidence: Dict[str, Any] = {
+        "roles": {role: {"model": model, "runtime_digest": digest, "runtime_exact": exact}
+                  for role, (model, digest, exact) in sorted(runtimes.items())},
+        "groups": groups,
+        "independent": not shared and not unverified,
+        "policy_required": bool(required_roles),
+        "independent_roles_required": required_roles,
+        "violations": violations,
+        "second_opinion_is_verification": False,
+    }
+    if violations:
+        evidence["reason_code"] = "ROLE_INDEPENDENCE_REQUIRED"
     return _check(
-        "models.role_independence",
-        CheckStatus.PASS if independent else CheckStatus.WARN,
-        required=False,
-        evidence={"role_models": role_models, "independent": independent, "policy_required": False},
-        remediation="Configure separately qualified role models if independent review is desired.",
+        "models.role_independence", status, required=bool(required_roles), evidence=evidence,
+        remediation=(
+            "Bind each role listed in model_policy.independent_roles (agent_llms.<role>.llm) to a model whose "
+            "exact runtime differs from the Developer's, and make it reachable so its identity is exact."
+            if required_roles else
+            "Roles sharing one runtime share its errors. Bind verifier roles to a separately qualified model "
+            "(agent_llms.<role>.llm) if independent review is wanted; model_policy.independent_roles enforces it."
+        ),
     )
 
 
@@ -957,7 +989,7 @@ def _check_fixed_guarantees(ctx: _Context) -> DoctorCheck:
     )
 
 
-_CHECKS: Tuple[Tuple[str, bool, Callable[[_Context], DoctorCheck]], ...] = (
+_CHECKS: Tuple[Tuple[str, Union[bool, Callable[[AppConfig], bool]], Callable[[_Context], DoctorCheck]], ...] = (
     ("profile.production", True, _check_profile),
     ("plugins.core_tools", True, _check_core_plugins),
     ("workspace.identity_lock", True, _check_identity_lock),
@@ -977,7 +1009,7 @@ _CHECKS: Tuple[Tuple[str, bool, Callable[[_Context], DoctorCheck]], ...] = (
     ("model.qualification", True, _check_qualification),
     ("embedding.connectivity", True, _check_embedding),
     ("lsp.java", False, _check_lsp),
-    ("models.role_independence", False, _check_role_independence),
+    ("models.role_independence", _role_independence_required, _check_role_independence),
     ("semantic.precision_boundary", False, _check_precision_boundary),
     ("release.integrity", True, _check_release_integrity),
     ("runtime.fixed_guarantees", True, _check_fixed_guarantees),
@@ -1014,6 +1046,8 @@ def _report(checks: Iterable[DoctorCheck]) -> ProductionDoctorReport:
 def run_production_doctor(cfg: AppConfig, workspace_path: str) -> ProductionDoctorReport:
     ctx = _Context(cfg=cfg, workspace=os.path.realpath(workspace_path))
     for check_id, required, fn in _CHECKS:
+        if callable(required):
+            required = required(cfg)
         ctx.checks[check_id] = _run_check(ctx, check_id, required, fn)
     return _report(ctx.checks.values())
 

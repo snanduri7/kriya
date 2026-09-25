@@ -770,6 +770,59 @@ def _model_cfg(ctx: click.Context) -> AppConfig:
     return ctx.obj['config']
 
 
+def _workflow_config(cfg: AppConfig) -> AppConfig:
+    """The configuration a workflow command (generate, fix, proposal
+    execution) runs with. PRD-018: when model_policy.independent_roles
+    requires roles to run on a runtime distinct from the Developer's, it is
+    checked here, before any model call, and the command is refused if the
+    exact runtimes do not show it."""
+    if cfg.model_policy.independent_roles:
+        from kriya.core.role_metrics import ROLE_INDEPENDENCE_REQUIRED, independence_violations, role_runtimes
+
+        violations = independence_violations(cfg, role_runtimes(cfg))
+        if violations:
+            click.secho(f"[{ROLE_INDEPENDENCE_REQUIRED}] model_policy.independent_roles is not met:", fg="red",
+                        err=True)
+            for violation in violations:
+                click.secho(f"  - {violation}", fg="red", err=True)
+            sys.exit(1)
+    return cfg
+
+
+@model_group.command(name="metrics")
+@click.option("--json", "json_output", is_flag=True, help="Emit the aggregated table as JSON.")
+@click.pass_context
+def model_metrics(ctx: click.Context, json_output: bool) -> None:
+    """Per-role model metrics aggregated over the finished runs in traces.db.
+
+    One row per (role, model, exact runtime): calls, protocol and schema
+    failures, latency and tokens, and for the Developer its attempts,
+    first-pass successes and the retries its failed attempts triggered.
+    Observations only: deterministic gate outcomes remain the only
+    verification evidence (PRD-018)."""
+    from kriya.core.role_metrics import aggregate_role_metrics, runs_with_role_metrics
+    from kriya.core.state_paths import trace_db_path
+
+    cfg = _model_cfg(ctx)
+    table = aggregate_role_metrics(runs_with_role_metrics(trace_db_path(cfg)))
+    if json_output:
+        click.echo(json.dumps(table, indent=2, sort_keys=True))
+        return
+    click.secho(f"Per-role model metrics over {len(table['runs'])} run(s) (table {table['digest'][:12]})", bold=True)
+    if not table["rows"]:
+        click.echo("  No run has recorded per-role metrics yet.")
+    for row in table["rows"]:
+        runtime = row["runtime_digest"][:12] if row["runtime_exact"] else "unverified runtime"
+        line = (f"  {row['role']:<16} {row['model']:<28} {runtime:<18} calls={row['calls']} "
+                f"protocol_failures={row['protocol_failures']} schema_failures={row['schema_failures']} "
+                f"latency={row['latency_seconds']:.1f}s tokens={row['prompt_tokens']}+{row['completion_tokens']}")
+        if row["attempts"]:
+            line += (f" attempts={row['attempts']} passed={row['attempts_passed']} "
+                     f"first_pass={row['first_pass_successes']}/{row['first_pass_runs']} "
+                     f"retries_triggered={row['retries_triggered']}")
+        click.echo(line)
+
+
 @model_group.command(name="fingerprint")
 @click.option("--model", "model_name", default=None, help="Model to fingerprint (default: llm.model).")
 @click.option("--json", "json_output", is_flag=True, help="Emit the fingerprint as JSON.")
@@ -1722,7 +1775,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             click.secho("Error: Missing argument 'GOAL' or '--file' option.", fg="red")
             sys.exit(1)
 
-    cfg: AppConfig = ctx.obj['config']
+    cfg: AppConfig = _workflow_config(ctx.obj['config'])
 
     llm = LLMClient(cfg)
     kernel = Kernel(config=cfg)
@@ -2389,7 +2442,7 @@ def plan_milestones_cmd(ctx: click.Context, goal: Optional[str], file: Optional[
             click.secho("Error: Missing argument 'GOAL' or '--file' option.", fg="red")
             sys.exit(1)
 
-    cfg: AppConfig = ctx.obj['config']
+    cfg: AppConfig = _workflow_config(ctx.obj['config'])
     llm = LLMClient(cfg)
     kernel = Kernel(config=cfg)
     we = WorkflowEngine(kernel, llm)
@@ -3191,7 +3244,7 @@ def proposal_execute(ctx: click.Context, proposal_id: str, yes: bool) -> None:
     from kriya.workflow.proposal_promotion import ProposalPromotionError, execute_approved_proposal
     from kriya.workflow.proposal_store import ProposalStoreError
 
-    cfg: AppConfig = ctx.obj['config']
+    cfg: AppConfig = _workflow_config(ctx.obj['config'])
     workspace_root = os.getcwd()
 
     llm = LLMClient(cfg)
@@ -3524,7 +3577,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         click.secho("Error: Non-TTY (piped) input detected. You must specify the '--yes' (-y) flag to auto-approve patch application.", fg="red")
         sys.exit(1)
             
-    cfg: AppConfig = ctx.obj['config']
+    cfg: AppConfig = _workflow_config(ctx.obj['config'])
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     we = WorkflowEngine(kernel, llm)

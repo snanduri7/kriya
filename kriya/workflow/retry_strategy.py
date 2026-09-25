@@ -407,6 +407,7 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             scope=ctx.execution_scope,
         )
     state.overall_attempt_succeeded = False
+    state.record_developer_attempt_outcome(getattr(ctx.developer, "llm", None), passed=False)
     log_gate_banner(
         "OVERALL ATTEMPT", "FAILED", state.attempt_number, failure_detail,
         scope=ctx.execution_scope,

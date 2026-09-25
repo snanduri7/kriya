@@ -17,6 +17,7 @@ from kriya.agents.contracts import (
 from kriya.config.config import FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
 from kriya.core.model_runtime import binding_output_tokens
+from kriya.core.role_metrics import model_role
 from kriya.core.token_budget import ContextBudgetUnsatisfiableError, OutputBudgetUnsatisfiableError
 
 logger = logging.getLogger(__name__)
@@ -249,7 +250,36 @@ _JSON_DOCUMENT_BASENAMES = frozenset({
 FILE_LIST_PROTOCOL_ANSWER_AS_CONTENT = "FILE_LIST_PROTOCOL_ANSWER_AS_CONTENT"
 
 
+def _record_schema_failure(llm: Any, model: str) -> None:
+    """PRD-018: a response the caller rejected against its role contract."""
+    metrics = getattr(llm, "role_metrics", None)
+    if metrics is not None and hasattr(metrics, "record_schema_failure"):
+        metrics.record_schema_failure(model=model)
+
+
 async def call_with_escalation(
+    llm: LLMClient,
+    system_prompt: str,
+    prompt: str,
+    candidates: List[Optional[Any]],
+    json_mode: bool = False,
+    stream_callback: Optional[Callable[[str], None]] = None,
+    is_failure: Optional[Callable[[str], bool]] = None,
+    temperature_override: Optional[float] = None,
+    max_tokens_override: Optional[int] = None,
+    role: Optional[str] = None,
+) -> str:
+    """See _call_with_escalation; ``role`` attributes every call it makes to
+    that agent role (PRD-018 per-role metrics)."""
+    with model_role(role):
+        return await _call_with_escalation(
+            llm, system_prompt, prompt, candidates, json_mode=json_mode, stream_callback=stream_callback,
+            is_failure=is_failure, temperature_override=temperature_override,
+            max_tokens_override=max_tokens_override,
+        )
+
+
+async def _call_with_escalation(
     llm: LLMClient,
     system_prompt: str,
     prompt: str,
@@ -309,6 +339,7 @@ async def call_with_escalation(
             logger.debug(f"Escalation attempt {i + 1}/{len(candidates)} raised: {ex}")
             continue
         if is_failure and is_failure(response):
+            _record_schema_failure(llm, cand.model if cand is not None else llm.model)
             last_response = response
             last_exc = None
             logger.debug(f"Escalation attempt {i + 1}/{len(candidates)} produced an unusable response, trying next.")
@@ -440,7 +471,7 @@ class BaseAgent(ABC):
         being brief."""
         return await call_with_escalation(
             self.llm, system_prompt_override or self.system_prompt, prompt, self._candidates(),
-            json_mode=json_mode, stream_callback=stream_callback,
+            json_mode=json_mode, stream_callback=stream_callback, role=self.name,
             temperature_override=temperature_override,
             max_tokens_override=(
                 max_tokens_override if max_tokens_override is not None else self.max_output_tokens
@@ -2305,6 +2336,7 @@ class DeveloperAgent(BaseAgent):
         files, err = parse_file_list(response_str)
         if files is not None:
             return [{"filepath": p, "content": None, "edits": None} for p in files], "contract"
+        _record_schema_failure(self.llm, model_override or self.llm.model)
         logger.debug(f"Developer file-list response didn't validate against the contract ({err}) - trying the older, more permissive extraction.")
 
         # _extract_json_value() raises (not returns None) when it can't recover
@@ -2715,7 +2747,7 @@ class RunVerifierAgent(BaseAgent):
         try:
             response_str = await call_with_escalation(
                 self.llm, self.system_prompt, prompt, self._candidates(),
-                json_mode=True, is_failure=_is_unparseable_json,
+                json_mode=True, is_failure=_is_unparseable_json, role=self.name,
             )
         except Exception as e:
             logger.warning(f"Run Verifier judge() call failed entirely, skipping run verification: {e}")
@@ -2944,7 +2976,7 @@ class RunVerifierAgent(BaseAgent):
         try:
             response_str = await call_with_escalation(
                 self.llm, grader_system_prompt, prompt, self._candidates(),
-                json_mode=True, is_failure=_is_unparseable_json,
+                json_mode=True, is_failure=_is_unparseable_json, role=self.name,
             )
         except Exception as e:
             logger.warning(f"Run Verifier grade() call failed entirely, treating as failure: {e}")
@@ -3119,7 +3151,7 @@ class SpecComplianceAgent(BaseAgent):
         try:
             response_str = await call_with_escalation(
                 self.llm, self.system_prompt, prompt, self._candidates(),
-                json_mode=True, is_failure=_is_unparseable_json,
+                json_mode=True, is_failure=_is_unparseable_json, role=self.name,
             )
         except Exception as e:
             logger.warning(f"Spec Compliance check() call failed entirely, skipping check: {e}")
@@ -3246,7 +3278,7 @@ class SkillGapAgent(BaseAgent):
         try:
             response_str = await call_with_escalation(
                 self.llm, self.system_prompt, prompt, self._candidates(),
-                json_mode=True, is_failure=_is_unparseable_json,
+                json_mode=True, is_failure=_is_unparseable_json, role=self.name,
             )
         except Exception as e:
             logger.warning(f"Skill Gap Agent call failed entirely: {e}")
@@ -3386,7 +3418,7 @@ class SkillGapAgent(BaseAgent):
         try:
             response_str = await call_with_escalation(
                 self.llm, system_prompt, prompt, self._candidates(),
-                json_mode=True, is_failure=_is_unparseable_json,
+                json_mode=True, is_failure=_is_unparseable_json, role=self.name,
             )
         except Exception as e:
             logger.warning(f"Skill Conflict Checker call failed entirely: {e}")
@@ -3632,7 +3664,7 @@ class ReviewerAgent(BaseAgent):
         try:
             response_str = await call_with_escalation(
                 self.llm, self.structured_system_prompt, prompt, self._candidates(),
-                json_mode=True, is_failure=_is_unparseable_json,
+                json_mode=True, is_failure=_is_unparseable_json, role=self.name,
             )
         except Exception as e:
             logger.warning(f"ReviewerAgent structured review call failed entirely: {e}")
