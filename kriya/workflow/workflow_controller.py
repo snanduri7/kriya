@@ -70,6 +70,7 @@ MA7.1's scope, left for a later increment.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -6438,6 +6439,17 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             self.workflow_engine.spec_compliance, requirement_set, goal,
                             plan_workspace_path, _terminal_candidate_paths(plan), obligation_ledger,
                         )
+                        # An UNVERIFIED requirement naming existing tests: run
+                        # exactly those on this candidate (never a model citation).
+                        from kriya.workflow.workflow import close_requirements_with_named_tests
+
+                        closures = await asyncio.to_thread(
+                            close_requirements_with_named_tests, autonomy_policy, obligation_ledger,
+                            requirement_set, plan_workspace_path, workspace_path,
+                            modified=_terminal_candidate_paths(plan), revision="terminal",
+                        )
+                        if closures:
+                            logger.info("Original requirement closure by named tests: %s", closures)
                     blocking = blocking_requirements(
                         obligation_ledger, requirement_set,
                         unknown_policy=getattr(autonomy_policy, "requirement_unknown_policy", "record"),

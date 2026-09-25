@@ -709,6 +709,38 @@ def _settle_future_owner_verification_obligations(
     return settled
 
 
+def close_requirements_with_named_tests(
+    autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
+    modified: Iterable[str], revision: Any, java_home_override: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """PRD-020: runs the tests an UNVERIFIED requirement's own text names, on
+    the candidate at ``candidate_root`` (the one the verifier just judged),
+    and records closure evidence when they execute and pass - see
+    requirements.close_unverified_requirements_with_named_tests. Shared by
+    the direct/milestone pre-apply boundary and enforce's terminal gate."""
+    from kriya.workflow.file_resolution import is_runnable_test_file
+    from kriya.workflow.requirements import close_unverified_requirements_with_named_tests
+
+    test_files: List[str] = []
+    for root, dirs, files in os.walk(candidate_root):
+        dirs[:] = [d for d in dirs if d not in {".git", ".kriya", "node_modules", ".venv", "venv",
+                                                "__pycache__", "target", "build", "dist"}]
+        for name in files:
+            rel = os.path.relpath(os.path.join(root, name), candidate_root)
+            if is_runnable_test_file(rel):
+                test_files.append(rel)
+    validator = PolymorphicValidator(
+        candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
+    )
+    validator.java_home_override = java_home_override
+    return close_unverified_requirements_with_named_tests(
+        ledger, requirement_set, test_files=test_files, modified=modified,
+        run_tests=lambda paths: validator.run_tests(target_test=list(paths)),
+        confirms_execution=output_confirms_nonzero_test_execution,
+        source="requirement_closure.named_test_run", revision=revision,
+    )
+
+
 class WorkflowEngine:
     """Orchestrates multi-agent pipelines and auto-debugging loops (Quality Gates)."""
 
@@ -3489,6 +3521,27 @@ class WorkflowEngine:
                 # non-satisfied outcome does is the requirement policy's call.
                 if requirement_set is not None:
                     autonomy_policy = self.kernel.config.autonomy
+                    # An UNVERIFIED (cannot confirm from code) requirement whose
+                    # own text names existing tests is closed only by running
+                    # exactly those tests on this candidate.
+                    try:
+                        closures = await asyncio.to_thread(
+                            close_requirements_with_named_tests, self.kernel.config.autonomy,
+                            resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
+                            modified=state.all_files_written, revision=state.attempt_number,
+                            java_home_override=state.java_home_override,
+                        )
+                    except Exception as exc:
+                        closures = []
+                        logger.warning(f"Requirement closure by named tests unavailable: {exc}")
+                    if closures:
+                        state.record_event(RunEvent(
+                            kind="requirement.closure", attempt=state.attempt_number,
+                            source="workflow.requirement_closure", authority=EventAuthority.AUTHORITATIVE,
+                            message="unverified requirement closure: " + ", ".join(
+                                f"{c['requirement']}={'closed' if c['closed'] else 'open'}" for c in closures),
+                            details={"requirement_set_digest": requirement_set.digest, "closures": closures},
+                        ))
                     blocking = blocking_requirements(
                         resolved_obligation_ledger, requirement_set,
                         unknown_policy=autonomy_policy.requirement_unknown_policy,

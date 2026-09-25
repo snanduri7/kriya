@@ -1379,9 +1379,11 @@ def runtime_profile_preset_fields(profile: Optional[str]) -> Dict[Any, Any]:
             # registries (cached release metadata only).
             ("autonomy", "shell_network"): "denied",
             ("knowledge", "offline_mode"): True,
-            # PRD-020: an original requirement with no verifier verdict never
-            # lets a production run succeed.
+            # PRD-020: an original requirement with no verifier verdict, or
+            # one the verifier cannot confirm from code and no deterministic
+            # evidence closed, never lets a production run succeed.
             ("autonomy", "requirement_unknown_policy"): "block",
+            ("autonomy", "requirement_unverified_policy"): "block",
         }
     return {}
 

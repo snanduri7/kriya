@@ -129,7 +129,10 @@ from kriya.workflow.requirements import (
     RequirementOutcome,
     RequirementSet,
     parse_requirement_verdicts,
+    record_requirement_closure,
     record_requirement_verdicts,
+    requirement_obligation_id,
+    requirement_outcomes,
 )
 from kriya.workflow.repair_contract import RepairContractStatus, build_repair_contract, derive_process_boundary_participants
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
@@ -5180,6 +5183,48 @@ def _downgrade_suppressed_requirement_claims(
     )
 
 
+def _close_requirements_by_migration_gate(
+    state: GenerationState, ctx: "AttemptContext", fingerprint: str,
+) -> None:
+    """PRD-020: an UNVERIFIED requirement that states the migration itself -
+    its own text names both the migration's source and its target identity -
+    is positively verified by the DETERMINISTIC migration gate once every
+    current migration obligation is SATISFIED for this candidate. The
+    binding is the user's words, never the verifier's claim text; a
+    requirement naming only one side (e.g. a detail of how the target
+    library is used) is not the migration and stays UNVERIFIED."""
+    requirements, ledger = ctx.requirement_set, ctx.obligation_ledger
+    if requirements is None or ledger is None or not _migration_obligations_all_satisfied(ledger):
+        return
+    records = ledger.current_by_kind(ObligationKind.MIGRATION_COMPLETION)
+
+    def _terms(key: str) -> set:
+        return {token for rec in records for value in [rec.evidence.get(key)] if value
+                for token in re.split(r"[-_]", str(value).lower()) if len(token) >= 3}
+
+    source_terms, target_terms = _terms("source_identity"), _terms("target_identity")
+    if not source_terms or not target_terms:
+        return
+    outcomes = requirement_outcomes(ledger, requirements)
+    for requirement in requirements.requirements:
+        if outcomes.get(requirement.id) is not RequirementOutcome.UNVERIFIED:
+            continue
+        record = ledger.current(requirement_obligation_id(requirement.id))
+        if record is None or (record.evidence or {}).get("evidence_id") != fingerprint:
+            continue
+        lowered = requirement.text.lower()
+
+        def _names(terms: set) -> bool:
+            return any(re.search(rf"\b{re.escape(term)}\b", lowered) for term in terms)
+
+        if _names(source_terms) and _names(target_terms):
+            record_requirement_closure(
+                ledger, requirements, requirement.id, evidence_id=fingerprint, method="migration_gate",
+                detail={"migration_obligations": sorted(rec.id for rec in records)},
+                source="attempt.migration_gate", revision=state.attempt_number,
+            )
+
+
 def _structured_plan_paths(ctx: "AttemptContext") -> set:
     """Every path an approved structured plan declares (any subtask)."""
     plan = getattr(ctx, "structured_plan", None)
@@ -9326,6 +9371,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 state, ctx, arbitrated_contradictions + planner_only_requirements,
                 goal_spec_evidence_fingerprint,
             )
+        if ctx.requirement_set is not None:
+            _close_requirements_by_migration_gate(state, ctx, goal_spec_evidence_fingerprint)
         if not spec_result["compliant"] and kept_requirements:
             missing_desc = "; ".join(kept_requirements)
             message = (

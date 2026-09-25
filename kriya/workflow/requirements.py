@@ -22,12 +22,19 @@ user's text, verbatim:
 - Outcomes: SATISFIED (the verifier found the requirement in the code),
   VIOLATED (a concrete, literally-named requirement is absent - the gate
   fails and the retry names the REQ id and its original text), UNVERIFIED
-  (the requirement describes behaviour the verifier cannot confirm from
-  source text), UNKNOWN (no verdict at all). ``blocking_requirements``
-  applies the policy: VIOLATED always blocks success; UNKNOWN and
-  UNVERIFIED block when ``autonomy.requirement_unknown_policy`` /
-  ``requirement_unverified_policy`` say ``block`` (production seals
-  UNKNOWN to ``block``).
+  (CANNOT_CONFIRM_FROM_CODE: the requirement describes behaviour the
+  verifier cannot confirm from source text), UNKNOWN (NO_VERDICT).
+  ``blocking_requirements`` applies the policy: VIOLATED always blocks
+  success; UNKNOWN and UNVERIFIED block when
+  ``autonomy.requirement_unknown_policy`` / ``requirement_unverified_policy``
+  say ``block`` (production seals both to ``block``).
+- UNVERIFIED is never SATISFIED. It can be closed only by another
+  authoritative verifier's positive evidence for that exact requirement on
+  that exact candidate (``record_requirement_closure``): a separate
+  DETERMINISTIC record whose ``evidence_id`` must equal the verifier
+  verdict's own, so evidence about an earlier candidate never closes a later
+  one. The closed outcome is CLOSED_BY_EVIDENCE, distinct from the
+  verifier's SATISFIED. VIOLATED and UNKNOWN are never closed this way.
 
 A plan that paraphrases or omits a requirement cannot remove it: the set is
 derived from the goal, not from the plan, and the terminal decision reads
@@ -92,8 +99,11 @@ class RequirementOutcome(str, Enum):
     PENDING = "pending"
     SATISFIED = "satisfied"
     VIOLATED = "violated"
-    UNVERIFIED = "unverified"
-    UNKNOWN = "unknown"
+    UNVERIFIED = "unverified"  # CANNOT_CONFIRM_FROM_CODE
+    UNKNOWN = "unknown"  # NO_VERDICT
+    # UNVERIFIED by the verifier, then positively verified for this exact
+    # requirement and candidate by deterministic evidence (a test run).
+    CLOSED_BY_EVIDENCE = "closed_by_evidence"
 
 
 _OUTCOME_STATUS = {
@@ -102,6 +112,7 @@ _OUTCOME_STATUS = {
     RequirementOutcome.VIOLATED: ObligationStatus.VIOLATED,
     RequirementOutcome.UNVERIFIED: ObligationStatus.INDETERMINATE,
     RequirementOutcome.UNKNOWN: ObligationStatus.PENDING,
+    RequirementOutcome.CLOSED_BY_EVIDENCE: ObligationStatus.SATISFIED,
 }
 
 
@@ -254,6 +265,14 @@ def requirement_obligation_id(requirement_id: str) -> str:
     return f"{REQUIREMENT_OBLIGATION_PREFIX}{requirement_id}"
 
 
+def requirement_closure_id(requirement_id: str) -> str:
+    """The separate obligation id closure evidence is recorded under. Never
+    the verdict's own id: a DETERMINISTIC record there would outrank every
+    later verdict (ObligationLedger.current), including a VIOLATED one about
+    a different candidate."""
+    return f"{REQUIREMENT_OBLIGATION_PREFIX}{requirement_id}.closure"
+
+
 def seed_requirement_obligations(ledger: ObligationLedger, requirements: RequirementSet) -> None:
     """Record every requirement PENDING, once. Seeded at JUDGMENT (the
     lowest authority) so the verifier's verdict, not the seed, becomes the
@@ -305,17 +324,80 @@ def record_requirement_verdicts(
     return outcomes
 
 
+def record_requirement_closure(
+    ledger: ObligationLedger, requirements: RequirementSet, requirement_id: str, *,
+    evidence_id: str, method: str, detail: Dict[str, Any], source: str, revision: Any,
+) -> None:
+    """Record positive deterministic evidence that ``requirement_id`` holds
+    for the candidate identified by ``evidence_id`` (the verifier verdict's
+    own evidence id). It closes the requirement only while the verifier's
+    current verdict is UNVERIFIED for that same evidence id
+    (``requirement_outcomes``); it never touches the verdict record."""
+    requirement = requirements.get(requirement_id)
+    if requirement is None:
+        raise ValueError(f"unknown requirement id {requirement_id!r}")
+    ledger.record(ObligationRecord(
+        id=requirement_closure_id(requirement_id), kind=ObligationKind.ORIGINAL_REQUIREMENT,
+        status=ObligationStatus.SATISFIED, authority=ObligationAuthority.DETERMINISTIC,
+        description=requirement.text, source=source, revision=revision,
+        evidence={"requirement_set_digest": requirements.digest, "evidence_id": evidence_id,
+                  "method": method, **detail},
+        terminal_required=False,
+    ))
+
+
+def requirement_closure(
+    ledger: ObligationLedger, requirement_id: str, evidence_id: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """The closure evidence recorded for ``requirement_id`` on the candidate
+    ``evidence_id``, if any (the most recent matching record)."""
+    if not evidence_id:
+        return None
+    for record in reversed(ledger.history(requirement_closure_id(requirement_id))):
+        evidence = record.evidence or {}
+        if record.status is ObligationStatus.SATISFIED and evidence.get("evidence_id") == evidence_id:
+            return evidence
+    return None
+
+
 def requirement_outcomes(ledger: ObligationLedger, requirements: RequirementSet) -> Dict[str, RequirementOutcome]:
-    """Each requirement's authoritative outcome (PENDING until a verdict)."""
+    """Each requirement's authoritative outcome (PENDING until a verdict).
+    UNVERIFIED becomes CLOSED_BY_EVIDENCE only with closure evidence for the
+    exact candidate the verdict judged; nothing else is ever closed."""
     outcomes: Dict[str, RequirementOutcome] = {}
     for requirement in requirements.requirements:
         record = ledger.current(requirement_obligation_id(requirement.id))
-        raw = (record.evidence or {}).get("outcome") if record is not None else None
+        evidence = (record.evidence or {}) if record is not None else {}
+        raw = evidence.get("outcome")
         try:
-            outcomes[requirement.id] = RequirementOutcome(raw) if raw else RequirementOutcome.PENDING
+            outcome = RequirementOutcome(raw) if raw else RequirementOutcome.PENDING
         except ValueError:
-            outcomes[requirement.id] = RequirementOutcome.UNKNOWN
+            outcome = RequirementOutcome.UNKNOWN
+        if outcome is RequirementOutcome.CLOSED_BY_EVIDENCE:
+            outcome = RequirementOutcome.UNKNOWN  # only derived here, never a recorded verdict
+        if (outcome is RequirementOutcome.UNVERIFIED
+                and requirement_closure(ledger, requirement.id, evidence.get("evidence_id")) is not None):
+            outcome = RequirementOutcome.CLOSED_BY_EVIDENCE
+        outcomes[requirement.id] = outcome
     return outcomes
+
+
+_TEST_REFERENCE = re.compile(r"[\w./-]+")
+
+
+def named_existing_tests(text: str, test_files: Iterable[str]) -> List[str]:
+    """Test files a requirement's own text names: by path, file name or
+    stem (``tests/test_pricing.py``, ``test_pricing``, ``PricingTest``).
+    The binding comes from the user's words, never a model's citation."""
+    files = sorted(set(test_files))
+    names = {token.strip("./") for token in _TEST_REFERENCE.findall(text or "")}
+    named: List[str] = []
+    for path in files:
+        base = path.rsplit("/", 1)[-1]
+        stem = base.rsplit(".", 1)[0]
+        if path in names or base in names or (len(stem) > 3 and stem in names):
+            named.append(path)
+    return named
 
 
 def blocking_requirements(
@@ -399,3 +481,57 @@ def parse_requirement_verdicts(
             outcome = RequirementOutcome.UNVERIFIED
         verdicts[rid] = (outcome, str(entry.get("evidence") or ""))
     return verdicts, findings
+
+
+def close_unverified_requirements_with_named_tests(
+    ledger: ObligationLedger, requirements: RequirementSet, *,
+    test_files: Iterable[str], modified: Iterable[str],
+    run_tests: Any, confirms_execution: Any, source: str, revision: Any,
+) -> List[Dict[str, Any]]:
+    """Close each UNVERIFIED requirement whose own text names existing tests,
+    by running exactly those tests on the candidate the verifier judged.
+
+    Authoritative only under all of: the binding is the user's words
+    (``named_existing_tests``); every named test file is unchanged by the
+    candidate (``modified`` - a test the run wrote or edited is the model's
+    evidence, not an independent verifier); the run executed tests
+    (``confirms_execution(output)``) and passed. ``run_tests(paths)`` returns
+    the validator's ``{"success", "output"}``; it runs against the same
+    candidate the verdict's ``evidence_id`` identifies (the caller's
+    worktree, before anything else changes it). Returns one record per
+    attempted closure (closed or not, with why)."""
+    changed = set(modified)
+    files = list(test_files)
+    attempts: List[Dict[str, Any]] = []
+    outcomes = requirement_outcomes(ledger, requirements)
+    for requirement in requirements.requirements:
+        if outcomes.get(requirement.id) is not RequirementOutcome.UNVERIFIED:
+            continue
+        named = named_existing_tests(requirement.text, files)
+        if not named:
+            continue
+        record = ledger.current(requirement_obligation_id(requirement.id))
+        evidence_id = (record.evidence or {}).get("evidence_id") if record is not None else None
+        entry: Dict[str, Any] = {"requirement": requirement.id, "tests": named, "closed": False}
+        touched = sorted(set(named) & changed)
+        if touched:
+            entry["reason"] = f"named test(s) written or changed by this candidate: {', '.join(touched)}"
+        elif not evidence_id:
+            entry["reason"] = "the verdict has no evidence id to bind to"
+        else:
+            try:
+                result = run_tests(named) or {}
+            except Exception as exc:  # a runner failure is no evidence either way
+                result = {"success": False, "output": f"runner raised: {exc}"}
+            executed = bool(confirms_execution(str(result.get("output", ""))))
+            if result.get("success") and executed:
+                record_requirement_closure(
+                    ledger, requirements, requirement.id, evidence_id=evidence_id, method="named_test_run",
+                    detail={"tests": named, "passed": True}, source=source, revision=revision,
+                )
+                entry["closed"] = True
+            else:
+                entry["reason"] = ("named tests did not execute" if not executed
+                                   else "named tests failed")
+        attempts.append(entry)
+    return attempts
