@@ -582,6 +582,24 @@ Grounded ownership findings (§2.1c) about files the change created reach the Re
 approval is required, labelled as advisory evidence. They never fail a gate, and a review verdict does not change
 them.
 
+### 2.1e Public contract changes (PRD-023)
+
+Kriya rejects a change that removes or reshapes an established public signature other code calls, unless your goal
+authorizes it directly (it names the owner, the symbol and the change in one statement). Every such change is
+classified first:
+- `unauthorized`: a removed symbol still called; callers left on the old shape; or nothing in the goal authorizes a
+  contract change. Always blocked, and never offered for approval.
+- `potentially_derived`: the callers were updated too, and the owner is linked to a contract your goal does
+  authorize, either by referencing it or through a caller that maps one to the other.
+- `indeterminate`: the callers were updated and the goal authorizes a change elsewhere, but Kriya finds no supported
+  link.
+
+With `autonomy.contract_change_escalation: human`, which is SECURITY_AUTHORITY and defaults to `deny`, Kriya offers
+the potentially derived and indeterminate ones to you in a human-in-the-loop run, with the evidence. Approving
+creates an authorization for exactly that owner, symbol and change, in that plan revision. Without an interactive
+approver the change stays blocked (`CONTRACT_ESCALATION_UNAVAILABLE`). Classifications are recorded in the
+obligation ledger.
+
 ### 2.2 Control Plane, Policy, and Structured Execution
 
 A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.

@@ -197,6 +197,15 @@ PRD-012 normalizes every channel's network authority into one vocabulary, `kriya
 - **Post-generation findings.** `_record_post_generation_ownership_findings` adds findings for files a candidate actually created.
 - **Advisory evidence only.** `ownership_review_evidence(ledger, files)` feeds open GROUNDED findings from the ledger to the pre-approval and final Reviewer and to the approval reason. They never gate, and the Reviewer cannot change a finding.
 
+### Contract change classification and escalation (`kriya/workflow/contract_classification.py`) — PRD-023
+- **Classification.** `find_brownfield_public_api_changes` stays the only detector. `classify_api_violations` classifies every reported change from evidence: AUTHORIZED_DIRECT/AUTHORIZED_HUMAN, UNAUTHORIZED, POTENTIALLY_DERIVED, INDETERMINATE.
+  - UNAUTHORIZED: a removed symbol still called, a stale caller, or no DIRECT authorization in the run.
+  - POTENTIALLY_DERIVED: co-updated callers plus a supported relationship (the owner references the authorized owner/symbol, or a co-updated caller maps both).
+  - INDETERMINATE: co-updated callers but no supported relationship.
+- **Escalation.** Only POTENTIALLY_DERIVED/INDETERMINATE may be escalated (`attempt._classify_and_escalate_contract_changes`, at the pre-write gate), and only with `autonomy.contract_change_escalation: human` (SECURITY_AUTHORITY, default `deny`) in a human-in-the-loop run with a callback. Otherwise the change is blocked: `CONTRACT_ESCALATION_UNAVAILABLE`, or `..._DECLINED` if refused.
+- **Approval record.** An approval mints `contract_authority.human_contract_authorization` (the only other minting site; CORR-016's constructed-only-here and single-derivation-call structural tests still hold). The record is revision-bound, with provenance HUMAN, and is kept on `state.human_contract_authorizations`, which is honoured by the pre-write gate and the terminal re-check.
+- **Persistence.** Classifications are `CONTRACT_CHANGE_CLASSIFICATION` obligations.
+
 ### Storage (`kriya/core/db.py`, `kriya/memory/`)
 All persistent state lives in SQLite databases under `paths.memory` (`vector_index.db`, `web_knowledge.db`, `dependency_graph.db`, `knowledge_cache.db`) and the state directory (`traces.db`, `kriya/core/state_paths.py`), opened with WAL journal mode and a busy timeout for concurrent-safe access. `vector_index.db` mixes code-index vectors and a separate `learned_knowledge` table (from `kriya learn`) — keep those namespaces distinct, the workflow relies on querying them separately with different trust levels.
 
