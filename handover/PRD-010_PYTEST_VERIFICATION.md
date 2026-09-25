@@ -35,5 +35,18 @@ PYTEST_VERIFIED, LIVE_VERIFIED
 PRD-010 is VERIFIED. `production_ready` stays false by design until PRD-013/014 bind qualification to an exact
 runtime.
 
-Residual (pre-existing, not fixed): the packaged `logging.file` resolves against the CWD for every non-doctor command.
-See the handover.
+The residual recorded here at edef49e (the packaged `logging.file` resolving against the CWD) is closed by the
+logging/state cleanup below.
+
+## Logging/state cleanup verification (user-reported, 2026-09-25, at ba86812)
+- **Scope:** c7b5734, ed93938, 0ddf55f, e89ccb3, ba86812.
+  - Logs: `KRIYA_LOG_DIR` > `logging.directory` > `~/.kriya/logs`.
+  - State: `KRIYA_STATE_DIR` > `paths.state` > `~/.kriya/state`.
+  - `paths.logs` and `logging.file` removed, with typed errors and a repository guard.
+  - Explicit-only legacy `traces.db` migration.
+- **Focused command** (23 files, listed in the handover): PASSED.
+- **Full suite** `.venv/bin/pytest`: 5302 passed, 8 deselected, 143 warnings, 0 failed (1079.43s).
+- **Verdict:** PRD-010 logging/state cleanup is VERIFIED at ba86812. It is not reopened without new failing evidence.
+- **Operational, not a code blocker:** 17 configs under `~/kriya-live-validation` still name `paths.logs` or
+  `logging.file`. Fix them before any live doctor or demo run.
+
