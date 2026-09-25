@@ -569,6 +569,19 @@ block) marks a finding acknowledged, never satisfied. Only these mark it satisfi
 
 Kriya's exact-name and name-containment owner rules still apply first.
 
+### 2.1d Recovering from a duplicate owner (PRD-022)
+
+Kriya may reject a candidate for creating a parallel implementation and redirecting an existing test to it
+(`BROWNFIELD OWNERSHIP REJECTED`). The next attempt is then scoped to the existing owner, with its exact current
+source. Kriya also restores the redirected test to its original content and removes the parallel file that run
+created, so a correct fix of the owner passes on that retry.
+
+If the same parallel file comes back a second time, the choice is invalidated (`ARCHITECTURE_CHOICE_INVALIDATED`).
+
+Grounded ownership findings (§2.1c) about files the change created reach the Reviewer, and a human approver when
+approval is required, labelled as advisory evidence. They never fail a gate, and a review verdict does not change
+them.
+
 ### 2.2 Control Plane, Policy, and Structured Execution
 
 A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.
