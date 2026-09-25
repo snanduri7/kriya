@@ -1,6 +1,13 @@
 # PRD-011 Pytest Verification
 
 ## Verdict
+PENDING: superseded by the PRD-011 reopen (see `PRD-011_CODING_HANDOVER.md`, "Reopen closure"). The record below
+verified the pre-reopen revision (54ad798/d6b775e), which `PRD-001_011_INDEPENDENT_REVIEW.md` found BLOCKING. It is
+kept for provenance and is not evidence for the reopened code.
+
+## Superseded record
+
+### Verdict (superseded)
 PYTEST_VERIFIED
 
 ## Independent full-suite result
