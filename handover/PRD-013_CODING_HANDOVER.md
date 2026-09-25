@@ -1,7 +1,7 @@
 # PRD-013 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION. This is batch 3 (PRD-013 to PRD-016), with one pytest stop for the whole batch.
+IN_PROGRESS: the PRD-016 allocator/dispatch reconciliation is open (see PRD-016 handover); not ready for pytest.. This is batch 3 (PRD-013 to PRD-016), with one pytest stop for the whole batch.
 
 ## Scope
 Exact local model runtime fingerprint (`kriya/core/model_runtime.py`).

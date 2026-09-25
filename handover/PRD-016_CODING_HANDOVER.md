@@ -1,7 +1,7 @@
 # PRD-016 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION (batch 3).
+IN_PROGRESS: the PRD-016 allocator/dispatch reconciliation is open (see PRD-016 handover); not ready for pytest. (batch 3).
 
 ## Scope
 Tokenizer-aware dispatch budgeting (`kriya/core/token_budget.py`), applied inside `complete_result` and

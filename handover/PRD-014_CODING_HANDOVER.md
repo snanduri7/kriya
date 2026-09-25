@@ -1,7 +1,7 @@
 # PRD-014 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION (batch 3).
+IN_PROGRESS: the PRD-016 allocator/dispatch reconciliation is open (see PRD-016 handover); not ready for pytest. (batch 3).
 
 ## Scope
 Versioned qualification campaign keyed by the PRD-013 fingerprint (`kriya/core/model_qualification.py`,
