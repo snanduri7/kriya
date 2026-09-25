@@ -1036,17 +1036,27 @@ async def run_investigation_loop(
     )
 
 
-def render_investigation_evidence(evidence: List[ContextItem]) -> str:
+def render_investigation_evidence(evidence: List[ContextItem], char_budget: Optional[int] = None) -> str:
     """Renders gathered evidence into the same kind of plain text block
     build_code_context() already produces for retrieval-sourced context -
     appended to existing_code_context, never a new prompt-assembly
-    mechanism. Empty input renders to "" (a no-op append)."""
+    mechanism. Empty input renders to "" (a no-op append).
+
+    ``char_budget`` (PRD-016: the evidence share of the Developer call's
+    prompt allocation window) keeps whole items in gathering order while
+    they fit; the rest are named as left out, never cut mid-item."""
     if not evidence:
         return ""
-    blocks = [
-        f"=== Investigation evidence: {item.path}"
-        f"{'::' + item.member_id if item.member_id else ''} ===\n{item.content}"
-        for item in evidence
-    ]
+    blocks, left_out, used = [], [], 0
+    for item in evidence:
+        label = f"{item.path}{'::' + item.member_id if item.member_id else ''}"
+        block = f"=== Investigation evidence: {label} ===\n{item.content}"
+        if char_budget is not None and used + len(block) > char_budget:
+            left_out.append(label)
+            continue
+        blocks.append(block)
+        used += len(block)
+    if left_out:
+        blocks.append(f"(Left out for the context budget: {', '.join(left_out)})")
     return "\n\n=== Begin Developer-Requested Investigation Evidence ===\n" + "\n\n".join(blocks) + \
         "\n=== End Developer-Requested Investigation Evidence ===\n"

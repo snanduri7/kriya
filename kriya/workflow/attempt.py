@@ -60,8 +60,11 @@ from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, f
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
+    allocation_window,
     build_code_context,
     build_known_target_context,
+    investigation_evidence_char_budget,
+    retry_evidence_char_budget,
 )
 from kriya.workflow.context_package import make_context_item
 from kriya.workflow.context_source import (
@@ -609,7 +612,7 @@ class RetryContextPreparation:
 
 def _prepare_retry_context(
     state: GenerationState, ctx: "AttemptContext", *,
-    target_files: List[str], context_window: int, model_identity: str,
+    target_files: List[str], prompt_window: int, model_identity: str,
     base_code_context: str = "", enable_no_progress_gate: bool = True,
 ) -> RetryContextPreparation:
     """VAL-001 G1-R3 (run 0c18ac70, 2026-09-18/19): the single, centralized
@@ -646,7 +649,7 @@ def _prepare_retry_context(
     deterministically and for free from state it already holds."""
     retry_member_hints = _resolve_retry_member_hints(ctx, state, target_files)
     retry_package = _retry_package_for_attempt(
-        state, ctx, target_files=target_files, context_window=context_window,
+        state, ctx, target_files=target_files, prompt_window=prompt_window,
         exclude=retry_member_hints.keys(),
     )
     retry_error_context = (
@@ -657,7 +660,7 @@ def _prepare_retry_context(
     member_hint_rendered = ""
     if retry_member_hints:
         retry_member_limit = _reserve_graph_context_budget(
-            context_window, ctx.skills_prompt, ctx.learned_rag_context, base_code_context,
+            prompt_window, ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan, base_code_context,
         )
         retry_member_rendered, retry_member_package = build_known_target_context(
             list(retry_member_hints.keys()), ctx.workspace_path, ctx.worktree_path, retry_member_limit,
@@ -1113,16 +1116,15 @@ def _retry_package_for_attempt(
     ctx: "AttemptContext",
     *,
     target_files: Optional[List[str]],
-    context_window: int,
+    prompt_window: int,
     exclude: Optional[Iterable[str]] = None,
 ) -> Optional[RetryPackage]:
     if state.last_failure is None:
         return None
-    # Reserve at most a bounded fraction of the model window for retry source
-    # evidence.  Four characters/token is only an estimate; 1.5 chars per
-    # advertised token deliberately leaves ample room for goal, plan, design,
-    # skills, instructions, and output on local models with smaller windows.
-    max_chars = max(6000, min(48000, int(context_window * 1.5)))
+    # Retry source evidence gets its share of the call's prompt allocation
+    # window (PRD-016, context_budget.retry_evidence_char_budget), so the
+    # full retry prompt still fits beside the output budget.
+    max_chars = retry_evidence_char_budget(prompt_window)
     # CTX-001 P1 C2: `exclude` (deliberately applied only to all_files, NOT
     # to target_files) skips a path already given its own, higher-fidelity
     # member-exact rendering (build_known_target_context(), called just
@@ -1367,9 +1369,22 @@ async def _maybe_run_developer_investigation(
             state.known_target_context_items[item.path] = _preserve_member_exact_precision(
                 state, item.path, item,
             )
-    rendered = render_investigation_evidence(result.evidence)
+    rendered = render_investigation_evidence(
+        result.evidence,
+        char_budget=investigation_evidence_char_budget(
+            allocation_window(ctx.kernel.config, _chain_binding(ctx, kwargs.get("model_override"))),
+        ),
+    )
     if rendered:
         kwargs["existing_code_context"] = str(kwargs.get("existing_code_context") or "") + rendered
+
+
+def _chain_binding(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
+    """The llm_chain entry a Developer call with ``model_override`` goes to,
+    or None for the primary model."""
+    if not model_override:
+        return None
+    return next((fallback for fallback in ctx.chain if fallback.model == model_override), None)
 
 
 async def _run_developer_generation(
@@ -1927,7 +1942,7 @@ async def _run_coordinated_repair_generation(
                 # (both nearly always land in the same or immediately
                 # adjacent group, well under budget), load-bearing for a
                 # future 6-10 participant repair.
-                participant_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+                participant_content_budget=_reserve_sibling_content_budget(allocation_window(ctx.kernel.config)),
             )
             state.record_event(RunEvent(
                 kind="developer_repair_call", attempt=state.attempt_number, source="attempt.run_attempt",
@@ -1962,7 +1977,7 @@ async def _run_coordinated_repair_generation(
                 retry_temperature=ctx.kernel.config.llm.retry_temperature,
                 extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
                 files_with_current_content=state.all_files_written,
-                sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+                sibling_content_budget=_reserve_sibling_content_budget(allocation_window(ctx.kernel.config)),
                 operation_by_file=_operation_map(ctx, [filepath], attempt_operation, state),
                 default_operation=attempt_operation,
             )
@@ -4961,7 +4976,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # (see the budget comment above) - so the context budget is
         # always the primary model's own window, not a fallback's.
         current_limit = _reserve_graph_context_budget(
-            ctx.kernel.config.llm.context_window, ctx.skills_prompt, ctx.learned_rag_context
+            allocation_window(ctx.kernel.config), ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan
         )
         model_override = None
         base_url_override = None
@@ -5057,7 +5072,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             retry_prep = _prepare_retry_context(
                 state, ctx,
                 target_files=state.last_implicated_files,
-                context_window=ctx.kernel.config.llm.context_window,
+                prompt_window=allocation_window(ctx.kernel.config),
                 model_identity=ctx.kernel.config.llm.model,
                 base_code_context=base_code_context,
                 enable_no_progress_gate=not use_api_contract_recovery,
@@ -5164,7 +5179,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     retry_temperature=ctx.kernel.config.llm.retry_temperature,
                     extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
                     files_with_current_content=state.all_files_written,
-                    sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+                    sibling_content_budget=_reserve_sibling_content_budget(allocation_window(ctx.kernel.config)),
                     operation_by_file=_operation_map(
                         ctx, state.last_implicated_files, attempt_operation, state,
                     ),
@@ -5183,7 +5198,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         state.budgets.fallback_targeted_requested = False
         fallback = ctx.chain[0]
         current_limit = _reserve_graph_context_budget(
-            fallback.context_window, ctx.skills_prompt, ctx.learned_rag_context
+            allocation_window(ctx.kernel.config, fallback), ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan
         )
         model_override = fallback.model
         base_url_override = fallback.base_url
@@ -5218,7 +5233,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         retry_prep = _prepare_retry_context(
             state, ctx,
             target_files=state.last_implicated_files,
-            context_window=fallback.context_window,
+            prompt_window=allocation_window(ctx.kernel.config, fallback),
             model_identity=model_override,
             base_code_context=base_code_context,
         )
@@ -5257,7 +5272,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             retry_temperature=ctx.kernel.config.llm.retry_temperature,
             extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
             files_with_current_content=state.all_files_written,
-            sibling_content_budget=_reserve_sibling_content_budget(fallback.context_window),
+            sibling_content_budget=_reserve_sibling_content_budget(allocation_window(ctx.kernel.config, fallback)),
             operation_by_file=_operation_map(
                 ctx, state.last_implicated_files, attempt_operation, state,
             ),
@@ -5270,7 +5285,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # completeness check found missing, instead of re-describing an
         # error or regenerating the whole file set.
         current_limit = _reserve_graph_context_budget(
-            ctx.kernel.config.llm.context_window, ctx.skills_prompt, ctx.learned_rag_context
+            allocation_window(ctx.kernel.config), ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan
         )
         model_override = None
         base_url_override = None
@@ -5335,7 +5350,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             api_key_override=api_key_override,
             extra_body_override=extra_body_override,
             known_target_files=resolved_missing_files,
-            sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+            sibling_content_budget=_reserve_sibling_content_budget(allocation_window(ctx.kernel.config)),
             operation_by_file=_operation_map(
                 ctx, resolved_missing_files, attempt_operation, state,
             ),
@@ -5344,23 +5359,23 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     else:
         # Re-run context budget allocator dynamically for escalated model context window size
         current_limit = _reserve_graph_context_budget(
-            ctx.kernel.config.llm.context_window, ctx.skills_prompt, ctx.learned_rag_context
+            allocation_window(ctx.kernel.config), ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan
         )
         model_override = None
         base_url_override = None
         api_key_override = None
         extra_body_override = None
 
-        active_context_window = ctx.kernel.config.llm.context_window
+        active_prompt_window = allocation_window(ctx.kernel.config)
         fallback = resolve_fallback_model(state.budgets.retry_count, ctx.chain)
         if fallback is not None:
             model_override = fallback.model
             base_url_override = fallback.base_url
             api_key_override = fallback.api_key
             extra_body_override = fallback.extra_body
-            active_context_window = fallback.context_window
+            active_prompt_window = allocation_window(ctx.kernel.config, fallback)
             current_limit = _reserve_graph_context_budget(
-                fallback.context_window, ctx.skills_prompt, ctx.learned_rag_context
+                active_prompt_window, ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan
             )
             logger.info(f"Escalating compilation attempt to fallback model: {model_override} (Limit: {current_limit} tokens)")
 
@@ -5447,7 +5462,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         retry_prep = _prepare_retry_context(
             state, ctx,
             target_files=state.last_implicated_files,
-            context_window=active_context_window,
+            prompt_window=active_prompt_window,
             model_identity=model_override or ctx.kernel.config.llm.model,
             base_code_context=active_code_context,
         )
@@ -5486,7 +5501,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             if owner_contract:
                 task_desc += owner_contract
             known_target_limit = _reserve_graph_context_budget(
-                active_context_window, ctx.skills_prompt, ctx.learned_rag_context, current_graph_context,
+                active_prompt_window, ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan, current_graph_context,
             )
             # CTX-001 P1 C2: a known-target file's member is only ever
             # supplied here when an INDEPENDENT retrieval signal grounded
@@ -5627,7 +5642,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 retry_temperature=ctx.kernel.config.llm.retry_temperature,
                 extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
                 files_with_current_content=state.all_files_written,
-                sibling_content_budget=_reserve_sibling_content_budget(active_context_window),
+                sibling_content_budget=_reserve_sibling_content_budget(active_prompt_window),
                 operation_by_file=(
                     _operation_map(ctx, known_target_files, attempt_operation, state)
                     if known_target_files else None

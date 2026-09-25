@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 # the retry exists for real, previously-observed backend quirks whose exact
 # error shape isn't guaranteed across every OpenAI-compatible server, so an
 # unrecognized exception still gets the benefit of the doubt and retries.
+# A reasoning model's max_tokens covers hidden reasoning and visible output
+# together, so it never runs below this.
+REASONING_MIN_MAX_TOKENS = 12288
+
 _LLM_RETRY_EXCLUDED_EXCEPTIONS = (
     APIConnectionError, APITimeoutError, AuthenticationError,
     PermissionDeniedError, RateLimitError, InternalServerError,
@@ -370,7 +374,7 @@ class LLMClient:
 
         temperature = temperature_override if temperature_override is not None else self.temperature
         base_max_tokens = max_tokens_override if max_tokens_override is not None else self.max_tokens
-        max_tokens = max(base_max_tokens, 12288) if is_reasoning else base_max_tokens
+        max_tokens = max(base_max_tokens, REASONING_MIN_MAX_TOKENS) if is_reasoning else base_max_tokens
         if extra_body_override is not None:
             extra_body = extra_body_override or None
         else:

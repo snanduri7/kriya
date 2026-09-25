@@ -80,7 +80,7 @@ def build_reviewer_verified_evidence(gate_outcomes: List[Dict[str, Any]]) -> str
 
 def build_review_batches(files: List[Tuple[str, str]], budget: int) -> Tuple[List[str], List[str]]:
     """Chunks and greedily batches (relpath, content) pairs into review-prompt blobs that
-    each fit within `budget` tokens (same context_window * 0.75 convention used throughout
+    each fit within `budget` tokens (context_budget.review_batch_budget(): 0.75 of the prompt allocation window, PRD-016
     workflow.py, via the caller's own estimate_tokens() heuristic - not duplicated here to
     avoid an import cycle with kriya.workflow.workflow).
 

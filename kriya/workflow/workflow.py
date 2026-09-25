@@ -105,9 +105,11 @@ from kriya.workflow.context_budget import (
     RetrievalLimits,
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
+    allocation_window,
     build_code_context,
     estimate_tokens,
     retrieval_limits_for,
+    review_batch_budget,
     skeletonize_braced_code,
     skeletonize_code,
     skeletonize_python,
@@ -2007,7 +2009,7 @@ class WorkflowEngine:
                     # examples at this point (built above, before Graph RAG retrieval) - same
                     # unaccounted-overhead gap _reserve_graph_context_budget's own docstring
                     # describes for the retry loop, just on the very first attempt instead.
-                    primary_limit = _reserve_graph_context_budget(self.kernel.config.llm.context_window, convention_prompt)
+                    primary_limit = _reserve_graph_context_budget(allocation_window(self.kernel.config), convention_prompt)
                     graph_rag_context = build_code_context(matched_files, related_files, workspace_path, primary_limit, file_scores=file_scores)
         except Exception as ex:
             logger.warning(f"Failed to query Graph RAG: {ex}")
@@ -3340,7 +3342,7 @@ class WorkflowEngine:
                     try:
                         review_batches, _ = build_review_batches(
                             [(fp, worktree_file_contents[fp]) for fp in sorted(state.all_files_written)],
-                            int(self.kernel.config.llm.context_window * 0.75),
+                            review_batch_budget(self.kernel.config),
                         )
                         # The completed report is attached to the approval context
                         # below, where the human must see it before deciding. Streaming
@@ -4446,7 +4448,7 @@ class WorkflowEngine:
             # truncation-from-the-front failure mode the standalone `kriya review` CLI
             # command was already fixed for (see kriya/workflow/review_context.py).
             review_batches, _ = build_review_batches(
-                file_contents_for_review, int(self.kernel.config.llm.context_window * 0.75),
+                file_contents_for_review, review_batch_budget(self.kernel.config),
             )
             # Demo-01 Finding 3 follow-up (2026-09-11): a rejected/unapplied
             # candidate's review must never stream raw, unfiltered LLM

@@ -2527,7 +2527,9 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
         # received an unlabeled fragment of raw code with no indication it was even
         # being asked to review anything, produced a confused non-review response, and
         # Kriya still reported success (exit 0) with no warning at all.
-        budget = int(cfg.llm.context_window * 0.75)
+        from kriya.workflow.context_budget import review_batch_budget
+
+        budget = review_batch_budget(cfg)
         file_contents: List[Tuple[str, str]] = []
         for rel, full in files_to_review:
             try:

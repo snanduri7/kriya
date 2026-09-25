@@ -61,6 +61,11 @@ DEFAULT_MIN_OUTPUT_TOKENS = 1024
 # Hidden reasoning a reasoning model spends before any visible output; used
 # when qualification has not measured one.
 DEFAULT_REASONING_ALLOWANCE_TOKENS = 2048
+# Headroom kept free in the window beyond the counted prompt and the output
+# budget, for counting error the bound does not cover.
+DISPATCH_SAFETY_MARGIN_TOKENS = 256
+# Framing of a two-message (system + user) request, as plan_dispatch counts it.
+TWO_MESSAGE_FRAMING_TOKENS = REQUEST_OVERHEAD_TOKENS + 2 * PER_MESSAGE_OVERHEAD_TOKENS
 
 
 class ContextBudgetUnsatisfiableError(RuntimeError):
@@ -237,7 +242,8 @@ def compare_with_usage(decision: Optional[Dict[str, Any]], reported_prompt_token
 __all__ = [
     "CONTEXT_BUDGET_UNSATISFIABLE", "ContextBudgetUnsatisfiableError", "DEFAULT_BYTES_PER_TOKEN",
     "DEFAULT_NON_ASCII_BYTES_PER_TOKEN",
-    "DEFAULT_MIN_OUTPUT_TOKENS", "DEFAULT_REASONING_ALLOWANCE_TOKENS", "DispatchBudget", "TokenCount",
+    "DEFAULT_MIN_OUTPUT_TOKENS", "DEFAULT_REASONING_ALLOWANCE_TOKENS", "DISPATCH_SAFETY_MARGIN_TOKENS",
+    "DispatchBudget", "TWO_MESSAGE_FRAMING_TOKENS", "TokenCount",
     "bound_by_bytes", "compare_with_usage", "count_tokens", "dispatch_text", "plan_dispatch",
     "register_exact_counter", "unregister_exact_counter",
 ]

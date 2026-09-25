@@ -174,6 +174,7 @@ from kriya.workflow.workflow import (
     _normalize_error_for_repeat_detection,
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
+    allocation_window,
     build_code_context,
     _resolve_file_paths_from_design,
     _pin_exec_plugin_executable_to_resolved_jdk,
@@ -206,6 +207,7 @@ from kriya.workflow.workflow import (
     normalize_written_filepath,
     _resolve_file_locations,
 )
+from kriya.workflow.context_budget import _GRAPH_CONTEXT_SHARE, _SIBLING_CONTENT_BUDGET_FRACTION
 
 
 def test_restore_public_contract_diagnosis_mismatch_cannot_veto():
@@ -1487,7 +1489,7 @@ async def test_workflow_falls_back_to_heuristic_file_list_when_architect_respons
     # actually reach DeveloperAgent, scaled to the active (here: primary,
     # since attempt 1 never escalates) model's real context window - not
     # silently left unset.
-    assert first_call_kwargs["sibling_content_budget"] == _reserve_sibling_content_budget(cfg.llm.context_window)
+    assert first_call_kwargs["sibling_content_budget"] == _reserve_sibling_content_budget(allocation_window(cfg))
 
 def test_is_near_duplicate_rule_catches_real_observed_rephrasings():
     """Regression test using the actual duplicate pairs observed live: qpid/rules.txt
@@ -22323,16 +22325,16 @@ def test_reserve_graph_context_budget_subtracts_unbounded_text_size():
     causing real 400 'prompt is longer than context length' errors."""
     skills_text = "word " * 5000  # ~6500 estimated tokens
     budget = _reserve_graph_context_budget(16384, skills_text, "")
-    expected = int(16384 * 0.75) - estimate_tokens(skills_text)
+    expected = int(16384 * _GRAPH_CONTEXT_SHARE) - estimate_tokens(skills_text)
     assert budget == expected
-    assert budget < int(16384 * 0.75)  # strictly less than the old flat budget
+    assert budget < int(16384 * _GRAPH_CONTEXT_SHARE)  # strictly less than the old flat budget
 
 
 def test_reserve_graph_context_budget_accounts_for_multiple_unbounded_texts():
     skills_text = "word " * 1000
     learned_rag_text = "word " * 500
     budget = _reserve_graph_context_budget(16384, skills_text, learned_rag_text)
-    expected = int(16384 * 0.75) - estimate_tokens(skills_text) - estimate_tokens(learned_rag_text)
+    expected = int(16384 * _GRAPH_CONTEXT_SHARE) - estimate_tokens(skills_text) - estimate_tokens(learned_rag_text)
     assert budget == expected
 
 
@@ -22340,7 +22342,7 @@ def test_reserve_graph_context_budget_ignores_falsy_texts():
     # None/"" entries must not crash or contribute - the common case (no
     # learned_rag_context this run) shouldn't require callers to filter first.
     budget = _reserve_graph_context_budget(16384, "some skills text", "", None)
-    assert budget == int(16384 * 0.75) - estimate_tokens("some skills text")
+    assert budget == int(16384 * _GRAPH_CONTEXT_SHARE) - estimate_tokens("some skills text")
 
 
 def test_reserve_graph_context_budget_floors_instead_of_going_negative():
@@ -22357,7 +22359,7 @@ def test_reserve_graph_context_budget_barely_affects_a_large_primary_window():
     # case, only the fallback-model-with-a-small-window case it targets.
     skills_text = "word " * 5000
     budget = _reserve_graph_context_budget(32768, skills_text, "")
-    assert budget > int(32768 * 0.75) * 0.5
+    assert budget > int(32768 * _GRAPH_CONTEXT_SHARE) * 0.5
 
 
 def test_reserve_sibling_content_budget_scales_with_context_window():
@@ -22365,8 +22367,8 @@ def test_reserve_sibling_content_budget_scales_with_context_window():
     # _reserve_graph_context_budget's 0.75) uses a smaller 0.15 fraction, since
     # sibling content is reference-only material, not the primary content a
     # per-file completion is generating.
-    assert _reserve_sibling_content_budget(32768) == int(32768 * 0.15)
-    assert _reserve_sibling_content_budget(16384) == int(16384 * 0.15)
+    assert _reserve_sibling_content_budget(32768) == int(32768 * _SIBLING_CONTENT_BUDGET_FRACTION)
+    assert _reserve_sibling_content_budget(16384) == int(16384 * _SIBLING_CONTENT_BUDGET_FRACTION)
 
 
 def test_reserve_sibling_content_budget_scales_down_for_a_smaller_fallback_model():

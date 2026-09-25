@@ -151,8 +151,8 @@ _SEARCH_TEXT = (
 def _g1_shaped_module_large() -> str:
     """Same structural shape/members as _g1_shaped_module(), padded with
     inert filler functions so the whole file exceeds every retry-package
-    budget this file's tests use (context_window up to 32768 ->
-    target_budget up to 33600 chars) - mirrors the real incident's own
+    budget this file's tests use (prompt_window up to 32768 ->
+    retry evidence up to 19,660 chars) - mirrors the real incident's own
     331,064-char file staying an IMPLEMENTATION_EXCERPT (omitted_regions=
     True) across every retry, which is what keeps CTX-001-P1-C3's own
     SOURCE 3 gate (state.known_target_context_items[path].omitted_regions)
@@ -226,7 +226,7 @@ class TestTargetReachability:
         assert ctx.established_files == []
 
         pkg = _retry_package_for_attempt(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
         )
         assert pkg is not None
         assert len(pkg.target_projections) == 1
@@ -249,7 +249,7 @@ class TestTargetReachability:
         state.all_files_written = {"engine.py"}
 
         pkg = _retry_package_for_attempt(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
         )
         assert len(pkg.target_projections) == 1
         assert _classify_retry_target_source_origin(state, ctx, "engine.py") == "already_written"
@@ -263,7 +263,7 @@ class TestTargetReachability:
         state.last_failure = _anchored_edit_failure()
 
         pkg = _retry_package_for_attempt(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
         )
         assert len(pkg.target_projections) == 1
         assert _classify_retry_target_source_origin(state, ctx, "engine.py") == "established"
@@ -280,7 +280,7 @@ class TestTargetReachability:
         state.last_failure = _anchored_edit_failure()
 
         pkg = _retry_package_for_attempt(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
             exclude=["engine.py"],
         )
         assert pkg.target_projections == ()
@@ -298,7 +298,7 @@ class TestTargetReachability:
         state.last_failure = _anchored_edit_failure()
 
         prep = _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
             model_identity="primary-model",
         )
         assert prep.member_hints == {"engine.py": ["outer_extractor.walk_calls"]}
@@ -321,7 +321,7 @@ class TestTargetReachability:
         state.last_failure = _anchored_edit_failure()
 
         pkg = _retry_package_for_attempt(
-            state, ctx, target_files=["engine.py"], context_window=16384,
+            state, ctx, target_files=["engine.py"], prompt_window=16384,
         )
         assert len(pkg.target_projections) == 1
         projection = pkg.target_projections[0]
@@ -436,7 +436,7 @@ class TestMemberEscalation:
         # survive as the FINAL authority once the actually-relevant member
         # is re-grounded through the full retry-preparation pipeline.
         prep = _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
             model_identity="primary-model",
         )
         assert prep.member_hints == {"engine.py": ["outer_extractor.walk_calls"]}
@@ -469,7 +469,7 @@ class TestCentralizedPreparation:
             state.last_failure = _anchored_edit_failure()
 
             prep = _prepare_retry_context(
-                state, ctx, target_files=["engine.py"], context_window=window,
+                state, ctx, target_files=["engine.py"], prompt_window=window,
                 model_identity=model,
             )
             assert prep.member_hints == {"engine.py": ["outer_extractor.walk_calls"]}, mode
@@ -490,7 +490,7 @@ class TestCentralizedPreparation:
         state.budgets.anchor_failure_counts["engine.py"] = 1
         state.last_failure = _anchored_edit_failure()
         _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
             model_identity="primary-model",
         )
         assert state.known_target_context_items["engine.py"].member_id == "outer_extractor.walk_calls"
@@ -515,7 +515,7 @@ class TestCentralizedPreparation:
         state.last_attempt_mode = "full_set"
         state.last_failure = _anchored_edit_failure()
         prep = _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=16384,
+            state, ctx, target_files=["engine.py"], prompt_window=16384,
             model_identity="fallback-model",
         )
         assert prep.member_hints == {"engine.py": ["outer_extractor.walk_calls"]}
@@ -543,7 +543,7 @@ class TestNoProgressGate:
 
         # First attempt with this exact evidence proceeds normally.
         _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=16384,
+            state, ctx, target_files=["engine.py"], prompt_window=16384,
             model_identity="fallback-model",
         )
         # A second, immediately-following attempt in the SAME mode/model
@@ -552,7 +552,7 @@ class TestNoProgressGate:
         # real run) must be turned into a Failure BEFORE any Developer call.
         with pytest.raises(QualityGateFailure) as exc_info:
             _prepare_retry_context(
-                state, ctx, target_files=["engine.py"], context_window=16384,
+                state, ctx, target_files=["engine.py"], prompt_window=16384,
                 model_identity="fallback-model",
             )
         assert exc_info.value.failure.type == "no_progress_retry"
@@ -569,14 +569,14 @@ class TestNoProgressGate:
         state.budgets.last_failure_signature = ("anchored_edit", "anchor mismatch")
 
         _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
             model_identity="primary-model",
         )
         # Now a real anchor failure has occurred and SOURCE 3 can ground -
         # materially different evidence than the first call.
         state.budgets.anchor_failure_counts["engine.py"] = 1
         prep = _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
             model_identity="primary-model",
         )
         assert prep.member_hints == {"engine.py": ["outer_extractor.walk_calls"]}
@@ -596,7 +596,7 @@ class TestNoProgressGate:
         )
         state.budgets.last_failure_signature = ("operation_contract", "whole-file authority rejected")
         _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=16384,
+            state, ctx, target_files=["engine.py"], prompt_window=16384,
             model_identity="fallback-model",
         )
 
@@ -607,7 +607,7 @@ class TestNoProgressGate:
         state.budgets.last_failure_signature = ("compile", "a genuinely new compile error")
         # Does not raise - the failure signature progressed.
         _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=16384,
+            state, ctx, target_files=["engine.py"], prompt_window=16384,
             model_identity="fallback-model",
         )
 
@@ -640,13 +640,13 @@ class TestNoProgressGate:
         )
 
         _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
             model_identity="primary-model",
         )
         # Second call, byte-identical evidence and failure signature - must
         # NOT raise, unlike the real D1-rejection case in test_L.
         _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
             model_identity="primary-model",
         )
 
@@ -682,14 +682,14 @@ class TestNoProgressGate:
         state.budgets.last_failure_signature = ("anchored_edit", "anchor mismatch")
 
         _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
             model_identity="primary-model",
         )
         # Second call, byte-identical evidence and failure signature - must
         # NOT raise. Unlike test_L's genuine D1-rejection case, an anchored-
         # edit failure is never eligible for this gate at all.
         _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
             model_identity="primary-model",
         )
 
@@ -774,7 +774,7 @@ class TestObservability:
         state.last_failure = _anchored_edit_failure()
 
         _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=16384,
+            state, ctx, target_files=["engine.py"], prompt_window=16384,
             model_identity="fallback-model",
         )
         kinds = [event.kind for event in state.run_events]
@@ -832,7 +832,7 @@ class TestG1DeterministicReplay:
         state.last_failure = _anchored_edit_failure()
 
         after = _retry_package_for_attempt(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
         )
         assert len(after.target_projections) == 1
         _record_retry_projection_context_items(state, after)
@@ -851,7 +851,7 @@ class TestG1DeterministicReplay:
         # The NEXT retry's own centralized preparation renders that member
         # exact and records it as such.
         prep = _prepare_retry_context(
-            state, ctx, target_files=["engine.py"], context_window=32768,
+            state, ctx, target_files=["engine.py"], prompt_window=32768,
             model_identity="primary-model",
         )
         assert prep.member_hints == {"engine.py": ["outer_extractor.walk_calls"]}

@@ -557,6 +557,103 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4) if text else 0
 
 
+# --- PRD-016 / CTX-001: allocation against the dispatch budget ---------------
+# The builders below size prompt sections in estimate_tokens() units (len//4).
+# The dispatch check (kriya/core/token_budget.py) counts the same text with a
+# conservative byte bound (2.5 bytes per token by default, the measured ratio
+# once the runtime is qualified) against the served window, keeping the
+# configured output budget free. Before this, every builder took a fraction
+# of the raw context_window in len//4 units, so a fully allocated Developer
+# prompt (graph 0.75 + siblings 0.15 + retry evidence 1.5 chars/token, before
+# task/design/system text) counted to more than the whole window: the
+# dispatch check refused it, and before that check existed the local server
+# silently dropped part of it.
+#
+# prompt_allocation_window() converts the dispatch room of a call - window
+# minus its output budget, framing and safety margin - into allocator units.
+# The builders share it: the graph pool (skills, learned knowledge, graph
+# context, known-target and member-hint source; each later section reserves
+# what the earlier ones already used) 0.60, retry evidence 0.15, already-
+# written siblings 0.15, leaving 0.10 for the system prompt, task and
+# directives (design and plan are reserved from the graph pool). Opt-in
+# investigation evidence (DEV-INV-001) is capped at 0.10 on top; the dispatch
+# check then trims max_tokens rather than refusing. Optional context is sized to the PREFERRED window only, so it
+# never causes the dispatch to select a larger context tier; the byte bound
+# covers ASCII text exactly and the dispatch check stays the backstop for
+# the rest.
+_ALLOCATOR_CHARS_PER_TOKEN = 4
+_GRAPH_CONTEXT_SHARE = 0.60
+_RETRY_EVIDENCE_SHARE = 0.15
+_INVESTIGATION_EVIDENCE_SHARE = 0.10
+
+
+def prompt_allocation_window(context_window: int, output_budget: int, *,
+                             bytes_per_token: Optional[float] = None) -> int:
+    """Allocator-unit tokens a two-message prompt may occupy in
+    ``context_window`` while ``output_budget`` stays free (at most half the
+    window: a config whose output budget is larger has declared an
+    output-dominated call, and the dispatch check then reduces max_tokens)."""
+    from kriya.core.token_budget import (
+        DEFAULT_BYTES_PER_TOKEN,
+        DISPATCH_SAFETY_MARGIN_TOKENS,
+        TWO_MESSAGE_FRAMING_TOKENS,
+    )
+
+    reserve = min(max(0, int(output_budget)), int(context_window) // 2)
+    room = int(context_window) - reserve - TWO_MESSAGE_FRAMING_TOKENS - DISPATCH_SAFETY_MARGIN_TOKENS
+    ratio = bytes_per_token if bytes_per_token and bytes_per_token > 0 else DEFAULT_BYTES_PER_TOKEN
+    return max(0, int(room * ratio / _ALLOCATOR_CHARS_PER_TOKEN))
+
+
+def allocation_window(config: Any, binding: Any = None) -> int:
+    """The prompt allocation window of a Developer-shaped call to ``binding``
+    (the primary ``config.llm`` by default, or an ``llm_chain`` entry): the
+    same served window, output budget and counting ratio LLMClient's dispatch
+    check uses for that call (kriya/core/llm.py::complete_result)."""
+    from kriya.core.llm import REASONING_MIN_MAX_TOKENS
+
+    binding = binding if binding is not None else config.llm
+    window = binding.context_window
+    ratio = None
+    try:
+        from kriya.core.model_qualification import measured_limits_for
+        from kriya.core.model_runtime import resolve_configured_model_runtime
+
+        fingerprint = resolve_configured_model_runtime(
+            config, binding.model, base_url=binding.base_url, api_key=binding.api_key,
+            extra_body=binding.extra_body or {},
+        )
+        window = fingerprint.effective_context_window or window
+        ratio = measured_limits_for(fingerprint, config).get("bytes_per_token_floor")
+    except Exception as error:  # never blocks context assembly
+        logger.debug("Allocation window for %s uses the configured window: %s", binding.model, error)
+    output = config.llm.max_tokens
+    if binding.reasoning:
+        output = max(output, REASONING_MIN_MAX_TOKENS)
+    return prompt_allocation_window(window, output, bytes_per_token=ratio)
+
+
+# A review prompt is the file batch plus a goal header and candidate diff.
+_REVIEW_BATCH_SHARE = 0.75
+
+
+def review_batch_budget(config: Any) -> int:
+    """Token budget (allocator units) of one review batch
+    (review_context.build_review_batches) for the primary model."""
+    return int(allocation_window(config) * _REVIEW_BATCH_SHARE)
+
+
+def investigation_evidence_char_budget(prompt_window: int) -> int:
+    """Character budget of DEV-INV-001 investigation evidence appended to a
+    Developer prompt (it uses the fixed-text headroom of the window)."""
+    return int(prompt_window * _INVESTIGATION_EVIDENCE_SHARE * _ALLOCATOR_CHARS_PER_TOKEN)
+
+
+def retry_evidence_char_budget(prompt_window: int) -> int:
+    """Character budget of a retry package's source evidence."""
+    return max(4000, min(48000, int(prompt_window * _RETRY_EVIDENCE_SHARE * _ALLOCATOR_CHARS_PER_TOKEN)))
+
+
 # Floor for build_code_context()'s own budget after skills_prompt/learned_rag_context
 # are subtracted below - keeps the allocator functional (still returns SOME matched-file
 # context, just skeletonized more aggressively) rather than collapsing to 0 and silently
@@ -564,7 +661,7 @@ def estimate_tokens(text: str) -> int:
 _MIN_GRAPH_CONTEXT_BUDGET = 1000
 
 
-def _reserve_graph_context_budget(model_context_window: int, *unbounded_texts: str) -> int:
+def _reserve_graph_context_budget(prompt_window: int, *unbounded_texts: str) -> int:
     """Every retry path computes build_code_context()'s token budget as a flat fraction of
     the ACTIVE model's context_window (0.75), then separately prepends skills_prompt and
     learned_rag_context to the result - both unbounded, un-budgeted strings that are
@@ -585,9 +682,12 @@ def _reserve_graph_context_budget(model_context_window: int, *unbounded_texts: s
     instead of assuming graph-RAG context is the only occupant. Floored at
     _MIN_GRAPH_CONTEXT_BUDGET so a very large skills_prompt still leaves build_code_context()
     something to work with (already-aggressive skeletonization, not a hard zero) rather than
-    silently dropping all matched/related file context for the rest of this attempt."""
-    base_budget = int(model_context_window * 0.75)
-    reserved = sum(estimate_tokens(t) for t in unbounded_texts if t)
+    silently dropping all matched/related file context for the rest of this attempt.
+
+    PRD-016: ``prompt_window`` is the call's prompt_allocation_window() (see
+    above), not the raw context_window, and the pool is its graph share."""
+    base_budget = int(prompt_window * _GRAPH_CONTEXT_SHARE)
+    reserved = sum(estimate_tokens(t) for t in unbounded_texts if t and isinstance(t, str))
     return max(_MIN_GRAPH_CONTEXT_BUDGET, base_budget - reserved)
 
 
@@ -609,7 +709,7 @@ _MIN_SIBLING_CONTENT_BUDGET = 500
 _SIBLING_CONTENT_BUDGET_FRACTION = 0.15
 
 
-def _reserve_sibling_content_budget(model_context_window: int) -> int:
+def _reserve_sibling_content_budget(prompt_window: int) -> int:
     """Token budget for the concatenated "already-written sibling" section of a
     per-file Developer completion prompt (2026-08-15 external review, Finding 8).
 
@@ -628,8 +728,9 @@ def _reserve_sibling_content_budget(model_context_window: int) -> int:
     attempt get proportionally different budgets, not one hardcoded number that's
     generous for one and starves the other), floored at
     _MIN_SIBLING_CONTENT_BUDGET so even a small fallback model's window still
-    leaves room for at least one sibling's real content."""
-    return max(_MIN_SIBLING_CONTENT_BUDGET, int(model_context_window * _SIBLING_CONTENT_BUDGET_FRACTION))
+    leaves room for at least one sibling's real content. ``prompt_window`` is
+    the call's prompt_allocation_window() (PRD-016)."""
+    return max(_MIN_SIBLING_CONTENT_BUDGET, int(prompt_window * _SIBLING_CONTENT_BUDGET_FRACTION))
 
 
 _TIER_STEPS = ("full", "skeleton", "signatures")
@@ -697,7 +798,10 @@ def _build_file_tiers(
 
         file_tiers = {f: matched_tier for f in matched_contents}
         file_tiers.update({f: related_tier for f in related_contents})
-        return file_tiers
+        # Last related file first, then last matched file.
+        drop_order = list(reversed(list(related_contents))) + list(reversed(list(matched_contents)))
+        return _omit_over_budget(file_tiers, matched_contents, related_contents, budget_limit,
+                                 get_skeletonized, drop_order)
 
     # Score-aware degradation (2026-08-12 SME review, re-ranking retrieval):
     # each file (matched or related alike) has its own tier, degraded one
@@ -725,6 +829,36 @@ def _build_file_tiers(
         next_tier = _TIER_STEPS[_TIER_STEPS.index(file_tiers[lowest]) + 1]
         file_tiers[lowest] = next_tier
 
+    # Lowest score first (stable: earlier-listed files kept on ties).
+    drop_order = sorted(reversed(list(file_tiers)), key=lambda f: file_scores.get(f, 0.0))
+    return _omit_over_budget(file_tiers, matched_contents, related_contents, budget_limit,
+                             get_skeletonized, drop_order)
+
+
+# A file whose signatures still do not fit the budget is left out of the
+# prompt entirely (recorded as a budget_exhausted omission and named in the
+# rendered context). Before PRD-016 the tier search simply stopped at
+# "signatures" and rendered everything, so the budget was not a bound: a
+# dozen large classes rendered ~210K characters against a ~4.7K-token limit.
+_OMITTED_TIER = "omitted"
+
+
+def _omit_over_budget(
+    file_tiers: Dict[str, str], matched_contents: Dict[str, str], related_contents: Dict[str, str],
+    budget_limit: int, get_skeletonized: Callable[[str, str, str], str], drop_order: List[str],
+) -> Dict[str, str]:
+    contents = {**matched_contents, **related_contents}
+
+    def total() -> int:
+        return sum(
+            estimate_tokens(get_skeletonized(contents[f], f, tier))
+            for f, tier in file_tiers.items() if tier != _OMITTED_TIER
+        )
+
+    for filepath in drop_order:
+        if total() <= budget_limit:
+            break
+        file_tiers[filepath] = _OMITTED_TIER
     return file_tiers
 
 
@@ -827,8 +961,20 @@ def build_code_context_package(
 
     graph_rag_context = "\n\n=== Codebase Semantic Reference Context ===\n"
     items = []
+    budget_omitted: List[str] = []
+
+    def _record_budget_omission(filepath: str, content: str) -> None:
+        budget_omitted.append(filepath)
+        omitted.append(make_omitted_entry(
+            path=filepath, rank=0, reason=REASON_BUDGET_EXHAUSTED,
+            estimated_tokens=estimate_tokens(get_skeletonized(content, filepath, "signatures")),
+        ))
+
     for filepath, content in matched_contents.items():
         tier = file_tiers[filepath]
+        if tier == _OMITTED_TIER:
+            _record_budget_omission(filepath, content)
+            continue
         skel = get_skeletonized(content, filepath, tier)
         graph_rag_context += f"\nFile: {filepath} (Tier: {tier})\n{skel}\n"
         items.append(make_context_item(
@@ -846,6 +992,9 @@ def build_code_context_package(
         graph_rag_context += "\n\n=== Bounded Neighborhood Dependency Context ===\n"
         for filepath, content in related_contents.items():
             tier = file_tiers[filepath]
+            if tier == _OMITTED_TIER:
+                _record_budget_omission(filepath, content)
+                continue
             skel = get_skeletonized(content, filepath, tier)
             graph_rag_context += f"\nFile: {filepath} (Tier: {tier})\n{skel}\n"
             items.append(make_context_item(
@@ -858,6 +1007,11 @@ def build_code_context_package(
                 omitted.append(make_omitted_entry(
                     path=filepath, rank=0, reason=REASON_BODY_ELIDED, estimated_tokens=estimate_tokens(skel),
                 ))
+
+    if budget_omitted:
+        graph_rag_context += (
+            f"\n(Left out for the context budget, not shown above: {', '.join(budget_omitted)})\n"
+        )
 
     package = build_context_package(
         relevant_files=tuple(items),
