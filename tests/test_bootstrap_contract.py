@@ -70,7 +70,9 @@ def test_production_code_has_no_undefined_names():
 def test_every_production_annotation_resolves_at_runtime():
     # F821 accepts a name imported only under TYPE_CHECKING, but
     # typing.get_type_hints() cannot see it and raises NameError. Every
-    # class, method and function defined in kriya/ must resolve.
+    # class, method and function defined in kriya/ must resolve. Methods a
+    # library injects into a kriya class (pydantic sets model_post_init when a
+    # model declares a PrivateAttr) are the library's code, not ours.
     script = """
 import importlib, inspect, typing
 from pathlib import Path
@@ -85,7 +87,8 @@ for path in sorted(Path('kriya').rglob('*.py')):
             continue
         targets = [obj]
         if inspect.isclass(obj):
-            targets += [v for v in vars(obj).values() if inspect.isfunction(v)]
+            targets += [v for v in vars(obj).values()
+                        if inspect.isfunction(v) and v.__module__ == module.__name__]
         elif not inspect.isfunction(obj):
             continue
         for target in targets:
