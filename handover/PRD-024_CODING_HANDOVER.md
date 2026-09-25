@@ -79,8 +79,13 @@ Regression, plain runner:
    - the environment identity, which now also carries `verification_policy_identity`: the validator's containment/sandbox/limits/egress settings and `BASELINE_COMPARISON_VERSION`.
 
    A prior run that did not complete is never reused; resume keeps its own rule. It works under `required` too, so a production milestone plan pays M1's PRE plus one POST per unit, not two runs per unit. Engine-scoped (in memory), not persisted in the workspace, so a repository cannot ship forged "pre-existing failure" evidence. Recorded as `validation_baseline.full_regression_source` (`captured`/`resume`/`prior_full_suite`).
-3. **Environment identity change (disclosed).** Adding the verification policy changes the environment string. A baseline checkpointed before this change is therefore captured again on resume, once (the fail-safe direction).
-4. **Live test.** The PRD-024 live case uses a docstring goal, so under the new trigger it no longer takes a baseline. It now runs under `required` (what production seals) to prove pre-existing-failure handling. A new live case records how `auto` handles a docstring edit: disabled, or triggered only by a real non-supporting signal from the real route.
+3. **Reuse assumption (disclosed).** The terminal full-suite run happens in the sandbox; the evidence is keyed by the workspace content *after* apply. That is exact as long as nothing test-relevant is in the sandbox without being applied:
+   - run artifacts are removed after each attempt (`clean_untracked_files_since`);
+   - every file the Developer wrote in any attempt stays in `all_files_written` and is applied.
+
+   Untracked build or test junk is either ignored by the repository's `.gitignore` (and so outside both hashes), or makes the next run's starting hash differ, which only prevents reuse.
+4. **Environment identity change (disclosed).** Adding the verification policy changes the environment string. A baseline checkpointed before this change is therefore captured again on resume, once (the fail-safe direction).
+5. **Live test.** The PRD-024 live case uses a docstring goal, so under the new trigger it no longer takes a baseline. It now runs under `required` (what production seals) to prove pre-existing-failure handling. A new live case records how `auto` handles a docstring edit: disabled, or triggered only by a real non-supporting signal from the real route.
 
 Tests (plain runner): `test_prd024_baseline_auto_policy.py`, 35 passed, 14 of them new or changed:
 - trigger cases: API, config, shared owner, broad, and tested-source-alone (not triggered);
