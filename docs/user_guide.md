@@ -262,6 +262,41 @@ falls back to the host's tools.
 - **Unsupported.** Other versions (e.g. Java 7, Python 3.9) and toolchains without a profile fail closed.
   `kriya doctor --production` reports this as `toolchain.required`.
 
+### 2.0d Outbound network authority (egress)
+Each outbound network channel runs under one capability class:
+
+| Class | Meaning |
+|---|---|
+| `denied` | No network |
+| `registry_only` | Package registries only, through a scoped proxy |
+| `approved_public_knowledge` | Opt-in, read-only public lookups |
+| `explicit_destinations` | Exactly the endpoints the configuration names |
+| `unrestricted` | The execution environment's network: a privileged setting |
+
+Destinations only ever come from trusted configuration, which SEC-009 protects, or from fixed platform policy.
+Repository text and model output can ask for a destination, but they never authorize one.
+
+| Channel | Default | Production profile |
+|---|---|---|
+| Model and embedding endpoints | `llm.*`, `llm_chain`, `agent_llms`, `embedding.base_url`. Under `egress_policy: local_only`, a non-local endpoint is refused on every call. Embeddings obey this too. | Same (`local_only` is forced) |
+| Generated-code verification | Host network (no containment) | `denied` (contained) |
+| Dependency acquisition | Host network | `registry_only`: `autonomy.acquisition_registry_hosts` |
+| Shell tool (`kriya tools execute shell`, plan tool steps) | `autonomy.shell_network: unrestricted` | `denied`. Recognized package managers stay `registry_only`. |
+| KnowledgeGuard release metadata | Public registries (`knowledge.offline_mode: false`) | Off (`offline_mode: true`, cached data only) |
+| Live lookup | Off unless `autonomy.web_lookup_enabled` and `search.base_url` are both set | Same: explicit opt-in, sanitized terms, per-query approval |
+| MCP servers | Host network | The server's declared `capabilities.network`, enforced in OCI. `explicit_destinations` is not enforceable yet, so the server is refused. |
+
+- **Refusals are fail-closed.** `autonomy.shell_network: denied` without a real containment backend refuses the
+  command rather than running it on the host. With containment required, the shell tool is always contained, even
+  if `sandbox_execution` is off.
+- **Evidence.**
+  - Every run records its channels in the trace as the `egress.authority` run event: class, allowed or not,
+    destinations, the configuration field they come from, and the containment.
+  - Every contained command also records its own `egress` decision in its gate outcome, or in the shell tool's
+    result.
+- **The doctors never probe a refused endpoint.** Under `local_only`, a non-local model URL is reported as an error
+  and is never contacted, and the API key is never sent.
+
 ### 2.1 Per-Role Model Selection (`agent_llms`)
 Planner, Architect, Developer, Reviewer, RunVerifier, and SkillGapAgent (skill-gap extraction and conflict-checking) don't have to share one model - each is independently configurable, with its own optional escalation chain.
 
