@@ -539,7 +539,8 @@ to the exact files it judged:
 
 A violated requirement always blocks success. `autonomy.requirement_unknown_policy` and
 `autonomy.requirement_unverified_policy` (`record`, the default, or `block`) decide the other two. `block` stops
-before anything is applied, with `[REQUIREMENTS UNRESOLVED]`. The production profile seals the unknown policy to
+that unit before its changes are applied, with `[REQUIREMENTS UNRESOLVED]`. In a milestone plan the check runs in
+the final integration unit, so earlier milestones are already committed; the plan is not reported successful. The production profile seals the unknown policy to
 `block`. Both fields are SECURITY_AUTHORITY.
 
 Which unit verifies the requirements:
@@ -547,7 +548,8 @@ Which unit verifies the requirements:
 - a milestone plan's final integration unit, against the plan's original goal (a milestone verifies only its own goal);
 - enforce mode's terminal `original_requirements` gate.
 
-The result's `requirements` field, and the `requirement.derived`, `requirement.lineage` and `requirement.verdicts`
+`kriya fix` has no requirement set: its goal is Kriya's own wording around your error log. The result's
+`requirements` field, and the `requirement.derived`, `requirement.lineage` and `requirement.verdicts`
 run events, record everything. A resumed run derives the same ids from the goal again.
 
 ### 2.1c Existing owners of a responsibility (PRD-021)
@@ -622,8 +624,9 @@ A trivial change skips it. `required` always captures the baseline (the producti
 `PRE_EXISTING_FAILURE` (not blamed on the change), `NEW_FAILURE`/`CHANGED_FAILURE` (block), `RESOLVED_FAILURE`
 (fixed), `NOT_COMPARABLE`.
 
-Both runs record their environment (execution mode and the toolchain identity). If the change alters the toolchain,
-the runs are not comparable and the result blocks. If the baseline cannot be captured when it is needed, the run
+Both runs record their environment (execution mode and the toolchain identity), computed the same way. A dependency
+added to `pom.xml` is the same environment. A changed toolchain (a Java release migration) is not comparable: no
+failure is excused as pre-existing then, so any failure blocks, and a fully passing suite passes. If the baseline cannot be captured when it is needed, the run
 stops before generation (`baseline_indeterminate`). When the test output has no per-test parser, the result says so
 instead of reporting no failures.
 

@@ -1,0 +1,266 @@
+{
+  "first": [
+    {
+      "candidates": [
+        {
+          "explicit": false,
+          "model": "qwen3.5:9B",
+          "qualification": "MISSING",
+          "runtime_digest": "7b47e98cc0523cb1c4497e332b96ed3f3ff5ed883ca33de17531422a46b28aa2",
+          "score": {
+            "calls": 0,
+            "failure_rate": 0.0,
+            "mean_latency": 0.0,
+            "measured": false,
+            "success_rate": 0.0
+          }
+        }
+      ],
+      "mode": "evidence",
+      "model": "qwen3-coder:30b",
+      "reason": "no candidate is eligible; the role keeps its configured binding",
+      "rejected": [
+        {
+          "explicit": false,
+          "model": "qwen3.5:9B",
+          "qualification": "MISSING",
+          "reasons": [
+            "not qualified for developer (MISSING: no qualification record for this exact runtime)"
+          ],
+          "runtime_digest": "7b47e98cc0523cb1c4497e332b96ed3f3ff5ed883ca33de17531422a46b28aa2",
+          "score": {
+            "calls": 0,
+            "failure_rate": 0.0,
+            "mean_latency": 0.0,
+            "measured": false,
+            "success_rate": 0.0
+          }
+        }
+      ],
+      "role": "developer",
+      "runtime_digest": null,
+      "source": "configured_default",
+      "table_digest": null
+    },
+    {
+      "candidates": [
+        {
+          "explicit": true,
+          "model": "qwen3-coder:30b",
+          "qualification": "QUALIFIED",
+          "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+          "score": {
+            "calls": 0,
+            "failure_rate": 0.0,
+            "mean_latency": 0.0,
+            "measured": false,
+            "success_rate": 0.0
+          }
+        },
+        {
+          "explicit": false,
+          "model": "qwen3.5:9B",
+          "qualification": "QUALIFIED",
+          "runtime_digest": "15ad2c3e71af100833f091c4ff61cf61525112f1231026950f8e60a07dddc5b0",
+          "score": {
+            "calls": 0,
+            "failure_rate": 0.0,
+            "mean_latency": 0.0,
+            "measured": false,
+            "success_rate": 0.0
+          }
+        }
+      ],
+      "mode": "evidence",
+      "model": "qwen3-coder:30b",
+      "reason": "the explicit role binding is qualified",
+      "rejected": [],
+      "role": "planner",
+      "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+      "source": "explicit_override",
+      "table_digest": null
+    },
+    {
+      "candidates": [
+        {
+          "explicit": false,
+          "model": "qwen3.5:9B",
+          "qualification": "QUALIFIED",
+          "runtime_digest": "15ad2c3e71af100833f091c4ff61cf61525112f1231026950f8e60a07dddc5b0",
+          "score": {
+            "calls": 0,
+            "failure_rate": 0.0,
+            "mean_latency": 0.0,
+            "measured": false,
+            "success_rate": 0.0
+          }
+        }
+      ],
+      "mode": "evidence",
+      "model": "qwen3.5:9B",
+      "reason": "no eligible candidate has enough measured calls; first eligible candidate in operator order",
+      "rejected": [],
+      "role": "reviewer",
+      "runtime_digest": "15ad2c3e71af100833f091c4ff61cf61525112f1231026950f8e60a07dddc5b0",
+      "source": "evidence",
+      "table_digest": null
+    },
+    {
+      "candidates": [
+        {
+          "explicit": false,
+          "model": "qwen3.5:9B",
+          "qualification": "QUALIFIED",
+          "runtime_digest": "15ad2c3e71af100833f091c4ff61cf61525112f1231026950f8e60a07dddc5b0",
+          "score": {
+            "calls": 0,
+            "failure_rate": 0.0,
+            "mean_latency": 0.0,
+            "measured": false,
+            "success_rate": 0.0
+          }
+        }
+      ],
+      "mode": "evidence",
+      "model": "qwen3.5:9B",
+      "reason": "no eligible candidate has enough measured calls; first eligible candidate in operator order",
+      "rejected": [],
+      "role": "spec_compliance",
+      "runtime_digest": "15ad2c3e71af100833f091c4ff61cf61525112f1231026950f8e60a07dddc5b0",
+      "source": "evidence",
+      "table_digest": null
+    }
+  ],
+  "second": [
+    {
+      "candidates": [
+        {
+          "explicit": false,
+          "model": "qwen3.5:9B",
+          "qualification": "MISSING",
+          "runtime_digest": "7b47e98cc0523cb1c4497e332b96ed3f3ff5ed883ca33de17531422a46b28aa2",
+          "score": {
+            "calls": 0,
+            "failure_rate": 0.0,
+            "mean_latency": 0.0,
+            "measured": false,
+            "success_rate": 0.0
+          }
+        }
+      ],
+      "mode": "evidence",
+      "model": "qwen3-coder:30b",
+      "reason": "no candidate is eligible; the role keeps its configured binding",
+      "rejected": [
+        {
+          "explicit": false,
+          "model": "qwen3.5:9B",
+          "qualification": "MISSING",
+          "reasons": [
+            "not qualified for developer (MISSING: no qualification record for this exact runtime)"
+          ],
+          "runtime_digest": "7b47e98cc0523cb1c4497e332b96ed3f3ff5ed883ca33de17531422a46b28aa2",
+          "score": {
+            "calls": 0,
+            "failure_rate": 0.0,
+            "mean_latency": 0.0,
+            "measured": false,
+            "success_rate": 0.0
+          }
+        }
+      ],
+      "role": "developer",
+      "runtime_digest": null,
+      "source": "configured_default",
+      "table_digest": null
+    },
+    {
+      "candidates": [
+        {
+          "explicit": true,
+          "model": "qwen3-coder:30b",
+          "qualification": "QUALIFIED",
+          "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+          "score": {
+            "calls": 0,
+            "failure_rate": 0.0,
+            "mean_latency": 0.0,
+            "measured": false,
+            "success_rate": 0.0
+          }
+        },
+        {
+          "explicit": false,
+          "model": "qwen3.5:9B",
+          "qualification": "QUALIFIED",
+          "runtime_digest": "15ad2c3e71af100833f091c4ff61cf61525112f1231026950f8e60a07dddc5b0",
+          "score": {
+            "calls": 0,
+            "failure_rate": 0.0,
+            "mean_latency": 0.0,
+            "measured": false,
+            "success_rate": 0.0
+          }
+        }
+      ],
+      "mode": "evidence",
+      "model": "qwen3-coder:30b",
+      "reason": "the explicit role binding is qualified",
+      "rejected": [],
+      "role": "planner",
+      "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+      "source": "explicit_override",
+      "table_digest": null
+    },
+    {
+      "candidates": [
+        {
+          "explicit": false,
+          "model": "qwen3.5:9B",
+          "qualification": "QUALIFIED",
+          "runtime_digest": "15ad2c3e71af100833f091c4ff61cf61525112f1231026950f8e60a07dddc5b0",
+          "score": {
+            "calls": 0,
+            "failure_rate": 0.0,
+            "mean_latency": 0.0,
+            "measured": false,
+            "success_rate": 0.0
+          }
+        }
+      ],
+      "mode": "evidence",
+      "model": "qwen3.5:9B",
+      "reason": "no eligible candidate has enough measured calls; first eligible candidate in operator order",
+      "rejected": [],
+      "role": "reviewer",
+      "runtime_digest": "15ad2c3e71af100833f091c4ff61cf61525112f1231026950f8e60a07dddc5b0",
+      "source": "evidence",
+      "table_digest": null
+    },
+    {
+      "candidates": [
+        {
+          "explicit": false,
+          "model": "qwen3.5:9B",
+          "qualification": "QUALIFIED",
+          "runtime_digest": "15ad2c3e71af100833f091c4ff61cf61525112f1231026950f8e60a07dddc5b0",
+          "score": {
+            "calls": 0,
+            "failure_rate": 0.0,
+            "mean_latency": 0.0,
+            "measured": false,
+            "success_rate": 0.0
+          }
+        }
+      ],
+      "mode": "evidence",
+      "model": "qwen3.5:9B",
+      "reason": "no eligible candidate has enough measured calls; first eligible candidate in operator order",
+      "rejected": [],
+      "role": "spec_compliance",
+      "runtime_digest": "15ad2c3e71af100833f091c4ff61cf61525112f1231026950f8e60a07dddc5b0",
+      "source": "evidence",
+      "table_digest": null
+    }
+  ]
+}

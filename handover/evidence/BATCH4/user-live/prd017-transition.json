@@ -1,0 +1,111 @@
+{
+  "files": [
+    {
+      "content": "def hello():\n    return 'hi'",
+      "filepath": "hello.py"
+    }
+  ],
+  "requests": [
+    {
+      "max_tokens": 1024,
+      "model": "qwen3.5:9B",
+      "num_ctx": 8192,
+      "response_format": null
+    }
+  ],
+  "transition": {
+    "changes": {
+      "allocation_window": {
+        "from": null,
+        "to": 4300
+      },
+      "capability_source": {
+        "from": null,
+        "to": "explicit_llm_chain"
+      },
+      "context_policy": {
+        "from": null,
+        "to": "adaptive"
+      },
+      "context_window": {
+        "from": null,
+        "to": 8192
+      },
+      "edit_protocol": {
+        "from": null,
+        "to": "full_file"
+      },
+      "endpoint": {
+        "from": null,
+        "to": "http://localhost:11434/v1"
+      },
+      "failed_cases": {
+        "from": null,
+        "to": []
+      },
+      "json_mode": {
+        "from": null,
+        "to": false
+      },
+      "model": {
+        "from": null,
+        "to": "qwen3.5:9B"
+      },
+      "native_tool_calls": {
+        "from": null,
+        "to": false
+      },
+      "output_tokens": {
+        "from": null,
+        "to": 1024
+      },
+      "qualification": {
+        "from": null,
+        "to": "MISSING"
+      },
+      "reasoning": {
+        "from": null,
+        "to": false
+      },
+      "reliable_multiline_json": {
+        "from": null,
+        "to": false
+      },
+      "runtime_digest": {
+        "from": null,
+        "to": "1339a3691749806a8a206997622d4e27c6e1cb61d5ca11f55501b993fa22d3b9"
+      },
+      "runtime_exact": {
+        "from": null,
+        "to": true
+      },
+      "streaming": {
+        "from": null,
+        "to": false
+      }
+    },
+    "fallback": true,
+    "from": null,
+    "initial": true,
+    "to": {
+      "allocation_window": 4300,
+      "capability_source": "explicit_llm_chain",
+      "context_policy": "adaptive",
+      "context_window": 8192,
+      "digest": "dd86b7be65e0b442a0413886e271c4c7e834b5844467494fa998ef3591f37338",
+      "edit_protocol": "full_file",
+      "endpoint": "http://localhost:11434/v1",
+      "failed_cases": [],
+      "json_mode": false,
+      "model": "qwen3.5:9B",
+      "native_tool_calls": false,
+      "output_tokens": 1024,
+      "qualification": "MISSING",
+      "reasoning": false,
+      "reliable_multiline_json": false,
+      "runtime_digest": "1339a3691749806a8a206997622d4e27c6e1cb61d5ca11f55501b993fa22d3b9",
+      "runtime_exact": true,
+      "streaming": false
+    }
+  }
+}

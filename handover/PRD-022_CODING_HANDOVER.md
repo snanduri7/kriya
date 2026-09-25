@@ -48,6 +48,8 @@ That is a guaranteed redundant retry, which the PRD forbids.
 
 Result: the first corrective retry succeeds, 2 Developer calls in total. The test is back to baseline, the parallel file is gone, and the owner carries the change.
 
+**Enforce (review correction).** An approved structured plan may declare the parallel file (a CREATE), and the enforce terminal commit materializes every planned path. A plan-declared file is therefore never deleted or dropped from the expected files. The restored test alone ends the redirect, since the test no longer references the parallel file. Tested directly on the restoration step, both with a plan (test restored, file kept) and without one (both).
+
 ### 3. Advisory post-generation near-duplicate findings
 - `workflow._record_post_generation_ownership_findings` checks, after each passing candidate, every file the candidate actually created (its real content is the work text) against the grounded owners PRD-021 found before planning.
 - Findings not already recorded are added to the ledger as GROUNDED, non-terminal obligations, to `ownership.finding` events and to the result.
@@ -62,12 +64,13 @@ When the approval gate fires anyway (human-in-the-loop, a sensitive path, the ri
 2. **Post-generation findings run where the grounded owners are known** (a run whose Planner ran on a TASK/ENHANCEMENT route). Enforce subtasks run with a predetermined plan: their plan-time findings are in the shared ledger and reach their review, but no second post-generation candidate scan runs per subtask.
 
 ## Tests (plain runner; you run pytest)
-`tests/test_prd022_ownership_recovery.py`, 5 passed:
+`tests/test_prd022_ownership_recovery.py`, 6 passed:
 - the first corrective retry carries the exact owner source, patch authority on the owner only, and nothing unrelated; that retry succeeds with the test restored and the parallel file removed;
 - a repeated violation still invalidates the choice (threshold 2, real classifier spied);
 - a near-duplicate reaches the Reviewer as advisory evidence, fails no gate, and a rejecting review does not change the finding;
 - a duplicate created without a planned finding is found after generation and reaches review;
-- a human approver sees the finding as evidence and approves.
+- a human approver sees the finding as evidence and approves;
+- a parallel file the approved plan declares is kept, and only the test is restored.
 
 Mutation checks, each caught:
 - no restoration;

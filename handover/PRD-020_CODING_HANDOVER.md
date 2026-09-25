@@ -51,6 +51,15 @@ Requirements are seeded PENDING at JUDGMENT, the lowest authority, so the verifi
 4. **Coverage gaps are not plan errors.** A requirement no subtask maps to stays terminally active. Rejecting the plan would add repair loops without making the requirement any safer.
 5. **Enforce adds one verifier call** at the terminal gates, only when `spec_compliance_enabled`. With it disabled, requirements stay PENDING, and the policy decides.
 
+### `kriya fix` has no requirement set (review correction)
+`fix` runs the engine with Kriya's own placeholder goal ("Fix compilation/test failure") around the error log.
+Deriving a "requirement" from that would contradict this PRD's premise, and under production (unknown=block) it
+would block every `fix` whose verifier omitted the id. The flag `run_generation_workflow(requirements_from_goal=False)`
+travels through the direct wrap's call arguments to the unit call, so plan digests are untouched, and `fix` sets it.
+The other synthesized-goal callers were checked: milestone and enforce units carry no requirement goal, and a
+proposal's goal is user-authored. Two tests prove it: the engine derives nothing, and `kriya fix` passes the flag
+(mutation: flag not passed, caught).
+
 ## Residuals
 - **Enforce terminal verifier size.** The enforce `original_requirements` gate sends every file the plan leaves in the
   candidate in one verifier call. For a very large candidate, PRD-016 refuses that call before inference. The
@@ -58,11 +67,15 @@ Requirements are seeded PENDING at JUDGMENT, the lowest authority, so the verifi
   message carries the verifier's reason (`[verifier: ...]`), so the cause is visible. Batching the verifier over
   file groups is a possible refinement if live evidence shows it matters.
 
+- **Production effect.** Every production (enforce) run now makes one whole-candidate verifier call at its terminal
+  gates, and with unknown=block a missing verdict refuses success. A production-profile brownfield run (demo-03) is
+  recommended as part of live verification, so the real effect is seen before VERIFIED.
+
 ## Resume effect (disclosed)
 The ledger now carries requirement records and `Subtask` has a new field. A structured plan approved before this change hashes differently. A direct checkpoint's effective ledger from before this change has no requirement records, so the resumed run seeds them PENDING.
 
 ## Tests (plain runner; you run pytest)
-- `tests/test_prd020_requirement_lineage.py`: 22 tests.
+- `tests/test_prd020_requirement_lineage.py`: 24 tests (including the `fix` placeholder-goal pair).
   - Derivation: list and prose, determinism and digest binding, code spans and abbreviations, numbered items and continuations, clarifications.
   - Ledger and policy: the verifier outranks the seed, a later violation is a regression and blocks, policy matrix, the generic aggregator skips the kind, snapshot round trip with idempotent re-seeding, lineage is citation only.
   - A missing claim counts only for a concrete requirement (parsing and the agent: general prose never fails the gate).

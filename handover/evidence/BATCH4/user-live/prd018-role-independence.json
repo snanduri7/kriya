@@ -1,0 +1,132 @@
+{
+  "override": {
+    "groups": [
+      {
+        "identity": "exact",
+        "model": "qwen3-coder:30b",
+        "roles": [
+          "architect",
+          "developer",
+          "planner",
+          "reviewer",
+          "skill_gap"
+        ],
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a"
+      },
+      {
+        "identity": "exact",
+        "model": "qwen3.5:9B",
+        "roles": [
+          "run_verifier",
+          "spec_compliance"
+        ],
+        "runtime_digest": "647bff5e52adc9415fb5e545edbe33212cf556bd0cf189e64dba73b0e37243f6"
+      }
+    ],
+    "independent": false,
+    "independent_roles_required": [
+      "run_verifier",
+      "spec_compliance"
+    ],
+    "policy_required": true,
+    "roles": {
+      "architect": {
+        "model": "qwen3-coder:30b",
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+        "runtime_exact": true
+      },
+      "developer": {
+        "model": "qwen3-coder:30b",
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+        "runtime_exact": true
+      },
+      "planner": {
+        "model": "qwen3-coder:30b",
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+        "runtime_exact": true
+      },
+      "reviewer": {
+        "model": "qwen3-coder:30b",
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+        "runtime_exact": true
+      },
+      "run_verifier": {
+        "model": "qwen3.5:9B",
+        "runtime_digest": "647bff5e52adc9415fb5e545edbe33212cf556bd0cf189e64dba73b0e37243f6",
+        "runtime_exact": true
+      },
+      "skill_gap": {
+        "model": "qwen3-coder:30b",
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+        "runtime_exact": true
+      },
+      "spec_compliance": {
+        "model": "qwen3.5:9B",
+        "runtime_digest": "647bff5e52adc9415fb5e545edbe33212cf556bd0cf189e64dba73b0e37243f6",
+        "runtime_exact": true
+      }
+    },
+    "second_opinion_is_verification": false,
+    "violations": []
+  },
+  "same_model": {
+    "groups": [
+      {
+        "identity": "exact",
+        "model": "qwen3-coder:30b",
+        "roles": [
+          "architect",
+          "developer",
+          "planner",
+          "reviewer",
+          "run_verifier",
+          "skill_gap",
+          "spec_compliance"
+        ],
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a"
+      }
+    ],
+    "independent": false,
+    "independent_roles_required": [],
+    "policy_required": false,
+    "roles": {
+      "architect": {
+        "model": "qwen3-coder:30b",
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+        "runtime_exact": true
+      },
+      "developer": {
+        "model": "qwen3-coder:30b",
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+        "runtime_exact": true
+      },
+      "planner": {
+        "model": "qwen3-coder:30b",
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+        "runtime_exact": true
+      },
+      "reviewer": {
+        "model": "qwen3-coder:30b",
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+        "runtime_exact": true
+      },
+      "run_verifier": {
+        "model": "qwen3-coder:30b",
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+        "runtime_exact": true
+      },
+      "skill_gap": {
+        "model": "qwen3-coder:30b",
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+        "runtime_exact": true
+      },
+      "spec_compliance": {
+        "model": "qwen3-coder:30b",
+        "runtime_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+        "runtime_exact": true
+      }
+    },
+    "second_opinion_is_verification": false,
+    "violations": []
+  }
+}

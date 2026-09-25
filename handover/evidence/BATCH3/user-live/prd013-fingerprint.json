@@ -1,0 +1,68 @@
+{
+  "drifted": {
+    "adapter_version": "kriya-openai-compat/2",
+    "alias": "qwen3-coder:30b",
+    "artifact_digest": "sha256:06c1097efce0431c2045fe7b2e5108366e43bee1b4603a7aded8f21689e90bca",
+    "chat_template": "renderer:qwen3-coder",
+    "configured_context_window": 4096,
+    "digest": "a68faa4057bd27559b84f67a3f86cb01a1436031a7f35e636527819d5df781ca",
+    "effective_context_window": 4096,
+    "endpoint": "http://localhost:11434/v1",
+    "exact": true,
+    "family": "qwen3moe",
+    "kriya_protocol": "capabilities-sha256:14c4e497e2628e2640513fe81e767d1c6910db77d2a4e866e6f77648c5aee3a0",
+    "missing_components": [],
+    "model_context_length": 262144,
+    "model_format": "gguf",
+    "parameter_size": "30.5B",
+    "probe_errors": [],
+    "provider": "ollama",
+    "provider_version": "0.34.2",
+    "quantization": "Q4_K_M",
+    "runtime_parameters_digest": "sha256:da6082e309c09dfcf08f90fdfb26a8501f12e1f264aaae681b29fd2579c9d28b",
+    "schema_version": 1,
+    "served_capabilities": [
+      "completion",
+      "tools"
+    ],
+    "tokenizer_digest": "sha256:5e50ba4472f20e5cf4e76414c33b6937086a022a4f4ce7be4eba80472199bf6b",
+    "tokenizer_identity": "gpt2/qwen2",
+    "tool_call_parser": "parser:qwen3-coder",
+    "weights_digest": "sha256:1194192cf2a187eb02722edcc3f77b11d21f537048ce04b67ccf8ba78863006a"
+  },
+  "first": {
+    "adapter_version": "kriya-openai-compat/2",
+    "alias": "qwen3-coder:30b",
+    "artifact_digest": "sha256:06c1097efce0431c2045fe7b2e5108366e43bee1b4603a7aded8f21689e90bca",
+    "chat_template": "renderer:qwen3-coder",
+    "configured_context_window": 8192,
+    "digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+    "effective_context_window": 8192,
+    "endpoint": "http://localhost:11434/v1",
+    "exact": true,
+    "family": "qwen3moe",
+    "kriya_protocol": "capabilities-sha256:14c4e497e2628e2640513fe81e767d1c6910db77d2a4e866e6f77648c5aee3a0",
+    "missing_components": [],
+    "model_context_length": 262144,
+    "model_format": "gguf",
+    "parameter_size": "30.5B",
+    "probe_errors": [],
+    "provider": "ollama",
+    "provider_version": "0.34.2",
+    "quantization": "Q4_K_M",
+    "runtime_parameters_digest": "sha256:da6082e309c09dfcf08f90fdfb26a8501f12e1f264aaae681b29fd2579c9d28b",
+    "schema_version": 1,
+    "served_capabilities": [
+      "completion",
+      "tools"
+    ],
+    "tokenizer_digest": "sha256:5e50ba4472f20e5cf4e76414c33b6937086a022a4f4ce7be4eba80472199bf6b",
+    "tokenizer_identity": "gpt2/qwen2",
+    "tool_call_parser": "parser:qwen3-coder",
+    "weights_digest": "sha256:1194192cf2a187eb02722edcc3f77b11d21f537048ce04b67ccf8ba78863006a"
+  },
+  "second_digest": "5a608316008beb1694da129edc76a765c2975f9d66a6b8bcb849291ae1c20c9a",
+  "stale_reasons": [
+    "the runtime fingerprint changed since qualification"
+  ]
+}
