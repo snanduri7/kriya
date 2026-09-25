@@ -175,6 +175,31 @@ agent_llms:
       base_url: "http://localhost:11434/v1"
 ```
 
+### 2.0a Where logs go (`logging`)
+Kriya never writes log files into the directory you run it from.
+
+```yaml
+logging:
+  level: "INFO"
+  directory: null          # null = ~/.kriya/logs; otherwise an absolute path (a relative one is refused)
+  file_enabled: true       # application log: <directory>/kriya.log
+  run_file_enabled: true   # per-run log: <directory>/runs/<run_id>/kriya.log
+```
+
+- **Which directory wins:** the `KRIYA_LOG_DIR` environment variable, then `logging.directory`, then `~/.kriya/logs`.
+- **A repository cannot redirect logs.** A `logging.directory` set in a repository's `kriya.yaml` is a security setting:
+  it needs `kriya authority approve` before it takes effect.
+- **Mutating runs** (`generate`, `fix`, milestones, recovery) each get their own run log. Its first line names the run
+  ID and the workspace.
+- **Read-only commands** (`runs status`, `authority inspect`, `doctor`) write only the application log, or nothing at
+  all.
+- **`kriya doctor --production`** logs to the terminal only. It checks that the log directory is valid and writable
+  (`persistence.logs`) without creating it.
+- **Errors:** an invalid or unwritable log directory stops the command with an "Error configuring logging" message.
+  Kriya never falls back to `./logs`.
+- **`logging.file` is deprecated and ignored.** It still loads, and a warning names the real location. Existing
+  `./logs` directories are left alone, never migrated or deleted.
+
 ### 2.1 Per-Role Model Selection (`agent_llms`)
 Planner, Architect, Developer, Reviewer, RunVerifier, and SkillGapAgent (skill-gap extraction and conflict-checking) don't have to share one model - each is independently configurable, with its own optional escalation chain.
 

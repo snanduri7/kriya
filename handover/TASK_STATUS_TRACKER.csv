@@ -10,7 +10,7 @@ PRD-008,Resume Integrity and Deterministic Invalidation,Wave 2,P0,PRD-007,NOT RE
 DEF-DEV-EMPTY-ARRAY,Developer [] answer written as file content (false success),Wave 2,P0,PRD-008,NOT REQUIRED,VERIFIED,fd42e01 (tested; full suite 5106/0/8),PYTEST_VERIFIED,NOT_REQUIRED
 PRD-008A,Unified ExecutionPlan / WorkUnit Orchestration,Wave 2,P0,PRD-008 DEF-DEV-EMPTY-ARRAY,REQUIRED,PYTEST_VERIFIED,e1d0e4c eacac0d 933d11b 39cb5c2 2181aec 5f3c846 6a90ff1 594fa16 123d78c b99db27 (tested b99db27; full suite 5200/0/8),PYTEST_VERIFIED,PENDING
 PRD-009,Sealed Production Runtime Profile,Wave 2,P0,PRD-008,NOT REQUIRED,VERIFIED,d7163de reopened; 3fb4749 (tested edef49e; focused+full PASSED),PYTEST_VERIFIED,NOT_REQUIRED
-PRD-010,kriya doctor --production Deployment Gate,Wave 2,P0,PRD-009,REQUIRED,VERIFIED,aa492ab reopened; d22cb8e 0aa946a edef49e (tested edef49e; focused+full PASSED),PYTEST_VERIFIED,LIVE_VERIFIED
+PRD-010,kriya doctor --production Deployment Gate,Wave 2,P0,PRD-009,REQUIRED,READY_FOR_PYTEST_VERIFICATION,aa492ab reopened; d22cb8e 0aa946a edef49e (verified edef49e); logging-location closure pending pytest,PYTEST_VERIFIED@edef49e,LIVE_VERIFIED@edef49e
 PRD-011,OCI Toolchain Parity and Versioned Execution Images,Wave 3,P0,PRD-010,REQUIRED,IMPLEMENTING,54ad798 reopened,,
 PRD-012,Production Egress and MCP Containment Enforcement,Wave 3,P0,PRD-011,REQUIRED,NOT_STARTED,,,
 PRD-013,Exact Local Model Runtime Fingerprint,Wave 4,P0,PRD-012,REQUIRED,NOT_STARTED,,,

@@ -406,9 +406,16 @@ skills:
   load_global: true
   load_cwd: true
 
+# Kriya never writes logs into the directory you run it from. Log directory:
+# KRIYA_LOG_DIR env var > logging.directory (absolute path) > ~/.kriya/logs.
+# Application log: <dir>/kriya.log; each mutating run also gets
+# <dir>/runs/<run_id>/kriya.log. `logging.file` is deprecated and ignored.
+# Existing ./logs directories are left in place, never migrated or deleted.
 logging:
   level: "INFO"
-  file: "./logs/kriya.log"
+  directory: null
+  file_enabled: true
+  run_file_enabled: true
 
 # Stage 0 KnowledgeGuard - scans a goal for library/version mentions that postdate
 # training_cutoff before generation starts.

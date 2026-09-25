@@ -298,3 +298,116 @@ dir (`paths.*` and `plugins.directory` do). Changing it moves log output for eve
 
 Plain-runner: `test_production_doctor` 51/0 (parametrized cases expanded, real-Docker tests included),
 `test_doctor_command` 8/0.
+
+## Logging location closure (2026-09-25)
+
+Closes the residual recorded above: the packaged `logging.file: ./logs/kriya.log` resolved against the process CWD, so
+every command wrote `logs/kriya.log` into the directory it ran from. This follows the user's "PRD-010 Logging
+Location Closure" and the "Logging Config Addendum".
+
+**Design** (`kriya/core/logging_setup.py`, the one owner of log locations):
+
+**Log directory,** first match wins; each value is canonicalized and a relative one is a typed `LogDirectoryError`,
+never CWD-anchored:
+1. `KRIYA_LOG_DIR`;
+2. `logging.directory`: absolute, with `~` expanded and realpath'd once in `resolve_config_state()`, so the value
+   SEC-009 digests is exactly the directory opened;
+3. `~/.kriya/logs`.
+   - This matches the existing `~/.kriya/authority` and `~/.kriya/mcp_approvals` home.
+   - `platformdirs` is not installed, and adding a dependency would change the lock file.
+
+**What gets written, and when:**
+- **Application log:** `<dir>/kriya.log`, controlled by `logging.file_enabled`.
+- **Run log:** `<dir>/runs/<run_id>/kriya.log`, controlled by `logging.run_file_enabled`.
+  - It is attached by `begin_mutating_run()` on the new-run branch only, after the RunRecord is saved.
+  - It is detached after the terminal-record and retention lines, so they land in it.
+  - Its first line is `# Kriya run <run_id> workspace <path>`, so runs from different workspaces are distinguishable.
+  - `run_id` is validated with `persistence._valid_run_id` before it becomes a path segment.
+  - A run log that cannot be opened is warned and skipped; it never alters the run.
+- **Invalid or unwritable directory:** `LogDirectoryError` becomes the clean CLI error "Error configuring logging" and
+  exit 1. There is never a fallback to `./logs`.
+- **Console and `--json`:** console logging is unchanged, and `--json` stdout is unaffected; logs go to stderr and
+  files only.
+- **Commands without a run:** `doctor` (plain) writes only the application log. `runs`/`authority` return before
+  logging is configured. `doctor --production` stays console-only and gets a new required check, `persistence.logs`:
+  resolve, then probe without creating, then check the app log file is writable. It WARNs when both log files are
+  disabled.
+
+**SEC-009 classification:**
+- `logging.directory`: any string is SECURITY_AUTHORITY (a filesystem write target); `null` is overridden to
+  REPOSITORY_SAFE.
+- `logging.file_enabled` and `logging.run_file_enabled` are REPOSITORY_SAFE (turning logging off removes a
+  capability, the `logging.file: null` precedent).
+- This follows CLAUDE.md's new-field rule. No existing boundary changed.
+- The existing production approval in `~/kriya-live-validation/prd010-doctor-live` was re-checked after the change and
+  still loads (the packaged default is trusted and not in the security-field set).
+
+**`logging.file`** is deprecated and never opened.
+- It stays in the schema with its SEC-009 classification unchanged, so the existing user configs and the SEC-009
+  containment tests keep working. A warning names the real location.
+- Honoring it would have failed the closure's own required behaviour: an auto-discovered repo config's
+  `./logs/kriya.log` anchors to that repo, which is the CWD.
+- The two `~/kriya-live-validation` configs that set it now log to `~/.kriya/logs` instead.
+- Legacy `./logs` directories are never migrated or deleted.
+
+**Tests:**
+- `tests/test_logging_location.py` (23):
+  - precedence env > config > default, and the same path from four CWDs;
+  - relative/empty config and env values are typed errors; load-time canonicalization through a symlink;
+  - load rejects a relative directory with nothing created; a repository `logging.directory` needs security authority;
+  - null/disabled fields are repository-safe; the packaged default names no relative file;
+  - the app log goes to the canonical dir with the CWD left untouched;
+  - an unwritable directory is a typed error, and exit 1 through the CLI;
+  - each run gets its own run log keyed by `run_id` (two workspaces, detached after the run, lines also in the app log);
+  - `run_file_enabled: false` writes no run log, and a run with logging never configured attaches nothing;
+  - generate bootstrap creates no `cwd/logs` (only its own `.kriya/` run state; the `--json` stdout contract is intact;
+    the run log is keyed to the run record's id);
+  - `doctor --production` from two CWDs;
+  - the plain doctor, `runs status` and `authority inspect` leave the workspace byte tree unchanged, including `.git`.
+- The root logger is cleared in each test: `configure_logging()` is a no-op when handlers exist, and pytest installs
+  its own.
+- `tests/test_production_doctor.py` (+4): the log check passes without creating the directory; a relative env value
+  fails and blocks; an unwritable directory fails; both files disabled is WARN. The pinned check-ID list gains
+  `persistence.logs`.
+- `tests/conftest.py` (new): a session-scoped autouse fixture points `KRIYA_LOG_DIR` at a temp dir, so the suite,
+  including CLI subprocesses, never writes the real `~/.kriya/logs`.
+
+**Assertion-direction log:**
+- `test_cli_logging_file_approval_reaches_configure_logging_end_to_end` was replaced by
+  `test_cli_logging_directory_approval_reaches_configure_logging_end_to_end`.
+  - The same two-direction SEC-009 proof now runs on the field that actually decides the log location: denied means
+    nothing is created, approved means the target is written.
+  - It adds "no `ws/logs`".
+- New `test_cli_deprecated_logging_file_is_never_opened`: an in-workspace `logging.file` loads but writes nothing into
+  the workspace.
+- This is stricter, not weaker. The `logging.file` containment tests in `test_sec009_config_authority.py` are
+  unchanged.
+
+**Evidence:**
+- **Mutation checks,** each caught:
+  - accepting a relative directory;
+  - removing the run-log attachment (2 tests fail);
+  - restoring a CWD-relative `logging.file` handler (2 tests fail).
+- **Plain-runner** (HOME and KRIYA_LOG_DIR in the scratchpad):
+
+| Suite | Result |
+|---|---|
+| `test_logging_location` | 23/0 |
+| `test_production_doctor` | 53/0, plus the 2 real-Docker tests 2/0 with the real HOME |
+| `test_doctor_command` | 8/0 |
+| `test_sec009_config_authority` | 51/0 |
+| `test_sec009_p2_authority_approval` | 36/0 |
+| `test_config` | 31/0 |
+| `test_generate_json_contract` | 17/0 |
+| `test_prd008_recovery` | 23/0 |
+| `test_bootstrap_contract` | 18/0 |
+| `test_cli_smoke` | 65/0 |
+| `test_run_ownership` | 33/0 |
+| `test_repl` | 19 run; 12 need pytest's `capsys` and were not run here |
+
+- Pre-existing and not touched: ruff F401 (an unused `compute_violations` import in `authority_inspect`).
+
+**Focused command:**
+```bash
+.venv/bin/pytest -ra tests/test_logging_location.py tests/test_production_doctor.py tests/test_doctor_command.py tests/test_sec009_config_authority.py tests/test_sec009_p2_authority_approval.py tests/test_config.py tests/test_config_command.py tests/test_generate_json_contract.py tests/test_prd008_recovery.py tests/test_run_ownership.py tests/test_bootstrap_contract.py tests/test_cli_smoke.py tests/test_repl.py
+```

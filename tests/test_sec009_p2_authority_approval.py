@@ -509,22 +509,26 @@ def test_27_older_approval_without_logging_file_in_security_subset_does_not_gran
 
 
 @pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
-def test_cli_logging_file_approval_reaches_configure_logging_end_to_end(tmp_path, monkeypatch):
+def test_cli_logging_directory_approval_reaches_configure_logging_end_to_end(tmp_path, monkeypatch):
     """Real production CLI, real approval artifact, real outside-workspace
     target: proves the SIDE_EFFECT invariant in both directions through the
     actual entry point - denied means no directory/file, approved means the
-    real log target is created. `kriya plugins` never reaches an LLM call."""
+    real log target is created. `kriya plugins` never reaches an LLM call.
+    (PRD-010 logging closure: moved from the now-ignored logging.file to
+    logging.directory, the field that decides where logs are written.)"""
+    monkeypatch.delenv("KRIYA_LOG_DIR", raising=False)  # config, not env, must decide
     home = tmp_path / "_home"
     ws = tmp_path / "repo"
     ws.mkdir()
     outside_dir = tmp_path / "cli_log_outside"
-    target = outside_dir / "attacker.log"
-    _write_yaml(ws / "kriya.yaml", {"logging": {"file": str(target)}})
-    env = {"KRIYA_AUTHORITY_HOME": str(home)}
+    target = outside_dir / "kriya.log"
+    _write_yaml(ws / "kriya.yaml", {"logging": {"directory": str(outside_dir)}})
+    env = {"KRIYA_AUTHORITY_HOME": str(home), "HOME": str(tmp_path / "_user_home")}
 
     code, out, err = _run_cli(["plugins"], cwd=str(ws), extra_env=env)
     assert code != 0
     assert "Configuration-authority denied" in err
+    assert "logging.directory" in err
     assert not outside_dir.exists()
     assert not target.exists()
 
@@ -535,7 +539,25 @@ def test_cli_logging_file_approval_reaches_configure_logging_end_to_end(tmp_path
 
     code2, out2, err2 = _run_cli(["plugins"], cwd=str(ws), extra_env=env)
     assert code2 == 0, err2
-    assert target.exists(), "approved logging.file target must actually be created by configure_logging()"
+    assert target.exists(), "approved logging.directory must actually receive the application log"
+    assert not (ws / "logs").exists()
+
+
+@pytest.mark.skipif(not os.path.exists(KRIYA_BIN), reason="kriya console script not installed beside active Python")
+def test_cli_deprecated_logging_file_is_never_opened(tmp_path, monkeypatch):
+    """An approved, in-workspace logging.file loads (existing configs keep
+    working) but is ignored: nothing is written into the workspace."""
+    log_dir = tmp_path / "canonical_logs"
+    monkeypatch.setenv("KRIYA_LOG_DIR", str(log_dir))
+    ws = tmp_path / "repo"
+    ws.mkdir()
+    _write_yaml(ws / "kriya.yaml", {"logging": {"file": "./logs/kriya.log"}})
+
+    code, out, err = _run_cli(["plugins"], cwd=str(ws), extra_env={"HOME": str(tmp_path / "_user_home")})
+    assert code == 0, err
+    assert not (ws / "logs").exists()
+    assert (log_dir / "kriya.log").exists()
+    assert "logging.file is deprecated and ignored" in err
 
 
 # --- Resume: same authority resolver, no stale-approval inheritance --------

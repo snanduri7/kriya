@@ -141,6 +141,9 @@ _REPOSITORY_SAFE_FIELDS: frozenset = frozenset({
     ("autonomy", "acquisition_cpu_seconds"), ("autonomy", "acquisition_memory_mb"),
     ("skills", "load_global"), ("skills", "load_cwd"),
     ("logging", "level"),
+    # Turning log files off removes a capability (same reasoning as
+    # `logging.file: null`); logging.directory is value-sensitive - see below.
+    ("logging", "file_enabled"), ("logging", "run_file_enabled"),
     # logging.file is NOT listed here - its classification depends on a
     # resolved value (in-workspace vs. escaping), exactly like
     # paths.{skills,memory,logs} below. config.py always supplies an
@@ -218,6 +221,10 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # labeling and as the fail-closed static fallback if config.py's
     # runtime override were ever skipped by a bug.
     ("logging", "file"),
+    # logging.directory (PRD-010 logging closure): any configured directory
+    # is a filesystem write target; config.py overrides only an explicit
+    # null to REPOSITORY_SAFE.
+    ("logging", "directory"),
     # SEC-004 (2026-09-13): every mcp_lifecycle.* bound is security-
     # relevant - a repository weakening a timeout/output-limit/resource
     # ceiling reopens exactly the hang/leak/resource-exhaustion classes

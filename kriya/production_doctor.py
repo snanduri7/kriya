@@ -380,6 +380,7 @@ PRODUCTION_DOCTOR_CHECK_IDS = (
     "workspace.identity_lock",
     "persistence.checkpoints",
     "persistence.traces",
+    "persistence.logs",
     "capacity.workspace",
     "capacity.temp",
     "git.worktree",
@@ -482,6 +483,42 @@ def _check_checkpoints(ctx: _Context) -> DoctorCheck:
 
 def _check_traces(ctx: _Context) -> DoctorCheck:
     return _store_check("persistence.traces", os.path.realpath(ctx.cfg.paths.logs))
+
+
+def _check_logs(ctx: _Context) -> DoctorCheck:
+    """The log directory Kriya would use (KRIYA_LOG_DIR > logging.directory >
+    ~/.kriya/logs) is valid, and exists or can be created, and is writable,
+    without the doctor creating it."""
+    from kriya.core.logging_setup import LogDirectoryError, application_log_path, resolve_log_directory
+
+    remediation = (
+        "Set logging.directory (or KRIYA_LOG_DIR) to an absolute, writable directory, "
+        "or make the default ~/.kriya/logs writable."
+    )
+    logging_cfg = ctx.cfg.logging
+    base = {
+        "file_enabled": logging_cfg.file_enabled,
+        "run_file_enabled": logging_cfg.run_file_enabled,
+        "deprecated_logging_file_ignored": logging_cfg.file,
+    }
+    try:
+        log_dir, source = resolve_log_directory(ctx.cfg)
+    except LogDirectoryError as error:
+        return _check("persistence.logs", CheckStatus.FAIL, evidence={**base, "error": str(error)},
+                      remediation=remediation)
+    evidence = {**base, "source": source}
+    try:
+        evidence.update(_store_probe(log_dir))
+        app_log = application_log_path(log_dir)
+        if os.path.exists(app_log) and not os.access(app_log, os.W_OK):
+            raise PermissionError(f"{app_log} exists and is not writable")
+    except OSError as error:
+        return _check("persistence.logs", CheckStatus.FAIL, evidence={**evidence, "path": log_dir, "error": str(error)},
+                      remediation=remediation)
+    if not (logging_cfg.file_enabled or logging_cfg.run_file_enabled):
+        return _check("persistence.logs", CheckStatus.WARN, evidence=evidence,
+                      remediation="Enable logging.file_enabled or logging.run_file_enabled to keep a durable log.")
+    return _check("persistence.logs", CheckStatus.PASS, evidence=evidence, remediation=remediation)
 
 
 def _capacity_check(check_id: str, path: str) -> DoctorCheck:
@@ -874,6 +911,7 @@ _CHECKS: Tuple[Tuple[str, bool, Callable[[_Context], DoctorCheck]], ...] = (
     ("workspace.identity_lock", True, _check_identity_lock),
     ("persistence.checkpoints", True, _check_checkpoints),
     ("persistence.traces", True, _check_traces),
+    ("persistence.logs", True, _check_logs),
     ("capacity.workspace", True, _check_workspace_capacity),
     ("capacity.temp", True, _check_temp_capacity),
     ("git.worktree", True, _check_git_worktree),

@@ -25,6 +25,7 @@ from kriya.control.persistence import load_run_record, save_run_record
 from kriya.control.run_ownership import acquire_run_lock
 from kriya.control.run_record import IllegalRunTransitionError, RunLifecycle, RunRecord
 from kriya.control.workspace_identity import workspace_identity
+from kriya.core.logging_setup import run_log
 
 logger = logging.getLogger(__name__)
 
@@ -344,28 +345,31 @@ def begin_mutating_run(
         )
         save_run_record(canonical, record, expected_revision=None)
         lease.record = record
-        token = _ACTIVE_RUN.set(context)
-        try:
-            yield context
-        except BaseException as error:
+        # The run log wraps the whole run, so terminal-record and retention
+        # lines land in it; it never alters the run (see run_log).
+        with run_log(context.run_id, canonical):
+            token = _ACTIVE_RUN.set(context)
             try:
-                _fail_active_run(context, error)
-            except Exception as record_error:  # never mask the run's own error
-                logger.error("Run %s: terminal failure record not persisted: %s", context.run_id, record_error)
-            raise
-        finally:
-            try:
-                _fail_active_run(context)
-            except Exception as record_error:
-                logger.error("Run %s: terminal record not persisted: %s", context.run_id, record_error)
-            else:
-                from kriya.control.retention import prune_after_run
-                prune_after_run(canonical, context.run_id)
+                yield context
+            except BaseException as error:
+                try:
+                    _fail_active_run(context, error)
+                except Exception as record_error:  # never mask the run's own error
+                    logger.error("Run %s: terminal failure record not persisted: %s", context.run_id, record_error)
+                raise
             finally:
-                # Always expire the capability with the lock, so a same-process
-                # caller (e.g. the REPL) can never reuse it without ownership.
-                lease.active = False
-                _ACTIVE_RUN.reset(token)
+                try:
+                    _fail_active_run(context)
+                except Exception as record_error:
+                    logger.error("Run %s: terminal record not persisted: %s", context.run_id, record_error)
+                else:
+                    from kriya.control.retention import prune_after_run
+                    prune_after_run(canonical, context.run_id)
+                finally:
+                    # Always expire the capability with the lock, so a same-process
+                    # caller (e.g. the REPL) can never reuse it without ownership.
+                    lease.active = False
+                    _ACTIVE_RUN.reset(token)
 
 
 @contextmanager

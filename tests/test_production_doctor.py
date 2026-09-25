@@ -163,7 +163,7 @@ def test_check_ids_are_pinned_unique_and_always_complete(tmp_path):
     assert len(ids) == len(set(ids))
     assert PRODUCTION_DOCTOR_CHECK_IDS == (
         "profile.production", "plugins.core_tools", "workspace.identity_lock",
-        "persistence.checkpoints", "persistence.traces", "capacity.workspace",
+        "persistence.checkpoints", "persistence.traces", "persistence.logs", "capacity.workspace",
         "capacity.temp", "git.worktree", "isolation.candidate_worktree", "toolchain.required",
         "containment.oci_smoke", "containment.no_host_fallback", "egress.policy",
         "model.connectivity", "model.runtime_fingerprint", "model.qualification",
@@ -636,6 +636,48 @@ def test_plain_doctor_keeps_file_logging():
         CliRunner().invoke(main, ["doctor"])
     configure.assert_called_once()
     assert configure.call_args.kwargs.get("file_logging", True) is True
+
+
+def test_log_directory_check_passes_without_creating_the_directory(tmp_path, monkeypatch):
+    log_dir = tmp_path / "not-yet" / "logs"
+    monkeypatch.setenv("KRIYA_LOG_DIR", str(log_dir))
+    check = _checks(_run(tmp_path))["persistence.logs"]
+    assert check.status is CheckStatus.PASS
+    assert check.evidence["source"] == "env"
+    assert check.evidence["exists"] is False
+    assert not log_dir.exists()
+
+
+def test_a_relative_log_directory_fails_the_log_check(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRIYA_LOG_DIR", "relative/logs")
+    report = _run(tmp_path)
+    check = _checks(report)["persistence.logs"]
+    assert check.status is CheckStatus.FAIL and check.required
+    assert "absolute" in check.evidence["error"]
+    assert "persistence.logs" in _blocking(report)
+
+
+def test_an_unwritable_log_directory_fails_the_log_check(tmp_path, monkeypatch):
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)
+    monkeypatch.setenv("KRIYA_LOG_DIR", str(locked / "logs"))
+    try:
+        if os.access(locked, os.W_OK):
+            pytest.skip("running with privileges that ignore directory permissions")
+        check = _checks(_run(tmp_path))["persistence.logs"]
+    finally:
+        locked.chmod(0o700)
+    assert check.status is CheckStatus.FAIL
+
+
+def test_log_files_disabled_is_a_warning(tmp_path, monkeypatch):
+    monkeypatch.setenv("KRIYA_LOG_DIR", str(tmp_path / "logs"))
+    cfg = _production_cfg(tmp_path)
+    cfg.logging.file_enabled = False
+    cfg.logging.run_file_enabled = False
+    check = _checks(_run(tmp_path, cfg=cfg))["persistence.logs"]
+    assert check.status is CheckStatus.WARN
 
 
 def test_json_requires_production_mode(tmp_path):

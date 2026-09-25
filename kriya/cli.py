@@ -23,6 +23,7 @@ from kriya.control.run_ownership import WorkspaceLockHeldError
 from kriya.control.commit_state import UncertainWorkspaceStateError
 from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
+from kriya.core.logging_setup import LogDirectoryError, configure_logging
 from kriya.plugins.plugin import PluginManager
 from kriya.prompt import PromptEngine
 from kriya.skills import SkillEngine
@@ -84,32 +85,14 @@ async def _initialize_plugins_tolerant(kernel: Kernel, pm: PluginManager) -> Dic
             results[p.name] = e
     return results
 
-def configure_logging(cfg: AppConfig, file_logging: bool = True) -> None:
-    """Initializes root logging handlers (console + optional file) from AppConfig.logging.
-    file_logging=False keeps it console-only (the non-mutating production doctor)."""
-    if logging.getLogger().handlers:
-        return
-
-    level = getattr(logging, cfg.logging.level.upper(), logging.INFO)
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-
-    handlers: List[logging.Handler] = []
-
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setFormatter(formatter)
-    handlers.append(console_handler)
-
-    if file_logging and cfg.logging.file:
-        try:
-            log_path = os.path.abspath(cfg.logging.file)
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
-            file_handler = logging.FileHandler(log_path)
-            file_handler.setFormatter(formatter)
-            handlers.append(file_handler)
-        except Exception as e:
-            click.secho(f"Warning: Failed to initialize log file '{cfg.logging.file}': {e}", fg="yellow", err=True)
-
-    logging.basicConfig(level=level, handlers=handlers)
+def _bootstrap_logging(cfg: AppConfig, file_logging: bool = True) -> None:
+    """configure_logging() with a typed log-directory failure turned into a
+    clean CLI error instead of a traceback."""
+    try:
+        configure_logging(cfg, file_logging=file_logging)
+    except LogDirectoryError as error:
+        click.secho(f"Error configuring logging: {error}", fg="red", err=True)
+        sys.exit(1)
 
 @click.group(invoke_without_command=True)
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to Kriya configuration YAML file.')
@@ -147,9 +130,8 @@ def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -
         click.secho(f"Error loading configuration: {e}", fg="red", err=True)
         sys.exit(1)
     if ctx.invoked_subcommand != 'doctor':
-        # doctor configures its own logging: --production must not create a
-        # log file (the packaged ./logs/kriya.log resolves against the CWD).
-        configure_logging(ctx.obj['config'])
+        # doctor configures its own logging: --production writes no log file.
+        _bootstrap_logging(ctx.obj['config'])
 
     # No subcommand given: drop into the interactive session, same as bare
     # `python`/`node`/`claude` - but only on a real interactive terminal.
@@ -215,7 +197,7 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
         sys.exit(1)
     if production:
         if config_error is None:
-            configure_logging(ctx.obj['config'], file_logging=False)
+            _bootstrap_logging(ctx.obj['config'], file_logging=False)
         from kriya.production_doctor import (
             config_load_failure_report,
             render_production_report,
@@ -235,7 +217,7 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
         return
 
     cfg: AppConfig = ctx.obj['config']
-    configure_logging(cfg)
+    _bootstrap_logging(cfg)
     click.secho("=== Kriya Doctor ===", bold=True)
     
     # 1. Check directories

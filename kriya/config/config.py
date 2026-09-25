@@ -84,8 +84,15 @@ class SkillsConfig(BaseModel):
     load_cwd: bool = Field(default=True)
 
 class LoggingConfig(BaseModel):
+    """Log locations are owned by kriya/core/logging_setup.py: the directory is
+    KRIYA_LOG_DIR > `directory` (absolute; canonicalized once at load) >
+    ~/.kriya/logs, never the process CWD. `file` is deprecated and ignored
+    (kept so existing configs load and its SEC-009 classification holds)."""
     level: str = Field(default="INFO")
-    file: Optional[str] = Field(default="./logs/kriya.log")
+    directory: Optional[str] = Field(default=None)
+    file_enabled: bool = Field(default=True)
+    run_file_enabled: bool = Field(default=True)
+    file: Optional[str] = Field(default=None)
 
 class MCPCapabilityConfig(BaseModel):
     """TOOL-003 P1 (2026-09-13): the operator-controlled MAXIMUM
@@ -1247,6 +1254,17 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                         resolved_lf = lf if os.path.isabs(lf) else os.path.join(config_dir, lf)
                         user_data["logging"]["file"] = os.path.realpath(resolved_lf)
 
+                    # logging.directory - canonicalized ONCE here (expand ~,
+                    # realpath) so the value SEC-009 digests is exactly the
+                    # directory kriya/core/logging_setup.py opens. A relative
+                    # value is a typed error: it is never anchored to the CWD
+                    # or to config_dir.
+                    if isinstance(user_data.get("logging"), dict) and user_data["logging"].get("directory") is not None:
+                        from kriya.core.logging_setup import canonical_log_directory
+                        user_data["logging"]["directory"] = canonical_log_directory(
+                            user_data["logging"]["directory"], "logging.directory"
+                        )
+
                     # TOOL-003 P1: MCP capability filesystem paths - resolved
                     # and escape-checked HERE, anchored to config_dir (same
                     # anchor and same realpath-based idiom as paths.*/
@@ -1363,6 +1381,12 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                             )
                         else:
                             classification_overrides[("logging", "file")] = FieldClassification.REPOSITORY_SAFE
+                    # logging.directory: null (the canonical default) grants
+                    # nothing; any directory is a filesystem write target and
+                    # falls to its static SECURITY_AUTHORITY entry.
+                    if isinstance(user_data.get("logging"), dict) and "directory" in user_data["logging"]:
+                        if user_data["logging"]["directory"] is None:
+                            classification_overrides[("logging", "directory")] = FieldClassification.REPOSITORY_SAFE
 
                     # Simple deep merge of level-1 dicts, tracking provenance
                     # at the exact same granularity the merge itself uses.
@@ -1379,6 +1403,9 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                             else:
                                 provenance[(None, key)] = source
         except Exception as e:
+            from kriya.core.logging_setup import LogDirectoryError
+            if isinstance(e, LogDirectoryError):
+                raise  # already typed and names the field
             raise ValueError(f"Failed to load configuration at {config_path}: {e}") from e
 
     # --- runtime_profile expansion (dict-level, BEFORE AppConfig/authority) ---
