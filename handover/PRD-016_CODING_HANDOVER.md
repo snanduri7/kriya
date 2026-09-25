@@ -151,8 +151,8 @@ check existed the server silently truncated it.
   - `test_dev_inv_001` 85/2;
   - `test_prd008_resume_fingerprints` 97/1;
   - `test_workflow_controller_enforce` 219/53 (identical names).
-- `test_workflow` 862/6, the same six names as HEAD, on `a9a3563`. The final commit is re-verified in the batch
-  READY message.
+- `test_workflow` 862/6 and `test_workflow_controller_enforce` 219/53: both on the final code (`5a779ae`), with the
+  same failure names as before batch 3.
 - Mutation checks:
   - disabling the omission bound fails 7 allocation tests;
   - disabling the trace drain or the `num_ctx` switch fails 4 adaptive tests;
