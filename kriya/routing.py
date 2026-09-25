@@ -181,7 +181,8 @@ class Router:
     def __init__(self, cfg: AppConfig):
         self._cfg = cfg
         self._embed_client = OllamaEmbeddingClient(
-            base_url=cfg.embedding.base_url, model=cfg.routing.embed_model
+            base_url=cfg.embedding.base_url, model=cfg.routing.embed_model,
+            egress_policy=cfg.autonomy.egress_policy,
         )
         self._llm_client = LLMClient(cfg)
         self._centroids: Optional[Dict[str, List[float]]] = None

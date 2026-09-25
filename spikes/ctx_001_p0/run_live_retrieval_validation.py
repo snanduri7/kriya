@@ -182,7 +182,7 @@ async def run_band(name: str, filler_count: int) -> Dict[str, Any]:
     store = LocalVectorStore(os.path.join(mem, "vector_index.db"))
     total_chunks = store.conn.execute("SELECT COUNT(*) FROM vector_chunks").fetchone()[0]
 
-    client = OllamaEmbeddingClient(base_url=cfg.embedding.base_url, model=cfg.embedding.model)
+    client = OllamaEmbeddingClient(base_url=cfg.embedding.base_url, model=cfg.embedding.model, egress_policy=cfg.autonomy.egress_policy)
     query_text = fixtures.CORE_GROUND_TRUTH["goal"]
 
     t0 = time.perf_counter()

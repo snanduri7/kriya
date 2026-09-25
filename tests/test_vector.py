@@ -7,7 +7,7 @@ from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
 
 @pytest.mark.asyncio
 async def test_ollama_embedding_client():
-    client = OllamaEmbeddingClient(base_url="http://localhost:11434/v1", model="nomic-embed-text:latest")
+    client = OllamaEmbeddingClient(base_url="http://localhost:11434/v1", model="nomic-embed-text:latest", egress_policy="local_only")
     
     # Mock httpx AsyncClient post
     with patch("httpx.AsyncClient.post") as mock_post:

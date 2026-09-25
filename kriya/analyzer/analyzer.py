@@ -768,7 +768,10 @@ class RepositoryAnalyzer:
         # 1. Resolve storage paths
         vector_index_path = os.path.join(cfg.paths.memory, "vector_index.db")
         store = LocalVectorStore(vector_index_path)
-        client = OllamaEmbeddingClient(base_url=cfg.embedding.base_url, model=cfg.embedding.model)
+        client = OllamaEmbeddingClient(
+            base_url=cfg.embedding.base_url, model=cfg.embedding.model,
+            egress_policy=cfg.autonomy.egress_policy,
+        )
         
         from kriya.analyzer.graph import DependencyGraph
         db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")

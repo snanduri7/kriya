@@ -17,13 +17,32 @@ logger = logging.getLogger(__name__)
 class OllamaEmbeddingClient:
     """Queries OpenAI-compatible or local Ollama endpoints for vector embeddings."""
 
-    def __init__(self, base_url: str, model: str) -> None:
+    def __init__(self, base_url: str, model: str, *, egress_policy: str) -> None:
+        """``egress_policy`` is required (autonomy.egress_policy): embedding
+        requests carry repository code and goal text, so they obey the same
+        local_only boundary as LLMClient (PRD-012). No default - a caller
+        cannot construct an ungoverned client by omission."""
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self.egress_policy = egress_policy
         self.detected_dimensions = 768
+
+    def _enforce_egress(self) -> None:
+        """Raised before any request and never swallowed by the graceful
+        dummy-vector degradation below: a refused endpoint is a boundary,
+        not an outage."""
+        if self.egress_policy == "local_only":
+            from kriya.core.llm import EgressViolationError, is_local_url
+
+            if not is_local_url(self.base_url):
+                raise EgressViolationError(
+                    f"Egress violation: embedding request to external endpoint '{self.base_url}' "
+                    "blocked under 'local_only' policy."
+                )
 
     async def get_embedding(self, text: str, client: Optional[httpx.AsyncClient] = None, is_query: bool = False) -> List[float]:
         """Fetch embedding vector for the given text segment."""
+        self._enforce_egress()
         if "nomic" in self.model.lower():
             prefix = "search_query: " if is_query else "search_document: "
             if not text.startswith(prefix):
@@ -74,6 +93,7 @@ class OllamaEmbeddingClient:
         """Fetch multiple embedding vectors concurrently and batched to optimize performance."""
         if not texts:
             return []
+        self._enforce_egress()
 
         batch_size = 32
         batches = [texts[i:i + batch_size] for i in range(0, len(texts), batch_size)]

@@ -65,7 +65,7 @@ async def main() -> None:
 
     cfg = load_config(args.config)
     embed_model = args.embed_model or cfg.embedding.model
-    embed_client = OllamaEmbeddingClient(base_url=cfg.embedding.base_url, model=embed_model)
+    embed_client = OllamaEmbeddingClient(base_url=cfg.embedding.base_url, model=embed_model, egress_policy=cfg.autonomy.egress_policy)
     classifier = _build_classifier(args, cfg, embed_client)
 
     exemplar_count = sum(len(v) for v in EXEMPLARS.values())

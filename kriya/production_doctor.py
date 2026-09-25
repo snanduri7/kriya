@@ -96,6 +96,11 @@ def _json_request(
 
 def probe_llm_runtime(cfg: AppConfig) -> Dict[str, Any]:
     """Return connectivity plus exact native metadata when the endpoint exposes it."""
+    from kriya.core.llm import EgressViolationError, is_local_url
+
+    if cfg.autonomy.egress_policy == "local_only" and not is_local_url(cfg.llm.base_url):
+        # PRD-012: never probe (or send the API key to) a refused endpoint.
+        raise EgressViolationError(f"llm.base_url {cfg.llm.base_url!r} is not local under local_only; not probed")
     models_url = f"{cfg.llm.base_url.rstrip('/')}/models"
     listing = _json_request(models_url, api_key=cfg.llm.api_key)
     models = [item for item in listing.get("data", []) if isinstance(item, dict)]
@@ -159,6 +164,7 @@ def probe_embedding(cfg: AppConfig) -> Dict[str, Any]:
         OllamaEmbeddingClient(
             base_url=cfg.embedding.base_url,
             model=cfg.embedding.model,
+            egress_policy=cfg.autonomy.egress_policy,
         ).get_embedding("kriya production doctor")
     )
     if not vector or not any(value != 0.0 for value in vector):

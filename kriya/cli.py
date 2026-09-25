@@ -309,6 +309,12 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
     click.echo(f"  - Model: {model}")
     click.echo("  - Testing connection...")
     try:
+        from kriya.core.llm import is_local_url
+
+        if cfg.autonomy.egress_policy == "local_only" and not is_local_url(base_url):
+            # PRD-012: never probe (or send the API key to) an endpoint the
+            # egress policy refuses; the error is already reported above.
+            raise RuntimeError("not probed: the endpoint is not local under local_only egress")
         url = f"{base_url.rstrip('/')}/models"
         req = urllib.request.Request(
             url=url,
@@ -353,7 +359,7 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
 
     try:
         from kriya.memory.vector import OllamaEmbeddingClient
-        client = OllamaEmbeddingClient(base_url=embed_url, model=embed_model)
+        client = OllamaEmbeddingClient(base_url=embed_url, model=embed_model, egress_policy=cfg.autonomy.egress_policy)
         import asyncio
         emb = asyncio.run(client.get_embedding("test connectivity"))
         if emb and any(v != 0.0 for v in emb):
@@ -1805,7 +1811,8 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                 from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
                 embed_client = OllamaEmbeddingClient(
                     base_url=cfg.embedding.base_url,
-                    model=cfg.embedding.model
+                    model=cfg.embedding.model,
+                    egress_policy=cfg.autonomy.egress_policy,
                 )
                 vector_store = LocalVectorStore(index_path)
                 query_emb = await embed_client.get_embedding(goal, is_query=True)
@@ -3182,7 +3189,8 @@ def ask(ctx: click.Context, question: str) -> None:
                 from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
                 embed_client = OllamaEmbeddingClient(
                     base_url=cfg.embedding.base_url,
-                    model=cfg.embedding.model
+                    model=cfg.embedding.model,
+                    egress_policy=cfg.autonomy.egress_policy,
                 )
                 vector_store = LocalVectorStore(index_path)
                 query_emb = await embed_client.get_embedding(question, is_query=True)
@@ -3227,7 +3235,8 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
     
     embed_client = OllamaEmbeddingClient(
         base_url=cfg.embedding.base_url,
-        model=cfg.embedding.model
+        model=cfg.embedding.model,
+        egress_policy=cfg.autonomy.egress_policy,
     )
     
     os.makedirs(cfg.paths.memory, exist_ok=True)
