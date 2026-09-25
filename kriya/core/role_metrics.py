@@ -87,12 +87,22 @@ _COUNTERS = ("calls", "protocol_failures", "schema_failures", "prompt_tokens", "
 
 
 class RoleMetrics:
-    """The counters of one LLMClient (one engine). ``since`` gives the
-    part a run added, so a nested or repeated run reports only its own."""
+    """The counters of one LLMClient (one engine). ``take_unreported`` gives
+    everything recorded since the previous report, so each run's trace row
+    carries the calls made since the last row - including calls made
+    before a unit run started (a controller's structured planning, milestone
+    planning) - and nothing is reported twice."""
 
     def __init__(self) -> None:
         self._entries: Dict[Tuple[str, str, str], RoleRuntimeMetrics] = {}
         self._last_runtime: Dict[Tuple[str, str], Tuple[str, bool]] = {}
+        self._reported: Dict[Tuple[str, str, str], RoleRuntimeMetrics] = {}
+
+    def take_unreported(self) -> List[Dict[str, Any]]:
+        """The rows recorded since the last call (see ``since``)."""
+        rows = self.since(self._reported)
+        self._reported = self.snapshot()
+        return rows
 
     def _entry(self, role: str, model: str, digest: str, exact: bool) -> RoleRuntimeMetrics:
         key = (role, model, digest)

@@ -33,7 +33,8 @@ configuration.
 
 ### Placement matters
 A model's runtime identity includes its capability-profile provenance (PRD-013), so the same model as the primary and
-as a role binding are different runtimes. Candidates are therefore assessed, qualified and measured in their routed
+as a role binding are different runtimes (the kind of binding matters, not which role: one qualification as a role
+binding covers every role it is routed to with the same settings). Candidates are therefore assessed, qualified and measured in their routed
 placement. `kriya model qualify --model <candidate> --role <role>` qualifies a candidate exactly as it runs when
 routed to that role.
 
@@ -52,7 +53,7 @@ routed to that role.
   - frozen replay and drift refusal;
   - config validation and classification;
   - an end-to-end run through the CLI boundary and `WorkflowEngine`: the reviewer's calls go to the routed candidate, `model.route` lands in `traces.db`, and the table is not written.
-- 28 passed.
+- 30 passed.
 - Mutation checks, each caught:
   - apply is a no-op fails 3;
   - qualification ignored fails the unqualified-runtime test;
@@ -78,11 +79,29 @@ KRIYA_BATCH4_EVIDENCE_DIR=handover/evidence/BATCH4/user-live KRIYA_LIVE_BASE_URL
 KRIYA_LIVE_LLM_MODEL=qwen3-coder:30b KRIYA_LIVE_FALLBACK_MODEL=qwen3.5:9B \
 .venv/bin/pytest -m live_model -ra -s tests/test_live_prd017_019_model_roles.py 2>&1 | tee handover/evidence/BATCH4/user-live/batch4-live.log
 ```
-Both models must already be pulled; windows stay at 8192. PRD-019's case plans a stage matrix (reviewer,
-spec_compliance, planner) over both real runtimes twice and checks the route records are identical. The fallback is
-qualified by record for the reviewer route only, so the reviewer routes to it by evidence while the other roles keep
-their binding with recorded rejections.
+Both models must already be pulled; windows stay at 8192. PRD-019's case plans a stage matrix over both real runtimes
+twice and checks the route records are identical:
+- reviewer and spec_compliance route to the fallback by evidence (its runtime as a role binding is qualified by record);
+- the planner keeps its qualified explicit binding on the primary model;
+- the Developer's route to the fallback is refused, because as the primary `llm` the fallback is a different, unqualified runtime identity.
+
+### Found in review and fixed: alias collisions
+Model bindings are looked up by alias, in the order primary, `llm_chain`, `agent_llms`. A candidate sharing its alias
+with another binding, but not its settings, silently took that binding's capabilities and runtime identity:
+- when routing evaluated it;
+- in `qualify --role`;
+- at run time.
+
+Reproduced offline: a same-alias `llm_chain` entry without JSON mode got the routed reviewer candidate rejected.
+
+Now a candidate may share an alias only with a binding whose identity-relevant settings are identical (base URL,
+request options, window, reasoning, declared capabilities, context policy). Anything else is:
+- a configuration error at load time;
+- `ROUTING_CANDIDATE_ALIAS_CONFLICT` from `plan_routes` for a configuration built in code.
+
+Tested.
 
 ## Residuals
-- A candidate whose alias equals the primary model's alias resolves to the primary's binding (runtime lookup is by alias). Give routing candidates distinct aliases, or route the Developer itself.
+- `kriya review` and `kriya ask` build no workflow engine and do not apply routing to the roles they use.
+- Aliases shared *between existing bindings* (for example an `llm_chain` entry and an `agent_llms` role with the same model name and different settings) resolve to the first by alias. That predates this batch and is not changed.
 - Metrics accumulate per exact runtime. A re-pulled tag starts unmeasured, which is intended: it is a different runtime.

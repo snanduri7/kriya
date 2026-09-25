@@ -270,3 +270,20 @@ def test_an_unknown_policy_role_is_rejected():
 
     with pytest.raises(ValidationError):
         AppConfig(model_policy={"independent_roles": ["developer"]})
+
+
+def test_calls_before_a_unit_run_are_reported_once_by_the_next_row():
+    """A controller's planning calls happen before a unit run starts; they
+    are carried by the next trace row, and no row repeats another's."""
+    metrics = RoleMetrics()
+    with model_role("planner"):
+        _call(metrics)  # structured planning, before any unit run
+    with model_role("developer"):
+        _call(metrics)
+    first = metrics.take_unreported()
+    assert sorted(row["role"] for row in first) == ["developer", "planner"]
+    with model_role("developer"):
+        _call(metrics)
+    second = metrics.take_unreported()
+    assert [(row["role"], row["calls"]) for row in second] == [("developer", 1)]
+    assert metrics.take_unreported() == []

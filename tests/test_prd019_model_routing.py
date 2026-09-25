@@ -384,3 +384,29 @@ def test_the_workflow_command_applies_routes_and_the_run_records_them(tmp_path, 
     assert [(r["role"], r["model"], r["source"]) for r in routes] == [("reviewer", "cand-b", "evidence")]
     assert routes[0]["rejected"][0]["model"] == "cand-a"
     assert not (tmp_path / "table.json").exists()
+
+
+def test_a_candidate_aliasing_another_binding_with_other_settings_is_refused(tmp_path, monkeypatch):
+    """Bindings resolve by alias: a candidate that shares its alias with an
+    llm_chain entry (no JSON mode, whole files) would silently take that
+    entry's capabilities and runtime identity when routed."""
+    from pydantic import ValidationError
+
+    _exact_ollama(monkeypatch)
+    cfg = _routing_cfg(tmp_path)
+    cfg.llm_chain = [FallbackModelConfig(model="cand-b", capabilities=ModelCapabilities(
+        json_mode=False, preferred_edit_protocol="full_file"))]
+    with pytest.raises(mr.RoutingError) as refused:
+        mr.plan_routes(cfg)
+    assert refused.value.reason_code == mr.ROUTING_CANDIDATE_ALIAS_CONFLICT
+    assert "llm_chain[0]" in str(refused.value)
+
+    with pytest.raises(ValidationError) as invalid:
+        AppConfig(llm_chain=[{"model": "cand-b"}],
+                  model_policy={"routing": {"candidates": [{"model": "cand-b", "context_window": 8192}]}})
+    assert "distinct alias" in str(invalid.value)
+
+
+def test_a_candidate_identical_to_the_binding_it_aliases_is_accepted():
+    AppConfig(llm_chain=[{"model": "same", "context_window": 8192}],
+              model_policy={"routing": {"candidates": [{"model": "same", "context_window": 8192}]}})

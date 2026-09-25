@@ -717,13 +717,14 @@ class WorkflowEngine:
         )
         metrics = _role_metrics_of(self.developer.llm)
         if metrics is not None and not state.role_metrics_recorded:
-            # PRD-018: this run's calls per (role, model, exact runtime).
+            # PRD-018: the calls per (role, model, exact runtime) since the
+            # engine's previous trace row (RoleMetrics.take_unreported).
             state.role_metrics_recorded = True
             state.record_event(RunEvent(
                 kind="model.role_metrics", attempt=state.attempt_number, source="workflow",
                 authority=EventAuthority.AUXILIARY,
                 message="per-role model metrics of this run (observations, not verification evidence)",
-                details={"rows": metrics.since(state.role_metrics_baseline)},
+                details={"rows": metrics.take_unreported()},
             ))
         return [event.to_dict() for event in state.run_events]
 
@@ -1235,10 +1236,7 @@ class WorkflowEngine:
             logger.warning(f"Could not record the run's model runtime identity: {exc}")
         # PRD-018: which roles share which exact runtime (visibility; the
         # independence policy itself is enforced before the workflow starts,
-        # kriya/cli.py _workflow_config), and the metrics baseline this
-        # run's model.role_metrics event is measured from.
-        metrics = _role_metrics_of(self.developer.llm)
-        state.role_metrics_baseline = metrics.snapshot() if metrics is not None else None
+        # kriya/cli.py _workflow_config).
         try:
             state.record_event(RunEvent(
                 kind="model.role_independence", attempt=0, source="workflow.run_generation_workflow",

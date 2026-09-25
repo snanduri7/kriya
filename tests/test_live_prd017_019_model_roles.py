@@ -123,6 +123,7 @@ def test_prd017_a_real_fallback_hop_is_recomputed_for_the_fallback_runtime(cfg, 
 def test_prd018_doctor_identifies_shared_and_independent_real_runtimes(cfg, tmp_path):
     from kriya.production_doctor import CheckStatus, _check_role_independence, _Context
 
+    cfg.llm_chain = []  # bindings resolve by alias: keep the role bindings the only FALLBACK binding
     shared = _check_role_independence(_Context(cfg=cfg, workspace=str(tmp_path)))
     for role in VERIFIER_ROLES:
         setattr(cfg.agent_llms, role, AgentModelConfig(llm=LLMConfig(
@@ -140,23 +141,38 @@ def test_prd018_doctor_identifies_shared_and_independent_real_runtimes(cfg, tmp_
 
 
 def test_prd019_routing_over_two_real_runtimes_is_deterministic(cfg, tmp_path):
+    """Stage matrix over the two real runtimes: reviewer and spec_compliance
+    are routed to the fallback by evidence (its runtime as a role binding is
+    qualified; qualification belongs to the runtime identity, which depends
+    on the kind of binding, not on which role), the planner keeps its
+    qualified explicit binding on the primary model, and the developer's
+    route is refused for the unqualified placement. The plan is computed
+    twice and must be identical."""
+    cfg.llm_chain = []  # bindings resolve by alias: the candidate must be the only FALLBACK binding
+    cfg.agent_llms.planner = AgentModelConfig(llm=LLMConfig(
+        model=PRIMARY, base_url=BASE_URL, extra_body={"options": {"num_ctx": 8192}}, context_window=8192,
+        max_tokens=2048, capabilities=cfg.llm.capabilities))
     routing = cfg.model_policy.routing
     routing.mode = "evidence"
     routing.table_path = str(tmp_path / "table.json")
     # Declared capabilities: an undeclared profile is the conservative one (no JSON mode), which the JSON roles
     # would reject before any evidence is weighed.
     routing.candidates = [
-        FallbackModelConfig(model=PRIMARY, base_url=BASE_URL, extra_body={"options": {"num_ctx": 8192}},
-                            context_window=8192, capabilities=ModelCapabilities(json_mode=True)),
         FallbackModelConfig(model=FALLBACK, base_url=BASE_URL, extra_body={"options": {"num_ctx": 8192}},
                             context_window=8192, capabilities=ModelCapabilities(json_mode=True)),
     ]
-    routing.roles = {role: [FALLBACK, PRIMARY] for role in ("reviewer", "spec_compliance", "planner")}
-    # Qualify the fallback for the reviewer route only (a record, not a live campaign).
-    placed = mr.place_candidate(cfg, "reviewer", routing.candidates[1])
-    runtime = resolve_configured_model_runtime(placed, FALLBACK)
-    assert runtime.exact, runtime.to_dict()
-    mq.save_record(mq.build_record(runtime, [mq.CaseResult(c, mq.PASS) for c in mq.CAPABILITIES]))
+    routing.roles = {role: [FALLBACK] for role in ("reviewer", "spec_compliance", "planner", "developer")}
+    # Qualification records (not a live campaign): the fallback as routed to the reviewer, and the planner's
+    # explicit binding on the primary model.
+    placed = mr.place_candidate(cfg, "reviewer", routing.candidates[0])
+    fallback_runtime = resolve_configured_model_runtime(placed, FALLBACK)
+    planner_binding = cfg.agent_llms.planner.llm
+    planner_runtime = resolve_configured_model_runtime(
+        cfg, PRIMARY, base_url=planner_binding.base_url, api_key=planner_binding.api_key,
+        extra_body=planner_binding.extra_body)
+    for runtime in (fallback_runtime, planner_runtime):
+        assert runtime.exact, runtime.to_dict()
+        mq.save_record(mq.build_record(runtime, [mq.CaseResult(c, mq.PASS) for c in mq.CAPABILITIES]))
 
     first = mr.plan_routes(cfg).to_events()
     clear_model_runtime_cache()
@@ -165,6 +181,10 @@ def test_prd019_routing_over_two_real_runtimes_is_deterministic(cfg, tmp_path):
     assert first == second
     decisions = {event["role"]: event for event in first}
     assert (decisions["reviewer"]["model"], decisions["reviewer"]["source"]) == (FALLBACK, "evidence")
-    for role in ("spec_compliance", "planner"):
-        assert decisions[role]["source"] == "configured_default"  # nothing qualified for these routes
-        assert all(row["reasons"] for row in decisions[role]["rejected"])
+    assert (decisions["planner"]["model"], decisions["planner"]["source"]) == (PRIMARY, "explicit_override")
+    assert decisions["reviewer"]["runtime_digest"] != decisions["planner"]["runtime_digest"]
+    assert (decisions["spec_compliance"]["model"], decisions["spec_compliance"]["runtime_digest"]) == (
+        FALLBACK, decisions["reviewer"]["runtime_digest"])
+    # As the primary llm the fallback is a different runtime identity, never qualified here.
+    assert decisions["developer"]["source"] == "configured_default"
+    assert all(row["reasons"] for row in decisions["developer"]["rejected"])

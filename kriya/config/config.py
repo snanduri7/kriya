@@ -763,6 +763,47 @@ class FallbackModelConfig(BaseModel):
 _POLICY_ROLES = ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance")
 
 
+# The settings a model binding's runtime identity and protocol depend on
+# (kriya/core/model_runtime.py, model_capabilities.py).
+_BINDING_IDENTITY_FIELDS = ("base_url", "extra_body", "context_window", "reasoning", "capabilities", "context_policy")
+
+
+def _binding_identity(binding: Any) -> Dict[str, Any]:
+    identity: Dict[str, Any] = {}
+    for name in _BINDING_IDENTITY_FIELDS:
+        value = getattr(binding, name, None)
+        if isinstance(value, BaseModel):
+            identity[name] = (value.model_dump(), sorted(value.model_fields_set))
+        else:
+            identity[name] = value
+    return identity
+
+
+def routing_alias_conflicts(config: Any) -> List[str]:
+    """Routing candidates whose alias names another binding (the primary
+    llm, an llm_chain entry, an agent_llms role's llm or chain) with
+    different identity-relevant settings."""
+    others = [("llm", config.llm)]
+    others += [(f"llm_chain[{index}]", entry) for index, entry in enumerate(config.llm_chain)]
+    for role in _POLICY_ROLES:
+        role_cfg = getattr(config.agent_llms, role, None)
+        if role_cfg is None:
+            continue
+        if role_cfg.llm is not None:
+            others.append((f"agent_llms.{role}.llm", role_cfg.llm))
+        others += [(f"agent_llms.{role}.llm_chain[{index}]", entry) for index, entry in enumerate(role_cfg.llm_chain)]
+    conflicts = []
+    for candidate in config.model_policy.routing.candidates:
+        for where, other in others:
+            if (other.model.casefold() == candidate.model.casefold()
+                    and _binding_identity(other) != _binding_identity(candidate)):
+                conflicts.append(
+                    f"candidate {candidate.model!r} has the alias of {where} but different settings; model "
+                    "bindings are resolved by alias, so give the candidate a distinct alias (an Ollama tag "
+                    "copy) or identical settings")
+    return conflicts
+
+
 class ModelRoutingConfig(BaseModel):
     """PRD-019: opt-in evidence-based model routing (kriya/core/model_routing.py).
     ``roles`` maps a role (developer or an agent_llms role) to candidate
@@ -1186,6 +1227,17 @@ class AppConfig(BaseModel):
         if v not in _VALID_RUNTIME_PROFILES:
             raise ValueError(f"runtime_profile must be one of {_VALID_RUNTIME_PROFILES!r}, got {v!r}")
         return v
+
+    @model_validator(mode="after")
+    def _routing_candidates_must_not_alias_other_bindings(self) -> "AppConfig":
+        """PRD-019: model bindings are looked up by alias, so a routing
+        candidate that shares its alias with another binding but not its
+        settings would silently take that binding's capabilities and runtime
+        identity when routed."""
+        conflicts = routing_alias_conflicts(self)
+        if conflicts:
+            raise ValueError("model_policy.routing.candidates: " + "; ".join(conflicts))
+        return self
 
     @model_validator(mode="after")
     def _production_profile_must_remain_sealed(self) -> "AppConfig":

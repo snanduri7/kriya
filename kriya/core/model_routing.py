@@ -34,6 +34,7 @@ from kriya.core.role_metrics import METRICS_TABLE_VERSION, metrics_digest
 # The routing table is the PRD-018 metrics table (role_metrics.aggregate_role_metrics).
 ROUTING_TABLE_VERSION = METRICS_TABLE_VERSION
 ROUTE_FROZEN_MISMATCH = "ROUTE_FROZEN_MISMATCH"
+ROUTING_CANDIDATE_ALIAS_CONFLICT = "ROUTING_CANDIDATE_ALIAS_CONFLICT"
 ROUTING_TABLE_INVALID = "ROUTING_TABLE_INVALID"
 
 # Roles whose responses Kriya parses as JSON (agent.py call_with_escalation
@@ -322,6 +323,7 @@ def plan_routes(config: Any, *, mode: Optional[str] = None) -> RoutingPlan:
     """The route of every role listed in ``model_policy.routing.roles``.
     ``mode`` overrides the configured mode (``kriya model routes`` shows the
     evidence decision even while routing is off)."""
+    from kriya.config.config import routing_alias_conflicts
     from kriya.core.model_runtime import resolve_configured_model_runtime
 
     routing = config.model_policy.routing
@@ -329,6 +331,9 @@ def plan_routes(config: Any, *, mode: Optional[str] = None) -> RoutingPlan:
     plan = RoutingPlan()
     if mode == "off" or not routing.roles:
         return plan
+    conflicts = routing_alias_conflicts(config)  # also a config error; checked again for configs built in code
+    if conflicts:
+        raise RoutingError(ROUTING_CANDIDATE_ALIAS_CONFLICT, "; ".join(conflicts))
     table = load_table(routing_table_path(config))
     plan.table_digest = table.get("digest")
     frozen = load_frozen_routes(routing.frozen_routes_path) if mode == "frozen" else None

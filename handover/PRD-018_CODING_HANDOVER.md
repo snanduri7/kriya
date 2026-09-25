@@ -27,7 +27,7 @@ A call outside any scope is recorded as `unattributed`, never guessed. The conte
 
 ### Run trace
 - `model.role_independence` (run start): each role's model, runtime digest and exactness, the shared-runtime groups, the policy and any violation.
-- `model.role_metrics` (once, when the trace is written): the rows this run added, measured from a baseline taken at run start, so a nested or repeated run on the same engine reports only its own.
+- `model.role_metrics` (once, when the trace is written): every call the engine made since its previous trace row (`RoleMetrics.take_unreported`). Calls made before a unit run starts (the enforce controller's structured planning, milestone planning) are carried by the next row, and no call is reported twice. A direct goal delegates entirely to its one unit run, so a parent and its unit never both write metrics.
 
 ## Files
 - New: `kriya/core/role_metrics.py`, `tests/test_prd018_role_metrics.py`.
@@ -43,7 +43,7 @@ A call outside any scope is recorded as `unattributed`, never guessed. The conte
   - `kriya/cli.py` (`_workflow_config`, `kriya model metrics`).
 
 ## Tests (plain runner; you run pytest)
-- `test_prd018_role_metrics`: 19 passed. One is an end-to-end run through the real `WorkflowEngine` and `LLMClient` (stubbed transport, exact probe stand-in). It checks:
+- `test_prd018_role_metrics`: 20 passed. One is an end-to-end run through the real `WorkflowEngine` and `LLMClient` (stubbed transport, exact probe stand-in). It checks:
   - `traces.db` holds one `model.role_metrics` event with the Developer on its exact runtime, one attempt and first-pass success;
   - the helper roles are on a different runtime;
   - the `model.role_independence` groups;
@@ -56,8 +56,9 @@ A call outside any scope is recorded as `unattributed`, never guessed. The conte
   - no per-call recording.
 
 ## Decisions to review
+0. **Found in review and fixed: pre-unit calls were dropped.** The first version measured each run from a baseline taken at its start, so planning calls made before a unit run began were counted in no row. Replaced by the engine-level unreported cursor above (tested).
 1. **The doctor row's `required` flag depends on the configuration.** It is blocking only under the policy. Otherwise a deployment would fail readiness for the default single-model setup, which the PRD says must stay supported.
-2. **Policy enforcement is at the command boundary.** `generate`, `fix` and proposal execution check it before building the engine. A programmatic caller of `WorkflowEngine` directly is not checked (the run still records the violation in `model.role_independence`).
+2. **Policy enforcement is at the command boundary.** `generate`, `fix` and proposal execution check it before building the engine. These are the only places that build a `WorkflowEngine` (checked across `kriya/` and `plugins/`; `kriya-mcp` builds no engine or model client). A programmatic caller of `WorkflowEngine` directly is not checked, but the run still records the violation in `model.role_independence`. `kriya review` and `kriya ask` build no engine and do not apply the policy.
 3. **Schema failures are counted where Kriya already rejects a response**, not re-derived. A Developer answer later rejected by a quality gate is an attempt outcome, not a schema failure.
 
 ## Live test

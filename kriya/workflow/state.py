@@ -400,10 +400,7 @@ class GenerationState:
     # attempt's gate outcome is charged to the runtime that generated it
     # (never to one it did not call, e.g. a refused fallback).
     last_developer_call_attempt: Optional[int] = None
-    # PRD-018: the engine's role-metrics snapshot when this run started
-    # (kriya/core/role_metrics.py RoleMetrics.since), and whether the run's
-    # model.role_metrics event has been recorded.
-    role_metrics_baseline: Optional[Dict[Any, Any]] = None
+    # PRD-018: whether this run's model.role_metrics event has been recorded.
     role_metrics_recorded: bool = False
     # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/
     # validation_baseline.py) - the PRE-candidate authoritative record(s),
