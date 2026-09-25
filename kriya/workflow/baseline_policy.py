@@ -15,9 +15,9 @@ and the environment identity PRE and POST are compared under.
   then as binding as ``required``: indeterminate stops the run, and POST
   NEW/CHANGED/NOT_COMPARABLE blocks.
 
-``baseline_environment_identity`` records what PRE ran under (execution mode
-plus the PRD-011 toolchain fingerprint, which is attested only for contained
-execution and otherwise says why not). POST computes the same over the
+``baseline_environment_identity`` records what PRE ran under (execution mode,
+the validator's execution policy, and the PRD-011 toolchain fingerprint,
+which is attested only for contained execution and otherwise says why not). POST computes the same over the
 candidate's own toolchain declarations, so a candidate that changes the
 toolchain makes the comparison NOT_COMPARABLE instead of silently comparing
 two different environments.
@@ -31,8 +31,14 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
 _BROWNFIELD_KINDS = ("task", "enhancement", "refactor")
-_RISKY_IMPACT = ("public_contract_change", "dependency_change", "build_system_change", "persistence_change",
-                 "security_boundary_change", "shared_entrypoint_change")
+_RISKY_IMPACT = ("public_contract_change", "dependency_change", "build_system_change", "configuration_change",
+                 "persistence_change", "security_boundary_change", "shared_entrypoint_change")
+# A change to this many existing source files is broad by itself.
+BROAD_EXISTING_CHANGE_FILES = 3
+# The validator settings a full-suite result depends on (besides the
+# toolchain): a result obtained under different ones is not the same run.
+_VERIFICATION_POLICY_FIELDS = ("contained_execution_required", "containment_backend", "sandbox_execution",
+                               "sandbox_cpu_seconds", "sandbox_memory_mb", "sandbox_env_allowlist", "egress_policy")
 _IGNORED_DIRS = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv", "__pycache__"}
 
 
@@ -83,10 +89,17 @@ def decide_auto_baseline(
     Preconditions (all needed, otherwise not triggered - a baseline could not
     protect anything): a brownfield route (task, enhancement, refactor); a
     git workspace identity; an existing test suite; at least one planned
-    change to an existing non-test file. Then any risk signal triggers it:
-    risk at least MEDIUM, a non-LIGHT execution weight, a refactor, a risky
-    impact component, or a changed source an existing test names. A LOW,
-    LIGHT change to an untested file stays cheap (not triggered)."""
+    change to an existing non-test file. Then a regression-risk signal
+    triggers it: risk at least MEDIUM (the triage's own classification), a
+    non-LIGHT execution weight, a refactor, a risky impact component (public
+    contract/API, dependency, build system, configuration, persistence,
+    security boundary, shared entry point) or a broad change to existing
+    code (``BROAD_EXISTING_CHANGE_FILES`` or more existing sources).
+
+    An existing test that names a changed source is supporting evidence
+    (recorded in the signals: it is what the baseline would protect), never
+    a trigger by itself - otherwise nearly every change in a well-tested
+    repository, a docstring edit included, would pay a full suite run."""
     from kriya.workflow.file_resolution import is_runnable_test_file
 
     kind = getattr(getattr(route, "kind", None), "value", None)
@@ -113,12 +126,17 @@ def decide_auto_baseline(
     if kind == "refactor":
         reasons.append("refactor (behaviour must be preserved)")
     reasons.extend(f"impact {name}" for name in _RISKY_IMPACT if getattr(impact, name, False))
-    if tested:
-        reasons.append(f"changed source(s) named by existing tests: {', '.join(tested)}")
+    if len(changed) >= BROAD_EXISTING_CHANGE_FILES:
+        reasons.append(f"broad change to existing code ({len(changed)} existing sources)")
     signals = {"route_kind": kind, "risk": getattr(risk, "name", None), "execution_weight": weight,
-               "existing_tests": len(tests), "changed_existing_sources": changed, "tested_changed_sources": tested}
+               "existing_tests": len(tests), "changed_existing_sources": changed,
+               "supporting": {"tested_changed_sources": tested}}
     if not reasons:
-        return AutoBaselineDecision(False, ("low-risk, light change to untested source",), signals)
+        return AutoBaselineDecision(False, ("no regression-risk signal for this change" + (
+            " (an existing test names the changed source, which alone does not require a baseline)"
+            if tested else ""),), signals)
+    if tested:
+        reasons.append(f"supporting: changed source(s) named by existing tests: {', '.join(tested)}")
     return AutoBaselineDecision(True, tuple(reasons), signals)
 
 
@@ -156,5 +174,54 @@ def baseline_environment_identity(
                                         candidate_files=declarations or None, declaration_mutable=True)
     mode = ("contained" if getattr(autonomy_cfg, "contained_execution_required", False) is True
             else "sandbox" if getattr(autonomy_cfg, "sandbox_execution", False) else "host")
-    return json.dumps({"execution": mode, "toolchain": fingerprint.value, "basis": fingerprint.basis},
-                      sort_keys=True)
+    return json.dumps({"execution": mode, "toolchain": fingerprint.value, "basis": fingerprint.basis,
+                       "verification_policy": verification_policy_identity(autonomy_cfg)},
+                      sort_keys=True, default=str)
+
+
+def verification_policy_identity(autonomy_cfg: Any) -> Dict[str, Any]:
+    """The validator settings a full-suite result depends on, plus the
+    baseline comparison's own version: part of the environment identity, so
+    a result obtained under different settings is never reused or compared
+    as the same run."""
+    from kriya.workflow.validation_baseline import BASELINE_COMPARISON_VERSION
+
+    policy = {name: getattr(autonomy_cfg, name, None) for name in _VERIFICATION_POLICY_FIELDS}
+    policy["comparison_version"] = BASELINE_COMPARISON_VERSION
+    return policy
+
+
+def full_suite_evidence_for_reuse(
+    workspace_path: str, autonomy_cfg: Any, *, goal: Optional[str], run_id: str, raw_result: Mapping[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """An applied candidate's terminal full-suite result as a baseline for
+    the next run starting from this workspace (the next milestone, say).
+
+    Called after the candidate was applied, so the workspace content hash is
+    that of the state the suite ran against; the environment identity is
+    computed the same way PRE computes it (here the declarations on disk
+    are the candidate's). The next run reuses it only when its own starting
+    content, command, selection and environment match exactly
+    (``validation_baseline.is_baseline_reusable``). A run that did not
+    complete (an environment failure, a timeout) is never kept."""
+    from kriya.workflow.checkpoint import compute_workspace_content_hash
+    from kriya.workflow.validation_baseline import (
+        ValidationInvocation,
+        build_validation_outcome,
+        capture_validation_baseline,
+    )
+
+    outcome = build_validation_outcome(dict(raw_result))
+    if outcome.execution_status != "completed":
+        return None
+    revision = compute_workspace_content_hash(workspace_path)
+    if revision is None:
+        return None
+    invocation = ValidationInvocation(
+        command_identity="polymorphic_validator.run_tests", selection_identity="full_suite",
+        environment_fingerprint=baseline_environment_identity(workspace_path, autonomy_cfg, goal=goal),
+        target_test=None,
+    )
+    baseline = capture_validation_baseline(
+        workspace_revision=revision, run_id=run_id, invocation=invocation, raw_result=dict(raw_result))
+    return baseline.to_dict() if baseline.status == "captured" else None

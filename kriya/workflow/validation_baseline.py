@@ -120,6 +120,11 @@ class TestStatus(str, Enum):
     SKIP = "skip"
 
 
+# The PRE/POST comparison's own identity: a stored full-suite result is only
+# reused under the same comparison rules (part of the environment identity).
+BASELINE_COMPARISON_VERSION = 1
+
+
 @dataclass(frozen=True)
 class TestOutcome:
     test_id: str
@@ -832,6 +837,10 @@ class BrownfieldBaselineCaptureResult:
     # terminal result (FAILURE_BEHAVIOR: never silently proceed assuming
     # green) rather than continue toward the Developer.
     hard_stop_reason: Optional[str] = None
+    # PRD-024: where the full-regression baseline came from - "captured" (run
+    # now), "resume" (this run's own checkpoint) or "prior_full_suite" (an
+    # earlier full-suite result describing exactly this starting state).
+    full_regression_source: Optional[str] = None
 
 
 def _normalized_targets(target_test: Optional[Union[str, Sequence[str]]]) -> Optional[Tuple[str, ...]]:
@@ -900,27 +909,42 @@ def _reuse_or_capture(
     resume_baseline: Optional[Dict[str, Any]],
     run_validator: Callable[[Optional[Tuple[str, ...]]], Dict[str, Any]],
     compute_revision: Callable[[], Optional[str]], environment_identity: Optional[str] = None,
-) -> ValidationBaseline:
+    prior_baseline: Optional[Dict[str, Any]] = None,
+) -> Tuple[ValidationBaseline, str]:
+    """The baseline and where it came from: this run's own checkpoint
+    ("resume"), then an earlier full-suite result (``prior_baseline``,
+    "prior_full_suite"), each reused only when its workspace revision and
+    its invocation (command, selection, environment - which includes the
+    validator's execution policy) match exactly; otherwise a fresh capture
+    ("captured")."""
     invocation = ValidationInvocation(
         command_identity="polymorphic_validator.run_tests",
         selection_identity=_selection_identity_for_targets(target_test),
         environment_fingerprint=environment_identity,
         target_test=target_test,
     )
-    if resume_baseline is not None:
+    current_revision: List[Optional[str]] = []
+    for source, payload in (("resume", resume_baseline), ("prior_full_suite", prior_baseline)):
+        if payload is None:
+            continue
         try:
-            candidate = ValidationBaseline.from_dict(resume_baseline)
-            if is_baseline_reusable(
-                candidate, current_workspace_revision=compute_revision(), invocation=invocation,
-            ):
-                return candidate
+            candidate = ValidationBaseline.from_dict(payload)
+            if not current_revision:
+                current_revision.append(compute_revision())
+            # A prior result must be a completed run (never an environment
+            # failure or timeout); resume keeps its existing rule.
+            completed = candidate.outcome is not None and candidate.outcome.execution_status == "completed"
+            if ((source == "resume" or completed)
+                    and is_baseline_reusable(
+                        candidate, current_workspace_revision=current_revision[0], invocation=invocation)):
+                return candidate, source
         except Exception:
-            pass  # malformed/legacy checkpoint payload - fall through to a fresh capture, never raise
+            pass  # malformed/legacy payload - fall through to a fresh capture, never raise
     return _capture_single_baseline(
         run_id=run_id, target_test=target_test,
         run_validator=run_validator, compute_revision=compute_revision,
         environment_identity=environment_identity,
-    )
+    ), "captured"
 
 
 def capture_brownfield_baselines(
@@ -932,6 +956,7 @@ def capture_brownfield_baselines(
     resume_baseline_targeted: Optional[Dict[str, Any]] = None,
     resume_baseline_full_regression: Optional[Dict[str, Any]] = None,
     environment_identity: Optional[str] = None,
+    prior_full_regression: Optional[Dict[str, Any]] = None,
 ) -> BrownfieldBaselineCaptureResult:
     """`run_validator(target_test) -> {"success": bool, "output": str}` and
     `compute_revision() -> Optional[str]` are the caller's own thin wrappers
@@ -961,11 +986,18 @@ def capture_brownfield_baselines(
     changed target_test SELECTION (a different file, a different order, an
     added/removed target) changes `selection_identity` and is therefore
     drift exactly like any other invocation change - never silently reused
-    across a target_test edit."""
+    across a target_test edit.
+
+    PRD-024: ``prior_full_regression`` is an earlier completed full-suite
+    result (e.g. the previous milestone's terminal regression run, recorded
+    against the workspace it left behind). It is reused as this run's
+    full-regression baseline under exactly the same rule - same workspace
+    content, command, selection and environment - instead of running the
+    suite again."""
     normalized_target_test = _normalized_targets(target_test)
     targeted = None
     if normalized_target_test is not None:
-        targeted = _reuse_or_capture(
+        targeted, _ = _reuse_or_capture(
             run_id=run_id, target_test=normalized_target_test,
             resume_baseline=resume_baseline_targeted,
             run_validator=run_validator, compute_revision=compute_revision,
@@ -973,13 +1005,15 @@ def capture_brownfield_baselines(
         )
 
     full_regression = None
+    full_regression_source = None
     hard_stop_reason = None
     if full_regression_policy == "required":
-        full_regression = _reuse_or_capture(
+        full_regression, full_regression_source = _reuse_or_capture(
             run_id=run_id, target_test=None,
             resume_baseline=resume_baseline_full_regression,
             run_validator=run_validator, compute_revision=compute_revision,
             environment_identity=environment_identity,
+            prior_baseline=prior_full_regression,
         )
         if full_regression.status == "baseline_indeterminate":
             hard_stop_reason = (
@@ -989,4 +1023,5 @@ def capture_brownfield_baselines(
 
     return BrownfieldBaselineCaptureResult(
         targeted=targeted, full_regression=full_regression, hard_stop_reason=hard_stop_reason,
+        full_regression_source=full_regression_source,
     )

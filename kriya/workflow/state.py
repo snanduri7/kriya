@@ -416,6 +416,10 @@ class GenerationState:
     # Developer writes them again (attempt.py), so a retry that fixes the
     # owner is not rejected for evidence it had no authority to repair.
     ownership_redirect_recovery: Dict[str, List[str]] = field(default_factory=dict)
+    # PRD-024: the terminal full-suite regression result of this run's
+    # accepted candidate (raw validator result), kept so that after the
+    # candidate is applied it can serve as the next run's baseline.
+    terminal_full_suite_result: Optional[Dict[str, Any]] = None
     # PRD-023: human-approved, revision-bound contract change authorizations
     # created during this run (contract_classification.human_authorization).
     human_contract_authorizations: List[Any] = field(default_factory=list)

@@ -12,7 +12,9 @@ the batch's mechanisms under real model output, not code quality:
 - PRD-022: a duplicate-owner tendency is recorded attempt by attempt; if the
   ownership gate fires, the next request targets the grounded owner only.
 - PRD-024: a brownfield repository with one known pre-existing failing test:
-  the `auto` baseline triggers and that failure is never classified new.
+  under `required` (what production seals) that failure is never classified
+  new; under `auto` a docstring edit is not baselined for its test reference
+  alone.
 - PRD-023 has no live case: nothing a model sees changed (see its handover).
 
 Run (both models must already be pulled; the primary is the one used):
@@ -201,7 +203,7 @@ def test_prd024_pre_existing_failure_is_not_a_new_regression(cfg, tmp_path):
     ws = tmp_path / "ws"
     _repo(str(ws), {**PRICING_REPO,
                     "tests/test_legacy.py": "def test_known_broken():\n    assert 1 == 2, 'known pre-existing failure'\n"})
-    cfg.autonomy.brownfield_full_regression_baseline_policy = "auto"
+    cfg.autonomy.brownfield_full_regression_baseline_policy = "required"  # what production seals
     goal = "Add a docstring to price() in src/pricing.py explaining its arguments"
     result, _, _ = _run(cfg, goal, ws)
     policy = _events(cfg, "validation_baseline.policy")
@@ -210,8 +212,30 @@ def test_prd024_pre_existing_failure_is_not_a_new_regression(cfg, tmp_path):
                                        "quality_gates_passed": result.get("quality_gates_passed"),
                                        "failure_category": result.get("failure_category")})
 
-    assert policy and policy[-1]["effective"] == "required", policy  # pricing.py is named by a test
+    assert policy and policy[-1]["effective"] == "required", policy
     for delta in deltas:
         assert delta["level2"].get("tests/test_legacy.py::test_known_broken") in (None, "PRE_EXISTING_FAILURE")
     if deltas:
         assert deltas[-1]["level1_classification"] in ("PRE_EXISTING_FAILURE", "CHANGED_FAILURE", "NEW_FAILURE")
+
+
+def test_prd024_auto_does_not_baseline_a_docstring_edit_for_its_test_reference_alone(cfg, tmp_path):
+    """The real triage route for a docstring edit to a tested file: the test
+    reference is recorded as supporting evidence and never triggers the
+    baseline by itself."""
+    ws = tmp_path / "ws"
+    _repo(str(ws), PRICING_REPO)
+    cfg.autonomy.brownfield_full_regression_baseline_policy = "auto"
+    goal = "Add a docstring to price() in src/pricing.py explaining its arguments"
+    result, _, _ = _run(cfg, goal, ws)
+    policy = _events(cfg, "validation_baseline.policy")
+    _evidence("prd024-auto-docstring.json", {"policy": policy,
+                                             "quality_gates_passed": result.get("quality_gates_passed")})
+
+    assert policy and policy[-1]["configured"] == "auto", policy
+    decision = policy[-1]["auto_decision"] or {}
+    if decision.get("required"):
+        # Triggered only by a real risk signal from the real route, never the test reference.
+        assert [r for r in decision["reasons"] if not r.startswith("supporting:")], decision
+    else:
+        assert policy[-1]["effective"] == "disabled"

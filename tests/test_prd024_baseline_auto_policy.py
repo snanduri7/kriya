@@ -58,12 +58,32 @@ def repo(tmp_path):
     (_route(weight=ExecutionWeight.HEAVY), ["src/banner.py"], "rev", True),
     (_route(kind=ChangeKind.REFACTOR), ["src/banner.py"], "rev", True),
     (_route(dependency_change=True), ["src/banner.py"], "rev", True),
-    (_route(), ["src/pricing.py"], "rev", True),                                        # tested source
+    (_route(public_contract_change=True), ["src/pricing.py"], "rev", True),             # API change
+    (_route(configuration_change=True), ["src/banner.py"], "rev", True),                # runtime/config
+    (_route(shared_entrypoint_change=True), ["src/banner.py"], "rev", True),            # shared owner
+    (_route(), ["src/pricing.py", "src/banner.py", "src/extra.py"], "rev", True),       # broad change
+    (_route(), ["src/pricing.py"], "rev", False),                   # tested source alone: supporting only
 ])
 def test_auto_trigger_matrix(repo, route, planned, revision, expected):
+    (repo / "src" / "extra.py").write_text("EXTRA = 1\n")
     decision = decide_auto_baseline(route, planned, str(repo), workspace_revision=revision)
     assert decision.required is expected, decision.reasons
     assert effective_baseline_policy("auto", decision) == ("required" if expected else "disabled")
+
+
+def test_a_low_risk_edit_to_a_tested_source_records_the_test_but_takes_no_baseline(repo):
+    """A docstring-sized LOW/LIGHT change to a file an existing test names:
+    the test reference is recorded as supporting evidence, never a trigger."""
+    decision = decide_auto_baseline(_route(), ["src/pricing.py"], str(repo), workspace_revision="rev")
+    assert decision.required is False
+    assert decision.signals["supporting"]["tested_changed_sources"] == ["src/pricing.py"]
+    assert "alone does not require a baseline" in decision.reasons[0]
+    # The same file under a real risk signal: triggered, the test is supporting.
+    risky = decide_auto_baseline(_route(public_contract_change=True), ["src/pricing.py"], str(repo),
+                                 workspace_revision="rev")
+    assert risky.required is True
+    assert risky.reasons[0] == "impact public_contract_change"
+    assert risky.reasons[-1].startswith("supporting: changed source(s) named by existing tests")
 
 
 def test_a_repository_without_tests_never_triggers(tmp_path):
@@ -284,3 +304,142 @@ async def test_a_trivial_change_does_not_pay_for_a_full_baseline(repo):
     [policy] = _events(cfg, "validation_baseline.policy")
     assert policy["effective"] == "disabled" and not policy["auto_decision"]["required"]
     assert _events(cfg, "validation_baseline.full_regression_delta") == []
+
+
+# ------------------------------------------------ reusing an exact prior full-suite result
+
+from kriya.workflow.validation_baseline import capture_brownfield_baselines  # noqa: E402
+
+
+def _prior(revision="rev-A", environment="env-A", target_test=None, output="4 passed", success=True):
+    invocation = ValidationInvocation(
+        command_identity="polymorphic_validator.run_tests",
+        selection_identity="full_suite" if target_test is None else f"target_test:{json.dumps(list(target_test))}",
+        environment_fingerprint=environment, target_test=target_test)
+    return capture_validation_baseline(workspace_revision=revision, run_id="earlier", invocation=invocation,
+                                       raw_result={"success": success, "output": output}).to_dict()
+
+
+def _capture(prior, revision="rev-A", environment="env-A"):
+    calls = []
+
+    def run_validator(target_test):
+        calls.append(target_test)
+        return {"success": True, "output": "4 passed"}
+
+    result = capture_brownfield_baselines(
+        run_id="now", target_test=None, full_regression_policy="required", run_validator=run_validator,
+        compute_revision=lambda: revision, environment_identity=environment, prior_full_regression=prior)
+    return result, calls
+
+
+def test_an_exact_prior_full_suite_result_is_reused_not_rerun():
+    result, calls = _capture(_prior())
+    assert calls == []
+    assert result.full_regression_source == "prior_full_suite"
+    assert result.full_regression.run_id == "earlier"
+
+
+@pytest.mark.parametrize("prior, why", [
+    (_prior(revision="rev-B"), "the workspace changed since"),
+    (_prior(environment="env-B"), "a different toolchain/containment/verification policy"),
+    (_prior(target_test=("tests/test_pricing.py",)), "a targeted run is not the full suite"),
+])
+def test_prior_evidence_for_another_state_is_not_reused(prior, why):
+    result, calls = _capture(prior)
+    assert calls == [None], why
+    assert result.full_regression_source == "captured" and result.full_regression.run_id == "now"
+
+
+def test_a_prior_run_that_did_not_complete_is_not_reused():
+    prior = _prior()
+    prior["outcome"]["execution_status"] = "environment_failure"
+    result, calls = _capture(prior)
+    assert calls == [None] and result.full_regression_source == "captured"
+
+
+def test_the_verification_policy_is_part_of_the_environment_identity(repo):
+    from kriya.workflow.baseline_policy import baseline_environment_identity
+
+    cfg = AppConfig()
+    before = baseline_environment_identity(str(repo), cfg.autonomy)
+    cfg.autonomy.sandbox_cpu_seconds = cfg.autonomy.sandbox_cpu_seconds + 1
+    assert baseline_environment_identity(str(repo), cfg.autonomy) != before
+
+
+def _counting_suite(calls):
+    def run_tests(self, target_test=None, *args, **kwargs):
+        calls.append(target_test)
+        return {"success": True, "output": "4 passed"}
+
+    return patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=run_tests)
+
+
+@pytest.mark.asyncio
+async def test_the_next_run_reuses_the_applied_candidates_full_suite_run(repo):
+    """Run 1 captures PRE and runs POST; run 2 starts from exactly what run 1
+    applied, so run 1's POST is its baseline (one full-suite run, not two)."""
+    _git(repo)
+    cfg, engine = _engine(repo, _route(risk=RiskClass.MEDIUM), FIX)
+    calls = []
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
+               return_value={"success": True, "output": ""}), _counting_suite(calls):
+        first = await engine.run_generation_workflow(goal="Tidy the pricing comment", workspace_path=str(repo))
+        first_runs = calls.count(None)
+        engine.developer.run_generation = AsyncMock(return_value=[
+            {"filepath": "src/pricing.py", "content": "def price(q, u):\n    return q * u  # tidy\n"}])
+        second = await engine.run_generation_workflow(goal="Tidy the pricing comment again",
+                                                      workspace_path=str(repo))
+
+    assert first["quality_gates_passed"] is True and second["quality_gates_passed"] is True
+    assert first_runs == 2 and calls.count(None) == 3
+    sources = [e["source"] for e in _events(cfg, "validation_baseline.full_regression_source")]
+    assert sources == ["captured", "prior_full_suite"]
+
+
+@pytest.mark.asyncio
+async def test_a_changed_workspace_or_policy_is_baselined_again(repo):
+    _git(repo)
+    cfg, engine = _engine(repo, _route(risk=RiskClass.MEDIUM), FIX)
+    calls = []
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
+               return_value={"success": True, "output": ""}), _counting_suite(calls):
+        await engine.run_generation_workflow(goal="Tidy the pricing comment", workspace_path=str(repo))
+        (repo / "src" / "banner.py").write_text("TEXT = 'edited outside Kriya'\n")  # workspace moved on
+        engine.developer.run_generation = AsyncMock(return_value=[
+            {"filepath": "src/pricing.py", "content": "def price(q, u):\n    return q * u  # two\n"}])
+        await engine.run_generation_workflow(goal="Tidy the pricing comment again", workspace_path=str(repo))
+        cfg.autonomy.sandbox_cpu_seconds = cfg.autonomy.sandbox_cpu_seconds + 1  # verification policy
+        engine.developer.run_generation = AsyncMock(return_value=[
+            {"filepath": "src/pricing.py", "content": "def price(q, u):\n    return q * u  # three\n"}])
+        await engine.run_generation_workflow(goal="Tidy the pricing comment once more", workspace_path=str(repo))
+
+    sources = [e["source"] for e in _events(cfg, "validation_baseline.full_regression_source")]
+    assert sources == ["captured", "captured", "captured"]
+    assert calls.count(None) == 6
+
+
+def test_a_milestone_reuses_the_previous_milestones_full_suite_run(tmp_path, monkeypatch):
+    """Through the real CLI and milestone driver, under production's
+    `required`: M1 captures PRE and runs POST; M2 and the integration unit
+    each start from exactly what the unit before them committed, so that
+    unit's POST run is their baseline - one full-suite run per unit, plus
+    M1's PRE, instead of two per unit."""
+    import test_prd020_milestone_requirements as harness
+
+    calls = []
+
+    def run_tests(self, target_test=None, *args, **kwargs):
+        calls.append(target_test)
+        return {"success": True, "output": "1 passed"}
+
+    with patch("kriya.tools.validate.PolymorphicValidator.run_tests", new=run_tests), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
+               return_value={"success": True, "output": ""}):
+        cfg, result = harness._run(tmp_path, monkeypatch, harness.Transport(),
+                                   brownfield_full_regression_baseline_policy="required")
+
+    assert result.exit_code == 0, result.output
+    sources = [e["source"] for e in _events(cfg, "validation_baseline.full_regression_source")]
+    assert sources == ["captured", "prior_full_suite", "prior_full_suite"], sources  # M1, M2, integration
+    assert calls.count(None) == 4  # M1's PRE, then one POST per unit

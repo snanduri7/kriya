@@ -715,6 +715,10 @@ class WorkflowEngine:
     def __init__(self, kernel: Kernel, llm_client: LLMClient) -> None:
         self.kernel = kernel
         self.llm = llm_client
+        # PRD-024: the last applied candidate's terminal full-suite result
+        # (full_suite_evidence_for_reuse), offered to the next run as its
+        # baseline; reused only if it describes that run's exact start.
+        self._prior_full_suite_evidence: Optional[Dict[str, Any]] = None
         # Per-role model config (kriya/config/config.py::AgentRolesConfig) - each
         # optional, defaulting to None (LLMClient's own primary model) when a project
         # never configures agent_llms, so this is a zero-behavior-change default.
@@ -3203,7 +3207,18 @@ class WorkflowEngine:
             compute_revision=lambda: compute_workspace_content_hash(workspace_path),
             resume_baseline_targeted=(resume_state or {}).get("validation_baseline_targeted"),
             resume_baseline_full_regression=(resume_state or {}).get("validation_baseline_full_regression"),
+            prior_full_regression=self._prior_full_suite_evidence,
         )
+        if baseline_capture.full_regression_source is not None:
+            state.record_event(RunEvent(
+                kind="validation_baseline.full_regression_source", attempt=0,
+                source="workflow.run_generation_workflow", authority=EventAuthority.AUXILIARY,
+                message=f"full-regression baseline: {baseline_capture.full_regression_source}",
+                details={"source": baseline_capture.full_regression_source,
+                         "baseline_run_id": getattr(baseline_capture.full_regression, "run_id", None),
+                         "workspace_revision": getattr(
+                             baseline_capture.full_regression, "workspace_revision", None)},
+            ))
         state.validation_baseline_targeted = baseline_capture.targeted
         state.validation_baseline_full_regression = baseline_capture.full_regression
         if baseline_capture.targeted is not None:
@@ -3998,6 +4013,7 @@ class WorkflowEngine:
                 validator.java_home_override = state.java_home_override
 
                 full_test_res = validator.run_tests()
+                state.terminal_full_suite_result = full_test_res
 
                 # VAL-001 brownfield validation baselining - ONLY changes
                 # the blocking decision when a full-regression baseline was
@@ -4608,6 +4624,18 @@ class WorkflowEngine:
                     logger.info(
                         "Applied terminally verified sandbox change to workspace: %s", filepath,
                     )
+                # PRD-024: the suite just ran against exactly what is now in
+                # the workspace; the next run starting here may reuse it.
+                if state.terminal_full_suite_result is not None:
+                    try:
+                        from kriya.workflow.baseline_policy import full_suite_evidence_for_reuse
+                        self._prior_full_suite_evidence = full_suite_evidence_for_reuse(
+                            workspace_path, self.kernel.config.autonomy, goal=goal, run_id=run_id,
+                            raw_result=state.terminal_full_suite_result,
+                        )
+                    except Exception as exc:
+                        self._prior_full_suite_evidence = None
+                        logger.warning(f"Full-suite evidence not kept for reuse: {exc}")
 
                 state.overall_attempt_succeeded = True
                 state.record_developer_attempt_outcome(self.developer.llm, passed=True)
