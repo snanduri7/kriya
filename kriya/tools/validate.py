@@ -180,6 +180,15 @@ def _pyproject_dependencies(pyproject_path: str) -> List[str]:
     return [dep for dep in dependencies if isinstance(dep, str) and dep.strip()]
 
 
+def toolchain_evidence(result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """PRD-011: the attested contained toolchain (image, content digest,
+    declared and observed runtime/build-tool versions) a validator result
+    carries, as the gate-outcome fields that persist it with the verdict.
+    Empty for an uncontained result - host mode never claims an identity."""
+    identity = result.get("toolchain_identity") if isinstance(result, dict) else None
+    return {"toolchain_identity": identity} if identity is not None else {}
+
+
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
 
@@ -1766,6 +1775,7 @@ class PolymorphicValidator:
 
         output_parts = []
         steps = []
+        sequence_toolchain: Dict[str, Any] = {}
         overall_success = True
         any_timed_out = False
         last_returncode = None
@@ -1808,8 +1818,9 @@ class PolymorphicValidator:
             steps.append({
                 "command": list(command), "exit_code": res["returncode"],
                 "stdout": res["stdout"], "stderr": res["stderr"],
-                "timed_out": res["timeout"],
+                "timed_out": res["timeout"], **toolchain_evidence(res),
             })
+            sequence_toolchain = toolchain_evidence(res) or sequence_toolchain
             last_returncode = res["returncode"]
             if res["timeout"]:
                 any_timed_out = True
@@ -1824,6 +1835,7 @@ class PolymorphicValidator:
             "returncode": last_returncode,
             "output": "\n\n".join(output_parts),
             "steps": steps,
+            **sequence_toolchain,
         }
 
 

@@ -229,7 +229,7 @@ from kriya.workflow.retry_prompts import (
     _build_missing_files_retry_prompt,
     _build_targeted_retry_prompt,
 )
-from kriya.tools.validate import PolymorphicValidator
+from kriya.tools.validate import PolymorphicValidator, toolchain_evidence
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.review_context import build_candidate_diff_context, build_review_batches, build_reviewer_verified_evidence
@@ -3934,6 +3934,7 @@ class WorkflowEngine:
                         "success": True,
                         "output": full_test_res.get("output", ""),
                         "deferred_to_future_owner": deferral.future_owner_id,
+                        **toolchain_evidence(full_test_res),
                     })
                     # Falls through to the same post-regression checks and
                     # success path below, exactly as a genuinely passing
@@ -4092,7 +4093,8 @@ class WorkflowEngine:
                     "attempt": state.attempt_number,
                     "type": "regression_test",
                     "success": True,
-                    "output": full_test_res.get("output", "")
+                    "output": full_test_res.get("output", ""),
+                    **toolchain_evidence(full_test_res),
                 })
                 state.terminal_regression_succeeded = True
                 if obligation_ledger is not None and current_subtask_id:
