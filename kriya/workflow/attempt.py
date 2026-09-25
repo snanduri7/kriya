@@ -1417,6 +1417,10 @@ async def _run_developer_generation(
             # already carries that same honest None, never a fabricated
             # "stop").
             "finish_reason": (last_call_metrics or {}).get("finish_reason"),
+            # PRD-013/015: the exact runtime the call went to and its
+            # normalized protocol outcome (secret-free).
+            "runtime_fingerprint": (last_call_metrics or {}).get("runtime_fingerprint"),
+            "protocol_status": (last_call_metrics or {}).get("protocol_status"),
         })
         state.record_event(RunEvent(
             kind="generation.completed" if succeeded else "generation.failed",
@@ -1431,6 +1435,7 @@ async def _run_developer_generation(
                 "duration_seconds": duration,
                 "file_count": file_count,
                 "model": active_model,
+                "model_use": (last_call_metrics or {}).get("completion"),
             },
         ))
 

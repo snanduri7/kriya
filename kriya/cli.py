@@ -752,6 +752,127 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
         click.secho(f"Execution failed: {e}", fg="red")
         sys.exit(1)
 
+@main.group(name="model")
+def model_group() -> None:
+    """PRD-013/014: exact model runtime identity and protocol qualification.
+    A model name is never a qualification: `qualify` runs the protocol cases
+    against the exact served runtime and records the evidence outside the
+    workspace; `status` shows whether each production role's models are
+    currently qualified."""
+    pass
+
+
+def _model_cfg(ctx: click.Context) -> AppConfig:
+    config_error = ctx.obj.get('config_error')
+    if config_error is not None:
+        click.secho(f"Error loading configuration: {config_error}", fg="red", err=True)
+        sys.exit(1)
+    return ctx.obj['config']
+
+
+@model_group.command(name="fingerprint")
+@click.option("--model", "model_name", default=None, help="Model to fingerprint (default: llm.model).")
+@click.option("--json", "json_output", is_flag=True, help="Emit the fingerprint as JSON.")
+@click.pass_context
+def model_fingerprint(ctx: click.Context, model_name: Optional[str], json_output: bool) -> None:
+    """Show the exact runtime fingerprint of a configured model."""
+    from kriya.core.model_runtime import resolve_configured_model_runtime
+
+    cfg = _model_cfg(ctx)
+    fingerprint = resolve_configured_model_runtime(cfg, model_name, fresh=True)
+    record = fingerprint.to_dict()
+    if json_output:
+        click.echo(json.dumps(record, indent=2, sort_keys=True))
+    else:
+        click.secho(f"Model runtime: {fingerprint.alias}", bold=True)
+        for key in sorted(record):
+            click.echo(f"  {key}: {record[key]}")
+    if not fingerprint.exact:
+        ctx.exit(1)
+
+
+@model_group.command(name="qualify")
+@click.option("--model", "model_name", default=None, help="Model to qualify (default: llm.model).")
+@click.option("--case", "cases", multiple=True, help="Run only these capability cases (repeatable).")
+@click.option("--json", "json_output", is_flag=True, help="Emit the qualification record as JSON.")
+@click.option("--out", "out_path", type=click.Path(dir_okay=False), default=None,
+              help="Also write the record (JSON) to this file, e.g. for a handover.")
+@click.pass_context
+def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, json_output: bool,
+                  out_path: Optional[str]) -> None:
+    """Run the protocol qualification cases against the exact served runtime.
+
+    The record is keyed by the runtime fingerprint and stored outside the
+    workspace (~/.kriya/qualifications, or KRIYA_QUALIFICATION_HOME). It
+    becomes stale when the runtime, Kriya's protocol adapter or the
+    qualification policy changes."""
+    from kriya.core.model_qualification import CAPABILITIES, QualificationError, run_qualification, save_record
+
+    cfg = _model_cfg(ctx)
+    _bootstrap_logging(cfg, file_logging=False)
+    unknown = sorted(set(cases) - set(CAPABILITIES))
+    if unknown:
+        raise click.UsageError(f"unknown case(s) {unknown}; known: {', '.join(CAPABILITIES)}")
+
+    def progress(result) -> None:
+        if not json_output:
+            color = {"PASS": "green", "FAIL": "red"}.get(result.status, "yellow")
+            click.secho(f"  {result.capability:<28} {result.status:<11} {result.elapsed_seconds:>7.2f}s", fg=color)
+
+    if not json_output:
+        click.secho(f"Qualifying {model_name or cfg.llm.model} ...", bold=True)
+    try:
+        record = asyncio.run(run_qualification(cfg, model_name, only=cases or None, progress=progress))
+    except QualificationError as error:
+        click.secho(str(error), fg="red", err=True)
+        ctx.exit(1)
+        return
+    if cases:
+        record["partial"] = True
+    path = None if cases else save_record(record, workspace_root=os.path.realpath(os.getcwd()))
+    if out_path:
+        with open(out_path, "w", encoding="utf-8") as stream:
+            json.dump(record, stream, indent=2, sort_keys=True)
+    if json_output:
+        click.echo(json.dumps(record, indent=2, sort_keys=True))
+    else:
+        click.echo(f"\nSummary: {record['summary']}  measured limits: {record['measured_limits']}")
+        click.echo(f"Runtime fingerprint: {record['fingerprint_digest']}")
+        click.echo(f"Record: {path}" if path else "Partial run (--case): not saved as a qualification record.")
+
+
+@model_group.command(name="status")
+@click.option("--json", "json_output", is_flag=True, help="Emit the per-role assessment as JSON.")
+@click.pass_context
+def model_status(ctx: click.Context, json_output: bool) -> None:
+    """Show each production role's models, exact runtimes and qualification."""
+    from kriya.core.model_qualification import QUALIFIED, assess, required_capabilities, role_models
+    from kriya.core.model_runtime import resolve_configured_model_runtime
+
+    cfg = _model_cfg(ctx)
+    report: Dict[str, Any] = {}
+    all_qualified = True
+    for role, models in role_models(cfg).items():
+        report[role] = []
+        for model in models:
+            runtime = resolve_configured_model_runtime(cfg, model, fresh=True)
+            assessment = assess(runtime, required_capabilities(cfg, role, model),
+                                workspace_root=os.path.realpath(os.getcwd()))
+            all_qualified &= assessment.status == QUALIFIED
+            report[role].append({"model": model, "exact": runtime.exact, **assessment.to_dict()})
+    if json_output:
+        click.echo(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        for role, entries in report.items():
+            for entry in entries:
+                color = "green" if entry["status"] == QUALIFIED else "red"
+                click.secho(f"  {role:<16} {entry['model']:<32} {entry['status']}", fg=color)
+                for reason in entry["reasons"]:
+                    click.echo(f"      - {reason}")
+    if not all_qualified:
+        ctx.exit(1)
+
+
 @main.group(name="mcp")
 def mcp_group() -> None:
     """TOOL-002 P2: inspect MCP tool identities and explicitly, durably

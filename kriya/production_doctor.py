@@ -6,7 +6,6 @@ runtime metadata.  FAIL and UNAVAILABLE are blocking when ``required`` is true.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -95,8 +94,10 @@ def _json_request(
 
 
 def probe_llm_runtime(cfg: AppConfig) -> Dict[str, Any]:
-    """Return connectivity plus exact native metadata when the endpoint exposes it."""
+    """Connectivity plus the PRD-013 exact runtime fingerprint of the primary
+    model, probed fresh (never from the per-process cache)."""
     from kriya.core.llm import EgressViolationError, is_local_url
+    from kriya.core.model_runtime import configured_context_window, kriya_protocol_identity, probe_model_runtime
 
     if cfg.autonomy.egress_policy == "local_only" and not is_local_url(cfg.llm.base_url):
         # PRD-012: never probe (or send the API key to) a refused endpoint.
@@ -106,52 +107,18 @@ def probe_llm_runtime(cfg: AppConfig) -> Dict[str, Any]:
     models = [item for item in listing.get("data", []) if isinstance(item, dict)]
     selected = next((item for item in models if item.get("id") == cfg.llm.model), None)
 
-    native_metadata = None
-    parsed = urllib.parse.urlsplit(cfg.llm.base_url)
-    path = parsed.path.rstrip("/")
-    if path.endswith("/v1"):
-        native_root = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path[:-3], "", ""))
-        try:
-            tags = _json_request(f"{native_root.rstrip('/')}/api/tags")
-            native_models = [item for item in tags.get("models", []) if isinstance(item, dict)]
-            native_selected = next(
-                (
-                    item for item in native_models
-                    if str(item.get("name") or item.get("model") or "").casefold()
-                    == cfg.llm.model.casefold()
-                ),
-                None,
-            )
-            shown = _json_request(
-                f"{native_root.rstrip('/')}/api/show",
-                payload={"model": cfg.llm.model},
-            )
-            # These fields identify the served artifact/runtime contract. Avoid
-            # hashing response prose that can change without changing runtime.
-            native_metadata = {
-                key: shown[key]
-                for key in ("modified_at", "details", "model_info", "capabilities", "parameters")
-                if key in shown
-            }
-            if native_selected and native_selected.get("digest"):
-                native_metadata["digest"] = native_selected["digest"]
-        except Exception:
-            native_metadata = None
-
-    fingerprint = None
-    if selected is not None and native_metadata and native_metadata.get("digest"):
-        material = {
-            "model": cfg.llm.model,
-            "endpoint_model": selected,
-            "native_metadata": native_metadata,
-        }
-        canonical = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-        fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    runtime = probe_model_runtime(
+        base_url=cfg.llm.base_url, model=cfg.llm.model, api_key=cfg.llm.api_key,
+        egress_policy=cfg.autonomy.egress_policy,
+        configured_context=configured_context_window(cfg.llm.extra_body),
+        kriya_protocol=kriya_protocol_identity(cfg, cfg.llm.model),
+        transport=lambda url, payload, api_key: _json_request(url, api_key=api_key, payload=payload),
+    )
     return {
         "models": [item.get("id") for item in models],
         "selected_model": selected,
-        "native_metadata": native_metadata,
-        "fingerprint": fingerprint,
+        "runtime": runtime,
+        "fingerprint": runtime.digest if runtime.exact else None,
     }
 
 
@@ -422,6 +389,7 @@ CHECK_RAISED = "CHECK_RAISED"
 RUNTIME_FINGERPRINT_NOT_COMPUTABLE = "RUNTIME_FINGERPRINT_NOT_COMPUTABLE"
 RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE = "RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE"
 MODEL_NOT_QUALIFIED = "MODEL_NOT_QUALIFIED"
+QUALIFICATION_STALE = "QUALIFICATION_STALE"
 
 _SEVERITY = {CheckStatus.PASS: 0, CheckStatus.WARN: 1, CheckStatus.UNAVAILABLE: 2, CheckStatus.FAIL: 3}
 
@@ -800,50 +768,90 @@ def _check_model_connectivity(ctx: _Context) -> DoctorCheck:
 
 
 def _check_runtime_fingerprint(ctx: _Context) -> DoctorCheck:
-    """Never PASS yet: a fingerprint is only meaningful once it is bound to an
-    exact-runtime qualification record, which PRD-013/014 introduce. Until then
-    the computed fingerprint is evidence, and the check fails closed."""
-    fingerprint = ctx.runtime_probe.get("fingerprint")
+    """PRD-013: PASS when the primary model's runtime is exact (artifact
+    digest and provider version reported); every component is evidence."""
+    runtime = ctx.runtime_probe.get("runtime")
+    if runtime is not None and runtime.exact:
+        return _check("model.runtime_fingerprint", CheckStatus.PASS, evidence={
+            "model": ctx.cfg.llm.model, "fingerprint": runtime.digest, "runtime": runtime.to_dict(),
+        })
     return _check(
         "model.runtime_fingerprint",
         CheckStatus.UNAVAILABLE,
         evidence={
             "model": ctx.cfg.llm.model,
-            "fingerprint": fingerprint,
-            "native_metadata": bool(ctx.runtime_probe.get("native_metadata")),
-            "reason_code": (
-                RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE if fingerprint else RUNTIME_FINGERPRINT_NOT_COMPUTABLE
-            ),
+            "fingerprint": None,
+            "runtime": runtime.to_dict() if runtime is not None else None,
+            "reason_code": RUNTIME_FINGERPRINT_NOT_COMPUTABLE,
         },
         remediation=(
-            "Exact runtime fingerprint binding arrives with PRD-013/014."
-            if fingerprint else
-            "Use a local endpoint exposing exact model metadata (Ollama /api/show) so the served artifact can be fingerprinted."
+            "Use a local endpoint exposing exact model metadata (Ollama /api/version, /api/tags, /api/show) "
+            "so the served artifact can be fingerprinted."
         ),
     )
 
 
 def _check_qualification(ctx: _Context) -> DoctorCheck:
-    """A model name is not a qualification. A model outside every campaign is
-    a FAIL; a campaign-named model is still UNAVAILABLE until its exact runtime
-    is qualified (PRD-013/014). Campaign membership is looked up by identity,
-    never inferred from the capability-profile source (a loaded config's
-    packaged llm.capabilities makes that explicit_primary for every model)."""
-    from kriya.core.model_capabilities import is_campaign_named_model, resolve_model_capability_profile
+    """PRD-014: every production role's every callable model (its binding
+    and escalation chain) must have a CURRENT qualification record for its
+    exact runtime covering the capabilities Kriya uses with it. A model name
+    is never a qualification. FAIL when a determinable runtime lacks it;
+    UNAVAILABLE when a runtime cannot be identified exactly."""
+    from kriya.core.model_capabilities import is_campaign_named_model
+    from kriya.core.model_qualification import (
+        MISSING,
+        NOT_EXACT,
+        NOT_QUALIFIED,
+        QUALIFIED,
+        STALE,
+        assess,
+        required_capabilities,
+        role_models,
+    )
+    from kriya.core.model_runtime import resolve_configured_model_runtime
 
-    source = resolve_model_capability_profile(ctx.cfg, ctx.cfg.llm.model).source
-    named = is_campaign_named_model(ctx.cfg.llm.model)
+    runtimes: Dict[str, Any] = {}
+    primary = ctx.runtime_probe.get("runtime")
+    if primary is not None:
+        runtimes[ctx.cfg.llm.model.casefold()] = primary
+    roles: Dict[str, Any] = {}
+    statuses = set()
+    for role, models in role_models(ctx.cfg).items():
+        entries = []
+        for model in models:
+            key = model.casefold()
+            if key not in runtimes:
+                try:
+                    runtimes[key] = resolve_configured_model_runtime(ctx.cfg, model, fresh=True)
+                except Exception as error:  # an unreachable runtime is undeterminable, not qualified
+                    runtimes[key] = None
+                    entries.append({"model": model, "status": NOT_EXACT, "reasons": [str(error)]})
+                    statuses.add(NOT_EXACT)
+                    continue
+            runtime = runtimes[key]
+            if runtime is None:
+                entries.append({"model": model, "status": NOT_EXACT, "reasons": ["runtime could not be probed"]})
+                statuses.add(NOT_EXACT)
+                continue
+            assessment = assess(runtime, required_capabilities(ctx.cfg, role, model), workspace_root=ctx.workspace)
+            statuses.add(assessment.status)
+            entries.append({"model": model, "campaign_named": is_campaign_named_model(model),
+                            **assessment.to_dict()})
+        roles[role] = entries
+    if statuses == {QUALIFIED}:
+        status, reason = CheckStatus.PASS, None
+    elif statuses & {NOT_QUALIFIED, STALE, MISSING}:
+        status = CheckStatus.FAIL
+        reason = (MODEL_NOT_QUALIFIED if MISSING in statuses or NOT_QUALIFIED in statuses
+                  else QUALIFICATION_STALE)
+    else:
+        status, reason = CheckStatus.UNAVAILABLE, RUNTIME_FINGERPRINT_NOT_COMPUTABLE
+    evidence: Dict[str, Any] = {"model": ctx.cfg.llm.model, "roles": roles, "name_based_profile_is_authority": False}
+    if reason:
+        evidence["reason_code"] = reason
     return _check(
-        "model.qualification",
-        CheckStatus.UNAVAILABLE if named else CheckStatus.FAIL,
-        evidence={
-            "model": ctx.cfg.llm.model,
-            "campaign_named": named,
-            "name_based_profile_source": source,
-            "name_based_profile_is_authority": False,
-            "reason_code": RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE if named else MODEL_NOT_QUALIFIED,
-        },
-        remediation="Qualify this exact model runtime through the production model campaign (PRD-013/014).",
+        "model.qualification", status, evidence=evidence,
+        remediation="Qualify each exact model runtime with `kriya model qualify --model <model>` (PRD-014).",
     )
 
 

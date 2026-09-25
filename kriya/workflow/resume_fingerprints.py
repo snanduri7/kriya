@@ -582,6 +582,7 @@ def compute_resume_fingerprints(
     input_obligation_fingerprint: Optional[Fingerprint] = None,
     effective_obligation_fingerprint: Optional[Fingerprint] = None,
     toolchain: Optional[Fingerprint] = None,
+    model_runtime: Optional[Fingerprint] = None,
 ) -> Dict[str, Fingerprint]:
     """Every fingerprint in FINGERPRINT_NAMES. ``workspace`` and
     ``input_obligation_fingerprint`` may be passed precomputed: a run fixes
@@ -603,7 +604,10 @@ def compute_resume_fingerprints(
             else ledger_fingerprint(effective_obligation_ledger)
         ),
         "skills": skills_fingerprint(skill_source_dirs),
-        "model_runtime": Fingerprint.unavailable("model runtime identity is not bound until PRD-013"),
+        "model_runtime": (
+            model_runtime if model_runtime is not None
+            else Fingerprint.unavailable("no model runtime identity was supplied")
+        ),
         "containment": Fingerprint(_digest(owned["containment"]), "containment-config"),
         "toolchain": toolchain if toolchain is not None else toolchain_fingerprint(),
         "verification_policy": Fingerprint(
@@ -613,6 +617,28 @@ def compute_resume_fingerprints(
         "authority_context": authority_context_fingerprint(**authority_inputs),
         "kriya_runtime": kriya_runtime_fingerprint(),
     }
+
+
+def model_runtime_resume_fingerprint(config: Any) -> Fingerprint:
+    """PRD-013: the exact runtimes of every model a production role can call
+    (the Developer's llm + llm_chain, each agent_llms binding), plus the
+    config fields this owner owns. Available only when EVERY runtime is
+    exact; otherwise UNAVAILABLE, which never matches."""
+    from kriya.core.model_qualification import role_models
+    from kriya.core.model_runtime import resolve_configured_model_runtime
+
+    models = list(dict.fromkeys(m for chain in role_models(config).values() for m in chain))
+    digests = {}
+    for model in models:
+        fingerprint = resolve_configured_model_runtime(config, model)
+        if not fingerprint.exact:
+            return Fingerprint.unavailable(
+                f"model runtime identity of {model!r} is not exact "
+                f"({'; '.join(fingerprint.probe_errors) or ', '.join(fingerprint.missing_components)})"
+            )
+        digests[model.casefold()] = fingerprint.digest
+    owned = split_config_by_owner(config.model_dump())["model_runtime"]
+    return Fingerprint(_digest({"runtimes": digests, "config": owned}), "model-runtime")
 
 
 def _declaration_mutable(write_scope_mode: Any, allowed_write_relpaths: Any, structured_plan: Any) -> bool:
@@ -766,6 +792,7 @@ def generation_resume_fingerprints(
             effective_obligation_ledger if effective_obligation_ledger is not None else obligation_ledger
         ),
         skill_source_dirs=skill_dirs,
+        model_runtime=model_runtime_resume_fingerprint(config),
         toolchain=toolchain_fingerprint(
             workspace_path, config.autonomy, goal=goal, candidate_files=candidate_files,
             declaration_mutable=_declaration_mutable(write_scope_mode, allowed_write_relpaths, structured_plan),

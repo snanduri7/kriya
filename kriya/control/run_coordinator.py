@@ -154,6 +154,24 @@ def annotate_run(workspace_path: str, **evidence: Any) -> Optional[str]:
     return None
 
 
+def record_model_runtime_use(fingerprint_id: str) -> None:
+    """PRD-013: add a model runtime fingerprint id to the active run in this
+    execution context (every model call is attributable). Best effort: a
+    call outside a run, or a persistence failure, never fails the call."""
+    context = current_run_context()
+    if context is None or not fingerprint_id:
+        return
+    record = context._lease.record
+    if record is None or record.terminal or fingerprint_id in record.model_runtime_fingerprint_ids:
+        return
+    try:
+        _persist(context, lambda current: current.annotate(
+            model_runtime_fingerprint_ids=[*current.model_runtime_fingerprint_ids, fingerprint_id],
+        ))
+    except Exception as error:
+        logger.warning("Run %s: model runtime fingerprint not persisted: %s", context.run_id, error)
+
+
 def owning_run_commits(workspace_path: str) -> Optional[Tuple[str, List[Dict[str, Any]]]]:
     """(run_id, a copy of its commit cycles) for the run that owns
     ``workspace_path``, else None. Read-only: callers that attribute commits

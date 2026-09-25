@@ -1,7 +1,6 @@
 import ipaddress
 import json
 import logging
-import re
 import socket
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
@@ -112,6 +111,10 @@ class LLMClient:
         # convention everywhere in this codebase already (no concurrent
         # complete() calls share one LLMClient), not a new constraint.
         self.last_call_metrics: Optional[Dict[str, Any]] = None
+        # PRD-015: the normalized result (kriya.core.completion.CompletionResult)
+        # of the most recent call, set before the call returns or raises;
+        # None while a call is in flight. Same single-flight convention.
+        self.last_completion = None
 
     def _audit_llm_network_access(self, url: str) -> None:
         """MA4.3 - audit-only ExecutionPolicy consultation, wired in front of
@@ -138,6 +141,127 @@ class LLMClient:
         except Exception as e:
             logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
+    # ------------------------------------------------------------------
+    # PRD-013/015/016: runtime identity, normalized result, dispatch budget
+    # ------------------------------------------------------------------
+
+    def _binding(self, model: str) -> Dict[str, Any]:
+        """Config for ``model``: primary llm, an llm_chain entry or an
+        agent_llms binding (the first exact, case-folded match)."""
+        target = (model or "").casefold()
+        cfg = self.config
+        if cfg.llm.model.casefold() == target:
+            return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning}
+        candidates = list(cfg.llm_chain)
+        for role in ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance"):
+            role_cfg = getattr(cfg.agent_llms, role, None)
+            if role_cfg is None:
+                continue
+            if role_cfg.llm is not None:
+                candidates.append(role_cfg.llm)
+            candidates.extend(role_cfg.llm_chain)
+        for candidate in candidates:
+            if candidate.model.casefold() == target:
+                return {"context_window": candidate.context_window, "reasoning": candidate.reasoning}
+        return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning}
+
+    async def _runtime_fingerprint(self, model: str, base_url: str, api_key: str,
+                                   extra_body: Optional[Dict[str, Any]]):
+        """PRD-013: the exact runtime this call goes to (cached per process),
+        recorded on the active run. Never fails the call."""
+        import asyncio
+
+        from kriya.control.run_coordinator import record_model_runtime_use
+        from kriya.core.model_runtime import (
+            ModelRuntimeFingerprint,
+            configured_context_window,
+            endpoint_identity,
+            kriya_protocol_identity,
+            resolve_model_runtime,
+        )
+
+        try:
+            protocol = kriya_protocol_identity(self.config, model)
+            fingerprint = await asyncio.to_thread(
+                resolve_model_runtime,
+                base_url=base_url, model=model, api_key=api_key,
+                egress_policy=self.config.autonomy.egress_policy,
+                configured_context=configured_context_window(extra_body),
+                kriya_protocol=protocol, config=self.config,
+            )
+        except Exception as error:
+            logger.warning("Model runtime fingerprint unavailable for %s: %s", model, error)
+            fingerprint = ModelRuntimeFingerprint(
+                alias=model, endpoint=endpoint_identity(base_url), probe_errors=(str(error),),
+            )
+        if fingerprint.exact:
+            record_model_runtime_use(fingerprint.digest)
+        return fingerprint
+
+    def _dispatch_budget(self, *, model: str, fingerprint, messages: List[Dict[str, Any]],
+                         tools: Optional[List[Dict[str, Any]]], max_tokens: int, is_reasoning: bool):
+        """PRD-016: plan this request's output budget against the served
+        window. Raises ContextBudgetUnsatisfiableError before any inference."""
+        from kriya.core.model_qualification import measured_limits_for
+        from kriya.core.token_budget import DEFAULT_REASONING_ALLOWANCE_TOKENS, plan_dispatch
+
+        limits = measured_limits_for(fingerprint, self.config) if fingerprint.exact else {}
+        if fingerprint.effective_context_window:
+            window, source = fingerprint.effective_context_window, "served_num_ctx"
+        else:
+            window, source = self._binding(model).get("context_window"), "config_declared"
+        reasoning = 0
+        if is_reasoning:
+            reasoning = int(limits.get("reasoning_tokens_max") or DEFAULT_REASONING_ALLOWANCE_TOKENS)
+        tokenizer = fingerprint.tokenizer_digest if fingerprint.tokenizer_digest != "unavailable" else None
+        return plan_dispatch(
+            messages=messages, tools=tools, requested_max_tokens=max_tokens,
+            context_window=window, window_source=source, tokenizer_digest=tokenizer,
+            qualified_bytes_per_token=limits.get("bytes_per_token_floor"),
+            qualified_non_ascii_bytes_per_token=limits.get("non_ascii_bytes_per_token_floor"),
+            reasoning_allowance=reasoning,
+        )
+
+    def _finish(self, result, *, started: float, budget) -> None:
+        """Common post-call bookkeeping: timing, budget comparison, the
+        usage line and the observational metrics."""
+        import time
+
+        import click
+
+        from kriya.core.token_budget import compare_with_usage
+
+        result.elapsed_seconds = time.time() - started
+        if budget is not None:
+            result.budget = budget.to_dict()
+            comparison = compare_with_usage(result.budget, result.prompt_tokens, model=result.model)
+            if comparison:
+                result.budget.update(comparison)
+        self.last_completion = result
+        if result.error is None:
+            click.secho(
+                f"\n[Usage: {result.prompt_tokens} input tokens, {result.completion_tokens} output tokens | "
+                f"Time: {result.elapsed_seconds:.2f}s | Finish: {result.finish_reason or 'unreported'}"
+                f"{'' if result.status.value == 'OK' else ' | ' + result.status.value}]",
+                fg="blue", dim=True,
+            )
+            # R1 Deliverable 5 - observational only. tokens_estimated=True means
+            # the server's response carried no usage field for prompt and/or
+            # completion tokens, so one or both counts are the char/4 heuristic,
+            # never presented as exact. finish_reason (VAL-001 G1-R3) is None
+            # when the provider/SDK never reported one - never a fabricated "stop".
+            self.last_call_metrics = {
+                "model": result.model,
+                "prompt_tokens": result.prompt_tokens,
+                "completion_tokens": result.completion_tokens,
+                "tokens_estimated": result.tokens_estimated,
+                "duration_seconds": result.elapsed_seconds,
+                "finish_reason": result.finish_reason,
+                "runtime_fingerprint": result.runtime_fingerprint,
+                "protocol_status": result.status.value,
+                "completion": result.to_telemetry(),
+            }
+
     async def complete(
         self,
         system_prompt: str,
@@ -154,6 +278,12 @@ class LLMClient:
     ) -> str:
         """Call the local LLM server and return the text completion (supporting streaming and JSON mode).
 
+        PRD-015 compatibility API over ``complete_result``: returns the visible
+        content and raises the original exception for a backend error or
+        timeout, exactly as before. Capability-sensitive callers read the
+        normalized ``self.last_completion`` (a CompletionResult) after the
+        call, or call ``complete_result`` directly.
+
         temperature_override/max_tokens_override/reasoning_override/extra_body_override let
         a caller fully specify an alternate model's real config (not just model/base_url/
         api_key) - without them, is_reasoning falls back to scanning the top-level llm_chain
@@ -166,6 +296,47 @@ class LLMClient:
         the same way it already passes that entry's model/base_url/api_key/temperature -
         otherwise the primary's own extra_body (e.g. a reasoning_effort tuned for a
         completely different model) silently applies to the fallback call instead."""
+        result = await self.complete_result(
+            system_prompt, user_prompt, stream_callback=stream_callback, json_mode=json_mode,
+            model_override=model_override, base_url_override=base_url_override,
+            api_key_override=api_key_override, temperature_override=temperature_override,
+            max_tokens_override=max_tokens_override, reasoning_override=reasoning_override,
+            extra_body_override=extra_body_override,
+        )
+        if result.error is not None:
+            logger.error(f"Local LLM call failed: {result.error}", exc_info=result.error)
+            raise result.error
+        if result.status.value != "OK":
+            logger.warning(
+                "Completion from '%s' is %s (finish_reason=%s); returned to a compatibility caller as text.",
+                result.model, result.status.value, result.finish_reason,
+            )
+        return result.content
+
+    async def complete_result(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        stream_callback: Optional[Callable[[str], None]] = None,
+        json_mode: bool = False,
+        model_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+        temperature_override: Optional[float] = None,
+        max_tokens_override: Optional[int] = None,
+        reasoning_override: Optional[bool] = None,
+        extra_body_override: Optional[Dict[str, Any]] = None,
+    ):
+        """PRD-015: one completion as a normalized ``CompletionResult``.
+
+        Raises only for policy refusals (egress, CONTEXT_BUDGET_UNSATISFIABLE)
+        and cancellation (recorded as CANCELLED first, never swallowed); a
+        backend error or timeout is returned as BACKEND_ERROR/TIMEOUT."""
+        import asyncio
+        import time
+
+        from kriya.core.completion import CompletionResult, CompletionStatus, classify, split_reasoning
+
         # MA4.3 - audit-only, always runs regardless of egress_policy, and can
         # never affect the unconditional enforcement immediately below.
         url_to_check = base_url_override or self.config.llm.base_url
@@ -214,20 +385,32 @@ class LLMClient:
         # JSON-extraction fallback can recover since there's no JSON substring in it.
         response_format = {"type": "json_object"} if json_mode else None
 
-        logger.info(f"Sending completion request to local LLM [Model: {model}, Stream: {stream_callback is not None}, JSON Mode: {json_mode}, Reasoning: {is_reasoning}]")
-        import time
-
-        import click
-
-        start_time = time.time()
-        # Cleared up front, not just overwritten on success - a caller reading
-        # this after a raised exception must see None (no metrics for a
-        # failed call), never a stale value left over from a previous call.
         self.last_call_metrics = None
+        self.last_completion = None
+        fingerprint = await self._runtime_fingerprint(
+            model, url_to_check, api_key_override or self.config.llm.api_key, extra_body,
+        )
+        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+        budget = self._dispatch_budget(
+            model=model, fingerprint=fingerprint, messages=messages, tools=None,
+            max_tokens=max_tokens, is_reasoning=is_reasoning,
+        )
+        max_tokens = budget.max_tokens
+
+        logger.info(f"Sending completion request to local LLM [Model: {model}, Stream: {stream_callback is not None}, JSON Mode: {json_mode}, Reasoning: {is_reasoning}]")
+        start_time = time.time()
+        result = CompletionResult(
+            status=CompletionStatus.OK, model=model,
+            runtime_fingerprint=fingerprint.digest, runtime_fingerprint_exact=fingerprint.exact,
+            protocol={"json_mode": json_mode, "streaming": stream_callback is not None, "tools": False,
+                      "reasoning_model": is_reasoning, "response_format_dropped": False,
+                      "empty_content_floor_retry": False},
+            max_tokens=max_tokens,
+        )
 
         try:
             try:
-                content, prompt_tokens, completion_tokens, finish_reason = await self._request_once(
+                raw = await self._request_once(
                     client, model, system_prompt, user_prompt, temperature, max_tokens,
                     extra_body, response_format, stream_callback
                 )
@@ -244,16 +427,16 @@ class LLMClient:
                         f"reasoning model '{model}' ({e}) - retrying once without it (this backend/"
                         "model combination may not support JSON mode together with reasoning)."
                     )
-                    content, prompt_tokens, completion_tokens, finish_reason = await self._request_once(
+                    result.protocol["response_format_dropped"] = True
+                    raw = await self._request_once(
                         client, model, system_prompt, user_prompt, temperature, max_tokens,
                         extra_body, None, stream_callback
                     )
                 else:
                     raise
 
-            if is_reasoning:
-                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-            elif json_mode and not content.strip() and max_tokens < 12288:
+            content, hidden = split_reasoning(raw["content"], anywhere=is_reasoning)
+            if not is_reasoning and json_mode and not content and max_tokens < 12288:
                 # Some models emit hidden <think>...</think> reasoning before ever
                 # committing to JSON regardless of Kriya's own is_reasoning
                 # classification for them (a static per-model config guess, not a
@@ -271,77 +454,76 @@ class LLMClient:
                     f"max_tokens={max_tokens} (likely silent reasoning) - retrying once "
                     "with a 12288-token floor."
                 )
-                content, prompt_tokens, completion_tokens, finish_reason = await self._request_once(
-                    client, model, system_prompt, user_prompt, temperature, 12288,
+                floor = 12288
+                if budget.context_window:
+                    floor = min(floor, max(max_tokens, budget.context_window - budget.prompt_tokens))
+                result.protocol["empty_content_floor_retry"] = True
+                result.max_tokens = floor
+                raw = await self._request_once(
+                    client, model, system_prompt, user_prompt, temperature, floor,
                     extra_body, response_format, stream_callback
                 )
-                content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-
-            elapsed_time = time.time() - start_time
-            tokens_estimated = prompt_tokens == 0 or completion_tokens == 0
-            if prompt_tokens == 0:
-                prompt_tokens = int((len(system_prompt) + len(user_prompt)) / 4)
-            if completion_tokens == 0:
-                completion_tokens = int(len(content) / 4)
-
-            finish_reason_display = finish_reason or "unreported"
-            click.secho(
-                f"\n[Usage: {prompt_tokens} input tokens, {completion_tokens} output tokens | "
-                f"Time: {elapsed_time:.2f}s | Finish: {finish_reason_display}]",
-                fg="blue", dim=True,
-            )
-            # R1 Deliverable 5 - observational only, see this attribute's own
-            # docstring in __init__. tokens_estimated=True means the server's
-            # response carried no usage field for prompt and/or completion
-            # tokens, so one or both counts above are the existing char/4
-            # heuristic, not a real measurement - never silently presented as
-            # exact. finish_reason (VAL-001 G1-R3) is None when the
-            # provider/SDK never reported one - never presented as "stop" by
-            # default, since that would be a fabricated claim of a normal
-            # completion this code never actually observed.
-            self.last_call_metrics = {
-                "model": model,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "tokens_estimated": tokens_estimated,
-                "duration_seconds": elapsed_time,
-                "finish_reason": finish_reason,
-            }
-            return content
+                content, hidden = split_reasoning(raw["content"], anywhere=True)
+        except asyncio.CancelledError:
+            result.status = CompletionStatus.CANCELLED
+            result.backend_status = "cancelled"
+            self._finish(result, started=start_time, budget=budget)
+            raise
         except Exception as e:
-            logger.error(f"Local LLM call failed: {e}", exc_info=True)
-            raise e
+            result.status = CompletionStatus.TIMEOUT if _is_timeout(e) else CompletionStatus.BACKEND_ERROR
+            result.backend_status = "error"
+            result.backend_error = f"{type(e).__name__}: {e}"[:500]
+            result.error = e
+            self._finish(result, started=start_time, budget=budget)
+            return result
+
+        reasoning_chars = hidden + raw["reasoning_chars"]
+        result.content = content
+        result.reasoning_present = reasoning_chars > 0
+        result.reasoning_chars = reasoning_chars
+        result.reasoning_source = (
+            "reasoning_field" if raw["reasoning_chars"] else ("think_tags" if hidden else None)
+        )
+        result.finish_reason = raw["finish_reason"]
+        result.provider_metadata = raw["provider_metadata"]
+        prompt_tokens, completion_tokens = raw["prompt_tokens"], raw["completion_tokens"]
+        result.tokens_estimated = prompt_tokens == 0 or completion_tokens == 0
+        result.prompt_tokens = prompt_tokens or int((len(system_prompt) + len(user_prompt)) / 4)
+        result.completion_tokens = completion_tokens or int(len(content) / 4)
+        result.status, result.parser_status = classify(
+            content=content, finish_reason=result.finish_reason, tool_calls=[], structured=json_mode,
+        )
+        self._finish(result, started=start_time, budget=budget)
+        return result
 
     async def _request_once(
         self, client, model, system_prompt, user_prompt, temperature, max_tokens,
         extra_body, response_format, stream_callback
-    ):
+    ) -> Dict[str, Any]:
         """Issues a single completion request (streaming or not) and returns
-        (content, prompt_tokens, completion_tokens, finish_reason). Split out
-        from complete() so a reasoning model's response_format can be
-        retried once without it on failure.
+        the raw fields the normalizer needs: content, reasoning_chars (from a
+        separate provider reasoning field), prompt_tokens, completion_tokens,
+        finish_reason and provider_metadata. Split out from complete_result()
+        so a reasoning model's response_format can be retried once without it.
 
-        finish_reason (VAL-001 G1-R3, 2026-09-18: a real investigation had
-        no way to tell "the model stopped naturally" from "the provider cut
-        it off at max_tokens" and had to infer it entirely from token counts
-        and content shape) is read the same defensive way `usage` already
-        is here - `getattr(..., "finish_reason", None)`, never a bare
-        attribute access - so a provider/SDK version that omits the field
-        entirely degrades to None exactly like a provider that omits
-        `usage` already degrades prompt_tokens/completion_tokens to 0
-        above. Never raises, never changes what content/token counts this
-        function already returns."""
+        Every provider field is read defensively (``getattr(..., None)`` and
+        a type check, never a bare attribute access): a provider/SDK that
+        omits ``usage`` degrades the token counts to 0 (estimated later), and
+        one that omits ``finish_reason`` degrades it to None - never a
+        fabricated "stop" (VAL-001 G1-R3)."""
         prompt_tokens = 0
         completion_tokens = 0
         finish_reason = None
+        reasoning_chars = 0
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
         if stream_callback:
             try:
                 response = await client.chat.completions.create(
                     model=model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
+                    messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     stream=True,
@@ -353,10 +535,7 @@ class LLMClient:
                 logger.debug(f"Streaming request with stream_options failed, retrying without it (server may not support it): {e}")
                 response = await client.chat.completions.create(
                     model=model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
+                    messages=messages,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     stream=True,
@@ -365,48 +544,61 @@ class LLMClient:
                 )
 
             chunks = []
+            metadata: Dict[str, Any] = {}
             async for chunk in response:
-                if hasattr(chunk, "usage") and chunk.usage:
-                    prompt_tokens = chunk.usage.prompt_tokens
-                    completion_tokens = chunk.usage.completion_tokens
+                if not metadata:
+                    metadata = _provider_metadata(chunk)
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    prompt_tokens = _int_or_zero(getattr(usage, "prompt_tokens", 0))
+                    completion_tokens = _int_or_zero(getattr(usage, "completion_tokens", 0))
                 if chunk.choices:
                     # The finish_reason-carrying chunk is typically the LAST
                     # one and usually has empty/None delta content - checked
-                    # unconditionally here (not gated on delta.content being
-                    # truthy like the append/callback below), and only
-                    # overwritten when a real value is present, so an
-                    # earlier chunk's own null finish_reason (every non-
-                    # final chunk) can never clobber a real one seen later -
-                    # not that ordering should matter for a well-behaved
-                    # stream, but this stays correct even if it doesn't.
-                    chunk_finish_reason = getattr(chunk.choices[0], "finish_reason", None)
+                    # unconditionally here, and only overwritten when a real
+                    # value is present, so an earlier chunk's null
+                    # finish_reason can never clobber a real one seen later.
+                    chunk_finish_reason = _str_or_none(getattr(chunk.choices[0], "finish_reason", None))
                     if chunk_finish_reason:
                         finish_reason = chunk_finish_reason
-                    if chunk.choices[0].delta.content:
-                        delta = chunk.choices[0].delta.content
-                        chunks.append(delta)
-                        stream_callback(delta)
+                    delta = chunk.choices[0].delta
+                    reasoning_delta = _str_or_none(getattr(delta, "reasoning", None))
+                    if reasoning_delta:
+                        reasoning_chars += len(reasoning_delta)
+                    if delta.content:
+                        chunks.append(delta.content)
+                        stream_callback(delta.content)
             content = "".join(chunks).strip()
         else:
             response = await client.chat.completions.create(
                 model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
+                messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
                 extra_body=extra_body,
                 response_format=response_format
             )
-            if hasattr(response, "usage") and response.usage:
-                prompt_tokens = response.usage.prompt_tokens
-                completion_tokens = response.usage.completion_tokens
+            metadata = _provider_metadata(response)
+            usage = getattr(response, "usage", None)
+            if usage:
+                prompt_tokens = _int_or_zero(getattr(usage, "prompt_tokens", 0))
+                completion_tokens = _int_or_zero(getattr(usage, "completion_tokens", 0))
             if response.choices:
-                finish_reason = getattr(response.choices[0], "finish_reason", None)
-            content = response.choices[0].message.content or ""
-            content = content.strip()
-        return content, prompt_tokens, completion_tokens, finish_reason
+                finish_reason = _str_or_none(getattr(response.choices[0], "finish_reason", None))
+            message = response.choices[0].message
+            reasoning = _str_or_none(getattr(message, "reasoning", None)) or _str_or_none(
+                getattr(message, "reasoning_content", None)
+            )
+            reasoning_chars = len(reasoning) if reasoning else 0
+            content = (message.content or "").strip()
+        return {
+            "content": content,
+            "reasoning_chars": reasoning_chars,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "finish_reason": finish_reason,
+            "provider_metadata": metadata,
+        }
 
     async def complete_with_tools(
         self,
@@ -428,13 +620,53 @@ class LLMClient:
         kriya/workflow/self_correction.py for the only current caller's turn-budget
         loop.
 
+        PRD-015 compatibility API over ``complete_with_tools_result``: the
+        returned dict and raised exceptions are unchanged."""
+        result = await self.complete_with_tools_result(
+            messages, tools, model_override=model_override, base_url_override=base_url_override,
+            api_key_override=api_key_override, temperature_override=temperature_override,
+            max_tokens_override=max_tokens_override, extra_body_override=extra_body_override,
+        )
+        if result.error is not None:
+            raise result.error
+        return {
+            "content": result.content,
+            "tool_calls": [
+                {key: value for key, value in call.items() if key != "source"} for call in result.tool_calls
+            ],
+        }
+
+    async def complete_with_tools_result(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        model_override: Optional[str] = None,
+        base_url_override: Optional[str] = None,
+        api_key_override: Optional[str] = None,
+        temperature_override: Optional[float] = None,
+        max_tokens_override: Optional[int] = None,
+        extra_body_override: Optional[Dict[str, Any]] = None,
+    ):
+        """PRD-015: one native tool-calling turn as a CompletionResult.
+
         Reuses complete()'s own egress check and base_url_override/api_key_override
         client-construction logic unchanged - this is a second call site into the
-        same safety boundary, not a parallel one. Deliberately does not support
-        streaming, json_mode, or reasoning-tag stripping, all out of scope for a
-        tool-calling turn (see this session's tool-use scoping decision - a tool
-        loop's own turn content is a short plan/summary, not the kind of long-form
-        output those features exist for)."""
+        same safety boundary, not a parallel one. Native tool calls are
+        normalized here; when a backend returned tool calls as text (Hermes
+        JSON or Qwen XML ``<tool_call>`` blocks its own parser did not
+        convert), they are recovered here too, and every call's arguments go
+        through the same capability validation."""
+        import asyncio
+        import time
+
+        from kriya.core.completion import (
+            CompletionResult,
+            CompletionStatus,
+            classify,
+            parse_textual_tool_calls,
+            split_reasoning,
+        )
+
         url_to_check = base_url_override or self.config.llm.base_url
         self._audit_llm_network_access(url_to_check)
 
@@ -446,7 +678,9 @@ class LLMClient:
 
         model = model_override or self.model
         from kriya.core.model_capabilities import (
-            ModelCapabilityError, capabilities_for_model, validate_tool_call_sample,
+            ModelCapabilityError,
+            capabilities_for_model,
+            validate_tool_call_sample,
         )
         capabilities = capabilities_for_model(self.config, model)
         if not capabilities.native_tool_calls:
@@ -468,15 +702,46 @@ class LLMClient:
         else:
             extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
 
-        response = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=tools,
-            tool_choice="auto",
-            temperature=temperature,
-            max_tokens=max_tokens,
-            extra_body=extra_body,
+        self.last_call_metrics = None
+        self.last_completion = None
+        fingerprint = await self._runtime_fingerprint(
+            model, url_to_check, api_key_override or self.config.llm.api_key, extra_body,
         )
+        budget = self._dispatch_budget(
+            model=model, fingerprint=fingerprint, messages=messages, tools=tools,
+            max_tokens=max_tokens, is_reasoning=False,
+        )
+        max_tokens = budget.max_tokens
+        start_time = time.time()
+        result = CompletionResult(
+            status=CompletionStatus.OK, model=model,
+            runtime_fingerprint=fingerprint.digest, runtime_fingerprint_exact=fingerprint.exact,
+            protocol={"json_mode": False, "streaming": False, "tools": True, "tool_count": len(tools)},
+            max_tokens=max_tokens,
+        )
+        try:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto",
+                temperature=temperature,
+                max_tokens=max_tokens,
+                extra_body=extra_body,
+            )
+        except asyncio.CancelledError:
+            result.status = CompletionStatus.CANCELLED
+            result.backend_status = "cancelled"
+            self._finish(result, started=start_time, budget=budget)
+            raise
+        except Exception as e:
+            result.status = CompletionStatus.TIMEOUT if _is_timeout(e) else CompletionStatus.BACKEND_ERROR
+            result.backend_status = "error"
+            result.backend_error = f"{type(e).__name__}: {e}"[:500]
+            result.error = e
+            self._finish(result, started=start_time, budget=budget)
+            return result
+
         message = response.choices[0].message
         raw_tool_calls = message.tool_calls or []
         tool_calls = []
@@ -494,8 +759,9 @@ class LLMClient:
                     tc.function.name,
                 )
                 tool_calls.append({
-                    "id": tc.id, "name": tc.function.name, "arguments": {},
+                    "id": tc.id, "name": tc.function.name, "arguments": {}, "source": "native",
                 })
+                result.parser_status = "malformed_tool_arguments"
                 continue
 
             sample = validate_tool_call_sample(raw_arguments, capabilities)
@@ -506,8 +772,63 @@ class LLMClient:
                 )
                 tool_calls.append({
                     "id": tc.id, "name": tc.function.name, "arguments": {},
-                    "argument_error": "; ".join(sample.violations),
+                    "argument_error": "; ".join(sample.violations), "source": "native",
                 })
                 continue
-            tool_calls.append({"id": tc.id, "name": tc.function.name, "arguments": arguments})
-        return {"content": (message.content or "").strip(), "tool_calls": tool_calls}
+            tool_calls.append({"id": tc.id, "name": tc.function.name, "arguments": arguments, "source": "native"})
+
+        content, hidden = split_reasoning(message.content or "")
+        if not tool_calls and "<tool_call>" in content:
+            recovered, content, errors = parse_textual_tool_calls(content)
+            for call in recovered:
+                sample = validate_tool_call_sample(json.dumps(call["arguments"]), capabilities)
+                if not sample.compatible:
+                    call["argument_error"] = "; ".join(sample.violations)
+                    call["arguments"] = {}
+            tool_calls.extend(recovered)
+            if errors:
+                result.parser_status = "malformed_textual_tool_call"
+        result.content = content
+        result.tool_calls = tool_calls
+        reasoning = _str_or_none(getattr(message, "reasoning", None))
+        result.reasoning_chars = hidden + (len(reasoning) if reasoning else 0)
+        result.reasoning_present = result.reasoning_chars > 0
+        result.reasoning_source = "reasoning_field" if reasoning else ("think_tags" if hidden else None)
+        result.finish_reason = _str_or_none(getattr(response.choices[0], "finish_reason", None))
+        result.provider_metadata = _provider_metadata(response)
+        usage = getattr(response, "usage", None)
+        prompt_tokens = _int_or_zero(getattr(usage, "prompt_tokens", 0)) if usage else 0
+        completion_tokens = _int_or_zero(getattr(usage, "completion_tokens", 0)) if usage else 0
+        result.tokens_estimated = prompt_tokens == 0 or completion_tokens == 0
+        result.prompt_tokens = prompt_tokens or None
+        result.completion_tokens = completion_tokens or None
+        status, _ = classify(content=content, finish_reason=result.finish_reason, tool_calls=tool_calls,
+                             structured=False)
+        result.status = status
+        if result.parser_status == "not_applicable" and tool_calls:
+            result.parser_status = "ok"
+        self._finish(result, started=start_time, budget=budget)
+        return result
+
+
+def _str_or_none(value: Any) -> Optional[str]:
+    return value if isinstance(value, str) and value else None
+
+
+def _int_or_zero(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
+def _provider_metadata(response: Any) -> Dict[str, Any]:
+    """Response identifiers only; anything that is not a plain string is dropped."""
+    return {
+        key: value
+        for key in ("id", "model", "system_fingerprint")
+        if isinstance(value := getattr(response, key, None), str) and value
+    }
+
+
+def _is_timeout(error: BaseException) -> bool:
+    import asyncio
+
+    return isinstance(error, (APITimeoutError, asyncio.TimeoutError, TimeoutError))

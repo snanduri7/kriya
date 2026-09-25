@@ -348,9 +348,24 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         and not scope_denial_failure
         and isinstance(e, ContainmentSetupError)
     )
+    # PRD-016: a request refused before inference because the prompt plus the
+    # minimum output cannot fit the served window. Typed, with its reason
+    # code; the retry may still succeed on a fallback model with its own
+    # window (the context allocator re-runs against it).
+    from kriya.core.token_budget import ContextBudgetUnsatisfiableError
+
+    budget_failure = (
+        Failure(
+            type="context_budget_unsatisfiable", message=str(e), raw_output=str(e), source="orchestrator",
+            diagnostics={"reason_code": e.reason_code, "budget": e.decision.to_dict()},
+        )
+        if attached_failure is None and not scope_denial_failure and isinstance(e, ContextBudgetUnsatisfiableError)
+        else None
+    )
     failure: Failure = (
         attached_failure
         or scope_denial_failure
+        or budget_failure
         or Failure(
             type=(
                 "containment_setup_failed" if is_containment_setup_failure

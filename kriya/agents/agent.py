@@ -19,6 +19,27 @@ from kriya.core.llm import LLMClient
 
 logger = logging.getLogger(__name__)
 
+# PRD-015: reason code for a Developer completion the provider cut off at
+# its output budget (CompletionStatus.OUTPUT_TRUNCATED).
+OUTPUT_TRUNCATED = "OUTPUT_TRUNCATED"
+
+
+def _truncated_completion_error(llm: Any, target: str) -> Optional[str]:
+    """The typed protocol error when the client's most recent normalized
+    completion was truncated, else None. Reads the normalized result only
+    (a test double without one is never treated as truncated)."""
+    from kriya.core.completion import CompletionResult
+
+    completion = getattr(llm, "last_completion", None)
+    if isinstance(completion, CompletionResult) and completion.truncated:
+        return (
+            f"{OUTPUT_TRUNCATED}: the model stopped at its output budget (finish_reason="
+            f"{completion.finish_reason!r}, max_tokens={completion.max_tokens}) while writing {target}; "
+            "incomplete output is never used as content"
+        )
+    return None
+
+
 # Matches _build_error_source_context()'s own display gutter (">> N: " for
 # the reported line, "   N: " for surrounding context lines - the format
 # string there is f"{'>>' if ... else '  '} {i+1}: ...", so a NON-highlighted
@@ -2126,6 +2147,14 @@ class DeveloperAgent(BaseAgent):
                 if analysis:
                     logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
 
+            # PRD-015: truncated output is never a file. A completion the
+            # provider stopped at the output budget may still parse as code
+            # (a Python module cut at a line boundary compiles), so the
+            # normalized finish state decides, not the text.
+            truncation_error = _truncated_completion_error(self.llm, filepath)
+            if truncation_error:
+                protocol_error = truncation_error
+
             if protocol_error:
                 logger.warning(
                     f"Developer returned a malformed repair response for '{filepath}': "
@@ -2140,7 +2169,7 @@ class DeveloperAgent(BaseAgent):
             # live (2026-08-13, ignite_qpid_protocol validation): the model's own
             # analysis correctly named the real cause in a sibling file, but
             # nothing downstream ever read this text again after logging it.
-            protocol_reason_code = None
+            protocol_reason_code = OUTPUT_TRUNCATED if truncation_error else None
             if edits:
                 file_entry = {"filepath": filepath, "content": None, "edits": edits}
             else:
@@ -2382,6 +2411,11 @@ class DeveloperAgent(BaseAgent):
             temperature_override=retry_temperature,
         )
         
+        truncation_error = _truncated_completion_error(self.llm, "the file list")
+        if truncation_error:
+            # A truncated file array can still yield a partial list through
+            # the lenient extraction below; never accept one.
+            raise ValueError(truncation_error)
         try:
             res = self._extract_json_value(response_str)
         except json.JSONDecodeError as e:

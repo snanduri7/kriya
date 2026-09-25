@@ -259,6 +259,20 @@ _UNRESOLVED_GATE_MARKERS = (
 )
 
 
+async def _primary_model_runtime_details(cfg: Any) -> Dict[str, Any]:
+    """PRD-013/014: the primary model's runtime fingerprint and the
+    Developer role's qualification assessment, for the ``model.runtime``
+    run event. Evidence only; never blocks a run."""
+    import asyncio
+
+    from kriya.core.model_qualification import assess, required_capabilities
+    from kriya.core.model_runtime import resolve_configured_model_runtime
+
+    fingerprint = await asyncio.to_thread(resolve_configured_model_runtime, cfg)
+    qualification = assess(fingerprint, required_capabilities(cfg, "developer", cfg.llm.model))
+    return {"fingerprint": fingerprint.to_dict(), "developer_qualification": qualification.to_dict()}
+
+
 def _gate_outcome_proven(outcome: Optional[Dict[str, Any]]) -> Optional[bool]:
     """True only for a gate that actually executed and passed; None for a
     skipped/unconfirmed one (e.g. an "unknown" stack's pass-through)."""
@@ -1164,6 +1178,17 @@ class WorkflowEngine:
             ))
         except Exception as exc:  # never blocks the run; the gap is logged loudly
             logger.warning(f"Could not record the run's egress authority: {exc}")
+        # PRD-013/014: the exact runtime of the primary model and its
+        # qualification state, persisted with the run. Every call also adds
+        # its own fingerprint id to the RunRecord (LLMClient).
+        try:
+            state.record_event(RunEvent(
+                kind="model.runtime", attempt=0, source="workflow.run_generation_workflow",
+                authority=EventAuthority.AUXILIARY, message="primary model runtime identity",
+                details=await _primary_model_runtime_details(self.kernel.config),
+            ))
+        except Exception as exc:
+            logger.warning(f"Could not record the run's model runtime identity: {exc}")
         generation_budget = self.kernel.config.autonomy.generation_time_budget_seconds
         if generation_budget is None:
             logger.info(
