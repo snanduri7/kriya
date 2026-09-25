@@ -176,9 +176,10 @@ def test_a_model_not_served_by_the_endpoint_is_not_exact():
     assert any("not served" in error for error in fp.probe_errors)
 
 
-def test_a_non_local_endpoint_is_never_probed_under_local_only():
+@pytest.mark.parametrize("policy", ["local_only", "unrestricted"])
+def test_a_non_local_endpoint_is_never_probed_under_any_policy(policy):
     calls = []
-    fp = probe_model_runtime(base_url="http://8.8.8.8/v1", model=MODEL, egress_policy="local_only",
+    fp = probe_model_runtime(base_url="http://8.8.8.8/v1", model=MODEL, egress_policy=policy,
                              transport=_transport(calls=calls))
     assert calls == []
     assert not fp.exact and "not local" in fp.probe_errors[0]
@@ -200,8 +201,10 @@ def test_endpoint_identity_drops_credentials_and_query():
     assert endpoint_identity("http://user:secret@LOCALHOST:11434/v1/?k=v#x") == "http://localhost:11434/v1"
 
 
-def test_only_exact_fingerprints_are_cached(monkeypatch):
-    results = [_probe({"/api/version": {"version": "0.34.2"}}), _probe(), _probe()]
+def test_every_result_is_cached_for_the_process_and_fresh_reprobes(monkeypatch):
+    """A non-exact result (unpulled model, non-Ollama server) is cached too, so
+    it never costs blocking probes on every call; fresh=True re-probes."""
+    results = [_probe({"/api/version": {"version": "0.34.2"}}), _probe()]
     calls = []
 
     def fake_probe(**kwargs):
@@ -210,10 +213,11 @@ def test_only_exact_fingerprints_are_cached(monkeypatch):
 
     monkeypatch.setattr(model_runtime, "probe_model_runtime", fake_probe)
     first = resolve_model_runtime(base_url=BASE_URL, model=MODEL)
-    second = resolve_model_runtime(base_url=BASE_URL, model=MODEL)
-    third = resolve_model_runtime(base_url=BASE_URL, model=MODEL)
-    assert not first.exact and second.exact
-    assert third is second and len(calls) == 2
+    again = resolve_model_runtime(base_url=BASE_URL, model=MODEL)
+    assert not first.exact and again is first and len(calls) == 1
+    fresh = resolve_model_runtime(base_url=BASE_URL, model=MODEL, fresh=True)
+    assert fresh.exact and len(calls) == 2
+    assert resolve_model_runtime(base_url=BASE_URL, model=MODEL) is fresh
 
 
 def test_an_exact_fingerprint_is_recorded_content_addressed_in_the_state_dir():

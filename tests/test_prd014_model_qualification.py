@@ -371,3 +371,34 @@ def test_cli_status_is_nonzero_until_every_role_is_qualified(monkeypatch):
     assert result.exit_code == 1
     report = json.loads(result.output[result.output.index("{"):])
     assert report["developer"][0]["status"] == mq.MISSING
+
+
+def test_the_doctor_and_qualify_fingerprint_the_same_runtime_identically(monkeypatch):
+    """One shared fake endpoint: the digest `kriya model qualify` records is the
+    digest `doctor --production` computes, so a qualified deployment can pass."""
+    from kriya.core import model_runtime
+    from kriya.production_doctor import probe_llm_runtime
+
+    cfg = AppConfig()
+    cfg.llm.model = MODEL
+    cfg.llm.extra_body = {"options": {"num_ctx": 16384}}
+    responses = {
+        "/v1/models": {"data": [{"id": MODEL, "created": 1}]},
+        "/api/version": {"version": "0.34.2"},
+        "/api/tags": {"models": [{"name": MODEL, "digest": "abc"}]},
+        "/api/show": {"details": {"format": "gguf", "quantization_level": "Q4_K_M"},
+                      "modelfile": "FROM /b/sha256-99\nRENDERER r\nPARSER p\n",
+                      "model_info": {"general.architecture": "a", "a.context_length": 32768}},
+    }
+
+    def serve(url):
+        return responses["/" + url.split("/", 3)[3]]
+
+    monkeypatch.setenv(model_runtime.PROBE_ENV_VAR, "1")
+    monkeypatch.setattr(model_runtime, "_http_json", lambda url, payload, api_key: serve(url))
+    monkeypatch.setattr("kriya.production_doctor._json_request", lambda url, **kwargs: serve(url))
+
+    doctor = probe_llm_runtime(cfg)["runtime"]
+    record = asyncio.run(mq.run_qualification(cfg, llm=FakeLLM(_result("READY")), only=["plain_completion"]))
+    assert doctor.exact and record["fingerprint_digest"] == doctor.digest
+    assert doctor.effective_context_window == 16384

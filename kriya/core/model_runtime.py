@@ -18,8 +18,8 @@ Rules:
 
 Probing uses the configured endpoint only (Ollama's native ``/api/version``,
 ``/api/tags`` and ``/api/show`` next to its OpenAI-compatible ``/v1``) and
-never the internet. Under ``local_only`` a non-local endpoint is never
-contacted. ``KRIYA_MODEL_RUNTIME_PROBE=0`` disables probing (the mocked test
+never the internet. A non-local endpoint is never probed a non-local endpoint is never probed at all.
+``KRIYA_MODEL_RUNTIME_PROBE=0`` disables probing (the mocked test
 suite sets it), which yields an all-unavailable, non-exact fingerprint.
 """
 from __future__ import annotations
@@ -249,8 +249,11 @@ def probe_model_runtime(
         if not probing_enabled():
             return _replace(base, probe_errors=("probing disabled by KRIYA_MODEL_RUNTIME_PROBE",))
         transport = _http_json
-    if egress_policy == "local_only" and not is_local_url(base_url):
-        return _replace(base, probe_errors=("endpoint is not local under local_only; not probed",))
+    if not is_local_url(base_url):
+        # Native metadata endpoints are only ever asked of a local server:
+        # never send the API key (or any request) to a remote host for
+        # identity, whatever the egress policy allows for completions.
+        return _replace(base, probe_errors=("endpoint is not local; runtime metadata is never probed remotely",))
 
     errors = []
     parsed = urllib.parse.urlsplit(base_url)
@@ -353,8 +356,10 @@ def resolve_model_runtime(
     fresh: bool = False,
     config: Any = None,
 ) -> ModelRuntimeFingerprint:
-    """Cached probe, keyed by every input that enters the fingerprint. A
-    non-exact result is not cached (the endpoint may simply be starting)."""
+    """Cached probe, keyed by every input that enters the fingerprint. Every
+    result is cached for the process, including a non-exact one (an unpulled
+    chain model or a non-Ollama server must not cost blocking probes on every
+    call); ``fresh=True`` (doctor, qualify, status) always re-probes."""
     key = (endpoint_identity(base_url), (model or "").casefold(), configured_context, kriya_protocol)
     if not fresh:
         with _CACHE_LOCK:
@@ -365,9 +370,9 @@ def resolve_model_runtime(
         base_url=base_url, model=model, api_key=api_key, egress_policy=egress_policy,
         configured_context=configured_context, kriya_protocol=kriya_protocol,
     )
+    with _CACHE_LOCK:
+        _CACHE[key] = fingerprint
     if fingerprint.exact:
-        with _CACHE_LOCK:
-            _CACHE[key] = fingerprint
         record_fingerprint(fingerprint, config)
     return fingerprint
 
