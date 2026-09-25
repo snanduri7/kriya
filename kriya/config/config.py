@@ -733,9 +733,16 @@ class SearchConfig(BaseModel):
     # terms never receive unattended auto-approval.
     public_terms: List[str] = Field(default_factory=list)
 
-# The shared output budget (the packaged llm.max_tokens in default_config.yaml,
-# pinned by a test): what a model binding that leaves max_tokens unset asks for.
-DEFAULT_OUTPUT_TOKENS = 16384
+def _packaged_llm_max_tokens() -> int:
+    """The packaged llm.max_tokens (default_config.yaml, the canonical
+    default every configuration is layered on)."""
+    with open(os.path.join(os.path.dirname(__file__), "default_config.yaml"), "r", encoding="utf-8") as handle:
+        return int(yaml.safe_load(handle)["llm"]["max_tokens"])
+
+
+# The shared output budget: what a model binding that leaves max_tokens unset
+# asks for. Read from the packaged default, never a second copy of the value.
+DEFAULT_OUTPUT_TOKENS = _packaged_llm_max_tokens()
 
 
 class FallbackModelConfig(BaseModel):

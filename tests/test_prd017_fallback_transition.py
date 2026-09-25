@@ -151,15 +151,10 @@ def test_request_profile_is_resolved_for_the_model_actually_called():
 
 
 def test_the_shared_output_default_is_the_packaged_llm_max_tokens():
-    import os
+    from kriya.config.config import _packaged_llm_max_tokens
 
-    import yaml
-
-    import kriya.config as config_package
-
-    with open(os.path.join(os.path.dirname(config_package.__file__), "default_config.yaml")) as handle:
-        packaged = yaml.safe_load(handle)
-    assert packaged["llm"]["max_tokens"] == DEFAULT_OUTPUT_TOKENS
+    # Read from default_config.yaml (not a second literal); the effective value is unchanged.
+    assert DEFAULT_OUTPUT_TOKENS == _packaged_llm_max_tokens() == 16384
 
 
 def test_an_unset_fallback_output_budget_is_the_shared_default_not_the_primary_override():
