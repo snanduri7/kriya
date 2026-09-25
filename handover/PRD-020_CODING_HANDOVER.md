@@ -132,4 +132,30 @@ Tests added (plain runner):
 - REQ-3: do not change the signature, annotations or other methods; names literals.
 - REQ-4: "Do not modify any other file in the repository." Names no literal, so a verifier "missing" claim cannot count, and "unverifiable" is possible.
 
-Under the new seal an UNVERIFIED REQ-4 ends the run REQUIREMENTS_UNRESOLVED. Enforce's write-scope authority does enforce that constraint deterministically, but nothing binds that authority to REQ-4's text. Whether such a policy block counts as green is the user's call, asked before the run.
+Resolved by the closure-and-push review: REQ-4 is decided by deterministic mutation-scope evidence (below).
+
+## Closure review: mutation-scope evidence
+"Do not modify any other file" must not stay CANNOT_CONFIRM when Kriya can prove it from its own write record.
+- **Recognition** (`is_mutation_scope_requirement`): a closed pattern matched against the whole requirement ("do not / never / must not" + "modify / change / edit / touch / alter" + "any other file(s)", optionally "in the repository/project/..."). REQ-3's "any other method in this class", "keep the change small" and a conditional ("... unless ...") do not match. No model, no fuzzy matching.
+- **Authorized paths** (`authorized_mutation_paths`): the tokens of the immutable goal-derived requirement set that are *exactly* a path tracked at the run's base (`git ls-tree` of the base). No basename/stem match; the Planner/Developer file lists are not inputs. Empty = "other" has no referent = the requirement is left as the verifier left it (fail closed). demo-03: exactly `src/main/java/com/myapp/service/driver/DefaultDriverService.java`.
+- **Actual paths** (`workflow.mutation_scope_evidence`): the candidate's own paths that git reports changed against the base (`git diff --relative <base>` + untracked, `.kriya/` and ignored files excluded) plus the run's committed path history - every settled COMMITTED cycle of the RunRecord, read from that transaction's commit evidence (byte state before != after). Anything else git reports is `foreign_paths`. The candidate must be at the run's base revision (milestones never git-commit, so it is), otherwise evidence is unavailable.
+- **Decision** (`close_mutation_scope_requirements`), bound to the verdict's `evidence_id`:
+  - any actual path outside the set: a DETERMINISTIC VIOLATED record under `requirement.REQ-n.closure`; `requirement_outcomes` reports VIOLATED whatever the verifier said (new: counter-evidence);
+  - otherwise foreign changes, unavailable evidence, or no verdict to bind to: not closed;
+  - otherwise, with an UNVERIFIED or SATISFIED verdict: CLOSED_BY_EVIDENCE (a SATISFIED verdict is reported as closed by the deterministic proof, so the outcome names what proved it). VIOLATED/UNKNOWN verdicts are never closed.
+  - Evidence recorded: requirement id, `kind: MUTATION_SCOPE`, authorized paths, actual paths, out-of-scope paths, foreign paths, committed history, run id, base and candidate revision, verdict evidence id. Results expose it as `requirements.evidence`.
+- **Where:** the direct/milestone pre-apply boundary (in the `requirement.closure` event, candidate paths = `all_files_written`) and the enforce terminal `original_requirements` gate (candidate paths = every planned path).
+- **Disclosed:** an untracked build artifact that `.gitignore` does not cover is a foreign change, so the requirement stays unresolved rather than closing (fail closed). A goal that names a file only as context (not as the change target) still authorizes it: the referent is the user's literal words.
+
+Tests: `tests/test_prd020_mutation_scope.py`, 24 passed (plain runner):
+- recognition and the exact-path referent;
+- exact one-file scope closes (UNVERIFIED and SATISFIED verdicts);
+- a second changed file is VIOLATED and blocks under every policy;
+- a Planner-selected file with no goal-named file cannot close;
+- stale evidence (closure and counter-evidence) never carries to a later candidate;
+- foreign changes / unavailable evidence / no verdict stay unresolved;
+- the direct engine on a real git repo (close; violate with nothing applied);
+- the enforce terminal gate (close; Planner's second file violated; no referent unresolved);
+- the real CLI milestone driver: M2's earlier commit to another file makes the integration check VIOLATED although the integration candidate itself only touched the authorized file; both milestones in scope closes.
+
+Mutations, each caught: actual paths used as authorized, evidence-id binding dropped, foreign check dropped, VIOLATED override dropped, committed history dropped, enforce call site dropped, direct call site dropped.

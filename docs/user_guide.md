@@ -545,6 +545,16 @@ that exact candidate, recorded as `closed_by_evidence` (distinct from `satisfied
 - the migration gate, for a requirement naming both the migration's source and its target, once every migration
   obligation is satisfied.
 
+A file-boundary requirement ("Do not modify any other file in the repository.", recognized only as that whole
+statement - never "keep the change small" or "any other method") is decided from what the run actually changed,
+not by the verifier. The authorized files are exactly the repository files your goal names (a path Kriya tracks at
+the run's start, e.g. `src/main/java/.../DefaultDriverService.java`); the Planner's choice never authorizes a file.
+The actual files are what the candidate changed plus everything the run already committed (earlier milestones).
+All inside the authorized set with nothing unaccounted for: `closed_by_evidence` (evidence kind `MUTATION_SCOPE`,
+listed under `requirements.evidence` in the result with the authorized paths, actual paths, candidate and run).
+Any file outside it: `violated`, whatever the verifier said. A goal that names no file gives "other" no referent,
+so the requirement stays unresolved.
+
 A `violated` or `unknown` requirement is never closed this way, and evidence about an earlier candidate never
 closes a later one.
 
