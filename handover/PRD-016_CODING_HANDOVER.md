@@ -167,6 +167,12 @@ check existed the server silently truncated it.
   - `test_generation_time_budget` (1): its minimal fake context had no `worktree_path`/`workspace_path`, which the
     grounded output expectation reads (every real `AttemptContext` has both). The fake now carries them as None.
   Both files pass in the plain runner after the fix; awaiting the pytest re-run.
+- Live (user, 2026-09-25): the batch-3 live-model tests passed. Demo-03 brownfield generate at `19572e9`
+  (qwen3-coder:30b, 77 s, exit 0, one attempt): the expected one-line fix (`driverRepository.save(driverDO);`), 1 file
+  changed, 53/53 tests in Kriya's gates and in the independent post-run check. Trace `16448b21`: the target file
+  packaged at tier `full` with nothing omitted, and no `model.budget_expansion` or `model.optional_context_reduced`
+  event (the request fit the preferred 32K window). The smaller allocation did not cost this run anything. The diff
+  also drops the file's trailing newline (full-file rewrite), which is cosmetic; not yet checked whether earlier green runs did the same.
 
 ## Live test
 In `tests/test_live_prd013_016_model_runtime.py` (command in the PRD-014 handover):
