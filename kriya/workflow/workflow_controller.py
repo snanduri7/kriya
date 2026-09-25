@@ -6432,6 +6432,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # PRD-020: the user's original requirements, judged against the
                 # whole verified candidate by the verifier (never by the plan's
                 # own acceptance text), then the requirement policy decides.
+                requirement_closure_attempts: List[Dict[str, Any]] = []
                 try:
                     autonomy_policy = getattr(getattr(
                         getattr(self.workflow_engine, "kernel", None), "config", None), "autonomy", None)
@@ -6467,6 +6468,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                         )
                         if closures:
                             logger.info("Original requirement closure by named tests: %s", closures)
+                        requirement_closure_attempts = scope_closures + closures
                         # The terminal migration gate just judged this same final
                         # candidate; a requirement stating the migration itself
                         # is closed by it (attempt._close_requirements_by_migration_gate).
@@ -6640,6 +6642,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 "outcomes": {rid: outcome.value for rid, outcome in
                              requirement_outcomes(obligation_ledger, requirement_set).items()},
                 "evidence": requirement_evidence(obligation_ledger, requirement_set),
+                # Every closure attempt, closed or not, with why (a requirement
+                # left open by missing evidence is otherwise undiagnosable).
+                "closure_attempts": requirement_closure_attempts,
             }
         except Exception as error:
             logger.warning(f"Original requirement outcomes unavailable for the result: {error}")

@@ -304,6 +304,11 @@ async def test_enforce_terminal_gate_decides_the_scope_requirement(tmp_path, mon
         assert evidence["authorized_paths"] == ["app.py"] and evidence["base_revision"]
     else:
         assert f"REQ-2 ({outcome})" in gap and result.legacy_result["quality_gates_passed"] is False
+    [attempt] = [a for a in result.legacy_result["requirements"]["closure_attempts"]
+                 if a.get("kind") == MUTATION_SCOPE]
+    assert attempt["closed"] is (outcome == "closed_by_evidence")
+    if outcome == "unverified":
+        assert "no authoritative referent" in attempt["reason"]
 
 
 # ------------------------------------------------------------ milestone plans: committed history
