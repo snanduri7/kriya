@@ -36,6 +36,12 @@ INVENTORY = {
         1, "probe of the managed service Kriya itself launched (loopback or inside its container)"),
     ("kriya/production_doctor.py", "urlopen"): (
         1, "doctor probe of the configured llm/embedding endpoints (SEC-009 config)"),
+    ("kriya/core/model_qualification.py", "AsyncOpenAI"): (
+        1, "PRD-014 timeout-semantics case: the SAME configured model endpoint with a tiny client timeout; "
+           "every request still goes through LLMClient.complete_result's local_only egress check"),
+    ("kriya/core/model_runtime.py", "urlopen"): (
+        1, "PRD-013 runtime metadata probe (/api/version, /api/tags, /api/show) of the configured model "
+           "endpoint only; refused for a non-local endpoint under local_only"),
     ("kriya/cli.py", "urlopen"): (
         1, "`kriya doctor` connectivity check of llm.base_url, refused when not local under local_only"),
 }

@@ -11,7 +11,6 @@ from click.testing import CliRunner
 from kriya.cli import main
 from kriya.config import AppConfig
 from kriya.config.config import (
-    load_config,
     PRODUCTION_FIXED_RUNTIME_GUARANTEES,
     FallbackModelConfig,
     runtime_profile_preset_fields,
@@ -24,7 +23,6 @@ from kriya.production_doctor import (
     MODEL_NOT_QUALIFIED,
     PRODUCTION_DOCTOR_CHECK_IDS,
     RUNTIME_FINGERPRINT_NOT_COMPUTABLE,
-    RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE,
     CheckStatus,
     DoctorCheck,
     ProductionDoctorReport,
@@ -32,8 +30,6 @@ from kriya.production_doctor import (
     probe_oci_containment,
     run_production_doctor,
 )
-
-MODEL_BINDING_CHECKS = {"model.runtime_fingerprint", "model.qualification"}
 
 
 def _docker_ready():
@@ -75,18 +71,35 @@ SMOKE_EVIDENCE = {
 }
 
 
+def _exact_runtime(model="qwen3-coder:30b", **changes):
+    from dataclasses import replace
+
+    from kriya.core.model_runtime import ModelRuntimeFingerprint
+
+    fp = ModelRuntimeFingerprint(
+        alias=model, endpoint="http://localhost:11434/v1", provider="ollama", provider_version="0.34.2",
+        artifact_digest="sha256:abc", weights_digest="sha256:def", quantization="Q4_K_M",
+        tokenizer_identity="gpt2/qwen2", kriya_protocol="capabilities-sha256:x",
+    )
+    return replace(fp, **changes)
+
+
 @contextmanager
-def _healthy_boundaries():
+def _healthy_boundaries(runtime=None):
     """Every external boundary healthy: Docker, the model endpoint (which
-    exposes an exact fingerprint), embeddings, and the LSP binary."""
+    exposes an exact runtime fingerprint), embeddings, and the LSP binary.
+    Every other role model resolves to the same exact runtime shape."""
+    runtime = runtime or _exact_runtime()
     with patch("kriya.production_doctor._Docker.resolve", return_value=("/usr/bin/docker", {"runtime": "docker"})), \
          patch("kriya.production_doctor.probe_oci_containment", return_value=dict(SMOKE_EVIDENCE)), \
          patch("kriya.production_doctor.probe_llm_runtime", return_value={
              "models": ["qwen3-coder:30b"],
              "selected_model": {"id": "qwen3-coder:30b"},
-             "native_metadata": {"details": {"format": "gguf"}, "digest": "sha256:abc"},
-             "fingerprint": "a" * 64,
+             "runtime": runtime,
+             "fingerprint": runtime.digest if runtime.exact else None,
          }), \
+         patch("kriya.core.model_runtime.resolve_configured_model_runtime",
+               side_effect=lambda cfg, model=None, **kw: _exact_runtime(model or cfg.llm.model)), \
          patch("kriya.production_doctor.probe_embedding", return_value={"dimensions": 384}), \
          patch("kriya.tools.lsp.find_jdtls", return_value=None):
         yield
@@ -112,13 +125,15 @@ def _blocking(report):
 
 # --- the deployment decision -------------------------------------------------------------
 
-def test_healthy_deployment_is_blocked_only_by_the_pending_exact_runtime_qualification(tmp_path):
-    """Everything else passes; readiness still fails closed because a model is
-    not production-qualified until its exact runtime is (PRD-013/014)."""
+def test_healthy_deployment_is_blocked_only_by_the_missing_exact_runtime_qualification(tmp_path):
+    """Everything else passes, including the exact runtime fingerprint;
+    readiness still fails closed because no role's exact runtime has a
+    qualification record (PRD-014)."""
     report = _run(tmp_path)
     checks = _checks(report)
     assert report.production_ready is False
-    assert _blocking(report) == MODEL_BINDING_CHECKS
+    assert _blocking(report) == {"model.qualification"}
+    assert checks["model.runtime_fingerprint"].status is CheckStatus.PASS
     assert report.schema_version == 1
     for check_id in ("lsp.java", "models.role_independence", "semantic.precision_boundary"):
         assert checks[check_id].status is CheckStatus.WARN
@@ -413,20 +428,18 @@ def test_a_workspace_with_no_detectable_toolchain_is_a_visible_warning(tmp_path)
 
 # --- models: a name is never a qualification --------------------------------------------
 
-def test_a_computed_fingerprint_is_evidence_but_stays_unavailable_until_it_is_bound(tmp_path):
+def test_an_exact_runtime_fingerprint_passes_with_every_component_as_evidence(tmp_path):
     check = _checks(_run(tmp_path))["model.runtime_fingerprint"]
-    assert check.status is CheckStatus.UNAVAILABLE
+    assert check.status is CheckStatus.PASS
     assert check.required is True
-    assert check.evidence["fingerprint"] == "a" * 64
-    assert check.evidence["reason_code"] == RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE
+    assert check.evidence["fingerprint"] == _exact_runtime().digest
+    assert check.evidence["runtime"]["artifact_digest"] == "sha256:abc"
 
 
 def test_missing_exact_runtime_fingerprint_blocks_production(tmp_path):
     cfg = _production_cfg(tmp_path)
-    with _healthy_boundaries(), patch("kriya.production_doctor.probe_llm_runtime", return_value={
-        "models": [cfg.llm.model], "selected_model": {"id": cfg.llm.model},
-        "native_metadata": None, "fingerprint": None,
-    }):
+    not_exact = _exact_runtime(artifact_digest="unavailable")
+    with _healthy_boundaries(runtime=not_exact):
         report = run_production_doctor(cfg, str(_git_workspace(tmp_path / "workspace")))
     check = _checks(report)["model.runtime_fingerprint"]
     assert check.status is CheckStatus.UNAVAILABLE
@@ -435,12 +448,14 @@ def test_missing_exact_runtime_fingerprint_blocks_production(tmp_path):
 
 
 def test_a_campaign_model_name_is_not_a_qualification(tmp_path):
+    """No qualification record exists for the exact runtime: a campaign
+    model name does not substitute for one."""
     check = _checks(_run(tmp_path))["model.qualification"]
-    assert check.status is CheckStatus.UNAVAILABLE
-    assert check.evidence["name_based_profile_source"] == "known_production_profile"
-    assert check.evidence["campaign_named"] is True
+    assert check.status is CheckStatus.FAIL
     assert check.evidence["name_based_profile_is_authority"] is False
-    assert check.evidence["reason_code"] == RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE
+    assert check.evidence["reason_code"] == MODEL_NOT_QUALIFIED
+    developer = check.evidence["roles"]["developer"][0]
+    assert developer["campaign_named"] is True and developer["status"] == "MISSING"
 
 
 def test_unqualified_model_blocks_production(tmp_path):
@@ -453,35 +468,55 @@ def test_unqualified_model_blocks_production(tmp_path):
     assert report.production_ready is False
 
 
-def _loaded_llm_config(tmp_path, body="{}\n"):
-    """The llm section exactly as load_config() builds it: the packaged
-    default declares llm.capabilities, so the profile source is explicit_primary."""
-    path = tmp_path / "operator.yaml"
-    path.write_text(body, encoding="utf-8")
-    return load_config(str(path)).llm
+def _qualify_all_roles(cfg, statuses=None):
+    """Save a current record (every capability PASS unless overridden) for
+    each role model's exact runtime."""
+    from kriya.core.model_qualification import CAPABILITIES, CaseResult, build_record, role_models, save_record
+
+    for model in {m for chain in role_models(cfg).values() for m in chain}:
+        results = [CaseResult(cap, (statuses or {}).get(cap, "PASS")) for cap in CAPABILITIES]
+        save_record(build_record(_exact_runtime(model), results))
 
 
-def test_a_loaded_configs_campaign_model_is_unavailable_not_failed(tmp_path):
-    """Regression (live CLI run, 2026-09-25): keyed on the capability-profile
-    source, a real loaded config reported FAIL/MODEL_NOT_QUALIFIED for a
-    campaign model while a bare AppConfig() reported UNAVAILABLE."""
+def test_every_role_qualified_for_its_exact_runtime_passes(tmp_path):
     cfg = _production_cfg(tmp_path)
-    cfg.llm = _loaded_llm_config(tmp_path)
-    assert cfg.llm.capabilities.model_fields_set
+    _qualify_all_roles(cfg)
     check = _checks(_run(tmp_path, cfg=cfg))["model.qualification"]
-    assert check.status is CheckStatus.UNAVAILABLE
-    assert check.evidence["campaign_named"] is True
-    assert check.evidence["name_based_profile_source"] == "explicit_primary"
-    assert check.evidence["reason_code"] == RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE
+    assert check.status is CheckStatus.PASS, check.evidence
+    assert "reason_code" not in check.evidence
 
 
-def test_a_loaded_configs_unknown_model_still_fails(tmp_path):
+def test_a_fully_qualified_healthy_deployment_is_production_ready(tmp_path):
+    """PRD-014 makes readiness reachable: with every role's exact runtime
+    qualified, nothing blocks."""
     cfg = _production_cfg(tmp_path)
-    cfg.llm = _loaded_llm_config(tmp_path, "llm:\n  model: unqualified:latest\n")
+    _qualify_all_roles(cfg)
+    report = _run(tmp_path, cfg=cfg)
+    assert _blocking(report) == set()
+    assert report.production_ready is True
+
+
+def test_a_failed_required_capability_blocks_the_role(tmp_path):
+    cfg = _production_cfg(tmp_path)
+    _qualify_all_roles(cfg, {"full_file_raw_content": "FAIL"})
     check = _checks(_run(tmp_path, cfg=cfg))["model.qualification"]
     assert check.status is CheckStatus.FAIL
-    assert check.evidence["campaign_named"] is False
-    assert check.evidence["reason_code"] == MODEL_NOT_QUALIFIED
+    developer = check.evidence["roles"]["developer"][0]
+    assert developer["status"] == "NOT_QUALIFIED" and "full_file_raw_content" in developer["failed"]
+    # A role that does not use full-file generation is still qualified.
+    assert check.evidence["roles"]["reviewer"][0]["status"] == "QUALIFIED"
+
+
+def test_runtime_drift_makes_the_qualification_stale_or_missing(tmp_path):
+    cfg = _production_cfg(tmp_path)
+    _qualify_all_roles(cfg)
+    drifted = _exact_runtime(artifact_digest="sha256:re-pulled")
+    with _healthy_boundaries(runtime=drifted):
+        report = run_production_doctor(cfg, str(_git_workspace(tmp_path / "workspace")))
+    check = _checks(report)["model.qualification"]
+    assert check.status is CheckStatus.FAIL
+    assert check.evidence["roles"]["developer"][0]["status"] == "MISSING"
+    assert report.production_ready is False
 
 
 def test_runtime_fingerprint_binds_openai_identity_to_native_digest_and_metadata(tmp_path):
@@ -489,18 +524,22 @@ def test_runtime_fingerprint_binds_openai_identity_to_native_digest_and_metadata
 
     def response(url, **_kwargs):
         if url.endswith("/v1/models"):
-            return {"data": [{"id": cfg.llm.model, "owned_by": "library"}]}
+            return {"data": [{"id": cfg.llm.model, "owned_by": "library", "created": 123}]}
+        if url.endswith("/api/version"):
+            return {"version": "0.34.2"}
         if url.endswith("/api/tags"):
-            return {"models": [{"name": cfg.llm.model, "digest": "sha256:abc"}]}
+            return {"models": [{"name": cfg.llm.model, "digest": "abc", "modified_at": "t1"}]}
         if url.endswith("/api/show"):
-            return {"details": {"format": "gguf", "quantization_level": "Q4_K_M"}, "model_info": {"arch": "qwen3"}}
+            return {"details": {"format": "gguf", "quantization_level": "Q4_K_M"}, "model_info": {"arch": "qwen3"},
+                    "modified_at": "t1"}
         raise AssertionError(url)
 
     with patch("kriya.production_doctor._json_request", side_effect=response):
         first = probe_llm_runtime(cfg)
         second = probe_llm_runtime(cfg)
 
-    assert first["native_metadata"]["digest"] == "sha256:abc"
+    assert first["runtime"].artifact_digest == "sha256:abc"
+    assert first["runtime"].quantization == "Q4_K_M"
     assert first["fingerprint"] == second["fingerprint"]
     assert len(first["fingerprint"]) == 64
 
