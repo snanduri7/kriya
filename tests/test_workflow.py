@@ -22378,10 +22378,11 @@ def test_reserve_sibling_content_budget_scales_down_for_a_smaller_fallback_model
     assert _reserve_sibling_content_budget(16384) < _reserve_sibling_content_budget(32768)
 
 
-def test_reserve_sibling_content_budget_floors_instead_of_collapsing_to_near_zero():
-    # A pathologically small context window must still leave room for at
-    # least one typically-sized sibling file's real content.
-    assert _reserve_sibling_content_budget(1000) == 500
+def test_reserve_sibling_content_budget_is_proportional_even_in_a_tiny_window():
+    # PRD-016: no absolute floor - in a small window the floors of every
+    # section added up to a prompt larger than the window itself, which the
+    # dispatch check refuses.
+    assert _reserve_sibling_content_budget(1000) == 150
 
 
 def _write_deterministic_text_file(path, lines=40, words_per_line=8):

@@ -651,7 +651,19 @@ def investigation_evidence_char_budget(prompt_window: int) -> int:
 
 def retry_evidence_char_budget(prompt_window: int) -> int:
     """Character budget of a retry package's source evidence."""
-    return max(4000, min(48000, int(prompt_window * _RETRY_EVIDENCE_SHARE * _ALLOCATOR_CHARS_PER_TOKEN)))
+    share = int(prompt_window * _RETRY_EVIDENCE_SHARE * _ALLOCATOR_CHARS_PER_TOKEN)
+    floor = _proportional_floor(1000, prompt_window) * _ALLOCATOR_CHARS_PER_TOKEN
+    return max(floor, min(48000, share))
+
+
+# A section floor keeps a small window's section useful, but never more than
+# this share of the prompt window: absolute floors in a small window added
+# up to more than the window itself, a prompt the dispatch check refuses.
+_FLOOR_SHARE_CAP = 0.15
+
+
+def _proportional_floor(floor: int, prompt_window: int) -> int:
+    return min(floor, int(prompt_window * _FLOOR_SHARE_CAP))
 
 
 # Floor for build_code_context()'s own budget after skills_prompt/learned_rag_context
@@ -688,16 +700,8 @@ def _reserve_graph_context_budget(prompt_window: int, *unbounded_texts: str) -> 
     above), not the raw context_window, and the pool is its graph share."""
     base_budget = int(prompt_window * _GRAPH_CONTEXT_SHARE)
     reserved = sum(estimate_tokens(t) for t in unbounded_texts if t and isinstance(t, str))
-    return max(_MIN_GRAPH_CONTEXT_BUDGET, base_budget - reserved)
+    return max(_proportional_floor(_MIN_GRAPH_CONTEXT_BUDGET, prompt_window), base_budget - reserved)
 
-
-# Floor for _reserve_sibling_content_budget() below, same role as
-# _MIN_GRAPH_CONTEXT_BUDGET above - even a small/fallback model's window still
-# leaves enough room to show at least one typically-sized sibling file's real
-# content, rather than collapsing to near-zero and defeating the cross-file
-# consistency fix this budget protects (see _reserve_sibling_content_budget's
-# own docstring).
-_MIN_SIBLING_CONTENT_BUDGET = 500
 
 # Sibling content (kriya/agents/agent.py's DeveloperAgent._fill_missing_content(),
 # the "Already-Written File This Batch" section) is reference-only material for
@@ -726,11 +730,11 @@ def _reserve_sibling_content_budget(prompt_window: int) -> int:
     Scales with the ACTIVE model's context window (same convention as
     _reserve_graph_context_budget - a primary-model attempt and a fallback-model
     attempt get proportionally different budgets, not one hardcoded number that's
-    generous for one and starves the other), floored at
-    _MIN_SIBLING_CONTENT_BUDGET so even a small fallback model's window still
-    leaves room for at least one sibling's real content. ``prompt_window`` is
-    the call's prompt_allocation_window() (PRD-016)."""
-    return max(_MIN_SIBLING_CONTENT_BUDGET, int(prompt_window * _SIBLING_CONTENT_BUDGET_FRACTION))
+    generous for one and starves the other). ``prompt_window`` is the call's
+    prompt_allocation_window() (PRD-016); the former absolute 500-token floor
+    was removed with it - in a small window the floors of every section added
+    up to a prompt larger than the window."""
+    return int(prompt_window * _SIBLING_CONTENT_BUDGET_FRACTION)
 
 
 _TIER_STEPS = ("full", "skeleton", "signatures")
