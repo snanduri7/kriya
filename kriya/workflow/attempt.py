@@ -5180,6 +5180,64 @@ def _downgrade_suppressed_requirement_claims(
     )
 
 
+def _stage_ownership_redirect_restoration(
+    state: GenerationState, ctx: "AttemptContext", staged_writes: List[StagedFileWrite],
+) -> None:
+    """PRD-022: after a deterministic brownfield ownership violation
+    (workflow.py), the corrective retry is scoped to the grounded owner, with
+    patch authority over it only. The tests the rejected candidate redirected
+    and the parallel file it created are not the retry's to repair, and left
+    in place they would fail the same check whatever the owner fix, making
+    the retry redundant by construction. Like the RESTORE_PUBLIC_CONTRACT
+    evidence restoration above, they are restored deterministically in the
+    same guarded batch: each redirected test back to its exact baseline, and
+    each parallel file this run created removed. Anything the Developer
+    writes again in this attempt is left as written, so a repeated choice
+    still recurs and still counts toward ARCHITECTURE_CHOICE_INVALIDATED."""
+    recovery = state.ownership_redirect_recovery
+    if not recovery:
+        return
+    staged_targets = {staged.target_path for staged in staged_writes}
+    restored: List[str] = []
+    for test_path in recovery.get("redirected_tests", []):
+        baseline = state.all_original_contents.get(test_path)
+        target = os.path.join(ctx.worktree_path, test_path)
+        if not baseline or target in staged_targets:
+            continue
+        try:
+            with open(target, "r", encoding="utf-8", errors="replace") as handle:
+                current = handle.read()
+        except OSError:
+            current = ""
+        if current != baseline:
+            staged_writes.append(StagedFileWrite(
+                target_path=target, content=baseline, base_path=target,
+                expected_base_revision=content_revision(current),
+            ))
+            restored.append(test_path)
+    removed: List[str] = []
+    for candidate in recovery.get("abandoned_candidates", []):
+        target = os.path.join(ctx.worktree_path, candidate)
+        if (target in staged_targets or state.all_original_contents.get(candidate)
+                or os.path.exists(os.path.join(ctx.workspace_path, candidate)) or not os.path.isfile(target)):
+            continue  # written again this attempt, or not a file this run created
+        with open(target, "r", encoding="utf-8", errors="replace") as handle:
+            current = handle.read()
+        staged_writes.append(StagedFileWrite(
+            target_path=target, content="", base_path=target,
+            expected_base_revision=content_revision(current), delete=True,
+        ))
+        removed.append(candidate)
+    if restored or removed:
+        state.record_event(RunEvent(
+            kind="ownership.redirect_restored", attempt=state.attempt_number, source="attempt.staged_writes",
+            authority=EventAuthority.AUXILIARY,
+            message=f"restored redirected tests {restored}; removed abandoned parallel files {removed}",
+            details={"restored_tests": restored, "removed_candidates": removed,
+                     "owners": list(recovery.get("owners", []))},
+        ))
+
+
 def _settled_goal_spec_requirement(
     ledger: Optional[ObligationLedger], obligation_id: Optional[str], fingerprint: str,
 ) -> Optional[ObligationRecord]:
@@ -7256,6 +7314,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "baseline evidence %s", evidence_path,
                 )
 
+    _stage_ownership_redirect_restoration(state, ctx, staged_writes)
+
     # Nothing reaches the sandbox until every candidate has passed its cheap
     # deterministic checks.  The batch commit re-checks all source revisions
     # before the first write and rolls back already-written targets if an OS
@@ -7294,6 +7354,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         ))
     for staged in staged_writes:
         filepath = os.path.relpath(staged.target_path, ctx.worktree_path)
+        if staged.delete:
+            # PRD-022: an abandoned run-created parallel file is gone from
+            # the candidate, so no later gate reads it.
+            state.all_files_written.discard(filepath)
+            logger.info(f"Removed abandoned candidate from sandbox: {filepath}")
+            continue
         state.files_written.append(filepath)
         state.all_files_written.add(filepath)
         logger.info(f"Committed generated/edited candidate to sandbox: {filepath}")
@@ -7416,7 +7482,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # Sourced from architect_files (the structured file list, or its heuristic
         # fallback - see the Architect call above) rather than re-deriving via a
         # second independent regex pass over the design's prose.
-        expected_files = {os.path.basename(f) for f in ctx.architect_files}
+        # PRD-022: a parallel file a deterministic ownership violation
+        # abandoned is no longer an expected output, whatever the design said.
+        abandoned = set(state.ownership_redirect_recovery.get("abandoned_candidates", []))
+        expected_files = {os.path.basename(f) for f in ctx.architect_files if f not in abandoned}
         missing_files = find_missing_expected_files(expected_files, state.all_files_written, goal=ctx.goal)
         if missing_files:
             raise IncompleteGenerationError(

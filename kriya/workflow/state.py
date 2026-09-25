@@ -409,6 +409,13 @@ class GenerationState:
     # (kriya/workflow/ownership_findings.py) - advisory evidence for the
     # Developer and the Reviewer, never a gate.
     ownership_findings: List[Any] = field(default_factory=list)
+    # PRD-022: a deterministic brownfield ownership violation's evidence,
+    # sticky for the run - {"redirected_tests": [...], "abandoned_candidates":
+    # [...], "owners": [...]}. The next attempts restore each redirected test
+    # to its baseline and remove the run-created parallel file unless the
+    # Developer writes them again (attempt.py), so a retry that fixes the
+    # owner is not rejected for evidence it had no authority to repair.
+    ownership_redirect_recovery: Dict[str, List[str]] = field(default_factory=dict)
     # PRD-018: whether this run's model.role_metrics event has been recorded.
     role_metrics_recorded: bool = False
     # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/

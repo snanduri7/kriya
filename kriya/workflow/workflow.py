@@ -69,6 +69,7 @@ from kriya.workflow.ownership_findings import (
     findings_prompt_block,
     grounded_owner_candidates,
     owner_candidates_prompt_block,
+    ownership_review_evidence,
     parse_ownership_justifications,
     record_findings,
     settle_findings,
@@ -287,6 +288,45 @@ def _role_metrics_of(client: Any) -> Any:
 
     metrics = getattr(client, "role_metrics", None)
     return metrics if isinstance(metrics, RoleMetrics) else None
+
+
+def _record_post_generation_ownership_findings(
+    state: GenerationState, owner_candidates: List[Any], ledger: ObligationLedger, worktree_path: str,
+    goal: str, subtask_id: Optional[str], justifications: Dict[str, str],
+) -> None:
+    """PRD-022: every file this candidate created (new in this run) checked
+    against the grounded owners found before planning, using what the file
+    actually contains as its work text. Findings not already recorded for
+    the plan are recorded (GROUNDED, non-terminal) and kept for review."""
+    created = [path for path in sorted(state.all_files_written) if not state.all_original_contents.get(path)]
+    work = []
+    for path in created:
+        try:
+            with open(os.path.join(worktree_path, path), "r", encoding="utf-8", errors="replace") as fh:
+                work.append((path, subtask_id, fh.read()))
+        except OSError:
+            continue
+    known = {finding.id for finding in state.ownership_findings}
+    fresh = [
+        finding for finding in settle_findings(
+            find_ownership_findings(work, owner_candidates,
+                                    touched_paths=[p for p in state.all_files_written if p not in created]),
+            goal=goal, justifications=justifications,
+        )
+        if finding.id not in known
+    ]
+    if not fresh:
+        return
+    record_findings(ledger, fresh, revision=f"post_generation:{state.attempt_number}",
+                    source="workflow.post_generation")
+    state.ownership_findings.extend(fresh)
+    for finding in fresh:
+        state.record_event(RunEvent(
+            kind="ownership.finding", attempt=state.attempt_number, source="workflow.post_generation",
+            authority=EventAuthority.ADVISORY,
+            message=f"{finding.planned_path} may duplicate {finding.candidate_owner} ({finding.status})",
+            details=finding.to_dict(),
+        ))
 
 
 def _role_independence_details(cfg: Any) -> Dict[str, Any]:
@@ -3364,6 +3404,18 @@ class WorkflowEngine:
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
 
+                # PRD-022: near-duplicates the candidate actually created,
+                # against the grounded owners PRD-021 found before planning.
+                # Advisory evidence for review and approval - never a gate.
+                if owner_candidates:
+                    try:
+                        _record_post_generation_ownership_findings(
+                            state, owner_candidates, resolved_obligation_ledger, worktree_path, goal,
+                            current_subtask_id, parse_ownership_justifications(str(design or "")),
+                        )
+                    except Exception as exc:
+                        logger.warning(f"Post-generation ownership findings unavailable: {exc}")
+
                 # PRD-020: the user's original requirements are part of the
                 # pre-apply success boundary. Only the verifier's recorded
                 # outcomes count (never plan/design/review prose); what a
@@ -3562,7 +3614,8 @@ class WorkflowEngine:
                             stream_callback(
                                 "Review", "Preparing automated code review for approval...\n",
                             )
-                        verified_evidence = build_reviewer_verified_evidence(state.gate_outcomes)
+                        verified_evidence = build_reviewer_verified_evidence(state.gate_outcomes) + \
+                            ownership_review_evidence(resolved_obligation_ledger, state.all_files_written)
                         review_parts = []
                         for i, batch in enumerate(review_batches, 1):
                             batch_prompt = f"Goal: {goal}\n{verified_evidence}\nFiles generated:\n{batch}"
@@ -3582,6 +3635,11 @@ class WorkflowEngine:
                         escalation_reason += f"\n\n=== Automated Code Review ===\n{state.pre_approval_review}"
                     except Exception as ex:
                         logger.warning(f"Pre-approval Reviewer call failed, proceeding without it: {ex}")
+                if need_human_approval and approval_callback:
+                    # PRD-022: the approver sees open ownership findings as
+                    # evidence; they never decide the approval themselves.
+                    escalation_reason += ownership_review_evidence(
+                        resolved_obligation_ledger, state.all_files_written)
 
                 def _abort_without_applying(status: str, review_text: str) -> Dict[str, Any]:
                     """Shared cleanup for both 'a human said no' and 'approval was
@@ -4262,6 +4320,17 @@ class WorkflowEngine:
                     )
                     if diagnostics:
                         failure.diagnostics = {**(failure.diagnostics or {}), **diagnostics}
+                    # PRD-022: the redirected tests are evidence and the
+                    # parallel file is abandoned; the next attempt restores
+                    # both deterministically (attempt.py) so the retry only
+                    # has to change the grounded owner it is scoped to.
+                    for key, values in (
+                        ("redirected_tests", [item["redirected_test"] for item in ownership_violations]),
+                        ("abandoned_candidates", [item["new_candidate"] for item in ownership_violations]),
+                        ("owners", [item["existing_owner"] for item in ownership_violations]),
+                    ):
+                        merged = state.ownership_redirect_recovery.setdefault(key, [])
+                        merged.extend(v for v in values if v not in merged)
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
                 # CORR-016 (P9/PRV-08, 2026-09-08, DIRECT-only) - same
@@ -4620,7 +4689,11 @@ class WorkflowEngine:
                     f"Last quality gate error:\n{state.error_context}\n\nFiles from the failing attempt:\n"
                 )
             else:
-                goal_header = f"Goal: {goal}\n{build_reviewer_verified_evidence(state.gate_outcomes)}\nFiles generated:\n"
+                goal_header = (
+                    f"Goal: {goal}\n{build_reviewer_verified_evidence(state.gate_outcomes)}"
+                    f"{ownership_review_evidence(resolved_obligation_ledger, state.all_files_written)}"
+                    "\nFiles generated:\n"
+                )
 
             file_contents_for_review: List[Tuple[str, str]] = []
             for filepath in sorted(state.all_files_written):

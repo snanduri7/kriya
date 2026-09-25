@@ -314,6 +314,37 @@ def findings_prompt_block(findings: Sequence[OwnershipFinding]) -> str:
               "delegate to it.\n")
 
 
+def ownership_review_evidence(ledger: Optional[ObligationLedger], files: Iterable[str]) -> str:
+    """PRD-022: the run's grounded ownership findings that concern ``files``,
+    for the Reviewer and a human approver: advisory evidence only. Read from
+    the obligation ledger (where every producer records them), so it is the
+    same on the direct, milestone and enforce paths. Nothing a reviewer says
+    changes a finding: only ``settle_findings`` does."""
+    if ledger is None:
+        return ""
+    wanted = set(files)
+    lines = []
+    for record in ledger.current_by_kind(ObligationKind.GROUNDED_OWNERSHIP):
+        evidence = record.evidence or {}
+        if evidence.get("planned_path") not in wanted or evidence.get("status") == SATISFIED:
+            continue
+        reason = f": {evidence['justification']}" if evidence.get("justification") else ""
+        lines.append(
+            f"- {evidence['planned_path']} may duplicate existing {evidence['candidate_owner']} "
+            f"(basis {', '.join(evidence.get('match_basis') or [])}; confidence {evidence.get('confidence')}; "
+            f"{evidence.get('status')}{reason})"
+        )
+    if not lines:
+        return ""
+    return (
+        "\n=== Grounded ownership findings (advisory, GROUNDED suspicion - not a verified defect) ===\n"
+        "Kriya found these possible duplicate owners from repository evidence. Weigh them as context: "
+        "say whether the new code re-implements the existing owner's responsibility, but do not "
+        "present a suspicion as an established fact and do not reject for it alone.\n"
+        + "\n".join(lines) + "\n"
+    )
+
+
 _FENCED_JSON = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
