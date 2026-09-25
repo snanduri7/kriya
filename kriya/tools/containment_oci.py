@@ -123,7 +123,7 @@ _HOST_ONLY_ENV_VARS = frozenset({
 _MAVEN_EXE_RE = re.compile(r"\b(mvn|mvnw|javac|java|jar)\b")
 _PYTHON_EXE_RE = re.compile(r"\b(python3?|pytest|pip3?)\b")
 
-_ATTESTED_TOOLCHAINS: Dict[Tuple[str, str], ToolchainIdentity] = {}
+_ATTESTED_TOOLCHAINS: Dict[Tuple[str, str, Optional[str]], str] = {}
 
 # Public (not underscore-prefixed) - kriya/tools/dependency_execution.py
 # imports these directly so its own `--dest`/`--find-links` flags always
@@ -229,61 +229,93 @@ def _attest_toolchain_image(
         raise BackendUnavailableError(
             f"Required toolchain image {image!r} has no inspectable content digest; refusing verification."
         )
-    cached = _ATTESTED_TOOLCHAINS.get((image, digest))
-    if cached is not None:
-        if cached.runtime_version != identity.runtime_version:
-            raise ToolchainMismatchError(
-                f"Image {image!r} digest {digest} was attested for {cached.runtime} "
-                f"{cached.runtime_version}, not required {identity.runtime} {identity.runtime_version}."
-            )
-        return identity.with_runtime_evidence(
-            image_digest=digest, observed_runtime_version=cached.observed_runtime_version or "",
-            observed_build_tool_version=cached.observed_build_tool_version,
-        )
-
-    if identity.language == "java":
-        entrypoint, args = "java", ["-version"]
-        pattern = r'(?:version\s+)?["\s](\d+)(?:\.|["\s])'
-    elif identity.language == "python":
-        entrypoint, args = "python3", ["--version"]
-        pattern = r"Python\s+(\d+\.\d+)"
-    else:
-        raise BackendUnavailableError(f"No OCI runtime attestation exists for {identity.language!r}.")
-    probe = subprocess.run(
-        [docker_path, "run", "--rm", "--entrypoint", entrypoint, image] + args,
-        capture_output=True, timeout=60, text=True,
-    )
-    output = (probe.stdout + "\n" + probe.stderr).strip()
-    match = re.search(pattern, output)
-    observed = match.group(1) if match else None
-    if probe.returncode != 0 or observed != identity.runtime_version:
+    observed_runtime = _observed_version(docker_path, image, digest, identity, identity.language)
+    if not _version_prefix_matches(observed_runtime, identity.runtime_version):
         raise ToolchainMismatchError(
             f"Required {identity.runtime} {identity.runtime_version} does not match image {image!r} "
-            f"digest {digest}; observed {observed or 'unparseable runtime'} ({output[:500]})."
+            f"digest {digest}; observed {observed_runtime or 'unparseable runtime'}."
         )
-    observed_build_tool = None
-    if identity.build_tool_version and identity.build_tool in {"maven", "gradle"}:
-        executable = "mvn" if identity.build_tool == "maven" else "gradle"
-        build_probe = subprocess.run(
-            [docker_path, "run", "--rm", "--entrypoint", executable, image, "--version"],
-            capture_output=True, timeout=60, text=True,
+    if identity.runtime_constraint is not None and not _runtime_satisfies_constraint(identity, observed_runtime):
+        raise ToolchainMismatchError(
+            f"Image {image!r} digest {digest} provides {identity.runtime} {observed_runtime}, which does not "
+            f"satisfy the declared constraint {identity.runtime_constraint!r} ({identity.requirement_source})."
         )
-        build_output = (build_probe.stdout + "\n" + build_probe.stderr).strip()
-        build_pattern = r"Apache Maven\s+(\d+\.\d+)" if executable == "mvn" else r"Gradle\s+(\d+\.\d+)"
-        build_match = re.search(build_pattern, build_output)
-        observed_build_tool = build_match.group(1) if build_match else None
-        if build_probe.returncode != 0 or observed_build_tool != identity.build_tool_version:
-            raise ToolchainMismatchError(
-                f"Required {identity.build_tool} {identity.build_tool_version} does not match image "
-                f"{image!r} digest {digest}; observed {observed_build_tool or 'unparseable build tool'} "
-                f"({build_output[:500]})."
-            )
-    resolved = identity.with_runtime_evidence(
-        image_digest=digest, observed_runtime_version=observed,
+    observed_build_tool = (
+        _observed_version(docker_path, image, digest, identity, identity.build_tool)
+        if identity.build_tool_version else None
+    )
+    if identity.build_tool_version and not _version_prefix_matches(observed_build_tool, identity.build_tool_version):
+        raise ToolchainMismatchError(
+            f"Required {identity.build_tool} {identity.build_tool_version} does not match image "
+            f"{image!r} digest {digest}; observed {observed_build_tool or 'unparseable build tool'}."
+        )
+    return identity.with_runtime_evidence(
+        image_digest=digest, observed_runtime_version=observed_runtime or "",
         observed_build_tool_version=observed_build_tool,
     )
-    _ATTESTED_TOOLCHAINS[(image, digest)] = resolved
-    return resolved
+
+
+def _version_prefix_matches(observed: Optional[str], declared: str) -> bool:
+    """``observed`` (e.g. "3.12.7", "8.10.2", "17") is at the declared
+    granularity or finer: "3.12" matches "3.12.7", never "3.1"."""
+    if not observed:
+        return False
+    return observed.split(".")[:len(declared.split("."))] == declared.split(".")
+
+
+def _runtime_satisfies_constraint(identity: ToolchainIdentity, observed: Optional[str]) -> bool:
+    from kriya.tools.toolchain_identity import python_version_satisfies
+
+    parts = (observed or "").split(".")
+    if identity.language != "python" or len(parts) != 3 or not all(p.isdigit() for p in parts):
+        return False  # the constraint needs an exact version this probe did not yield
+    return python_version_satisfies(tuple(int(p) for p in parts), identity.runtime_constraint)
+
+
+_RUNTIME_PROBES = {
+    "java": ("java", ["-version"], re.compile(r'version\s+"(?:1\.)?(\d+)')),
+    "python": ("python3", ["--version"], re.compile(r"Python\s+(\d+\.\d+(?:\.\d+)?)")),
+}
+_BUILD_TOOL_PROBES = {
+    "maven": ("mvn", re.compile(r"Apache Maven\s+(\d+(?:\.\d+)*)")),
+    "gradle": ("gradle", re.compile(r"Gradle\s+(\d+(?:\.\d+)*)")),
+}
+
+
+def _observed_version(
+    docker_path: str, image: str, digest: str, identity: ToolchainIdentity, component: Optional[str],
+) -> str:
+    """The version of ``component`` (the runtime language, or the build
+    tool) that one image content digest really contains, observed by running
+    the image's own executable. Cached per content digest: the same bytes
+    always contain the same tools. Java reports its feature release ("8" for
+    1.8.0_x), Python its full X.Y.Z."""
+    key = (image, digest, component)
+    if key in _ATTESTED_TOOLCHAINS:
+        return _ATTESTED_TOOLCHAINS[key]
+    if component in _RUNTIME_PROBES:
+        entrypoint, args, pattern = _RUNTIME_PROBES[component]
+        timeout, label = 60, identity.runtime
+    elif component in _BUILD_TOOL_PROBES:
+        entrypoint, pattern = _BUILD_TOOL_PROBES[component]
+        args, timeout, label = ["--version"], 120, component
+    else:
+        raise BackendUnavailableError(f"No OCI toolchain attestation exists for {component!r}.")
+    probe = subprocess.run(
+        # By content digest, so the probe observes exactly the bytes that
+        # later run (the tag could be re-pointed mid-attestation).
+        [docker_path, "run", "--rm", "--entrypoint", entrypoint, digest] + args,
+        capture_output=True, timeout=timeout, text=True,
+    )
+    output = (probe.stdout + "\n" + probe.stderr).strip()
+    match = pattern.search(output)
+    if probe.returncode != 0 or not match:
+        raise ToolchainMismatchError(
+            f"Required {label} does not match image {image!r} digest {digest}: could not observe it "
+            f"({output[:500]})."
+        )
+    _ATTESTED_TOOLCHAINS[key] = match.group(1)
+    return match.group(1)
 
 
 # --- SEC-006: registry-scoped egress (DEPENDENCY_REGISTRY_ONLY) ---
@@ -928,7 +960,9 @@ class OCIContainmentBackend:
         if profile.cpu_seconds is not None:
             args += ["--cpus", _CPU_RATE_CAP]
 
-        args.append(image)
+        # PRD-011: run exactly the content that was attested - its immutable
+        # image ID, never the tag, which could be re-pointed in between.
+        args.append(resolved_toolchain.image_digest if resolved_toolchain is not None else image)
 
         def _cleanup() -> None:
             # Authoritative teardown - see PreparedContainment.cleanup's
@@ -1185,7 +1219,8 @@ class OCIContainmentBackend:
         if profile.cpu_seconds is not None:
             args += ["--cpus", _CPU_RATE_CAP]
 
-        args += ["--entrypoint", "/bin/sh", acq_image_tag, "-c", setup_script, "kriya-acq-cmd"]
+        run_image = resolved_toolchain.image_digest if resolved_toolchain is not None else acq_image_tag
+        args += ["--entrypoint", "/bin/sh", run_image, "-c", setup_script, "kriya-acq-cmd"]
 
         def _cleanup() -> None:
             try:

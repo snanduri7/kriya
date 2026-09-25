@@ -326,10 +326,10 @@ def _pom(workspace, release):
 
 def test_an_unsupported_declared_toolchain_blocks(tmp_path):
     workspace = _git_workspace(tmp_path / "workspace")
-    _pom(workspace, 11)
+    _pom(workspace, 7)  # Java 8/11/17/21 are supported (PRD-011 reopen)
     check = _checks(_run(tmp_path, workspace=workspace))["toolchain.required"]
     assert check.status is CheckStatus.FAIL
-    assert "Java 11" in check.evidence["error"]
+    assert "Java 7" in check.evidence["error"]
 
 
 def test_an_absent_toolchain_image_is_unavailable_and_never_pulled(tmp_path):

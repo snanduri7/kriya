@@ -10,7 +10,7 @@ import os
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass, replace
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from kriya.core.tomlcompat import tomllib
 from kriya.tools.containment import BackendUnavailableError
@@ -36,6 +36,10 @@ class ToolchainIdentity:
     image_digest: Optional[str] = None
     observed_runtime_version: Optional[str] = None
     observed_build_tool_version: Optional[str] = None
+    # A declared constraint the minor-version profile alone cannot prove
+    # (e.g. requires-python ">=3.11.4" on the 3.11 profile): the exact
+    # runtime version observed at attestation must satisfy it.
+    runtime_constraint: Optional[str] = None
 
     def with_runtime_evidence(
         self, *, image_digest: str, observed_runtime_version: str,
@@ -51,8 +55,14 @@ class ToolchainIdentity:
         return asdict(self)
 
 
-_SUPPORTED_JAVA = (21, 17)
-_SUPPORTED_PYTHON: Sequence[Tuple[int, int]] = ((3, 12), (3, 11), (3, 10))
+# Versioned prebuilt images exist for each (maven:3.9-eclipse-temurin-<N>,
+# gradle:8-jdk<N>, python:<X.Y>-slim). Order is preference.
+_SUPPORTED_JAVA = (21, 17, 11, 8)
+_DEFAULT_JAVA = 21
+_SUPPORTED_PYTHON: Sequence[Tuple[int, int]] = ((3, 14), (3, 13), (3, 12), (3, 11), (3, 10))
+# An unconstrained (or loosely constrained) project keeps the long-standing
+# 3.12 profile rather than silently moving to the newest interpreter.
+_DEFAULT_PYTHON: Tuple[int, int] = (3, 12)
 
 
 def _pom_java_version(workspace_path: str) -> Tuple[Optional[int], str]:
@@ -138,7 +148,7 @@ def _resolve_java(workspace_path: str, java_home_override: Optional[str] = None)
             )
         if version is None:
             version, source = override_version, f"JAVA_HOME:{java_home_override}/release"
-    version = version or 21
+    version = version or _DEFAULT_JAVA
     if version not in _SUPPORTED_JAVA:
         raise ToolchainResolutionError(
             f"Java {version} is required by {source}, but production containment supports exactly "
@@ -146,46 +156,83 @@ def _resolve_java(workspace_path: str, java_home_override: Optional[str] = None)
         )
     if build_tool == "gradle":
         image = f"gradle:8-jdk{version}"
+        build_version = "8"
     else:
         image = f"maven:3.9-eclipse-temurin-{version}"
     return ToolchainIdentity("java", "jdk", str(version), build_tool, build_version, image, source)
 
 
-def _version_tuple(value: str) -> Tuple[int, int]:
-    match = re.match(r"\s*(\d+)\.(\d+)", value)
-    if not match:
-        raise ToolchainResolutionError(f"Unsupported Python version expression component: {value!r}")
-    return int(match.group(1)), int(match.group(2))
+_SPECIFIER = re.compile(r"(===|==|!=|~=|>=|<=|>|<)\s*(\d+(?:\.\d+){0,2})(\.\*)?")
 
 
-def _python_satisfies(version: Tuple[int, int], spec: str) -> bool:
+def _parse_python_spec(spec: str) -> List[Tuple[str, Tuple[int, ...], bool]]:
+    """The PEP 440 subset real requires-python values use: ==, !=, ~=, >=,
+    <=, >, < on 1-3 release segments, and a trailing ``.*`` on == / !=.
+    Anything else (``===``, pre/post/dev/local versions) is refused rather
+    than guessed at."""
+    clauses = []
     for raw in spec.split(","):
         part = raw.strip()
         if not part:
             continue
-        if re.search(r"\d+\.\d+\.\d+", part):
-            raise ToolchainResolutionError(
-                f"Patch-specific requires-python constraint {part!r} cannot be proven by the "
-                "available minor-version OCI profiles."
-            )
-        match = re.fullmatch(r"(>=|<=|==|~=|>|<)\s*(\d+\.\d+)(?:\.\d+)?(?:\.\*)?", part)
-        if not match:
+        match = _SPECIFIER.fullmatch(part)
+        if not match or match.group(1) == "===":
             raise ToolchainResolutionError(f"Unsupported requires-python constraint {part!r}")
-        op, required_raw = match.groups()
-        required = _version_tuple(required_raw)
-        if op == ">=" and not version >= required:
-            return False
-        if op == ">" and not version > required:
-            return False
-        if op == "<=" and not version <= required:
-            return False
-        if op == "<" and not version < required:
-            return False
-        if op == "==" and not version == required:
-            return False
-        if op == "~=" and not (version >= required and version[0] == required[0]):
-            return False
-    return True
+        op, release, wildcard = match.group(1), tuple(int(x) for x in match.group(2).split(".")), bool(match.group(3))
+        if wildcard and op not in ("==", "!="):
+            raise ToolchainResolutionError(f"Unsupported requires-python constraint {part!r}")
+        if op == "~=" and len(release) < 2:
+            raise ToolchainResolutionError(f"Invalid compatible-release constraint {part!r}")
+        clauses.append((op, release, wildcard))
+    return clauses
+
+
+def _pad(release: Tuple[int, ...], length: int = 3) -> Tuple[int, ...]:
+    return tuple(release) + (0,) * (length - len(release))
+
+
+def _clause_holds(version: Tuple[int, int, int], op: str, release: Tuple[int, ...], wildcard: bool) -> bool:
+    if wildcard:
+        prefix = version[:len(release)] == release
+        return prefix if op == "==" else not prefix
+    target = _pad(release)
+    if op == "==":
+        return version == target
+    if op == "!=":
+        return version != target
+    if op == ">=":
+        return version >= target
+    if op == "<=":
+        return version <= target
+    if op == ">":
+        return version > target
+    if op == "<":
+        return version < target
+    # ~=X.Y[.Z]: >= X.Y[.Z] and the same release prefix minus its last segment.
+    return version >= target and version[:len(release) - 1] == release[:-1]
+
+
+def python_version_satisfies(version: Tuple[int, int, int], spec: str) -> bool:
+    return all(_clause_holds(version, *clause) for clause in _parse_python_spec(spec))
+
+
+_ALL, _SOME, _NONE = "all", "some", "none"
+
+
+def _minor_coverage(minor: Tuple[int, int], spec: str) -> str:
+    """Whether every, some or no patch release of ``minor`` satisfies
+    ``spec``. The predicate is piecewise constant between the patch numbers
+    the spec names for this minor, so those boundaries plus 0 and a
+    far-future patch decide it exactly."""
+    clauses = _parse_python_spec(spec)
+    patches = {0, 10_000}
+    for _op, release, _wildcard in clauses:
+        if len(release) == 3 and release[:2] == minor:
+            patches.update({max(release[2] - 1, 0), release[2], release[2] + 1})
+    results = {python_version_satisfies((minor[0], minor[1], patch), spec) for patch in patches}
+    if results == {True}:
+        return _ALL
+    return _SOME if True in results else _NONE
 
 
 def _resolve_python(workspace_path: str) -> ToolchainIdentity:
@@ -206,19 +253,41 @@ def _resolve_python(workspace_path: str) -> ToolchainIdentity:
     python_version_file = os.path.join(workspace_path, ".python-version")
     if spec is None and os.path.isfile(python_version_file):
         try:
-            spec = "==" + open(python_version_file, encoding="utf-8").read().strip()
-            source = ".python-version"
+            pinned = open(python_version_file, encoding="utf-8").read().split()
         except OSError as exc:
             raise ToolchainResolutionError(f"Cannot read .python-version: {exc}") from exc
-    candidates = [version for version in _SUPPORTED_PYTHON if spec is None or _python_satisfies(version, spec)]
-    if not candidates:
-        raise ToolchainResolutionError(
-            f"Python requirement {spec!r} from {source} cannot be satisfied by the production "
-            "containment profiles (3.12, 3.11, 3.10); refusing host-tool fallback."
+        match = re.fullmatch(r"(?:python-?|cpython-?)?(\d+)\.(\d+)(?:\.\d+)?", pinned[0] if pinned else "")
+        if not match:
+            raise ToolchainResolutionError(f"Unsupported .python-version value {' '.join(pinned)!r}")
+        # A pyenv pin names the developer's local interpreter; containment
+        # honours its minor version and records the exact patch it observed.
+        spec, source = f"=={match.group(1)}.{match.group(2)}.*", f".python-version:{pinned[0]}"
+    if spec is None:
+        version, constraint = _DEFAULT_PYTHON, None
+    else:
+        # Nearest to the default first (newer on a tie): the smallest move
+        # away from the long-standing profile that the project allows.
+        preference = sorted(
+            _SUPPORTED_PYTHON, key=lambda minor: (abs(minor[1] - _DEFAULT_PYTHON[1]), -minor[1]),
         )
-    version = candidates[0]
+        coverage = {minor: _minor_coverage(minor, spec) for minor in preference}
+        full = [minor for minor in preference if coverage[minor] == _ALL]
+        partial = [minor for minor in preference if coverage[minor] == _SOME]
+        if full:
+            version, constraint = full[0], None
+        elif partial:
+            version, constraint = partial[0], spec
+        else:
+            raise ToolchainResolutionError(
+                f"Python requirement {spec!r} from {source} cannot be satisfied by the production "
+                f"containment profiles ({', '.join(f'{a}.{b}' for a, b in _SUPPORTED_PYTHON)}); "
+                "refusing host-tool fallback."
+            )
     rendered = f"{version[0]}.{version[1]}"
-    return ToolchainIdentity("python", "cpython", rendered, "pip", None, f"python:{rendered}-slim", source)
+    return ToolchainIdentity(
+        "python", "cpython", rendered, "pip", None, f"python:{rendered}-slim", source,
+        runtime_constraint=constraint,
+    )
 
 
 def resolve_toolchain_identity(

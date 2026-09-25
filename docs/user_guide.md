@@ -229,6 +229,39 @@ location: independent of the log settings, and never derived from the directory 
   - The copy is refused if a database already exists at the new location, and the old file is never deleted.
   - `kriya traces` and `kriya doctor --production` both point this out while an old database is present.
 
+### 2.0c Contained verification toolchains (`autonomy.contained_execution_required`)
+With contained execution required, compile, test and runtime checks run in a prebuilt, versioned container
+image chosen from the project's declared toolchain. Kriya never installs a compiler or JDK during a run, and never
+falls back to the host's tools.
+
+| Project | How the version is chosen | Image |
+|---|---|---|
+| Maven | `pom.xml` `maven.compiler.release`/`source`/`target`/`java.version` (all must agree; `1.8` means 8) | `maven:3.9-eclipse-temurin-<8/11/17/21>` |
+| Gradle | `JavaLanguageVersion.of(N)` / `sourceCompatibility` / `targetCompatibility` | `gradle:8-jdk<8/11/17/21>` |
+| Python | `pyproject.toml` `requires-python`, else `.python-version` (minor version) | `python:<3.10-3.14>-slim` |
+
+- **Defaults.** With no declared version: JDK 21 for Java and Python 3.12.
+- **Goal-stated JDK.** When a goal names a Java version and Kriya selects that JDK because the host's `java` and `mvn`
+  disagree, its version is used here too. A repository that declares a different version is refused.
+- **Python specs.** `requires-python` supports the usual PEP 440 forms: `>=`, `<`, `!=`, `~=`, `==X.Y.*`,
+  major-only bounds such as `<4`, and patch bounds. Kriya keeps 3.12 if the spec allows it, otherwise it picks the
+  nearest allowed minor. If only some patch releases of that minor satisfy the spec (e.g. `>=3.11.4,<3.12`), the
+  image's exact version is checked when it is attested. `===`, pre-releases and unsatisfiable specs are refused.
+- **Attestation.** Before running anything, Kriya:
+  - checks the image's immutable content digest;
+  - runs the image's own `java -version`/`python3 --version`, plus `mvn --version` or `gradle --version`, to prove
+    it holds what was required;
+  - runs by that digest, never the tag.
+
+  A mismatch is a `CONTAINMENT_SETUP_FAILED` stop, never a pass.
+- **Evidence.**
+  - The attested identity is saved with each passing gate in the run trace (`toolchain_identity` in
+    `gate_outcomes`): image, digest, and required and observed versions.
+  - It is also the toolchain fingerprint that resume and milestone reuse compare (§3.4). A different image digest or
+    required version means the gates run again.
+- **Unsupported.** Other versions (e.g. Java 7, Python 3.9) and toolchains without a profile fail closed.
+  `kriya doctor --production` reports this as `toolchain.required`.
+
 ### 2.1 Per-Role Model Selection (`agent_llms`)
 Planner, Architect, Developer, Reviewer, RunVerifier, and SkillGapAgent (skill-gap extraction and conflict-checking) don't have to share one model - each is independently configurable, with its own optional escalation chain.
 
@@ -365,7 +398,7 @@ This is opt-in only - Kriya never guesses that you're resuming from goal text al
 | The containment, toolchain or verification settings | The candidate is kept, written into a fresh worktree through the normal write checks, and its gates run again |
 | Only the model identity (provider, model, base URL or API key, for the primary model or a per-role `agent_llms` model) | Nothing is dropped. Any other `llm`/`llm_chain`/`agent_llms` setting is part of the config: a fresh run |
 
-A value Kriya cannot determine counts as changed. The toolchain identity is not recorded until PRD-011, so today a resumed candidate always has its gates run again. Terminal full regression always runs before anything is applied, and a checkpoint whose run record has disappeared reuses nothing.
+A value Kriya cannot determine counts as changed. The toolchain identity is known only under contained execution (§2.0c): the required toolchain plus the local image's content digest. On the host it is unknown, so a resumed candidate always has its gates run again. Terminal full regression always runs before anything is applied, and a checkpoint whose run record has disappeared reuses nothing.
 
 **A crashed commit blocks every mutating command until it is settled.** If an earlier run died while writing files into the workspace (or its run record or commit evidence is unreadable), `generate`, `fix`, `generate --from-milestones`, `proposal execute`, and `tools execute` for a call that may write to the workspace, refuse to start, before any model call, and exit 1 with:
 ```
@@ -414,7 +447,7 @@ A final **integration pass** then runs once more against the whole assembled pro
   - the toolchain that produced that evidence is known and unchanged;
   - the workspace is exactly what the milestones completed since then explain. Untracked files under generated-output directories the repository model already ignores (`__pycache__`, `target`, `build`, `dist`, `node_modules`, `.venv`, ...) do not count; any other new or changed file, tracked or not, does.
 
-  In practice this path is not reachable yet. Milestone acceptance criteria are free text, and nothing maps them to specific checks. The toolchain identity is also unavailable until PRD-011. So a milestone that changed nothing reruns. A milestone that rewrites its file with identical bytes is an ordinary change and is skipped as described above.
+  In practice this path is not reachable yet. Milestone acceptance criteria are free text, and nothing maps them to specific checks. The toolchain identity is also only known under contained execution (§2.0c). So a milestone that changed nothing reruns. A milestone that rewrites its file with identical bytes is an ordinary change and is skipped as described above.
 
 Anything else reruns that milestone and everything that depends on it. An unrelated milestone that wrote the same files also reruns. Other milestones stay skipped. A file that several milestones and the integration pass wrote is checked against its last committed state. If it differs, the last completed milestone that wrote it reruns, with the reason `CURRENT_BYTES_DIVERGE_FROM_COMMITTED_LINEAGE`.
 
