@@ -439,18 +439,22 @@ What counts as "failure" differs by role, deliberately conservative so a legitim
 **Fallback transitions (PRD-017).** When the Developer's retry moves to an `llm_chain` model, everything the request
 depends on is resolved again for that model: its exact runtime and Developer qualification, its capability profile
 (native tools, JSON mode, edit protocol, streaming), reasoning, its served and prompt-allocation windows and its own
-output budget. A chain entry's `max_tokens` is now used for every call to it; leave it unset to inherit
-`llm.max_tokens`. Each change of model is recorded field by field as a `model.transition` run event. A fallback that
-cannot serve the attempt ends it with `FALLBACK_MODEL_INCOMPATIBLE` before any request is sent, and the run stops
-instead of retrying it (`failure_category: fallback_model_incompatible`). That happens when:
+output budget. A chain entry's `max_tokens` is now used for every call to it. Left unset, it is the shared default
+output budget (16384, the packaged `llm.max_tokens`), never your primary model's own `llm.max_tokens`; the per-call
+budget still follows the model's window (§2.0d). Each change of model is recorded field by field as a
+`model.transition` run event. A fallback cannot serve an attempt when:
 - a qualification record for its exact runtime has a failed Developer case;
 - `runtime_profile: production` is set and the runtime is not QUALIFIED;
 - the attempt may only patch an existing file (no complete current source was shown) and the model's profile returns
   whole files only;
 - its window leaves no room for a prompt.
 
-A runtime that has never been qualified is recorded, not refused. The chain order is never changed and a larger model
-is never assumed to be more capable.
+Such a fallback is skipped, and is sent no request: the attempt goes to the next configured fallback that can serve
+it, in your `llm_chain` order. Each skip is recorded as a `model.fallback_selection` run event (the requested model,
+every rejected one with its reasons, the selected one). Only when no remaining fallback can serve does the run stop
+with `FALLBACK_MODEL_INCOMPATIBLE` (`failure_category: fallback_model_incompatible`), listing every rejection. A
+runtime that has never been qualified is recorded, not refused. Compatible fallbacks are never reordered, and a
+larger model is never assumed to be more capable.
 
 **Role independence and per-role metrics (PRD-018).** By default every role may share the Developer's model, which
 is the fast local setup. Roles that share one runtime also share its errors, so `kriya doctor --production` reports
@@ -494,8 +498,12 @@ model_policy:
     # table_path: /abs/path/model_routing_table.json  (default: the state directory)
     # frozen_routes_path: /abs/path/frozen_routes.json (required for mode: frozen)
 ```
-A candidate is eligible only when its runtime is exactly identified and QUALIFIED for that role *as routed*, since
-a model's runtime identity depends on the binding it is placed in. Qualify it for its route with
+A candidate is eligible only when its runtime is exactly identified and QUALIFIED for that role *as routed*: the one
+qualification record of that exact runtime must pass every case the role requires (the base cases, the role's own,
+and each protocol its profile enables). One record serves every role its cases cover; a runtime that passes the
+Planner's and Reviewer's cases but failed a Developer case such as `anchored_edit_protocol` is still not routed to
+the Developer. A model's runtime identity depends on the binding it is placed in (the Developer's is the primary
+`llm`, every other role's an `agent_llms` binding), so qualify a candidate for its route with
 `kriya model qualify --model <candidate> --role <role>`. A JSON role needs a JSON-mode profile, and a candidate's
 window may not be smaller than the role's configured one (or `min_context_window`). An explicit
 `agent_llms.<role>.llm` wins whenever it is qualified.
@@ -510,7 +518,9 @@ it, never updates it. Every decision is recorded as a `model.route` run event: t
 reason and the final route. `kriya model routes` shows the decisions without running anything.
 `kriya model routes --freeze <path>` records them, and `mode: frozen` then replays exactly those runtimes for
 reproducible certification, refusing the run (`ROUTE_FROZEN_MISMATCH`) if any runtime changed or is no longer
-qualified. `model_policy` is SECURITY_AUTHORITY: a repository cannot set or relax it.
+qualified. Routes are sticky within a run: each checkpoint records them, and `--resume`/`--resume-id` reuses exactly
+those routes instead of routing again on a table that changed since, or refuses the resume
+(`ROUTE_RESUME_MISMATCH`) if a recorded runtime changed or is no longer qualified. `model_policy` is SECURITY_AUTHORITY: a repository cannot set or relax it.
 
 ### 2.2 Control Plane, Policy, and Structured Execution
 

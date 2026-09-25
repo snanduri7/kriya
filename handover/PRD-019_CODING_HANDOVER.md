@@ -33,9 +33,26 @@ configuration.
 
 ### Placement matters
 A model's runtime identity includes its capability-profile provenance (PRD-013), so the same model as the primary and
-as a role binding are different runtimes (the kind of binding matters, not which role: one qualification as a role
-binding covers every role it is routed to with the same settings). Candidates are therefore assessed, qualified and measured in their routed
-placement. `kriya model qualify --model <candidate> --role <role>` qualifies a candidate exactly as it runs when
+as a role binding are different runtimes (the kind of binding matters, not which role). Candidates are therefore
+assessed, qualified and measured in their routed placement.
+
+**Qualification scope (architecture review).** Qualification stays attached to the exact runtime and its case
+evidence (PRD-014; `kriya model qualify` always runs every case and saves one record per runtime). A candidate is
+eligible for a role only when `required_capabilities(role)` all PASS in that record. One record is reused by every
+role its evidence covers (no per-role re-qualification); a role needing a case the record failed or lacks is rejected
+naming that case. The first version of this handover said "one qualification covers every role", which overstated
+it; the code already assessed per role, and tests now prove it: reuse across reviewer, spec_compliance and planner;
+the planner rejected on `malformed_output_recovery` from the same record the reviewer uses; the Developer rejected on
+`anchored_edit_protocol` with its own placed record (so the rejection is not merely a missing record); an unqualified
+runtime stays ineligible despite better metrics.
+
+**Resume (architecture review).** Routes are sticky within a run. Each checkpoint records `model_routes` (every
+routed role's model, exact runtime and source). `generate`/`fix` `--resume`/`--resume-id` replay them at the command
+boundary (the same checkpoint selection as the engine: `--resume-id`, else the latest) instead of routing again on
+the current table: the same model on the same exact, still QUALIFIED runtime; a role that kept its configured binding
+keeps it. Anything else refuses the resume before any model call with `ROUTE_RESUME_MISMATCH`: a drifted runtime, a
+candidate no longer configured, a changed routed-role set. A checkpoint without recorded routes (routing was off, or
+it predates this change) is routed fresh; the resume fingerprint still refuses a different runtime. `kriya model qualify --model <candidate> --role <role>` qualifies a candidate exactly as it runs when
 routed to that role.
 
 ## Config
@@ -53,7 +70,8 @@ routed to that role.
   - frozen replay and drift refusal;
   - config validation and classification;
   - an end-to-end run through the CLI boundary and `WorkflowEngine`: the reviewer's calls go to the routed candidate, `model.route` lands in `traces.db`, and the table is not written.
-- 30 passed.
+- 30 passed originally; 39 after the review corrections (qualification scope 4, resume 5; the placement output budget and "checkpoints carry the routes" are assertions added to existing tests). The CLI resume-refusal test uses `capsys`, which the plain runner lacks; it passed through a shim.
+- Review-correction mutations, each caught: the role's required cases ignored (2 tests), resume routes ignored by `plan_routes` (3) or by the command boundary (2).
 - Mutation checks, each caught:
   - apply is a no-op fails 3;
   - qualification ignored fails the unqualified-runtime test;
@@ -69,7 +87,7 @@ routed to that role.
 1. **Routing requires QUALIFIED in every mode, not only production.** Routing is itself an evidence claim. Choosing an unqualified runtime because of a score is exactly what the PRD forbids.
 2. **Unmeasured candidates rank after measured ones.** Until `min_calls` calls exist, a candidate is ranked by operator order after every measured candidate, so a new runtime does not displace a measured one on no evidence.
 3. **The table is refreshed by an explicit command**, not at the end of each run. The operator controls when evidence changes the routes.
-4. **The Developer can be routed.** This replaces the primary `llm` for the run, and the resume fingerprint binds the routed runtime. Resuming a checkpoint under a different route is therefore refused (fail closed); use `frozen` mode for reproducible runs.
+4. **The Developer can be routed.** This replaces the primary `llm` for the run, and the resume fingerprint binds the routed runtime. A resume replays the checkpoint's own routes (see Resume), so a changed metrics table no longer blocks it; only a route that no longer holds does. A routed candidate's unset `max_tokens` is the shared default (PRD-017 decision 1).
 
 ## Live test
 `tests/test_live_prd017_019_model_roles.py` (all three PRDs):
