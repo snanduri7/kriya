@@ -9,7 +9,7 @@ import subprocess
 
 import pytest
 
-from kriya.config import AppConfig
+from kriya.config.config import load_config
 from kriya.production_doctor import (
     RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE,
     CheckStatus,
@@ -20,7 +20,11 @@ from kriya.production_doctor import (
 
 @pytest.mark.live_model
 def test_production_doctor_fingerprints_the_real_runtime_and_withholds_name_based_qualification(tmp_path):
-    cfg = AppConfig()
+    # Built through load_config() like the CLI: a bare AppConfig() lacks the
+    # packaged llm.capabilities and hid a real-path misclassification.
+    operator = tmp_path / "operator.yaml"
+    operator.write_text("{}\n", encoding="utf-8")
+    cfg = load_config(str(operator))
     cfg.llm.base_url = os.environ.get("KRIYA_LIVE_BASE_URL", "http://localhost:11434/v1")
     cfg.llm.model = os.environ.get("KRIYA_LIVE_LLM_MODEL", "qwen3-coder:30b")
     cfg.llm.api_key = os.environ.get("KRIYA_LIVE_API_KEY", "local-key")
@@ -44,4 +48,4 @@ def test_production_doctor_fingerprints_the_real_runtime_and_withholds_name_base
     assert fingerprint.evidence["reason_code"] == RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE
     qualification = checks["model.qualification"]
     assert qualification.status is CheckStatus.UNAVAILABLE
-    assert qualification.evidence["name_based_profile_source"] == "known_production_profile"
+    assert qualification.evidence["campaign_named"] is True

@@ -216,6 +216,15 @@ def _resolve_for_binding(model: str, capabilities: ModelCapabilities, explicit_s
     )
 
 
+def is_campaign_named_model(model: str) -> bool:
+    """Whether this model identity has a MODEL-001 campaign entry in
+    KNOWN_MODEL_PROFILES (same exact, case-folded match as every other lookup
+    here). Independent of which capability profile a config resolves to: the
+    packaged default config declares llm.capabilities explicitly, so a loaded
+    config resolves as explicit_primary even for a campaign model."""
+    return _normalize_model_identity(model) in KNOWN_MODEL_PROFILES
+
+
 def resolve_model_capability_profile(config, model: str) -> ResolvedCapabilityProfile:
     """Deterministic capability-profile resolution - the one production
     contract every capability-sensitive call site should route through.

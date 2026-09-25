@@ -84,8 +84,9 @@ async def _initialize_plugins_tolerant(kernel: Kernel, pm: PluginManager) -> Dic
             results[p.name] = e
     return results
 
-def configure_logging(cfg: AppConfig) -> None:
-    """Initializes root logging handlers (console + optional file) from AppConfig.logging."""
+def configure_logging(cfg: AppConfig, file_logging: bool = True) -> None:
+    """Initializes root logging handlers (console + optional file) from AppConfig.logging.
+    file_logging=False keeps it console-only (the non-mutating production doctor)."""
     if logging.getLogger().handlers:
         return
 
@@ -98,7 +99,7 @@ def configure_logging(cfg: AppConfig) -> None:
     console_handler.setFormatter(formatter)
     handlers.append(console_handler)
 
-    if cfg.logging.file:
+    if file_logging and cfg.logging.file:
         try:
             log_path = os.path.abspath(cfg.logging.file)
             os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -145,7 +146,10 @@ def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -
             return
         click.secho(f"Error loading configuration: {e}", fg="red", err=True)
         sys.exit(1)
-    configure_logging(ctx.obj['config'])
+    if ctx.invoked_subcommand != 'doctor':
+        # doctor configures its own logging: --production must not create a
+        # log file (the packaged ./logs/kriya.log resolves against the CWD).
+        configure_logging(ctx.obj['config'])
 
     # No subcommand given: drop into the interactive session, same as bare
     # `python`/`node`/`claude` - but only on a real interactive terminal.
@@ -210,6 +214,8 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
         click.secho(f"Error loading configuration: {config_error}", fg="red", err=True)
         sys.exit(1)
     if production:
+        if config_error is None:
+            configure_logging(ctx.obj['config'], file_logging=False)
         from kriya.production_doctor import (
             config_load_failure_report,
             render_production_report,
@@ -229,6 +235,7 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
         return
 
     cfg: AppConfig = ctx.obj['config']
+    configure_logging(cfg)
     click.secho("=== Kriya Doctor ===", bold=True)
     
     # 1. Check directories

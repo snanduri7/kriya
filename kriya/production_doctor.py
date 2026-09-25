@@ -745,16 +745,19 @@ def _check_runtime_fingerprint(ctx: _Context) -> DoctorCheck:
 def _check_qualification(ctx: _Context) -> DoctorCheck:
     """A model name is not a qualification. A model outside every campaign is
     a FAIL; a campaign-named model is still UNAVAILABLE until its exact runtime
-    is qualified (PRD-013/014)."""
-    from kriya.core.model_capabilities import resolve_model_capability_profile
+    is qualified (PRD-013/014). Campaign membership is looked up by identity,
+    never inferred from the capability-profile source (a loaded config's
+    packaged llm.capabilities makes that explicit_primary for every model)."""
+    from kriya.core.model_capabilities import is_campaign_named_model, resolve_model_capability_profile
 
     source = resolve_model_capability_profile(ctx.cfg, ctx.cfg.llm.model).source
-    named = source == "known_production_profile"
+    named = is_campaign_named_model(ctx.cfg.llm.model)
     return _check(
         "model.qualification",
         CheckStatus.UNAVAILABLE if named else CheckStatus.FAIL,
         evidence={
             "model": ctx.cfg.llm.model,
+            "campaign_named": named,
             "name_based_profile_source": source,
             "name_based_profile_is_authority": False,
             "reason_code": RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE if named else MODEL_NOT_QUALIFIED,

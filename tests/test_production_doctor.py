@@ -11,6 +11,7 @@ from click.testing import CliRunner
 from kriya.cli import main
 from kriya.config import AppConfig
 from kriya.config.config import (
+    load_config,
     PRODUCTION_FIXED_RUNTIME_GUARANTEES,
     FallbackModelConfig,
     runtime_profile_preset_fields,
@@ -438,6 +439,7 @@ def test_a_campaign_model_name_is_not_a_qualification(tmp_path):
     check = _checks(_run(tmp_path))["model.qualification"]
     assert check.status is CheckStatus.UNAVAILABLE
     assert check.evidence["name_based_profile_source"] == "known_production_profile"
+    assert check.evidence["campaign_named"] is True
     assert check.evidence["name_based_profile_is_authority"] is False
     assert check.evidence["reason_code"] == RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE
 
@@ -450,6 +452,37 @@ def test_unqualified_model_blocks_production(tmp_path):
     assert check.status is CheckStatus.FAIL
     assert check.evidence["reason_code"] == MODEL_NOT_QUALIFIED
     assert report.production_ready is False
+
+
+def _loaded_llm_config(tmp_path, body="{}\n"):
+    """The llm section exactly as load_config() builds it: the packaged
+    default declares llm.capabilities, so the profile source is explicit_primary."""
+    path = tmp_path / "operator.yaml"
+    path.write_text(body, encoding="utf-8")
+    return load_config(str(path)).llm
+
+
+def test_a_loaded_configs_campaign_model_is_unavailable_not_failed(tmp_path):
+    """Regression (live CLI run, 2026-09-25): keyed on the capability-profile
+    source, a real loaded config reported FAIL/MODEL_NOT_QUALIFIED for a
+    campaign model while a bare AppConfig() reported UNAVAILABLE."""
+    cfg = _production_cfg(tmp_path)
+    cfg.llm = _loaded_llm_config(tmp_path)
+    assert cfg.llm.capabilities.model_fields_set
+    check = _checks(_run(tmp_path, cfg=cfg))["model.qualification"]
+    assert check.status is CheckStatus.UNAVAILABLE
+    assert check.evidence["campaign_named"] is True
+    assert check.evidence["name_based_profile_source"] == "explicit_primary"
+    assert check.evidence["reason_code"] == RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE
+
+
+def test_a_loaded_configs_unknown_model_still_fails(tmp_path):
+    cfg = _production_cfg(tmp_path)
+    cfg.llm = _loaded_llm_config(tmp_path, "llm:\n  model: unqualified:latest\n")
+    check = _checks(_run(tmp_path, cfg=cfg))["model.qualification"]
+    assert check.status is CheckStatus.FAIL
+    assert check.evidence["campaign_named"] is False
+    assert check.evidence["reason_code"] == MODEL_NOT_QUALIFIED
 
 
 def test_runtime_fingerprint_binds_openai_identity_to_native_digest_and_metadata(tmp_path):
@@ -560,6 +593,49 @@ def test_plain_doctor_still_refuses_a_configuration_that_cannot_load():
         result = runner.invoke(main, ["doctor"])
     assert result.exit_code == 1
     assert "Error loading configuration: denied field" in result.stderr
+
+
+def test_production_doctor_cli_never_opens_a_log_file_in_the_workspace(tmp_path, monkeypatch):
+    """Regression (live CLI run, 2026-09-25): main() configured file logging
+    before the doctor ran, and the packaged ./logs/kriya.log resolves against
+    the CWD, so the doctor left logs/kriya.log in the workspace. Root handlers
+    are cleared here because configure_logging() is a no-op when any exist
+    (pytest installs its own), which would make this pass vacuously."""
+    import logging
+
+    cfg = _production_cfg(tmp_path)
+    cfg.logging.file = "./logs/kriya.log"
+    workspace = _git_workspace(tmp_path / "workspace")
+    monkeypatch.chdir(workspace)
+    report = ProductionDoctorReport(schema_version=1, production_ready=False, checks=())
+    root = logging.getLogger()
+    saved = root.handlers[:]
+    root.handlers.clear()
+    try:
+        with patch("kriya.cli.load_config", return_value=cfg), \
+             patch("kriya.production_doctor.run_production_doctor", return_value=report):
+            result = CliRunner().invoke(main, ["doctor", "--production", "--json"])
+        opened_files = [h for h in root.handlers if isinstance(h, logging.FileHandler)]
+    finally:
+        for handler in root.handlers:
+            if handler not in saved:
+                handler.close()
+        root.handlers[:] = saved
+    assert result.exit_code == 1
+    assert opened_files == []
+    assert sorted(os.listdir(workspace)) == [".git"]
+
+
+def test_plain_doctor_keeps_file_logging():
+    import urllib.error
+
+    with patch("kriya.cli.load_config", return_value=AppConfig()), \
+         patch("kriya.cli.configure_logging") as configure, \
+         patch("urllib.request.urlopen", side_effect=urllib.error.URLError("offline")), \
+         patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", side_effect=RuntimeError("offline")):
+        CliRunner().invoke(main, ["doctor"])
+    configure.assert_called_once()
+    assert configure.call_args.kwargs.get("file_logging", True) is True
 
 
 def test_json_requires_production_mode(tmp_path):

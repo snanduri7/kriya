@@ -244,9 +244,57 @@ Expected results:
 - native metadata carries a digest;
 - the same 64-character fingerprint is computed twice;
 - `model.runtime_fingerprint` is UNAVAILABLE with that fingerprint as evidence;
-- `model.qualification` is UNAVAILABLE with source `known_production_profile`.
+- `model.qualification` is UNAVAILABLE with `campaign_named: true`.
 
 Then run `.venv/bin/kriya doctor --production --json` from a real production-configured workspace and confirm:
 - the JSON parses;
 - exit code is 1;
-- no `.kriya/` directory was created by the doctor.
+- the doctor created nothing in the workspace: `ls -a` is identical before and after (no `.kriya/`, no `logs/`).
+
+## Live CLI verification findings (2026-09-25)
+
+The user ran `kriya doctor --production --json` in `~/kriya-live-validation/prd010-doctor-live` (Maven/JDK 17 project,
+`runtime_profile: production`, SEC-009-approved). The exit code was 1, the JSON parsed, and every infrastructure check
+passed: toolchain, OCI smoke, host fallback, egress, connectivity, embeddings, fixed guarantees. Two real defects
+surfaced that the mocked suite and the bare-`AppConfig()` live test could not see. Both are fixed in this commit.
+
+1. **`model.qualification` was FAIL/`MODEL_NOT_QUALIFIED` for the campaign model `qwen3-coder:30b`.**
+   - **Cause:** the status was keyed on the capability-profile *source*. The packaged `default_config.yaml` declares
+     `llm.capabilities`, so every config built by `load_config()` resolves as `explicit_primary`. The
+     `known_production_profile` branch was reachable only from a bare `AppConfig()`, which is exactly what the unit
+     tests and the live test built.
+   - **Fix:** campaign membership is now an identity lookup, `model_capabilities.is_campaign_named_model()`, using the
+     same case-folded exact match as `KNOWN_MODEL_PROFILES`. Evidence gains `campaign_named`, and
+     `name_based_profile_source` stays as diagnostics.
+   - **Safety:** not false success. Both statuses are required-blocking, so the defect misreported *why* the doctor
+     blocked, not *whether* it blocked.
+2. **The doctor left `logs/kriya.log` in the workspace.**
+   - **Cause:** `main()` called `configure_logging()` before any subcommand. The packaged `logging.file:
+     ./logs/kriya.log` is never canonicalized (the SEC-009 `logging.file` realpath step only rewrites user-supplied
+     values), so `os.path.abspath` anchors it to the CWD.
+   - **Fix:** `main()` no longer configures logging for `doctor`. `doctor --production` configures console-only logging
+     (`configure_logging(cfg, file_logging=False)`), and the plain doctor keeps file logging.
+   - The earlier live checklist only looked for `.kriya/`, which was too narrow. It is now "nothing created".
+
+**Regression tests,** each confirmed to fail on the pre-fix code:
+- `test_a_loaded_configs_campaign_model_is_unavailable_not_failed` builds `llm` through `load_config()`.
+- `test_a_loaded_configs_unknown_model_still_fails`.
+- `test_production_doctor_cli_never_opens_a_log_file_in_the_workspace` clears the root handlers, because
+  `configure_logging()` is a no-op when handlers exist and pytest installs its own, which would otherwise make the
+  test pass vacuously.
+- `test_plain_doctor_keeps_file_logging`.
+
+**Assertion-direction log:**
+- `test_live_production_doctor.py` now builds its config with `load_config()` and asserts `campaign_named is True`
+  instead of source `known_production_profile`.
+- `test_a_campaign_model_name_is_not_a_qualification` additionally asserts `campaign_named`.
+- The required status is unchanged (UNAVAILABLE, blocking). Nothing was weakened.
+
+**Pre-existing, out of scope, reported to the user:** for every other command (`generate`, `fix`, `ask`, ...), the
+packaged `logging.file` still resolves against the process CWD, so those commands write `logs/kriya.log` into the
+target repository. This contradicts CLAUDE.md, which says packaged-default relative paths resolve against the install
+dir (`paths.*` and `plugins.directory` do). Changing it moves log output for every command and touches the SEC-009
+`logging.file` closure code, so it was not changed in this batch.
+
+Plain-runner: `test_production_doctor` 51/0 (parametrized cases expanded, real-Docker tests included),
+`test_doctor_command` 8/0.
