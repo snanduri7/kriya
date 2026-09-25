@@ -13,10 +13,10 @@ PRD-009,Sealed Production Runtime Profile,Wave 2,P0,PRD-008,NOT REQUIRED,VERIFIE
 PRD-010,kriya doctor --production Deployment Gate,Wave 2,P0,PRD-009,REQUIRED,VERIFIED,aa492ab reopened; d22cb8e 0aa946a edef49e (verified edef49e); logging/state cleanup c7b5734..ba86812 (verified ba86812 5302/0),PYTEST_VERIFIED@ba86812,LIVE_VERIFIED@edef49e
 PRD-011,OCI Toolchain Parity and Versioned Execution Images,Wave 3,P0,PRD-010,REQUIRED,VERIFIED,54ad798 reopened; closure 0b4913c b6bdbe4 1996255 e1dfe21 12ce81d b2bd88f 9b046c3; final-review correction 6568f11,PYTEST_VERIFIED@99c2340 (5399/0),LIVE_VERIFIED@99c2340
 PRD-012,Production Egress and MCP Containment Enforcement,Wave 3,P0,PRD-011,REQUIRED,VERIFIED,see PRD-012_CODING_HANDOVER.md,PYTEST_VERIFIED@99c2340 (5399/0),LIVE_VERIFIED@99c2340
-PRD-013,Exact Local Model Runtime Fingerprint,Wave 4,P0,PRD-012,REQUIRED,READY_FOR_PYTEST_VERIFICATION,see PRD-013_CODING_HANDOVER.md,,
-PRD-014,Local Model Qualification Framework,Wave 4,P0,PRD-013,REQUIRED,READY_FOR_PYTEST_VERIFICATION,see PRD-014_CODING_HANDOVER.md,,
-PRD-015,Normalized LLM Completion and Protocol Result,Wave 4,P1,PRD-014,REQUIRED,READY_FOR_PYTEST_VERIFICATION,see PRD-015_CODING_HANDOVER.md,,
-PRD-016,Tokenizer-Aware Context and Output Budgeting,Wave 4,P1,PRD-015,REQUIRED,READY_FOR_PYTEST_VERIFICATION,see PRD-016_CODING_HANDOVER.md,,
+PRD-013,Exact Local Model Runtime Fingerprint,Wave 4,P0,PRD-012,REQUIRED,VERIFIED,see PRD-013_CODING_HANDOVER.md,PYTEST_VERIFIED@19572e9 (5582/3 at 881da7e; 3 fixture failures fixed in 19572e9 and re-run green),LIVE_VERIFIED@19572e9 (live-model tier + demo-03 brownfield)
+PRD-014,Local Model Qualification Framework,Wave 4,P0,PRD-013,REQUIRED,VERIFIED,see PRD-014_CODING_HANDOVER.md,PYTEST_VERIFIED@19572e9 (5582/3 at 881da7e; 3 fixture failures fixed in 19572e9 and re-run green),LIVE_VERIFIED@19572e9 (live-model tier + demo-03 brownfield)
+PRD-015,Normalized LLM Completion and Protocol Result,Wave 4,P1,PRD-014,REQUIRED,VERIFIED,see PRD-015_CODING_HANDOVER.md,PYTEST_VERIFIED@19572e9 (5582/3 at 881da7e; 3 fixture failures fixed in 19572e9 and re-run green),LIVE_VERIFIED@19572e9 (live-model tier + demo-03 brownfield)
+PRD-016,Tokenizer-Aware Context and Output Budgeting,Wave 4,P1,PRD-015,REQUIRED,VERIFIED,see PRD-016_CODING_HANDOVER.md,PYTEST_VERIFIED@19572e9 (5582/3 at 881da7e; 3 fixture failures fixed in 19572e9 and re-run green),LIVE_VERIFIED@19572e9 (live-model tier + demo-03 brownfield)
 PRD-017,Capability-Aware Fallback Model Transition,Wave 4,P1,PRD-016,REQUIRED,NOT_STARTED,,,
 PRD-018,Role-Model Independence Visibility and Per-Role Metrics,Wave 4,P2,PRD-017,REQUIRED,NOT_STARTED,,,
 PRD-019,Evidence-Based Model Routing,Wave 4,P2,PRD-018,REQUIRED,NOT_STARTED,,,

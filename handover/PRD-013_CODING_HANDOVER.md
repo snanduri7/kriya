@@ -1,8 +1,7 @@
 # PRD-013 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION (batch 3: PRD-013 to PRD-016, one pytest stop for the whole batch; the PRD-016
-allocator/dispatch reconciliation and adaptive budget are in - see the PRD-016 handover).
+VERIFIED (pytest 5582 passed at 881da7e; the 3 fixture failures were fixed in 19572e9 and re-run green; live-model tier and the demo-03 brownfield generate passed at 19572e9).
 
 ## Scope
 Exact local model runtime fingerprint (`kriya/core/model_runtime.py`).
