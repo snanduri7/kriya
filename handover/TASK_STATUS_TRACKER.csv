@@ -37,4 +37,5 @@ PRD-033,Production Telemetry and False-Success Metrics,Wave 7,P1,PRD-032,REQUIRE
 PRD-034,Full Pytest and CI Production Certification,Wave 7,P0,PRD-033,NOT REQUIRED,NOT_STARTED,,,
 PRD-035,Live Local-Model Certification Matrix,Wave 7,P0,PRD-034,REQUIRED,NOT_STARTED,,,
 PRD-036,Canary Rollout and Final Production Gate,Wave 8,P0,PRD-035,REQUIRED,NOT_STARTED,,,
-MODEL-QUAL-IDENTITY-001,Qualification identity omits behaviour-affecting inference settings (reasoning_effort/top_p/top_k/temperature); blocks default/routing changes from MODEL-EVAL-001,Defect,P1,None,REQUIRED,OPEN,,,
+MODEL-QUAL-IDENTITY-001,Qualification identity omits behaviour-affecting inference settings (reasoning_effort/top_p/top_k/temperature); blocks default/routing changes from MODEL-EVAL-001,Defect,P1,None,REQUIRED,READY_FOR_PYTEST_VERIFICATION,6c163f2,,
+MODEL-EVIDENCE-HARDENING-001,Pre-planning failure telemetry; typed Planner structured outcomes; requirement verdict reason codes (MODEL-EVAL-001 findings 2-4),Defect,P1,MODEL-QUAL-IDENTITY-001,REQUIRED,READY_FOR_PYTEST_VERIFICATION,596bfbe,,

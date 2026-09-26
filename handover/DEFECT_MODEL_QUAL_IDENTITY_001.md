@@ -2,7 +2,16 @@
 
 ## Status
 
-OPEN (raised 2026-09-26 by the MODEL-EVAL-001 review). Not fixed.
+FIXED in `6c163f2`, READY_FOR_PYTEST_VERIFICATION (2026-09-26); revalidation (live requalification at 32K) is user-run after pytest. Design, decisions and residuals are in `MODEL_EVIDENCE_HARDENING_001.md` §1. Raised 2026-09-26 by the MODEL-EVAL-001 review.
+
+**Decisions made by the fix:**
+- **Separate qualification identity.** The identity is runtime digest + inference-settings digest. The runtime fingerprint and the adapter version are unchanged, so the keys of role independence, metrics and routing are too.
+- **Temperature is per role.** It is the temperature each role's calls actually send, so it is part of the identity.
+- **max_tokens is metadata only.**
+- **Policy bumped to /3.** /2 records read STALE, never MISSING.
+- **Revalidation is 32K only.** 64K stays NOT_QUALIFIED.
+
+The text below is the original defect report.
 
 - It does **not** block MODEL-EVAL-001, whose settings were fixed and equivalent wherever the model supports them.
 - It **blocks** any packaged-default or production-routing change based on MODEL-EVAL-001.

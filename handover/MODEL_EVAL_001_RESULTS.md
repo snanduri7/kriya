@@ -89,7 +89,18 @@ False success means Kriya reported success but the diff grade or the independent
   - n = 3 on one easy task; no run exercised repair.
   - No Architect call happens in enforce mode, so the Architect comparison comes from qualification only: all three PASS on structured and multiline JSON.
 
-## Kriya findings from this campaign (not fixed; each a separate item)
+## Follow-up: MODEL-EVIDENCE-HARDENING-001 (2026-09-26, READY_FOR_PYTEST_VERIFICATION)
+
+- **Fixes.** Findings 1–4 below are fixed in `6c163f2` (identity) and `596bfbe` (telemetry). See `MODEL_EVIDENCE_HARDENING_001.md`.
+- **What this means for the recorded results:**
+  - They stand as recorded, and the 9 runs were not re-extracted.
+  - The extractor's row selection moved into the bundle's `trace_window.py`, with a regression test (`test_trace_window.py`).
+  - Its tightened window selects the same rows for all 9 runs.
+- **qwen3.8:27b @64K is NOT_QUALIFIED** for this exact runtime (`2241d06be2ee…`), this hardware (M1 Max) and this config (Ollama 0.34.2, `reasoning_effort: none`): context_capacity timed out at 613 s. Under policy /3 that record reads STALE; it is not re-qualified to make it pass, and it still keeps 65536 out of PRD-016 adaptive selection (tested).
+- **Revalidation** (user-run, after pytest is green): `./setup.sh requalify`, all three arms at 32K.
+- **Still gated.** No packaged-default or routing change is based on this campaign until both items are VERIFIED and the requalification is recorded.
+
+## Kriya findings from this campaign (fixed by MODEL-EVIDENCE-HARDENING-001, pending verification)
 
 1. **PRD-013 identity gap** (reported earlier). `reasoning_effort` and the sampling options are not part of the runtime fingerprint. The qualification that qwen3.6 now passes with `none` would also show QUALIFIED for a config without it, which reasons by default and fails.
 2. **A run that fails in planning leaves no metrics.** Enforce qwen3.6 run 3 wrote no `traces.db` runs row, so its three Planner calls appear nowhere in the role metrics (model-call 0 s, Planner calls under-counted). This is a PRD-018 completeness gap.
