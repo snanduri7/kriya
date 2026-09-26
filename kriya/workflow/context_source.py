@@ -382,13 +382,12 @@ def member_boundaries_for(path: str, content: str) -> Optional[List[MemberBounda
     honest unsupported signal (WP5's own "never fabricate member precision"
     requirement), never an empty list standing in for "no members found"
     (which IS possible for a genuinely supported language, e.g. a file with
-    no top-level def/class)."""
-    ext = os.path.splitext(path)[1].lower()
-    if ext == ".py":
-        return python_member_boundaries(content)
-    if ext == ".java":
-        return java_member_boundaries(content)
-    return None
+    no top-level def/class). PRD-028: answered by the language-adapter
+    registry (kriya/workflow/language_adapters.py), the one place member
+    capability per language is declared."""
+    from kriya.workflow.language_adapters import adapter_member_boundaries
+
+    return adapter_member_boundaries(path, content)
 
 
 def extract_member_body(content: str, start_line: int, end_line: int) -> str:

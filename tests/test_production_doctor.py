@@ -813,3 +813,32 @@ def test_stored_recall_certification_passes_and_the_doctor_never_runs_the_benchm
         check = _checks(_run(tmp_path, cfg=cfg))["context.recall_certification"]
     assert check.status is CheckStatus.PASS
     assert check.evidence["status"] == "CERTIFIED"
+
+
+# --- PRD-028: language capability boundary ------------------------------------------------
+
+def _precision_check(tmp_path, *, required, files):
+    cfg = _production_cfg(tmp_path)
+    cfg.autonomy.semantic_region_enforcement_required = required
+    workspace = _git_workspace(tmp_path / "workspace")
+    for name in files:
+        (workspace / name).write_text("x\n", encoding="utf-8")
+    return _checks(_run(tmp_path, cfg=cfg, workspace=workspace))["semantic.precision_boundary"]
+
+
+def test_precision_boundary_reports_capabilities_without_blocking_by_default(tmp_path):
+    check = _precision_check(tmp_path, required=False, files=["a.py", "B.java"])
+    assert check.required is False and check.status is CheckStatus.WARN
+    assert set(check.evidence["language_capabilities"]) == {"java", "python"}
+    assert check.evidence["editable_region_unsupported_in_workspace"] == [".py"]
+
+
+def test_required_region_enforcement_fails_on_a_language_without_the_capability(tmp_path):
+    check = _precision_check(tmp_path, required=True, files=["a.py", "B.java"])
+    assert check.required is True and check.status is CheckStatus.FAIL
+    assert ".py" in check.remediation
+
+
+def test_required_region_enforcement_passes_when_every_workspace_language_supports_it(tmp_path):
+    check = _precision_check(tmp_path, required=True, files=["B.java", "README.md"])
+    assert check.required is True and check.status is CheckStatus.PASS

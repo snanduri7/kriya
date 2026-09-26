@@ -66,6 +66,7 @@ from kriya.workflow.attribution import (
     find_whole_response_no_op,
     resolve_fallback_model,
 )
+from kriya.workflow.authority_escalation import grant_member_hints
 from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
@@ -718,6 +719,36 @@ def _compute_retry_evidence_fingerprint(
     return (mode, model_identity, per_path, state.budgets.last_failure_signature)
 
 
+def _escalation_authorized_paths(ctx: "AttemptContext", target_files: Iterable[str]) -> Tuple[str, ...]:
+    """PRD-028: the write scope a member-authority expansion must already
+    sit inside - never widened by it. DENY_ALL authorizes nothing; an
+    ALLOWLIST authorizes only its listed targets; UNRESTRICTED top-level
+    generation authorizes the retry's own grounded targets."""
+    targets = tuple(dict.fromkeys(target_files or ()))
+    if ctx.write_scope_mode is WriteScopeMode.DENY_ALL:
+        return ()
+    if ctx.write_scope_mode is WriteScopeMode.ALLOWLIST:
+        allowed = set(ctx.allowed_write_relpaths)
+        return tuple(path for path in targets if path in allowed)
+    return targets
+
+
+def _record_authority_expansions(state: GenerationState, expansions: Iterable[Any]) -> None:
+    for expansion in expansions:
+        state.authority_expansions.append(expansion)
+        state.record_event(RunEvent(
+            kind="authority.expansion",
+            attempt=state.attempt_number,
+            source="authority_escalation",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                f"Member authority {expansion.outcome} for {expansion.path}::{expansion.member_id} "
+                f"({expansion.reason_code}, origin {expansion.source_origin})."
+            ),
+            details=expansion.to_dict(),
+        ))
+
+
 def _effective_retry_temperature(ctx: "AttemptContext", model_identity: str) -> Optional[float]:
     """The sampling temperature a Developer retry on ``model_identity`` is
     sent with: ``llm.retry_temperature`` when configured, otherwise the
@@ -782,6 +813,19 @@ def _prepare_retry_context(
     cost, a "no new evidence" conclusion Kriya can already reach
     deterministically and for free from state it already holds."""
     retry_member_hints = _resolve_retry_member_hints(ctx, state, target_files)
+    # PRD-028: every hinted member is a read-only authority expansion the
+    # control plane decides (in write scope, supported language, exactly one
+    # member in the current source) - recorded with its source revision and
+    # pristine/candidate origin. Only GRANTED members become context.
+    retry_member_hints, expansions = grant_member_hints(
+        retry_member_hints, workspace_path=ctx.workspace_path, worktree_path=ctx.worktree_path,
+        authorized_paths=_escalation_authorized_paths(ctx, target_files),
+        evidence={
+            "source": "retry_member_hints", "attempt": state.attempt_number,
+            "failure_type": state.last_failure.type if state.last_failure is not None else None,
+        },
+    )
+    _record_authority_expansions(state, expansions)
     retry_package = _retry_package_for_attempt(
         state, ctx, target_files=target_files, prompt_window=prompt_window,
         exclude=retry_member_hints.keys(),
@@ -1547,11 +1591,20 @@ async def _maybe_run_developer_investigation(
         state.record_event(event)
     if not result.evidence:
         return
-    for item in result.evidence:
-        if item.tier == "member_exact":
-            state.known_target_context_items[item.path] = _preserve_member_exact_precision(
-                state, item.path, item,
-            )
+    # PRD-028: investigation evidence is always shown (read-only context),
+    # but a member becomes edit authority only through a GRANTED expansion.
+    member_items = {item.path: item for item in result.evidence if item.tier == "member_exact" and item.member_id}
+    _granted, expansions = grant_member_hints(
+        {path: [item.member_id] for path, item in member_items.items()},
+        workspace_path=ctx.workspace_path, worktree_path=ctx.worktree_path,
+        authorized_paths=_escalation_authorized_paths(ctx, list(kwargs.get("known_target_files") or [])),
+        evidence={"source": "developer_investigation", "attempt": state.attempt_number},
+    )
+    _record_authority_expansions(state, expansions)
+    for path in _granted:
+        state.known_target_context_items[path] = _preserve_member_exact_precision(
+            state, path, member_items[path],
+        )
     rendered = render_investigation_evidence(
         result.evidence,
         char_budget=investigation_evidence_char_budget(

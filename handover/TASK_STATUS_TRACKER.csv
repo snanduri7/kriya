@@ -28,7 +28,7 @@ PRD-024,Brownfield PRE/POST Full-Regression Auto Policy,Wave 5,P0,PRD-023,REQUIR
 PRD-025,Bounded Runtime-Verifier Evidence Package,Wave 5,P0,PRD-024,REQUIRED,READY_FOR_PYTEST_VERIFICATION,PRD-025 commit on 510fd98 (see handover/PRD-025_CODING_HANDOVER.md),,
 PRD-026,Universal Retry Progress Invariant Audit and Closure,Wave 5,P1,PRD-025,REQUIRED,READY_FOR_PYTEST_VERIFICATION,PRD-026 commit (see handover/PRD-026_CODING_HANDOVER.md),,
 PRD-027,Context Recall Certification Suite,Wave 5,P1,PRD-026,REQUIRED,READY_FOR_PYTEST_VERIFICATION,7c07a74 + 8aa6d26 + PRD-027 (2/2) commit (see handover/PRD-027_CODING_HANDOVER.md),,
-PRD-028,Dynamic Mutation Authority Escalation and Language Adapter Contract,Wave 5,P1,PRD-027,REQUIRED,NOT_STARTED,,,
+PRD-028,Dynamic Mutation Authority Escalation and Language Adapter Contract,Wave 5,P1,PRD-027,REQUIRED,READY_FOR_PYTEST_VERIFICATION,PRD-028 commit (see handover/PRD-028_CODING_HANDOVER.md),,
 PRD-029,ContractRegistry Lifecycle Closure,Wave 5,P1,PRD-028,REQUIRED,NOT_STARTED,,,
 PRD-030,Extract TerminalGateService and CommitService,Wave 6,P2,PRD-029,NOT REQUIRED,NOT_STARTED,,,
 PRD-031,Extract Verification and Recovery Coordination Services,Wave 6,P2,PRD-030,NOT REQUIRED,NOT_STARTED,,,

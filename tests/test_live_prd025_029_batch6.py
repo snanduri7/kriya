@@ -18,6 +18,11 @@ invariants and writes the model-dependent evidence to
   generate run on the certification's Java fixture repository, indexed with
   the real embedder - the Developer's own prompt must carry the golden
   evidence (code quality is secondary).
+- PRD-028: a real repair on a Python module too large to be shown whole,
+  with Developer investigation enabled. Every member-authority expansion the
+  run records is revision-bound and inside the write scope, with its
+  pristine/candidate origin. The large file never gets whole-file authority
+  from an escalation.
 
 Run:
     KRIYA_BATCH6_EVIDENCE_DIR=handover/evidence/BATCH6/user-live \\
@@ -264,3 +269,43 @@ async def test_live_prd027_developer_prompt_receives_golden_evidence(cfg, tmp_pa
                      "src/main/java/com/shop/order/DiscountPolicy.java",
                      "src/main/java/com/shop/order/OrderController.java"):
         assert present[required], required
+
+
+def _large_module(methods=160):
+    body = ["class Ledger:"]
+    for i in range(methods):
+        body.append(f"    def entry_{i}(self, amount):\n        return amount + {i}\n")
+    body.append("    def apply_fee(self, amount):\n        return amount - 5\n")
+    return "\n".join(body) + "\n"
+
+
+@pytest.mark.asyncio
+async def test_live_prd028_member_authority_is_revision_bound_and_in_scope(cfg, tmp_path):
+    import sqlite3
+
+    from kriya.core.kernel import Kernel
+    from kriya.core.state_paths import trace_db_path
+    from kriya.workflow.workflow import WorkflowEngine
+
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.autonomy.developer_investigation_enabled = True
+    cfg.paths.skills = str(tmp_path / "skills")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "ledger.py").write_text(_large_module(), encoding="utf-8")
+    engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    await engine.run_generation_workflow(
+        goal="In ledger.py, change Ledger.apply_fee so the fee is 7 instead of 5.", workspace_path=str(repo),
+    )
+    with sqlite3.connect(trace_db_path(cfg)) as db:
+        (events_json,) = db.execute("SELECT run_events FROM runs ORDER BY rowid DESC").fetchone()
+    expansions = [e["details"] for e in json.loads(events_json) if e["kind"] == "authority.expansion"]
+    _evidence("prd028_expansions.json", expansions)
+    if not expansions:
+        pytest.skip("the model never needed a member-authority expansion in this run (recorded as evidence)")
+    for record in expansions:
+        if record["outcome"] == "GRANTED":
+            assert record["in_write_scope"] is True
+            assert record["source_revision"] and record["source_origin"] in ("PRISTINE", "CANDIDATE")
+        assert record["mutation_boundary"] == "authorized_write_scope"

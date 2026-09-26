@@ -970,24 +970,76 @@ def _check_role_independence(ctx: _Context) -> DoctorCheck:
     )
 
 
+_WORKSPACE_LANGUAGE_SCAN_LIMIT = 20000
+_SCAN_SKIP_DIRS = frozenset({".git", ".kriya", "node_modules", "target", "build", ".venv", "venv", "__pycache__"})
+
+
+def _workspace_source_languages(workspace: str) -> Dict[str, int]:
+    """Source files per language extension in ``workspace`` (bounded walk,
+    build/VCS directories skipped): the languages a run there may edit."""
+    from kriya.analyzer.analyzer import EXTENSION_MAP
+
+    counts: Dict[str, int] = {}
+    seen = 0
+    for _root, dirs, files in os.walk(workspace):
+        dirs[:] = [d for d in dirs if d not in _SCAN_SKIP_DIRS]
+        for name in files:
+            seen += 1
+            if seen > _WORKSPACE_LANGUAGE_SCAN_LIMIT:
+                return counts
+            ext = os.path.splitext(name)[1].lower()
+            if ext in EXTENSION_MAP:
+                counts[ext] = counts.get(ext, 0) + 1
+    return counts
+
+
+def _precision_boundary_required(cfg: AppConfig) -> bool:
+    """Region-level precision is a production need only when the operator
+    requires semantic-region enforcement."""
+    return bool(cfg.autonomy.semantic_region_enforcement_required)
+
+
 def _check_precision_boundary(ctx: _Context) -> DoctorCheck:
-    """Always reported, never blocking: production does not force semantic
-    region enforcement (PRD-009), and where it is enabled it covers only the
-    scope below. Everything else has file-level write authority only."""
+    """PRD-028: the language-adapter capability table, always reported.
+    Blocking only when semantic-region enforcement is required AND the
+    workspace holds source in a language without the editable-region
+    capability - an active production need the adapters cannot meet.
+    Otherwise it stays an informational WARN (production does not force
+    region enforcement, PRD-009)."""
+    from kriya.workflow.language_adapters import Capability, CapabilityStatus, capability_status, capability_table
     from kriya.workflow.semantic_region_authority import SEMANTIC_REGION_SUPPORTED_SCOPE
 
+    required = _precision_boundary_required(ctx.cfg)
+    languages = _workspace_source_languages(ctx.workspace)
+    unsupported = sorted(
+        ext for ext in languages
+        if capability_status(f"x{ext}", Capability.EDITABLE_REGION) is not CapabilityStatus.SUPPORTED
+    )
+    evidence = {
+        "semantic_region_enforcement_required": ctx.cfg.autonomy.semantic_region_enforcement_required,
+        "forced_by_production_profile": False,
+        "supported_scope": {key: list(value) for key, value in SEMANTIC_REGION_SUPPORTED_SCOPE.items()},
+        "outside_scope": "file-level write authority only",
+        "language_capabilities": capability_table(),
+        "workspace_source_extensions": dict(sorted(languages.items())),
+        "editable_region_unsupported_in_workspace": unsupported,
+        "owner": "PRD-028",
+    }
+    if not required:
+        return _check(
+            "semantic.precision_boundary", CheckStatus.WARN, required=False, evidence=evidence,
+            remediation="Region-level precision covers the supported scope only; other languages have file-level authority.",
+        )
     return _check(
         "semantic.precision_boundary",
-        CheckStatus.WARN,
-        required=False,
-        evidence={
-            "semantic_region_enforcement_required": ctx.cfg.autonomy.semantic_region_enforcement_required,
-            "forced_by_production_profile": False,
-            "supported_scope": {key: list(value) for key, value in SEMANTIC_REGION_SUPPORTED_SCOPE.items()},
-            "outside_scope": "file-level write authority only",
-            "owner": "PRD-028",
-        },
-        remediation="Region-level semantic precision beyond the supported scope arrives with PRD-028.",
+        CheckStatus.FAIL if unsupported else CheckStatus.PASS,
+        required=True, evidence=evidence,
+        remediation=(
+            "semantic_region_enforcement_required is set, but the workspace contains source in "
+            f"{', '.join(unsupported)} with no editable-region capability - those edits would have "
+            "file-level authority only. Disable the requirement or restrict the workspace."
+            if unsupported else "No remediation required."
+        ),
     )
 
 
@@ -1050,7 +1102,7 @@ _CHECKS: Tuple[Tuple[str, Union[bool, Callable[[AppConfig], bool]], Callable[[_C
     ("context.recall_certification", _recall_certification_required, _check_recall_certification),
     ("lsp.java", False, _check_lsp),
     ("models.role_independence", _role_independence_required, _check_role_independence),
-    ("semantic.precision_boundary", False, _check_precision_boundary),
+    ("semantic.precision_boundary", _precision_boundary_required, _check_precision_boundary),
     ("release.integrity", True, _check_release_integrity),
     ("runtime.fixed_guarantees", True, _check_fixed_guarantees),
 )

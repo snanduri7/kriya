@@ -577,6 +577,9 @@ class GenerationState:
     sampling_resamples: int = 0
     retry_evidence_seen: Dict[str, int] = field(default_factory=dict)
     no_progress_reason: Optional[str] = None
+    # PRD-028 (kriya/workflow/authority_escalation.py): every member-authority
+    # expansion decision this run, GRANTED or INDETERMINATE.
+    authority_expansions: List[Any] = field(default_factory=list)
     # Current attempt's three distinct verification/application boundaries.
     candidate_gates_succeeded: bool = False
     terminal_regression_succeeded: bool = False

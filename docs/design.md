@@ -814,6 +814,27 @@ Kriya fully supports Java and Python:
 *   **Parsers**: Python's `ast` module for Python; regex-based extraction for Java and Spring XML (`kriya/analyzer/analyzer.py`, `kriya/analyzer/graph.py`) - not tree-sitter.
 *   **Quality Gates**: Automatically detects the build system from real markers - Java (`pom.xml`/`build.gradle`), Ruby (`Gemfile`/`Rakefile`/`spec`), or Python (`requirements.txt`/`pyproject.toml`/`setup.py`/`setup.cfg`/`Pipfile`/any `.py` file present) - see `PolymorphicValidator._detect_stack`. Runs `mvn clean compile` then `mvn test` as separate calls for Java (deliberately split for fast-fail), or invokes `pytest` directly via `sys.executable` for Python (no poetry integration). A workspace matching none of those markers (e.g. a real JS/TS/Go/Rust/C# project) is `"unknown"`, not a silent Python default - `run_compile_check`/`run_tests` report `success: True` with an explicit "no validation available for this stack" message rather than a Python check quietly matching zero real files and reporting a false-positive pass (a real bug, fixed 2026-08-03).
 
+### 4.2a Language-adapter contract and member authority escalation (PRD-028)
+*   **The contract.** `kriya/workflow/language_adapters.py` declares, per language, which deterministic capabilities Kriya has, each as SUPPORTED, PARTIAL or UNSUPPORTED:
+    *   `symbol_identity`;
+    *   `member_boundaries`;
+    *   `references`;
+    *   `exact_source`;
+    *   `editable_region`;
+    *   `verification_hooks`.
+    Java and Python adapt the existing extractors. Python's `editable_region` is UNSUPPORTED, because semantic-region authority is Java-only, and both have PARTIAL `references` (name-based graph edges). Every other language is UNSUPPORTED. `context_source.member_boundaries_for` answers through this registry.
+*   **Escalation records.** `kriya/workflow/authority_escalation.py` turns each read-only member request (retry member hints, which are always on, and DEV-INV `inspect_member`) into an `AuthorityExpansion` that the control plane decides:
+    *   **GRANTED** only for a path already inside the authorized write scope, in a language with the member-boundary capability, and resolving to exactly one member in the current source.
+    *   **INDETERMINATE** otherwise: out of scope, unsupported language, missing source, member not found, or ambiguous (overloads).
+    *   An INDETERMINATE result is never upgraded to whole-file authority, and an expansion never widens the write scope.
+    *   Out-of-scope investigation evidence is still shown as read-only context, but it does not become edit authority.
+*   **Pristine versus candidate.** A retry edits the worktree candidate, so member boundaries come from current (worktree-first) content, the bytes an anchored edit must match. Each record states:
+    *   `source_origin`: PRISTINE when the content equals the workspace baseline, else CANDIDATE;
+    *   `source_revision` and `pristine_revision`;
+    *   `member_in_pristine`, computed only from the immutable baseline. Candidate text never supplies a claim about the repository.
+*   **Revalidation.** `expansion_is_current` voids a grant when its source or baseline revision changes. Records go to `GenerationState.authority_expansions` and to the `authority.expansion` run event.
+*   **Doctor.** `semantic.precision_boundary` reports the capability table and the workspace's source languages. It is required, and fails, only when `semantic_region_enforcement_required` is set and the workspace contains a language without `editable_region`; otherwise it is an informational WARN.
+
 ### 4.3 Staged Skill Accrual
 *   **Rule Staging**: Extracted rules (from auto-debugging escalations) are written to `staged_rules.txt` inside the skill directory.
 *   **Repo-Local Approval**: Rules require manual confirmation (`kriya skills approve <skill>`) before appending to that repo's own `rules.txt` - this affects only the current repository's private `auto-<repo-slug>` skill.
