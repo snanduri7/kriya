@@ -2921,14 +2921,22 @@ def authority_group() -> None:
     pass
 
 
-# A configuration the operator must fix (StateDirectoryError, LogDirectoryError,
-# RemovedConfigFieldError, pydantic's ValidationError and the approval-store
-# errors are all ValueError subclasses; an unreadable file is an OSError; bad
-# YAML is a YAMLError). Deliberately not Exception: a coding error must still
-# show its traceback.
+# The typed errors that mean "the operator must fix the configuration or the
+# approval store". Named one by one, never ValueError/Exception: a coding error
+# (a failed unpack, a bad int(), a TypeError) must still show its traceback.
 def _authority_user_errors() -> tuple:
+    import pydantic
     import yaml
-    return (ValueError, OSError, yaml.YAMLError)
+
+    from kriya.config.authority import ConfigAuthorityError
+    from kriya.config.authority_approval import ApprovalArtifactError, TrustPathInsideWorkspaceError
+    from kriya.config.config import RemovedConfigFieldError
+    from kriya.core.state_paths import StateDirectoryError
+    return (
+        StateDirectoryError, LogDirectoryError, RemovedConfigFieldError, ConfigAuthorityError,
+        pydantic.ValidationError, TrustPathInsideWorkspaceError, ApprovalArtifactError,
+        OSError, yaml.YAMLError,
+    )
 
 
 def _authority_fail(error: BaseException) -> NoReturn:

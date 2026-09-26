@@ -270,11 +270,12 @@ def test_authority_approve_out_inside_the_workspace_is_a_clean_refusal(home, tmp
     assert sorted(os.listdir(workspace)) == ["kriya.yaml"]
 
 
-def test_authority_does_not_hide_a_coding_error(home, tmp_path, monkeypatch):
+@pytest.mark.parametrize("bug", [TypeError("bug"), ValueError("bug: not enough values to unpack")])
+def test_authority_does_not_hide_a_coding_error(home, tmp_path, monkeypatch, bug):
     _workspace_with_config(tmp_path, monkeypatch, {})
-    with patch("kriya.config.config.resolve_config_state", side_effect=TypeError("bug")):
+    with patch("kriya.config.config.resolve_config_state", side_effect=bug):
         result = CliRunner().invoke(main, ["authority", "inspect"])
-    assert isinstance(result.exception, TypeError)
+    assert result.exception is bug
 
 
 def test_a_null_state_directory_is_repository_safe(home, tmp_path, monkeypatch):
