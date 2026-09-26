@@ -127,12 +127,23 @@ def test_certification_covers_every_production_retrieval_policy():
 # --- stored record status (what doctor reads) --------------------------------------------
 
 
+def _index(config, dimensions=3):
+    from kriya.memory.vector import LocalVectorStore
+
+    os.makedirs(config.paths.memory, exist_ok=True)
+    store = LocalVectorStore(os.path.join(config.paths.memory, "vector_index.db"))
+    store.conn.execute("DELETE FROM vector_chunks")
+    store.conn.commit()
+    store.add_document("a.py", "x", [0.1] * dimensions, chunk_index=0, model_name=config.embedding.model,
+                       dimensions=dimensions)
+    store.close()
+
+
 @pytest.fixture
 def indexed_config(tmp_path):
     config = AppConfig()
     config.paths.memory = str(tmp_path / "memory")
-    os.makedirs(config.paths.memory)
-    open(os.path.join(config.paths.memory, "vector_index.db"), "wb").close()
+    _index(config)
     return config
 
 
@@ -147,9 +158,9 @@ def test_status_unavailable_when_the_embedding_runtime_cannot_be_proven(indexed_
     assert cc.certification_status(indexed_config)[0] == cc.STATUS_UNAVAILABLE
 
 
-def _save(config, *, certified, runtime="rt-1", embedder=cc.EMBEDDER_CONFIGURED):
+def _save(config, *, certified, runtime="rt-1", embedder=cc.EMBEDDER_CONFIGURED, dimensions=3):
     report = cc.CertificationReport(identity=cc.certification_identity(
-        config, embedder=embedder, embedding_runtime=runtime,
+        config, embedder=embedder, embedding_runtime=runtime, embedding_dimensions=dimensions,
     ))
     with patch.object(cc.CertificationReport, "certified", return_value=certified):
         return cc.save_certification(config, report)
@@ -203,20 +214,9 @@ def _config_file(tmp_path):
     return str(path)
 
 
-def test_cli_refuses_to_certify_without_an_exact_chat_runtime(tmp_path):
-    """The certified graph budget comes from the chat model's served window:
-    certifying without it would bind a budget doctor never computes."""
+def test_cli_refuses_to_certify_an_unproven_embedding_runtime(tmp_path):
     from kriya.cli import main
 
-    result = CliRunner().invoke(main, ["--config", _config_file(tmp_path), "context", "certify"])
-    assert result.exit_code == 1
-    assert "chat model" in result.output and "cannot be proven" in result.output
-
-
-def test_cli_refuses_to_certify_an_unproven_embedding_runtime(tmp_path, monkeypatch):
-    from kriya.cli import main
-
-    monkeypatch.setattr(cc, "chat_runtime_exact", lambda config: True)
     result = CliRunner().invoke(main, ["--config", _config_file(tmp_path), "context", "certify"])
     assert result.exit_code == 1
     assert "cannot be proven" in result.output
@@ -226,7 +226,6 @@ def test_cli_certifies_and_records(tmp_path, monkeypatch):
     from kriya.cli import main
 
     monkeypatch.setattr(cc, "embedding_runtime_identity", lambda config: "rt-1")
-    monkeypatch.setattr(cc, "chat_runtime_exact", lambda config: True)
     with patch("kriya.memory.vector.OllamaEmbeddingClient", lambda **kw: cc.DeterministicHashingEmbedder()):
         result = CliRunner().invoke(main, ["--config", _config_file(tmp_path), "context", "certify", "--json"])
     assert result.exit_code == 0, result.output
@@ -262,7 +261,6 @@ def test_cli_exits_nonzero_when_the_suite_does_not_certify(tmp_path, monkeypatch
     from kriya.cli import main
 
     monkeypatch.setattr(cc, "embedding_runtime_identity", lambda config: "rt-1")
-    monkeypatch.setattr(cc, "chat_runtime_exact", lambda config: True)
     monkeypatch.setattr(cc.CertificationReport, "certified", lambda self: False)
     with patch("kriya.memory.vector.OllamaEmbeddingClient", lambda **kw: cc.DeterministicHashingEmbedder()):
         result = CliRunner().invoke(main, ["--config", _config_file(tmp_path), "context", "certify"])
@@ -294,3 +292,75 @@ def test_an_embedding_model_runtime_can_be_proven_exact(monkeypatch):
         model_runtime.clear_model_runtime_cache()
     assert identity != "unavailable"
     assert len(identity) == 64
+
+
+
+# --- identity: exactly the retrieval inputs, never the chat model -----------------------------
+
+
+@pytest.fixture
+def certified(indexed_config, monkeypatch):
+    monkeypatch.setattr(cc, "embedding_runtime_identity", lambda config: "rt-1")
+    _save(indexed_config, certified=True)
+    assert cc.certification_status(indexed_config)[0] == cc.STATUS_CERTIFIED
+    return indexed_config
+
+
+def test_embedding_dimension_change_stales_the_certification(certified):
+    _index(certified, dimensions=4)
+    assert cc.certification_status(certified)[0] == cc.STATUS_MISSING
+
+
+def test_index_or_retrieval_implementation_change_stales_the_certification(certified, monkeypatch):
+    monkeypatch.setattr(cc, "index_implementation_digest", lambda: "other-implementation")
+    assert cc.certification_status(certified)[0] == cc.STATUS_MISSING
+
+
+def test_retrieval_limit_policy_change_stales_the_certification(certified):
+    certified.process_profiles.enabled = True
+    certified.process_profiles.enforce_context_depth = True
+    assert cc.certification_status(certified)[0] == cc.STATUS_MISSING
+
+
+def test_chat_model_change_alone_keeps_the_certification_current(certified):
+    certified.llm.model = "a-completely-different-chat-model:70b"
+    certified.llm.context_window = 131072
+    assert cc.certification_status(certified)[0] == cc.STATUS_CERTIFIED
+
+
+def test_chat_qualification_or_window_is_never_consulted(certified, monkeypatch):
+    def refuse(*args, **kwargs):
+        raise AssertionError("recall certification must not consult the chat model")
+
+    monkeypatch.setattr("kriya.workflow.context_budget.allocation_window", refuse)
+    monkeypatch.setattr("kriya.core.model_qualification.measured_limits_for", refuse)
+    assert cc.certification_status(certified)[0] == cc.STATUS_CERTIFIED
+
+
+def test_certify_runs_with_the_chat_endpoint_unavailable(tmp_path, monkeypatch):
+    from kriya.cli import main
+
+    def chat_unavailable(*args, **kwargs):
+        raise ConnectionError("chat endpoint unavailable")
+
+    # Every chat-model touchpoint - inference, its runtime probe, its budget -
+    # is unavailable; certification must not need any of them.
+    monkeypatch.setattr(cc, "embedding_runtime_identity", lambda config: "rt-1")
+    monkeypatch.setattr("kriya.workflow.context_budget.allocation_window", chat_unavailable)
+    monkeypatch.setattr("kriya.core.llm.LLMClient.complete_result", chat_unavailable)
+    monkeypatch.setattr("kriya.core.model_runtime.resolve_configured_model_runtime", chat_unavailable)
+    with patch("kriya.memory.vector.OllamaEmbeddingClient", lambda **kw: cc.DeterministicHashingEmbedder()):
+        result = CliRunner().invoke(main, ["--config", _config_file(tmp_path), "context", "certify", "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output[result.output.index("{"):])
+    assert data["identity"]["embedding_dimensions"] == 256
+    assert "graph_budget_tokens" not in data["identity"]
+
+
+def test_an_index_without_a_single_dimension_fails_closed(tmp_path, monkeypatch):
+    config = AppConfig()
+    config.paths.memory = str(tmp_path / "memory")
+    os.makedirs(config.paths.memory)
+    open(os.path.join(config.paths.memory, "vector_index.db"), "wb").close()
+    monkeypatch.setattr(cc, "embedding_runtime_identity", lambda config: "rt-1")
+    assert cc.certification_status(config)[0] == cc.STATUS_FAILED

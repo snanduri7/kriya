@@ -774,9 +774,14 @@ def test_real_smoke_assertions_detect_an_uncontained_container():
 
 # --- PRD-027: context-recall certification -----------------------------------------------
 
-def _with_code_index(cfg):
+def _with_code_index(cfg, dimensions=3):
+    from kriya.memory.vector import LocalVectorStore
+
     os.makedirs(cfg.paths.memory, exist_ok=True)
-    open(os.path.join(cfg.paths.memory, "vector_index.db"), "wb").close()
+    store = LocalVectorStore(os.path.join(cfg.paths.memory, "vector_index.db"))
+    store.add_document("a.py", "x", [0.1] * dimensions, chunk_index=0, model_name=cfg.embedding.model,
+                       dimensions=dimensions)
+    store.close()
 
 
 def test_recall_certification_not_applicable_without_a_code_index(tmp_path):
@@ -805,6 +810,7 @@ def test_stored_recall_certification_passes_and_the_doctor_never_runs_the_benchm
     with _healthy_boundaries():
         identity = cc.certification_identity(
             cfg, embedder=cc.EMBEDDER_CONFIGURED, embedding_runtime=cc.embedding_runtime_identity(cfg),
+            embedding_dimensions=3,
         )
     report_obj = cc.CertificationReport(identity=identity)
     with patch.object(cc.CertificationReport, "certified", return_value=True):

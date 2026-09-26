@@ -23,9 +23,11 @@ There are two embedders, and they certify different things:
   mechanics only. Its reports are marked ``embedder: deterministic_hashing``
   and can never satisfy production certification.
 - The configured embedding model (``kriya context certify``) produces the
-  production record. It is bound to the exact embedding runtime, retrieval
-  policy, index/chunker implementation and fixture suite, and it is stored
-  outside the workspace under the state directory.
+  production record. It is bound to the exact embedding runtime and
+  dimension, the retrieval limits, the context-tier policy, the
+  index/chunker/retrieval implementation and the fixture suite - never to
+  the chat model, which retrieval does not use - and it is stored outside
+  the workspace under the state directory.
 ``doctor --production`` only reads that record (``certification_status``),
 and never runs the benchmark.
 """
@@ -98,6 +100,12 @@ STATUS_FAILED = "FAILED"
 STATUS_UNAVAILABLE = "IDENTITY_UNAVAILABLE"
 
 DEFAULT_RETRIEVAL_LIMITS = RetrievalLimits(top_k=5, max_hops=2, max_neighborhood_results=30)
+# The version-controlled context-tier policy certification measures under:
+# the graph-context share (PRD-016) of the packaged default 32K primary
+# window. Production scales this with the chat model's served window; that
+# budget input is PRD-016's, not a retrieval input (see
+# certification_identity).
+CERTIFICATION_GRAPH_BUDGET_TOKENS = 10644
 
 
 class DeterministicHashingEmbedder:
@@ -274,12 +282,6 @@ def retrieval_policies(config: Any) -> Tuple[RetrievalLimits, ...]:
     return tuple(policies)
 
 
-def graph_budget_tokens(config: Any) -> int:
-    from kriya.workflow.context_budget import _reserve_graph_context_budget, allocation_window
-
-    return _reserve_graph_context_budget(allocation_window(config), "")
-
-
 def embedding_runtime_identity(config: Any) -> str:
     """The exact embedding runtime digest (PRD-013 fingerprint), or
     "unavailable" when it cannot be proven. A model name is never used as
@@ -295,21 +297,35 @@ def embedding_runtime_identity(config: Any) -> str:
     return fingerprint.digest if getattr(fingerprint, "exact", False) else "unavailable"
 
 
-def chat_runtime_exact(config: Any) -> bool:
-    """Whether the primary chat model's runtime is exactly identified. The
-    graph budget (``graph_budget_tokens``) is derived from its served window
-    and measured byte ratio, so a certification recorded without it would
-    bind a different budget than the one production retrieval (and doctor)
-    computes."""
-    from kriya.core.model_runtime import resolve_configured_model_runtime
+def indexed_embedding_dimensions(config: Any) -> Optional[int]:
+    """The single embedding dimension the production code index holds for
+    the configured embedding model, read from the index (no probe); None
+    when it holds none, or more than one."""
+    import sqlite3
 
+    path = os.path.join(config.paths.memory, "vector_index.db")
     try:
-        return bool(resolve_configured_model_runtime(config).exact)
-    except Exception:  # unprovable: the caller refuses to certify
-        return False
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+            rows = connection.execute(
+                "SELECT DISTINCT dimensions FROM vector_chunks WHERE model_name = ?", (config.embedding.model,),
+            ).fetchall()
+    except sqlite3.Error:
+        return None
+    return int(rows[0][0]) if len(rows) == 1 else None
 
 
-def certification_identity(config: Any, *, embedder: str, embedding_runtime: str) -> Dict[str, Any]:
+def certification_identity(
+    config: Any, *, embedder: str, embedding_runtime: str, embedding_dimensions: Optional[int],
+) -> Dict[str, Any]:
+    """Exactly the inputs that can change retrieval behaviour: the suite and
+    fixtures, the index/chunker/graph/retrieval/assembly implementation,
+    the exact embedding runtime and its dimension, the retrieval limits and
+    the context-tier policy. The chat model is not an input: Graph RAG makes
+    no chat inference (no query rewriting, scoring or selection by a chat
+    model). Its only production influence is the token budget via its
+    served window (PRD-016); certification pins the version-controlled
+    reference budget instead, so a chat-model change or requalification
+    never stales a certification."""
     from kriya import __version__
 
     return {
@@ -320,10 +336,14 @@ def certification_identity(config: Any, *, embedder: str, embedding_runtime: str
         "embedder": embedder,
         "embedding_model": config.embedding.model,
         "embedding_runtime": embedding_runtime,
+        "embedding_dimensions": embedding_dimensions,
         "retrieval_policies": [
             [limits.top_k, limits.max_hops, limits.max_neighborhood_results] for limits in retrieval_policies(config)
         ],
-        "graph_budget_tokens": graph_budget_tokens(config),
+        "context_tier_policy": {
+            "reference_graph_budget_tokens": CERTIFICATION_GRAPH_BUDGET_TOKENS,
+            "tiers": list(_TIER_RANK),
+        },
     }
 
 
@@ -359,10 +379,11 @@ async def run_certification(
     from kriya.memory.vector import LocalVectorStore
     from kriya.workflow.graph_retrieval import retrieve_graph_context
 
+    dimensions = len(await embedding_client.get_embedding("kriya context certification", is_query=True))
     report = CertificationReport(identity=certification_identity(
-        config, embedder=embedder, embedding_runtime=embedding_runtime,
+        config, embedder=embedder, embedding_runtime=embedding_runtime, embedding_dimensions=dimensions,
     ))
-    budget = graph_budget_tokens(config)
+    budget = CERTIFICATION_GRAPH_BUDGET_TOKENS
     with tempfile.TemporaryDirectory(prefix="kriya-context-cert-") as scratch:
         for repository in repositories:
             root = os.path.join(scratch, repository.name)
@@ -424,7 +445,15 @@ def certification_status(config: Any) -> Tuple[str, str]:
             f"embedding runtime identity of {config.embedding.model} cannot be proven - "
             "a certification cannot be matched to it"
         )
-    identity = certification_identity(config, embedder=EMBEDDER_CONFIGURED, embedding_runtime=runtime)
+    dimensions = indexed_embedding_dimensions(config)
+    if dimensions is None:
+        return STATUS_FAILED, (
+            f"the code index at paths.memory holds no single embedding dimension for {config.embedding.model} - "
+            "re-index with `kriya analyze`"
+        )
+    identity = certification_identity(
+        config, embedder=EMBEDDER_CONFIGURED, embedding_runtime=runtime, embedding_dimensions=dimensions,
+    )
     path = os.path.join(certification_directory(config), f"{identity_digest(identity)}.json")
     try:
         with open(path, "r", encoding="utf-8") as handle:
