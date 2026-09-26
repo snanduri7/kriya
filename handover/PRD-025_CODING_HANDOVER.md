@@ -90,6 +90,8 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop. The user runs t
   - explicit goal permits: `test_nonzero_exit_admitted_only_when_goal_declares_it_and_app_launched`;
   - verifier text alone cannot: `test_verifier_text_declaring_the_exit_grants_nothing`;
   - Planner/milestone text cannot, in `test_workflow.py`: `test_prd025_planner_or_milestone_text_cannot_declare_an_expected_exit` and `test_prd025_a_milestone_units_authority_is_the_users_original_goal`;
+  - an enforce subtask's own text cannot, through the verification-only subtask path, in `test_workflow.py`: `test_prd025_enforce_subtask_text_cannot_declare_an_expected_exit`. It is parametrized: the user's goal without the declaration gives FAIL, and with it gives PASS. Enforce passes the user's goal as `grounding_goal` and the subtask text as `goal`;
+  - Developer-authored output cannot (a `[VERIFICATION] PASS` marker plus prose claiming the exit is expected), in `test_workflow.py`: `test_prd025_developer_authored_pass_marker_cannot_admit_an_undeclared_exit`;
   - timeout fails: `test_timeout_is_authoritative_over_a_pass_grade`;
   - failed setup fails: `test_declared_nonzero_exit_still_fails_when_a_setup_step_failed`;
   - launch failure fails: `test_a_declared_exit_from_an_application_that_never_launched_fails`;
@@ -101,6 +103,8 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop. The user runs t
   - reverting `exit_authority_text` to `ctx.goal` or to `grounding_goal or goal`;
   - dropping `authoritative_goal` from the invocation;
   - dropping the milestone branch of `authoritative_goal_of`;
+  - dropping `grounding_goal` from the precedence (the enforce test);
+  - removing the nonzero-exit branch of the disposition (the enforce and Developer-marker tests);
   - accepting any declared code;
   - treating every declaration as ANY;
   - dropping the application-launched requirement;
@@ -112,6 +116,7 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop. The user runs t
 |---|---:|---:|---|
 | `.venv/bin/pytest -q tests/test_prd025_verifier_evidence.py` | 56 | 0 | 0.6 s (44 + 12 from the correction) |
 | `.venv/bin/pytest -q tests/test_workflow.py -k "prd025_exit_rule_is_reapplied or prd025_planner_or_milestone or prd025_a_milestone_units or prd025_llm_pass or accepts_expected_nonzero"` | 5 | 0 | correction |
+| `.venv/bin/pytest -q tests/test_workflow.py -k "prd025_enforce_subtask_text or prd025_developer_authored"` | 3 | 0 | correction |
 | `.venv/bin/pytest -q tests/test_workflow.py -k "prd025 or verification_only_packaged_java_uses_grounded or accepts_expected_nonzero_only"` | 7 | 0 | |
 | `... -k "missing_runtime_entrypoint_stops_without_source_repair or timeout_grades_captured_output_as_succeeded_then_hung"` + `tests/test_agents.py -k run_verifier` | 46 | 0 | Existing tests that combine a nonzero exit with a grader PASS |
 

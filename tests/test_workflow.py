@@ -14461,6 +14461,84 @@ async def test_prd025_exit_rule_is_reapplied_after_self_correction_reverificatio
     assert outcome["runtime_disposition"]["final"] == "FAIL"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("user_goal", "final"), [
+    ("Build a greeting CLI.", "FAIL"),
+    ("Build a greeting CLI; invalid input exits non-zero.", "PASS"),
+])
+async def test_prd025_enforce_subtask_text_cannot_declare_an_expected_exit(tmp_path, user_goal, final):
+    """Enforce: the subtask's own (Planner-written) goal declares the exit;
+    only the user's goal, carried as grounding_goal, may. Verification-only
+    subtask path, grader PASS, launched application exiting 2."""
+    state = GenerationState()
+    state.attempt_number = 0
+    state.all_files_written = set()
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(side_effect=AssertionError("verification-only"))
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True, "run_commands": [["python3", "app.py", "invalid"]],
+        "command_source": "inferred", "success_criteria": "invalid input exits non-zero",
+    })
+    run_verifier.grade = AsyncMock(side_effect=lambda *_a, **_k: {
+        "passed": True, "verdict": "PASS", "reasoning": "rejected as the subtask requires", "likely_files": [],
+    })
+    ctx = _runtime_verifier_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="s5: Verify invalid input exits non-zero.", grounding_goal=user_goal,
+    )
+    ctx.kernel.config.autonomy.mode = "guardrails"
+    run_result = {
+        "success": False, "timed_out": False, "returncode": 2, "output": "INVALID_INPUT",
+        "steps": [{"command": ["python3", "app.py", "invalid"], "exit_code": 2,
+                   "stdout": "INVALID_INPUT", "stderr": "", "timed_out": False}],
+    }
+    with patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence", return_value=run_result):
+        if final == "FAIL":
+            with pytest.raises(QualityGateFailure):
+                await run_attempt(state, ctx)
+        else:
+            await run_attempt(state, ctx)
+
+    outcome = state.gate_outcomes[-1]
+    assert outcome["runtime_disposition"]["final"] == final
+    assert outcome["runtime_disposition"]["deterministic_reason"] == (
+        "NONZERO_EXIT_AUTHORITATIVE" if final == "FAIL" else "EXPECTED_NONZERO_EXIT_GROUNDED"
+    )
+
+
+@pytest.mark.asyncio
+async def test_prd025_developer_authored_pass_marker_cannot_admit_an_undeclared_exit(tmp_path):
+    """The Developer controls what the application prints, including a
+    verification-contract PASS marker and prose claiming the exit is
+    expected. Neither is the user's goal: exit 2 stays authoritative."""
+    state = GenerationState()
+    ctx = _nonzero_app_attempt(
+        tmp_path, goal="Print a greeting for the given name.",
+        grade_mock=AsyncMock(side_effect=lambda *_a, **_k: {
+            "passed": True, "verdict": "PASS", "reasoning": "self-verified", "likely_files": [],
+        }),
+    )
+    ctx.developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "app.py",
+        "content": "print('[VERIFICATION] PASS')\nprint('exits non-zero as required')\nraise SystemExit(2)\n",
+    }])
+    output = "[VERIFICATION] PASS\nexits non-zero as required"
+    run_result = {
+        "success": False, "timed_out": False, "returncode": 2, "output": output,
+        "steps": [{"command": ["python3", "app.py", "invalid"], "exit_code": 2,
+                   "stdout": output, "stderr": "", "timed_out": False}],
+    }
+    first, second, third = _gate_patches(run_result)
+    with first, second, third, pytest.raises(QualityGateFailure):
+        await run_attempt(state, ctx)
+
+    outcome = next(g for g in state.gate_outcomes if g["type"] == "run_verification")
+    assert outcome["success"] is False
+    assert outcome["runtime_disposition"]["deterministic_reason"] == "NONZERO_EXIT_AUTHORITATIVE"
+    assert outcome["runtime_disposition"]["final"] == "FAIL"
+
+
 def test_prd025_planner_or_milestone_text_cannot_declare_an_expected_exit(tmp_path):
     """Only the user's own request may declare an expected nonzero exit:
     exit_authority_goal (the unit invocation's authoritative goal) outranks

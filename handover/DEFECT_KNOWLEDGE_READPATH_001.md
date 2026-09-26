@@ -8,6 +8,7 @@ The documentation claims that `kriya learn` content is consumed, fenced as untru
 - `docs/user_guide.md` §3.2: "Ingested content is treated as untrusted reference material in prompts (explicitly fenced ...)".
 - `docs/design.md` §2.2: the "Untrusted-Content Fencing" and "Precedence Hierarchy" bullets.
 - `CLAUDE.md` pipeline step 4, "Untrusted learned-knowledge RAG".
+- `CLAUDE.md` Storage section: "`vector_index.db` mixes code-index vectors and a separate `learned_knowledge` table (from `kriya learn`)". This is the wrong-database assumption the workflow reader follows; `learn` actually writes `web_knowledge.db`.
 
 In reality no command reads what `learn` writes. A documented feature silently does nothing, so this is P1.
 
