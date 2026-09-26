@@ -39,7 +39,8 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 | 9a7a4ac | Fix (my 63bc808): a required `tax_rate` left the consumer's test failing between subtasks, so a two-subtask plan could never pass |
 | 878a841 | First live run raw evidence |
 | 8600e2d | PROMPT-BUDGET-FIT-001C (P1): a refused final review is a typed non-success (`final_review_refused`), never a raw exception; applied and committed state reported truthfully |
-| (this) | 001A/B/C split, tracker, CLAUDE.md, summary |
+| 1786b42 | 001A/B/C split, tracker, CLAUDE.md, summary |
+| 1d0ad18  | Fix (my 8600e2d): `kriya fix` still labelled a refused final review as a rejected, unapplied candidate; summary |
 
 ## The three suspected P0/P1 defects
 1. **PRD-025: nonzero exit overridden by an LLM PASS. Confirmed**, in a narrower form than suspected.
@@ -104,7 +105,7 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 ```
 **001C subset** (after 8600e2d; workflow and result contracts):
 ```
-.venv/bin/pytest tests/test_prompt_budget_fit_001c.py tests/test_cli_smoke.py tests/test_traces_command.py tests/test_workflow.py tests/test_workflow_controller.py tests/test_workflow_controller_enforce.py tests/test_milestones.py tests/test_milestone2.py tests/test_prd020_milestone_requirements.py tests/test_prd020_requirement_lineage.py tests/test_prd008a_plan_executor.py tests/test_prd007_run_lifecycle.py tests/test_prd005_commit_transactions.py tests/test_prd026_retry_progress.py tests/test_prd029_contract_lifecycle.py tests/test_run_ownership.py tests/test_file_goal.py tests/test_deterministic_failure_diagnostic.py tests/test_d1_operation_mode_authority.py tests/test_model_evidence_hardening_001.py tests/test_model_evidence_hardening_final.py tests/test_performance_telemetry.py tests/test_ver006_distrust_containment.py tests/test_validation_baseline.py tests/test_prd011_toolchain_migration.py tests/test_failure_reporting.py tests/test_batch6_live_evidence_status.py tests/test_strict_doubles.py
+.venv/bin/pytest tests/test_prompt_budget_fit_001c.py tests/test_cli_smoke.py tests/test_generate_json_contract.py tests/test_dispatch_generation.py tests/test_traces_command.py tests/test_workflow.py tests/test_workflow_controller.py tests/test_workflow_controller_enforce.py tests/test_milestones.py tests/test_milestone2.py tests/test_prd020_milestone_requirements.py tests/test_prd020_requirement_lineage.py tests/test_prd008a_plan_executor.py tests/test_prd007_run_lifecycle.py tests/test_prd005_commit_transactions.py tests/test_prd026_retry_progress.py tests/test_prd029_contract_lifecycle.py tests/test_run_ownership.py tests/test_file_goal.py tests/test_deterministic_failure_diagnostic.py tests/test_d1_operation_mode_authority.py tests/test_model_evidence_hardening_001.py tests/test_model_evidence_hardening_final.py tests/test_performance_telemetry.py tests/test_ver006_distrust_containment.py tests/test_validation_baseline.py tests/test_prd011_toolchain_migration.py tests/test_failure_reporting.py tests/test_batch6_live_evidence_status.py tests/test_strict_doubles.py
 ```
 **Full:**
 ```
