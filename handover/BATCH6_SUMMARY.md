@@ -31,6 +31,11 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 | 8f43d31 | Fix (my f3707c4): the structural tripwire missed conditional, `.format`/`.join`/`%` and keyword enrichment; plus controller-path and Planner mutation-scope tests |
 | 85a5bfd | AUTH-GOAL-CONTAMINATION-001 parity: the enforce structured Planner reads reference context again, fenced, on the first request and every repair round |
 | a804134 | Fix (my 85a5bfd): the copied-plan API assertion had no control |
+| 909a1ba | Fix (my a0a2d0a): CORR-016's exact call-site pin now lists PRD-029's enforce ContractRegistry call of `derive_direct_contract_authorizations` (the user's goal) |
+| ead523e | Fix (my 61e4b26): the MA5.2 corrupt-registry test still expected the old read-as-empty behaviour |
+| 3e6f273 | Fix (my 83a80fd): the live fixture ran at 8K with no qualification record; it now uses the qualified identity and a preflight fails a mismatch as a fixture error |
+| 63bc808 | PRD-029: targeted live fixture where the authorized public contract change is the only solution |
+| (this) | Live triage record, PROMPT-BUDGET-FIT-001 (OPEN), summary |
 
 ## The three suspected P0/P1 defects
 1. **PRD-025: nonzero exit overridden by an LLM PASS. Confirmed**, in a narrower form than suspected.
@@ -97,9 +102,9 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 ```
 .venv/bin/pytest
 ```
-**Live** (real local Ollama, after pytest is green):
+**Live** (real local Ollama, after pytest is green). The model must be qualified at 32K under the packaged llm settings (`kriya model qualify --model qwen3-coder:30b`); every case's `cfg` preflight fails as `LIVE FIXTURE CONFIG ERROR` otherwise and writes `preflight_identity.json`:
 ```
-KRIYA_BATCH6_EVIDENCE_DIR=handover/evidence/BATCH6/user-live \
+KRIYA_BATCH6_EVIDENCE_DIR=handover/evidence/BATCH6/user-live-2 \
 KRIYA_LIVE_BASE_URL=http://localhost:11434/v1 KRIYA_LIVE_LLM_MODEL=qwen3-coder:30b \
 KRIYA_LIVE_EMBED_MODEL=nomic-embed-text:latest \
 .venv/bin/pytest -m live_model -ra -s tests/test_live_prd025_029_batch6.py
@@ -110,7 +115,11 @@ kriya -c <your kriya.yaml> context certify
 ```
 Each case writes its evidence with a status: `LIVE_EXERCISED` (the path ran and every assertion held), `NOT_LIVE_EXERCISED` (skipped, meaning the path never ran; this is never verification) or `FAILED`.
 - **PRD-028.** The escalation is triggered deterministically: one injected compile failure at `apply_fee`, whatever the model writes. It can be NOT_LIVE_EXERCISED only if the model never changes `ledger.py`.
+- **PRD-029, targeted** (`test_live_prd029_targeted_required_contract_change_is_committed_and_bound`, evidence `prd029_targeted_registry.json`). The user's tests call `total(items, tax_rate)` and `checkout(items, tax_rate)`, so only the authorized contract change passes; an offline test proves that design. On a verified commit it checks the record against the commit identity and the committed code's signatures, DIRECT provenance, the consumer invalidation and the full-suite reverification. It is NOT_LIVE_EXERCISED if the model never reaches the commit.
 - **PRD-029.** The verified commit depends on the model. If the enforce run does not reach it, the case is NOT_LIVE_EXERCISED. PRD-029 then stays verified by pytest only, including the real-subprocess crash tests, and its live verdict is recorded as NOT_LIVE_EXERCISED, not LIVE_VERIFIED.
+
+## First live run (2026-09-27) and triage
+4 passed, 2 FAILED (PRD-027 Developer context, PRD-028 member authority), 1 NOT_LIVE_EXERCISED (PRD-029). Both failures were `CONTEXT_BUDGET_UNSATISFIABLE` before inference. **Case A (fixture defect, mine, 83a80fd):** the fixture forced `num_ctx` 8192, replaced `extra_body` (a different inference identity) and used an empty qualification home, so requests were counted at the 2.5 default byte bound against 8K. Effective values at the refusals: qwen3-coder:30b, runtime 5a608316… (exact), served `num_ctx` 8192, qualification MISSING, no tier, `max_tokens` 1024, output reserve 1024 (the minimum), no fallbacks, counter `default_byte_bound`. The refused requests were the PRD-027 Planner (system 10,873 chars + user 6,711 of which the graph section about 4.7K; 7089 tokens) and the PRD-028 final Reviewer (file batch about 9.9K chars + diff + system 6,139 chars + evidence; 7212 tokens). The qualified identity is 32768 with a 2.11 bytes/token floor. Fixed in 3e6f273; production budgeting is unchanged. The allocator gaps this exposed are recorded as PROMPT-BUDGET-FIT-001 (OPEN, P2). Evidence of the first run is kept in `handover/evidence/BATCH6/user-live/`; point the rerun at a new directory (below) so it is preserved.
 
 ## Static gates
 `.venv/bin/ruff check .`: All checks passed. `.venv/bin/pylint kriya plugins/core_tools tests`: exit 0. Both hold at the final commit.
