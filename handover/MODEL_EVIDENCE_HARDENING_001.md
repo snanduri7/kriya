@@ -1,6 +1,6 @@
 # MODEL-EVIDENCE-HARDENING-001: qualification identity and model telemetry
 
-**Status:** READY_FOR_PYTEST_VERIFICATION (2026-09-26). Not pushed. No live command was run by Claude. Packaged default models, the demo-03 fallback and PRD-019 routes are unchanged.
+**Status:** **VERIFIED** (2026-09-26): full pytest green, and live 32K requalification accepted. MODEL-QUAL-IDENTITY-001 and the three telemetry defects are closed. Packaged defaults, the demo-03 fallback and PRD-019 routes are unchanged. See "Verification evidence" at the end.
 
 **Commits:**
 - `6c163f2` MODEL-QUAL-IDENTITY-001 (defect record: `DEFECT_MODEL_QUAL_IDENTITY_001.md`);
@@ -368,3 +368,37 @@ The environment binding is mutation-checked.
 
   The gate, the enumeration and the QUALIFIED check are mutation-checked.
 - **Focused run (Claude):** 345 passed across the four MODEL-EVIDENCE files, the environment and retry files, prd014/016/017/018/019 and production_doctor.
+
+
+## Verification evidence (2026-09-26)
+
+**pytest (user, full suite on `2bbf2f4`):**
+- 5988 passed, 1 failed, 22 deselected.
+- The one failure was `test_failure_reporting.py`'s pinned failure-type vocabulary. It was missing the new `retry_identity_not_qualified`, a test-only omission fixed in `e707721`.
+- After the fix, `tests/test_failure_reporting.py` passed 38/38 on the user's run and on Claude's.
+- No production code changed after the full run.
+
+**Live requalification (user, `./setup.sh requalify`, 2026-09-26 14:06–14:20 UTC, 32K only).**
+- **Code revision.** It ran on `50b2188`. The later commits change nothing that keys a record:
+  - `2bbf2f4` only adds a retry identity when `retry_temperature` is set, and no arm config sets it;
+  - `e707721` is test-only.
+
+  Recomputing the identities offline with the current code (no model calls) gives exactly one identity per arm, and it equals the recorded one.
+- **Evidence:** `~/kriya-live-demo/demo-03-brownfield/model-eval-001/evidence/requalification/`.
+
+| arm | runtime | runtime digest | settings digest | qualification identity | environment | before | after | cases |
+|---|---|---|---|---|---|---|---|---|
+| qwen3-coder | qwen3-coder:30b | `ea90552d45f9` | `ed7bfc09816e` | `ca28639b8c1b` | `7b3ce83bce65` | STALE | QUALIFIED | 18 PASS, 1 UNAVAILABLE |
+| qwen3.6 | qwen3.6:35b-a3b-q4_K_M | `cc523e4c9b65` | `0f1e6b5c1fec` | `853402b9ba78` | `7b3ce83bce65` | STALE | QUALIFIED | 18 PASS, 1 UNAVAILABLE |
+| qwen3.8 | qwen3.8:27b | `3b84735255df` | `0f1e6b5c1fec` | `ec37fc4f0381` | `7b3ce83bce65` | STALE | QUALIFIED | 18 PASS, 1 UNAVAILABLE |
+
+**How this meets the acceptance criteria:**
+- **status-before:** all old records read STALE, never MISSING.
+- **The exact executed identity** is recorded for every arm:
+  - qwen3-coder: temperature 0.7, top_k 20, top_p 0.8;
+  - qwen3.6 and qwen3.8: the same plus `reasoning_effort: none`.
+
+  qwen3.6 therefore qualified under its intended settings, and those two settings digests are equal by design, while the runtimes differ.
+- **The environment is exact and correct:** macOS arm64, metal, Apple M1 Max, unified 64 GiB class, `ollama/0.34.2`.
+- **The one UNAVAILABLE per arm** is `endpoint_restart_semantics`, which is never exercised live (expected).
+- **No retry identity** appeared, and 64K was not run. qwen3.8 @64K stays NOT_QUALIFIED for this runtime and environment.

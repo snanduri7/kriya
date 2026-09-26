@@ -89,7 +89,19 @@ False success means Kriya reported success but the diff grade or the independent
   - n = 3 on one easy task; no run exercised repair.
   - No Architect call happens in enforce mode, so the Architect comparison comes from qualification only: all three PASS on structured and multiline JSON.
 
-## Follow-up: MODEL-EVIDENCE-HARDENING-001 (2026-09-26, READY_FOR_PYTEST_VERIFICATION)
+## Follow-up: MODEL-EVIDENCE-HARDENING-001 (2026-09-26, VERIFIED)
+
+- **The gate is closed.** MODEL-QUAL-IDENTITY-001 and findings 2–4 are VERIFIED (full pytest green), and the qualification records are revalidated.
+- **All three arms re-qualify at 32K** under their exact executed inference identities and the M1 Max environment:
+  - qwen3-coder `ca28639b8c1b`;
+  - qwen3.6 `853402b9ba78` (with `reasoning_effort: none`);
+  - qwen3.8 `ec37fc4f0381`.
+
+  All are QUALIFIED, 18 PASS / 1 UNAVAILABLE each. Evidence: `evidence/requalification/`.
+- **The recommendation is unchanged:** no default or routing change.
+- **Next:** changing the demo-03 fallback to `reasoning_effort: none` can now be proposed separately, since qwen3.6 is qualified under that exact setting.
+
+### Original follow-up notes
 
 - **Fixes.** Findings 1–4 below are fixed in `6c163f2` (identity) and `596bfbe` (telemetry). See `MODEL_EVIDENCE_HARDENING_001.md`.
 - **What this means for the recorded results:**

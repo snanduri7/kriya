@@ -2,7 +2,7 @@
 
 ## Status
 
-FIXED in `6c163f2`, READY_FOR_PYTEST_VERIFICATION (2026-09-26); revalidation (live requalification at 32K) is user-run after pytest. Design, decisions and residuals are in `MODEL_EVIDENCE_HARDENING_001.md` §1. Raised 2026-09-26 by the MODEL-EVAL-001 review.
+**VERIFIED** (2026-09-26). Fixed in `6c163f2`, with follow-ups through `2bbf2f4`. Full pytest is green (see the handover). Revalidated live: the three MODEL-EVAL-001 arms were requalified at 32K under their exact executed identities, and all are QUALIFIED. Design, decisions and residuals are in `MODEL_EVIDENCE_HARDENING_001.md` §1. Raised 2026-09-26 by the MODEL-EVAL-001 review.
 
 **Decisions made by the fix:**
 - **Separate qualification identity.** The identity is runtime digest + inference-settings digest. The runtime fingerprint and the adapter version are unchanged, so the keys of role independence, metrics and routing are too.
