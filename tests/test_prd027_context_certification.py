@@ -255,3 +255,29 @@ def test_cli_exits_nonzero_when_the_suite_does_not_certify(tmp_path, monkeypatch
         result = CliRunner().invoke(main, ["--config", _config_file(tmp_path), "context", "certify"])
     assert result.exit_code == 1
     assert "CERTIFIED=false" in result.output
+
+
+def test_an_embedding_model_runtime_can_be_proven_exact(monkeypatch):
+    """Doctor-blocker guard: `kriya context certify` must be able to bind to
+    a real embedding runtime. Drive the real PRD-013 probe with an
+    embedding-model-shaped Ollama endpoint."""
+    from kriya.core import model_runtime
+
+    def transport(url, payload, api_key):
+        if url.endswith("/api/version"):
+            return {"version": "0.34.2"}
+        if url.endswith("/api/tags"):
+            return {"models": [{"name": "nomic-embed-text:latest", "digest": "0a109f422b47"}]}
+        return {"details": {"family": "nomic-bert", "format": "gguf"}, "model_info": {},
+                "modelfile": "FROM /blobs/sha256-970aa74c0a90", "capabilities": ["embedding"]}
+
+    monkeypatch.setenv(model_runtime.PROBE_ENV_VAR, "1")
+    monkeypatch.setattr(model_runtime, "_http_json", transport)
+    model_runtime.clear_model_runtime_cache()
+    try:
+        config = AppConfig()
+        identity = cc.embedding_runtime_identity(config)
+    finally:
+        model_runtime.clear_model_runtime_cache()
+    assert identity != "unavailable"
+    assert len(identity) == 64

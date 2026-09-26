@@ -111,6 +111,8 @@ ruff: All checks passed. pylint: exit 0.
 - The benchmark is small (2 repositories, 6 cases, 2–4 golden items per class). Recall per class moves in steps of 0.5; it is a floor, not a statistical estimate.
 - Certification covers the Graph RAG stage (the Developer's first-attempt semantic context). The known-target member-exact context and the planning candidate lists are separate mechanisms and are not certified here.
 - Precision is at the target (0.5), with no margin, under the CI embedder.
+- Seeding the graph walk with each matched file follows every call in that file. On a real repository, common method names can fill the 30 neighbourhood slots (one entry per file, ranked by relation weight and hop). The small fixtures cannot show that precision loss; the live certification with the real embedder is the measurement to watch.
+- `test_an_embedding_model_runtime_can_be_proven_exact` drives the real PRD-013 probe with an embedding-shaped endpoint and shows the runtime identity is provable. So `kriya context certify` and the doctor check do not block every indexed deployment.
 
 ## Verification-agent handoff
 Run the Batch 6 focused command, then the full suite, then the live `-k prd027` cases, then `kriya context certify` with the production config.

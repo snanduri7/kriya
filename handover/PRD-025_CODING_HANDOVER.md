@@ -120,6 +120,7 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop. The user runs t
 - Signature coverage is pattern-based. A failure that prints no recognized signature, in a range that was omitted, still relies on the head/tail samples. For that case the grader is instructed to answer UNKNOWN; the result is not enforced.
 - `allocation_window` uses the Developer role's inference settings for the byte-ratio lookup. It is the same served window, but a verifier-specific tokenizer ratio would be more exact.
 - Capture loss in ManagedProcess (managed services) is not counted. That output is never graded by `grade()`.
+- Goal grounding proves that a nonzero exit is declared behaviour. It does not prove that the final invocation is the case expected to exit nonzero. For example, a goal that declares "invalid input exits non-zero" admits a nonzero exit on a valid-input command too. The grader still judges the output; the exit is admissible, not a PASS.
 
 ## Decisions recorded
 - A nonzero exit is admissible only on the user's own goal text (never on judge or grader text). The rationale is in handover/BATCH6_DIRECTIVES.md and in this handover.
