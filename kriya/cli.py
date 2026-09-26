@@ -1909,6 +1909,35 @@ async def _dispatch_generation(we: "WorkflowEngine", cfg: AppConfig, **kwargs: A
     return await we.run_generation_workflow(**kwargs)
 
 
+async def _web_reference_context(cfg: AppConfig, goal: str) -> str:
+    """Reference documentation retrieved for ``goal`` from the web-knowledge
+    store, for the model's context only - never joined to the goal
+    (AUTH-GOAL-CONTAMINATION-001). Empty when the store is absent, nothing
+    scores above the threshold, or retrieval fails (best-effort, logged)."""
+    index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
+    if not os.path.exists(index_path):
+        return ""
+    try:
+        from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
+        embed_client = OllamaEmbeddingClient(
+            base_url=cfg.embedding.base_url,
+            model=cfg.embedding.model,
+            egress_policy=cfg.autonomy.egress_policy,
+        )
+        query_emb = await embed_client.get_embedding(goal, is_query=True)
+        vector_store = LocalVectorStore(index_path)
+        try:
+            matches = vector_store.query(query_emb, top_k=5)
+        finally:
+            vector_store.close()
+    except Exception as e:
+        logger.warning(f"Failed to query RAG database in workflow: {e}")
+        return ""
+    return "".join(
+        f"\n[Source: {m['filepath']}]\n{m['text']}\n" for m in matches if m["score"] > 0.4
+    )
+
+
 async def _dispatch_milestones(we: "WorkflowEngine", cfg: AppConfig, run_state: Any, workspace_path: str, **kwargs: Any) -> Dict[str, Any]:
     """MA7-C4 (2026-08-25 external review) - the milestone-DAG counterpart
     to _dispatch_generation above, closing the architectural split its own
@@ -2225,29 +2254,9 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
         sys.exit(0 if milestone_result.get("status") == "success" else 1)
 
     async def run_workflow():
-        nonlocal goal
-        rag_context = ""
-        index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
-        if os.path.exists(index_path):
-            try:
-                from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
-                embed_client = OllamaEmbeddingClient(
-                    base_url=cfg.embedding.base_url,
-                    model=cfg.embedding.model,
-                    egress_policy=cfg.autonomy.egress_policy,
-                )
-                vector_store = LocalVectorStore(index_path)
-                query_emb = await embed_client.get_embedding(goal, is_query=True)
-                matches = vector_store.query(query_emb, top_k=5)
-                good_matches = [m for m in matches if m["score"] > 0.4]
-                if good_matches:
-                    rag_context = "\n".join([f"[Source: {m['filepath']}]\n{m['text']}" for m in good_matches])
-                vector_store.close()
-            except Exception as e:
-                logger.warning(f"Failed to query RAG database in workflow: {e}")
-                
-        if rag_context:
-            goal = f"{goal}\n\n=== Web Reference Documentation Context ===\n{rag_context}"
+        # AUTH-GOAL-CONTAMINATION-001: `goal` stays the user's exact words;
+        # retrieved text travels separately and is fenced as untrusted.
+        reference_context = await _web_reference_context(cfg, goal)
 
         await kernel.start()
         res = await _dispatch_generation(
@@ -2262,7 +2271,8 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             web_lookup_query_callback=on_web_lookup_query,
             resume=resume,
             resume_id=resume_id,
-            protected_source_file=file
+            protected_source_file=file,
+            reference_context=reference_context,
         )
 
         if isinstance(res, dict) and res.get("status") == "knowledge_gap":
@@ -2294,6 +2304,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                     # written above, instead of leaving two independent rows behind.
                     trace_id_override=res.get("run_id"),
                     protected_source_file=file,
+                    reference_context=reference_context,
                 )
             elif knowledge_policy == 'strict':
                 click.secho("\n[KRIYA BLOCKED] Knowledge gap detected in strict mode:", bold=True, fg="red")
@@ -2343,6 +2354,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                         # leaving two independent rows behind.
                         trace_id_override=res.get("run_id"),
                         protected_source_file=file,
+                        reference_context=reference_context,
                     )
                 else:
                     if click.confirm("Would you like Kriya to scaffold skill templates for these libraries?"):
