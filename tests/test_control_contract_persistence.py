@@ -6,7 +6,7 @@ import tempfile
 
 import pytest
 
-from kriya.control.contracts import ContractRegistry, ContractState
+from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError, ContractState
 from kriya.control.persistence import (
     contract_registry_path,
     load_contract_registry,
@@ -42,5 +42,10 @@ def test_load_fails_closed_on_corrupt_file(workspace):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         f.write("not json")
-    registry = load_contract_registry(workspace)
-    assert registry.all_records() == ()
+    # PRD-029 (61e4b26): a corrupt registry is a typed stop, never read as
+    # empty (which the caller would then save over the real records).
+    with pytest.raises(ContractRegistryCorruptError) as excinfo:
+        load_contract_registry(workspace)
+    assert excinfo.value.path == path
+    with open(path) as f:
+        assert f.read() == "not json"
