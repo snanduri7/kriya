@@ -35,7 +35,8 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 | ead523e | Fix (my 61e4b26): the MA5.2 corrupt-registry test still expected the old read-as-empty behaviour |
 | 3e6f273 | Fix (my 83a80fd): the live fixture ran at 8K with no qualification record; it now uses the qualified identity and a preflight fails a mismatch as a fixture error |
 | 63bc808 | PRD-029: targeted live fixture where the authorized public contract change is the only solution |
-| (this) | Live triage record, PROMPT-BUDGET-FIT-001 (OPEN), summary |
+| 3464975 | Live triage record, PROMPT-BUDGET-FIT-001 (OPEN), summary |
+| (next) | Fix (my 63bc808): a required `tax_rate` left the consumer's test failing between subtasks, so a two-subtask plan could never pass; first-run raw evidence committed |
 
 ## The three suspected P0/P1 defects
 1. **PRD-025: nonzero exit overridden by an LLM PASS. Confirmed**, in a narrower form than suspected.
@@ -115,7 +116,7 @@ kriya -c <your kriya.yaml> context certify
 ```
 Each case writes its evidence with a status: `LIVE_EXERCISED` (the path ran and every assertion held), `NOT_LIVE_EXERCISED` (skipped, meaning the path never ran; this is never verification) or `FAILED`.
 - **PRD-028.** The escalation is triggered deterministically: one injected compile failure at `apply_fee`, whatever the model writes. It can be NOT_LIVE_EXERCISED only if the model never changes `ledger.py`.
-- **PRD-029, targeted** (`test_live_prd029_targeted_required_contract_change_is_committed_and_bound`, evidence `prd029_targeted_registry.json`). The user's tests call `total(items, tax_rate)` and `checkout(items, tax_rate)`, so only the authorized contract change passes; an offline test proves that design. On a verified commit it checks the record against the commit identity and the committed code's signatures, DIRECT provenance, the consumer invalidation and the full-suite reverification. It is NOT_LIVE_EXERCISED if the model never reaches the commit.
+- **PRD-029, targeted** (`test_live_prd029_targeted_required_contract_change_is_committed_and_bound`, evidence `prd029_targeted_registry.json`). The user's test calls `total(items, tax_rate)`, so only the authorized contract change passes. `tax_rate` has a default so every intermediate state stays valid however the Planner splits the work; `checkout.py` keeps calling `total(items)` and is the consumer invalidated and reverified. An offline test proves the design through the live run's own test gate (`PolymorphicValidator.run_tests`), and the pre-write gate passes the authorized candidate. On a verified commit it checks the record against the commit identity and the committed code's signatures, DIRECT provenance, the consumer invalidation and the full-suite reverification. It is NOT_LIVE_EXERCISED if the model never reaches the commit.
 - **PRD-029.** The verified commit depends on the model. If the enforce run does not reach it, the case is NOT_LIVE_EXERCISED. PRD-029 then stays verified by pytest only, including the real-subprocess crash tests, and its live verdict is recorded as NOT_LIVE_EXERCISED, not LIVE_VERIFIED.
 
 ## First live run (2026-09-27) and triage

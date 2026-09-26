@@ -70,20 +70,20 @@ def test_the_live_cfg_fixture_does_not_override_the_qualified_identity():
 
 
 def _suite_passes(repo):
-    import subprocess
-    import sys
+    """The live run's own test gate on the fixture repository."""
+    from kriya.config import AppConfig
+    from kriya.tools.validate import PolymorphicValidator
 
-    completed = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
-                               cwd=repo, capture_output=True, text=True, timeout=120, check=False)
-    return completed.returncode == 0
+    return PolymorphicValidator(str(repo), autonomy_cfg=AppConfig().autonomy).run_tests()["success"]
 
 
 def test_the_targeted_prd029_fixture_requires_the_authorized_contract_change(tmp_path):
-    """Offline proof of the targeted live fixture's design: the user's tests
-    fail on the unchanged API, the only kind of candidate that passes changes
-    the public signatures of both files, the goal alone authorizes exactly
-    those owners and symbols, and Kriya derives the registry delta from the
-    code (the model is never told about the registry)."""
+    """Offline proof of the targeted live fixture's design, through the live
+    run's own test gate: the user's tests fail on the unchanged API, the
+    reference candidate passes and changes the public signature of total,
+    the goal alone authorizes exactly that owner and symbol, and Kriya
+    derives the registry delta from the code, with checkout.py as the
+    invalidated consumer (the model is never told about the registry)."""
     from kriya.workflow.contract_authority import derive_direct_contract_authorizations
     from kriya.workflow.contract_lifecycle import (
         INVALIDATED_BY_CONTRACT_REVISION,
@@ -99,23 +99,21 @@ def test_the_targeted_prd029_fixture_requires_the_authorized_contract_change(tmp
     live.write_targeted_prd029_repo(solved, live.TARGETED_PRD029_REFERENCE_SOLUTION)
     assert not _suite_passes(base), "the unchanged API must not satisfy the user's tests"
     assert _suite_passes(solved)
-    for owner, changed in live.TARGETED_PRD029_REFERENCE_SOLUTION.items():
-        assert _normalized_public_signatures(owner, live.TARGETED_PRD029_FILES[owner]) != \
-            _normalized_public_signatures(owner, changed), owner
+    assert _normalized_public_signatures("pricing.py", live.TARGETED_PRD029_FILES["pricing.py"]) != \
+        _normalized_public_signatures("pricing.py", live.TARGETED_PRD029_REFERENCE_SOLUTION["pricing.py"])
 
     plan = EngineeringPlan(plan_id="p", kind=ChangeKind.TASK, subtasks=[Subtask(
         id="s1", description="apply the change", execution_method=ExecutionMethod.MODEL,
-        planned_files=[PlannedFile(path=path, action=FileAction.MODIFY) for path in ("pricing.py", "checkout.py")],
+        planned_files=[PlannedFile(path="pricing.py", action=FileAction.MODIFY)],
     )])
     authorizations = derive_direct_contract_authorizations(live.TARGETED_PRD029_GOAL, plan)
-    assert sorted(a.authorization_id for a in authorizations) == [
-        "grounding_goal::checkout.py::checkout::modify", "grounding_goal::pricing.py::total::modify"]
+    assert [a.authorization_id for a in authorizations] == ["grounding_goal::pricing.py::total::modify"]
 
     kwargs = {"workspace_path": str(base), "registry": None, "original_contents": dict(live.TARGETED_PRD029_FILES),
               "final_contents": dict(live.TARGETED_PRD029_REFERENCE_SOLUTION), "transaction_id": "tx",
               "candidate_hash": "c"}
     transition = derive_contract_transition(authorizations=authorizations, downstream_verified=True, **kwargs)
-    assert set(transition.created) == {public_api_contract_id("pricing.py"), public_api_contract_id("checkout.py")}
+    assert transition.created == (public_api_contract_id("pricing.py"),)
     assert {"consumer": "checkout.py", "contract": public_api_contract_id("pricing.py"), "symbols": ["total"],
             "reason": INVALIDATED_BY_CONTRACT_REVISION} in [dict(i) for i in transition.invalidated_consumers]
     # Without the goal's authorization nothing is recorded as authorized.

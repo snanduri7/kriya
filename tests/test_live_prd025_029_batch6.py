@@ -468,35 +468,33 @@ async def test_live_prd029_authorized_api_change_is_bound_to_its_commit(cfg, tmp
         assert committed and committed[-1]["contract_registry"]["after_digest"] == registry.digest()
 
 
-# PRD-029 targeted fixture: the user's own tests call the new signatures, so
+# PRD-029 targeted fixture: the user's test calls total(items, tax_rate), so
 # no candidate that keeps total(items) can pass - the authorized public
-# contract change is the only solution. Kriya is never told about the
-# registry; it must derive the contract delta from the committed code.
+# contract change is the only solution. The parameter has a default so every
+# intermediate state stays valid whatever way the Planner splits the work:
+# checkout.py keeps calling total(items) and is the consumer the change
+# invalidates and the terminal full suite reverifies. Kriya is never told
+# about the registry; it derives the contract delta from the committed code.
 TARGETED_PRD029_FILES = {
     "pricing.py": "def total(items):\n    return sum(items)\n",
     "checkout.py": "from pricing import total\n\n\ndef checkout(items):\n    return total(items)\n",
     "tests/test_pricing.py": (
         "from pricing import total\n\n\n"
         "def test_total_applies_the_tax_rate():\n    assert total([10, 20], 0.5) == 45\n\n\n"
-        "def test_total_without_tax():\n    assert total([1, 2], 0.0) == 3\n"
+        "def test_total_defaults_to_no_tax():\n    assert total([1, 2]) == 3\n"
     ),
     "tests/test_checkout.py": (
         "from checkout import checkout\n\n\n"
-        "def test_checkout_passes_the_tax_rate_through():\n    assert checkout([10, 20], 0.5) == 45\n"
+        "def test_checkout_totals_the_items():\n    assert checkout([1, 2]) == 3\n"
     ),
 }
 TARGETED_PRD029_GOAL = (
-    "In pricing, change the method named total to take a required second parameter tax_rate and "
-    "return the sum multiplied by (1 + tax_rate). In checkout, change the method named checkout to "
-    "take a required second parameter tax_rate and pass it to total. The tests under tests/ define "
-    "the expected behaviour."
+    "In pricing, change the method named total to take a second parameter tax_rate with default 0.0 "
+    "and return the sum multiplied by (1 + tax_rate). The tests under tests/ define the expected behaviour."
 )
 # Used only by the offline fixture test, never shown to the model.
 TARGETED_PRD029_REFERENCE_SOLUTION = {
-    "pricing.py": "def total(items, tax_rate):\n    return sum(items) * (1 + tax_rate)\n",
-    "checkout.py": (
-        "from pricing import total\n\n\ndef checkout(items, tax_rate):\n    return total(items, tax_rate)\n"
-    ),
+    "pricing.py": "def total(items, tax_rate=0.0):\n    return sum(items) * (1 + tax_rate)\n",
 }
 
 
