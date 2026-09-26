@@ -1,0 +1,12 @@
+diff --git a/src/main/java/com/myapp/service/driver/DefaultDriverService.java b/src/main/java/com/myapp/service/driver/DefaultDriverService.java
+index 605d8c5..15f7097 100644
+--- a/src/main/java/com/myapp/service/driver/DefaultDriverService.java
++++ b/src/main/java/com/myapp/service/driver/DefaultDriverService.java
+@@ -84,6 +84,7 @@ public class DefaultDriverService implements DriverService
+     {
+         DriverDO driverDO = findDriverChecked(driverId);
+         driverDO.setDeleted(true);
++        driverRepository.save(driverDO);
+     }
+ 
+ 

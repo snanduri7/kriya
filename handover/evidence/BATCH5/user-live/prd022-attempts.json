@@ -1,0 +1,22 @@
+{
+  "developer_calls": [
+    {
+      "implicated_files": null,
+      "known_target_files": [
+        "src/product.py",
+        "tests/test_product.py"
+      ],
+      "operation_by_file": {
+        "src/product.py": "create_full_file",
+        "tests/test_product.py": "create_full_file"
+      },
+      "prior_error_context": null
+    }
+  ],
+  "files": [
+    "tests/test_product.py",
+    "src/product.py"
+  ],
+  "quality_gates_passed": true,
+  "redirect_restored": []
+}

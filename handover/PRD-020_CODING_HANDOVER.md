@@ -1,7 +1,7 @@
 # PRD-020 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION (batch 5: PRD-020 to PRD-024, one pytest stop for the whole batch).
+VERIFIED at `ff3e6c9` (batch 5). Focused batch-5 pytest 1962 passed at `023a9cd` (the earlier focused run's 1 failure, an enforce test fixture whose bare MagicMock kernel enabled the PRD-020 verifier, fixed in `7c9da46` together with an unbound `requirement_closure_attempts` on early-stop enforce runs); full `.venv/bin/pytest` 5829 passed, 1 failed at `bcac161` (same fixture cause in `tests/test_workflow_controller.py`, fixed in `ff3e6c9`, module re-run 32/0 under pytest); live `tests/test_live_prd020_024_batch5.py` 5/5 passed, evidence in `handover/evidence/BATCH5/user-live/`; demo-03 production-profile run PASS (REQ-4 closed_by_evidence via MUTATION_SCOPE, authorized = actual = DefaultDriverService.java only, all 4 REQs resolved, all terminal gates passed, 53/53 tests, verifier 1 call 3.19s 1685/86 tokens, baseline source captured), evidence in `handover/evidence/BATCH5/demo03-production/`. Doctor `--production` was PRODUCTION_READY=false only because fallback qwen3.6:35b-a3b-q4_K_M is NOT_QUALIFIED (hidden reasoning exhausts case budgets); the run never needed it.
 
 ## Source identity
 - Base revision: `9b1cca5` (batch 4 verified and pushed).

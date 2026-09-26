@@ -1,0 +1,12 @@
+{
+  "demo": "demo-03-brownfield",
+  "config": "/Users/sriramnanduri/kriya-live-demo/demo-03-brownfield/config/generate-production.yaml",
+  "goal_sha256": "bd57aa20d0268748db33b80f7976736a09b908a045c7d5f133048e8944426e1d",
+  "kriya_commit": "ff3e6c9d27f396b4ff3cee2844a0a77315287817",
+  "model": "qwen3-coder:30b",
+  "start_utc": "2026-09-26T02:08:44Z",
+  "end_utc": "2026-09-26T02:12:32Z",
+  "duration_seconds": 228,
+  "cli_exit_code": 0,
+  "verdict": "PASS"
+}
