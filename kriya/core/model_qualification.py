@@ -422,15 +422,45 @@ def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str], *, set
     return QualificationAssessment(QUALIFIED, fingerprint.digest)
 
 
+# Measured limits that describe the runtime's tokenizer, not its sampling:
+# the same for every inference identity of one runtime.
+RUNTIME_SCOPED_LIMITS = ("bytes_per_token_floor", "non_ascii_bytes_per_token_floor")
+
+
+def _runtime_current(record: Dict[str, Any], fingerprint: ModelRuntimeFingerprint) -> bool:
+    """Current for this runtime under the current policy, whatever its settings."""
+    return (record.get("fingerprint_digest") == fingerprint.digest
+            and record.get("adapter_version") == MODEL_PROTOCOL_ADAPTER_VERSION
+            and record.get("policy_version") == QUALIFICATION_POLICY_VERSION
+            and record.get("schema_version") == QUALIFICATION_SCHEMA_VERSION
+            and bool(record.get("inference_settings_digest")))
+
+
 def measured_limits_for(fingerprint: ModelRuntimeFingerprint, config: Any = None, *,
                         settings: InferenceSettings) -> Dict[str, Any]:
-    """Measured limits from a CURRENT record for this exact runtime under
-    these inference settings, else {}."""
+    """Measured limits for this exact runtime. Identity-scoped limits (e.g.
+    reasoning_tokens_max) come only from a CURRENT record under these
+    inference settings. Tokenizer floors (RUNTIME_SCOPED_LIMITS) are a
+    property of the runtime: the most conservative value over every current
+    record of the runtime, whatever its settings, so a prompt sized under
+    one identity (allocation, the Developer's) is counted the same way when
+    it is dispatched under another (a retry_temperature retry, a Reviewer
+    temperature). A policy-/2 record never contributes."""
     if not fingerprint.exact:
         return {}
     record = load_record(fingerprint.digest, settings)
     current, _ = record_is_current(record, fingerprint, settings)
-    return dict(record.get("measured_limits") or {}) if current and record else {}
+    limits = dict(record.get("measured_limits") or {}) if current and record else {}
+    for key in RUNTIME_SCOPED_LIMITS:
+        limits.pop(key, None)
+        values = [
+            stored["measured_limits"][key] for stored in _stored_records()
+            if _runtime_current(stored, fingerprint)
+            and isinstance((stored.get("measured_limits") or {}).get(key), (int, float))
+        ]
+        if values:
+            limits[key] = min(values)
+    return limits
 
 
 # --------------------------------------------------------------------------

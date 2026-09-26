@@ -204,6 +204,11 @@ logging:
 `traces.db` is the run history behind `kriya traces`. It is persistent state, not log output, so it has its own
 location: independent of the log settings, and never derived from the directory you run from.
 
+Besides one row per generation run, two kinds of row record work that ends outside a generation run, so its model
+calls (and why it ended) reach `kriya model metrics`. `<run_id>.enforce` is an enforce-mode run's own row: its terminal
+status, why structured planning failed, the original-requirement verdicts with their reason codes, and the calls no
+subtask row reported. `<group>.milestone-plan` is a `kriya plan-milestones` result. Neither is a run record.
+
 - **Which directory wins:** the `KRIYA_STATE_DIR` environment variable (absolute), then `paths.state`, then
   `~/.kriya/state`. The database is `<state>/traces.db`.
 - **A relative `paths.state`** resolves against the directory of the config file that sets it, never the CWD.
@@ -505,9 +510,11 @@ model_policy:
     # table_path: /abs/path/model_routing_table.json  (default: the state directory)
     # frozen_routes_path: /abs/path/frozen_routes.json (required for mode: frozen)
 ```
-A candidate is eligible only when its runtime is exactly identified and QUALIFIED for that role *as routed*: the one
-qualification record of that exact runtime must pass every case the role requires (the base cases, the role's own,
-and each protocol its profile enables). One record serves every role its cases cover; a runtime that passes the
+A candidate is eligible only when its runtime is exactly identified and QUALIFIED for that role *as routed*: the
+qualification record of that exact runtime, under the inference settings the role sends, must pass every case the role
+requires (the base cases, the role's own, and each protocol its profile enables). One record serves every role that
+sends the same settings and whose cases it covers; a record under other settings (another `reasoning_effort`, say)
+qualifies nothing for it. A runtime that passes the
 Planner's and Reviewer's cases but failed a Developer case such as `anchored_edit_protocol` is still not routed to
 the Developer. A model's runtime identity depends on the binding it is placed in (the Developer's is the primary
 `llm`, every other role's an `agent_llms` binding), so qualify a candidate for its route with

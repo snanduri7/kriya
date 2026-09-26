@@ -45,7 +45,13 @@ Two roles differing only in temperature would then count as "independent", and o
 | Any role with its own `agent_llms` binding or chain entry | that binding's `temperature` |
 | Other roles on the primary binding | `llm.temperature` |
 
-`retry_temperature` is a per-call Developer override, not a role setting. LLMClient dispatch resolves measured limits and adaptive tiers from the request's **actual** settings (`request_settings`). A retry sent at `retry_temperature` is therefore its own inference identity, usually unqualified: it gets no measured limit and no qualified tier. It is off by default.
+`retry_temperature` is a per-call Developer override, not a role setting. LLMClient dispatch resolves measured limits and adaptive tiers from the request's **actual** settings (`request_settings`). A retry sent at `retry_temperature` is therefore its own inference identity, usually unqualified: it gets no qualified tier and no `reasoning_tokens_max`. It is off by default; no shipped or demo config sets it.
+
+**Tokenizer floors are runtime-scoped.** This was a follow-up fix, not a separate commit. `bytes_per_token_floor` and `non_ascii_bytes_per_token_floor` measure the tokenizer, not sampling.
+- They are the most conservative value over every current (/3) record of the runtime, whatever its settings. A /2 record never contributes.
+- So a prompt sized at allocation (under the Developer identity) is counted with the same ratio at dispatch under another identity: a retry at `retry_temperature`, or a Reviewer at `reviewer_temperature`.
+- Without this, dispatch could fall back to the default ratio and refuse a prompt allocation had accepted (CONTEXT_BUDGET_UNSATISFIABLE).
+- Tested and mutation-checked. `reasoning_tokens_max` and the context tiers stay identity-scoped.
 
 **Consumers now pass the role's settings:**
 - `doctor --production`;
@@ -145,6 +151,7 @@ A routing candidate qualified under one `reasoning_effort` is MISSING under anot
 - **B. Role metrics are keyed by runtime digest, not inference identity.** Metrics from two settings of one runtime, for example qwen3.6 with and without `reasoning_effort`, aggregate into one routing-table row. Routing's qualification gate is identity-correct, but its ranking is not. This should be fixed before metrics-ranked routing is used for such a model.
 - **C. An exception raised mid-planning still writes no row** on the direct path (for example a Planner backend error that propagates). Enforce's `_StructuredPlanUnavailable` path is covered.
 - **D. Other responses without typed outcomes.** Shadow-mode Planner responses and milestone-Planner responses get no typed outcomes. Milestone planning does get its telemetry row.
+- **F. The enforce row goes beyond defect 2's letter.** `<run_id>.enforce` is written on every enforce terminal, including success, not only on planning failure. The reason: the terminal verifier's calls ran after the last subtask row and were charged to the next run. The row carries the run's real status and is not a RunRecord. Veto it if you read "no fake SUCCESS merely to capture telemetry" against it; the planning-failure half stands on its own.
 - **E. RunRecord is not extended.** It is the commit-lifecycle authority, with a closed annotatable field set. Verdict reasons are persisted in the ledger, the result and traces instead.
 
 ## Verification
@@ -172,6 +179,20 @@ Allowed checks run by Claude:
   tests/test_milestone3_4.py tests/test_agents.py tests/test_cli_smoke.py tests/test_strict_doubles.py
 ```
 **Full (user):** `.venv/bin/pytest`
+
+**Operational consequence of the policy bump.** Every existing qualification record is STALE. Any `runtime_profile: production` config therefore fails `doctor --production` `model.qualification` (and production fallback gating) until it is requalified, not only the MODEL-EVAL-001 arms.
+
+The identities were computed offline (probe disabled, no model calls):
+
+| config | identities to qualify |
+|---|---|
+| qwen3-coder arm | 1 |
+| qwen3.6 arm | 1 |
+| qwen3.8 arm | 1 |
+| demo-03 `generate-production.yaml` | 2 |
+
+- For demo-03, `requalify` covers qwen3-coder only if its runtime digest also matches the arm's. The settings digest does match (`ed7bfc09…`). Check with `kriya --config config/generate-production.yaml model status` from the demo workspace.
+- demo-03's qwen3.6 fallback sends `{}`: no `reasoning_effort`, and no top_p/top_k. That is a different identity. It stays unqualified: it was NOT_QUALIFIED under /2 too, and per the spec it is not changed or requalified in this batch.
 
 **Then live requalification (user):**
 - `cd ~/kriya-live-demo/demo-03-brownfield/model-eval-001 && ./setup.sh requalify`

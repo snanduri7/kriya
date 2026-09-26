@@ -435,3 +435,36 @@ def test_the_resume_fingerprint_binds_each_roles_inference_settings(monkeypatch)
     monkeypatch.setattr(inf, "role_inference_settings", reviewer_differs)
     after = resume_fingerprints.model_runtime_resume_fingerprint(cfg)
     assert before.available and after.available and before.value != after.value
+
+
+def test_tokenizer_floors_are_runtime_scoped_so_allocation_and_dispatch_agree():
+    """Allocation sizes a Developer prompt under the role identity; a retry at
+    retry_temperature is dispatched under another. Both must count with the
+    same measured bytes-per-token floor (never the default on one side)."""
+    fp = _fp()
+    developer = _settings()
+    retry = _settings(temperature=0.3)
+    record = _record(fp, developer)
+    record["measured_limits"] = {"bytes_per_token_floor": 3.2, "non_ascii_bytes_per_token_floor": 1.4,
+                                 "reasoning_tokens_max": 900}
+    mq.save_record(record)
+    at_allocation = mq.measured_limits_for(fp, settings=developer)
+    at_retry = mq.measured_limits_for(fp, settings=retry)
+    assert at_allocation["bytes_per_token_floor"] == at_retry["bytes_per_token_floor"] == 3.2
+    assert at_retry["non_ascii_bytes_per_token_floor"] == 1.4
+    # Identity-scoped limits stay with their identity.
+    assert at_allocation["reasoning_tokens_max"] == 900 and "reasoning_tokens_max" not in at_retry
+    # Two identities' floors: the most conservative one applies to both.
+    other = _record(fp, retry)
+    other["measured_limits"] = {"bytes_per_token_floor": 2.9}
+    mq.save_record(other)
+    assert mq.measured_limits_for(fp, settings=developer)["bytes_per_token_floor"] == 2.9
+
+
+def test_an_old_policy_record_contributes_no_tokenizer_floor():
+    fp = _fp()
+    legacy = _legacy_record(fp)
+    legacy["measured_limits"] = {"bytes_per_token_floor": 3.0}
+    with open(mq.record_path(fp.digest), "w", encoding="utf-8") as stream:
+        json.dump(legacy, stream)
+    assert mq.measured_limits_for(fp, settings=_settings()) == {}
