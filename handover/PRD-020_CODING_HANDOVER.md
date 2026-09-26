@@ -165,3 +165,10 @@ Tests: `tests/test_prd020_mutation_scope.py`, 34 passed (plain runner; 10 added 
 - the real CLI milestone driver: M2's earlier commit to another file makes the integration check VIOLATED although the integration candidate itself only touched the authorized file; both milestones in scope closes.
 
 Mutations, each caught: every named path authorized (the old rule), ambiguity ignored, reference cue as target, relational word ignored, no-cue path as target, negation ignored, actual paths used as authorized, evidence-id binding dropped, foreign check dropped, VIOLATED override dropped, committed history dropped, enforce call site dropped, direct call site dropped.
+
+### Focused-suite fix (7c9da46)
+
+The user's focused pytest run found one failure: `test_enforce_recovery_plan_self_correction_produces_candidate_and_resumes_consumer`.
+
+- **Cause.** `_fake_kernel()` is a bare `MagicMock`, so `autonomy.spec_compliance_enabled` was truthy. The terminal verifier then awaited a `MagicMock` check and correctly failed closed. The test had been failing since 0cf643f. The fixture now disables the verifier.
+- **Second bug, found while investigating.** `requirement_closure_attempts` was bound only inside the terminal gate block. An enforce run that stopped earlier therefore lost its whole `requirements` result block. The variable is now initialised with the other terminal gaps, and the no-progress test asserts it.
