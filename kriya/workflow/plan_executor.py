@@ -82,11 +82,22 @@ class WorkUnitInvocation:
     # goal). None for every other unit: a milestone or a subtask verifies
     # something narrower than the whole request.
     requirement_goal: Optional[str] = None
+    # PRD-025: the USER's own request text this unit runs under - the only
+    # text that may declare behaviour such as an expected nonzero exit. A
+    # milestone unit's own goal is MilestonePlanner text and never counts.
+    # None when the caller supplies it another way (an enforce subtask
+    # passes grounding_goal).
+    authoritative_goal: Optional[str] = None
+    # PRD-029: the contract ids of the capabilities a milestone unit
+    # provides; its commit establishes them in the same transaction.
+    provided_capabilities: Tuple[str, ...] = ()
 
     @classmethod
     def for_unit(cls, plan: ExecutionPlan, unit: WorkUnit) -> "WorkUnitInvocation":
         return cls(plan.source_kind, plan.plan_id, unit.id, plan.fingerprint,
-                   requirement_goal=requirement_goal_of(plan, unit))
+                   requirement_goal=requirement_goal_of(plan, unit),
+                   authoritative_goal=authoritative_goal_of(plan, unit),
+                   provided_capabilities=provided_capabilities_of(plan, unit))
 
 
 def requirement_goal_of(plan: ExecutionPlan, unit: WorkUnit) -> Optional[str]:
@@ -96,6 +107,28 @@ def requirement_goal_of(plan: ExecutionPlan, unit: WorkUnit) -> Optional[str]:
     if plan.source_kind is PlanSourceKind.MILESTONE and unit.role is WorkUnitRole.INTEGRATION:
         return unit.provenance_dict().get("original_goal")
     return None
+
+
+def authoritative_goal_of(plan: ExecutionPlan, unit: WorkUnit) -> Optional[str]:
+    """The user's own request text ``unit`` runs under: the direct goal, or
+    a milestone plan's original goal (carried by its integration unit)."""
+    if plan.source_kind is PlanSourceKind.DIRECT:
+        return unit.goal
+    if plan.source_kind is PlanSourceKind.MILESTONE:
+        integration = next((u for u in plan.work_units if u.role is WorkUnitRole.INTEGRATION), None)
+        return integration.provenance_dict().get("original_goal") if integration is not None else None
+    return None
+
+
+def provided_capabilities_of(plan: ExecutionPlan, unit: WorkUnit) -> Tuple[str, ...]:
+    """Contract ids (``<milestone>:<capability>``) a milestone unit provides."""
+    if plan.source_kind is not PlanSourceKind.MILESTONE or unit.role is not WorkUnitRole.PRIMARY:
+        return ()
+    milestone = unit.provenance_dict().get("milestone") or {}
+    return tuple(
+        f"{milestone.get('id')}:{capability.get('name')}"
+        for capability in milestone.get("provides") or () if capability.get("name")
+    )
 
 
 class PlanDriver:

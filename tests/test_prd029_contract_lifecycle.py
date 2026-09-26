@@ -356,7 +356,8 @@ writes = [StagedFileWrite(target_path=path, content=V2, base_path=path, expected
 def build(*, candidate_hash):
     return cl.derive_contract_transition(
         workspace_path=workspace, registry=None, original_contents={OWNER: V1}, final_contents={OWNER: V2},
-        authorizations=[auth], transaction_id="tx1", candidate_hash=candidate_hash, downstream_verified=True)
+        authorizations=[auth], transaction_id="tx1", candidate_hash=candidate_hash, downstream_verified=True,
+        capability_contracts=("M1:Pricing",))
 
 with begin_mutating_run(workspace) as ctx:
     transition_mutating_run(ctx, RunLifecycle.RUNNING)
@@ -379,9 +380,21 @@ def _crash(workspace, crash_at):
     ("after_promote", cl.TRANSITION_ALREADY_APPLIED, OWNER_V2),
 ])
 def test_a_crash_at_every_boundary_recovers_to_an_exact_registry(tmp_path, crash_at, expected, source_after):
+    """The directive's three crash windows, with a milestone capability in
+    the same transaction: before the source commit, after it but before the
+    registry is persisted, and after the registry but before the RunRecord
+    settles."""
     workspace = _workspace(tmp_path)
+    planned = ContractRegistry()
+    planned.register("M1:Pricing", "Pricing", "M1", "pricing")  # PROPOSED at plan time
+    save_contract_registry(workspace, planned)
     before = load_contract_registry(workspace).digest()
     _crash(workspace, crash_at)
+    # Before recovery: the intent names both exact registry identities.
+    [cycle] = _record(workspace).commits
+    assert cycle["contract_registry"]["before_digest"] == before
+    assert cycle["contract_registry"]["established_capabilities"] == ["M1:Pricing"]
+    assert _record(workspace).terminal_status != "SUCCESS"
     report = recover_workspace(workspace)
     assert report.errors == []
     [transition] = report.contract_transitions
@@ -389,12 +402,18 @@ def test_a_crash_at_every_boundary_recovers_to_an_exact_registry(tmp_path, crash
     assert Path(workspace, OWNER).read_text() == source_after
     live = load_contract_registry(workspace).digest()
     record = _record(workspace)
+    capability = load_contract_registry(workspace).get("M1:Pricing")
     if source_after == OWNER_V2:
         assert live == record.commits[0]["contract_registry"]["after_digest"]
+        assert capability.state is ContractState.IMPLEMENTED
     else:
         assert live == before
+        assert capability.state is ContractState.PROPOSED
     assert record.terminal_status != "SUCCESS"
     assert not os.path.exists(pending_contract_registry_path(workspace, "tx1"))
+    # No duplicate transition: a second recovery changes nothing.
+    again = recover_workspace(workspace)
+    assert again.contract_transitions == [] and load_contract_registry(workspace).digest() == live
 
 
 # --- resume fingerprint ------------------------------------------------------------------------
@@ -571,8 +590,15 @@ async def test_milestone_completion_bookkeeping_preserves_contracts_its_unit_com
     async def unit_commits_a_contract(*args, **kwargs):
         calls["n"] += 1
         if calls["n"] == 1:
-            # What the commit seam promotes: a transition FROM the live registry.
-            transition = _derive(workspace, registry=load_contract_registry(workspace))
+            # What the commit seam promotes: ONE transition from the live
+            # registry carrying both the API contract and the capabilities
+            # this milestone unit provides.
+            transition = cl.derive_contract_transition(
+                workspace_path=workspace, registry=None, original_contents={OWNER: OWNER_V1},
+                final_contents={OWNER: OWNER_V2}, authorizations=[_auth()], transaction_id="tx1",
+                candidate_hash="hash1", downstream_verified=True,
+                capability_contracts=kwargs["work_unit"].provided_capabilities,
+            )
             save_contract_registry(workspace, ContractRegistry.from_dict(transition.after_payload))
         return {"quality_gates_passed": True, "design": "d", "files": [OWNER]}
 
@@ -589,3 +615,126 @@ async def test_milestone_completion_bookkeeping_preserves_contracts_its_unit_com
     live = load_contract_registry(workspace)
     assert live.get("api:src/Owner.java").source_revision == "tx1:hash1"
     assert live.get("M1:Pricing").state is ContractState.IMPLEMENTED
+
+
+
+# --- milestone capabilities are part of the commit transaction ---------------------------------
+
+
+def _planned_registry(workspace, *capabilities):
+    registry = ContractRegistry()
+    for contract_id in capabilities:
+        milestone, name = contract_id.split(":")
+        registry.register(contract_id, name, milestone, name)
+    save_contract_registry(workspace, registry)
+    return registry
+
+
+def test_capabilities_are_established_by_the_commit_transition(tmp_path):
+    workspace = _workspace(tmp_path)
+    _planned_registry(workspace, "M1:Pricing")
+    transition = cl.derive_contract_transition(
+        workspace_path=workspace, registry=None, original_contents={}, final_contents={}, authorizations=[],
+        transaction_id="tx1", candidate_hash="h1", downstream_verified=False,
+        capability_contracts=("M1:Pricing", "M9:NeverRegistered"),
+    )
+    assert transition.established_capabilities == ("M1:Pricing",)
+    assert transition.created == transition.changed == transition.stale == ()
+    record = ContractRegistry.from_dict(transition.after_payload).get("M1:Pricing")
+    assert record.state is ContractState.IMPLEMENTED and record.source_revision == "tx1:h1"
+    assert ContractRegistry.from_dict(transition.after_payload).try_get("M9:NeverRegistered") is None
+    assert transition.intent()["established_capabilities"] == ["M1:Pricing"]
+
+
+def test_an_already_established_capability_is_not_transitioned_twice(tmp_path):
+    workspace = _workspace(tmp_path)
+    registry = _planned_registry(workspace, "M1:Pricing")
+    for step in (registry.approve, registry.freeze, registry.mark_implemented):
+        step("M1:Pricing")
+    save_contract_registry(workspace, registry)
+    assert cl.derive_contract_transition(
+        workspace_path=workspace, registry=None, original_contents={}, final_contents={}, authorizations=[],
+        transaction_id="tx2", candidate_hash="h2", downstream_verified=False, capability_contracts=("M1:Pricing",),
+    ) is None
+
+
+def test_a_committed_milestone_without_its_capability_transition_is_incomplete(tmp_path, monkeypatch):
+    from kriya.workflow import milestones as milestones_module
+    from kriya.workflow.execution_plan import WorkUnitRole
+
+    workspace = _workspace(tmp_path)
+    _planned_registry(workspace, "M1:Pricing")
+    from test_milestones import mkv2
+
+    milestone = mkv2("M1", goal="g1", provides=[{"name": "Pricing"}])
+    driver = milestones_module._MilestonePlanDriver.__new__(milestones_module._MilestonePlanDriver)
+    driver.workspace_path = workspace
+    driver.contract_registry = load_contract_registry(workspace)
+    driver.run_state = SimpleNamespace(established_dependencies={})
+    driver.by_id = {"M1": milestone}
+    driver._cycles_before = {"M1": 0}
+    unit = SimpleNamespace(id="M1", role=WorkUnitRole.PRIMARY)
+
+    monkeypatch.setattr(milestones_module, "check_dependency_regression", lambda *a: [])
+    monkeypatch.setattr(milestones_module, "owning_run_commits",
+                        lambda ws: ("run", [{"transaction_id": "tx1", "result": COMMIT_COMMITTED}]))
+    import asyncio
+
+    result = asyncio.run(driver.check_passed_unit(unit, {"quality_gates_passed": True, "status": "success"}))
+    assert result["quality_gates_passed"] is False
+    assert result["status"] == "contract_registry_incomplete"
+    assert result["reason_codes"] == [cl.CONTRACT_REGISTRY_TRANSITION_INCOMPLETE]
+    assert result["unestablished_capabilities"] == ["M1:Pricing"]
+
+    # The same unit with its capability established by the transaction passes.
+    registry = load_contract_registry(workspace)
+    for step in (registry.approve, registry.freeze, registry.mark_implemented):
+        step("M1:Pricing")
+    save_contract_registry(workspace, registry)
+    ok = asyncio.run(driver.check_passed_unit(unit, {"quality_gates_passed": True, "status": "success"}))
+    assert ok["quality_gates_passed"] is True
+
+    # A unit that committed nothing establishes nothing and is not failed for it.
+    monkeypatch.setattr(milestones_module, "owning_run_commits", lambda ws: ("run", []))
+    _planned_registry(workspace, "M1:Pricing")
+    idle = asyncio.run(driver.check_passed_unit(unit, {"quality_gates_passed": True, "status": "success"}))
+    assert idle["quality_gates_passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_milestone_units_commit_establishes_its_capabilities(tmp_path):
+    """End to end through run_generation_workflow: the unit's own terminal
+    commit carries WorkUnitInvocation.provided_capabilities into the
+    registry transition, committed with its source."""
+    from kriya.config import AppConfig
+    from kriya.core.kernel import Kernel
+    from kriya.core.llm import LLMClient
+    from kriya.workflow.execution_plan import PlanSourceKind
+    from kriya.workflow.plan_executor import WorkUnitInvocation
+    from kriya.workflow.workflow import WorkflowEngine
+
+    for args in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "t"],
+                 ["commit", "-q", "--allow-empty", "-m", "base"]):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True)
+    _planned_registry(str(tmp_path), "M1:MathLib")
+    cfg = AppConfig()
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.skills = str(tmp_path / "skills")
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(side_effect=["Step 1: write code", "Design: math.py"] + ["Review: done"] * 5)
+    we = WorkflowEngine(Kernel(config=cfg), llm)
+    we.developer.run_generation = AsyncMock(
+        return_value=[{"filepath": "math.py", "content": "def add(a, b):\n    return a + b\n"}],
+    )
+    invocation = WorkUnitInvocation(
+        PlanSourceKind.MILESTONE, "plan-1", "M1", provided_capabilities=("M1:MathLib",),
+        authoritative_goal="Create math library",
+    )
+    with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
+               return_value={"success": True, "output": "ok"}):
+        res = await we.run_generation_workflow(goal="M1: math", workspace_path=str(tmp_path), work_unit=invocation)
+
+    assert res["quality_gates_passed"] is True, res.get("failure_category")
+    assert res["contract_registry"]["established_capabilities"] == ["M1:MathLib"]
+    assert load_contract_registry(str(tmp_path)).get("M1:MathLib").state is ContractState.IMPLEMENTED

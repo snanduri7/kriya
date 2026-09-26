@@ -31,7 +31,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
 from kriya.control.contracts import (
     ContractRegistryCorruptError,
-    mark_capabilities_implemented,
+    ContractState,
     register_provided_capabilities,
     wire_contract_consumers,
 )
@@ -44,6 +44,7 @@ from kriya.control.persistence import (
     save_control_state,
 )
 from kriya.control.run_coordinator import annotate_run, coordinated_mutation, owning_run_commits
+from kriya.control.run_record import COMMIT_COMMITTED
 from kriya.control.workspace_identity import ownership_metadata, validate_ownership
 from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.workflow.attempt import _build_python_runtime_grounding
@@ -58,7 +59,6 @@ from kriya.workflow.edit_safety import read_file_revision
 from kriya.workflow.execution_plan import ExecutionPlan, TerminalPhase, WorkUnit, WorkUnitRole
 from kriya.workflow.file_resolution import _resolve_run_command, ground_python_runtime_target
 from kriya.workflow.milestone_completion import (
-    COMPLETION_RECONSTRUCTED,
     COMPLETION_RECONSTRUCTION_UNVERIFIED,
     LOOP_FAILED,
     LOOP_PASSED,
@@ -1241,15 +1241,37 @@ class _MilestonePlanDriver(PlanDriver):
             result["dropped_dependencies"] = dropped
             return result
         if milestone.provides:
-            self.contract_registry = _live_contract_registry(self.workspace_path, milestone.id)
-            mark_capabilities_implemented(self.contract_registry, milestone)
-            _persist_contract_registry(
-                self.workspace_path,
-                self.contract_registry,
-                authoritative=self.authoritative,
-                milestone_id=milestone.id,
-            )
+            incomplete = self._unestablished_capabilities(unit, milestone)
+            if incomplete:
+                # PRD-029: the unit committed source but its capability
+                # transition is not in the registry - an incomplete
+                # transaction, never a successful milestone.
+                result = dict(result)
+                result["quality_gates_passed"] = False
+                result["status"] = "contract_registry_incomplete"
+                from kriya.workflow.contract_lifecycle import CONTRACT_REGISTRY_TRANSITION_INCOMPLETE
+                result["reason_codes"] = [CONTRACT_REGISTRY_TRANSITION_INCOMPLETE]
+                result["unestablished_capabilities"] = incomplete
         return result
+
+    def _unestablished_capabilities(self, unit: WorkUnit, milestone: MilestoneV2) -> List[str]:
+        """PRD-029: a milestone's provided capabilities are established only
+        by the transaction that commits its source (the terminal commit
+        seam, WorkUnitInvocation.provided_capabilities) - never marked by
+        bookkeeping afterwards. Returns the registered capabilities that
+        are still not IMPLEMENTED although this unit committed source. A
+        unit that committed nothing establishes nothing (and is not failed
+        for it)."""
+        self.contract_registry = _live_contract_registry(self.workspace_path, milestone.id)
+        owned = owning_run_commits(self.workspace_path)
+        cycles = owned[1][self._cycles_before.get(unit.id, 0):] if owned is not None else []
+        if not any(cycle.get("result") == COMMIT_COMMITTED for cycle in cycles):
+            return []
+        return [
+            f"{milestone.id}:{capability.name}" for capability in milestone.provides
+            if (record := self.contract_registry.try_get(f"{milestone.id}:{capability.name}")) is not None
+            and record.state is not ContractState.IMPLEMENTED
+        ]
 
     def retry_failed_unit(self, unit: WorkUnit, result: Dict[str, Any]) -> bool:
         milestone = self._milestone(unit)
@@ -1664,15 +1686,11 @@ async def run_milestones(
             _persist_milestone_control_state(
                 workspace_path, control_state, authoritative=authoritative,
             )
-    # A completion reconstructed from durable evidence (S4c-2) gets the same
-    # contract bookkeeping its interrupted run would have made.
-    reconstructed_ids = {
-        event.get("milestone_id") for event in reuse_assessment.events
-        if event.get("code") == COMPLETION_RECONSTRUCTED
-    }
-    for milestone in run_state.milestones:
-        if milestone.id in reconstructed_ids and milestone.provides:
-            mark_capabilities_implemented(contract_registry, milestone)
+    # PRD-029: a completion reconstructed from durable evidence (S4c-2) gets
+    # no capability bookkeeping here - its capabilities were established by
+    # its own commit transaction, which `kriya runs recover` completes
+    # exactly when the run was interrupted. The planned (PROPOSED)
+    # registrations above are persisted before any unit runs.
     _persist_contract_registry(
         workspace_path, contract_registry, authoritative=authoritative,
     )

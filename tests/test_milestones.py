@@ -719,7 +719,14 @@ async def test_run_milestones_registers_and_implements_declared_capabilities():
     exact real orchestration loop, 2026-08-24. A milestone that declares
     provides[] must end this run with a real, persisted, IMPLEMENTED
     ContractRecord - not just a planning-time validation signal that
-    evaporates once the plan is accepted."""
+    evaporates once the plan is accepted.
+
+    PRD-029: IMPLEMENTED is reached only through the unit's own commit
+    transaction (its WorkUnitInvocation carries the capability ids to the
+    terminal commit seam). This mocked unit commits nothing, so the
+    capabilities stay registered PROPOSED - never marked by bookkeeping
+    afterwards (tests/test_prd029_contract_lifecycle.py covers the
+    committed transaction)."""
     milestones = [
         mkv2("M1", goal="g1", success_criterion="c1", provides=[
             {"name": "ProtocolCodec", "description": "encode/decode Protocol objects"},
@@ -740,9 +747,15 @@ async def test_run_milestones_registers_and_implements_declared_capabilities():
         assert result["status"] == "success"
         registry = load_contract_registry(tmp)
         codec = registry.get("M1:ProtocolCodec")
-        assert codec.state == ContractState.IMPLEMENTED
+        assert codec.state == ContractState.PROPOSED
         assert codec.shape == "encode/decode Protocol objects"
-        assert registry.get("M2:MainEntrypoint").state == ContractState.IMPLEMENTED
+        assert registry.get("M2:MainEntrypoint").state == ContractState.PROPOSED
+        invocations = {
+            call.kwargs["work_unit"].work_unit_id: call.kwargs["work_unit"].provided_capabilities
+            for call in we.run_generation_workflow.await_args_list
+        }
+        assert invocations["M1"] == ("M1:ProtocolCodec",)
+        assert invocations["M2"] == ("M2:MainEntrypoint",)
 
 
 @pytest.mark.asyncio

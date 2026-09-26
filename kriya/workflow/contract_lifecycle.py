@@ -97,6 +97,7 @@ class RegistryTransition:
     stale: Tuple[str, ...]
     invalidated_consumers: Tuple[Dict[str, Any], ...]
     downstream_verification: Dict[str, Any]
+    established_capabilities: Tuple[str, ...] = ()
 
     def intent(self) -> Dict[str, Any]:
         """What the RunRecord commit cycle records about this transition."""
@@ -108,6 +109,7 @@ class RegistryTransition:
             "created": list(self.created),
             "changed": list(self.changed),
             "stale": list(self.stale),
+            "established_capabilities": list(self.established_capabilities),
             "invalidated_consumers": [dict(item) for item in self.invalidated_consumers],
             "downstream_verification": dict(self.downstream_verification),
         }
@@ -183,6 +185,7 @@ def derive_contract_transition(
     transaction_id: str,
     candidate_hash: str,
     downstream_verified: bool,
+    capability_contracts: Sequence[str] = (),
 ) -> Optional[RegistryTransition]:
     """The registry transition a verified candidate implies, or None when it
     changes no contract. ``registry`` None loads the live registry strictly.
@@ -274,7 +277,19 @@ def derive_contract_transition(
             ))
             stale.append(contract_id)
             invalidated.extend(invalidations)
-    if not (created or changed or stale):
+    # A milestone unit's provided capabilities are established by the same
+    # transaction as its committed source - never by bookkeeping afterwards.
+    # An id already IMPLEMENTED (a replayed or recovered unit) is not
+    # transitioned twice; an id the run never registered is not invented.
+    established: List[str] = []
+    for contract_id in capability_contracts:
+        record = after.try_get(contract_id)
+        if record is None or record.state is ContractState.IMPLEMENTED:
+            continue
+        _establish(after, contract_id)
+        after.replace_current(contract_id, replace(after.get(contract_id), source_revision=source_revision))
+        established.append(contract_id)
+    if not (created or changed or stale or established):
         return None
     verification = {
         "required": bool(invalidated),
@@ -297,6 +312,7 @@ def derive_contract_transition(
         after_digest=registry_digest(payload),
         after_payload=payload,
         created=tuple(created), changed=tuple(changed), stale=tuple(stale),
+        established_capabilities=tuple(established),
         invalidated_consumers=tuple(invalidated),
         downstream_verification=verification,
     )

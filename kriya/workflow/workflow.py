@@ -3561,6 +3561,9 @@ class WorkflowEngine:
             strict_spec_compliance=strict_spec_compliance,
             execution_scope=execution_scope,
             grounding_goal=grounding_goal,
+            exit_authority_goal=(
+                (work_unit.authoritative_goal if work_unit is not None else None) or grounding_goal or ""
+            ),
             migration_resolution=resolved_migration_resolution,
             structured_plan=structured_plan,
             current_subtask_id=current_subtask_id,
@@ -4825,6 +4828,11 @@ class WorkflowEngine:
                         authorizations=tuple(contract_authorizations),
                         transaction_id=terminal_transaction_id,
                         downstream_verified=downstream_verified,
+                        # PRD-029: a milestone unit establishes its provided
+                        # capabilities in this same transaction.
+                        capability_contracts=(
+                            work_unit.provided_capabilities if work_unit is not None else ()
+                        ),
                     ),
                 )
                 if not commit_outcome.committed:
