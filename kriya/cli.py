@@ -754,6 +754,64 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
         click.secho(f"Execution failed: {e}", fg="red")
         sys.exit(1)
 
+@main.group(name="context")
+def context_group() -> None:
+    """PRD-027: context-recall certification - does Kriya's retrieval deliver
+    the evidence a task needs, independently of any model."""
+    pass
+
+
+@context_group.command(name="certify")
+@click.option("--json", "as_json", is_flag=True, help="Print the certification record as JSON.")
+@click.pass_context
+def context_certify(ctx: click.Context, as_json: bool) -> None:
+    """Run the version-controlled recall/precision benchmark against the
+    configured embedding model and record the result outside the workspace.
+    Never calls a chat model. Exit 0 only when every class target and the
+    precision target are met."""
+    import asyncio
+
+    from kriya.memory.vector import OllamaEmbeddingClient
+    from kriya.workflow.context_certification import (
+        EMBEDDER_CONFIGURED,
+        embedding_runtime_identity,
+        run_certification,
+        save_certification,
+    )
+
+    cfg = _model_cfg(ctx)
+    runtime = embedding_runtime_identity(cfg)
+    if runtime == "unavailable":
+        click.secho(
+            f"Error: the exact runtime identity of embedding model {cfg.embedding.model} cannot be "
+            "proven (not served, or not a local exact runtime) - a certification must bind to it.",
+            fg="red", err=True,
+        )
+        sys.exit(1)
+    client = OllamaEmbeddingClient(
+        base_url=cfg.embedding.base_url, model=cfg.embedding.model, egress_policy=cfg.autonomy.egress_policy,
+    )
+    report = asyncio.run(run_certification(
+        cfg, embedding_client=client, embedder=EMBEDDER_CONFIGURED, embedding_runtime=runtime,
+    ))
+    path = save_certification(cfg, report)
+    data = report.to_dict()
+    if as_json:
+        click.echo(json.dumps({**data, "record_path": path}, indent=2, sort_keys=True))
+    else:
+        click.echo(f"=== Context-recall certification ({data['identity']['suite_version']}) ===")
+        for name, entry in data["classes"].items():
+            marker = "PASS" if entry["passed"] else "FAIL"
+            misses = ", ".join(f"{reason}={count}" for reason, count in sorted(entry["misses"].items()))
+            click.echo(
+                f"[{marker}] {name}: {entry['hits']}/{entry['golden']} recall {entry['recall']} "
+                f"(target {entry['target']}){' - ' + misses if misses else ''}"
+            )
+        click.echo(f"precision {data['precision']} (target {data['precision_target']})")
+        click.echo(f"CERTIFIED={str(data['certified']).lower()}  record: {path}")
+    sys.exit(0 if data["certified"] else 1)
+
+
 @main.group(name="model")
 def model_group() -> None:
     """PRD-013/014: exact model runtime identity and protocol qualification.

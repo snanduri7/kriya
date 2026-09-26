@@ -27,7 +27,7 @@ PRD-023,Derived Contract Change Classification and Escalation,Wave 5,P1,PRD-022,
 PRD-024,Brownfield PRE/POST Full-Regression Auto Policy,Wave 5,P0,PRD-023,REQUIRED,VERIFIED,see PRD-024_CODING_HANDOVER.md,"PYTEST_VERIFIED@ff3e6c9 (focused 1962/0 at 023a9cd; full 5829/1 at bcac161, the 1 = test_workflow_controller bare-MagicMock verifier fixture, fixed in ff3e6c9 and module re-run 32/0)","LIVE_VERIFIED@ff3e6c9 (tests/test_live_prd020_024_batch5.py 5/5; demo-03 production run PASS, REQ-4 MUTATION_SCOPE; evidence handover/evidence/BATCH5/)"
 PRD-025,Bounded Runtime-Verifier Evidence Package,Wave 5,P0,PRD-024,REQUIRED,READY_FOR_PYTEST_VERIFICATION,PRD-025 commit on 510fd98 (see handover/PRD-025_CODING_HANDOVER.md),,
 PRD-026,Universal Retry Progress Invariant Audit and Closure,Wave 5,P1,PRD-025,REQUIRED,READY_FOR_PYTEST_VERIFICATION,PRD-026 commit (see handover/PRD-026_CODING_HANDOVER.md),,
-PRD-027,Context Recall Certification Suite,Wave 5,P1,PRD-026,REQUIRED,NOT_STARTED,,,
+PRD-027,Context Recall Certification Suite,Wave 5,P1,PRD-026,REQUIRED,READY_FOR_PYTEST_VERIFICATION,7c07a74 + 8aa6d26 + PRD-027 (2/2) commit (see handover/PRD-027_CODING_HANDOVER.md),,
 PRD-028,Dynamic Mutation Authority Escalation and Language Adapter Contract,Wave 5,P1,PRD-027,REQUIRED,NOT_STARTED,,,
 PRD-029,ContractRegistry Lifecycle Closure,Wave 5,P1,PRD-028,REQUIRED,NOT_STARTED,,,
 PRD-030,Extract TerminalGateService and CommitService,Wave 6,P2,PRD-029,NOT REQUIRED,NOT_STARTED,,,

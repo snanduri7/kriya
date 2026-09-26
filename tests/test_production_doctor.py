@@ -51,6 +51,11 @@ def _production_cfg(tmp_path):
     for (top, leaf), value in runtime_profile_preset_fields("production").items():
         setattr(getattr(cfg, top), leaf, value)
     cfg.plugins.directory = str(tmp_path / "plugins")
+    # No code index unless a test builds one: the PRD-027 recall
+    # certification applies only where Graph RAG retrieval runs, and a
+    # CWD-relative default would otherwise pick up whatever index the
+    # directory the suite runs from happens to hold.
+    cfg.paths.memory = str(tmp_path / "memory")
     core = tmp_path / "plugins" / "core_tools"
     core.mkdir(parents=True)
     (core / "__init__.py").write_text("", encoding="utf-8")
@@ -181,7 +186,7 @@ def test_check_ids_are_pinned_unique_and_always_complete(tmp_path):
         "capacity.temp", "git.worktree", "isolation.candidate_worktree", "toolchain.required",
         "containment.oci_smoke", "containment.no_host_fallback", "egress.policy",
         "model.connectivity", "model.runtime_fingerprint", "model.qualification",
-        "embedding.connectivity", "lsp.java", "models.role_independence",
+        "embedding.connectivity", "context.recall_certification", "lsp.java", "models.role_independence",
         "semantic.precision_boundary", "release.integrity", "runtime.fixed_guarantees",
     )
 
@@ -765,3 +770,46 @@ def test_real_smoke_assertions_detect_an_uncontained_container():
     fields = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
     assert fields["IPV4_ROUTES"] != "0"
     assert fields["CAPEFF"] != "0000000000000000"
+
+
+# --- PRD-027: context-recall certification -----------------------------------------------
+
+def _with_code_index(cfg):
+    os.makedirs(cfg.paths.memory, exist_ok=True)
+    open(os.path.join(cfg.paths.memory, "vector_index.db"), "wb").close()
+
+
+def test_recall_certification_not_applicable_without_a_code_index(tmp_path):
+    check = _checks(_run(tmp_path))["context.recall_certification"]
+    assert check.required is False
+    assert check.status is CheckStatus.PASS
+    assert check.evidence["status"] == "NOT_APPLICABLE"
+
+
+def test_missing_recall_certification_blocks_a_deployment_that_uses_retrieval(tmp_path):
+    cfg = _production_cfg(tmp_path)
+    _with_code_index(cfg)
+    report = _run(tmp_path, cfg=cfg)
+    check = _checks(report)["context.recall_certification"]
+    assert check.required is True
+    assert check.status is CheckStatus.FAIL
+    assert check.evidence["status"] == "MISSING"
+    assert "context.recall_certification" in _blocking(report)
+
+
+def test_stored_recall_certification_passes_and_the_doctor_never_runs_the_benchmark(tmp_path):
+    from kriya.workflow import context_certification as cc
+
+    cfg = _production_cfg(tmp_path)
+    _with_code_index(cfg)
+    with _healthy_boundaries():
+        identity = cc.certification_identity(
+            cfg, embedder=cc.EMBEDDER_CONFIGURED, embedding_runtime=cc.embedding_runtime_identity(cfg),
+        )
+    report_obj = cc.CertificationReport(identity=identity)
+    with patch.object(cc.CertificationReport, "certified", return_value=True):
+        cc.save_certification(cfg, report_obj)
+    with patch.object(cc, "run_certification", side_effect=AssertionError("doctor must not run the benchmark")):
+        check = _checks(_run(tmp_path, cfg=cfg))["context.recall_certification"]
+    assert check.status is CheckStatus.PASS
+    assert check.evidence["status"] == "CERTIFIED"

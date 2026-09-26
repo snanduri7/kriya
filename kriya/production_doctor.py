@@ -366,6 +366,7 @@ PRODUCTION_DOCTOR_CHECK_IDS = (
     "model.runtime_fingerprint",
     "model.qualification",
     "embedding.connectivity",
+    "context.recall_certification",
     "lsp.java",
     "models.role_independence",
     "semantic.precision_boundary",
@@ -870,6 +871,39 @@ def _check_embedding(ctx: _Context) -> DoctorCheck:
         )
 
 
+def _recall_certification_required(cfg: AppConfig) -> bool:
+    """Required exactly when Graph RAG retrieval is in use (a code index
+    exists at paths.memory)."""
+    from kriya.workflow.context_certification import retrieval_applicable
+
+    return retrieval_applicable(cfg)
+
+
+def _check_recall_certification(ctx: _Context) -> DoctorCheck:
+    """PRD-027: reads the stored certification for this exact embedding
+    runtime, retrieval policy, index implementation and suite. It never
+    runs the benchmark."""
+    from kriya.workflow.context_certification import (
+        STATUS_CERTIFIED,
+        STATUS_NOT_APPLICABLE,
+        STATUS_UNAVAILABLE,
+        certification_status,
+    )
+
+    status, detail = certification_status(ctx.cfg)
+    check_status = (
+        CheckStatus.PASS if status in (STATUS_CERTIFIED, STATUS_NOT_APPLICABLE)
+        else CheckStatus.UNAVAILABLE if status == STATUS_UNAVAILABLE
+        else CheckStatus.FAIL
+    )
+    return _check(
+        "context.recall_certification", check_status,
+        required=_recall_certification_required(ctx.cfg),
+        evidence={"status": status, "detail": detail},
+        remediation="Run `kriya context certify` against the configured embedding model (see docs/user_guide.md).",
+    )
+
+
 def _check_lsp(ctx: _Context) -> DoctorCheck:
     from kriya.tools.lsp import find_jdtls
 
@@ -1013,6 +1047,7 @@ _CHECKS: Tuple[Tuple[str, Union[bool, Callable[[AppConfig], bool]], Callable[[_C
     ("model.runtime_fingerprint", True, _check_runtime_fingerprint),
     ("model.qualification", True, _check_qualification),
     ("embedding.connectivity", True, _check_embedding),
+    ("context.recall_certification", _recall_certification_required, _check_recall_certification),
     ("lsp.java", False, _check_lsp),
     ("models.role_independence", _role_independence_required, _check_role_independence),
     ("semantic.precision_boundary", False, _check_precision_boundary),

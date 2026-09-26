@@ -13,6 +13,11 @@ invariants and writes the model-dependent evidence to
   candidate with the same error (an ineffective-repair loop). At
   temperature 0 the run must stop within the retry bound (NO_PROGRESS or
   budget exhaustion), with the retry-progress block recorded - never loop.
+- PRD-027: (a) the certification suite against the REAL configured embedding
+  model, persisted as the production record doctor reads; (b) a real
+  generate run on the certification's Java fixture repository, indexed with
+  the real embedder - the Developer's own prompt must carry the golden
+  evidence (code quality is secondary).
 
 Run:
     KRIYA_BATCH6_EVIDENCE_DIR=handover/evidence/BATCH6/user-live \\
@@ -180,3 +185,82 @@ async def test_live_prd026_ineffective_repair_terminates(cfg, tmp_path):
     # max_retries + targeted_max_retries + API recovery allowance: never an
     # unbounded loop.
     assert calls["n"] <= 12
+
+
+EMBED_MODEL = os.environ.get("KRIYA_LIVE_EMBED_MODEL", "nomic-embed-text:latest")
+
+
+@pytest.mark.asyncio
+async def test_live_prd027_certification_with_the_real_embedder(cfg):
+    from kriya.memory.vector import OllamaEmbeddingClient
+    from kriya.workflow import context_certification as cc
+
+    cfg.embedding.model = EMBED_MODEL
+    cfg.embedding.base_url = BASE_URL
+    runtime = cc.embedding_runtime_identity(cfg)
+    assert runtime != "unavailable", "the live embedding runtime must be exactly identifiable"
+    client = OllamaEmbeddingClient(base_url=BASE_URL, model=EMBED_MODEL, egress_policy=cfg.autonomy.egress_policy)
+    report = await cc.run_certification(
+        cfg, embedding_client=client, embedder=cc.EMBEDDER_CONFIGURED, embedding_runtime=runtime,
+    )
+    path = cc.save_certification(cfg, report)
+    data = report.to_dict()
+    _evidence("prd027_certification.json", {**data, "record_path": path})
+    # Mechanics: every class measured, every miss typed. Whether the real
+    # embedder certifies is the recorded result, not a test assumption.
+    assert set(data["classes"]) == set(cc.CLASS_RECALL_TARGETS)
+    for case in data["cases"]:
+        for item in case["items"]:
+            assert item["outcome"] in (cc.HIT, cc.NOT_RETRIEVED, cc.BUDGET_EXHAUSTED,
+                                       cc.TIER_INSUFFICIENT, cc.SOURCE_UNAVAILABLE)
+
+
+@pytest.mark.asyncio
+async def test_live_prd027_developer_prompt_receives_golden_evidence(cfg, tmp_path):
+    from unittest.mock import patch
+
+    from kriya.analyzer.analyzer import RepositoryAnalyzer
+    from kriya.core.kernel import Kernel
+    from kriya.core.role_metrics import current_model_role
+    from kriya.workflow.context_recall_fixtures import JAVA_SHOP
+    from kriya.workflow.workflow import WorkflowEngine
+
+    cfg.embedding.model = EMBED_MODEL
+    cfg.embedding.base_url = BASE_URL
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    repo = tmp_path / "java-shop"
+    for path, content in JAVA_SHOP.files:
+        (repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / path).write_text(content, encoding="utf-8")
+    cfg.paths.memory = str(tmp_path / "memory")
+    cfg.paths.skills = str(tmp_path / "skills")
+    os.makedirs(cfg.paths.memory)
+    await RepositoryAnalyzer(str(repo)).index_repository(cfg, force=True, generate_conventions_skill=False)
+
+    case = JAVA_SHOP.cases[0]
+    developer_prompts = []
+    llm = LLMClient(cfg)
+    real_complete_result = llm.complete_result
+
+    async def recording(system_prompt, prompt, *args, **kwargs):
+        if current_model_role() == "developer":
+            developer_prompts.append(system_prompt + "\n" + prompt)
+        return await real_complete_result(system_prompt, prompt, *args, **kwargs)
+
+    engine = WorkflowEngine(Kernel(config=cfg), llm)
+    with patch.object(llm, "complete_result", side_effect=recording), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
+               return_value={"success": True, "output": "compile skipped in live context test"}), \
+         patch("kriya.tools.validate.PolymorphicValidator.run_tests",
+               return_value={"success": True, "output": "tests skipped in live context test"}):
+        await engine.run_generation_workflow(goal=case.goal, workspace_path=str(repo))
+
+    assert developer_prompts, "the Developer must have been called"
+    first = developer_prompts[0]
+    present = {item.path: item.path in first for item in case.golden}
+    _evidence("prd027_developer_context.json", {"goal": case.goal, "golden_present": present})
+    for required in ("src/main/java/com/shop/order/OrderService.java",
+                     "src/main/java/com/shop/order/DiscountPolicy.java",
+                     "src/main/java/com/shop/order/OrderController.java"):
+        assert present[required], required
