@@ -1,6 +1,18 @@
 # MODEL-EVAL-001: results (user-run, 2026-09-26)
 
-**Status:** COMPLETE: 9/9 timed runs plus qualification. **Recommendation: no default or routing change.** Packaged defaults are unchanged, and nothing was pushed.
+**Status:** COMPLETE: 9/9 timed runs plus qualification. The experiment design was APPROVED as-is (user review, 2026-09-26). **Recommendation: no default or routing change.** Packaged defaults are unchanged.
+
+**Gate (user review):** no packaged-default or production-routing change based on MODEL-EVAL-001 until **MODEL-QUAL-IDENTITY-001** (`DEFECT_MODEL_QUAL_IDENTITY_001.md`) is fixed and the affected qualification records are revalidated.
+
+## Exact runtime identity per arm (all `exact: true`, Ollama 0.34.2, GGUF Q4_K_M, 32K)
+
+| arm | runtime digest | Ollama artifact (image) | weights blob |
+|---|---|---|---|
+| qwen3-coder:30b | `ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276` | `sha256:06c1097efce0431c2045fe7b2e5108366e43bee1b4603a7aded8f21689e90bca` | `sha256:1194192cf2a187eb02722edcc3f77b11d21f537048ce04b67ccf8ba78863006a` |
+| qwen3.6:35b-a3b-q4_K_M | `cc523e4c9b6508b99e24b8bc9b8842946fd7c5285fcb3a4a5b0d69adb24c7e6f` | `sha256:07d35212591fc27746f0a317c975a6d68754fb38e9053d82e25f06057af28522` | `sha256:f5ee307a2982106a6eb82b62b2c00b575c9072145a759ae4660378acda8dcf2d` |
+| qwen3.8:27b | `3b84735255dfe12988bf0a55bdf5554d11365d0de04f256508dd1e0592ab5e29` | `sha256:22130167c4c20e20c7b71454612966ca8e8171e9b3cc8ab6ce8aa6cbfec79643` (= image ID `22130167c4c2`, the intended Q4_K_M image) | `sha256:f5f1dd8920d417aac2718b0bda3403da274301efdd6760b4f0f4b864ff2ad57d` |
+
+qwen3.8 at 64K is a separate runtime (`2241d06be2ee…`), used for qualification only.
 
 **Evidence:** `~/kriya-live-demo/demo-03-brownfield/model-eval-001/evidence/` (`comparison.md`/`.json`, `qualification/`, `runs/<arm>/run-N/`). The settings are described in `MODEL_EVAL_001_PREP.md`: 32K, production profile, no fallback, `reasoning_effort: none` on the thinking models.
 
@@ -45,6 +57,21 @@ The first `comparison.md` merged rows across runs, so its model-call times and t
 
 - **Run 1:** code was generated, but the verifier returned no usable per-requirement verdict. All four REQs were UNKNOWN, and production blocks on UNKNOWN, so the result was `REQUIREMENTS_UNRESOLVED` and the candidate was not applied. The mutation-scope evidence itself was clean: only the target file was touched.
 - **Run 3:** the Planner produced an unsafe structured plan three times (`VERIFICATION_EVIDENCE_PATH_MISSING` ×2, `STRUCTURED_PLAN_SCHEMA_INVALID`), so plan repair ran out.
+
+## Verdict in the review's priority order (qwen3.8 against each baseline)
+
+| priority | vs qwen3-coder | vs qwen3.6 |
+|---|---|---|
+| 1. correctness/completion | 3/3 vs 3/3: **equal** | 3/3 vs 1/3: **better** |
+| 2. false success / protocol failures | 0/0 vs 0/0: equal | 0/0 vs 0/0: equal |
+| 3. first-attempt success | 3 vs 3: equal | 3 vs 2: better |
+| 4. retries | 0 vs 0: equal | 0 vs 0: equal |
+| 5. total workflow time (median) | 784 s vs 231 s: **3.4× worse** | 784 s vs 317 s: 2.5× worse |
+| 6. tokens/latency (model-call median) | 510 s vs 81 s: worse | 510 s vs 81 s: worse |
+
+False success means Kriya reported success but the diff grade or the independent re-check disagreed. There were none in any arm.
+
+**Architect promotion evidence = INSUFFICIENT.** demo-03 runs in enforce mode, which makes no Architect call, so the Architect has qualification evidence only. That would change only if a separate real Architect task were run.
 
 ## Against the promotion rule, per role
 
