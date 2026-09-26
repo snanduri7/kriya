@@ -623,13 +623,24 @@ def model_runtime_resume_fingerprint(config: Any) -> Fingerprint:
     """PRD-013: the exact runtimes of every model a production role can call
     (the Developer's llm + llm_chain, each agent_llms binding), plus the
     config fields this owner owns. Available only when EVERY runtime is
-    exact; otherwise UNAVAILABLE, which never matches."""
+    exact; otherwise UNAVAILABLE, which never matches.
+
+    MODEL-QUAL-IDENTITY-001: also each role's inference-settings digest per
+    model (temperature, reasoning, reasoning_effort, sampling options...),
+    and the context tiers offered under each distinct settings identity, so
+    a checkpoint never resumes under different inference behaviour."""
+    from kriya.core.inference_settings import role_inference_settings
     from kriya.core.model_qualification import offered_context_tiers, role_models
     from kriya.core.model_runtime import _binding_for, binding_object, resolve_configured_model_runtime
 
-    models = list(dict.fromkeys(m for chain in role_models(config).values() for m in chain))
+    by_role = role_models(config)
+    models = list(dict.fromkeys(m for chain in by_role.values() for m in chain))
     digests = {}
-    tiers = {}
+    tiers: Dict[str, Any] = {}
+    settings_by_role = {
+        role: {model.casefold(): role_inference_settings(config, role, model) for model in chain}
+        for role, chain in by_role.items()
+    }
     for model in models:
         fingerprint = resolve_configured_model_runtime(config, model)
         if not fingerprint.exact:
@@ -643,14 +654,23 @@ def model_runtime_resume_fingerprint(config: Any) -> Fingerprint:
         # or revoked since the checkpoint changes what a request would use.
         binding = binding_object(config, model) or config.llm
         address = _binding_for(config, model)
-        offer = offered_context_tiers(
-            config, model, fingerprint, binding.context_policy,
-            base_url=address.get("base_url") or config.llm.base_url,
-            api_key=address.get("api_key") or config.llm.api_key,
-        )
-        tiers[model.casefold()] = [dict(item) for item in offer.evidence if item.get("source")]
+        distinct = {s.digest: s for per_model in settings_by_role.values()
+                    for key, s in per_model.items() if key == model.casefold()}
+        for settings_digest, settings in sorted(distinct.items()):
+            offer = offered_context_tiers(
+                config, model, fingerprint, binding.context_policy,
+                base_url=address.get("base_url") or config.llm.base_url,
+                api_key=address.get("api_key") or config.llm.api_key,
+                settings=settings,
+            )
+            tiers[f"{model.casefold()}@{settings_digest}"] = [
+                dict(item) for item in offer.evidence if item.get("source")
+            ]
+    inference = {role: {model: s.digest for model, s in per_model.items()}
+                 for role, per_model in settings_by_role.items()}
     owned = split_config_by_owner(config.model_dump())["model_runtime"]
-    return Fingerprint(_digest({"runtimes": digests, "context_tiers": tiers, "config": owned}), "model-runtime")
+    return Fingerprint(_digest({"runtimes": digests, "inference_settings": inference, "context_tiers": tiers,
+                                "config": owned}), "model-runtime")
 
 
 def _declaration_mutable(write_scope_mode: Any, allowed_write_relpaths: Any, structured_plan: Any) -> bool:

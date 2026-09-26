@@ -170,9 +170,13 @@ def test_prd019_routing_over_two_real_runtimes_is_deterministic(cfg, tmp_path):
     planner_runtime = resolve_configured_model_runtime(
         cfg, PRIMARY, base_url=planner_binding.base_url, api_key=planner_binding.api_key,
         extra_body=planner_binding.extra_body)
-    for runtime in (fallback_runtime, planner_runtime):
+    from kriya.core.inference_settings import role_inference_settings
+
+    for runtime, settings in ((fallback_runtime, role_inference_settings(placed, "reviewer", FALLBACK)),
+                              (planner_runtime, role_inference_settings(cfg, "planner", PRIMARY))):
         assert runtime.exact, runtime.to_dict()
-        mq.save_record(mq.build_record(runtime, [mq.CaseResult(c, mq.PASS) for c in mq.CAPABILITIES]))
+        mq.save_record(mq.build_record(runtime, [mq.CaseResult(c, mq.PASS) for c in mq.CAPABILITIES],
+                                       settings=settings))
 
     first = mr.plan_routes(cfg).to_events()
     clear_model_runtime_cache()

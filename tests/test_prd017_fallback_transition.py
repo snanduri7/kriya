@@ -16,6 +16,7 @@ from kriya.config import AppConfig
 from kriya.config.config import DEFAULT_OUTPUT_TOKENS, FallbackModelConfig, ModelCapabilities
 from kriya.core import model_qualification as mq
 from kriya.core import model_runtime
+from kriya.core.inference_settings import role_inference_settings
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.core.model_runtime import ModelRuntimeFingerprint
@@ -95,7 +96,7 @@ def _exact_ollama(monkeypatch):
 def _qualify(cfg, model, **statuses):
     runtime = model_runtime.resolve_configured_model_runtime(cfg, model)
     results = [mq.CaseResult(c, statuses.get(c, mq.PASS)) for c in mq.CAPABILITIES]
-    mq.save_record(mq.build_record(runtime, results))
+    mq.save_record(mq.build_record(runtime, results, settings=role_inference_settings(cfg, "developer", model)))
 
 
 def _ctx(workspace, cfg, developer):

@@ -610,6 +610,7 @@ def allocation_window(config: Any, binding: Any = None) -> int:
     window = binding.context_window
     ratio = None
     try:
+        from kriya.core.inference_settings import binding_inference_settings
         from kriya.core.model_qualification import measured_limits_for
         from kriya.core.model_runtime import resolve_configured_model_runtime
 
@@ -618,7 +619,9 @@ def allocation_window(config: Any, binding: Any = None) -> int:
             extra_body=binding.extra_body or {},
         )
         window = fingerprint.effective_context_window or window
-        ratio = measured_limits_for(fingerprint, config).get("bytes_per_token_floor")
+        ratio = measured_limits_for(
+            fingerprint, config, settings=binding_inference_settings(config, "developer", binding),
+        ).get("bytes_per_token_floor")
     except Exception as error:  # never blocks context assembly
         logger.debug("Allocation window for %s uses the configured window: %s", binding.model, error)
     output = binding_output_tokens(config, binding)

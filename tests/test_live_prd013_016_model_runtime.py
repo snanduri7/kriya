@@ -69,15 +69,18 @@ def test_prd013_fingerprint_is_stable_and_drift_invalidates_qualification(cfg):
     assert first.exact, first.to_dict()
     assert first.digest == second.digest
 
-    record = mq.build_record(first, [mq.CaseResult(cap, mq.PASS) for cap in mq.CAPABILITIES])
+    from kriya.core.inference_settings import role_inference_settings
+
+    settings = role_inference_settings(cfg, "developer", cfg.llm.model)
+    record = mq.build_record(first, [mq.CaseResult(cap, mq.PASS) for cap in mq.CAPABILITIES], settings=settings)
     mq.save_record(record)
-    assert mq.assess(first, ("plain_completion",)).status == mq.QUALIFIED
+    assert mq.assess(first, ("plain_completion",), settings=settings).status == mq.QUALIFIED
 
     cfg.llm.extra_body = {"options": {"num_ctx": 4096}}
     drifted = resolve_configured_model_runtime(cfg, fresh=True)
     assert drifted.digest != first.digest
-    assert mq.assess(drifted, ("plain_completion",)).status == mq.MISSING
-    current, reasons = mq.record_is_current(record, drifted)
+    assert mq.assess(drifted, ("plain_completion",), settings=settings).status == mq.MISSING
+    current, reasons = mq.record_is_current(record, drifted, settings)
     assert not current and any("fingerprint changed" in reason for reason in reasons)
     _evidence("prd013-fingerprint.json", {"first": first.to_dict(), "second_digest": second.digest,
                                           "drifted": drifted.to_dict(), "stale_reasons": reasons})
@@ -98,7 +101,10 @@ def test_prd014_full_qualification_campaign_reports_every_case(cfg):
         assert statuses[capability] == mq.PASS, (capability, record["cases"])
     assert record["measured_limits"]["bytes_per_token_floor"] > 0
     assert os.path.exists(path)
-    developer = mq.assess(resolve_configured_model_runtime(cfg), mq.required_capabilities(cfg, "developer", cfg.llm.model))
+    from kriya.core.inference_settings import role_inference_settings
+
+    developer = mq.assess(resolve_configured_model_runtime(cfg), mq.required_capabilities(cfg, "developer", cfg.llm.model),
+                          settings=role_inference_settings(cfg, "developer", cfg.llm.model))
     _evidence("prd014-developer-assessment.json", developer.to_dict())
     assert developer.status in (mq.QUALIFIED, mq.NOT_QUALIFIED)
 

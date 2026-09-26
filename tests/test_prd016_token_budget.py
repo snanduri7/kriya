@@ -333,8 +333,11 @@ async def test_a_qualified_tokenizer_ratio_is_used_for_the_exact_runtime(monkeyp
         kriya_protocol=model_runtime.kriya_protocol_identity(llm.config, llm.config.llm.model),
     )
     assert first.runtime_fingerprint == resolved.digest
+    from kriya.core.inference_settings import role_inference_settings
+
     record = build_record(resolved, [CaseResult(c, "PASS", measured={"bytes_per_token_floor": 3.2}
-                                                if c == "tokenizer_measurement" else {}) for c in CAPABILITIES])
+                                                if c == "tokenizer_measurement" else {}) for c in CAPABILITIES],
+                          settings=role_inference_settings(llm.config, "developer", llm.config.llm.model))
     save_record(record)
     with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=_response())):
         second = await llm.complete_result("s", "u" * 3200)

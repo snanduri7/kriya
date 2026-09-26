@@ -969,16 +969,29 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
                   out_path: Optional[str], context_window: Optional[int], route_role: Optional[str]) -> None:
     """Run the protocol qualification cases against the exact served runtime.
 
-    The record is keyed by the runtime fingerprint and stored outside the
-    workspace (~/.kriya/qualifications, or KRIYA_QUALIFICATION_HOME). It
-    becomes stale when the runtime, Kriya's protocol adapter or the
-    qualification policy changes. With --context-window the runtime is the
-    same model at that num_ctx (a different fingerprint); context_capacity
-    then sends one near-window request, which loads the model at that size."""
-    from kriya.core.model_qualification import CAPABILITIES, QualificationError, run_qualification, save_record
+    The record is keyed by the runtime fingerprint plus the inference
+    settings the model is called with (temperature, reasoning flag,
+    reasoning_effort, sampling options: MODEL-QUAL-IDENTITY-001) and stored
+    outside the workspace (~/.kriya/qualifications, or
+    KRIYA_QUALIFICATION_HOME). It becomes stale when the runtime, those
+    settings, Kriya's protocol adapter or the qualification policy changes.
+    When the configured roles call the model with different settings, each
+    distinct settings identity is qualified in turn. With --context-window
+    the runtime is the same model at that num_ctx (a different fingerprint);
+    context_capacity then sends one near-window request, which loads the
+    model at that size."""
+    from kriya.core.inference_settings import role_inference_settings
+    from kriya.core.model_qualification import (
+        CAPABILITIES,
+        QualificationError,
+        role_models,
+        run_qualification,
+        save_record,
+    )
 
     cfg = _model_cfg(ctx)
     _bootstrap_logging(cfg, file_logging=False)
+    target = model_name or cfg.llm.model
     if route_role:
         from kriya.core.model_routing import place_candidate
 
@@ -986,6 +999,15 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
         if candidate is None:
             raise click.UsageError(f"--role needs --model to name a model_policy.routing candidate; {model_name!r} is not")
         cfg = place_candidate(cfg, route_role, candidate)
+        identities = {role_inference_settings(cfg, route_role, target).digest: (
+            role_inference_settings(cfg, route_role, target), [route_role])}
+    else:
+        identities = {}
+        users = [role for role, models in role_models(cfg).items()
+                 if any(m.casefold() == target.casefold() for m in models)] or ["developer"]
+        for role in users:
+            settings = role_inference_settings(cfg, role, target)
+            identities.setdefault(settings.digest, (settings, []))[1].append(role)
     unknown = sorted(set(cases) - set(CAPABILITIES))
     if unknown:
         raise click.UsageError(f"unknown case(s) {unknown}; known: {', '.join(CAPABILITIES)}")
@@ -995,28 +1017,36 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
             color = {"PASS": "green", "FAIL": "red"}.get(result.status, "yellow")
             click.secho(f"  {result.capability:<28} {result.status:<11} {result.elapsed_seconds:>7.2f}s", fg=color)
 
-    if not json_output:
-        window_note = f" at num_ctx {context_window}" if context_window else ""
-        click.secho(f"Qualifying {model_name or cfg.llm.model}{window_note} ...", bold=True)
-    try:
-        record = asyncio.run(run_qualification(cfg, model_name, only=cases or None, progress=progress,
-                                               context_window=context_window))
-    except QualificationError as error:
-        click.secho(str(error), fg="red", err=True)
-        ctx.exit(1)
-        return
-    if cases:
-        record["partial"] = True
-    path = None if cases else save_record(record, workspace_root=os.path.realpath(os.getcwd()))
+    records = []
+    for settings, roles in identities.values():
+        if not json_output:
+            window_note = f" at num_ctx {context_window}" if context_window else ""
+            click.secho(f"Qualifying {target}{window_note} for {', '.join(roles)} "
+                        f"(inference settings {settings.digest}: temperature={settings.temperature}, "
+                        f"reasoning={settings.reasoning}, extra_body={settings.extra_body_json}) ...", bold=True)
+        try:
+            record = asyncio.run(run_qualification(cfg, target, only=cases or None, progress=progress,
+                                                   context_window=context_window, settings=settings))
+        except QualificationError as error:
+            click.secho(str(error), fg="red", err=True)
+            ctx.exit(1)
+            return
+        record["roles"] = roles
+        if cases:
+            record["partial"] = True
+        path = None if cases else save_record(record, workspace_root=os.path.realpath(os.getcwd()))
+        records.append(record)
+        if not json_output:
+            click.echo(f"\nSummary: {record['summary']}  measured limits: {record['measured_limits']}")
+            click.echo(f"Runtime fingerprint: {record['fingerprint_digest']}")
+            click.echo(f"Qualification identity: {record['qualification_identity']}")
+            click.echo(f"Record: {path}" if path else "Partial run (--case): not saved as a qualification record.")
+    output: Any = records[0] if len(records) == 1 else {"records": records}
     if out_path:
         with open(out_path, "w", encoding="utf-8") as stream:
-            json.dump(record, stream, indent=2, sort_keys=True)
+            json.dump(output, stream, indent=2, sort_keys=True)
     if json_output:
-        click.echo(json.dumps(record, indent=2, sort_keys=True))
-    else:
-        click.echo(f"\nSummary: {record['summary']}  measured limits: {record['measured_limits']}")
-        click.echo(f"Runtime fingerprint: {record['fingerprint_digest']}")
-        click.echo(f"Record: {path}" if path else "Partial run (--case): not saved as a qualification record.")
+        click.echo(json.dumps(output, indent=2, sort_keys=True))
 
 
 @model_group.command(name="status")
@@ -1024,6 +1054,7 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
 @click.pass_context
 def model_status(ctx: click.Context, json_output: bool) -> None:
     """Show each production role's models, exact runtimes and qualification."""
+    from kriya.core.inference_settings import role_inference_settings
     from kriya.core.model_qualification import QUALIFIED, assess, required_capabilities, role_models
     from kriya.core.model_runtime import resolve_configured_model_runtime
 
@@ -1034,10 +1065,12 @@ def model_status(ctx: click.Context, json_output: bool) -> None:
         report[role] = []
         for model in models:
             runtime = resolve_configured_model_runtime(cfg, model, fresh=True)
-            assessment = assess(runtime, required_capabilities(cfg, role, model),
+            settings = role_inference_settings(cfg, role, model)
+            assessment = assess(runtime, required_capabilities(cfg, role, model), settings=settings,
                                 workspace_root=os.path.realpath(os.getcwd()))
             all_qualified &= assessment.status == QUALIFIED
-            report[role].append({"model": model, "exact": runtime.exact, **assessment.to_dict()})
+            report[role].append({"model": model, "exact": runtime.exact, "inference_settings": settings.to_dict(),
+                                 **assessment.to_dict()})
     if json_output:
         click.echo(json.dumps(report, indent=2, sort_keys=True))
     else:

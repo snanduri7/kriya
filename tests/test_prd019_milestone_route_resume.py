@@ -22,6 +22,7 @@ from kriya.core import model_qualification as mq
 from kriya.core import model_routing as mr
 from kriya.core import model_runtime
 from kriya.core import role_metrics as rm
+from kriya.core.inference_settings import role_inference_settings
 from kriya.core.llm import LLMClient
 from kriya.core.model_runtime import ModelRuntimeFingerprint
 from kriya.core.state_paths import trace_db_path
@@ -68,7 +69,8 @@ def _qualify(cfg, alias):
     placed = mr.place_candidate(cfg, "reviewer", next(c for c in cfg.model_policy.routing.candidates
                                                        if c.model == alias))
     runtime = model_runtime.resolve_configured_model_runtime(placed, alias)
-    mq.save_record(mq.build_record(runtime, [mq.CaseResult(c, mq.PASS) for c in mq.CAPABILITIES]))
+    mq.save_record(mq.build_record(runtime, [mq.CaseResult(c, mq.PASS) for c in mq.CAPABILITIES],
+                                   settings=role_inference_settings(placed, "reviewer", alias)))
     return runtime.digest
 
 

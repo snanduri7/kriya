@@ -1,17 +1,26 @@
 """PRD-014: exact local model runtime qualification.
 
 A qualification record is evidence that ONE exact runtime (a PRD-013
-``ModelRuntimeFingerprint`` digest) passed the protocol cases Kriya uses with
+``ModelRuntimeFingerprint`` digest), called with ONE set of inference
+settings (``kriya/core/inference_settings.py``: temperature, reasoning flag,
+reasoning_effort, sampling options and every other ``extra_body`` field
+except the per-call ``num_ctx``), passed the protocol cases Kriya uses with
 it, under one Kriya protocol-adapter version and one qualification policy
 version. It is never inferred from a model's name or benchmark reputation.
+Records are keyed by the qualification identity (runtime digest + settings
+digest, MODEL-QUAL-IDENTITY-001), so a record qualified with
+``reasoning_effort: none`` never qualifies the same runtime called without it.
 
 - Every case yields PASS, FAIL or UNAVAILABLE with its evidence. UNAVAILABLE
   is never PASS.
 - A runtime that is not ``exact`` (artifact digest and provider version
   known) cannot be qualified at all.
-- A record is STALE when the runtime fingerprint, the protocol adapter
-  version or the policy version differs from the current one; a stale
-  record qualifies nothing and its measured limits are not used.
+- A record is STALE when the runtime fingerprint, the inference settings,
+  the protocol adapter version or the policy version differs from the
+  current one; a stale record qualifies nothing and its measured limits are
+  not used. A policy-/2 record (keyed by the runtime digest alone, from
+  before inference settings were part of the identity) is still found and
+  reported STALE, never MISSING, and is never silently reinterpreted.
 - Records live OUTSIDE any workspace (``~/.kriya/qualifications`` by
   default, ``KRIYA_QUALIFICATION_HOME`` to override), like SEC-009 and
   TOOL-002 approvals, so a repository can never ship its own qualification.
@@ -43,10 +52,13 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
 
+from kriya.core.inference_settings import InferenceSettings, qualification_identity
 from kriya.core.model_runtime import MODEL_PROTOCOL_ADAPTER_VERSION, ModelRuntimeFingerprint
 
-QUALIFICATION_POLICY_VERSION = "kriya-qualification/2"
-QUALIFICATION_SCHEMA_VERSION = 1
+# /3 (MODEL-QUAL-IDENTITY-001): records are keyed by runtime + inference
+# settings; every /2 record is STALE and must be re-qualified.
+QUALIFICATION_POLICY_VERSION = "kriya-qualification/3"
+QUALIFICATION_SCHEMA_VERSION = 2
 QUALIFICATION_HOME_ENV = "KRIYA_QUALIFICATION_HOME"
 
 PASS, FAIL, UNAVAILABLE = "PASS", "FAIL", "UNAVAILABLE"
@@ -162,32 +174,47 @@ def context_tier_requirements(config: Any, model: str) -> Tuple[str, ...]:
     return tuple(dict.fromkeys([*required, *CONTEXT_TIER_REQUIREMENTS]))
 
 
-def recorded_context_sizes(fingerprint: ModelRuntimeFingerprint) -> List[int]:
-    """Context windows other than ``fingerprint``'s own that have a
-    qualification record for the same served artifact at the same endpoint
-    (candidates only: each is re-verified against its own current
-    fingerprint before use)."""
+def _stored_records() -> Iterable[Dict[str, Any]]:
     home = qualification_home()
-    sizes = set()
     try:
-        names = os.listdir(home)
+        names = sorted(os.listdir(home))
     except OSError:
-        return []
+        return
     for name in names:
         if not name.endswith(".json"):
             continue
         try:
             with open(os.path.join(home, name), encoding="utf-8") as stream:
-                recorded = (json.load(stream) or {}).get("fingerprint") or {}
-        except (OSError, ValueError, AttributeError):
+                record = json.load(stream)
+        except (OSError, ValueError):
             continue
+        if isinstance(record, dict):
+            yield record
+
+
+def recorded_context_sizes(fingerprint: ModelRuntimeFingerprint, settings: InferenceSettings) -> List[int]:
+    """Context windows other than ``fingerprint``'s own that have a
+    qualification record for the same served artifact at the same endpoint
+    under the same inference settings (candidates only: each is re-verified
+    against its own current fingerprint before use)."""
+    sizes = set()
+    for record in _stored_records():
+        recorded = record.get("fingerprint") if isinstance(record.get("fingerprint"), dict) else {}
         size = recorded.get("configured_context_window")
         if (isinstance(size, int) and size != fingerprint.configured_context_window
+                and record.get("inference_settings_digest") == settings.digest
                 and recorded.get("artifact_digest") == fingerprint.artifact_digest
                 and recorded.get("endpoint") == fingerprint.endpoint
                 and str(recorded.get("alias", "")).casefold() == fingerprint.alias.casefold()):
             sizes.add(size)
     return sorted(sizes)
+
+
+def runtime_has_records(runtime_digest: str) -> bool:
+    """Whether any qualification record, under any inference settings or
+    policy version, exists for this exact runtime. An operator-declared tier
+    stands in for qualification only while there is no such data at all."""
+    return any(record.get("fingerprint_digest") == runtime_digest for record in _stored_records())
 
 
 @dataclass(frozen=True)
@@ -202,12 +229,13 @@ class ContextTierOffer:
 
 
 def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFingerprint, policy: Any, *,
-                          base_url: str, api_key: str) -> ContextTierOffer:
-    """A tier is offered when this exact runtime at that num_ctx has a
-    current qualification record passing every case the model's roles need
-    plus context_capacity, or - while no qualification data exists for it -
-    when the operator declared it safe; a NOT_QUALIFIED or STALE record
-    overrides a declaration. Never above the policy ceiling or the model's
+                          base_url: str, api_key: str, settings: InferenceSettings) -> ContextTierOffer:
+    """A tier is offered when this exact runtime at that num_ctx, called with
+    ``settings``, has a current qualification record passing every case the
+    model's roles need plus context_capacity, or - while no qualification
+    data exists for that runtime at all, under any settings or policy - when
+    the operator declared it safe; a NOT_QUALIFIED or STALE record, or a
+    record under other inference settings, overrides a declaration. Never above the policy ceiling or the model's
     trained length. The window can only be chosen per request on an exact
     Ollama runtime (num_ctx is an Ollama request option); anywhere else the
     adaptive policy behaves like strict and says so."""
@@ -226,7 +254,7 @@ def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFing
     declared = set(policy.declared_safe_context_tiers)
     sizes = set(declared)
     if fingerprint.exact:
-        sizes |= set(recorded_context_sizes(fingerprint))
+        sizes |= set(recorded_context_sizes(fingerprint, settings))
     if not sizes:
         return ContextTierOffer((), ceiling, "")
     if not fingerprint.exact or fingerprint.provider != "ollama":
@@ -245,12 +273,14 @@ def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFing
             base_url=base_url, model=model, api_key=api_key, egress_policy=config.autonomy.egress_policy,
             configured_context=size, kriya_protocol=fingerprint.kriya_protocol, config=config,
         )
-        assessment = assess(tier_runtime, context_tier_requirements(config, model))
+        assessment = assess(tier_runtime, context_tier_requirements(config, model), settings=settings)
         source = None
         if assessment.status == QUALIFIED:
             source = TIER_SOURCE_QUALIFICATION_RECORD
-        elif assessment.status == MISSING and size in declared:
+        elif assessment.status == MISSING and size in declared and not runtime_has_records(tier_runtime.digest):
             source = TIER_SOURCE_OPERATOR_DECLARED
+        elif assessment.status == MISSING and size in declared:
+            notes.append(f"{size}: {MISSING} for these inference settings (qualified under other settings)")
         else:
             notes.append(f"{size}: {assessment.status}")
         if source:
@@ -282,14 +312,16 @@ def _refuse_inside_workspace(path: str, workspace_root: Optional[str]) -> None:
         )
 
 
-def record_path(fingerprint_digest: str, workspace_root: Optional[str] = None) -> str:
+def record_path(record_key: str, workspace_root: Optional[str] = None) -> str:
+    """``<home>/<key>.json``; the key is a qualification identity (or, for a
+    policy-/2 record, the runtime digest it was keyed by)."""
     home = qualification_home()
     _refuse_inside_workspace(home, workspace_root)
-    return os.path.join(home, f"{fingerprint_digest}.json")
+    return os.path.join(home, f"{record_key}.json")
 
 
 def save_record(record: Dict[str, Any], workspace_root: Optional[str] = None) -> str:
-    path = record_path(record["fingerprint_digest"], workspace_root)
+    path = record_path(record["qualification_identity"], workspace_root)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as stream:
@@ -298,13 +330,21 @@ def save_record(record: Dict[str, Any], workspace_root: Optional[str] = None) ->
     return path
 
 
-def load_record(fingerprint_digest: str, workspace_root: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def _read_record(record_key: str, workspace_root: Optional[str]) -> Optional[Dict[str, Any]]:
     try:
-        with open(record_path(fingerprint_digest, workspace_root), encoding="utf-8") as stream:
+        with open(record_path(record_key, workspace_root), encoding="utf-8") as stream:
             record = json.load(stream)
     except (OSError, ValueError, QualificationPathInsideWorkspaceError):
         return None
     return record if isinstance(record, dict) else None
+
+
+def load_record(runtime_digest: str, settings: InferenceSettings,
+                workspace_root: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """The record for this runtime under these inference settings; else a
+    policy-/2 record keyed by the runtime digest alone (which is STALE)."""
+    return (_read_record(qualification_identity(runtime_digest, settings), workspace_root)
+            or _read_record(runtime_digest, workspace_root))
 
 
 # --------------------------------------------------------------------------
@@ -323,12 +363,19 @@ class QualificationAssessment:
         return asdict(self)
 
 
-def record_is_current(record: Optional[Dict[str, Any]], fingerprint: ModelRuntimeFingerprint) -> Tuple[bool, List[str]]:
+def record_is_current(record: Optional[Dict[str, Any]], fingerprint: ModelRuntimeFingerprint,
+                      settings: InferenceSettings) -> Tuple[bool, List[str]]:
     if record is None:
-        return False, ["no qualification record for this exact runtime"]
+        return False, ["no qualification record for this exact runtime and inference settings"]
     reasons = []
     if record.get("fingerprint_digest") != fingerprint.digest:
         reasons.append("the runtime fingerprint changed since qualification")
+    if record.get("inference_settings_digest") != settings.digest:
+        reasons.append(
+            "the inference settings differ from the qualified ones"
+            if record.get("inference_settings_digest")
+            else "the record predates inference-settings identity (re-qualify)"
+        )
     if record.get("adapter_version") != MODEL_PROTOCOL_ADAPTER_VERSION:
         reasons.append(
             f"the Kriya protocol adapter changed ({record.get('adapter_version')} -> {MODEL_PROTOCOL_ADAPTER_VERSION})"
@@ -342,8 +389,11 @@ def record_is_current(record: Optional[Dict[str, Any]], fingerprint: ModelRuntim
     return not reasons, reasons
 
 
-def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str],
+def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str], *, settings: InferenceSettings,
            record: Optional[Dict[str, Any]] = None, workspace_root: Optional[str] = None) -> QualificationAssessment:
+    """``settings``: what the role sends this runtime
+    (``inference_settings.role_inference_settings``); a record qualified
+    under other settings does not count."""
     required = tuple(required)
     if not fingerprint.exact:
         return QualificationAssessment(
@@ -351,11 +401,11 @@ def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str],
             (f"runtime identity is not exact (missing {', '.join(fingerprint.missing_components) or 'components'})",),
         )
     if record is None:
-        record = load_record(fingerprint.digest, workspace_root)
+        record = load_record(fingerprint.digest, settings, workspace_root)
     if record is None:
         return QualificationAssessment(MISSING, fingerprint.digest, required, (),
-                                       ("no qualification record for this exact runtime",))
-    current, reasons = record_is_current(record, fingerprint)
+                                       ("no qualification record for this exact runtime and inference settings",))
+    current, reasons = record_is_current(record, fingerprint, settings)
     if not current:
         return QualificationAssessment(STALE, fingerprint.digest, required, (), tuple(reasons))
     statuses = {case.get("capability"): case.get("status") for case in record.get("cases", [])}
@@ -372,12 +422,14 @@ def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str],
     return QualificationAssessment(QUALIFIED, fingerprint.digest)
 
 
-def measured_limits_for(fingerprint: ModelRuntimeFingerprint, config: Any = None) -> Dict[str, Any]:
-    """Measured limits from a CURRENT record for this exact runtime, else {}."""
+def measured_limits_for(fingerprint: ModelRuntimeFingerprint, config: Any = None, *,
+                        settings: InferenceSettings) -> Dict[str, Any]:
+    """Measured limits from a CURRENT record for this exact runtime under
+    these inference settings, else {}."""
     if not fingerprint.exact:
         return {}
-    record = load_record(fingerprint.digest)
-    current, _ = record_is_current(record, fingerprint)
+    record = load_record(fingerprint.digest, settings)
+    current, _ = record_is_current(record, fingerprint, settings)
     return dict(record.get("measured_limits") or {}) if current and record else {}
 
 
@@ -867,6 +919,9 @@ async def case_context_capacity(llm, model, ctx):
     choice = response.choices[0]
     content = str(getattr(choice.message, "content", "") or "")
     evidence = {
+        # This probe measures the server's window, so it is sent at
+        # temperature 0.0 whatever the qualified inference settings say.
+        "temperature": 0.0,
         "context_window": int(window), "target_prompt_tokens": target, "reported_prompt_tokens": reported,
         "fill_ratio": round(reported / int(window), 4) if reported else None,
         "first_marker_recalled": head in content, "last_marker_recalled": tail in content,
@@ -911,20 +966,26 @@ async def run_qualification(
     only: Optional[Iterable[str]] = None,
     progress: Optional[Callable[[CaseResult], None]] = None,
     context_window: Optional[int] = None,
+    settings: Optional[InferenceSettings] = None,
 ) -> Dict[str, Any]:
     """Run the protocol cases against the configured endpoint for one exact
     runtime and return the record (the caller saves it).
 
-    ``context_window`` qualifies the model at that num_ctx instead of its
-    configured one (a PRD-016 context tier). Every case is sent with the
-    binding's own request options and a strict budget policy, so a case is
-    never itself sent with a different window."""
+    ``settings`` are the inference settings qualified (default: what the
+    Developer sends ``model`` with, ``role_inference_settings``); every case
+    is sent with them (temperature, reasoning flag and extra_body) and the
+    record is keyed by them. ``context_window`` qualifies the model at that
+    num_ctx instead of its configured one (a PRD-016 context tier). Every
+    case is sent with a strict budget policy, so a case is never itself sent
+    with a different window."""
+    from kriya.core.inference_settings import role_inference_settings
     from kriya.core.llm import LLMClient
     from kriya.core.model_capabilities import capabilities_for_model
     from kriya.core.model_runtime import _binding_for, configured_context_window, resolve_configured_model_runtime
 
     model = model or config.llm.model
-    config = qualification_config(config, model, context_window)
+    settings = settings or role_inference_settings(config, "developer", model)
+    config = qualification_config(config, model, context_window, settings=settings)
     fingerprint = fingerprint or resolve_configured_model_runtime(config, model, fresh=True)
     if not fingerprint.exact:
         raise QualificationError(
@@ -960,19 +1021,32 @@ async def run_qualification(
         results.append(result)
         if progress is not None:
             progress(result)
-    return build_record(fingerprint, results)
+    return build_record(fingerprint, results, settings=settings)
 
 
-def qualification_config(config: Any, model: str, context_window: Optional[int] = None) -> Any:
+def qualification_config(config: Any, model: str, context_window: Optional[int] = None, *,
+                         settings: Optional[InferenceSettings] = None) -> Any:
     """A copy of ``config`` for qualifying ``model``: optionally at another
     num_ctx (set on the model's own binding, which is what its fingerprint
-    is built from), every request carrying that binding's own request
-    options (LLMClient otherwise sends the primary binding's), and a strict
-    budget policy so no case is itself sent with a different window."""
+    is built from), every request carrying ``settings`` (the temperature,
+    reasoning flag and extra_body qualified; LLMClient otherwise sends the
+    primary binding's), and a strict budget policy so no case is itself sent
+    with a different window."""
     from kriya.core.model_runtime import binding_object
 
     copy = config.model_copy(deep=True)
     binding = binding_object(copy, model) or copy.llm
+    if settings is not None:
+        # Keep the binding's own num_ctx: it is the runtime input, not a setting.
+        options = dict((getattr(binding, "extra_body", None) or {}).get("options") or {})
+        extra_body = settings.extra_body
+        window = options.get("num_ctx")
+        if window is not None:
+            extra_body["options"] = {**dict(extra_body.get("options") or {}), "num_ctx": window}
+        binding.extra_body = extra_body
+        binding.reasoning = settings.reasoning
+        copy.llm.temperature = settings.temperature if settings.temperature is not None else copy.llm.temperature
+        copy.llm.reasoning = settings.reasoning
     if context_window is not None:
         extra_body = dict(getattr(binding, "extra_body", None) or {})
         extra_body["options"] = {**dict(extra_body.get("options") or {}), "num_ctx": int(context_window)}
@@ -987,7 +1061,8 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
     return copy
 
 
-def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult]) -> Dict[str, Any]:
+def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult], *,
+                 settings: InferenceSettings) -> Dict[str, Any]:
     from kriya import __version__ as kriya_version
 
     counts = {status: sum(1 for r in results if r.status == status) for status in (PASS, FAIL, UNAVAILABLE)}
@@ -996,8 +1071,12 @@ def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult]
         "policy_version": QUALIFICATION_POLICY_VERSION,
         "adapter_version": MODEL_PROTOCOL_ADAPTER_VERSION,
         "kriya_version": kriya_version,
+        "qualification_identity": qualification_identity(fingerprint.digest, settings),
         "fingerprint_digest": fingerprint.digest,
         "fingerprint": fingerprint.to_dict(),
+        "inference_settings_digest": settings.digest,
+        # output_ceiling inside is metadata (the configured max_tokens), never identity.
+        "inference_settings": settings.to_dict(),
         "qualified_at": datetime.now(timezone.utc).isoformat(),
         "cases": [asdict(r) for r in results],
         "measured_limits": measured_limits(results),
@@ -1012,5 +1091,6 @@ __all__ = [
     "CONTEXT_TIER_REQUIREMENTS", "ContextTierOffer", "UNAVAILABLE", "offered_context_tiers", "assess", "build_record", "context_tier_requirements",
     "load_record", "measured_limits", "measured_limits_for", "qualification_config", "qualification_home",
     "record_is_current", "record_path", "recorded_context_sizes", "required_capabilities", "role_models",
+    "runtime_has_records",
     "run_qualification", "save_record",
 ]

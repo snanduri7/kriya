@@ -12,6 +12,7 @@ from click.testing import CliRunner
 from kriya.config import AppConfig
 from kriya.core import model_qualification as mq
 from kriya.core.completion import CompletionResult, CompletionStatus
+from kriya.core.inference_settings import role_inference_settings
 from kriya.core.model_runtime import ModelRuntimeFingerprint
 
 MODEL = "qwen3-coder:30b"
@@ -214,9 +215,14 @@ def test_a_crashing_case_is_a_fail_with_evidence():
 
 # --- record, store and assessment -----------------------------------------------------------
 
-def _record(statuses=None, fp=None):
+def _settings():
+    """What the default configuration's Developer sends MODEL with."""
+    return role_inference_settings(AppConfig(), "developer", MODEL)
+
+
+def _record(statuses=None, fp=None, settings=None):
     results = [mq.CaseResult(cap, (statuses or {}).get(cap, mq.PASS)) for cap in mq.CAPABILITIES]
-    return mq.build_record(fp or _fp(), results)
+    return mq.build_record(fp or _fp(), results, settings=settings or _settings())
 
 
 def test_the_record_carries_every_binding_input():
@@ -229,7 +235,7 @@ def test_the_record_carries_every_binding_input():
 def test_store_round_trip_and_default_location_is_outside_the_workspace(tmp_path, monkeypatch):
     path = mq.save_record(_record(), workspace_root=str(tmp_path / "ws"))
     assert os.path.realpath(path).startswith(os.path.realpath(os.environ[mq.QUALIFICATION_HOME_ENV]))
-    assert mq.load_record(_fp().digest)["fingerprint_digest"] == _fp().digest
+    assert mq.load_record(_fp().digest, _settings())["fingerprint_digest"] == _fp().digest
     monkeypatch.delenv(mq.QUALIFICATION_HOME_ENV)
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     assert mq.qualification_home() == os.path.realpath(str(tmp_path / "home" / ".kriya" / "qualifications"))
@@ -240,20 +246,20 @@ def test_a_store_inside_the_workspace_is_refused(tmp_path, monkeypatch):
     monkeypatch.setenv(mq.QUALIFICATION_HOME_ENV, str(workspace / ".kriya" / "qualifications"))
     with pytest.raises(mq.QualificationPathInsideWorkspaceError):
         mq.save_record(_record(), workspace_root=str(workspace))
-    assert mq.load_record(_fp().digest, workspace_root=str(workspace)) is None
+    assert mq.load_record(_fp().digest, _settings(), workspace_root=str(workspace)) is None
 
 
 def test_assessment_states():
     required = ("plain_completion", "structured_json")
-    assert mq.assess(_fp(artifact_digest="unavailable"), required).status == mq.NOT_EXACT
-    assert mq.assess(_fp(), required).status == mq.MISSING
+    assert mq.assess(_fp(artifact_digest="unavailable"), required, settings=_settings()).status == mq.NOT_EXACT
+    assert mq.assess(_fp(), required, settings=_settings()).status == mq.MISSING
     mq.save_record(_record())
-    assert mq.assess(_fp(), required).status == mq.QUALIFIED
+    assert mq.assess(_fp(), required, settings=_settings()).status == mq.QUALIFIED
     mq.save_record(_record({"structured_json": mq.FAIL}))
-    failed = mq.assess(_fp(), required)
+    failed = mq.assess(_fp(), required, settings=_settings())
     assert failed.status == mq.NOT_QUALIFIED and failed.failed == ("structured_json",)
     mq.save_record(_record({"structured_json": mq.UNAVAILABLE}))
-    unavailable = mq.assess(_fp(), required)
+    unavailable = mq.assess(_fp(), required, settings=_settings())
     assert unavailable.status == mq.NOT_QUALIFIED and unavailable.missing == ("structured_json",)
 
 
@@ -261,28 +267,29 @@ def test_assessment_states():
     ("adapter_version", "kriya-openai-compat/0"),
     ("policy_version", "kriya-qualification/0"),
     ("fingerprint_digest", "0" * 64),
+    ("inference_settings_digest", "sha256:" + "0" * 64),
 ])
 def test_protocol_or_policy_or_runtime_drift_makes_a_record_stale(field, value):
     record = _record()
     record[field] = value
-    assessment = mq.assess(_fp(), ("plain_completion",), record=record)
+    assessment = mq.assess(_fp(), ("plain_completion",), settings=_settings(), record=record)
     assert assessment.status == mq.STALE and assessment.reasons
 
 
 def test_runtime_drift_finds_no_record_for_the_new_identity():
     mq.save_record(_record())
-    assert mq.assess(_fp(artifact_digest="sha256:re-pulled"), ("plain_completion",)).status == mq.MISSING
+    assert mq.assess(_fp(artifact_digest="sha256:re-pulled"), ("plain_completion",), settings=_settings()).status == mq.MISSING
 
 
 def test_measured_limits_are_used_only_from_a_current_record():
     record = _record()
     record["measured_limits"] = {"bytes_per_token_floor": 3.1}
     mq.save_record(record)
-    assert mq.measured_limits_for(_fp()) == {"bytes_per_token_floor": 3.1}
+    assert mq.measured_limits_for(_fp(), settings=_settings()) == {"bytes_per_token_floor": 3.1}
     record["adapter_version"] = "old"
     mq.save_record(record)
-    assert mq.measured_limits_for(_fp()) == {}
-    assert mq.measured_limits_for(_fp(provider_version="unavailable")) == {}
+    assert mq.measured_limits_for(_fp(), settings=_settings()) == {}
+    assert mq.measured_limits_for(_fp(provider_version="unavailable"), settings=_settings()) == {}
 
 
 def test_measured_limits_come_only_from_passing_cases():
@@ -346,7 +353,7 @@ def test_cli_qualify_saves_a_full_record_and_writes_the_handover_report(tmp_path
     result = CliRunner().invoke(main, ["model", "qualify", "--json", "--out", str(out)])
     assert result.exit_code == 0, result.output
     assert json.loads(out.read_text())["fingerprint_digest"] == _fp().digest
-    assert mq.load_record(_fp().digest) is not None
+    assert mq.load_record(_fp().digest, _settings()) is not None
 
 
 def test_cli_qualify_reports_a_non_exact_runtime_and_exits_nonzero(monkeypatch):

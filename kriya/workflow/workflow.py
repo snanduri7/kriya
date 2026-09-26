@@ -404,11 +404,13 @@ async def _primary_model_runtime_details(cfg: Any) -> Dict[str, Any]:
     run event. Evidence only; never blocks a run."""
     import asyncio
 
+    from kriya.core.inference_settings import role_inference_settings
     from kriya.core.model_qualification import assess, required_capabilities
     from kriya.core.model_runtime import resolve_configured_model_runtime
 
     fingerprint = await asyncio.to_thread(resolve_configured_model_runtime, cfg)
-    qualification = assess(fingerprint, required_capabilities(cfg, "developer", cfg.llm.model))
+    settings = role_inference_settings(cfg, "developer", cfg.llm.model)
+    qualification = assess(fingerprint, required_capabilities(cfg, "developer", cfg.llm.model), settings=settings)
     return {"fingerprint": fingerprint.to_dict(), "developer_qualification": qualification.to_dict()}
 
 

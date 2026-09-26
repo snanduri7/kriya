@@ -82,6 +82,7 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
     """The request profile of a Developer call to ``binding`` (the primary
     ``config.llm`` by default, or an ``llm_chain`` entry). Never raises: an
     unresolvable runtime is recorded as unavailable."""
+    from kriya.core.inference_settings import binding_inference_settings
     from kriya.core.llm import REASONING_MIN_MAX_TOKENS
     from kriya.core.model_capabilities import resolve_model_capability_profile
     from kriya.core.model_qualification import assess, required_capabilities
@@ -106,7 +107,8 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
         runtime_exact = bool(fingerprint.exact)
         runtime_digest = fingerprint.digest if runtime_exact else "unavailable"
         served_window = fingerprint.effective_context_window
-        assessment = assess(fingerprint, required_capabilities(config, DEVELOPER_ROLE, model))
+        assessment = assess(fingerprint, required_capabilities(config, DEVELOPER_ROLE, model),
+                            settings=binding_inference_settings(config, DEVELOPER_ROLE, binding))
         qualification, failed = assessment.status, tuple(assessment.failed)
     except Exception as error:  # a profile is evidence; it never blocks the run itself
         logger.debug("Request profile of %s: runtime unavailable: %s", model, error)

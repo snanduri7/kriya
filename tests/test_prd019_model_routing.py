@@ -189,6 +189,7 @@ def test_a_missing_table_is_empty(tmp_path):
 from kriya.config import AppConfig  # noqa: E402
 from kriya.config.config import DEFAULT_OUTPUT_TOKENS, FallbackModelConfig, ModelCapabilities  # noqa: E402
 from kriya.core import model_runtime  # noqa: E402
+from kriya.core.inference_settings import role_inference_settings  # noqa: E402 - with the late imports above
 from kriya.core.model_runtime import ModelRuntimeFingerprint  # noqa: E402
 
 
@@ -225,7 +226,8 @@ def _qualify_placed(cfg, role, alias):
     """Qualify ``alias`` as it runs when routed to ``role``."""
     placed = mr.place_candidate(cfg, role, next(c for c in cfg.model_policy.routing.candidates if c.model == alias))
     runtime = model_runtime.resolve_configured_model_runtime(placed, alias)
-    mq.save_record(mq.build_record(runtime, [mq.CaseResult(c, mq.PASS) for c in mq.CAPABILITIES]))
+    mq.save_record(mq.build_record(runtime, [mq.CaseResult(c, mq.PASS) for c in mq.CAPABILITIES],
+                                   settings=role_inference_settings(placed, role, alias)))
     return runtime.digest
 
 
@@ -233,7 +235,8 @@ def _qualify_placed_with(cfg, role, alias, **statuses):
     """Like _qualify_placed, with chosen case statuses (PASS otherwise)."""
     placed = mr.place_candidate(cfg, role, next(c for c in cfg.model_policy.routing.candidates if c.model == alias))
     runtime = model_runtime.resolve_configured_model_runtime(placed, alias)
-    mq.save_record(mq.build_record(runtime, [mq.CaseResult(c, statuses.get(c, mq.PASS)) for c in mq.CAPABILITIES]))
+    mq.save_record(mq.build_record(runtime, [mq.CaseResult(c, statuses.get(c, mq.PASS)) for c in mq.CAPABILITIES],
+                                   settings=role_inference_settings(placed, role, alias)))
     return runtime.digest
 
 
@@ -247,7 +250,9 @@ def test_one_qualification_record_is_reused_by_every_role_its_evidence_satisfies
     for role in ("reviewer", "spec_compliance", "planner"):
         decision = plan.decisions[role]
         assert (decision.model, decision.source, decision.runtime_digest) == ("cand-a", "evidence", digest), role
-    assert mq.load_record(digest) is not None and len({d.runtime_digest for d in plan.decisions.values()}) == 1
+    reviewer_settings = role_inference_settings(mr.place_candidate(
+        cfg, "reviewer", cfg.model_policy.routing.candidates[0]), "reviewer", "cand-a")
+    assert mq.load_record(digest, reviewer_settings) is not None and len({d.runtime_digest for d in plan.decisions.values()}) == 1
 
 
 def test_a_record_covers_a_role_only_when_it_has_every_case_that_role_requires(tmp_path, monkeypatch):

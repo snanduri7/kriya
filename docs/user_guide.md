@@ -346,9 +346,16 @@ executed on the host during qualification.
 kriya model qualify [--model <name>] [--json] [--out report.json]   # a --case subset is reported, never saved
 kriya model status [--json]                                          # every role's models and their state
 ```
-Records live outside any workspace (`~/.kriya/qualifications/<fingerprint>.json`, or `KRIYA_QUALIFICATION_HOME`), so a
-repository can never ship its own. A record is **stale** when the runtime fingerprint, Kriya's protocol adapter or the
-qualification policy version changes. Each role requires the cases for the protocols Kriya uses with it: always
+Records live outside any workspace (`~/.kriya/qualifications/<qualification identity>.json`, or
+`KRIYA_QUALIFICATION_HOME`), so a repository can never ship its own. The qualification identity is the exact runtime
+fingerprint plus the **inference settings** the role sends: temperature, the `reasoning` flag and every `extra_body`
+field except the per-call `num_ctx` (so `reasoning_effort`, `think`, `top_p`, `top_k`, `seed`, ...). `max_tokens` is
+recorded but is not part of the identity. A model qualified with `reasoning_effort: none` is therefore not qualified
+for a configuration that drops it. When the roles call a model with different settings (for example a
+`reviewer_temperature`), `kriya model qualify` qualifies each distinct identity in turn. A record is **stale** when the
+runtime fingerprint, the inference settings, Kriya's protocol adapter or the qualification policy version changes;
+records written before inference settings were part of the identity (policy `kriya-qualification/2`) are stale and
+must be re-qualified. Each role requires the cases for the protocols Kriya uses with it: always
 completion, stop, truncation detection, reasoning handling and endpoint errors; the Developer also full-file content,
 the anchored edit protocol and malformed-output recovery; the Planner malformed-output recovery; and every role the
 tool-call, JSON, multi-line JSON and streaming cases its resolved capability profile enables. `kriya doctor

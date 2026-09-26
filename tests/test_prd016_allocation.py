@@ -100,10 +100,12 @@ def test_allocation_window_uses_the_qualified_ratio_of_the_exact_runtime(monkeyp
     before = allocation_window(cfg)
     assert before == prompt_allocation_window(32768, 16384)
     resolved = model_runtime.resolve_configured_model_runtime(cfg)
+    from kriya.core.inference_settings import role_inference_settings
+
     save_record(build_record(resolved, [
         CaseResult(c, "PASS", measured={"bytes_per_token_floor": 3.2} if c == "tokenizer_measurement" else {})
         for c in CAPABILITIES
-    ]))
+    ], settings=role_inference_settings(cfg, "developer", cfg.llm.model)))
     assert allocation_window(cfg) == prompt_allocation_window(32768, 16384, bytes_per_token=3.2)
 
 

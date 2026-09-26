@@ -16,6 +16,7 @@ from openai import (
 )
 
 from kriya.config import AppConfig
+from kriya.core.inference_settings import request_settings
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType
 
@@ -221,11 +222,13 @@ class LLMClient:
 
     def _dispatch_budget(self, *, model: str, fingerprint, messages: List[Dict[str, Any]],
                          tools: Optional[List[Dict[str, Any]]], max_tokens: int, is_reasoning: bool,
-                         base_url: str, api_key: str, expected_output=None):
+                         base_url: str, api_key: str, settings, expected_output=None):
         """PRD-016: choose this request's context window and output budget
         (kriya/core/token_budget.py plan_dispatch). Raises
         ContextBudgetUnsatisfiableError / OutputBudgetUnsatisfiableError
-        before any inference."""
+        before any inference. ``settings`` are the request's own inference
+        settings (MODEL-QUAL-IDENTITY-001): measured limits and qualified
+        tiers come only from a record qualified with exactly them."""
         from dataclasses import replace
 
         from kriya.core.model_qualification import measured_limits_for
@@ -233,7 +236,7 @@ class LLMClient:
 
         binding = self._binding(model)
         policy = binding["context_policy"]
-        limits = measured_limits_for(fingerprint, self.config) if fingerprint.exact else {}
+        limits = measured_limits_for(fingerprint, self.config, settings=settings) if fingerprint.exact else {}
         if fingerprint.effective_context_window:
             window, source = fingerprint.effective_context_window, "served_num_ctx"
         else:
@@ -244,7 +247,8 @@ class LLMClient:
         tokenizer = fingerprint.tokenizer_digest if fingerprint.tokenizer_digest != "unavailable" else None
         from kriya.core.model_qualification import offered_context_tiers
 
-        offer = offered_context_tiers(self.config, model, fingerprint, policy, base_url=base_url, api_key=api_key)
+        offer = offered_context_tiers(self.config, model, fingerprint, policy, base_url=base_url, api_key=api_key,
+                                      settings=settings)
         tiers, ceiling, note = offer.tiers, offer.ceiling, offer.note
         try:
             decision = plan_dispatch(
@@ -497,6 +501,7 @@ class LLMClient:
         budget = self._dispatch_budget(
             model=model, fingerprint=fingerprint, messages=messages, tools=None,
             max_tokens=max_tokens, is_reasoning=is_reasoning, base_url=url_to_check, api_key=api_key,
+            settings=request_settings(temperature=temperature, reasoning=is_reasoning, extra_body=extra_body),
             expected_output=expected_output,
         )
         max_tokens = budget.max_tokens
@@ -825,6 +830,10 @@ class LLMClient:
         budget = self._dispatch_budget(
             model=model, fingerprint=fingerprint, messages=messages, tools=tools,
             max_tokens=max_tokens, is_reasoning=False, base_url=url_to_check, api_key=api_key,
+            # The binding's reasoning flag, as the role identity records it
+            # (this path applies no reasoning floor of its own).
+            settings=request_settings(temperature=temperature, reasoning=bool(self._binding(model)["reasoning"]),
+                                      extra_body=extra_body),
         )
         max_tokens = budget.max_tokens
         if budget.context_expanded:

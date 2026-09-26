@@ -471,11 +471,15 @@ def test_unqualified_model_blocks_production(tmp_path):
 def _qualify_all_roles(cfg, statuses=None):
     """Save a current record (every capability PASS unless overridden) for
     each role model's exact runtime."""
+    from kriya.core.inference_settings import role_inference_settings
     from kriya.core.model_qualification import CAPABILITIES, CaseResult, build_record, role_models, save_record
 
-    for model in {m for chain in role_models(cfg).values() for m in chain}:
-        results = [CaseResult(cap, (statuses or {}).get(cap, "PASS")) for cap in CAPABILITIES]
-        save_record(build_record(_exact_runtime(model), results))
+    # One record per inference identity: each role's settings for each model.
+    for role, chain in role_models(cfg).items():
+        for model in chain:
+            results = [CaseResult(cap, (statuses or {}).get(cap, "PASS")) for cap in CAPABILITIES]
+            save_record(build_record(_exact_runtime(model), results,
+                                     settings=role_inference_settings(cfg, role, model)))
 
 
 def test_every_role_qualified_for_its_exact_runtime_passes(tmp_path):

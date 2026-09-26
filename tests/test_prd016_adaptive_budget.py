@@ -21,6 +21,7 @@ from kriya.core import model_qualification as mq
 from kriya.core import model_runtime
 from kriya.core import token_budget as tb
 from kriya.core.completion import CompletionStatus
+from kriya.core.inference_settings import role_inference_settings
 from kriya.core.llm import LLMClient
 from kriya.core.model_runtime import ModelRuntimeFingerprint
 
@@ -78,7 +79,7 @@ def _qualify_tier(cfg, size, *, statuses=None):
     tier_cfg.llm.context_policy.mode = cfg.llm.context_policy.mode
     runtime = model_runtime.resolve_configured_model_runtime(tier_cfg, MODEL)
     results = [mq.CaseResult(c, (statuses or {}).get(c, mq.PASS)) for c in mq.CAPABILITIES]
-    mq.save_record(mq.build_record(runtime, results))
+    mq.save_record(mq.build_record(runtime, results, settings=role_inference_settings(cfg, "developer", MODEL)))
     return runtime
 
 
@@ -276,9 +277,10 @@ def test_recorded_tiers_are_discovered_for_the_same_artifact_only(monkeypatch):
     cfg = _cfg()
     _qualify_tier(cfg, 65536)
     preferred = model_runtime.resolve_configured_model_runtime(cfg, MODEL)
-    assert mq.recorded_context_sizes(preferred) == [65536]
+    settings = role_inference_settings(cfg, "developer", MODEL)
+    assert mq.recorded_context_sizes(preferred, settings) == [65536]
     other = replace(preferred, artifact_digest="sha256:other")
-    assert mq.recorded_context_sizes(other) == []
+    assert mq.recorded_context_sizes(other, settings) == []
 
 
 def _capacity_client(*, recall_head=True, fill=0.97, usage=True):

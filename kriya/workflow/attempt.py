@@ -1520,6 +1520,7 @@ def _grounded_output_expectations(ctx: "AttemptContext", paths: Optional[Iterabl
 
     ratio = None
     try:
+        from kriya.core.inference_settings import binding_inference_settings
         from kriya.core.model_qualification import measured_limits_for
         from kriya.core.model_runtime import resolve_configured_model_runtime
 
@@ -1528,7 +1529,10 @@ def _grounded_output_expectations(ctx: "AttemptContext", paths: Optional[Iterabl
             ctx.kernel.config, target.model, base_url=target.base_url, api_key=target.api_key,
             extra_body=target.extra_body or {},
         )
-        ratio = measured_limits_for(fingerprint, ctx.kernel.config).get("bytes_per_token_floor")
+        ratio = measured_limits_for(
+            fingerprint, ctx.kernel.config,
+            settings=binding_inference_settings(ctx.kernel.config, "developer", target),
+        ).get("bytes_per_token_floor")
     except Exception as error:  # the default bound is the conservative fallback
         logger.debug("Output expectations use the default token bound: %s", error)
     expectations: Dict[str, Any] = {}
