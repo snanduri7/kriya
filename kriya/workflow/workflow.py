@@ -11,6 +11,9 @@ import subprocess
 import sys
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
+# `name as name` marks an explicit re-export: the helper moved to its own module
+# during modularization, and callers (tests, review_context.py, spikes) still
+# import it from here. Ruff keeps these; remove one only with its last caller.
 from kriya.agents.agent import (
     ArchitectAgent,
     DeveloperAgent,
@@ -127,23 +130,23 @@ from kriya.workflow.context_budget import (
     _MIN_GRAPH_CONTEXT_BUDGET,
     RetrievalLimits,
     _reserve_graph_context_budget,
-    _reserve_sibling_content_budget,
+    _reserve_sibling_content_budget as _reserve_sibling_content_budget,
     allocation_window,
     build_code_context,
-    estimate_tokens,
+    estimate_tokens as estimate_tokens,
     retrieval_limits_for,
     review_batch_budget,
-    skeletonize_braced_code,
-    skeletonize_code,
-    skeletonize_python,
+    skeletonize_braced_code as skeletonize_braced_code,
+    skeletonize_code as skeletonize_code,
+    skeletonize_python as skeletonize_python,
 )
 from kriya.workflow.edit_safety import (
     StagedFileWrite,
     _strip_java_comments_and_strings,
-    apply_anchored_edits,
+    apply_anchored_edits as apply_anchored_edits,
     atomic_write_file,
     content_revision,
-    find_structural_corruption,
+    find_structural_corruption as find_structural_corruption,
     normalize_whitespace,
 )
 from kriya.workflow.terminal_commit import (
@@ -153,11 +156,11 @@ from kriya.workflow.terminal_commit import (
 )
 from kriya.workflow.attribution import (
     FutureOwnerVerificationDeferral,
-    _detect_missing_build_manifest,
-    find_edits_ignoring_own_diagnosis,
-    find_edits_ignoring_reported_line,
-    find_misdirected_edit_target,
-    find_whole_response_no_op,
+    _detect_missing_build_manifest as _detect_missing_build_manifest,
+    find_edits_ignoring_own_diagnosis as find_edits_ignoring_own_diagnosis,
+    find_edits_ignoring_reported_line as find_edits_ignoring_reported_line,
+    find_misdirected_edit_target as find_misdirected_edit_target,
+    find_whole_response_no_op as find_whole_response_no_op,
     resolve_future_owner_verification_deferral,
 )
 from kriya.workflow.contract_authority import derive_direct_contract_authorizations
@@ -165,26 +168,26 @@ from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, f
 from kriya.workflow.semantic_scope_derivation import derive_semantic_authority_for_run
 from kriya.workflow.file_resolution import (
     EXPECTED_FILE_EXTENSIONS,
-    IncompleteGenerationError,
+    IncompleteGenerationError as IncompleteGenerationError,
     TEST_OR_DOC_REQUEST_PHRASES,
     _goal_requests_tests_or_docs,
     _is_test_or_doc_file,
     _resolve_file_paths_from_design,
-    _resolve_maven_main_class,
-    _resolve_run_command,
+    _resolve_maven_main_class as _resolve_maven_main_class,
+    _resolve_run_command as _resolve_run_command,
     prefer_existing_artifact_owners,
-    check_plan_completeness,
+    check_plan_completeness as check_plan_completeness,
     classify_plan_completeness,
-    downgrade_ungrounded_goal_explicit_commands,
+    downgrade_ungrounded_goal_explicit_commands as downgrade_ungrounded_goal_explicit_commands,
     extract_expected_files,
-    extract_planner_code_blocks,
+    extract_planner_code_blocks as extract_planner_code_blocks,
     extract_target_test,
     find_brownfield_test_redirections,
     find_brownfield_public_api_changes,
-    find_missing_expected_files,
+    find_missing_expected_files as find_missing_expected_files,
     identify_redirected_test_obligations,
     include_response_construction_owners,
-    normalize_written_filepath,
+    normalize_written_filepath as normalize_written_filepath,
 )
 from kriya.workflow.architectural_choice import (
     architecture_choice_invalidated_message,
@@ -195,8 +198,8 @@ from kriya.workflow.skill_extraction import (
     _IDENTITY_GENERIC_WORDS,
     _RULE_DEDUP_STOPWORDS,
     _filter_misattributed_extraction,
-    _is_near_duplicate_rule,
-    _likely_misattributed_sibling,
+    _is_near_duplicate_rule as _is_near_duplicate_rule,
+    _likely_misattributed_sibling as _likely_misattributed_sibling,
     _loose_identity_words,
     _rule_content_words,
     _sanitize_for_flat_file_line,
@@ -209,7 +212,7 @@ from kriya.workflow.skill_extraction import (
     _write_skill_extraction,
 )
 from kriya.workflow.live_lookup import (
-    _augment_error_with_live_lookup,
+    _augment_error_with_live_lookup as _augment_error_with_live_lookup,
     _extract_first_usable,
     _resolve_via_web_lookup,
 )
@@ -221,40 +224,40 @@ from kriya.workflow.failure_grounding import (
     _JVM_STARTUP_FAILURE_MARKERS,
     _MISSING_EXECUTABLE_PATTERN,
     _JDK24_SECURITY_MANAGER_API_MARKER,
-    _build_error_source_context,
+    _build_error_source_context as _build_error_source_context,
     _build_quality_gate_failure,
     _capture_failed_content,
-    _normalize_error_for_repeat_detection,
-    _resolve_file_locations,
-    classify_environment_failure,
-    extract_error_search_terms,
-    extract_error_source_locations,
-    extract_implicated_files,
+    _normalize_error_for_repeat_detection as _normalize_error_for_repeat_detection,
+    _resolve_file_locations as _resolve_file_locations,
+    classify_environment_failure as classify_environment_failure,
+    extract_error_search_terms as extract_error_search_terms,
+    extract_error_source_locations as extract_error_source_locations,
+    extract_implicated_files as extract_implicated_files,
 )
 from kriya.workflow.toolchain import (
     toolchain_declaration_mutable,
     _JAVA_VERSION_MENTION_PATTERN,
     _JDK_INCOMPATIBLE_JVM_FLAGS,
     _check_java_toolchain_mismatch,
-    _goal_or_repo_targets_java,
+    _goal_or_repo_targets_java as _goal_or_repo_targets_java,
     _java_toolchain_fact,
-    _pin_exec_plugin_executable_to_resolved_jdk,
+    _pin_exec_plugin_executable_to_resolved_jdk as _pin_exec_plugin_executable_to_resolved_jdk,
     _resolve_java_home_override,
-    _resolve_jdk_home_for_version,
-    _strip_jdk_incompatible_jvm_flags,
+    _resolve_jdk_home_for_version as _resolve_jdk_home_for_version,
+    _strip_jdk_incompatible_jvm_flags as _strip_jdk_incompatible_jvm_flags,
 )
 from kriya.workflow.lsp_integration import (
-    _build_lsp_diagnostics_context,
-    _get_or_start_jdtls_client,
+    _build_lsp_diagnostics_context as _build_lsp_diagnostics_context,
+    _get_or_start_jdtls_client as _get_or_start_jdtls_client,
 )
 from kriya.workflow.retry_prompts import (
     ECOSYSTEM_INVARIANT_HEADER,
     RESOURCE_LIFECYCLE_HEADER,
     VERIFICATION_CONTRACT_HEADER,
     _build_ecosystem_invariant_block,
-    _build_full_set_retry_prompt,
-    _build_missing_files_retry_prompt,
-    _build_targeted_retry_prompt,
+    _build_full_set_retry_prompt as _build_full_set_retry_prompt,
+    _build_missing_files_retry_prompt as _build_missing_files_retry_prompt,
+    _build_targeted_retry_prompt as _build_targeted_retry_prompt,
 )
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.attempt import AttemptContext, run_attempt
@@ -267,7 +270,7 @@ from kriya.workflow.planner_repair import (
     build_structured_plan_repair_prompt,
     classify_structured_plan_parse_issue,
 )
-from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
+from kriya.workflow.verification_contract import extract_contract_verdict as extract_contract_verdict, pass_verdict_is_grounded as pass_verdict_is_grounded
 
 logger = logging.getLogger(__name__)
 
