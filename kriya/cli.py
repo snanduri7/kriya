@@ -4060,6 +4060,9 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         if (
             res.get("files") and res.get("review")
             and not res.get("review_included_in_approval")
+            # PROMPT-BUDGET-FIT-001C: no review exists; the refusal was
+            # already reported, and this candidate was not rejected.
+            and not res.get("final_review_refusal")
         ):
             # Demo-01 Run A finding (2026-09-11) - same fix as `generate`
             # above: header must reflect accepted vs rejected disposition,

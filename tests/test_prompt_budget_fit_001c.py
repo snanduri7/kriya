@@ -137,7 +137,8 @@ def test_a_refused_final_review_after_an_applied_commit_is_a_typed_non_success(t
     refused = [e["details"] for e in json.loads(events) if e["kind"] == "review.refused"]
     assert refused and refused[0]["reason_code"] == CONTEXT_BUDGET_UNSATISFIABLE
     assert "Files applied to workspace and committed (direct), not rolled back: m1.py" in cli.output
-    assert "[FINAL REVIEW REFUSED]" in cli.output and "NOT applied" not in cli.output
+    assert "[FINAL REVIEW REFUSED]" in cli.output
+    assert "not applied" not in cli.output.lower() and "rejected candidate" not in cli.output.lower()
     # Nothing left for a resume to redo.
     assert not glob.glob(os.path.join(str(workspace), ".kriya", "checkpoints", "*"))
 
@@ -221,6 +222,9 @@ async def test_an_enforce_subtask_whose_final_review_is_refused_fails_typed_and_
     assert subtask["status"] == "failed" and CONTEXT_BUDGET_UNSATISFIABLE in subtask["reason_codes"]
     assert "final review not performed" in subtask["error"]
     assert not (workspace / "a.py").exists()  # nothing reached the live workspace
+    # The plan-worktree refusal never surfaces at the top level, where the
+    # CLI would read candidate_applied as the live workspace.
+    assert "final_review_refusal" not in legacy
 
 
 def test_terminal_quality_never_passes_with_a_refused_final_review():
@@ -254,3 +258,4 @@ def test_kriya_fix_reports_a_refused_final_review_truthfully(tmp_path):
     assert "Files applied to workspace and committed (direct), not rolled back: m1.py" in result.output
     assert "[FINAL REVIEW REFUSED]" in result.output
     assert "still fail" not in result.output and "[SUCCESS]" not in result.output
+    assert "not applied" not in result.output.lower() and "rejected candidate" not in result.output.lower()
