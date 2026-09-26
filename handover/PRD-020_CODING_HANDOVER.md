@@ -137,7 +137,13 @@ Resolved by the closure-and-push review: REQ-4 is decided by deterministic mutat
 ## Closure review: mutation-scope evidence
 "Do not modify any other file" must not stay CANNOT_CONFIRM when Kriya can prove it from its own write record.
 - **Recognition** (`is_mutation_scope_requirement`): a closed pattern matched against the whole requirement ("do not / never / must not" + "modify / change / edit / touch / alter" + "any other file(s)", optionally "in the repository/project/..."). REQ-3's "any other method in this class", "keep the change small" and a conditional ("... unless ...") do not match. No model, no fuzzy matching.
-- **Authorized paths** (`authorized_mutation_paths`): the tokens of the immutable goal-derived requirement set that are *exactly* a path tracked at the run's base (`git ls-tree` of the base). No basename/stem match; the Planner/Developer file lists are not inputs. Empty = "other" has no referent = the requirement is left as the verifier left it (fail closed). demo-03: exactly `src/main/java/com/myapp/service/driver/DefaultDriverService.java`.
+- **Authorized paths** (`mutation_path_roles`, corrected by the final mutation-scope review): only paths the goal's own words establish as change *targets* - never every path mentioned. A named path is exactly a path tracked at the run's base (no basename/stem match), or an untracked file-shaped path under a creation verb. Its role at each mention is read from the nearest cue word before it in its own clause (code spans skipped, `;` ends a clause), from closed vocabularies, no model:
+  - mutation verb (modify/change/edit/fix/update/patch/rewrite/refactor/implement/correct/adjust/alter/amend/add/remove/delete/rename/replace/create/write) → target (`Modify src/A.java and src/B.java` → both);
+  - reference word (compare/see/refer/reference/read/consult/mirror/follow/inspect/use/look/like/according/based/similar/against/per/example/template) → reference, never writable (`Compare it with src/B.java`);
+  - a negated mutation verb (`do not modify src/B.java`) → forbidden;
+  - a relational word (with/next/beside/alongside/near/into/onto) under a mutation verb (`Replace A with B`, `Create N next to A`), no cue at all, or different roles at different mentions → ambiguous.
+  
+  Any ambiguous path leaves the requirement unresolved (production blocks); no target at all = "other" has no referent (unresolved). Planner/Architect/Developer file lists are never inputs. demo-03: REQ-1's "Fix ... (in `.../DefaultDriverService.java`)" → exactly that file, nothing ambiguous. Evidence also records `reference_paths`; attempts record forbidden/ambiguous paths.
 - **Actual paths** (`workflow.mutation_scope_evidence`): the candidate's own paths that git reports changed against the base (`git diff --relative <base>` + untracked, `.kriya/` and ignored files excluded) plus the run's committed path history - every settled COMMITTED cycle of the RunRecord, read from that transaction's commit evidence (byte state before != after). Anything else git reports is `foreign_paths`. The candidate must be at the run's base revision (milestones never git-commit, so it is), otherwise evidence is unavailable.
 - **Decision** (`close_mutation_scope_requirements`), bound to the verdict's `evidence_id`:
   - any actual path outside the set: a DETERMINISTIC VIOLATED record under `requirement.REQ-n.closure`; `requirement_outcomes` reports VIOLATED whatever the verifier said (new: counter-evidence);
@@ -147,7 +153,7 @@ Resolved by the closure-and-push review: REQ-4 is decided by deterministic mutat
 - **Where:** the direct/milestone pre-apply boundary (in the `requirement.closure` event, candidate paths = `all_files_written`) and the enforce terminal `original_requirements` gate (candidate paths = every planned path).
 - **Disclosed:** an untracked build artifact that `.gitignore` does not cover is a foreign change, so the requirement stays unresolved rather than closing (fail closed). A goal that names a file only as context (not as the change target) still authorizes it: the referent is the user's literal words.
 
-Tests: `tests/test_prd020_mutation_scope.py`, 24 passed (plain runner):
+Tests: `tests/test_prd020_mutation_scope.py`, 34 passed (plain runner; 10 added by the target-only correction: one and two explicit targets, reference not allowed, modifying a referenced path VIOLATED, ambiguous roles unresolved incl. relational words, negated/created paths, the demo-03 goal allows only DefaultDriverService.java; the enforce case with the Planner's extra file stays VIOLATED):
 - recognition and the exact-path referent;
 - exact one-file scope closes (UNVERIFIED and SATISFIED verdicts);
 - a second changed file is VIOLATED and blocks under every policy;
@@ -158,4 +164,4 @@ Tests: `tests/test_prd020_mutation_scope.py`, 24 passed (plain runner):
 - the enforce terminal gate (close; Planner's second file violated; no referent unresolved);
 - the real CLI milestone driver: M2's earlier commit to another file makes the integration check VIOLATED although the integration candidate itself only touched the authorized file; both milestones in scope closes.
 
-Mutations, each caught: actual paths used as authorized, evidence-id binding dropped, foreign check dropped, VIOLATED override dropped, committed history dropped, enforce call site dropped, direct call site dropped.
+Mutations, each caught: every named path authorized (the old rule), ambiguity ignored, reference cue as target, relational word ignored, no-cue path as target, negation ignored, actual paths used as authorized, evidence-id binding dropped, foreign check dropped, VIOLATED override dropped, committed history dropped, enforce call site dropped, direct call site dropped.

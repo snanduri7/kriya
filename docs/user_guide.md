@@ -547,8 +547,11 @@ that exact candidate, recorded as `closed_by_evidence` (distinct from `satisfied
 
 A file-boundary requirement ("Do not modify any other file in the repository.", recognized only as that whole
 statement - never "keep the change small" or "any other method") is decided from what the run actually changed,
-not by the verifier. The authorized files are exactly the repository files your goal names (a path Kriya tracks at
-the run's start, e.g. `src/main/java/.../DefaultDriverService.java`); the Planner's choice never authorizes a file.
+not by the verifier. The authorized files are only the files your goal asks to change: a path named after a change
+verb ("Fix ... in `src/A.java`", "Modify `src/A.java` and `src/B.java`", "Create `src/New.java`"). A path named as
+context ("Compare it with `src/B.java`", "see ...") or prohibited ("do not modify `src/B.java`") is never writable,
+and a path whose role the wording does not settle ("replace it with `src/B.java`", a path with no verb) leaves the
+requirement unresolved rather than guessing. The Planner's choice never authorizes a file.
 The actual files are what the candidate changed plus everything the run already committed (earlier milestones).
 All inside the authorized set with nothing unaccounted for: `closed_by_evidence` (evidence kind `MUTATION_SCOPE`,
 listed under `requirements.evidence` in the result with the authorized paths, actual paths, candidate and run).
