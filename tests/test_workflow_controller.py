@@ -51,6 +51,9 @@ def _workflow_engine(route=None, legacy_result=None):
     we = MagicMock()
     we.engineering_triage.classify = AsyncMock(return_value=route or _route())
     we.run_generation_workflow = AsyncMock(return_value=legacy_result or {"status": "success", "run_id": "legacy-run"})
+    # A bare MagicMock flag is truthy: PRD-020's terminal requirement verifier
+    # (not exercised in this module) would await a MagicMock check and fail closed.
+    we.kernel.config.autonomy.spec_compliance_enabled = False
     return we
 
 
