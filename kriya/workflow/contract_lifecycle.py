@@ -48,9 +48,12 @@ from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 from kriya.control.contracts import (
     CONTRACT_REGISTRY_CORRUPT,
     KIND_PUBLIC_API,
+    ContractChangeConflictError,
+    ContractNotFoundError,
     ContractRegistry,
     ContractRegistryTransitionError,
     ContractState,
+    ContractStateError,
     compute_shape_hash,
     registry_digest,
 )
@@ -58,11 +61,12 @@ from kriya.control.contracts import (
 CONTRACT_CONSUMER_VERIFICATION_MISSING = "CONTRACT_CONSUMER_VERIFICATION_MISSING"
 CONTRACT_REGISTRY_TRANSITION_INCOMPLETE = "CONTRACT_REGISTRY_TRANSITION_INCOMPLETE"
 CONTRACT_REGISTRY_STAGING_FAILED = "CONTRACT_REGISTRY_STAGING_FAILED"
+CONTRACT_REGISTRY_TRANSITION_INVALID = "CONTRACT_REGISTRY_TRANSITION_INVALID"
 # Commit outcomes that end a run deterministically (no generation retry can
 # change them): failure_category ``contract_registry_blocked``.
 CONTRACT_REGISTRY_STOP_REASON_CODES = frozenset({
     CONTRACT_CONSUMER_VERIFICATION_MISSING, CONTRACT_REGISTRY_TRANSITION_INCOMPLETE,
-    CONTRACT_REGISTRY_STAGING_FAILED, CONTRACT_REGISTRY_CORRUPT,
+    CONTRACT_REGISTRY_STAGING_FAILED, CONTRACT_REGISTRY_CORRUPT, CONTRACT_REGISTRY_TRANSITION_INVALID,
 })
 STALE_UNAUTHORIZED_SOURCE_CHANGE = "SOURCE_CHANGED_WITHOUT_AUTHORIZATION"
 INVALIDATED_BY_CONTRACT_REVISION = "CONTRACT_REVISION_CHANGED"
@@ -190,7 +194,8 @@ def derive_contract_transition(
     """The registry transition a verified candidate implies, or None when it
     changes no contract. ``registry`` None loads the live registry strictly.
     Pure with respect to it: the registry is never mutated. Raises ContractTransitionRefused when invalidated
-    consumers lack downstream verification."""
+    consumers lack downstream verification, or when the registry's own
+    lifecycle refuses a step (CONTRACT_REGISTRY_TRANSITION_INVALID)."""
     from kriya.control.persistence import load_contract_registry
     from kriya.workflow.file_resolution import (
         _is_test_or_doc_file,
@@ -202,110 +207,118 @@ def derive_contract_transition(
         # Strict: an unreadable registry raises ContractRegistryCorruptError,
         # which refuses the commit - never read as empty.
         registry = load_contract_registry(workspace_path)
-    after = ContractRegistry.from_dict(registry.to_dict())
-    source_revision = f"{transaction_id}:{candidate_hash}"
-    authorized_pairs = {
-        (getattr(item, "affected_owner", None), getattr(item, "affected_symbol", None)): item
-        for item in authorizations
-    }
-    existing = {
-        record.owner: record for record in after.all_records()
-        if record.kind == KIND_PUBLIC_API and record.owner
-    }
-    created: List[str] = []
-    changed: List[str] = []
-    stale: List[str] = []
-    invalidated: List[Dict[str, Any]] = []
-    for owner in sorted(final_contents):
-        original = original_contents.get(owner)
-        if not original or is_runnable_test_file(owner) or _is_test_or_doc_file(owner):
-            continue
-        before_sigs = _normalized_public_signatures(owner, original)
-        after_sigs = _normalized_public_signatures(owner, final_contents[owner])
-        if before_sigs == after_sigs:
-            continue
-        changed_names = sorted(
-            {name for sig, name in before_sigs.items() if sig not in after_sigs}
-            | {name for sig, name in after_sigs.items() if sig not in before_sigs}
-        )
-        contract_id = public_api_contract_id(owner)
-        prior = existing.get(owner)
-        if all((owner, name) in authorized_pairs for name in changed_names):
-            shape = sorted(after_sigs)
-            consumers = _reference_scan(workspace_path, final_contents, changed_names, owner)
-            reason = INVALIDATED_BY_CONTRACT_REVISION
-            if prior is None:
-                after.register(contract_id, name=owner, provider_milestone_id="", shape=shape)
-                created.append(contract_id)
-            elif prior.content_hash != compute_shape_hash(shape):
-                after.apply_change(after.propose_change(
-                    contract_id, shape, reason="authorized public API change committed",
+    try:
+        after = ContractRegistry.from_dict(registry.to_dict())
+        source_revision = f"{transaction_id}:{candidate_hash}"
+        authorized_pairs = {
+            (getattr(item, "affected_owner", None), getattr(item, "affected_symbol", None)): item
+            for item in authorizations
+        }
+        existing = {
+            record.owner: record for record in after.all_records()
+            if record.kind == KIND_PUBLIC_API and record.owner
+        }
+        created: List[str] = []
+        changed: List[str] = []
+        stale: List[str] = []
+        invalidated: List[Dict[str, Any]] = []
+        for owner in sorted(final_contents):
+            original = original_contents.get(owner)
+            if not original or is_runnable_test_file(owner) or _is_test_or_doc_file(owner):
+                continue
+            before_sigs = _normalized_public_signatures(owner, original)
+            after_sigs = _normalized_public_signatures(owner, final_contents[owner])
+            if before_sigs == after_sigs:
+                continue
+            changed_names = sorted(
+                {name for sig, name in before_sigs.items() if sig not in after_sigs}
+                | {name for sig, name in after_sigs.items() if sig not in before_sigs}
+            )
+            contract_id = public_api_contract_id(owner)
+            prior = existing.get(owner)
+            if all((owner, name) in authorized_pairs for name in changed_names):
+                shape = sorted(after_sigs)
+                consumers = _reference_scan(workspace_path, final_contents, changed_names, owner)
+                reason = INVALIDATED_BY_CONTRACT_REVISION
+                if prior is None:
+                    after.register(contract_id, name=owner, provider_milestone_id="", shape=shape)
+                    created.append(contract_id)
+                elif prior.content_hash != compute_shape_hash(shape):
+                    after.apply_change(after.propose_change(
+                        contract_id, shape, reason="authorized public API change committed",
+                    ))
+                    changed.append(contract_id)
+                else:
+                    continue
+                _establish(after, contract_id)
+                invalidations = tuple(
+                    {"consumer": consumer, "contract": contract_id, "symbols": symbols, "reason": reason}
+                    for consumer, symbols in consumers.items()
+                )
+                after.replace_current(contract_id, replace(
+                    after.get(contract_id),
+                    kind=KIND_PUBLIC_API, owner=owner, source_revision=source_revision,
+                    consumers=tuple(consumers),
+                    consumer_provenance=tuple(
+                        {"consumer": consumer, "symbols": symbols, "provenance": CONSUMER_PROVENANCE_NAME_SCAN}
+                        for consumer, symbols in consumers.items()
+                    ),
+                    consumers_complete=False,
+                    authorization={
+                        "changed_symbols": changed_names,
+                        "authorizations": [_authorization_evidence(authorized_pairs[(owner, name)])
+                                           for name in changed_names],
+                    },
+                    stale_reason=None,
+                    invalidated_consumers=invalidations,
                 ))
-                changed.append(contract_id)
-            else:
+                invalidated.extend(invalidations)
+            elif prior is not None and prior.stale_reason is None:
+                invalidations = tuple(
+                    {"consumer": consumer, "contract": contract_id, "reason": INVALIDATED_BY_STALE_CONTRACT}
+                    for consumer in prior.consumers
+                )
+                after.replace_current(contract_id, replace(
+                    prior, stale_reason=STALE_UNAUTHORIZED_SOURCE_CHANGE, invalidated_consumers=invalidations,
+                ))
+                stale.append(contract_id)
+                invalidated.extend(invalidations)
+        # A milestone unit's provided capabilities are established by the same
+        # transaction as its committed source - never by bookkeeping afterwards.
+        # An id already IMPLEMENTED (a replayed or recovered unit) is not
+        # transitioned twice; an id the run never registered is not invented.
+        established: List[str] = []
+        for contract_id in capability_contracts:
+            record = after.try_get(contract_id)
+            if record is None or record.state is ContractState.IMPLEMENTED:
                 continue
             _establish(after, contract_id)
-            invalidations = tuple(
-                {"consumer": consumer, "contract": contract_id, "symbols": symbols, "reason": reason}
-                for consumer, symbols in consumers.items()
+            after.replace_current(contract_id, replace(after.get(contract_id), source_revision=source_revision))
+            established.append(contract_id)
+        if not (created or changed or stale or established):
+            return None
+        verification = {
+            "required": bool(invalidated),
+            "satisfied": bool(downstream_verified),
+            "satisfied_by": DOWNSTREAM_VERIFIED_BY if downstream_verified else None,
+        }
+        if invalidated and not downstream_verified:
+            raise ContractTransitionRefused(
+                CONTRACT_CONSUMER_VERIFICATION_MISSING,
+                f"{len(invalidated)} contract consumer(s) invalidated "
+                f"({sorted({item['consumer'] for item in invalidated})}) without a passing terminal full "
+                "suite on this candidate",
             )
-            after.replace_current(contract_id, replace(
-                after.get(contract_id),
-                kind=KIND_PUBLIC_API, owner=owner, source_revision=source_revision,
-                consumers=tuple(consumers),
-                consumer_provenance=tuple(
-                    {"consumer": consumer, "symbols": symbols, "provenance": CONSUMER_PROVENANCE_NAME_SCAN}
-                    for consumer, symbols in consumers.items()
-                ),
-                consumers_complete=False,
-                authorization={
-                    "changed_symbols": changed_names,
-                    "authorizations": [_authorization_evidence(authorized_pairs[(owner, name)])
-                                       for name in changed_names],
-                },
-                stale_reason=None,
-                invalidated_consumers=invalidations,
-            ))
-            invalidated.extend(invalidations)
-        elif prior is not None and prior.stale_reason is None:
-            invalidations = tuple(
-                {"consumer": consumer, "contract": contract_id, "reason": INVALIDATED_BY_STALE_CONTRACT}
-                for consumer in prior.consumers
-            )
-            after.replace_current(contract_id, replace(
-                prior, stale_reason=STALE_UNAUTHORIZED_SOURCE_CHANGE, invalidated_consumers=invalidations,
-            ))
-            stale.append(contract_id)
-            invalidated.extend(invalidations)
-    # A milestone unit's provided capabilities are established by the same
-    # transaction as its committed source - never by bookkeeping afterwards.
-    # An id already IMPLEMENTED (a replayed or recovered unit) is not
-    # transitioned twice; an id the run never registered is not invented.
-    established: List[str] = []
-    for contract_id in capability_contracts:
-        record = after.try_get(contract_id)
-        if record is None or record.state is ContractState.IMPLEMENTED:
-            continue
-        _establish(after, contract_id)
-        after.replace_current(contract_id, replace(after.get(contract_id), source_revision=source_revision))
-        established.append(contract_id)
-    if not (created or changed or stale or established):
-        return None
-    verification = {
-        "required": bool(invalidated),
-        "satisfied": bool(downstream_verified),
-        "satisfied_by": DOWNSTREAM_VERIFIED_BY if downstream_verified else None,
-    }
-    if invalidated and not downstream_verified:
+        after.revision += 1
+        after.source_revision = source_revision
+        payload = after.to_dict()
+    except (ContractStateError, ContractNotFoundError, ContractChangeConflictError) as error:
+        # The registry's own lifecycle refused a step (an illegal state
+        # transition, a record missing or superseded mid-derivation): the
+        # candidate cannot be recorded exactly, and no retry changes that.
         raise ContractTransitionRefused(
-            CONTRACT_CONSUMER_VERIFICATION_MISSING,
-            f"{len(invalidated)} contract consumer(s) invalidated "
-            f"({sorted({item['consumer'] for item in invalidated})}) without a passing terminal full "
-            "suite on this candidate",
-        )
-    after.revision += 1
-    after.source_revision = source_revision
-    payload = after.to_dict()
+            CONTRACT_REGISTRY_TRANSITION_INVALID, f"{type(error).__name__}: {error}",
+        ) from error
     return RegistryTransition(
         transaction_id=transaction_id,
         before_digest=registry.digest(),

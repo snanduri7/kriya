@@ -448,8 +448,97 @@ def test_registry_fingerprint_absent_changed_and_corrupt(tmp_path):
 # --- the workflow's deterministic stop ----------------------------------------------------------
 
 
+def test_an_illegal_registry_lifecycle_step_is_a_typed_refusal(tmp_path):
+    from kriya.control.contracts import ContractStateError
+
+    workspace = _workspace(tmp_path)
+    _seed_planned_capability(workspace)
+    before = Path(contract_registry_path(workspace)).read_bytes()
+    with patch.object(ContractRegistry, "freeze", side_effect=ContractStateError("freeze refused")), \
+         pytest.raises(cl.ContractTransitionRefused) as refused:
+        _derive(workspace)
+    assert refused.value.reason_code == cl.CONTRACT_REGISTRY_TRANSITION_INVALID
+    assert refused.value.reason_code in cl.CONTRACT_REGISTRY_STOP_REASON_CODES
+    assert Path(contract_registry_path(workspace)).read_bytes() == before
+
+
+def test_a_coding_error_inside_the_derivation_is_never_turned_into_a_refusal(tmp_path):
+    workspace = _workspace(tmp_path)
+    _seed_planned_capability(workspace)
+    with patch.object(ContractRegistry, "freeze", side_effect=TypeError("bug")), pytest.raises(TypeError):
+        _derive(workspace)
+
+
+def _seed_planned_capability(workspace):
+    planned = ContractRegistry()
+    planned.register("M1:Pricing", "Pricing", "M1", "pricing")  # PROPOSED at plan time
+    save_contract_registry(workspace, planned)
+
+
+def _derive_with_capability():
+    """The real derivation, with a planned capability to establish, so the
+    commit carries a real (non-empty) registry transition."""
+    real = cl.derive_contract_transition
+    return lambda **kwargs: real(**{**kwargs, "capability_contracts": ("M1:Pricing",)})
+
+
+def _refuse_consumers(_workspace):
+    refusal = cl.ContractTransitionRefused(cl.CONTRACT_CONSUMER_VERIFICATION_MISSING, "consumers unverified")
+    return [patch("kriya.workflow.workflow.derive_contract_transition", side_effect=refusal)]
+
+
+def _corrupt_registry(workspace):
+    path = contract_registry_path(workspace)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    Path(path).write_text("{not json", encoding="utf-8")
+    return []
+
+
+def _illegal_lifecycle_step(workspace):
+    from kriya.control.contracts import ContractStateError
+
+    _seed_planned_capability(workspace)
+    return [
+        patch("kriya.workflow.workflow.derive_contract_transition", side_effect=_derive_with_capability()),
+        patch.object(ContractRegistry, "approve", side_effect=ContractStateError("approve refused")),
+    ]
+
+
+def _staging_fails(workspace):
+    _seed_planned_capability(workspace)
+    return [
+        patch("kriya.workflow.workflow.derive_contract_transition", side_effect=_derive_with_capability()),
+        patch("kriya.control.persistence.stage_pending_contract_registry", side_effect=OSError("disk full")),
+    ]
+
+
+def _live_registry_mismatch(workspace):
+    from kriya.control.contracts import ContractRegistryTransitionError
+
+    _seed_planned_capability(workspace)
+    return [
+        patch("kriya.workflow.workflow.derive_contract_transition", side_effect=_derive_with_capability()),
+        patch("kriya.control.persistence.promote_pending_contract_registry",
+              side_effect=ContractRegistryTransitionError("the live registry changed")),
+    ]
+
+
 @pytest.mark.asyncio
-async def test_a_refused_contract_transition_is_a_deterministic_stop_not_a_retry(tmp_path):
+@pytest.mark.parametrize(("arrange", "reason", "source_committed"), [
+    (_refuse_consumers, cl.CONTRACT_CONSUMER_VERIFICATION_MISSING, False),
+    (_corrupt_registry, CONTRACT_REGISTRY_CORRUPT, False),
+    (_illegal_lifecycle_step, cl.CONTRACT_REGISTRY_TRANSITION_INVALID, False),
+    (_staging_fails, cl.CONTRACT_REGISTRY_STAGING_FAILED, False),
+    # The source bytes landed and the cycle stays open for `runs recover`.
+    (_live_registry_mismatch, cl.CONTRACT_REGISTRY_TRANSITION_INCOMPLETE, True),
+], ids=["consumer_verification_missing", "corrupt", "invalid_transition", "staging_failed",
+        "promotion_state_mismatch"])
+async def test_a_registry_refusal_is_a_terminal_stop_never_a_retry(tmp_path, arrange, reason, source_committed):
+    """Every deterministic registry refusal ends the run with the typed
+    contract-registry failure: one Developer call, no retry, never
+    ``no_progress`` and never ``quality_gates_exhausted``. (An unauthorized
+    public API change is different: PRD-023 names the candidate change, so
+    the model can repair it, and it stays retryable.)"""
     from kriya.config import AppConfig
     from kriya.core.kernel import Kernel
     from kriya.core.llm import LLMClient
@@ -469,18 +558,29 @@ async def test_a_refused_contract_transition_is_a_deterministic_stop_not_a_retry
     for args in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "t"],
                  ["commit", "-q", "--allow-empty", "-m", "base"]):
         subprocess.run(["git", *args], cwd=tmp_path, check=True)
-    refusal = cl.ContractTransitionRefused(cl.CONTRACT_CONSUMER_VERIFICATION_MISSING, "consumers unverified")
+    workspace = str(tmp_path)
+    patches = arrange(workspace)
+    live = Path(contract_registry_path(workspace))
+    registry_before = live.read_bytes() if live.exists() else None
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
-               return_value={"success": True, "output": "ok"}), \
-         patch("kriya.workflow.workflow.derive_contract_transition", side_effect=refusal):
-        res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path))
+               return_value={"success": True, "output": "ok"}):
+        for extra in patches:
+            extra.start()
+        try:
+            res = await we.run_generation_workflow(goal="Create math library", workspace_path=workspace)
+        finally:
+            for extra in patches:
+                extra.stop()
 
     assert res["quality_gates_passed"] is False
     assert res["failure_category"] == "contract_registry_blocked"
-    assert res["environment_failure"].startswith(cl.CONTRACT_CONSUMER_VERIFICATION_MISSING)
+    assert res["failure_category"] not in ("no_progress", "quality_gates_exhausted")
+    assert res["environment_failure"].startswith(reason)
     assert res["contract_registry"] is None
-    assert we.developer.run_generation.await_count == 1
-    assert not (tmp_path / "math.py").exists()
+    assert we.developer.run_generation.await_count == 1  # no redundant model retry
+    assert (tmp_path / "math.py").exists() is source_committed
+    # The live registry is never rewritten by a refused transition.
+    assert (live.read_bytes() if live.exists() else None) == registry_before
 
 
 @pytest.mark.asyncio
