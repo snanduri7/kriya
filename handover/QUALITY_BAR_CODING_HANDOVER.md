@@ -1,6 +1,6 @@
 # Quality-bar follow-up after Batch 5: coding handover
 
-**Status:** READY_FOR_PYTEST (2026-09-26). Local commits, not pushed.
+**Status:** VERIFIED (2026-09-26): the user's pytest over the listed files is green. Local commits, not pushed.
 
 This is the queued follow-up from the Batch 5 closure. It puts CLAUDE.md's "Mandatory quality bar" into force for rule 1 (static check) and rule 3 (strict test doubles). It also fixes the raw `kriya authority` traceback seen during demo-03 production prep.
 
