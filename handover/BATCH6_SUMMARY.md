@@ -130,6 +130,23 @@ Each case writes its evidence with a status: `LIVE_EXERCISED` (the path ran and 
 ## First live run (2026-09-27) and triage
 4 passed, 2 FAILED (PRD-027 Developer context, PRD-028 member authority), 1 NOT_LIVE_EXERCISED (PRD-029). Both failures were `CONTEXT_BUDGET_UNSATISFIABLE` before inference. **Case A (fixture defect, mine, 83a80fd):** the fixture forced `num_ctx` 8192, replaced `extra_body` (a different inference identity) and used an empty qualification home, so requests were counted at the 2.5 default byte bound against 8K. Effective values at the refusals: qwen3-coder:30b, runtime 5a608316… (exact), served `num_ctx` 8192, qualification MISSING, no tier, `max_tokens` 1024, output reserve 1024 (the minimum), no fallbacks, counter `default_byte_bound`. The refused requests were the PRD-027 Planner (system 10,873 chars + user 6,711 of which the graph section about 4.7K; 7089 tokens) and the PRD-028 final Reviewer (file batch about 9.9K chars + diff + system 6,139 chars + evidence; 7212 tokens). The qualified identity is 32768 with a 2.11 bytes/token floor. Fixed in 3e6f273; production budgeting is unchanged. The gaps this exposed are PROMPT-BUDGET-FIT-001: 001A (Planner graph pool) and 001B (Reviewer batches) stay OPEN, P2, for a dedicated prompt-fit follow-up; 001C, the P1 result contract (a refused final review escaped as a raw exception after the candidate was applied), is fixed in 8600e2d. Evidence of the first run is kept in `handover/evidence/BATCH6/user-live/`; point the rerun at a new directory (below) so it is preserved.
 
+## Final verification gate (2026-09-27, HEAD e34e0ee): Batch 6 NOT closed
+Green:
+- 001C subset: 1856 passed.
+- Full suite: 6245 passed.
+- Live suite: 8 passed into `handover/evidence/BATCH6/user-live-3`.
+  - The preflight used the intended identity: qwen3-coder:30b, runtime ea90552d…, exact, QUALIFIED, effective 32768.
+  - Every case was LIVE_EXERCISED, including the targeted PRD-029 case (COMMITTED, DIRECT authorization, consumers invalidated and re-verified by the terminal full regression).
+- `user-live-2` is the earlier run from before 001C (its files predate 8600e2d). It is kept, but not used for closure.
+
+Red (evidence in `handover/evidence/BATCH6/prd027-precision/`):
+- **`context certify`** with the demo-03 production config: all 9 recall classes 1.0, but **precision 0.4808 < 0.5, CERTIFIED=false**.
+  - The live PRD-027 test had recorded the same result as green, because it checked mechanics only. It now fails when `certified` is not true, and records `live_status` and `certification_status` separately.
+  - The defect is PRD027-PRECISION-001, diagnosed in `handover/DEFECT_PRD027_PRECISION_001.md`. The fix is awaiting review.
+- **`doctor --production`**: PRODUCTION_READY=false.
+  - The only FAIL is `model.qualification`: the qwen3.6:35b-a3b-q4_K_M Developer fallback's record is STALE (policy /2, predates inference-settings identity). The user will re-qualify it.
+  - `context.recall_certification` was NOT_APPLICABLE (no code index at `paths.memory`), so it is not integration evidence.
+
 ## Static gates
 `.venv/bin/ruff check .`: All checks passed. `.venv/bin/pylint kriya plugins/core_tools tests`: exit 0. Both hold at the final commit.
 

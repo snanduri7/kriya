@@ -1,0 +1,192 @@
+{
+  "expansions": [
+    {
+      "capability": "member_boundaries",
+      "evidence": {
+        "attempt": 2,
+        "failure_type": "compile",
+        "source": "retry_member_hints"
+      },
+      "in_write_scope": true,
+      "language": "python",
+      "member_id": "Ledger.apply_fee",
+      "member_in_pristine": true,
+      "mutation_boundary": "authorized_write_scope",
+      "outcome": "GRANTED",
+      "path": "ledger.py",
+      "pristine_revision": "25a2118e1c82f7843071573e3bc7e74e57396b7dec1013fa57e3c0906d1745a5",
+      "reason_code": "MEMBER_AUTHORITY_GRANTED",
+      "source_origin": "CANDIDATE",
+      "source_revision": "e7358c6c7807e3198c1681f873322d8c490ae48c07259d3402367aea69102071"
+    },
+    {
+      "capability": "member_boundaries",
+      "evidence": {
+        "attempt": 2,
+        "source": "developer_investigation"
+      },
+      "in_write_scope": true,
+      "language": "python",
+      "member_id": "Ledger.apply_fee",
+      "member_in_pristine": true,
+      "mutation_boundary": "authorized_write_scope",
+      "outcome": "GRANTED",
+      "path": "ledger.py",
+      "pristine_revision": "25a2118e1c82f7843071573e3bc7e74e57396b7dec1013fa57e3c0906d1745a5",
+      "reason_code": "MEMBER_AUTHORITY_GRANTED",
+      "source_origin": "CANDIDATE",
+      "source_revision": "e7358c6c7807e3198c1681f873322d8c490ae48c07259d3402367aea69102071"
+    },
+    {
+      "capability": "member_boundaries",
+      "evidence": {
+        "attempt": 3,
+        "failure_type": "compile",
+        "source": "retry_member_hints"
+      },
+      "in_write_scope": true,
+      "language": "python",
+      "member_id": "Ledger.apply_fee",
+      "member_in_pristine": true,
+      "mutation_boundary": "authorized_write_scope",
+      "outcome": "GRANTED",
+      "path": "ledger.py",
+      "pristine_revision": "25a2118e1c82f7843071573e3bc7e74e57396b7dec1013fa57e3c0906d1745a5",
+      "reason_code": "MEMBER_AUTHORITY_GRANTED",
+      "source_origin": "CANDIDATE",
+      "source_revision": "e7358c6c7807e3198c1681f873322d8c490ae48c07259d3402367aea69102071"
+    },
+    {
+      "capability": "member_boundaries",
+      "evidence": {
+        "attempt": 3,
+        "source": "developer_investigation"
+      },
+      "in_write_scope": true,
+      "language": "python",
+      "member_id": "Ledger.apply_fee",
+      "member_in_pristine": true,
+      "mutation_boundary": "authorized_write_scope",
+      "outcome": "GRANTED",
+      "path": "ledger.py",
+      "pristine_revision": "25a2118e1c82f7843071573e3bc7e74e57396b7dec1013fa57e3c0906d1745a5",
+      "reason_code": "MEMBER_AUTHORITY_GRANTED",
+      "source_origin": "CANDIDATE",
+      "source_revision": "e7358c6c7807e3198c1681f873322d8c490ae48c07259d3402367aea69102071"
+    },
+    {
+      "capability": "member_boundaries",
+      "evidence": {
+        "attempt": 4,
+        "failure_type": "compile",
+        "source": "retry_member_hints"
+      },
+      "in_write_scope": true,
+      "language": "python",
+      "member_id": "Ledger.apply_fee",
+      "member_in_pristine": true,
+      "mutation_boundary": "authorized_write_scope",
+      "outcome": "GRANTED",
+      "path": "ledger.py",
+      "pristine_revision": "25a2118e1c82f7843071573e3bc7e74e57396b7dec1013fa57e3c0906d1745a5",
+      "reason_code": "MEMBER_AUTHORITY_GRANTED",
+      "source_origin": "CANDIDATE",
+      "source_revision": "e7358c6c7807e3198c1681f873322d8c490ae48c07259d3402367aea69102071"
+    },
+    {
+      "capability": "member_boundaries",
+      "evidence": {
+        "attempt": 4,
+        "source": "developer_investigation"
+      },
+      "in_write_scope": true,
+      "language": "python",
+      "member_id": "Ledger.apply_fee",
+      "member_in_pristine": true,
+      "mutation_boundary": "authorized_write_scope",
+      "outcome": "GRANTED",
+      "path": "ledger.py",
+      "pristine_revision": "25a2118e1c82f7843071573e3bc7e74e57396b7dec1013fa57e3c0906d1745a5",
+      "reason_code": "MEMBER_AUTHORITY_GRANTED",
+      "source_origin": "CANDIDATE",
+      "source_revision": "e7358c6c7807e3198c1681f873322d8c490ae48c07259d3402367aea69102071"
+    },
+    {
+      "capability": "member_boundaries",
+      "evidence": {
+        "attempt": 5,
+        "failure_type": "compile",
+        "source": "retry_member_hints"
+      },
+      "in_write_scope": true,
+      "language": "python",
+      "member_id": "Ledger.apply_fee",
+      "member_in_pristine": true,
+      "mutation_boundary": "authorized_write_scope",
+      "outcome": "GRANTED",
+      "path": "ledger.py",
+      "pristine_revision": "25a2118e1c82f7843071573e3bc7e74e57396b7dec1013fa57e3c0906d1745a5",
+      "reason_code": "MEMBER_AUTHORITY_GRANTED",
+      "source_origin": "CANDIDATE",
+      "source_revision": "e7358c6c7807e3198c1681f873322d8c490ae48c07259d3402367aea69102071"
+    },
+    {
+      "capability": "member_boundaries",
+      "evidence": {
+        "attempt": 5,
+        "source": "developer_investigation"
+      },
+      "in_write_scope": true,
+      "language": "python",
+      "member_id": "Ledger.apply_fee",
+      "member_in_pristine": true,
+      "mutation_boundary": "authorized_write_scope",
+      "outcome": "GRANTED",
+      "path": "ledger.py",
+      "pristine_revision": "25a2118e1c82f7843071573e3bc7e74e57396b7dec1013fa57e3c0906d1745a5",
+      "reason_code": "MEMBER_AUTHORITY_GRANTED",
+      "source_origin": "CANDIDATE",
+      "source_revision": "e7358c6c7807e3198c1681f873322d8c490ae48c07259d3402367aea69102071"
+    },
+    {
+      "capability": "member_boundaries",
+      "evidence": {
+        "attempt": 6,
+        "failure_type": "compile",
+        "source": "retry_member_hints"
+      },
+      "in_write_scope": true,
+      "language": "python",
+      "member_id": "Ledger.apply_fee",
+      "member_in_pristine": true,
+      "mutation_boundary": "authorized_write_scope",
+      "outcome": "GRANTED",
+      "path": "ledger.py",
+      "pristine_revision": "25a2118e1c82f7843071573e3bc7e74e57396b7dec1013fa57e3c0906d1745a5",
+      "reason_code": "MEMBER_AUTHORITY_GRANTED",
+      "source_origin": "CANDIDATE",
+      "source_revision": "e7358c6c7807e3198c1681f873322d8c490ae48c07259d3402367aea69102071"
+    },
+    {
+      "capability": "member_boundaries",
+      "evidence": {
+        "attempt": 6,
+        "source": "developer_investigation"
+      },
+      "in_write_scope": false,
+      "language": "python",
+      "member_id": "Ledger.apply_fee",
+      "member_in_pristine": true,
+      "mutation_boundary": "authorized_write_scope",
+      "outcome": "INDETERMINATE",
+      "path": "ledger.py",
+      "pristine_revision": "25a2118e1c82f7843071573e3bc7e74e57396b7dec1013fa57e3c0906d1745a5",
+      "reason_code": "OUT_OF_MUTATION_SCOPE",
+      "source_origin": null,
+      "source_revision": ""
+    }
+  ],
+  "fee_line": 483,
+  "injected_compile_failure": true,
+  "status": "LIVE_EXERCISED"
+}

@@ -1,0 +1,2608 @@
+[
+ {
+  "repository": "java-shop",
+  "case": "discount-cap",
+  "goal": "Cap the discount returned by OrderService.computeDiscount at 50 percent of the order subtotal.",
+  "repo_files": [
+   "pom.xml",
+   "src/main/java/com/shop/inventory/StockLevel.java",
+   "src/main/java/com/shop/inventory/WarehouseClient.java",
+   "src/main/java/com/shop/notify/EmailSender.java",
+   "src/main/java/com/shop/notify/SmsSender.java",
+   "src/main/java/com/shop/order/DiscountPolicy.java",
+   "src/main/java/com/shop/order/Order.java",
+   "src/main/java/com/shop/order/OrderController.java",
+   "src/main/java/com/shop/order/OrderService.java",
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+   "src/main/java/com/shop/pricing/PriceCalculator.java",
+   "src/main/java/com/shop/pricing/TaxTable.java",
+   "src/main/resources/application.properties",
+   "src/test/java/com/shop/order/OrderServiceTest.java"
+  ],
+  "golden": [
+   "src/main/java/com/shop/order/DiscountPolicy.java",
+   "src/main/java/com/shop/order/OrderController.java",
+   "src/main/java/com/shop/order/OrderService.java",
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+   "src/main/java/com/shop/pricing/PriceCalculator.java",
+   "src/main/java/com/shop/pricing/TaxTable.java",
+   "src/test/java/com/shop/order/OrderServiceTest.java"
+  ],
+  "acceptable": [
+   "src/main/java/com/shop/order/Order.java"
+  ],
+  "lexical_terms": [
+   "cap",
+   "discount",
+   "returned",
+   "orderservice",
+   "order",
+   "service",
+   "computediscount",
+   "compute",
+   "percent",
+   "subtotal"
+  ],
+  "vector_top20": [
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    4,
+    0.7504
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    3,
+    0.7502
+   ],
+   [
+    "src/main/resources/application.properties",
+    0,
+    0.7313
+   ],
+   [
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    1,
+    0.7227
+   ],
+   [
+    "src/main/java/com/shop/order/OrderController.java",
+    1,
+    0.7037
+   ],
+   [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    0,
+    0.6919
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    0,
+    0.6636
+   ],
+   [
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    1,
+    0.6596
+   ],
+   [
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    0,
+    0.649
+   ],
+   [
+    "src/main/java/com/shop/order/Order.java",
+    0,
+    0.6385
+   ],
+   [
+    "src/main/java/com/shop/pricing/TaxTable.java",
+    1,
+    0.6227
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    2,
+    0.617
+   ],
+   [
+    "src/main/java/com/shop/inventory/StockLevel.java",
+    1,
+    0.6117
+   ],
+   [
+    "src/main/java/com/shop/inventory/StockLevel.java",
+    2,
+    0.609
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    1,
+    0.607
+   ],
+   [
+    "src/test/java/com/shop/order/OrderServiceTest.java",
+    0,
+    0.6031
+   ],
+   [
+    "src/main/java/com/shop/order/OrderController.java",
+    0,
+    0.5679
+   ],
+   [
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    0,
+    0.5668
+   ],
+   [
+    "pom.xml",
+    0,
+    0.5598
+   ],
+   [
+    "src/main/java/com/shop/inventory/WarehouseClient.java",
+    2,
+    0.5556
+   ]
+  ],
+  "lexical_top20": [
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    3
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    4
+   ],
+   [
+    "src/main/java/com/shop/order/OrderController.java",
+    1
+   ],
+   [
+    "src/main/resources/application.properties",
+    0
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    0
+   ],
+   [
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    1
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    2
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    1
+   ],
+   [
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    1
+   ],
+   [
+    "src/main/java/com/shop/order/Order.java",
+    0
+   ],
+   [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    0
+   ],
+   [
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    0
+   ],
+   [
+    "src/test/java/com/shop/order/OrderServiceTest.java",
+    0
+   ],
+   [
+    "src/main/java/com/shop/order/OrderController.java",
+    0
+   ]
+  ],
+  "hybrid_top5": [
+   {
+    "rank": 1,
+    "file": "src/main/java/com/shop/order/OrderService.java",
+    "chunk": 4,
+    "rrf": 0.03252,
+    "vector_rank_cos": [
+     1,
+     0.7504
+    ],
+    "lexical_rank": 2,
+    "header": "File: src/main/java/com/shop/order/OrderService.java"
+   },
+   {
+    "rank": 2,
+    "file": "src/main/java/com/shop/order/OrderService.java",
+    "chunk": 3,
+    "rrf": 0.03252,
+    "vector_rank_cos": [
+     2,
+     0.7502
+    ],
+    "lexical_rank": 1,
+    "header": "File: src/main/java/com/shop/order/OrderService.java"
+   },
+   {
+    "rank": 3,
+    "file": "src/main/resources/application.properties",
+    "chunk": 0,
+    "rrf": 0.0315,
+    "vector_rank_cos": [
+     3,
+     0.7313
+    ],
+    "lexical_rank": 4,
+    "header": "File: src/main/resources/application.properties"
+   },
+   {
+    "rank": 4,
+    "file": "src/main/java/com/shop/order/OrderController.java",
+    "chunk": 1,
+    "rrf": 0.03126,
+    "vector_rank_cos": [
+     5,
+     0.7037
+    ],
+    "lexical_rank": 3,
+    "header": "File: src/main/java/com/shop/order/OrderController.java"
+   },
+   {
+    "rank": 5,
+    "file": "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "chunk": 1,
+    "rrf": 0.03078,
+    "vector_rank_cos": [
+     4,
+     0.7227
+    ],
+    "lexical_rank": 6,
+    "header": "File: src/main/java/com/shop/order/SeasonalDiscountPolicy.java"
+   }
+  ],
+  "matched_files": [
+   "src/main/java/com/shop/order/OrderService.java",
+   "src/main/resources/application.properties",
+   "src/main/java/com/shop/order/OrderController.java",
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java"
+  ],
+  "seeds_by_file": {
+   "src/main/java/com/shop/order/OrderService.java": [
+    "com.shop.order.OrderService",
+    "placeOrder",
+    "cancelOrder",
+    "computeDiscount",
+    "discountFor",
+    "src/main/java/com/shop/order/OrderService.java"
+   ],
+   "src/main/resources/application.properties": [
+    "application",
+    "src/main/resources/application.properties"
+   ],
+   "src/main/java/com/shop/order/OrderController.java": [
+    "com.shop.order.OrderController",
+    "quote",
+    "src/main/java/com/shop/order/OrderController.java"
+   ],
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java": [
+    "com.shop.order.SeasonalDiscountPolicy",
+    "discountFor",
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java"
+   ]
+  },
+  "neighborhood_combined": [
+   {
+    "filepath": "src/main/java/com/shop/order/OrderService.java",
+    "name": "DiscountPolicy",
+    "relation_type": "implements",
+    "hop": 1,
+    "score": 1.0
+   },
+   {
+    "filepath": "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "name": "DiscountPolicy",
+    "relation_type": "implements",
+    "hop": 1,
+    "score": 1.0
+   },
+   {
+    "filepath": "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "name": "com.shop.pricing.PriceCalculator",
+    "relation_type": "imports",
+    "hop": 1,
+    "score": 1.0
+   },
+   {
+    "filepath": "src/main/java/com/shop/order/OrderController.java",
+    "name": "src/main/java/com/shop/order/OrderController.java",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "src/test/java/com/shop/order/OrderServiceTest.java",
+    "name": "src/test/java/com/shop/order/OrderServiceTest.java",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "src/main/java/com/shop/order/DiscountPolicy.java",
+    "name": "src/main/java/com/shop/order/DiscountPolicy.java",
+    "relation_type": "imports",
+    "hop": 2,
+    "score": 0.5
+   },
+   {
+    "filepath": "src/main/java/com/shop/order/Order.java",
+    "name": "src/main/java/com/shop/order/Order.java",
+    "relation_type": "imports",
+    "hop": 2,
+    "score": 0.5
+   },
+   {
+    "filepath": "src/main/java/com/shop/pricing/TaxTable.java",
+    "name": "com.shop.pricing.TaxTable",
+    "relation_type": "imports",
+    "hop": 2,
+    "score": 0.5
+   }
+  ],
+  "neighborhood_by_matched_file": {
+   "src/main/java/com/shop/order/OrderService.java": [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    "src/main/java/com/shop/order/Order.java",
+    "src/main/java/com/shop/order/OrderController.java",
+    "src/main/java/com/shop/order/OrderService.java",
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "src/main/java/com/shop/pricing/TaxTable.java",
+    "src/test/java/com/shop/order/OrderServiceTest.java"
+   ],
+   "src/main/resources/application.properties": [],
+   "src/main/java/com/shop/order/OrderController.java": [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    "src/main/java/com/shop/order/Order.java",
+    "src/main/java/com/shop/order/OrderController.java",
+    "src/main/java/com/shop/order/OrderService.java",
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "src/main/java/com/shop/pricing/TaxTable.java",
+    "src/test/java/com/shop/order/OrderServiceTest.java"
+   ],
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java": [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    "src/main/java/com/shop/order/Order.java",
+    "src/main/java/com/shop/order/OrderController.java",
+    "src/main/java/com/shop/order/OrderService.java",
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "src/main/java/com/shop/pricing/TaxTable.java",
+    "src/test/java/com/shop/order/OrderServiceTest.java"
+   ]
+  },
+  "related_files": [
+   "src/main/java/com/shop/order/DiscountPolicy.java",
+   "src/main/java/com/shop/order/Order.java",
+   "src/main/java/com/shop/pricing/PriceCalculator.java",
+   "src/main/java/com/shop/pricing/TaxTable.java",
+   "src/test/java/com/shop/order/OrderServiceTest.java"
+  ],
+  "file_scores": {
+   "src/main/java/com/shop/pricing/PriceCalculator.java": 1.0,
+   "src/test/java/com/shop/order/OrderServiceTest.java": 0.7,
+   "src/main/java/com/shop/order/DiscountPolicy.java": 0.5,
+   "src/main/java/com/shop/order/Order.java": 0.5,
+   "src/main/java/com/shop/pricing/TaxTable.java": 0.5,
+   "src/main/java/com/shop/order/OrderService.java": 0.03252,
+   "src/main/resources/application.properties": 0.0315,
+   "src/main/java/com/shop/order/OrderController.java": 0.03126,
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java": 0.03078
+  },
+  "packaged": [
+   {
+    "path": "src/main/java/com/shop/order/OrderService.java",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "matched"
+   },
+   {
+    "path": "src/main/resources/application.properties",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "matched"
+   },
+   {
+    "path": "src/main/java/com/shop/order/OrderController.java",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "matched"
+   },
+   {
+    "path": "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "matched"
+   },
+   {
+    "path": "src/main/java/com/shop/order/DiscountPolicy.java",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "graph"
+   },
+   {
+    "path": "src/test/java/com/shop/order/OrderServiceTest.java",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "graph"
+   },
+   {
+    "path": "src/main/java/com/shop/order/Order.java",
+    "tier": "full",
+    "label": "ACCEPTABLE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "src/main/java/com/shop/pricing/TaxTable.java",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "graph"
+   },
+   {
+    "path": "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "graph"
+   }
+  ],
+  "omitted": []
+ },
+ {
+  "repository": "java-shop",
+  "case": "discount-from-config",
+  "goal": "Read the maximum discount percent for OrderService from the order.discount.max-percent setting in application.properties instead of hard-coding it.",
+  "repo_files": [
+   "pom.xml",
+   "src/main/java/com/shop/inventory/StockLevel.java",
+   "src/main/java/com/shop/inventory/WarehouseClient.java",
+   "src/main/java/com/shop/notify/EmailSender.java",
+   "src/main/java/com/shop/notify/SmsSender.java",
+   "src/main/java/com/shop/order/DiscountPolicy.java",
+   "src/main/java/com/shop/order/Order.java",
+   "src/main/java/com/shop/order/OrderController.java",
+   "src/main/java/com/shop/order/OrderService.java",
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+   "src/main/java/com/shop/pricing/PriceCalculator.java",
+   "src/main/java/com/shop/pricing/TaxTable.java",
+   "src/main/resources/application.properties",
+   "src/test/java/com/shop/order/OrderServiceTest.java"
+  ],
+  "golden": [
+   "src/main/java/com/shop/order/OrderService.java",
+   "src/main/resources/application.properties"
+  ],
+  "acceptable": [
+   "src/main/java/com/shop/order/DiscountPolicy.java",
+   "src/main/java/com/shop/order/Order.java"
+  ],
+  "lexical_terms": [
+   "read",
+   "maximum",
+   "discount",
+   "percent",
+   "orderservice",
+   "order",
+   "service",
+   "max",
+   "setting",
+   "application",
+   "properties",
+   "hard",
+   "coding"
+  ],
+  "vector_top20": [
+   [
+    "src/main/resources/application.properties",
+    0,
+    0.8165
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    4,
+    0.7272
+   ],
+   [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    0,
+    0.7083
+   ],
+   [
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    1,
+    0.7045
+   ],
+   [
+    "src/main/java/com/shop/order/OrderController.java",
+    1,
+    0.6963
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    3,
+    0.6945
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    0,
+    0.6774
+   ],
+   [
+    "src/main/java/com/shop/order/Order.java",
+    0,
+    0.6635
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    2,
+    0.6536
+   ],
+   [
+    "src/main/java/com/shop/pricing/TaxTable.java",
+    1,
+    0.6518
+   ],
+   [
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    0,
+    0.644
+   ],
+   [
+    "src/main/java/com/shop/inventory/StockLevel.java",
+    2,
+    0.6384
+   ],
+   [
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    1,
+    0.6327
+   ],
+   [
+    "src/main/java/com/shop/inventory/StockLevel.java",
+    1,
+    0.6322
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    1,
+    0.6264
+   ],
+   [
+    "src/test/java/com/shop/order/OrderServiceTest.java",
+    0,
+    0.6229
+   ],
+   [
+    "pom.xml",
+    0,
+    0.5967
+   ],
+   [
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    0,
+    0.5885
+   ],
+   [
+    "src/main/java/com/shop/order/OrderController.java",
+    0,
+    0.5829
+   ],
+   [
+    "src/main/java/com/shop/inventory/WarehouseClient.java",
+    1,
+    0.573
+   ]
+  ],
+  "lexical_top20": [
+   [
+    "src/main/resources/application.properties",
+    0
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    4
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    0
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    3
+   ],
+   [
+    "src/main/java/com/shop/order/OrderController.java",
+    1
+   ],
+   [
+    "pom.xml",
+    0
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    2
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    1
+   ],
+   [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    0
+   ],
+   [
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    0
+   ],
+   [
+    "src/test/java/com/shop/order/OrderServiceTest.java",
+    0
+   ],
+   [
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    1
+   ],
+   [
+    "src/main/java/com/shop/order/Order.java",
+    0
+   ],
+   [
+    "src/main/java/com/shop/order/OrderController.java",
+    0
+   ]
+  ],
+  "hybrid_top5": [
+   {
+    "rank": 1,
+    "file": "src/main/resources/application.properties",
+    "chunk": 0,
+    "rrf": 0.03279,
+    "vector_rank_cos": [
+     1,
+     0.8165
+    ],
+    "lexical_rank": 1,
+    "header": "File: src/main/resources/application.properties"
+   },
+   {
+    "rank": 2,
+    "file": "src/main/java/com/shop/order/OrderService.java",
+    "chunk": 4,
+    "rrf": 0.03226,
+    "vector_rank_cos": [
+     2,
+     0.7272
+    ],
+    "lexical_rank": 2,
+    "header": "File: src/main/java/com/shop/order/OrderService.java"
+   },
+   {
+    "rank": 3,
+    "file": "src/main/java/com/shop/order/OrderService.java",
+    "chunk": 0,
+    "rrf": 0.0308,
+    "vector_rank_cos": [
+     7,
+     0.6774
+    ],
+    "lexical_rank": 3,
+    "header": "File: src/main/java/com/shop/order/OrderService.java"
+   },
+   {
+    "rank": 4,
+    "file": "src/main/java/com/shop/order/OrderService.java",
+    "chunk": 3,
+    "rrf": 0.03078,
+    "vector_rank_cos": [
+     6,
+     0.6945
+    ],
+    "lexical_rank": 4,
+    "header": "File: src/main/java/com/shop/order/OrderService.java"
+   },
+   {
+    "rank": 5,
+    "file": "src/main/java/com/shop/order/OrderController.java",
+    "chunk": 1,
+    "rrf": 0.03077,
+    "vector_rank_cos": [
+     5,
+     0.6963
+    ],
+    "lexical_rank": 5,
+    "header": "File: src/main/java/com/shop/order/OrderController.java"
+   }
+  ],
+  "matched_files": [
+   "src/main/resources/application.properties",
+   "src/main/java/com/shop/order/OrderService.java",
+   "src/main/java/com/shop/order/OrderController.java"
+  ],
+  "seeds_by_file": {
+   "src/main/resources/application.properties": [
+    "application",
+    "src/main/resources/application.properties"
+   ],
+   "src/main/java/com/shop/order/OrderService.java": [
+    "com.shop.order.OrderService",
+    "placeOrder",
+    "cancelOrder",
+    "computeDiscount",
+    "discountFor",
+    "src/main/java/com/shop/order/OrderService.java"
+   ],
+   "src/main/java/com/shop/order/OrderController.java": [
+    "com.shop.order.OrderController",
+    "quote",
+    "src/main/java/com/shop/order/OrderController.java"
+   ]
+  },
+  "neighborhood_combined": [
+   {
+    "filepath": "src/main/java/com/shop/order/OrderService.java",
+    "name": "DiscountPolicy",
+    "relation_type": "implements",
+    "hop": 1,
+    "score": 1.0
+   },
+   {
+    "filepath": "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "name": "com.shop.pricing.PriceCalculator",
+    "relation_type": "imports",
+    "hop": 1,
+    "score": 1.0
+   },
+   {
+    "filepath": "src/main/java/com/shop/order/OrderController.java",
+    "name": "src/main/java/com/shop/order/OrderController.java",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "src/test/java/com/shop/order/OrderServiceTest.java",
+    "name": "src/test/java/com/shop/order/OrderServiceTest.java",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "src/main/java/com/shop/order/DiscountPolicy.java",
+    "name": "src/main/java/com/shop/order/DiscountPolicy.java",
+    "relation_type": "imports",
+    "hop": 2,
+    "score": 0.5
+   },
+   {
+    "filepath": "src/main/java/com/shop/order/Order.java",
+    "name": "src/main/java/com/shop/order/Order.java",
+    "relation_type": "imports",
+    "hop": 2,
+    "score": 0.5
+   },
+   {
+    "filepath": "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "name": "com.shop.order.SeasonalDiscountPolicy",
+    "relation_type": "implements",
+    "hop": 2,
+    "score": 0.5
+   },
+   {
+    "filepath": "src/main/java/com/shop/pricing/TaxTable.java",
+    "name": "com.shop.pricing.TaxTable",
+    "relation_type": "imports",
+    "hop": 2,
+    "score": 0.5
+   }
+  ],
+  "neighborhood_by_matched_file": {
+   "src/main/resources/application.properties": [],
+   "src/main/java/com/shop/order/OrderService.java": [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    "src/main/java/com/shop/order/Order.java",
+    "src/main/java/com/shop/order/OrderController.java",
+    "src/main/java/com/shop/order/OrderService.java",
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "src/main/java/com/shop/pricing/TaxTable.java",
+    "src/test/java/com/shop/order/OrderServiceTest.java"
+   ],
+   "src/main/java/com/shop/order/OrderController.java": [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    "src/main/java/com/shop/order/Order.java",
+    "src/main/java/com/shop/order/OrderController.java",
+    "src/main/java/com/shop/order/OrderService.java",
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "src/main/java/com/shop/pricing/TaxTable.java",
+    "src/test/java/com/shop/order/OrderServiceTest.java"
+   ]
+  },
+  "related_files": [
+   "src/main/java/com/shop/order/DiscountPolicy.java",
+   "src/main/java/com/shop/order/Order.java",
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+   "src/main/java/com/shop/pricing/PriceCalculator.java",
+   "src/main/java/com/shop/pricing/TaxTable.java",
+   "src/test/java/com/shop/order/OrderServiceTest.java"
+  ],
+  "file_scores": {
+   "src/main/java/com/shop/pricing/PriceCalculator.java": 1.0,
+   "src/test/java/com/shop/order/OrderServiceTest.java": 0.7,
+   "src/main/java/com/shop/order/DiscountPolicy.java": 0.5,
+   "src/main/java/com/shop/order/Order.java": 0.5,
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java": 0.5,
+   "src/main/java/com/shop/pricing/TaxTable.java": 0.5,
+   "src/main/resources/application.properties": 0.03279,
+   "src/main/java/com/shop/order/OrderService.java": 0.03226,
+   "src/main/java/com/shop/order/OrderController.java": 0.03077
+  },
+  "packaged": [
+   {
+    "path": "src/main/resources/application.properties",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "matched"
+   },
+   {
+    "path": "src/main/java/com/shop/order/OrderService.java",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "matched"
+   },
+   {
+    "path": "src/main/java/com/shop/order/OrderController.java",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "matched"
+   },
+   {
+    "path": "src/main/java/com/shop/order/DiscountPolicy.java",
+    "tier": "full",
+    "label": "ACCEPTABLE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "src/test/java/com/shop/order/OrderServiceTest.java",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "src/main/java/com/shop/order/Order.java",
+    "tier": "full",
+    "label": "ACCEPTABLE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "src/main/java/com/shop/pricing/TaxTable.java",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   }
+  ],
+  "omitted": []
+ },
+ {
+  "repository": "java-shop",
+  "case": "junit-upgrade",
+  "goal": "Upgrade the junit-jupiter test dependency in the Maven pom.xml to version 5.10.2.",
+  "repo_files": [
+   "pom.xml",
+   "src/main/java/com/shop/inventory/StockLevel.java",
+   "src/main/java/com/shop/inventory/WarehouseClient.java",
+   "src/main/java/com/shop/notify/EmailSender.java",
+   "src/main/java/com/shop/notify/SmsSender.java",
+   "src/main/java/com/shop/order/DiscountPolicy.java",
+   "src/main/java/com/shop/order/Order.java",
+   "src/main/java/com/shop/order/OrderController.java",
+   "src/main/java/com/shop/order/OrderService.java",
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+   "src/main/java/com/shop/pricing/PriceCalculator.java",
+   "src/main/java/com/shop/pricing/TaxTable.java",
+   "src/main/resources/application.properties",
+   "src/test/java/com/shop/order/OrderServiceTest.java"
+  ],
+  "golden": [
+   "pom.xml"
+  ],
+  "acceptable": [
+   "src/test/java/com/shop/order/OrderServiceTest.java"
+  ],
+  "lexical_terms": [
+   "upgrade",
+   "junit",
+   "jupiter",
+   "test",
+   "dependency",
+   "maven",
+   "pom",
+   "xml",
+   "version"
+  ],
+  "vector_top20": [
+   [
+    "pom.xml",
+    0,
+    0.7825
+   ],
+   [
+    "src/main/java/com/shop/order/Order.java",
+    0,
+    0.5639
+   ],
+   [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    0,
+    0.5377
+   ],
+   [
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    1,
+    0.5375
+   ],
+   [
+    "src/main/java/com/shop/pricing/TaxTable.java",
+    1,
+    0.5351
+   ],
+   [
+    "src/main/resources/application.properties",
+    0,
+    0.5216
+   ],
+   [
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    1,
+    0.5212
+   ],
+   [
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    0,
+    0.5128
+   ],
+   [
+    "src/main/java/com/shop/notify/EmailSender.java",
+    0,
+    0.5105
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    4,
+    0.5079
+   ],
+   [
+    "src/main/java/com/shop/inventory/StockLevel.java",
+    2,
+    0.5057
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    3,
+    0.5055
+   ],
+   [
+    "src/main/java/com/shop/notify/SmsSender.java",
+    0,
+    0.5052
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    2,
+    0.4964
+   ],
+   [
+    "src/main/java/com/shop/order/OrderController.java",
+    1,
+    0.4946
+   ],
+   [
+    "src/main/java/com/shop/notify/EmailSender.java",
+    1,
+    0.493
+   ],
+   [
+    "src/main/java/com/shop/inventory/StockLevel.java",
+    1,
+    0.4911
+   ],
+   [
+    "src/main/java/com/shop/inventory/StockLevel.java",
+    0,
+    0.4886
+   ],
+   [
+    "src/test/java/com/shop/order/OrderServiceTest.java",
+    0,
+    0.4875
+   ],
+   [
+    "src/main/java/com/shop/order/OrderService.java",
+    0,
+    0.4841
+   ]
+  ],
+  "lexical_top20": [
+   [
+    "pom.xml",
+    0
+   ],
+   [
+    "src/test/java/com/shop/order/OrderServiceTest.java",
+    0
+   ]
+  ],
+  "hybrid_top5": [
+   {
+    "rank": 1,
+    "file": "pom.xml",
+    "chunk": 0,
+    "rrf": 0.03279,
+    "vector_rank_cos": [
+     1,
+     0.7825
+    ],
+    "lexical_rank": 1,
+    "header": "File: pom.xml"
+   },
+   {
+    "rank": 2,
+    "file": "src/test/java/com/shop/order/OrderServiceTest.java",
+    "chunk": 0,
+    "rrf": 0.02879,
+    "vector_rank_cos": [
+     19,
+     0.4875
+    ],
+    "lexical_rank": 2,
+    "header": "File: src/test/java/com/shop/order/OrderServiceTest.java"
+   },
+   {
+    "rank": 3,
+    "file": "src/main/java/com/shop/order/Order.java",
+    "chunk": 0,
+    "rrf": 0.01613,
+    "vector_rank_cos": [
+     2,
+     0.5639
+    ],
+    "lexical_rank": null,
+    "header": "File: src/main/java/com/shop/order/Order.java"
+   },
+   {
+    "rank": 4,
+    "file": "src/main/java/com/shop/order/DiscountPolicy.java",
+    "chunk": 0,
+    "rrf": 0.01587,
+    "vector_rank_cos": [
+     3,
+     0.5377
+    ],
+    "lexical_rank": null,
+    "header": "File: src/main/java/com/shop/order/DiscountPolicy.java"
+   },
+   {
+    "rank": 5,
+    "file": "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "chunk": 1,
+    "rrf": 0.01562,
+    "vector_rank_cos": [
+     4,
+     0.5375
+    ],
+    "lexical_rank": null,
+    "header": "File: src/main/java/com/shop/order/SeasonalDiscountPolicy.java"
+   }
+  ],
+  "matched_files": [
+   "pom.xml",
+   "src/test/java/com/shop/order/OrderServiceTest.java",
+   "src/main/java/com/shop/order/Order.java",
+   "src/main/java/com/shop/order/DiscountPolicy.java",
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java"
+  ],
+  "seeds_by_file": {
+   "pom.xml": [
+    "pom",
+    "pom.xml"
+   ],
+   "src/test/java/com/shop/order/OrderServiceTest.java": [
+    "com.shop.order.OrderServiceTest",
+    "src/test/java/com/shop/order/OrderServiceTest.java"
+   ],
+   "src/main/java/com/shop/order/Order.java": [
+    "Order",
+    "src/main/java/com/shop/order/Order.java"
+   ],
+   "src/main/java/com/shop/order/DiscountPolicy.java": [
+    "com.shop.order.DiscountPolicy",
+    "src/main/java/com/shop/order/DiscountPolicy.java"
+   ],
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java": [
+    "com.shop.order.SeasonalDiscountPolicy",
+    "discountFor",
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java"
+   ]
+  },
+  "neighborhood_combined": [
+   {
+    "filepath": "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "name": "DiscountPolicy",
+    "relation_type": "implements",
+    "hop": 1,
+    "score": 1.0
+   },
+   {
+    "filepath": "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "name": "com.shop.pricing.PriceCalculator",
+    "relation_type": "imports",
+    "hop": 1,
+    "score": 1.0
+   },
+   {
+    "filepath": "src/main/java/com/shop/pricing/TaxTable.java",
+    "name": "com.shop.pricing.TaxTable",
+    "relation_type": "imports",
+    "hop": 1,
+    "score": 1.0
+   },
+   {
+    "filepath": "src/main/java/com/shop/order/OrderService.java",
+    "name": "computeDiscount",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "src/main/java/com/shop/order/DiscountPolicy.java",
+    "name": "src/main/java/com/shop/order/DiscountPolicy.java",
+    "relation_type": "imports",
+    "hop": 2,
+    "score": 0.5
+   },
+   {
+    "filepath": "src/main/java/com/shop/order/Order.java",
+    "name": "src/main/java/com/shop/order/Order.java",
+    "relation_type": "imports",
+    "hop": 2,
+    "score": 0.5
+   },
+   {
+    "filepath": "src/main/java/com/shop/order/OrderController.java",
+    "name": "src/main/java/com/shop/order/OrderController.java",
+    "relation_type": "imports",
+    "hop": 2,
+    "score": 0.5
+   },
+   {
+    "filepath": "src/test/java/com/shop/order/OrderServiceTest.java",
+    "name": "src/test/java/com/shop/order/OrderServiceTest.java",
+    "relation_type": "imports",
+    "hop": 2,
+    "score": 0.5
+   }
+  ],
+  "neighborhood_by_matched_file": {
+   "pom.xml": [],
+   "src/test/java/com/shop/order/OrderServiceTest.java": [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    "src/main/java/com/shop/order/Order.java",
+    "src/main/java/com/shop/order/OrderController.java",
+    "src/main/java/com/shop/order/OrderService.java",
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "src/main/java/com/shop/pricing/TaxTable.java",
+    "src/test/java/com/shop/order/OrderServiceTest.java"
+   ],
+   "src/main/java/com/shop/order/Order.java": [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    "src/main/java/com/shop/order/Order.java",
+    "src/main/java/com/shop/order/OrderController.java",
+    "src/main/java/com/shop/order/OrderService.java",
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "src/main/java/com/shop/pricing/TaxTable.java",
+    "src/test/java/com/shop/order/OrderServiceTest.java"
+   ],
+   "src/main/java/com/shop/order/DiscountPolicy.java": [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    "src/main/java/com/shop/order/Order.java",
+    "src/main/java/com/shop/order/OrderController.java",
+    "src/main/java/com/shop/order/OrderService.java",
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "src/main/java/com/shop/pricing/TaxTable.java",
+    "src/test/java/com/shop/order/OrderServiceTest.java"
+   ],
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java": [
+    "src/main/java/com/shop/order/DiscountPolicy.java",
+    "src/main/java/com/shop/order/Order.java",
+    "src/main/java/com/shop/order/OrderController.java",
+    "src/main/java/com/shop/order/OrderService.java",
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "src/main/java/com/shop/pricing/TaxTable.java",
+    "src/test/java/com/shop/order/OrderServiceTest.java"
+   ]
+  },
+  "related_files": [
+   "src/main/java/com/shop/order/OrderController.java",
+   "src/main/java/com/shop/order/OrderService.java",
+   "src/main/java/com/shop/pricing/PriceCalculator.java",
+   "src/main/java/com/shop/pricing/TaxTable.java"
+  ],
+  "file_scores": {
+   "src/main/java/com/shop/pricing/PriceCalculator.java": 1.0,
+   "src/main/java/com/shop/pricing/TaxTable.java": 1.0,
+   "src/main/java/com/shop/order/OrderService.java": 0.7,
+   "src/main/java/com/shop/order/OrderController.java": 0.5,
+   "pom.xml": 0.03279,
+   "src/test/java/com/shop/order/OrderServiceTest.java": 0.02879,
+   "src/main/java/com/shop/order/Order.java": 0.01613,
+   "src/main/java/com/shop/order/DiscountPolicy.java": 0.01587,
+   "src/main/java/com/shop/order/SeasonalDiscountPolicy.java": 0.01562
+  },
+  "packaged": [
+   {
+    "path": "pom.xml",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "matched"
+   },
+   {
+    "path": "src/test/java/com/shop/order/OrderServiceTest.java",
+    "tier": "full",
+    "label": "ACCEPTABLE",
+    "entered_via": "matched"
+   },
+   {
+    "path": "src/main/java/com/shop/order/Order.java",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "matched"
+   },
+   {
+    "path": "src/main/java/com/shop/order/DiscountPolicy.java",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "matched"
+   },
+   {
+    "path": "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "matched"
+   },
+   {
+    "path": "src/main/java/com/shop/order/OrderService.java",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "src/main/java/com/shop/pricing/PriceCalculator.java",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "src/main/java/com/shop/pricing/TaxTable.java",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "src/main/java/com/shop/order/OrderController.java",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   }
+  ],
+  "omitted": []
+ },
+ {
+  "repository": "python-payments",
+  "case": "charge-retry",
+  "goal": "Make StripeGateway.charge retry a failed charge request up to three times before raising.",
+  "repo_files": [
+   "config/settings.yaml",
+   "inventory/__init__.py",
+   "inventory/stock.py",
+   "inventory/warehouse.py",
+   "payments/__init__.py",
+   "payments/checkout.py",
+   "payments/currency.py",
+   "payments/emailer.py",
+   "payments/gateway.py",
+   "payments/paypal_gateway.py",
+   "payments/rates.py",
+   "payments/stripe_gateway.py",
+   "pyproject.toml",
+   "tests/test_stripe_gateway.py"
+  ],
+  "golden": [
+   "payments/checkout.py",
+   "payments/currency.py",
+   "payments/gateway.py",
+   "payments/paypal_gateway.py",
+   "payments/rates.py",
+   "payments/stripe_gateway.py",
+   "tests/test_stripe_gateway.py"
+  ],
+  "acceptable": [],
+  "lexical_terms": [
+   "make",
+   "stripegateway",
+   "stripe",
+   "gateway",
+   "charge",
+   "retry",
+   "failed",
+   "request",
+   "three",
+   "times",
+   "raising"
+  ],
+  "vector_top20": [
+   [
+    "tests/test_stripe_gateway.py",
+    2,
+    0.7099
+   ],
+   [
+    "payments/stripe_gateway.py",
+    3,
+    0.6879
+   ],
+   [
+    "payments/stripe_gateway.py",
+    4,
+    0.6697
+   ],
+   [
+    "config/settings.yaml",
+    0,
+    0.6434
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    0,
+    0.6294
+   ],
+   [
+    "payments/stripe_gateway.py",
+    2,
+    0.6266
+   ],
+   [
+    "payments/gateway.py",
+    3,
+    0.6262
+   ],
+   [
+    "payments/stripe_gateway.py",
+    1,
+    0.6233
+   ],
+   [
+    "payments/checkout.py",
+    1,
+    0.6211
+   ],
+   [
+    "payments/stripe_gateway.py",
+    0,
+    0.6186
+   ],
+   [
+    "payments/checkout.py",
+    0,
+    0.6157
+   ],
+   [
+    "payments/gateway.py",
+    2,
+    0.6152
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    3,
+    0.6027
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    1,
+    0.5873
+   ],
+   [
+    "payments/paypal_gateway.py",
+    3,
+    0.5562
+   ],
+   [
+    "payments/paypal_gateway.py",
+    4,
+    0.5437
+   ],
+   [
+    "payments/gateway.py",
+    1,
+    0.5116
+   ],
+   [
+    "pyproject.toml",
+    0,
+    0.5044
+   ],
+   [
+    "payments/emailer.py",
+    0,
+    0.4994
+   ],
+   [
+    "payments/paypal_gateway.py",
+    2,
+    0.4981
+   ]
+  ],
+  "lexical_top20": [
+   [
+    "config/settings.yaml",
+    0
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    2
+   ],
+   [
+    "payments/stripe_gateway.py",
+    3
+   ],
+   [
+    "payments/stripe_gateway.py",
+    4
+   ],
+   [
+    "payments/stripe_gateway.py",
+    1
+   ],
+   [
+    "payments/checkout.py",
+    1
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    0
+   ],
+   [
+    "payments/checkout.py",
+    0
+   ],
+   [
+    "payments/stripe_gateway.py",
+    2
+   ],
+   [
+    "payments/gateway.py",
+    2
+   ],
+   [
+    "payments/gateway.py",
+    3
+   ],
+   [
+    "payments/paypal_gateway.py",
+    3
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    1
+   ],
+   [
+    "payments/stripe_gateway.py",
+    0
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    3
+   ],
+   [
+    "payments/paypal_gateway.py",
+    0
+   ],
+   [
+    "payments/paypal_gateway.py",
+    1
+   ],
+   [
+    "payments/gateway.py",
+    0
+   ],
+   [
+    "payments/gateway.py",
+    1
+   ],
+   [
+    "payments/paypal_gateway.py",
+    2
+   ]
+  ],
+  "hybrid_top5": [
+   {
+    "rank": 1,
+    "file": "tests/test_stripe_gateway.py",
+    "chunk": 2,
+    "rrf": 0.03252,
+    "vector_rank_cos": [
+     1,
+     0.7099
+    ],
+    "lexical_rank": 2,
+    "header": "File: tests/test_stripe_gateway.py"
+   },
+   {
+    "rank": 2,
+    "file": "config/settings.yaml",
+    "chunk": 0,
+    "rrf": 0.03202,
+    "vector_rank_cos": [
+     4,
+     0.6434
+    ],
+    "lexical_rank": 1,
+    "header": "File: config/settings.yaml"
+   },
+   {
+    "rank": 3,
+    "file": "payments/stripe_gateway.py",
+    "chunk": 3,
+    "rrf": 0.032,
+    "vector_rank_cos": [
+     2,
+     0.6879
+    ],
+    "lexical_rank": 3,
+    "header": "File: payments/stripe_gateway.py"
+   },
+   {
+    "rank": 4,
+    "file": "payments/stripe_gateway.py",
+    "chunk": 4,
+    "rrf": 0.0315,
+    "vector_rank_cos": [
+     3,
+     0.6697
+    ],
+    "lexical_rank": 4,
+    "header": "File: payments/stripe_gateway.py"
+   },
+   {
+    "rank": 5,
+    "file": "tests/test_stripe_gateway.py",
+    "chunk": 0,
+    "rrf": 0.03031,
+    "vector_rank_cos": [
+     5,
+     0.6294
+    ],
+    "lexical_rank": 7,
+    "header": "File: tests/test_stripe_gateway.py"
+   }
+  ],
+  "matched_files": [
+   "tests/test_stripe_gateway.py",
+   "config/settings.yaml",
+   "payments/stripe_gateway.py"
+  ],
+  "seeds_by_file": {
+   "tests/test_stripe_gateway.py": [
+    "FakeClient",
+    "test_charge_returns_transaction_id",
+    "post",
+    "tests/test_stripe_gateway.py"
+   ],
+   "config/settings.yaml": [
+    "settings",
+    "config/settings.yaml"
+   ],
+   "payments/stripe_gateway.py": [
+    "StripeGateway",
+    "__init__",
+    "charge",
+    "refund",
+    "payments/stripe_gateway.py"
+   ]
+  },
+  "neighborhood_combined": [
+   {
+    "filepath": "payments/gateway.py",
+    "name": "PaymentGateway",
+    "relation_type": "inherits",
+    "hop": 1,
+    "score": 1.0
+   },
+   {
+    "filepath": "payments/stripe_gateway.py",
+    "name": "PaymentGateway",
+    "relation_type": "inherits",
+    "hop": 1,
+    "score": 1.0
+   },
+   {
+    "filepath": "payments/checkout.py",
+    "name": "payments/checkout.py",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "payments/currency.py",
+    "name": "to_minor_units",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "payments/paypal_gateway.py",
+    "name": "charge",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "tests/test_stripe_gateway.py",
+    "name": "tests/test_stripe_gateway.py",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "payments/rates.py",
+    "name": "rate_for",
+    "relation_type": "calls",
+    "hop": 2,
+    "score": 0.35
+   }
+  ],
+  "neighborhood_by_matched_file": {
+   "tests/test_stripe_gateway.py": [
+    "payments/checkout.py",
+    "payments/currency.py",
+    "payments/gateway.py",
+    "payments/paypal_gateway.py",
+    "payments/stripe_gateway.py",
+    "tests/test_stripe_gateway.py"
+   ],
+   "config/settings.yaml": [],
+   "payments/stripe_gateway.py": [
+    "payments/checkout.py",
+    "payments/currency.py",
+    "payments/gateway.py",
+    "payments/paypal_gateway.py",
+    "payments/rates.py",
+    "payments/stripe_gateway.py",
+    "tests/test_stripe_gateway.py"
+   ]
+  },
+  "related_files": [
+   "payments/checkout.py",
+   "payments/currency.py",
+   "payments/gateway.py",
+   "payments/paypal_gateway.py",
+   "payments/rates.py"
+  ],
+  "file_scores": {
+   "payments/gateway.py": 1.0,
+   "payments/checkout.py": 0.7,
+   "payments/currency.py": 0.7,
+   "payments/paypal_gateway.py": 0.7,
+   "payments/rates.py": 0.35,
+   "tests/test_stripe_gateway.py": 0.03252,
+   "config/settings.yaml": 0.03202,
+   "payments/stripe_gateway.py": 0.032
+  },
+  "packaged": [
+   {
+    "path": "tests/test_stripe_gateway.py",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "matched"
+   },
+   {
+    "path": "config/settings.yaml",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "matched"
+   },
+   {
+    "path": "payments/stripe_gateway.py",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "matched"
+   },
+   {
+    "path": "payments/paypal_gateway.py",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "graph"
+   },
+   {
+    "path": "payments/checkout.py",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "graph"
+   },
+   {
+    "path": "payments/rates.py",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "graph"
+   },
+   {
+    "path": "payments/gateway.py",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "graph"
+   },
+   {
+    "path": "payments/currency.py",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "graph"
+   }
+  ],
+  "omitted": []
+ },
+ {
+  "repository": "python-payments",
+  "case": "retries-from-config",
+  "goal": "Read the charge retry count for StripeGateway from max_charge_retries in config/settings.yaml instead of hard-coding it.",
+  "repo_files": [
+   "config/settings.yaml",
+   "inventory/__init__.py",
+   "inventory/stock.py",
+   "inventory/warehouse.py",
+   "payments/__init__.py",
+   "payments/checkout.py",
+   "payments/currency.py",
+   "payments/emailer.py",
+   "payments/gateway.py",
+   "payments/paypal_gateway.py",
+   "payments/rates.py",
+   "payments/stripe_gateway.py",
+   "pyproject.toml",
+   "tests/test_stripe_gateway.py"
+  ],
+  "golden": [
+   "config/settings.yaml",
+   "payments/stripe_gateway.py"
+  ],
+  "acceptable": [
+   "payments/gateway.py"
+  ],
+  "lexical_terms": [
+   "read",
+   "charge",
+   "retry",
+   "count",
+   "stripegateway",
+   "stripe",
+   "gateway",
+   "max_charge_retries",
+   "max",
+   "retries",
+   "config",
+   "settings",
+   "yaml",
+   "hard",
+   "coding"
+  ],
+  "vector_top20": [
+   [
+    "config/settings.yaml",
+    0,
+    0.7671
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    2,
+    0.7091
+   ],
+   [
+    "payments/stripe_gateway.py",
+    3,
+    0.6849
+   ],
+   [
+    "payments/stripe_gateway.py",
+    4,
+    0.6476
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    0,
+    0.6342
+   ],
+   [
+    "payments/stripe_gateway.py",
+    2,
+    0.6305
+   ],
+   [
+    "payments/stripe_gateway.py",
+    1,
+    0.6234
+   ],
+   [
+    "payments/stripe_gateway.py",
+    0,
+    0.6216
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    3,
+    0.6207
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    1,
+    0.6204
+   ],
+   [
+    "payments/gateway.py",
+    2,
+    0.6138
+   ],
+   [
+    "payments/checkout.py",
+    1,
+    0.6137
+   ],
+   [
+    "payments/checkout.py",
+    0,
+    0.6118
+   ],
+   [
+    "payments/gateway.py",
+    3,
+    0.6068
+   ],
+   [
+    "payments/paypal_gateway.py",
+    3,
+    0.5667
+   ],
+   [
+    "payments/paypal_gateway.py",
+    4,
+    0.5398
+   ],
+   [
+    "payments/rates.py",
+    0,
+    0.5339
+   ],
+   [
+    "payments/rates.py",
+    1,
+    0.5308
+   ],
+   [
+    "payments/gateway.py",
+    1,
+    0.529
+   ],
+   [
+    "pyproject.toml",
+    0,
+    0.5286
+   ]
+  ],
+  "lexical_top20": [
+   [
+    "config/settings.yaml",
+    0
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    2
+   ],
+   [
+    "payments/stripe_gateway.py",
+    3
+   ],
+   [
+    "payments/stripe_gateway.py",
+    4
+   ],
+   [
+    "payments/stripe_gateway.py",
+    1
+   ],
+   [
+    "payments/checkout.py",
+    1
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    0
+   ],
+   [
+    "payments/checkout.py",
+    0
+   ],
+   [
+    "payments/stripe_gateway.py",
+    2
+   ],
+   [
+    "payments/gateway.py",
+    2
+   ],
+   [
+    "payments/gateway.py",
+    3
+   ],
+   [
+    "payments/paypal_gateway.py",
+    3
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    1
+   ],
+   [
+    "payments/stripe_gateway.py",
+    0
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    3
+   ],
+   [
+    "payments/paypal_gateway.py",
+    0
+   ],
+   [
+    "payments/paypal_gateway.py",
+    1
+   ],
+   [
+    "payments/gateway.py",
+    0
+   ],
+   [
+    "payments/gateway.py",
+    1
+   ],
+   [
+    "payments/paypal_gateway.py",
+    2
+   ]
+  ],
+  "hybrid_top5": [
+   {
+    "rank": 1,
+    "file": "config/settings.yaml",
+    "chunk": 0,
+    "rrf": 0.03279,
+    "vector_rank_cos": [
+     1,
+     0.7671
+    ],
+    "lexical_rank": 1,
+    "header": "File: config/settings.yaml"
+   },
+   {
+    "rank": 2,
+    "file": "tests/test_stripe_gateway.py",
+    "chunk": 2,
+    "rrf": 0.03226,
+    "vector_rank_cos": [
+     2,
+     0.7091
+    ],
+    "lexical_rank": 2,
+    "header": "File: tests/test_stripe_gateway.py"
+   },
+   {
+    "rank": 3,
+    "file": "payments/stripe_gateway.py",
+    "chunk": 3,
+    "rrf": 0.03175,
+    "vector_rank_cos": [
+     3,
+     0.6849
+    ],
+    "lexical_rank": 3,
+    "header": "File: payments/stripe_gateway.py"
+   },
+   {
+    "rank": 4,
+    "file": "payments/stripe_gateway.py",
+    "chunk": 4,
+    "rrf": 0.03125,
+    "vector_rank_cos": [
+     4,
+     0.6476
+    ],
+    "lexical_rank": 4,
+    "header": "File: payments/stripe_gateway.py"
+   },
+   {
+    "rank": 5,
+    "file": "tests/test_stripe_gateway.py",
+    "chunk": 0,
+    "rrf": 0.03031,
+    "vector_rank_cos": [
+     5,
+     0.6342
+    ],
+    "lexical_rank": 7,
+    "header": "File: tests/test_stripe_gateway.py"
+   }
+  ],
+  "matched_files": [
+   "config/settings.yaml",
+   "tests/test_stripe_gateway.py",
+   "payments/stripe_gateway.py"
+  ],
+  "seeds_by_file": {
+   "config/settings.yaml": [
+    "settings",
+    "config/settings.yaml"
+   ],
+   "tests/test_stripe_gateway.py": [
+    "FakeClient",
+    "test_charge_returns_transaction_id",
+    "post",
+    "tests/test_stripe_gateway.py"
+   ],
+   "payments/stripe_gateway.py": [
+    "StripeGateway",
+    "__init__",
+    "charge",
+    "refund",
+    "payments/stripe_gateway.py"
+   ]
+  },
+  "neighborhood_combined": [
+   {
+    "filepath": "payments/gateway.py",
+    "name": "PaymentGateway",
+    "relation_type": "inherits",
+    "hop": 1,
+    "score": 1.0
+   },
+   {
+    "filepath": "payments/stripe_gateway.py",
+    "name": "PaymentGateway",
+    "relation_type": "inherits",
+    "hop": 1,
+    "score": 1.0
+   },
+   {
+    "filepath": "payments/checkout.py",
+    "name": "payments/checkout.py",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "payments/currency.py",
+    "name": "to_minor_units",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "payments/paypal_gateway.py",
+    "name": "charge",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "tests/test_stripe_gateway.py",
+    "name": "tests/test_stripe_gateway.py",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "payments/rates.py",
+    "name": "rate_for",
+    "relation_type": "calls",
+    "hop": 2,
+    "score": 0.35
+   }
+  ],
+  "neighborhood_by_matched_file": {
+   "config/settings.yaml": [],
+   "tests/test_stripe_gateway.py": [
+    "payments/checkout.py",
+    "payments/currency.py",
+    "payments/gateway.py",
+    "payments/paypal_gateway.py",
+    "payments/stripe_gateway.py",
+    "tests/test_stripe_gateway.py"
+   ],
+   "payments/stripe_gateway.py": [
+    "payments/checkout.py",
+    "payments/currency.py",
+    "payments/gateway.py",
+    "payments/paypal_gateway.py",
+    "payments/rates.py",
+    "payments/stripe_gateway.py",
+    "tests/test_stripe_gateway.py"
+   ]
+  },
+  "related_files": [
+   "payments/checkout.py",
+   "payments/currency.py",
+   "payments/gateway.py",
+   "payments/paypal_gateway.py",
+   "payments/rates.py"
+  ],
+  "file_scores": {
+   "payments/gateway.py": 1.0,
+   "payments/checkout.py": 0.7,
+   "payments/currency.py": 0.7,
+   "payments/paypal_gateway.py": 0.7,
+   "payments/rates.py": 0.35,
+   "config/settings.yaml": 0.03279,
+   "tests/test_stripe_gateway.py": 0.03226,
+   "payments/stripe_gateway.py": 0.03175
+  },
+  "packaged": [
+   {
+    "path": "config/settings.yaml",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "matched"
+   },
+   {
+    "path": "tests/test_stripe_gateway.py",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "matched"
+   },
+   {
+    "path": "payments/stripe_gateway.py",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "matched"
+   },
+   {
+    "path": "payments/paypal_gateway.py",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "payments/checkout.py",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "payments/rates.py",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "payments/gateway.py",
+    "tier": "full",
+    "label": "ACCEPTABLE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "payments/currency.py",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   }
+  ],
+  "omitted": []
+ },
+ {
+  "repository": "python-payments",
+  "case": "requests-upgrade",
+  "goal": "Raise the minimum requests dependency version in pyproject.toml to 2.32.",
+  "repo_files": [
+   "config/settings.yaml",
+   "inventory/__init__.py",
+   "inventory/stock.py",
+   "inventory/warehouse.py",
+   "payments/__init__.py",
+   "payments/checkout.py",
+   "payments/currency.py",
+   "payments/emailer.py",
+   "payments/gateway.py",
+   "payments/paypal_gateway.py",
+   "payments/rates.py",
+   "payments/stripe_gateway.py",
+   "pyproject.toml",
+   "tests/test_stripe_gateway.py"
+  ],
+  "golden": [
+   "pyproject.toml"
+  ],
+  "acceptable": [],
+  "lexical_terms": [
+   "raise",
+   "minimum",
+   "requests",
+   "dependency",
+   "version",
+   "pyproject",
+   "toml"
+  ],
+  "vector_top20": [
+   [
+    "pyproject.toml",
+    0,
+    0.8033
+   ],
+   [
+    "config/settings.yaml",
+    0,
+    0.6287
+   ],
+   [
+    "payments/rates.py",
+    0,
+    0.5968
+   ],
+   [
+    "payments/rates.py",
+    1,
+    0.5811
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    3,
+    0.5739
+   ],
+   [
+    "inventory/stock.py",
+    2,
+    0.5723
+   ],
+   [
+    "payments/gateway.py",
+    0,
+    0.5674
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    1,
+    0.5649
+   ],
+   [
+    "payments/gateway.py",
+    3,
+    0.5631
+   ],
+   [
+    "payments/currency.py",
+    0,
+    0.5625
+   ],
+   [
+    "payments/stripe_gateway.py",
+    3,
+    0.561
+   ],
+   [
+    "payments/stripe_gateway.py",
+    0,
+    0.5609
+   ],
+   [
+    "payments/currency.py",
+    1,
+    0.5587
+   ],
+   [
+    "payments/paypal_gateway.py",
+    3,
+    0.5545
+   ],
+   [
+    "payments/gateway.py",
+    2,
+    0.5538
+   ],
+   [
+    "payments/paypal_gateway.py",
+    4,
+    0.5523
+   ],
+   [
+    "tests/test_stripe_gateway.py",
+    2,
+    0.5516
+   ],
+   [
+    "inventory/stock.py",
+    0,
+    0.5488
+   ],
+   [
+    "payments/paypal_gateway.py",
+    2,
+    0.5485
+   ],
+   [
+    "payments/gateway.py",
+    1,
+    0.543
+   ]
+  ],
+  "lexical_top20": [
+   [
+    "pyproject.toml",
+    0
+   ]
+  ],
+  "hybrid_top5": [
+   {
+    "rank": 1,
+    "file": "pyproject.toml",
+    "chunk": 0,
+    "rrf": 0.03279,
+    "vector_rank_cos": [
+     1,
+     0.8033
+    ],
+    "lexical_rank": 1,
+    "header": "File: pyproject.toml"
+   },
+   {
+    "rank": 2,
+    "file": "config/settings.yaml",
+    "chunk": 0,
+    "rrf": 0.01613,
+    "vector_rank_cos": [
+     2,
+     0.6287
+    ],
+    "lexical_rank": null,
+    "header": "File: config/settings.yaml"
+   },
+   {
+    "rank": 3,
+    "file": "payments/rates.py",
+    "chunk": 0,
+    "rrf": 0.01587,
+    "vector_rank_cos": [
+     3,
+     0.5968
+    ],
+    "lexical_rank": null,
+    "header": "File: payments/rates.py"
+   },
+   {
+    "rank": 4,
+    "file": "payments/rates.py",
+    "chunk": 1,
+    "rrf": 0.01562,
+    "vector_rank_cos": [
+     4,
+     0.5811
+    ],
+    "lexical_rank": null,
+    "header": "File: payments/rates.py"
+   },
+   {
+    "rank": 5,
+    "file": "tests/test_stripe_gateway.py",
+    "chunk": 3,
+    "rrf": 0.01538,
+    "vector_rank_cos": [
+     5,
+     0.5739
+    ],
+    "lexical_rank": null,
+    "header": "File: tests/test_stripe_gateway.py"
+   }
+  ],
+  "matched_files": [
+   "pyproject.toml",
+   "config/settings.yaml",
+   "payments/rates.py",
+   "tests/test_stripe_gateway.py"
+  ],
+  "seeds_by_file": {
+   "pyproject.toml": [
+    "pyproject",
+    "pyproject.toml"
+   ],
+   "config/settings.yaml": [
+    "settings",
+    "config/settings.yaml"
+   ],
+   "payments/rates.py": [
+    "rate_for",
+    "payments/rates.py"
+   ],
+   "tests/test_stripe_gateway.py": [
+    "FakeClient",
+    "test_charge_returns_transaction_id",
+    "post",
+    "tests/test_stripe_gateway.py"
+   ]
+  },
+  "neighborhood_combined": [
+   {
+    "filepath": "payments/currency.py",
+    "name": "payments/currency.py",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "payments/gateway.py",
+    "name": "charge",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "payments/paypal_gateway.py",
+    "name": "charge",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "payments/rates.py",
+    "name": "payments/currency.py",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "payments/stripe_gateway.py",
+    "name": "payments/stripe_gateway.py",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "tests/test_stripe_gateway.py",
+    "name": "tests/test_stripe_gateway.py",
+    "relation_type": "calls",
+    "hop": 1,
+    "score": 0.7
+   },
+   {
+    "filepath": "payments/checkout.py",
+    "name": "payments/checkout.py",
+    "relation_type": "imports",
+    "hop": 2,
+    "score": 0.5
+   }
+  ],
+  "neighborhood_by_matched_file": {
+   "pyproject.toml": [],
+   "config/settings.yaml": [],
+   "payments/rates.py": [
+    "payments/currency.py",
+    "payments/rates.py"
+   ],
+   "tests/test_stripe_gateway.py": [
+    "payments/checkout.py",
+    "payments/currency.py",
+    "payments/gateway.py",
+    "payments/paypal_gateway.py",
+    "payments/stripe_gateway.py",
+    "tests/test_stripe_gateway.py"
+   ]
+  },
+  "related_files": [
+   "payments/checkout.py",
+   "payments/currency.py",
+   "payments/gateway.py",
+   "payments/paypal_gateway.py",
+   "payments/stripe_gateway.py"
+  ],
+  "file_scores": {
+   "payments/currency.py": 0.7,
+   "payments/gateway.py": 0.7,
+   "payments/paypal_gateway.py": 0.7,
+   "payments/stripe_gateway.py": 0.7,
+   "payments/checkout.py": 0.5,
+   "pyproject.toml": 0.03279,
+   "config/settings.yaml": 0.01613,
+   "payments/rates.py": 0.01587,
+   "tests/test_stripe_gateway.py": 0.01538
+  },
+  "packaged": [
+   {
+    "path": "pyproject.toml",
+    "tier": "full",
+    "label": "GOLDEN",
+    "entered_via": "matched"
+   },
+   {
+    "path": "config/settings.yaml",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "matched"
+   },
+   {
+    "path": "payments/rates.py",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "matched"
+   },
+   {
+    "path": "tests/test_stripe_gateway.py",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "matched"
+   },
+   {
+    "path": "payments/paypal_gateway.py",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "payments/checkout.py",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "payments/stripe_gateway.py",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "payments/gateway.py",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   },
+   {
+    "path": "payments/currency.py",
+    "tier": "full",
+    "label": "FALSE_POSITIVE",
+    "entered_via": "graph"
+   }
+  ],
+  "omitted": []
+ }
+]
