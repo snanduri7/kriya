@@ -1,0 +1,14 @@
+{
+  "developer_calls": 3,
+  "failure_category": "no_progress",
+  "retry_progress": {
+    "classification": "NO_PROGRESS",
+    "consecutive_no_progress_attempts": 3,
+    "distinct_vectors": 4,
+    "last_vector_digest": "949ab5cf936978d6ed7a4fcbf2861c8830414c0fc761450a0e98570d83d429ea",
+    "no_progress_terminated": true,
+    "sampling_resamples": 0,
+    "terminal_reason": "RETRY_NO_PROGRESS_EXHAUSTED"
+  },
+  "status": "LIVE_EXERCISED"
+}

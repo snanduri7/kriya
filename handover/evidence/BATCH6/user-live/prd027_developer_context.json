@@ -1,0 +1,4 @@
+{
+  "error": "ContextBudgetUnsatisfiableError: CONTEXT_BUDGET_UNSATISFIABLE: the request needs about 7089 prompt tokens (default_byte_bound) plus at least 1024 output tokens, but the served context window is 8192 (served_num_ctx). Nothing was sent to the model.",
+  "status": "FAILED"
+}
