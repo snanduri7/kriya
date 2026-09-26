@@ -364,3 +364,20 @@ def test_an_index_without_a_single_dimension_fails_closed(tmp_path, monkeypatch)
     open(os.path.join(config.paths.memory, "vector_index.db"), "wb").close()
     monkeypatch.setattr(cc, "embedding_runtime_identity", lambda config: "rt-1")
     assert cc.certification_status(config)[0] == cc.STATUS_FAILED
+
+
+@pytest.mark.parametrize("target", ["seed_rule_module", "vector_leg", "lexical_leg", "lexical_terms"])
+def test_every_retrieval_input_is_part_of_the_implementation_identity(target, monkeypatch):
+    """A change to the expansion-seed rule (PRD027-PRECISION-001) or to
+    either leg of the hybrid query must stale a stored certification."""
+    from kriya.memory import vector
+    from kriya.workflow import graph_retrieval
+
+    obj = {
+        "seed_rule_module": graph_retrieval, "vector_leg": vector.LocalVectorStore.query,
+        "lexical_leg": vector.LocalVectorStore.query_lexical, "lexical_terms": vector.lexical_query_terms,
+    }[target]
+    before = cc.index_implementation_digest()
+    real = cc.inspect.getsource
+    monkeypatch.setattr(cc.inspect, "getsource", lambda o: "changed" if o is obj else real(o))
+    assert cc.index_implementation_digest() != before

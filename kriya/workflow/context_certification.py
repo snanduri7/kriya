@@ -257,14 +257,17 @@ def index_implementation_digest() -> str:
     stored certification."""
     from kriya.analyzer.analyzer import RepositoryAnalyzer, chunk_file_with_metadata_headers
     from kriya.analyzer.graph import DependencyGraph
-    from kriya.memory.vector import LocalVectorStore
+    from kriya.memory.vector import LocalVectorStore, lexical_query_terms
+    from kriya.workflow import graph_retrieval
     from kriya.workflow.context_budget import build_code_context_package
-    from kriya.workflow.graph_retrieval import retrieve_graph_context
 
+    # Both legs of the hybrid query and the whole graph_retrieval module
+    # (retrieve_graph_context, the expansion-seed rule and its constants).
     sources = [
         inspect.getsource(obj) for obj in (
             chunk_file_with_metadata_headers, RepositoryAnalyzer.index_repository, DependencyGraph,
-            LocalVectorStore.query_hybrid, retrieve_graph_context, build_code_context_package,
+            LocalVectorStore.query, LocalVectorStore.query_lexical, lexical_query_terms,
+            LocalVectorStore.query_hybrid, graph_retrieval, build_code_context_package,
         )
     ]
     return hashlib.sha256("\n".join(sources).encode("utf-8")).hexdigest()
