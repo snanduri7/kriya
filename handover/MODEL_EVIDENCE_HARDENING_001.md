@@ -5,7 +5,10 @@
 **Commits:**
 - `6c163f2` MODEL-QUAL-IDENTITY-001 (defect record: `DEFECT_MODEL_QUAL_IDENTITY_001.md`);
 - `596bfbe` the three telemetry defects (MODEL-EVAL-001 findings 2–4);
-- plus this handover and the tracker/results updates.
+- `02ec465` handover, tracker and results updates;
+- `ddd9258` runtime-scoped tokenizer floors;
+- `95c1163` qualification environment identity, runtime portability seam and INF-001;
+- plus a final commit: the conftest host pin, the tool-path fallback, the widened tripwire and these notes.
 
 **MODEL-EVAL-001 verdict is unchanged:**
 - qwen3-coder:30b stays the default;
@@ -223,6 +226,8 @@ Changing the demo-03 fallback to `reasoning_effort: none` is a separate proposal
 - **Observable only for a loopback endpoint.** A LAN endpoint's hardware is not this machine's, so its environment is unavailable and capacity evidence is never reused for it.
 - **Ollama does not report its server-side parallelism**, so `runtime_parallelism` is `unavailable` for it. The field stays for runtimes that do report it.
 - **Disable the probe** with `KRIYA_EXECUTION_ENVIRONMENT_PROBE=0`.
+- **Tools.** `sysctl` and `nvidia-smi` are found on PATH, else in `/usr/sbin`, `/usr/bin`, `/sbin` or `/bin`, so a minimal PATH (IDE, launchd) does not lose qualified tiers.
+- **The mocked suite pins a fixed, exact fake host** (an autouse fixture in `tests/conftest.py`), so it never depends on the machine it runs on. The prd016 tier tests are green under `PATH=/usr/bin:/bin`.
 
 **Records:**
 - Capacity cases are stored in `environment_evidence[<environment digest>]`; functional cases stay in `cases`.
@@ -260,12 +265,25 @@ The environment binding is mutation-checked.
   - `supports_per_request_context_window`.
 
   Inference settings, LLMClient `_request_options`, `qualification_config` and PRD-016 tier offering (formerly `provider != "ollama"`) all go through it.
-- **Tripwire:** a test fails on any `provider ==/!=/in` or `"num_ctx"` literal in non-comment code anywhere in `kriya/` except `model_runtime.py`.
+- **Tripwire:** a test fails if any non-comment code in `kriya/` outside `model_runtime.py` contains:
+  - a provider comparison or membership (`==`, `!=`, `in`, `not in`; loop variables excluded);
+  - an `"ollama"` literal;
+  - a `"num_ctx"` literal;
+  - an Ollama-native `/api/...` path.
+
+  Anything else must be a named INF-001 inventory item. Today there is one: `kriya/memory/vector.py`'s `OllamaEmbeddingClient` native `/api/embeddings` fallback (embeddings, not model inference or qualification). The doctor's runtime check goes through the adapter's probe and the OpenAI-compatible `/models`. The tripwire is mutation-checked.
 - **Deliberately not done:**
   - No vLLM adapter.
   - The Ollama probe (`/api/version`, `/api/tags`, `/api/show`) stays inside `model_runtime.py`.
   - The `context_capacity` case still sends the window via the adapter's request field.
   - The user-facing tier note still says "exact Ollama runtime", which is accurate while Ollama is the only adapter; a test asserts on it.
 - **Follow-up recorded:** `INF-001` (Pluggable Inference Runtime Framework; tracker row, OPEN). It covers adapters for Ollama, vLLM and other OpenAI-compatible runtimes behind this seam, each owning its probe, per-request context control, capability reporting and environment/parallelism reporting. Generic orchestration, evidence, routing, retry and verification code must depend only on the abstraction.
+
+**Disclosed consequences (fail-closed, intended):**
+- A LAN (non-loopback) Ollama endpoint can no longer get a qualification-backed context tier: its environment is unobservable from this machine. Once any record exists for the tier runtime, declared tiers are blocked too. Adapter-reported environments belong to INF-001.
+- Likewise for a platform with no detectable backend (e.g. Windows): capacity evidence never counts there.
+- The resume `model_runtime` fingerprint binds the offered tiers, which now depend on the environment, so resuming a checkpoint on different hardware is refused.
+
+**What `./setup.sh requalify` now records:** each `<arm>-32k.json` has an `environment` block (digest, os/arch, metal, "Apple M1 Max", 64 GiB class, `ollama/0.34.2`, exact) and an `environment_evidence` entry holding `context_capacity` under that digest.
 
 **Focused command:** add `tests/test_qual_environment_identity.py` and `tests/test_bootstrap_contract.py` to the focused list above.

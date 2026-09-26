@@ -98,12 +98,24 @@ def memory_class_gib(total_bytes: Any) -> Optional[int]:
     return int(2 ** round(math.log2(gib)))
 
 
+# Where a tool lives when PATH is minimal (an IDE or launchd start).
+_SYSTEM_TOOL_DIRS = ("/usr/sbin", "/usr/bin", "/sbin", "/bin")
+
+
+def _resolve_tool(name: str) -> Optional[str]:
+    found = shutil.which(name)
+    if found:
+        return found
+    return next((os.path.join(d, name) for d in _SYSTEM_TOOL_DIRS if os.access(os.path.join(d, name), os.X_OK)), None)
+
+
 def _run(argv: Sequence[str]) -> Optional[str]:
-    if shutil.which(argv[0]) is None:
+    tool = _resolve_tool(argv[0])
+    if tool is None:
         return None
     try:
-        completed = subprocess.run(list(argv), capture_output=True, text=True, timeout=_COMMAND_TIMEOUT_SECONDS,
-                                   check=False)
+        completed = subprocess.run([tool, *argv[1:]], capture_output=True, text=True,
+                                   timeout=_COMMAND_TIMEOUT_SECONDS, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     return completed.stdout.strip() if completed.returncode == 0 else None

@@ -42,12 +42,20 @@ def _isolated_kriya_state_dir(tmp_path_factory, monkeypatch):
                         lambda: str(state_dir / "no-historical-install" / "logs" / "traces.db"))
 
 
+_TEST_HOST = {"os": "linux", "architecture": "x86_64", "memory_bytes": 64 * (1 << 30), "cpu_model": None,
+              "gpus": [], "gpu_backend": None}
+
+
 @pytest.fixture(autouse=True)
 def _no_model_runtime_probe(request, monkeypatch, tmp_path_factory):
-    from kriya.core import model_qualification, model_runtime
+    from kriya.core import execution_environment, model_qualification, model_runtime
 
     if request.node.get_closest_marker("live_model") is None:
         monkeypatch.setenv(model_runtime.PROBE_ENV_VAR, "0")
+        # Qualification environment identity: a fixed, exact fake host, so a
+        # mocked test never depends on the machine (sysctl/nvidia-smi/PATH)
+        # it runs on. Environment tests override this themselves.
+        monkeypatch.setattr(execution_environment, "_cached_host_properties", lambda: dict(_TEST_HOST))
         # PRD-014: never read or write the developer's real qualification store.
         monkeypatch.setenv(model_qualification.QUALIFICATION_HOME_ENV,
                            str(tmp_path_factory.mktemp("kriya-qualifications")))

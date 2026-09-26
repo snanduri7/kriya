@@ -220,19 +220,35 @@ def test_the_runtime_fingerprint_names_every_portable_component():
             "chat_template", "tool_call_parser", "kriya_protocol", "adapter_version"} <= fields
 
 
-def test_generic_code_never_branches_on_a_provider_or_names_its_context_option():
+# INF-001 inventory: provider-native calls outside the model runtime adapter,
+# each named here on purpose (none is part of model qualification).
+INF_001_INVENTORY = {
+    "kriya/memory/vector.py": "OllamaEmbeddingClient's native /api/embeddings fallback (embeddings, not inference)",
+}
+_PROVIDER_CODE = (
+    r"(?<!for )\bprovider\s*(==|!=|not\s+in|in)\s*",  # a provider comparison/membership (not a loop variable)
+    r"[\"']ollama[\"']",  # a provider name as a value
+    r"[\"']num_ctx[\"']",  # the Ollama per-request context field
+    r"/api/(show|tags|version|ps|embeddings|embed|generate|chat)\b",  # Ollama-native endpoints
+)
+
+
+def test_generic_code_never_branches_on_a_provider_or_uses_its_native_api():
     """INF-001 seam: only kriya/core/model_runtime.py (the runtime adapter)
-    knows a provider's name or its per-request context field."""
-    adapter = {"kriya/core/model_runtime.py"}
+    knows a provider's name, its per-request context field or its native
+    API; anything else is a named INF-001 inventory item."""
     offenders = []
     for path in sorted((REPO / "kriya").rglob("*.py")):
         rel = path.relative_to(REPO).as_posix()
-        if rel in adapter:
+        if rel == "kriya/core/model_runtime.py" or rel in INF_001_INVENTORY:
             continue
-        code = "\n".join(line for line in path.read_text().splitlines() if not line.lstrip().startswith("#"))
-        if re.search(r"provider\s*(==|!=|in)\s*[\"'(\[{]", code) or re.search(r"[\"']num_ctx[\"']", code):
+        code = "\n".join(line for line in path.read_text().splitlines()
+                         if not line.lstrip().startswith(("#", '"', "'")))
+        if any(re.search(pattern, code) for pattern in _PROVIDER_CODE):
             offenders.append(rel)
     assert offenders == []
+    for rel in INF_001_INVENTORY:  # still true, or remove it from the inventory
+        assert re.search(_PROVIDER_CODE[3], (REPO / rel).read_text()), rel
 
 
 def test_the_context_window_request_field_is_the_adapters():
