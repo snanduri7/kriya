@@ -566,6 +566,17 @@ class GenerationState:
     last_progress_classification: Optional[str] = None
     consecutive_no_progress_attempts: int = 0
     no_progress_terminated: bool = False
+    # PRD-026 (kriya/workflow/retry_progress.py): every progress-vector digest
+    # this run produced (digest -> first attempt number), never erased, so a
+    # return to an earlier state (A -> B -> A) is recognized; the last vector
+    # for changed-dimension telemetry; identical-evidence retries spent on
+    # stochastic variation; and the retry-evidence fingerprints already shown
+    # to the Developer (hash -> first attempt number).
+    progress_vector_digests: Dict[str, int] = field(default_factory=dict)
+    last_progress_vector: Optional[Any] = None
+    sampling_resamples: int = 0
+    retry_evidence_seen: Dict[str, int] = field(default_factory=dict)
+    no_progress_reason: Optional[str] = None
     # Current attempt's three distinct verification/application boundaries.
     candidate_gates_succeeded: bool = False
     terminal_regression_succeeded: bool = False
@@ -697,6 +708,20 @@ class GenerationState:
             and self.quality_gates_succeeded
             and self.api_contract_recovery is None
         )
+
+    def retry_progress_summary(self) -> Dict[str, Any]:
+        """PRD-026 result/trace contract: how the retry-progress invariant
+        ended this run. Content-free (digests and counts only)."""
+        last = self.last_progress_vector
+        return {
+            "classification": self.last_progress_classification,
+            "consecutive_no_progress_attempts": self.consecutive_no_progress_attempts,
+            "no_progress_terminated": self.no_progress_terminated,
+            "terminal_reason": self.no_progress_reason,
+            "distinct_vectors": len(self.progress_vector_digests),
+            "last_vector_digest": last.digest() if last is not None else None,
+            "sampling_resamples": self.sampling_resamples,
+        }
 
     def generation_metrics(self, total_wall_seconds: Optional[float] = None) -> Dict[str, Any]:
         """Content-free operational telemetry safe to persist in local traces.

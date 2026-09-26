@@ -21,7 +21,7 @@ estimate.
 import hashlib
 import logging
 import os
-from typing import Optional
+from typing import Any, Optional
 
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
@@ -59,6 +59,13 @@ from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.repair_contract import RepairContractStatus
 from kriya.workflow.retry_policy import RetryAction, decide_for_state
+from kriya.workflow.retry_progress import (
+    NO_PROGRESS_TERMINAL_REASON,
+    REGRESSION,
+    ProgressVector,
+    build_progress_vector,
+    classify_progress,
+)
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.state import APIContractRecovery, GenerationState
 from kriya.workflow.worktree import remove_git_worktree
@@ -165,8 +172,15 @@ def record_workspace_progress(
     stage: Optional[str] = None,
     files=None,
     action: Optional[str] = None,
+    vector: Optional[ProgressVector] = None,
 ) -> bool:
-    """Classify every failed attempt and bound retries without content progress."""
+    """Classify every failed attempt and bound retries without progress.
+
+    PRD-026: with ``vector`` (every production caller passes one), a vector
+    this run already produced is REPEATED_VECTOR and counts toward
+    ``limit``, whatever changed in between. That closes the A -> B -> A
+    cycle the pairwise comparison below cannot see. Without a vector the
+    pre-PRD-026 pairwise rules apply unchanged."""
     normalized_files = tuple(sorted(set(files or ())))
     same_workspace = workspace_hash == state.last_failed_workspace_hash
     stage_order = {
@@ -176,43 +190,104 @@ def record_workspace_progress(
         "goal_spec_compliance": 5, "regression_test": 6,
     }
     action_changed = action != state.last_progress_action
-    if not same_workspace:
-        classification = "PROGRESS"
-    elif action_changed:
-        classification = "NO_PROGRESS"
-    elif (
+    stage_regressed = (
         stage is not None
         and state.last_progress_stage is not None
         and stage in stage_order
         and state.last_progress_stage in stage_order
         and stage_order[stage] < stage_order[state.last_progress_stage]
-    ):
-        classification = "REGRESSION"
-    elif (
+    )
+    repeated_action = (
         failure_signature == state.last_progress_failure_signature
         and stage == state.last_progress_stage
         and normalized_files == state.last_progress_files
-    ):
-        classification = "REPEATED_ACTION"
-    else:
-        classification = "NO_PROGRESS"
-
-    if same_workspace and not action_changed:
+    )
+    classification, counts = classify_progress(
+        already_seen=vector is not None and vector.digest() in state.progress_vector_digests,
+        same_workspace=same_workspace, action_changed=action_changed,
+        stage_regressed=stage_regressed, repeated_action=repeated_action,
+    )
+    if counts:
         state.consecutive_no_progress_attempts += 1
     else:
         state.consecutive_no_progress_attempts = 0
+    if vector is not None:
+        previous = state.last_progress_vector
+        state.progress_vector_digests.setdefault(vector.digest(), state.attempt_number)
+        state.last_progress_vector = vector
+        state.record_event(RunEvent(
+            kind="retry.progress_vector",
+            attempt=state.attempt_number,
+            source="retry_strategy.record_workspace_progress",
+            authority=EventAuthority.ADVISORY,
+            message=f"Retry progress classified {classification}.",
+            details={
+                "digest": vector.digest(),
+                "classification": classification,
+                "changed_dimensions": list(vector.changed_dimensions(previous)),
+                "consecutive_no_progress_attempts": state.consecutive_no_progress_attempts,
+                "distinct_vectors": len(state.progress_vector_digests),
+            },
+        ))
     state.last_failed_workspace_hash = workspace_hash
     state.last_progress_failure_signature = failure_signature
     state.last_progress_stage = stage
     state.last_progress_files = normalized_files
     state.last_progress_action = action
     state.last_progress_classification = classification
-    if classification == "REGRESSION":
+    if classification == REGRESSION:
         state.consecutive_no_progress_attempts = max(
             state.consecutive_no_progress_attempts, 2,
         )
     state.no_progress_terminated = state.consecutive_no_progress_attempts >= limit
+    if state.no_progress_terminated and state.no_progress_reason is None:
+        state.no_progress_reason = NO_PROGRESS_TERMINAL_REASON
+        state.record_event(RunEvent(
+            kind="retry.no_progress_terminal",
+            attempt=state.attempt_number,
+            source="retry_strategy.record_workspace_progress",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                f"{NO_PROGRESS_TERMINAL_REASON}: {state.consecutive_no_progress_attempts} consecutive "
+                f"attempts without material progress (limit {limit})."
+            ),
+            details={
+                "reason_code": NO_PROGRESS_TERMINAL_REASON,
+                "classification": classification,
+                "limit": limit,
+                "last_vector_digest": vector.digest() if vector is not None else None,
+            },
+        ))
     return not state.no_progress_terminated
+
+
+def _attempt_progress_vector(
+    state: GenerationState, ctx: Any, failure: Any, failure_signature: Any, workspace_hash: str,
+    missing_files: Any,
+) -> ProgressVector:
+    """PRD-026: the canonical progress vector of the attempt that just
+    failed, from state Kriya already holds (never raw model text)."""
+    profile = state.last_developer_request_profile
+    recovery = state.api_contract_recovery
+    plan = getattr(ctx, "structured_plan", None)
+    diagnostics = getattr(failure, "diagnostics", None) or {}
+    return build_progress_vector(
+        failure_signature=failure_signature,
+        workspace_hash=workspace_hash,
+        implicated_files=getattr(failure, "likely_files", None) or (),
+        missing_files=missing_files or (),
+        evidence_fingerprint=state.budgets.last_retry_evidence_fingerprint,
+        context_items=state.known_target_context_items,
+        action=state.last_attempt_mode,
+        protocol=recovery.phase.value if recovery is not None else None,
+        request_profile=(
+            f"{profile.model}@{profile.digest}" if profile is not None
+            else state.last_model_override or ctx.kernel.config.llm.model
+        ),
+        plan_revision=plan.content_hash() if plan is not None else None,
+        repair_contract=state.repair_contract,
+        diagnostics=(diagnostics.get("reason_code"),) if isinstance(diagnostics, dict) else (),
+    )
 
 
 def compute_effective_workspace_hash(workspace_path: str, known_files=None) -> str:
@@ -724,6 +799,10 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             f"{state.last_attempt_mode}:"
             f"{state.last_model_override or ctx.kernel.config.llm.model}"
         ),
+        vector=_attempt_progress_vector(
+            state, ctx, failure, current_failure_signature, current_workspace_hash,
+            e.missing_files if is_incomplete_generation else (),
+        ),
     ):
         logger.error(
             "Quality Gates stopped after %s consecutive attempts produced no "
@@ -739,6 +818,23 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
         )
         if ctx.chain:
             state.budgets.fallback_targeted_requested = True
+        state.record_event(RunEvent(
+            kind="retry.strategy_transition",
+            attempt=state.attempt_number,
+            source="retry_strategy.handle_attempt_failure",
+            authority=EventAuthority.ADVISORY,
+            message="No material progress on consecutive attempts - forcing a strategy transition.",
+            details={
+                "reason": state.last_progress_classification,
+                "consecutive_no_progress_attempts": state.consecutive_no_progress_attempts,
+                "from_mode": state.last_attempt_mode,
+                "targeted_budget_closed": True,
+                "fallback_targeted_requested": bool(ctx.chain),
+                "last_vector_digest": (
+                    state.last_progress_vector.digest() if state.last_progress_vector is not None else None
+                ),
+            },
+        ))
 
     # Re-evaluate which file(s) THIS failure implicates/is missing -
     # independent of whether this attempt was itself targeted, missing-

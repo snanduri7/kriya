@@ -2,6 +2,7 @@
 
 import json
 import sys
+from typing import Any, Dict, Optional
 
 import click
 
@@ -52,3 +53,17 @@ class GenerateOutput:
         if exit_code is not None:
             raise SystemExit(exit_code)
         return False
+
+
+def no_progress_stop_message(progress: Optional[Dict[str, Any]]) -> str:
+    """PRD-026: the terminal message for a run the retry-progress invariant
+    stopped (failure_category ``no_progress``)."""
+    progress = progress or {}
+    return (
+        f"\n[NO PROGRESS] {progress.get('terminal_reason') or 'RETRY_NO_PROGRESS_EXHAUSTED'}: Kriya stopped "
+        f"retrying after {progress.get('consecutive_no_progress_attempts', 0)} consecutive attempts without "
+        f"material progress (last classification {progress.get('classification')}, "
+        f"{progress.get('distinct_vectors', 0)} distinct retry states, "
+        f"{progress.get('sampling_resamples', 0)} sampling resamples). Another attempt on the same evidence "
+        "could not change the outcome; the last failure is recorded in this run's gate outcomes and trace."
+    )

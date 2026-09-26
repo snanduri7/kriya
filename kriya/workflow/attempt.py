@@ -26,6 +26,7 @@ from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
 )
+from kriya.core.inference_settings import role_binding_for_model
 from kriya.core.kernel import Kernel
 from kriya.core.token_budget import OutputBudgetUnsatisfiableError
 from kriya.policy.errors import PolicyDeniedError
@@ -179,6 +180,7 @@ from kriya.workflow.requirements import (
 from kriya.workflow.resume_fingerprints import ResumePlan
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
 from kriya.workflow.retry_policy import API_CONTRACT_RECOVERY_MAX_ATTEMPTS, RetryAction, decide_retry_action
+from kriya.workflow.retry_progress import SAMPLING_NOT_PERMITTED, SAMPLING_RESAMPLE, sampling_resample_permitted
 from kriya.workflow.retry_prompts import (
     _build_coordinated_retry_prompt,
     _build_full_set_retry_prompt,
@@ -716,6 +718,19 @@ def _compute_retry_evidence_fingerprint(
     return (mode, model_identity, per_path, state.budgets.last_failure_signature)
 
 
+def _effective_retry_temperature(ctx: "AttemptContext", model_identity: str) -> Optional[float]:
+    """The sampling temperature a Developer retry on ``model_identity`` is
+    sent with: ``llm.retry_temperature`` when configured, otherwise the
+    called binding's own temperature (PRD-014: a fallback never inherits
+    the primary's sampling)."""
+    config = ctx.kernel.config
+    if config.llm.retry_temperature is not None:
+        return config.llm.retry_temperature
+    binding = role_binding_for_model(config, "developer", model_identity)
+    own = getattr(binding, "temperature", None)
+    return own if own is not None else config.llm.temperature
+
+
 @dataclass
 class RetryContextPreparation:
     """Bundles everything a targeted/fallback_targeted/full_set retry needs
@@ -874,11 +889,42 @@ def _prepare_retry_context(
             and (state.last_failure.diagnostics or {}).get("reason_code")
             in _DETERMINISTIC_VERDICT_REASON_CODES
         )
-        no_progress = (
-            eligible
-            and state.budgets.last_retry_evidence_fingerprint is not None
-            and fingerprint == state.budgets.last_retry_evidence_fingerprint
-        )
+        # PRD-026: identical evidence shown on ANY earlier attempt (not only
+        # the previous one) is a repeat - an A -> B -> A evidence cycle
+        # presents nothing new either.
+        fingerprint_hash = content_revision(repr(fingerprint))
+        repeated_evidence = fingerprint_hash in state.retry_evidence_seen
+        no_progress = eligible and repeated_evidence
+        sampling_resample = False
+        if repeated_evidence and not no_progress:
+            # A probabilistic failure may be resampled on identical evidence
+            # only when the model actually samples; it is budgeted as a
+            # typed SAMPLING_RESAMPLE, never as material progress.
+            effective_temperature = _effective_retry_temperature(ctx, model_identity)
+            if sampling_resample_permitted(state.last_attempt_mode, effective_temperature):
+                sampling_resample = True
+                state.sampling_resamples += 1
+                state.record_event(RunEvent(
+                    kind="retry.sampling_resample",
+                    attempt=state.attempt_number,
+                    source="attempt._prepare_retry_context",
+                    authority=EventAuthority.ADVISORY,
+                    message=(
+                        f"{SAMPLING_RESAMPLE}: identical retry evidence resampled at temperature "
+                        f"{effective_temperature} - budgeted, not counted as progress."
+                    ),
+                    details={
+                        "reason_code": SAMPLING_RESAMPLE,
+                        "mode": state.last_attempt_mode,
+                        "model": model_identity,
+                        "effective_temperature": effective_temperature,
+                        "first_seen_attempt": state.retry_evidence_seen[fingerprint_hash],
+                        "fingerprint_hash": fingerprint_hash,
+                        "sampling_resamples": state.sampling_resamples,
+                    },
+                ))
+            else:
+                no_progress = True
         state.record_event(RunEvent(
             kind="retry.progress_decision",
             attempt=state.attempt_number,
@@ -894,10 +940,14 @@ def _prepare_retry_context(
                 "request_profile": request_profile.digest,
                 "target_files": sorted(set(target_files or ())),
                 "no_progress": no_progress,
-                "fingerprint_hash": content_revision(repr(fingerprint)),
+                "sampling_resample": sampling_resample,
+                "fingerprint_hash": fingerprint_hash,
             },
         ))
         if no_progress:
+            reason_code = (
+                "NO_PROGRESS_RETRY_EXHAUSTED" if eligible else SAMPLING_NOT_PERMITTED
+            )
             raise QualityGateFailure(Failure(
                 type="no_progress_retry",
                 message=(
@@ -910,13 +960,15 @@ def _prepare_retry_context(
                     "again; deferring to the existing retry-strategy/no-progress machinery "
                     "instead of spending it."
                 ),
-                raw_output=f"retry_evidence_fingerprint_hash={content_revision(repr(fingerprint))}",
+                raw_output=f"retry_evidence_fingerprint_hash={fingerprint_hash}",
                 source="orchestrator",
                 attempt=state.attempt_number,
                 mode=state.last_attempt_mode,
                 likely_files=sorted(set(target_files or ())),
+                diagnostics={"reason_code": reason_code},
             ))
         state.budgets.last_retry_evidence_fingerprint = fingerprint
+        state.retry_evidence_seen.setdefault(fingerprint_hash, state.attempt_number)
 
     return RetryContextPreparation(
         retry_package=retry_package,

@@ -9,6 +9,10 @@ invariants and writes the model-dependent evidence to
   the selected model's budget, and it keeps the middle marker. A second run
   with a small capture limit loses bytes at capture, and the grader can no
   longer PASS it.
+- PRD-026: a real Developer faces a compile gate that rejects every
+  candidate with the same error (an ineffective-repair loop). At
+  temperature 0 the run must stop within the retry bound (NO_PROGRESS or
+  budget exhaustion), with the retry-progress block recorded - never loop.
 
 Run:
     KRIYA_BATCH6_EVIDENCE_DIR=handover/evidence/BATCH6/user-live \\
@@ -133,3 +137,46 @@ async def test_live_prd025_capture_loss_can_never_pass(cfg, tmp_path):
     assert grade["verdict"] in ("UNKNOWN", "FAIL")
     [package] = [p for p in grade["evidence_packages"] if p["answered"]]
     assert package["truncation"][0] == "CAPTURE_TRUNCATION"
+
+
+@pytest.mark.asyncio
+async def test_live_prd026_ineffective_repair_terminates(cfg, tmp_path):
+    from unittest.mock import patch
+
+    from kriya.core.kernel import Kernel
+    from kriya.workflow.workflow import WorkflowEngine
+
+    cfg.llm.temperature = 0.0
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.skills = str(tmp_path / "skills")
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    llm = LLMClient(cfg)
+    engine = WorkflowEngine(Kernel(config=cfg), llm)
+    calls = {"n": 0}
+    real_generation = engine.developer.run_generation
+
+    async def counted(*args, **kwargs):
+        calls["n"] += 1
+        return await real_generation(*args, **kwargs)
+
+    engine.developer.run_generation = counted
+    with patch(
+        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+        return_value={"success": False, "output": "BUILD ERROR: toolchain rejects every candidate (injected)."},
+    ):
+        result = await engine.run_generation_workflow(
+            goal="Create calc.py with a function add(a, b) returning a + b.", workspace_path=str(workspace),
+        )
+    _evidence("prd026_ineffective_repair.json", {
+        "failure_category": result.get("failure_category"),
+        "retry_progress": result.get("retry_progress"),
+        "developer_calls": calls["n"],
+    })
+    assert result["quality_gates_passed"] is False
+    assert result["failure_category"] in ("no_progress", "quality_gates_exhausted")
+    assert result["retry_progress"]["distinct_vectors"] >= 1
+    # max_retries + targeted_max_retries + API recovery allowance: never an
+    # unbounded loop.
+    assert calls["n"] <= 12

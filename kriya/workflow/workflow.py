@@ -5279,6 +5279,8 @@ class WorkflowEngine:
                 else "retry_identity_not_qualified" if is_retry_identity_stop
                 else "requirements_unresolved" if is_requirements_unresolved_stop
                 else "environment_failure" if state.environment_failure
+                # PRD-026: the retry-progress invariant ended the run.
+                else "no_progress" if state.no_progress_terminated
                 else "quality_gates_exhausted"
             )
 
@@ -5380,6 +5382,7 @@ class WorkflowEngine:
             ),
             "environment_failure": state.environment_failure if not quality_passed else None,
             "failure_category": failure_category,
+            "retry_progress": state.retry_progress_summary(),
             "failure_report": failure_report_dicts,
             "plan_scope_conflict": state.plan_scope_conflict,
             "toolchain_warning": state.toolchain_warning,

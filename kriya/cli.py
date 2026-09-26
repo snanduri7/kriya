@@ -15,7 +15,7 @@ import click
 from kriya import __version__
 from kriya.agents import ReviewerAgent
 from kriya.analyzer import RepositoryAnalyzer
-from kriya.cli_output import GenerateOutput
+from kriya.cli_output import GenerateOutput, no_progress_stop_message
 from kriya.config import AppConfig, load_config
 from kriya.control.commit_state import UncertainWorkspaceStateError
 from kriya.control.run_coordinator import begin_mutating_run, transition_mutating_run
@@ -2426,6 +2426,8 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                 # STOP CONDITION, not a root ENVIRONMENT/TOOLCHAIN failure.
                 # This is a distinct, dedicated message, not toolchain
                 # advice repurposed.
+                if res.get("failure_category") == "no_progress":
+                    click.secho(no_progress_stop_message(res.get("retry_progress")), fg="yellow")
                 if res.get("failure_category") == "generation_budget_exhausted":
                     click.secho(
                         f"\n[GENERATION BUDGET EXHAUSTED] {res['environment_failure']}\n"
@@ -3916,6 +3918,8 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                 )
             # Demo-01 Finding 4 (2026-09-11): see the matching branch above
             # in this file's other quality-gates-failure branch.
+            if res.get("failure_category") == "no_progress":
+                click.secho(no_progress_stop_message(res.get("retry_progress")), fg="yellow")
             if res.get("failure_category") == "generation_budget_exhausted":
                 click.secho(
                     f"\n[GENERATION BUDGET EXHAUSTED] {res['environment_failure']}\n"

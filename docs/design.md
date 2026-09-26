@@ -1843,6 +1843,28 @@ Recovery remains scope-preserving. A first anchor mismatch refreshes the exact c
 
 Retry progress is recorded on every failed attempt using effective workspace content, failure signature, verification stage, and implicated files. Outcomes are classified as `PROGRESS`, `NO_PROGRESS`, `REGRESSION`, or `REPEATED_ACTION`. Two consecutive no-progress outcomes force the existing bounded broader strategy; the third stops local retry. This policy changes neither allowed write scope nor the global retry ceiling, plan recovery, local-only egress, or authoritative full-regression enforcement.
 
+**PRD-026: a universal progress invariant (`kriya/workflow/retry_progress.py`).**
+*   Every failed attempt also produces a canonical `ProgressVector`, and the run keeps every digest it has seen (`GenerationState.progress_vector_digests`, never erased). The vector covers:
+    *   the failure signature;
+    *   the workspace hash;
+    *   the implicated and missing files;
+    *   the retry-evidence fingerprint;
+    *   the context revision set;
+    *   the action and API-recovery protocol phase;
+    *   the Developer request-profile digest;
+    *   the plan revision;
+    *   the repair-contract revision;
+    *   the deterministic diagnostics.
+*   Returning to a vector produced earlier in the run is `REPEATED_VECTOR`, and it counts toward the no-progress bound. That covers an A→B→A→B alternation, which the pairwise rule above reset on every step.
+*   API-contract recovery is under the same rule and keeps its own hard maximum.
+*   `RETRY_ACTION_MATERIAL_DELTA` documents, for each retry family, the dimensions whose change makes another attempt useful.
+*   Stochastic resampling is not progress. The retry-evidence gate (`_prepare_retry_context`) compares against every evidence fingerprint already shown to the Developer, not only the last one:
+    *   Repeated evidence after a deterministic verdict is refused (`NO_PROGRESS_RETRY_EXHAUSTED`).
+    *   Repeated evidence after a probabilistic failure is a typed `SAMPLING_RESAMPLE`, but only when the effective temperature is above zero: `llm.retry_temperature`, else the called binding's own temperature. It is budgeted like any retry, never resets the counter and never erases seen vectors.
+    *   At temperature 0 the identical-evidence retry is refused (`SAMPLING_NOT_PERMITTED`).
+*   Telemetry: `retry.progress_vector` (digest, classification, changed dimensions), `retry.sampling_resample`, `retry.strategy_transition` (the forced transition) and `retry.no_progress_terminal` (`RETRY_NO_PROGRESS_EXHAUSTED`).
+*   A run stopped this way reports `failure_category: "no_progress"` and a `retry_progress` result block, and the CLI prints a `[NO PROGRESS]` stop message.
+
 Authoritative structured planning persists a separate bounded local diagnostic record for every initial/repair attempt under `.kriya/control/planning-diagnostics/<run-id>.jsonl`. Each record contains the exact bounded planner request and response, parsed plan, complete deterministic validation errors, exact repair prompt, content-free bounded repository-path evidence, and normalized planned-file ownership decisions. Fields unsupported by the current plan contract, such as a planned symbol or semantic owner discovery, are recorded explicitly as null/false rather than inferred. These proprietary diagnostics remain local, never feed outward lookup, do not enter the compact decision ledger, and cannot authorize an invalid plan or extend the two-repair limit.
 
 The first diagnostic run proved that task-shaped planning enumerated the correct existing implementation and test paths locally but omitted them from the Planner contract. The model consequently invented parallel paths and assigned the same invented implementation path to separate analysis and edit subtasks; repair corrected file actions but could not recover ownership without repository evidence. Authoritative planning now supplies a bounded, content-free, goal-ranked list of existing paths for every route. Modify/delete plans must select a relevant exact path, create is reserved for a genuinely absent requested artifact, each path has one MODEL owner, and analysis/inspection is folded into that implementation subtask rather than emitted as a second file-owning stage. Repair repeats the same evidence and gives an explicit remove-or-merge correction. Deterministic duplicate ownership and nonexistent-modify rejection remain unchanged.
