@@ -222,7 +222,7 @@ class TestD1CompletenessGatedOperation:
             )
 
     def test_partial_explicit_omission_prohibits_whole_file(self, tmp_path):
-        content = _write_target(tmp_path, "target.py", "def f():\n    return 1\n")
+        _write_target(tmp_path, "target.py", "def f():\n    return 1\n")
         ctx = _minimal_attempt_ctx(tmp_path)
         state = GenerationState()
         # No ContextItem recorded at all for this path (e.g. it was recorded
@@ -267,7 +267,7 @@ class TestD1CompletenessGatedOperation:
         assert mandatory is False
 
     def test_no_state_defaults_safe(self, tmp_path):
-        content = _write_target(tmp_path, "target.py", "def f():\n    return 1\n")
+        _write_target(tmp_path, "target.py", "def f():\n    return 1\n")
         ctx = _minimal_attempt_ctx(tmp_path)
         op, mandatory = _completeness_gated_operation(
             "target.py", CodeOperation.REPAIR_WITH_FULL_FILE,
@@ -416,7 +416,7 @@ class TestD2G1Replay:
     second time the way it was live."""
 
     def test_repair_behavior_full_file_fallback_rejected_by_completeness_gate(self, tmp_path):
-        content = _write_target(
+        _write_target(
             tmp_path, "engine.py",
             "def bind(name, type_name, scope_node):\n    pass\n\n\n"
             "def public_entry():\n    return bind(1, 2, 3)\n",
@@ -648,7 +648,7 @@ class TestD1MetaRegression:
         toolchain_only_once_across_retries exercises) still places the
         file's real, current, complete content in reference_projections.
         _record_retry_projection_context_items() must record it from there."""
-        content = _write_target(tmp_path, "pom.xml", "<project><bad/></project>\n")
+        _write_target(tmp_path, "pom.xml", "<project><bad/></project>\n")
         state = GenerationState()
         failure = Failure(type="compile", message="some generic xml error")
         retry_package = build_retry_package(

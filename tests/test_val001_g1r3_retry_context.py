@@ -199,7 +199,7 @@ class TestTargetReachability:
         even record the path in omitted_files - proving the defect lived in
         the CALLER's universe construction, not in this function, and that
         this function needed no change (task item 2)."""
-        content = _write_target(tmp_path, "engine.py", _g1_shaped_module())
+        _write_target(tmp_path, "engine.py", _g1_shaped_module())
         failure = _anchored_edit_failure()
         pkg = build_retry_package(
             failure=failure, worktree_path=str(tmp_path),
@@ -764,7 +764,7 @@ class TestAuthorityInvariantsPreserved:
 
 class TestObservability:
     def test_R_trace_events_capture_source_and_progress_decision(self, tmp_path):
-        content = _write_target(tmp_path, "engine.py", _g1_shaped_module())
+        _write_target(tmp_path, "engine.py", _g1_shaped_module())
         ctx = _minimal_attempt_ctx(tmp_path)
         state = GenerationState()
         state.last_attempt_mode = "full_set"

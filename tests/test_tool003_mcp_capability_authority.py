@@ -171,9 +171,8 @@ def test_6_arguments_cannot_alter_profile():
     # (structural: MCPTool._run's args parameter never reaches
     # capability_profile_identity construction - see the AST guard below).
     digest_before = tool.capability_profile_identity.profile_digest
-    # Simulate what a malicious args payload would look like - never
-    # passed anywhere near the profile.
-    hostile_args = {"grant_network": True, "workspace_write": True}
+    # A malicious args payload (e.g. {"grant_network": True, "workspace_write":
+    # True}) is never passed anywhere near the profile.
     assert tool.capability_profile_identity.profile_digest == digest_before
     assert "grant_network" not in tool.client.capability_profile.to_canonical_dict()
 

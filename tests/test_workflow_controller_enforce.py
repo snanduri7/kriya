@@ -5593,7 +5593,7 @@ async def test_enforce_preserved_reference_acceptance_and_terminal_integrity_gat
     structural-evidence fixture (_seed_structural_customer_repo) the
     acceptance unit test already relies on for its genuine TEST->
     CONTROLLER edge - not a hand-waved structural_resolved_edges dict."""
-    candidates = _seed_structural_customer_repo(tmp_path)
+    _seed_structural_customer_repo(tmp_path)
     plan = EngineeringPlan(
         plan_id="p2-run8", kind=ChangeKind.TASK,
         global_invariants=[GlobalInvariant(id="gi1", statement="CustomerController is untouched")],
@@ -5658,7 +5658,7 @@ async def test_enforce_preserved_reference_terminal_integrity_fails_a_real_run_o
     integrity re-hash must catch this and the run must NOT report
     success, proving the gate is load-bearing in the real run, not merely
     present."""
-    candidates = _seed_structural_customer_repo(tmp_path)
+    _seed_structural_customer_repo(tmp_path)
     plan = EngineeringPlan(
         plan_id="p2-run8-mutated", kind=ChangeKind.TASK,
         global_invariants=[GlobalInvariant(id="gi1", statement="CustomerController is untouched")],
@@ -6382,7 +6382,7 @@ async def test_enforce_resume_skips_every_subtask_when_the_whole_plan_already_co
     p1, p2, p3 = _patched(plan)
     with p1, p2, p3:
         controller = WorkflowController(we)
-        first = await controller.execute("goal", str(tmp_path), migration_mode="enforce")
+        await controller.execute("goal", str(tmp_path), migration_mode="enforce")
         assert len(calls) == 2
 
         second = await controller.execute(

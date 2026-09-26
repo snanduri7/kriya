@@ -409,7 +409,6 @@ def test_malformed_checkpoint_string_target_test_fails_closed_via_matches_not_re
 
 
 def test_13_retry_reuses_pristine_baseline_without_rerunning_validator():
-    inv = ValidationInvocation("cmd", "target_test:tests/x.py")
     calls = []
 
     def rv(t):
@@ -477,7 +476,6 @@ def test_multi_target_becomes_ordered_tuple_two_argv_entries_never_joined_string
 
 
 def test_multi_target_order_is_preserved_in_selection_identity_and_invocation():
-    inv_ab = ValidationInvocation("cmd", "sel", target_test=("tests/a.py", "tests/b.py"))
     calls = []
     baseline = capture_brownfield_baselines(
         run_id="r1", target_test=("tests/a.py", "tests/b.py"), full_regression_policy="disabled",

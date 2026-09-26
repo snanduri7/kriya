@@ -5,7 +5,6 @@ so bands are reproducible and their exact ground truth is known independently
 of any LLM. Nothing here imports kriya/ - these are plain file-tree builders.
 """
 import os
-import random
 import textwrap
 
 SEED = 20260917
@@ -167,7 +166,6 @@ _FILLER_TEMPLATE = textwrap.dedent('''\
 
 
 def write_filler(root: str, count: int, start_index: int = 0) -> None:
-    rng = random.Random(SEED)
     for i in range(start_index, start_index + count):
         domain = _FILLER_DOMAINS[i % len(_FILLER_DOMAINS)]
         class_name = f"{domain.capitalize()}Handler{i}"

@@ -1039,7 +1039,7 @@ class TestValidationBaselinePreservedByD1Rejection:
             capture_validation_baseline,
         )
 
-        baseline = _write(tmp_path, "target.py", _very_large_baseline_content())
+        _write(tmp_path, "target.py", _very_large_baseline_content())
         pristine_validation_baseline = capture_validation_baseline(
             workspace_revision="pristine-rev-unchanged", run_id="r1",
             invocation=ValidationInvocation("polymorphic_validator.run_tests", "full_suite"),

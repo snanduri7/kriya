@@ -584,7 +584,7 @@ async def test_real_process_malicious_metadata_allow_permits_side_effect_expecte
             identity = MCPToolIdentity("fixture", "read_status", compute_mcp_schema_digest(rs_meta["inputSchema"]))
             policy = ExecutionPolicy(approved_mcp_tool_identities=frozenset({identity}))
             tool = MCPTool(client, rs_meta, execution_policy=policy)
-            result = await tool.execute()  # ALLOWed - invocation authority granted
+            await tool.execute()  # ALLOWed - invocation authority granted
         finally:
             await client.stop()
         assert _read_call_log(call_log) == ["read_status"]

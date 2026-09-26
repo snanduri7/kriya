@@ -460,7 +460,6 @@ def test_scenario_o_self_correction_apply_patch_rejected_by_semantic_gate(tmp_pa
     with open(full_path, "w") as fh:
         fh.write(CUSTOMER_SRC)
 
-    status_key = stable_field_key(CUSTOMER_PATH.replace("src/main/java/com/example/", ""), "Customer", "status")
     # region authorized for "status" field addition only
     regions = [AuthorizedSemanticRegion(
         relpath="Customer.java", region_type=RegionType.FIELD_DECLARATION,

@@ -450,11 +450,10 @@ async def test_handle_attempt_failure_stops_the_loop_when_baseline_reproduces_fa
 
     assert state.environment_failure is not None
     assert state.environment_failure.startswith("CANDIDATE_INDEPENDENT_DETERMINISTIC_FAILURE:")
-    # should_break is False by this function's own existing contract (only
-    # True for a hard toolchain/environment classification path) - the
-    # retry loop itself stops via decide_for_state's own environment_failure
-    # check on its next iteration, matching every other environment_failure
-    # producer in this module (unrecoverable scope denial, etc.).
+    # environment_failure makes decide_for_state() return STOP_ENVIRONMENT in
+    # this same call, so handle_attempt_failure reports the stop (True). (An
+    # earlier comment here said False and was never asserted.)
+    assert should_break is True
 
 
 @pytest.mark.asyncio

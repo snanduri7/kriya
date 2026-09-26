@@ -548,7 +548,7 @@ class TestResolvers:
     @pytest.mark.asyncio
     async def test_write_shaped_request_has_no_executable_binding(self, tmp_path):
         _write(tmp_path, "a.py", "x = 1\n")
-        deps = _deps(tmp_path)
+        _deps(tmp_path)
         # "apply_patch" is a real tool name from the SEPARATE self-correction
         # loop - proves the two toolsets don't cross-wire.
         native = normalize_native_tool_call({

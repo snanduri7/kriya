@@ -117,7 +117,6 @@ def test_pt05_validator_timing_records_kind_duration_and_success():
             return {"success": True, "output": "BUILD SUCCESS"}
 
     state = GenerationState()
-    started = 100.0
     with patch("time.monotonic", side_effect=lambda: next(fake_times, 102.5)):
         validator = _FakeValidator()
         _compile_started = time.monotonic()

@@ -327,7 +327,7 @@ def test_scenario_e_mcp_approved_autonomous_subtask_exactly_one_call(tmp_path):
         async def run():
             await kernel.mcp.start_all({"probe": {"command": sys.executable, "args": [MOCK_SERVER]}})
             try:
-                tool = kernel.registry.get("tool", "probe_echo_test")
+                kernel.registry.get("tool", "probe_echo_test")
                 call_spy = AsyncMock(wraps=kernel.mcp.clients["probe"].call_tool)
                 kernel.mcp.clients["probe"].call_tool = call_spy
                 subtask = _tool_subtask(id="mcp1", tool_name="probe_echo_test", tool_arguments={"message": "hi"})
@@ -795,14 +795,6 @@ async def test_resumed_tool_subtask_revalidates_mcp_approval_fresh_after_revocat
     was revoked in between, re-execution (never resume-skip, per
     exclude_tool_subtasks_from_resume) denies for real."""
     with _cwd(tmp_path / "ws"):
-        workspace_root = os.path.realpath(os.getcwd())
-        profile = resolve_mcp_capability_profile({}, workspace_root=workspace_root)
-        profile_digest = compute_mcp_capability_profile_digest(profile)
-        schema = {"type": "object", "properties": {"message": {"type": "string"}}, "required": ["message"]}
-        identity = MCPToolIdentity(
-            server_identity="probe", tool_name="echo_test", schema_digest=compute_mcp_schema_digest(schema),
-        )
-        wid = workspace_identity(workspace_root)
         # Never approved at all in THIS run (simulating: it was approved
         # when the prior interrupted run completed it, but that approval
         # is gone now - revoked, or never persisted correctly).

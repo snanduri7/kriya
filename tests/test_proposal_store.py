@@ -448,7 +448,7 @@ def test_proposal_approve_command_has_no_yes_flag():
 
 def test_review_propose_without_save_creates_no_proposals_dir(tmp_path):
     _write_target(str(tmp_path))
-    proposal = _build_proposal(str(tmp_path))
+    _build_proposal(str(tmp_path))
     # simulate the CLI's default path: build only, never persist
     assert not os.path.isdir(os.path.join(str(tmp_path), ".kriya", "proposals"))
 

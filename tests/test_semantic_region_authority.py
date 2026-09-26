@@ -93,7 +93,6 @@ def _with_unrelated_find_change(source: str) -> str:
 # =====================================================================
 
 def test_stable_key_unchanged_across_whitespace_only_reformatting():
-    shifted = BASELINE.replace("    public void delete", "    public void delete")  # no-op, control
     reformatted = "\n\n" + BASELINE  # every line shifted down by 2
     base_snap = build_file_snapshot(RELPATH, BASELINE)
     reformatted_snap = build_file_snapshot(RELPATH, reformatted)
