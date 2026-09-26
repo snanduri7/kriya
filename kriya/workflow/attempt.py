@@ -719,6 +719,15 @@ def _compute_retry_evidence_fingerprint(
     return (mode, model_identity, per_path, state.budgets.last_failure_signature)
 
 
+def exit_authority_text(ctx: "AttemptContext") -> str:
+    """PRD-025: the text an expected nonzero exit may be declared in - the
+    user's own request (exit_authority_goal, else grounding_goal, else the
+    goal of a plain top-level run, which IS the user's). A milestone or
+    subtask goal, a plan, a judge's criteria or a grader's reasoning is
+    never consulted."""
+    return ctx.exit_authority_goal or ctx.grounding_goal or ctx.goal
+
+
 def _escalation_authorized_paths(ctx: "AttemptContext", target_files: Iterable[str]) -> Tuple[str, ...]:
     """PRD-028: the write scope a member-authority expansion must already
     sit inside - never widened by it. DENY_ALL authorizes nothing; an
@@ -2216,6 +2225,11 @@ class AttemptContext:
     # Original/global goal used only for deterministic architectural owner
     # discovery when a bounded subtask's local wording omits that context.
     grounding_goal: str = ""
+    # PRD-025: the user's own request text - the ONLY text that may declare
+    # an expected nonzero exit (see exit_authority_text). Set by
+    # run_generation_workflow from the unit invocation; never Planner or
+    # MilestonePlanner restatement.
+    exit_authority_goal: str = ""
     # The run's ONE, already-resolved MigrationObligation (or explicit
     # NOT_APPLICABLE/INDETERMINATE), resolved ONCE by the top-level caller
     # (run_generation_workflow for a plain/Legacy run, WorkflowController for
@@ -4953,7 +4967,7 @@ async def _execute_runtime_verification_directly(
         # PRD-025: a nonzero exit outranks any semantic grade unless the
         # user's goal declares that exit as expected from a launched app.
         apply_runtime_disposition(
-            grade, run_res, goal_text=ctx.grounding_goal or ctx.goal,
+            grade, run_res, goal_text=exit_authority_text(ctx),
             verification_authority=verification_authority,
         )
     else:
@@ -4981,7 +4995,7 @@ async def _execute_runtime_verification_directly(
             )
 
     apply_runtime_disposition(
-        grade, run_res, goal_text=ctx.grounding_goal or ctx.goal,
+        grade, run_res, goal_text=exit_authority_text(ctx),
         verification_authority=verification_authority,
     )
     if not grade["passed"]:
@@ -9032,7 +9046,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         # semantic grade unless the user's own goal declares
                         # that exit as the expected behaviour.
                         apply_runtime_disposition(
-                            grade, run_res, goal_text=ctx.grounding_goal or ctx.goal,
+                            grade, run_res, goal_text=exit_authority_text(ctx),
                             verification_authority=verification_authority,
                         )
 
@@ -9200,7 +9214,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     # PRD-025: the final disposition, re-applied after any
                     # self-correction re-verification replaced the grade.
                     apply_runtime_disposition(
-                        grade, run_res, goal_text=ctx.grounding_goal or ctx.goal,
+                        grade, run_res, goal_text=exit_authority_text(ctx),
                         verification_authority=verification_authority,
                     )
                     if not grade["passed"]:

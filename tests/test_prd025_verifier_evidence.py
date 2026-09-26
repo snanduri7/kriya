@@ -16,6 +16,7 @@ from kriya.core.llm import LLMClient
 from kriya.tools.process import ProcessController, ProcessResult
 from kriya.workflow.context_budget import allocation_window
 from kriya.workflow.verifier_evidence import (
+    ANY_NONZERO_EXIT,
     CAPTURE_LOSS_UNRESOLVED,
     DECISIVE_EVIDENCE_OMITTED,
     EXPECTED_NONZERO_EXIT_GROUNDED,
@@ -29,6 +30,7 @@ from kriya.workflow.verifier_evidence import (
     apply_runtime_disposition,
     build_package_for_budget,
     build_verifier_evidence_package,
+    declared_nonzero_exit_codes,
     finalize_semantic_verdict,
     goal_declares_expected_nonzero_exit,
     parse_reported_verdict,
@@ -254,6 +256,70 @@ def test_declared_nonzero_exit_still_fails_when_a_setup_step_failed():
         grade, run, goal_text="exit with a nonzero status on bad input", verification_authority="llm",
     )
     assert grade["passed"] is False
+    assert disposition["deterministic_reason"] == NONZERO_EXIT_AUTHORITATIVE
+
+
+@pytest.mark.parametrize(("goal", "codes"), [
+    ("Invalid input exits non-zero.", ANY_NONZERO_EXIT),
+    ("the CLI should exit with code 2 when the file is missing", frozenset({"2"})),
+    ("return code of 3 for bad flags; exit with code 4 for a missing file", frozenset({"3", "4"})),
+    ("exit with code 2, or exits non-zero on any other error", ANY_NONZERO_EXIT),
+    ("never exit with code 2", frozenset()),
+    ("Print hello.", frozenset()),
+])
+def test_declared_nonzero_exit_codes(goal, codes):
+    assert declared_nonzero_exit_codes(goal) == codes
+
+
+@pytest.mark.parametrize(("exit_code", "final", "reason"), [
+    (2, "PASS", EXPECTED_NONZERO_EXIT_GROUNDED),
+    (1, "FAIL", NONZERO_EXIT_AUTHORITATIVE),
+    (139, "FAIL", NONZERO_EXIT_AUTHORITATIVE),
+])
+def test_an_exit_code_other_than_the_declared_one_always_fails(exit_code, final, reason):
+    """A goal naming the expected code admits only that code: a crash (1) or
+    a segfault (139) is an unrelated failure, whatever the grader says."""
+    grade = _pass_grade()
+    disposition = apply_runtime_disposition(
+        grade, _run_result("", exit_code=exit_code),
+        goal_text="Exit with code 2 when the input file is missing.", verification_authority="llm",
+    )
+    assert disposition["final"] == final
+    assert disposition["deterministic_reason"] == reason
+    assert grade["passed"] is (final == "PASS")
+
+
+def test_a_declared_exit_from_an_application_that_never_launched_fails():
+    run = _run_result("Error: Could not find or load main class App", exit_code=1)
+    run["output"] = "Error: Could not find or load main class App"
+    grade = _pass_grade()
+    disposition = apply_runtime_disposition(
+        grade, run, goal_text="Invalid input exits non-zero.", verification_authority="llm",
+    )
+    assert disposition["final"] == "FAIL"
+    assert disposition["deterministic_reason"] == NONZERO_EXIT_AUTHORITATIVE
+
+
+def test_a_declared_exit_still_needs_the_semantic_verdict():
+    """The goal only makes the exit admissible evidence; the verifier must
+    still confirm the behaviour (an unrelated crash with the declared code is
+    graded FAIL and stays FAIL)."""
+    grade = {"passed": False, "verdict": "FAIL", "reasoning": "traceback, not a rejection"}
+    disposition = apply_runtime_disposition(
+        grade, _run_result("Traceback ...", exit_code=2),
+        goal_text="Invalid input exits non-zero.", verification_authority="llm",
+    )
+    assert disposition["final"] == "FAIL" and grade["passed"] is False
+
+
+def test_verifier_text_declaring_the_exit_grants_nothing():
+    """The grader/judge saying the exit is expected is not the user's goal."""
+    grade = {**_pass_grade(), "reasoning": "The app correctly exits non-zero as the success criteria require."}
+    disposition = apply_runtime_disposition(
+        grade, _run_result("INVALID_INPUT", exit_code=2), goal_text="Build a greeting CLI.",
+        verification_authority="llm",
+    )
+    assert disposition["final"] == "FAIL"
     assert disposition["deterministic_reason"] == NONZERO_EXIT_AUTHORITATIVE
 
 

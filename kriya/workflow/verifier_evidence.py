@@ -509,25 +509,51 @@ def parse_reported_verdict(parsed: Dict[str, Any], passed: bool) -> RuntimeVerdi
 _EXPECTED_NONZERO_EXIT_RE = re.compile(
     r"\bnon-?zero\s+(?:exit|return|status)"
     r"|\bexit(?:s|ed|ing)?\s+(?:with\s+)?(?:an?\s+)?(?:non-?zero|error|failure)\b"
-    r"|\b(?:exit|return)\s+(?:code|status)\s+(?:of\s+|is\s+|=\s*)?(?:[1-9]\d*|non-?zero)\b"
-    r"|\bexit(?:s|ed|ing)?\s+(?:with\s+)?(?:code|status)\s+[1-9]\d*\b",
+    r"|\b(?:exit|return)\s+(?:code|status)\s+(?:of\s+|is\s+|=\s*)?(?:(?P<code>[1-9]\d*)|non-?zero)\b"
+    r"|\bexit(?:s|ed|ing)?\s+(?:with\s+)?(?:code|status)\s+(?P<code2>[1-9]\d*)\b",
     re.IGNORECASE,
 )
 _NEGATION_RE = re.compile(r"\b(?:not|never|without|no)\b|n't\b", re.IGNORECASE)
+# Any nonzero code: the goal declares an exit without naming its value.
+ANY_NONZERO_EXIT = frozenset({"*"})
 
 
-def goal_declares_expected_nonzero_exit(goal_text: str) -> bool:
-    """Whether the user's own goal text states that a nonzero exit is the
-    expected behaviour. A negated mention nearby ("must not exit non-zero")
-    does not count."""
+def declared_nonzero_exit_codes(goal_text: str) -> frozenset:
+    """The nonzero exit codes the user's own goal text states as expected.
+
+    Empty: none declared. ``ANY_NONZERO_EXIT``: an exit declared without a
+    value ("exits non-zero"). Otherwise the named codes ("exit with code 2"),
+    so a different code is not the declared behaviour. A negated mention
+    nearby ("must not exit non-zero") does not count."""
+    codes: set = set()
     for match in _EXPECTED_NONZERO_EXIT_RE.finditer(goal_text or ""):
         clause_start = max(
             goal_text.rfind(".", 0, match.start()), goal_text.rfind("\n", 0, match.start()),
             goal_text.rfind(";", 0, match.start()), goal_text.rfind(",", 0, match.start()),
         ) + 1
-        if not _NEGATION_RE.search(goal_text[max(clause_start, match.start() - 30): match.start()]):
-            return True
-    return False
+        if _NEGATION_RE.search(goal_text[max(clause_start, match.start() - 30): match.start()]):
+            continue
+        code = match.group("code") or match.group("code2")
+        if code is None:
+            return ANY_NONZERO_EXIT
+        codes.add(code)
+    return frozenset(codes)
+
+
+def goal_declares_expected_nonzero_exit(goal_text: str) -> bool:
+    """Whether the user's own goal text states that some nonzero exit is the
+    expected behaviour (see ``declared_nonzero_exit_codes``)."""
+    return bool(declared_nonzero_exit_codes(goal_text))
+
+
+def _declared_exit_matches(run_result: Dict[str, Any], goal_text: str) -> bool:
+    declared = declared_nonzero_exit_codes(goal_text)
+    if not declared:
+        return False
+    if declared == ANY_NONZERO_EXIT:
+        return True
+    steps = run_result.get("steps") or []
+    return bool(steps) and str(steps[-1].get("exit_code")) in declared
 
 
 def apply_runtime_disposition(
@@ -536,7 +562,8 @@ def apply_runtime_disposition(
     """Final, deterministic runtime disposition, applied to ``grade`` in
     place. A timeout, or a nonzero exit, makes the result FAIL whatever the
     grade says. The one exception is a nonzero exit the goal itself declares
-    as expected, from an application that launched normally. The semantic
+    as expected (the declared code, when the goal names one), from an
+    application whose setup steps succeeded and which launched normally. The semantic
     verdict decides only when no deterministic failure exists. Idempotent."""
     from kriya.workflow.acceptance import runtime_application_step_started
 
@@ -548,7 +575,7 @@ def apply_runtime_disposition(
     elif run_result.get("timed_out"):
         deterministic, reason = RuntimeVerdict.FAIL.value, TIMEOUT_AUTHORITATIVE
     elif not run_result.get("success"):
-        if runtime_application_step_started(run_result) and goal_declares_expected_nonzero_exit(goal_text):
+        if runtime_application_step_started(run_result) and _declared_exit_matches(run_result, goal_text):
             reason = EXPECTED_NONZERO_EXIT_GROUNDED
         else:
             deterministic, reason = RuntimeVerdict.FAIL.value, NONZERO_EXIT_AUTHORITATIVE

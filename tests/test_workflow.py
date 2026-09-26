@@ -14425,6 +14425,79 @@ async def test_prd025_llm_pass_cannot_override_undeclared_nonzero_exit(tmp_path)
     assert outcome["runtime_disposition"]["final"] == "FAIL"
 
 
+@pytest.mark.asyncio
+async def test_prd025_exit_rule_is_reapplied_after_self_correction_reverification(tmp_path):
+    """The re-run after a self-correction repair replaces the grade; the
+    deterministic exit rule must be applied to THAT grade too."""
+    state = GenerationState()
+    ctx = _nonzero_app_attempt(
+        tmp_path, goal="Print a greeting for the given name.",
+        # A fresh PASS per call: the first disposition mutates its grade.
+        grade_mock=AsyncMock(side_effect=lambda *_a, **_k: {
+            "passed": True, "verdict": "PASS", "reasoning": "looks right", "likely_files": [],
+        }),
+    )
+    ctx.kernel.config.autonomy.self_correction_loop_enabled = True
+    nonzero = {
+        "success": False, "timed_out": False, "returncode": 2, "output": "boom",
+        "steps": [{"command": ["python3", "app.py", "invalid"], "exit_code": 2,
+                   "stdout": "", "stderr": "boom", "timed_out": False}],
+    }
+    repaired = MagicMock(resolved=True, turns_used=1, transcript=[], final_compile_output="", incidents=[])
+    first, second, _ = _gate_patches(nonzero)
+    with first, second, patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence",
+                              side_effect=[nonzero, nonzero]), \
+         patch("kriya.workflow.self_correction.run_self_correction_loop",
+               AsyncMock(return_value=repaired)) as loop, \
+         pytest.raises(QualityGateFailure):
+        await run_attempt(state, ctx)
+
+    loop.assert_awaited_once()
+    assert ctx.run_verifier.grade.await_count == 2  # the re-verification graded PASS again
+
+    outcome = next(g for g in state.gate_outcomes if g["type"] == "run_verification")
+    assert outcome["success"] is False
+    assert outcome["runtime_disposition"]["deterministic_reason"] == "NONZERO_EXIT_AUTHORITATIVE"
+    assert outcome["runtime_disposition"]["final"] == "FAIL"
+
+
+def test_prd025_planner_or_milestone_text_cannot_declare_an_expected_exit(tmp_path):
+    """Only the user's own request may declare an expected nonzero exit:
+    exit_authority_goal (the unit invocation's authoritative goal) outranks
+    a subtask's grounding goal, which outranks a plain run's own goal."""
+    from kriya.workflow.attempt import exit_authority_text
+    from kriya.workflow.verifier_evidence import apply_runtime_disposition
+
+    planner_text = "M2: reject invalid input and exit with a nonzero status."
+    user_goal = "Build a greeting CLI."
+    ctx = _minimal_attempt_ctx(tmp_path, goal=planner_text, exit_authority_goal=user_goal)
+    assert exit_authority_text(ctx) == user_goal
+    ctx = _minimal_attempt_ctx(tmp_path, goal=planner_text, grounding_goal=user_goal)
+    assert exit_authority_text(ctx) == user_goal
+    run = {"success": False, "timed_out": False, "returncode": 2, "output": "",
+           "steps": [{"command": ["app"], "exit_code": 2, "timed_out": False}]}
+    grade = {"passed": True, "verdict": "PASS", "reasoning": "r"}
+    disposition = apply_runtime_disposition(grade, run, goal_text=exit_authority_text(ctx),
+                                            verification_authority="llm")
+    assert disposition["final"] == "FAIL" and grade["passed"] is False
+
+
+def test_prd025_a_milestone_units_authority_is_the_users_original_goal():
+    from test_milestones import mkv2
+
+    from kriya.workflow.milestones import MilestoneRunState
+    from kriya.workflow.plan_adapters import milestone_execution_plan
+    from kriya.workflow.plan_executor import WorkUnitInvocation
+
+    run_state = MilestoneRunState(
+        group_id="g", original_goal="Build a greeting CLI.",
+        milestones=[mkv2("M1", goal="M1: reject invalid input and exit with a nonzero status.")],
+    )
+    plan = milestone_execution_plan(run_state)
+    for unit in plan.work_units:
+        assert WorkUnitInvocation.for_unit(plan, unit).authoritative_goal == "Build a greeting CLI."
+
+
 def _real_grader(reply: dict):
     llm = LLMClient(AppConfig())
     llm.complete = AsyncMock(return_value=json.dumps(reply))
