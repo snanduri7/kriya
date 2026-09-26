@@ -5256,6 +5256,12 @@ class WorkflowEngine:
                 bool(state.environment_failure)
                 and state.environment_failure.startswith("FALLBACK_MODEL_INCOMPATIBLE:")
             )
+            # MODEL-EVIDENCE-HARDENING-001: same convention - a production
+            # retry identity that is not qualified (attempt.py).
+            is_retry_identity_stop = (
+                bool(state.environment_failure)
+                and state.environment_failure.startswith("RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED:")
+            )
             # PRD-020: same convention - an original requirement without
             # accepted evidence under a blocking policy (requirements.py).
             is_requirements_unresolved_stop = (
@@ -5270,6 +5276,7 @@ class WorkflowEngine:
                 else "containment_setup_failed" if is_containment_setup_failed_stop
                 else "regression_unattributed" if is_regression_unattributed_stop
                 else "fallback_model_incompatible" if is_fallback_incompatible_stop
+                else "retry_identity_not_qualified" if is_retry_identity_stop
                 else "requirements_unresolved" if is_requirements_unresolved_stop
                 else "environment_failure" if state.environment_failure
                 else "quality_gates_exhausted"

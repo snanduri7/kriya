@@ -341,7 +341,7 @@ def _served_window(fingerprint: Any, binding: Any) -> Optional[int]:
 def candidate_evidence(config: Any, role: str, model: str, *, order: int, explicit: bool,
                        table: Dict[str, Any]) -> CandidateEvidence:
     """Evidence for ``model`` bound as ``role`` in ``config`` (already placed)."""
-    from kriya.core.inference_settings import role_inference_settings
+    from kriya.core.inference_settings import role_inference_identities, role_inference_settings
     from kriya.core.model_capabilities import capabilities_for_model
     from kriya.core.model_qualification import assess, required_capabilities
     from kriya.core.model_runtime import resolve_configured_model_runtime
@@ -356,6 +356,13 @@ def candidate_evidence(config: Any, role: str, model: str, *, order: int, explic
         assessment = assess(fingerprint, required_capabilities(config, role, model), settings=settings)
         exact, digest = bool(fingerprint.exact), fingerprint.digest if fingerprint.exact else None
         status, reasons = assessment.status, tuple(assessment.reasons)
+        # Every identity the role executes must be qualified (a Developer's
+        # differing retry-temperature identity included).
+        for label, other in role_inference_identities(config, role, model)[1:]:
+            extra = assess(fingerprint, required_capabilities(config, role, model), settings=other)
+            if status == "QUALIFIED" and extra.status != "QUALIFIED":
+                status = extra.status
+                reasons = tuple(f"{label} identity: {reason}" for reason in extra.reasons)
         window = _served_window(fingerprint, binding)
         settings_digest: Optional[str] = settings.digest
     except Exception as error:  # an unreachable runtime is simply not eligible

@@ -37,6 +37,9 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 FALLBACK_MODEL_INCOMPATIBLE = "FALLBACK_MODEL_INCOMPATIBLE"
+# MODEL-EVIDENCE-HARDENING-001: a production Developer retry whose
+# retry-temperature inference identity is not QUALIFIED (refused before any request).
+RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED = "RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED"
 
 # Edit protocols that can only return whole files (model_capabilities).
 FULL_FILE_ONLY_PROTOCOLS = frozenset({"full_file", "full_file_text"})
@@ -65,6 +68,10 @@ class ModelRequestProfile:
     allocation_window: int
     output_tokens: int
     context_policy: str
+    # MODEL-EVIDENCE-HARDENING-001: a differing llm.retry_temperature is its
+    # own inference identity; None when a retry is the same identity.
+    retry_inference_settings_digest: Optional[str] = None
+    retry_qualification: Optional[str] = None
 
     @property
     def digest(self) -> str:
@@ -82,7 +89,7 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
     """The request profile of a Developer call to ``binding`` (the primary
     ``config.llm`` by default, or an ``llm_chain`` entry). Never raises: an
     unresolvable runtime is recorded as unavailable."""
-    from kriya.core.inference_settings import binding_inference_settings
+    from kriya.core.inference_settings import binding_inference_settings, retry_inference_settings
     from kriya.core.llm import REASONING_MIN_MAX_TOKENS
     from kriya.core.model_capabilities import resolve_model_capability_profile
     from kriya.core.model_qualification import assess, required_capabilities
@@ -99,6 +106,9 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
     caps = capability.capabilities
     runtime_digest, runtime_exact, qualification, failed = "unavailable", False, "UNAVAILABLE", ()
     served_window = None
+    retry_settings = retry_inference_settings(config, DEVELOPER_ROLE, binding)
+    retry_digest: Optional[str] = retry_settings.digest if retry_settings is not None else None
+    retry_qualification: Optional[str] = "UNAVAILABLE" if retry_settings is not None else None
     try:
         fingerprint = resolve_configured_model_runtime(
             config, model, base_url=binding.base_url, api_key=binding.api_key,
@@ -110,6 +120,9 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
         assessment = assess(fingerprint, required_capabilities(config, DEVELOPER_ROLE, model),
                             settings=binding_inference_settings(config, DEVELOPER_ROLE, binding))
         qualification, failed = assessment.status, tuple(assessment.failed)
+        if retry_settings is not None:
+            retry_qualification = assess(fingerprint, required_capabilities(config, DEVELOPER_ROLE, model),
+                                         settings=retry_settings).status
     except Exception as error:  # a profile is evidence; it never blocks the run itself
         logger.debug("Request profile of %s: runtime unavailable: %s", model, error)
     output = binding_output_tokens(config, binding)
@@ -133,6 +146,8 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
         allocation_window=allocation_window(config, binding),
         output_tokens=int(output),
         context_policy=binding.context_policy.mode,
+        retry_inference_settings_digest=retry_digest,
+        retry_qualification=retry_qualification,
     )
 
 
@@ -168,6 +183,12 @@ def fallback_incompatibilities(config: Any, profile: ModelRequestProfile, *,
         reasons.append(
             f"the production runtime profile requires a QUALIFIED Developer runtime; {profile.model} is "
             f"{profile.qualification}"
+        )
+    if (getattr(config, "runtime_profile", None) == "production" and profile.retry_qualification is not None
+            and profile.retry_qualification != QUALIFIED):
+        reasons.append(
+            f"the production runtime profile requires the Developer retry identity (retry_temperature "
+            f"{config.llm.retry_temperature}) to be QUALIFIED; {profile.model} is {profile.retry_qualification}"
         )
     patch_files = sorted(set(patch_required_files))
     if patch_files and profile.edit_protocol in FULL_FILE_ONLY_PROTOCOLS:

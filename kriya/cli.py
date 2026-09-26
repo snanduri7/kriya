@@ -980,7 +980,7 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
     the runtime is the same model at that num_ctx (a different fingerprint);
     context_capacity then sends one near-window request, which loads the
     model at that size."""
-    from kriya.core.inference_settings import role_inference_settings
+    from kriya.core.inference_settings import role_inference_identities
     from kriya.core.model_qualification import (
         CAPABILITIES,
         QualificationError,
@@ -999,15 +999,17 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
         if candidate is None:
             raise click.UsageError(f"--role needs --model to name a model_policy.routing candidate; {model_name!r} is not")
         cfg = place_candidate(cfg, route_role, candidate)
-        identities = {role_inference_settings(cfg, route_role, target).digest: (
-            role_inference_settings(cfg, route_role, target), [route_role])}
+        identities = {settings.digest: (settings, [route_role if label == "normal" else f"{route_role} ({label})"])
+                      for label, settings in role_inference_identities(cfg, route_role, target)}
     else:
         identities = {}
         users = [role for role, models in role_models(cfg).items()
                  if any(m.casefold() == target.casefold() for m in models)] or ["developer"]
         for role in users:
-            settings = role_inference_settings(cfg, role, target)
-            identities.setdefault(settings.digest, (settings, []))[1].append(role)
+            # Including a Developer's differing retry-temperature identity.
+            for label, settings in role_inference_identities(cfg, role, target):
+                identities.setdefault(settings.digest, (settings, []))[1].append(
+                    role if label == "normal" else f"{role} ({label})")
     unknown = sorted(set(cases) - set(CAPABILITIES))
     if unknown:
         raise click.UsageError(f"unknown case(s) {unknown}; known: {', '.join(CAPABILITIES)}")
@@ -1060,7 +1062,7 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
 def model_status(ctx: click.Context, json_output: bool) -> None:
     """Show each production role's models, exact runtimes and qualification."""
     from kriya.core.execution_environment import environment_for_fingerprint
-    from kriya.core.inference_settings import role_inference_settings
+    from kriya.core.inference_settings import role_inference_identities
     from kriya.core.model_qualification import QUALIFIED, assess, required_capabilities, role_models
     from kriya.core.model_runtime import resolve_configured_model_runtime
 
@@ -1071,20 +1073,22 @@ def model_status(ctx: click.Context, json_output: bool) -> None:
         report[role] = []
         for model in models:
             runtime = resolve_configured_model_runtime(cfg, model, fresh=True)
-            settings = role_inference_settings(cfg, role, model)
-            assessment = assess(runtime, required_capabilities(cfg, role, model), settings=settings,
-                                workspace_root=os.path.realpath(os.getcwd()))
-            all_qualified &= assessment.status == QUALIFIED
-            report[role].append({"model": model, "exact": runtime.exact, "inference_settings": settings.to_dict(),
-                                 "execution_environment": environment_for_fingerprint(runtime).to_dict(),
-                                 **assessment.to_dict()})
+            for label, settings in role_inference_identities(cfg, role, model):
+                assessment = assess(runtime, required_capabilities(cfg, role, model), settings=settings,
+                                    workspace_root=os.path.realpath(os.getcwd()))
+                all_qualified &= assessment.status == QUALIFIED
+                report[role].append({"model": model, "identity": label, "exact": runtime.exact,
+                                     "inference_settings": settings.to_dict(),
+                                     "execution_environment": environment_for_fingerprint(runtime).to_dict(),
+                                     **assessment.to_dict()})
     if json_output:
         click.echo(json.dumps(report, indent=2, sort_keys=True))
     else:
         for role, entries in report.items():
             for entry in entries:
                 color = "green" if entry["status"] == QUALIFIED else "red"
-                click.secho(f"  {role:<16} {entry['model']:<32} {entry['status']}", fg=color)
+                label = "" if entry["identity"] == "normal" else f" ({entry['identity']})"
+                click.secho(f"  {role:<16} {entry['model'] + label:<40} {entry['status']}", fg=color)
                 for reason in entry["reasons"]:
                     click.echo(f"      - {reason}")
     if not all_qualified:

@@ -337,3 +337,34 @@ The environment binding is mutation-checked.
 **Verification:**
 - Claude: pylint 0, ruff 0, and 198 passed across the four new files plus prd017/prd018/prd019.
 - User: the focused list plus `tests/test_model_evidence_hardening_final.py tests/test_qual_environment_identity.py tests/test_bootstrap_contract.py`, then the full suite, then `./setup.sh requalify`.
+
+## Retry identity (user review, 2026-09-26)
+
+**Invariant.** A Developer retry at a configured `llm.retry_temperature` that differs from the called model's own temperature is a distinct inference identity. It never runs under the normal identity's qualification.
+
+- **Enumeration** (`inference_settings.retry_inference_settings` / `role_inference_identities`): the retry identity is the model's own binding settings at the retry temperature. No identity is added when `retry_temperature` is unset or equal, or for roles other than the Developer. These all enumerate it:
+  - `kriya model qualify` (qualified in the same call, reported as `developer (retry)`);
+  - `model status` and `doctor --production` (per identity, `identity: normal|retry`);
+  - the resume `model_runtime` fingerprint;
+  - Developer routing: a candidate must be QUALIFIED for both.
+- **Before inference:**
+  - The PRD-017 request profile carries `retry_inference_settings_digest` / `retry_qualification`.
+  - In production, fallback selection skips a fallback whose retry identity is not QUALIFIED.
+  - `attempt._require_qualified_retry_identity` refuses a production Developer call carrying `retry_temperature` unless the exact retry identity is QUALIFIED. It is a typed terminal: `RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED`, failure type/category `retry_identity_not_qualified` (unrecoverable, RESOURCE), and a `model.retry_identity_not_qualified` event. Nothing is sent.
+- **Outside production** it is recorded in the profile, not refused, like any identity.
+- **Telemetry and metrics** use the executed identity, as every call does. Changing `retry_temperature` makes a previous retry qualification inapplicable.
+- **max_tokens** stays out of the identity.
+- **Exposure today:** no shipped or demo config sets `retry_temperature`, so requalification is unaffected (one identity per arm).
+- **Tests** (`tests/test_retry_inference_identity.py`, 9):
+  - equal temperature → same identity;
+  - differing → distinct identity;
+  - normal QUALIFIED + retry not → refused before inference, zero requests;
+  - both QUALIFIED → executes at the retry temperature, with telemetry and metrics on the retry identity;
+  - outside production → recorded;
+  - first attempt → not gated;
+  - changed retry temperature → retry identity MISSING;
+  - no retry temperature → unchanged;
+  - qualify and status enumerate it.
+
+  The gate, the enumeration and the QUALIFIED check are mutation-checked.
+- **Focused run (Claude):** 345 passed across the four MODEL-EVIDENCE files, the environment and retry files, prd014/016/017/018/019 and production_doctor.

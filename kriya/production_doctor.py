@@ -797,7 +797,7 @@ def _check_qualification(ctx: _Context) -> DoctorCheck:
     exact runtime covering the capabilities Kriya uses with it. A model name
     is never a qualification. FAIL when a determinable runtime lacks it;
     UNAVAILABLE when a runtime cannot be identified exactly."""
-    from kriya.core.inference_settings import role_inference_settings
+    from kriya.core.inference_settings import role_inference_identities
     from kriya.core.model_capabilities import is_campaign_named_model
     from kriya.core.model_qualification import (
         MISSING,
@@ -834,12 +834,14 @@ def _check_qualification(ctx: _Context) -> DoctorCheck:
                 entries.append({"model": model, "status": NOT_EXACT, "reasons": ["runtime could not be probed"]})
                 statuses.add(NOT_EXACT)
                 continue
-            settings = role_inference_settings(ctx.cfg, role, model)
-            assessment = assess(runtime, required_capabilities(ctx.cfg, role, model), settings=settings,
-                                workspace_root=ctx.workspace)
-            statuses.add(assessment.status)
-            entries.append({"model": model, "campaign_named": is_campaign_named_model(model),
-                            **assessment.to_dict()})
+            # Every identity the role executes the model with (a Developer's
+            # differing retry temperature is its own; MODEL-EVIDENCE-HARDENING-001).
+            for label, settings in role_inference_identities(ctx.cfg, role, model):
+                assessment = assess(runtime, required_capabilities(ctx.cfg, role, model), settings=settings,
+                                    workspace_root=ctx.workspace)
+                statuses.add(assessment.status)
+                entries.append({"model": model, "identity": label, "inference_settings_digest": settings.digest,
+                                "campaign_named": is_campaign_named_model(model), **assessment.to_dict()})
         roles[role] = entries
     if statuses == {QUALIFIED}:
         status, reason = CheckStatus.PASS, None

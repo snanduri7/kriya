@@ -1812,6 +1812,44 @@ def _enter_developer_model(state: GenerationState, ctx: "AttemptContext", kwargs
     return kwargs
 
 
+def _require_qualified_retry_identity(state: GenerationState, ctx: "AttemptContext",
+                                      kwargs: Dict[str, Any]) -> None:
+    """MODEL-EVIDENCE-HARDENING-001: a Developer retry carrying a
+    retry_temperature that differs from the called model's own temperature
+    executes a distinct inference identity. Under the production runtime
+    profile that exact identity must be QUALIFIED; otherwise the attempt ends
+    with the typed terminal RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED before any
+    request - it never runs under the normal identity's qualification.
+    Outside production it is recorded (the profile), never refused."""
+    from kriya.core.model_qualification import QUALIFIED
+    from kriya.workflow.model_transition import RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED
+
+    profile = state.last_developer_request_profile
+    config = ctx.kernel.config
+    if (kwargs.get("retry_temperature") is None or profile is None or profile.retry_qualification is None
+            or profile.retry_qualification == QUALIFIED or getattr(config, "runtime_profile", None) != "production"):
+        return
+    message = (f"{RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED}: the production runtime profile requires the Developer "
+               f"retry identity of {profile.model} (retry_temperature {config.llm.retry_temperature}, inference "
+               f"settings {profile.retry_inference_settings_digest}) to be QUALIFIED; it is "
+               f"{profile.retry_qualification}. Qualify it with `kriya model qualify --model {profile.model}`; "
+               "nothing was sent to the model.")
+    details = {"reason_code": RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED, "model": profile.model,
+               "retry_temperature": config.llm.retry_temperature,
+               "retry_inference_settings_digest": profile.retry_inference_settings_digest,
+               "retry_qualification": profile.retry_qualification}
+    state.record_event(RunEvent(
+        kind="model.retry_identity_not_qualified", attempt=state.attempt_number,
+        source="attempt._run_developer_generation", authority=EventAuthority.ADVISORY,
+        message=message, details=details,
+    ))
+    logger.error(message)
+    raise QualityGateFailure(Failure(
+        type="retry_identity_not_qualified", message=message, raw_output=message, source="orchestrator",
+        attempt=state.attempt_number, diagnostics=details,
+    ))
+
+
 def _chain_binding(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
     """The llm_chain entry a Developer call with ``model_override`` goes to,
     or None for the primary model."""
@@ -1837,6 +1875,7 @@ async def _run_developer_generation_as_developer(
     targets = kwargs.get("known_target_files")
     file_count = len(targets or ctx.expected_files_upfront or state.all_files_written or [None])
     kwargs = _enter_developer_model(state, ctx, kwargs)
+    _require_qualified_retry_identity(state, ctx, kwargs)
     active_model = kwargs.get("model_override") or ctx.kernel.config.llm.model
     _ensure_generation_time_budget(
         state, ctx, file_count=file_count, active_model=active_model,

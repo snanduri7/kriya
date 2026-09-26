@@ -128,6 +128,8 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
     "output_budget_unsatisfiable": FailureCategory.RESOURCE,
     # PRD-017: a fallback model that cannot serve the attempt it was chosen for.
     "fallback_incompatible": FailureCategory.RESOURCE,
+    # MODEL-EVIDENCE-HARDENING-001: an unqualified production retry identity.
+    "retry_identity_not_qualified": FailureCategory.RESOURCE,
 
     # INTERNAL - Kriya's own implementation broke, not the application
     "internal_framework_error": FailureCategory.INTERNAL,

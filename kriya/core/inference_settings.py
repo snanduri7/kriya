@@ -35,10 +35,14 @@ Rules:
   primary binding sends ``llm.temperature``, except the Reviewer, which
   sends ``llm.reviewer_temperature`` when set. Qualified inference identity
   == executed inference identity.
-- ``llm.retry_temperature`` is a per-call override on Developer retries, not
-  a role setting. A retry call sent with it is a different inference
-  identity at dispatch, so it gets no qualified tier or measured limit
-  unless that identity was qualified.
+- ``llm.retry_temperature`` (a Developer retry's per-call temperature) is a
+  distinct inference identity whenever it differs from the model's own
+  temperature: ``retry_inference_settings`` / ``role_inference_identities``
+  enumerate it next to the normal one, qualification covers both, and the
+  production runtime profile refuses a Developer retry whose exact retry
+  identity is not QUALIFIED before any request
+  (RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED, kriya/workflow/attempt.py). It is
+  never qualified by the normal-temperature identity's record.
 """
 from __future__ import annotations
 
@@ -46,7 +50,7 @@ import copy
 import hashlib
 import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 INFERENCE_SETTINGS_VERSION = 1
 
@@ -141,6 +145,32 @@ def binding_inference_settings(config: Any, role: str, binding: Any = None) -> I
     )
 
 
+def retry_inference_settings(config: Any, role: str, binding: Any = None) -> Optional[InferenceSettings]:
+    """The Developer's retry identity for ``binding``: its own settings at
+    ``llm.retry_temperature``. None when no retry temperature is configured,
+    for other roles (only Developer retries use it), or when it equals the
+    binding's own temperature (then a retry is the same identity)."""
+    retry = getattr(config.llm, "retry_temperature", None)
+    if role != "developer" or retry is None:
+        return None
+    normal = binding_inference_settings(config, role, binding)
+    retried = request_settings(temperature=retry, reasoning=normal.reasoning, extra_body=normal.extra_body,
+                               output_ceiling=normal.output_ceiling)
+    return None if retried.digest == normal.digest else retried
+
+
+def role_inference_identities(config: Any, role: str, model: str) -> List[Tuple[str, InferenceSettings]]:
+    """Every inference identity ``role`` executes ``model`` with, labelled:
+    ("normal", ...) and, for a Developer with a differing retry temperature,
+    ("retry", ...). Qualification, doctor, status and resume enumerate these."""
+    binding = role_binding_for_model(config, role, model)
+    identities = [("normal", binding_inference_settings(config, role, binding))]
+    retry = retry_inference_settings(config, role, binding)
+    if retry is not None:
+        identities.append(("retry", retry))
+    return identities
+
+
 def role_binding_for_model(config: Any, role: str, model: str) -> Any:
     """The binding ``role`` calls ``model`` through: the Developer's primary
     llm or an llm_chain entry; another role's own agent_llms binding or chain
@@ -173,6 +203,6 @@ def qualification_identity(runtime_digest: str, settings: InferenceSettings) -> 
 
 __all__ = [
     "INFERENCE_SETTINGS_VERSION", "InferenceSettings", "binding_inference_settings",
-    "normalized_extra_body", "qualification_identity", "request_settings", "role_binding_for_model",
-    "role_inference_settings",
+    "normalized_extra_body", "qualification_identity", "request_settings", "retry_inference_settings",
+    "role_binding_for_model", "role_inference_identities", "role_inference_settings",
 ]

@@ -629,7 +629,7 @@ def model_runtime_resume_fingerprint(config: Any) -> Fingerprint:
     model (temperature, reasoning, reasoning_effort, sampling options...),
     and the context tiers offered under each distinct settings identity, so
     a checkpoint never resumes under different inference behaviour."""
-    from kriya.core.inference_settings import role_inference_settings
+    from kriya.core import inference_settings as inference
     from kriya.core.model_qualification import offered_context_tiers, role_models
     from kriya.core.model_runtime import _binding_for, binding_object, resolve_configured_model_runtime
 
@@ -637,8 +637,10 @@ def model_runtime_resume_fingerprint(config: Any) -> Fingerprint:
     models = list(dict.fromkeys(m for chain in by_role.values() for m in chain))
     digests = {}
     tiers: Dict[str, Any] = {}
+    # Every identity per role and model, including a Developer's differing
+    # retry-temperature identity.
     settings_by_role = {
-        role: {model.casefold(): role_inference_settings(config, role, model) for model in chain}
+        role: {model.casefold(): inference.role_inference_identities(config, role, model) for model in chain}
         for role, chain in by_role.items()
     }
     for model in models:
@@ -655,7 +657,8 @@ def model_runtime_resume_fingerprint(config: Any) -> Fingerprint:
         binding = binding_object(config, model) or config.llm
         address = _binding_for(config, model)
         distinct = {s.digest: s for per_model in settings_by_role.values()
-                    for key, s in per_model.items() if key == model.casefold()}
+                    for key, identities in per_model.items() if key == model.casefold()
+                    for _, s in identities}
         for settings_digest, settings in sorted(distinct.items()):
             offer = offered_context_tiers(
                 config, model, fingerprint, binding.context_policy,
@@ -666,10 +669,11 @@ def model_runtime_resume_fingerprint(config: Any) -> Fingerprint:
             tiers[f"{model.casefold()}@{settings_digest}"] = [
                 dict(item) for item in offer.evidence if item.get("source")
             ]
-    inference = {role: {model: s.digest for model, s in per_model.items()}
-                 for role, per_model in settings_by_role.items()}
+    inference_digests = {role: {model: {label: s.digest for label, s in identities}
+                                    for model, identities in per_model.items()}
+                         for role, per_model in settings_by_role.items()}
     owned = split_config_by_owner(config.model_dump())["model_runtime"]
-    return Fingerprint(_digest({"runtimes": digests, "inference_settings": inference, "context_tiers": tiers,
+    return Fingerprint(_digest({"runtimes": digests, "inference_settings": inference_digests, "context_tiers": tiers,
                                 "config": owned}), "model-runtime")
 
 

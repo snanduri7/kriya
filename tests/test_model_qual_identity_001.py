@@ -426,13 +426,13 @@ def test_the_resume_fingerprint_binds_each_roles_inference_settings(monkeypatch)
     _exact_probe(monkeypatch)
     cfg = _roles_cfg()
     before = resume_fingerprints.model_runtime_resume_fingerprint(cfg)
-    real = inf.role_inference_settings
+    real = inf.role_inference_identities
 
     def reviewer_differs(config, role, model):
-        settings = real(config, role, model)
-        return replace(settings, temperature=0.9) if role == "reviewer" else settings
+        identities = real(config, role, model)
+        return [(label, replace(s, temperature=0.9)) for label, s in identities] if role == "reviewer" else identities
 
-    monkeypatch.setattr(inf, "role_inference_settings", reviewer_differs)
+    monkeypatch.setattr(inf, "role_inference_identities", reviewer_differs)
     after = resume_fingerprints.model_runtime_resume_fingerprint(cfg)
     assert before.available and after.available and before.value != after.value
 

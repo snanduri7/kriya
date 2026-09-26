@@ -522,6 +522,10 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             # failed qualification, a required patch it cannot return, no
             # prompt room). Re-sending it cannot change that.
             "fallback_incompatible",
+            # MODEL-EVIDENCE-HARDENING-001: a production Developer retry
+            # whose retry-temperature identity is not QUALIFIED. Retrying
+            # cannot qualify it.
+            "retry_identity_not_qualified",
             # PRD-020: an original requirement without accepted evidence under
             # a blocking policy. The Developer cannot supply the verifier's
             # missing verdict or confirm an unverifiable requirement.
