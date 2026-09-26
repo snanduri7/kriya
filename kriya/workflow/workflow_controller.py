@@ -244,6 +244,7 @@ from kriya.workflow.terminal_commit import (
     materialize_candidate,
 )
 from kriya.workflow.triage import ChangeKind
+from kriya.workflow.untrusted_context import fence_untrusted_reference
 from kriya.workflow.verification_report import build_verification_report
 from kriya.workflow.workflow import _log_phase_banner
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport, WorkflowResult
@@ -4201,6 +4202,12 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             "Set requirement_ids on each subtask to the REQ ids it serves, using only these ids. "
             "Never drop, merge or reword a requirement: one no subtask serves stays open."
         ))
+        # AUTH-GOAL-CONTAMINATION-001: retrieved reference text informs the
+        # decomposition as fenced, untrusted context, appended after every
+        # goal-derived section (initial and repair requests alike). Nothing
+        # above, and no authority decision, ever reads it.
+        planner_reference = fence_untrusted_reference(legacy_kwargs.get("reference_context", ""))
+        authoritative_planner_request += planner_reference
         planning_repository_evidence = bounded_repository_evidence(
             workspace_path, planning_repository_candidates,
         )
@@ -4567,7 +4574,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     must_preserve=must_preserve,
                     validation_evidence=prompt_validation_evidence,
                     available_tool_names=available_tool_names,
-                )
+                ) + planner_reference
             try:
                 persist_planning_attempt_diagnostic(
                     workspace_path, run_id,

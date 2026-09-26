@@ -28,7 +28,8 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 | 783558d | Summary update |
 | f3707c4 | AUTH-GOAL-CONTAMINATION-001: retrieved reference text never becomes authority (the `generate` pre-step no longer joins it to the goal) |
 | b351682 | AUTH-GOAL-CONTAMINATION-001 record, docs, tracker, summary |
-| (this) | Fix (my f3707c4): the structural tripwire missed conditional, `.format`/`.join`/`%` and keyword enrichment; plus controller-path and Planner mutation-scope tests |
+| 8f43d31 | Fix (my f3707c4): the structural tripwire missed conditional, `.format`/`.join`/`%` and keyword enrichment; plus controller-path and Planner mutation-scope tests |
+| (this) | AUTH-GOAL-CONTAMINATION-001 parity: the enforce structured Planner reads reference context again, fenced, on the first request and every repair round |
 
 ## The three suspected P0/P1 defects
 1. **PRD-025: nonzero exit overridden by an LLM PASS. Confirmed**, in a narrower form than suspected.
@@ -45,6 +46,7 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
   - **The defect.** `kriya generate` appended its retrieved web-knowledge text to the goal. That one string fed requirement lineage, mutation scope, DIRECT contract authorization, expected-exit authority and the resume goal fingerprint.
   - **The fix.** The goal now stays the user's exact words on every dispatch. The retrieved text reaches the models only as fenced `reference_context`.
   - **Proof.** Each consumer is tested against a real run, with a pre-fix control. A structural test forbids rebinding an authority goal to an enriched version of itself.
+  - **Planner parity.** Every Planner that has reference context reads it fenced, after the goal: direct, and enforce (first request and repair rounds). Milestone planning has no retrieval source; shadow's observational Planner sends the plain goal by design.
 - **Retrieval** (8aa6d26, found by the PRD-027 measurement):
   - a missing embedding dimension silently degraded any non-768 model to lexical-only;
   - the lexical leg phrase-matched the whole goal;
@@ -81,7 +83,7 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 - A milestone unit that commits nothing leaves its capabilities PROPOSED (previously marked IMPLEMENTED by bookkeeping).
 - A goal that names an exit code admits only that code. A test that asserted `quality_gates_exhausted` for a run that actually stopped on no progress would now see `no_progress`.
 - Retrieval now returns callers, dependencies and configuration files, and its lexical leg matches, so Graph RAG context content differs.
-- `kriya generate`'s retrieved reference text is no longer part of the goal. It reaches the models as fenced reference context, but not KnowledgeGuard, triage, skill matching, the retrieval queries or enforce's structured Planner.
+- `kriya generate`'s retrieved reference text is no longer part of the goal. It reaches the models as fenced reference context, including the direct and enforce Planners, but not KnowledgeGuard, triage, skill matching or the retrieval queries. Shadow mode's observational Planner no longer sees it (it sends the plain goal by design).
 - `doctor --production` has a new pinned check, `context.recall_certification`. The fixture's `paths.memory` is now isolated.
 - Registry `to_dict()` gained schema 2 keys, so checkpoints saved before this batch fail `contract_hash` once. `kriya_runtime` invalidates them anyway.
 
@@ -119,7 +121,7 @@ The new test files only, plus mutation checks against them. The final-correction
 - `tests/test_batch6_live_evidence_status.py` (2);
 - 8 named `test_workflow.py` IDs;
 - one offline, mocked simulation of the PRD-028 live case;
-- AUTH-GOAL-CONTAMINATION-001: `tests/test_auth_goal_contamination_001.py` (23), `tests/test_dispatch_generation.py` and `tests/test_generate_json_contract.py`, and 11 mutations, all killed.
+- AUTH-GOAL-CONTAMINATION-001: `tests/test_auth_goal_contamination_001.py` (28), `tests/test_dispatch_generation.py` and `tests/test_generate_json_contract.py`, and 15 mutations, all killed.
 
 **Quota deviation (recorded once):** while building PRD-025..028 I also ran several existing suites (about 300 tests in total) as regression checks, which is more than the quota rule allows.
 
