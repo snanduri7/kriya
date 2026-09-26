@@ -33,3 +33,38 @@ def test_a_failed_and_a_completed_live_case(tmp_path, monkeypatch):
     with live._verdict("passed.json") as evidence:
         evidence["observed"] = 2
     assert _status(tmp_path, "passed.json")["status"] == live.LIVE_EXERCISED
+
+
+def _identity(window, status):
+    from kriya.core import model_qualification as mq
+    from kriya.core.model_runtime import ModelRuntimeFingerprint
+
+    fingerprint = ModelRuntimeFingerprint(alias="m", endpoint="http://localhost:11434/v1",
+                                          effective_context_window=window)
+    reasons = () if status == mq.QUALIFIED else ("no qualification record",)
+    return fingerprint, mq.QualificationAssessment(status, "digest", reasons=reasons)
+
+
+def test_the_live_preflight_rejects_the_unqualified_8k_fixture_identity():
+    """The first Batch 6 live run used num_ctx 8192 and an empty qualification
+    home (MISSING, default byte bound): both must be named as a fixture error."""
+    from kriya.core import model_qualification as mq
+
+    problems = live.live_identity_problems(*_identity(8192, mq.MISSING), 32768)
+    assert len(problems) == 2
+    assert "8192, expected 32768" in problems[0] and "MISSING" in problems[1]
+    assert live.live_identity_problems(*_identity(32768, mq.QUALIFIED), 32768) == []
+    assert live.live_identity_problems(*_identity(32768, mq.STALE), 32768)
+
+
+def test_the_live_cfg_fixture_does_not_override_the_qualified_identity():
+    """The window, sampling options and qualification home come from the
+    packaged defaults and the operator's real qualification records."""
+    import inspect
+
+    source = inspect.getsource(live.cfg)
+    for override in ("llm.extra_body", "llm.context_window", "llm.max_tokens", "llm.temperature",
+                     "QUALIFICATION_HOME"):
+        assert override not in source, override
+    assert live.EXPECTED_CONTEXT_WINDOW == 32768
+

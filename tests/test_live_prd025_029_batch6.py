@@ -62,7 +62,10 @@ pytestmark = pytest.mark.live_model
 EVIDENCE_DIR = os.environ.get("KRIYA_BATCH6_EVIDENCE_DIR")
 BASE_URL = os.environ.get("KRIYA_LIVE_BASE_URL", "http://localhost:11434/v1")
 PRIMARY = os.environ.get("KRIYA_LIVE_LLM_MODEL", "qwen3-coder:30b")
-WINDOW = 8192
+# The qualified production identity these cases must run under: the packaged
+# llm settings (num_ctx 32768, temperature/top_k/top_p) of a model qualified
+# with `kriya model qualify`. The cfg fixture never overrides any of them.
+EXPECTED_CONTEXT_WINDOW = int(os.environ.get("KRIYA_LIVE_CONTEXT_WINDOW", "32768"))
 
 
 def _write_evidence(name, payload):
@@ -94,20 +97,49 @@ def _verdict(name):
     _write_evidence(name, {**evidence, "status": LIVE_EXERCISED})
 
 
+def live_identity_problems(fingerprint, assessment, expected_window):
+    """Why the resolved Developer identity is not the qualified one these live
+    cases are meant to exercise ([] when it is). A fixture that silently ran
+    at another window or without qualification measured the wrong thing: an
+    8K window with the default byte bound refused prompts the qualified 32K
+    identity serves (Batch 6 live, 2026-09-27)."""
+    problems = []
+    if fingerprint.effective_context_window != expected_window:
+        problems.append(
+            f"effective context window is {fingerprint.effective_context_window}, expected {expected_window}")
+    if assessment.status != mq.QUALIFIED:
+        problems.append(f"developer qualification is {assessment.status}: {'; '.join(assessment.reasons)}")
+    return problems
+
+
 @pytest.fixture
-def cfg(tmp_path, monkeypatch):
-    monkeypatch.setenv(mq.QUALIFICATION_HOME_ENV, str(tmp_path / "qualifications"))
+def cfg(tmp_path):
     operator = tmp_path / "operator.yaml"
     operator.write_text("{}\n", encoding="utf-8")
     config = load_config(str(operator))
     config.llm.base_url = BASE_URL
     config.llm.model = PRIMARY
     config.llm.api_key = os.environ.get("KRIYA_LIVE_API_KEY", "local-key")
-    config.llm.extra_body = {"options": {"num_ctx": WINDOW}}
-    config.llm.context_window = WINDOW
-    config.llm.max_tokens = 1024
     config.llm_chain = []
     clear_model_runtime_cache()
+    from kriya.core.inference_settings import role_inference_settings
+    from kriya.core.model_runtime import resolve_configured_model_runtime
+
+    fingerprint = resolve_configured_model_runtime(config, PRIMARY, fresh=True)
+    assessment = mq.assess(
+        fingerprint, mq.required_capabilities(config, "developer", PRIMARY),
+        settings=role_inference_settings(config, "developer", PRIMARY),
+    )
+    problems = live_identity_problems(fingerprint, assessment, EXPECTED_CONTEXT_WINDOW)
+    _write_evidence("preflight_identity.json", {
+        "model": PRIMARY, "runtime_digest": fingerprint.digest, "runtime_exact": fingerprint.exact,
+        "effective_context_window": fingerprint.effective_context_window,
+        "expected_context_window": EXPECTED_CONTEXT_WINDOW, "qualification": assessment.status,
+        "problems": problems,
+    })
+    if problems:
+        pytest.fail("LIVE FIXTURE CONFIG ERROR (not a product result): " + "; ".join(problems)
+                    + ". Qualify the model first: kriya model qualify --model " + PRIMARY, pytrace=False)
     return config
 
 
@@ -434,3 +466,4 @@ async def test_live_prd029_authorized_api_change_is_bound_to_its_commit(cfg, tmp
         committed = [cycle for run in scan_run_records(str(repo)).records for cycle in run.commits
                      if cycle.get("contract_registry")]
         assert committed and committed[-1]["contract_registry"]["after_digest"] == registry.digest()
+
