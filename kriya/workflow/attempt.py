@@ -54,7 +54,6 @@ from kriya.tools.service_runtime import (
 from kriya.tools.validate import PolymorphicValidator, execution_evidence, get_pom_dependencies
 from kriya.workflow.acceptance import (
     output_confirms_nonzero_test_execution,
-    runtime_application_step_started,
     runtime_verification_infrastructure_reason,
     subtask_owns_test_obligation,
 )
@@ -212,6 +211,11 @@ from kriya.workflow.toolchain import (
 )
 from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
 from kriya.workflow.verification_contract import ContractVerdictState, classify_contract_verdict
+from kriya.workflow.verifier_evidence import (
+    RetainedRuntimeEvidence,
+    apply_runtime_disposition,
+    runtime_evidence_outcome_fields,
+)
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
@@ -2553,6 +2557,7 @@ _DISTRUST_DISCLOSURE_NOTE = (
 async def _resolve_runtime_verification_grade(
     ctx: "AttemptContext", state: ContractVerdictState,
     contract_verdict: Optional[Dict[str, Any]], grade_kwargs: Dict[str, Any],
+    *, run_result: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], str]:
     """VER-006 containment (2026-09-10) - the single place every run_res-
     outcome branch (clean run / timed out / plain nonzero exit / post-self-
@@ -2594,6 +2599,10 @@ async def _resolve_runtime_verification_grade(
     if state in (ContractVerdictState.PASS, ContractVerdictState.FAIL):
         return contract_verdict, "contract"
 
+    # PRD-025: the grader gets a bounded package built from the per-step
+    # retained capture, scanned once here - only when a grader call happens.
+    if run_result is not None:
+        grade_kwargs = {**grade_kwargs, "evidence": RetainedRuntimeEvidence.from_run_result(run_result)}
     if state is ContractVerdictState.ABSENT:
         grade = await ctx.run_verifier.grade(**grade_kwargs)
         return grade, "llm"
@@ -4795,6 +4804,7 @@ async def _execute_runtime_verification_directly(
                 "output": run_res["output"], "returncode": run_res["returncode"],
                 "files_written": known_files, "timed_out": True,
             },
+            run_result=run_res,
         )
         timeout_s = autonomy_cfg_rv.run_verification_timeout_seconds
         if grade["passed"]:
@@ -4832,14 +4842,14 @@ async def _execute_runtime_verification_directly(
                     "output": run_res["output"], "returncode": run_res["returncode"],
                     "files_written": known_files,
                 },
+                run_result=run_res,
             )
-        if grade.get("passed") and not runtime_application_step_started(run_res):
-            grade["passed"] = False
-            grade["reasoning"] = (
-                "Observed output appeared semantically correct, but one or more required "
-                "verification setup steps failed or the application was never shown to have "
-                f"started. Semantic evidence: {grade.get('reasoning', '')}"
-            )
+        # PRD-025: a nonzero exit outranks any semantic grade unless the
+        # user's goal declares that exit as expected from a launched app.
+        apply_runtime_disposition(
+            grade, run_res, goal_text=ctx.grounding_goal or ctx.goal,
+            verification_authority=verification_authority,
+        )
     else:
         deterministic_kind = deterministic_sequence_kind(resolved_run_commands)
         if deterministic_kind is not None:
@@ -4861,8 +4871,13 @@ async def _execute_runtime_verification_directly(
                     "output": run_res["output"], "returncode": run_res["returncode"],
                     "files_written": known_files,
                 },
+                run_result=run_res,
             )
 
+    apply_runtime_disposition(
+        grade, run_res, goal_text=ctx.grounding_goal or ctx.goal,
+        verification_authority=verification_authority,
+    )
     if not grade["passed"]:
         message = (
             f"RUNTIME VERIFICATION FAILURE (verification-only subtask): {grade['reasoning']}"
@@ -4878,6 +4893,7 @@ async def _execute_runtime_verification_directly(
             "graded_by": verification_authority, "commands": resolved_run_commands,
             "steps": run_res.get("steps", []),
             "deterministic_result": _deterministic_result_provenance_field(verification_authority),
+            **runtime_evidence_outcome_fields(grade),
         })
         state.gate_outcomes.append(failure_outcome)
         raise QualityGateFailure(failure)
@@ -4888,6 +4904,7 @@ async def _execute_runtime_verification_directly(
         "graded_by": verification_authority, "commands": resolved_run_commands,
         "steps": run_res.get("steps", []),
         "deterministic_result": _deterministic_result_provenance_field(verification_authority),
+        **runtime_evidence_outcome_fields(grade),
         **execution_evidence(run_res),
     })
 
@@ -8808,6 +8825,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 "files_written": list(state.all_files_written),
                                 "timed_out": True,
                             },
+                            run_result=run_res,
                         )
                         timeout_s = autonomy_cfg_rv.run_verification_timeout_seconds
                         if grade["passed"]:
@@ -8894,6 +8912,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                     "returncode": run_res["returncode"],
                                     "files_written": list(state.all_files_written),
                                 },
+                                run_result=run_res,
                             )
 
                         # A semantic expected-failure verdict is admissible
@@ -8902,14 +8921,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         # executable launch failures were already classified
                         # as verifier infrastructure above and never reach
                         # this branch.
-                        if grade.get("passed") and not runtime_application_step_started(run_res):
-                            grade["passed"] = False
-                            grade["reasoning"] = (
-                                "Observed output appeared semantically correct, but a required "
-                                "verification setup step failed or the application was never "
-                                "shown to have started. "
-                                f"Semantic evidence: {grade.get('reasoning', '')}"
-                            )
+                        #
+                        # PRD-025: beyond that, a nonzero exit outranks any
+                        # semantic grade unless the user's own goal declares
+                        # that exit as the expected behaviour.
+                        apply_runtime_disposition(
+                            grade, run_res, goal_text=ctx.grounding_goal or ctx.goal,
+                            verification_authority=verification_authority,
+                        )
 
                         # Bounded self-correction, widened 2026-08-22 from
                         # compile-only to also cover THIS specific run-
@@ -9031,6 +9050,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                             "returncode": run_res["returncode"],
                                             "files_written": list(state.all_files_written),
                                         },
+                                        run_result=run_res,
                                     )
                     else:
                         deterministic_kind = deterministic_sequence_kind(resolved_run_commands)
@@ -9069,7 +9089,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                     "returncode": run_res["returncode"],
                                     "files_written": list(state.all_files_written),
                                 },
+                                run_result=run_res,
                             )
+                    # PRD-025: the final disposition, re-applied after any
+                    # self-correction re-verification replaced the grade.
+                    apply_runtime_disposition(
+                        grade, run_res, goal_text=ctx.grounding_goal or ctx.goal,
+                        verification_authority=verification_authority,
+                    )
                     if not grade["passed"]:
                         # A compile error always names its own broken file
                         # (file:[line,col]) - a runtime failure's captured
@@ -9125,6 +9152,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             "commands": resolved_run_commands,
                             "steps": run_res.get("steps", []),
                             "deterministic_result": _deterministic_result_provenance_field(verification_authority),
+                            **runtime_evidence_outcome_fields(grade),
                         })
                         state.gate_outcomes.append(failure_outcome)
                         raise QualityGateFailure(failure)
@@ -9147,6 +9175,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         "commands": resolved_run_commands,
                         "steps": run_res.get("steps", []),
                         "deterministic_result": _deterministic_result_provenance_field(verification_authority),
+                        **runtime_evidence_outcome_fields(grade),
                     }
                     if self_correction_result is not None and self_correction_result.resolved:
                         # Same markers the compile gate's own self-correction

@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kriya.agents.agent import DeveloperAgent
+from kriya.agents.agent import DeveloperAgent, RunVerifierAgent
 from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
@@ -5514,16 +5514,24 @@ def test_verification_only_java_grounding_outranks_inferred_maven_exec():
     ]
 
 
+_DECLARES_NONZERO_GOAL = (
+    "Run the app: valid input prints RESULT=42; invalid input prints INVALID_INPUT and exits non-zero."
+)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("argument", "returncode", "output", "expected_pass"),
+    ("argument", "returncode", "output", "goal", "expected_pass"),
     [
-        ("21", 0, "RESULT=42", True),
-        ("invalid", 1, "INVALID_INPUT", True),
+        ("21", 0, "RESULT=42", _DECLARES_NONZERO_GOAL, True),
+        ("invalid", 1, "INVALID_INPUT", _DECLARES_NONZERO_GOAL, True),
+        # PRD-025 defect repro: the grader (and the judge's own criteria)
+        # accept the nonzero exit, but the USER's goal never declared it.
+        ("invalid", 1, "INVALID_INPUT", "Run the app and print the result.", False),
     ],
 )
 async def test_verification_only_packaged_java_uses_grounded_runtime_and_launches_application(
-    tmp_path, argument, returncode, output, expected_pass,
+    tmp_path, argument, returncode, output, goal, expected_pass,
 ):
     source = tmp_path / "src/main/java/com/example/App.java"
     source.parent.mkdir(parents=True)
@@ -5554,10 +5562,12 @@ async def test_verification_only_packaged_java_uses_grounded_runtime_and_launche
         "success_criteria": "valid input prints RESULT=42; invalid input prints INVALID_INPUT and exits nonzero",
     })
     run_verifier.grade = AsyncMock(return_value={
-        "passed": expected_pass, "reasoning": "observed required application behavior", "likely_files": [],
+        "passed": True, "reasoning": "observed required application behavior", "likely_files": [],
     })
+    # PRD-025: a nonzero exit is admissible only because the USER's goal
+    # declares it (never because the judge/grader says so).
     ctx = _runtime_verifier_ctx(
-        tmp_path, developer=developer, run_verifier=run_verifier,
+        tmp_path, developer=developer, run_verifier=run_verifier, goal=goal,
         established_files=[
             "pom.xml", "src/main/java/com/example/App.java", "src/test/java/com/example/AppTest.java",
         ],
@@ -5579,14 +5589,25 @@ async def test_verification_only_packaged_java_uses_grounded_runtime_and_launche
     with patch(
         "kriya.tools.validate.PolymorphicValidator.run_app_sequence", side_effect=fake_run_app_sequence,
     ):
-        await run_attempt(state, ctx)
+        if expected_pass:
+            await run_attempt(state, ctx)
+        else:
+            with pytest.raises(QualityGateFailure):
+                await run_attempt(state, ctx)
 
     assert captured["commands"] == [
         ["javac", "-d", ".kriya/runtime-verification/classes", "src/main/java/com/example/App.java"],
         ["java", "-cp", ".kriya/runtime-verification/classes", "com.example.App", argument],
     ]
     assert not developer.run_generation.called
-    assert any(o["type"] == "run_verification" and o["success"] for o in state.gate_outcomes)
+    outcome = next(o for o in state.gate_outcomes if o["type"] == "run_verification")
+    assert outcome["success"] is expected_pass
+    expected_reason = (
+        None if returncode == 0 else
+        "EXPECTED_NONZERO_EXIT_GROUNDED" if expected_pass else "NONZERO_EXIT_AUTHORITATIVE"
+    )
+    assert outcome["runtime_disposition"]["deterministic_reason"] == expected_reason
+    assert outcome["runtime_disposition"]["final"] == ("PASS" if expected_pass else "FAIL")
 
 
 @pytest.mark.asyncio
@@ -14314,6 +14335,7 @@ async def test_run_attempt_accepts_expected_nonzero_only_after_application_start
     })
     ctx = _minimal_attempt_ctx(
         tmp_path, developer=developer, run_verifier=run_verifier,
+        goal="Reject invalid input: print INVALID_INPUT and exit with a nonzero status.",
         architect_files=["app.py"], expected_files_upfront=["app.py"],
     )
     run_result = {
@@ -14340,6 +14362,127 @@ async def test_run_attempt_accepts_expected_nonzero_only_after_application_start
     outcome = next(g for g in state.gate_outcomes if g["type"] == "run_verification")
     assert outcome["success"] is True
     assert "INVALID_INPUT" in outcome["output"]
+    assert outcome["runtime_disposition"]["deterministic_reason"] == "EXPECTED_NONZERO_EXIT_GROUNDED"
+    assert outcome["runtime_disposition"]["final"] == "PASS"
+
+
+def _nonzero_app_attempt(tmp_path, *, goal, grade_mock):
+    developer = AsyncMock()
+    developer.run_generation = AsyncMock(return_value=[{
+        "filepath": "app.py", "content": "raise SystemExit(2)\n",
+    }])
+    run_verifier = AsyncMock()
+    run_verifier.judge = AsyncMock(return_value={
+        "should_run": True,
+        "run_commands": [["python3", "app.py", "invalid"]],
+        "command_source": "inferred",
+        "success_criteria": "Invalid input is rejected with INVALID_INPUT and a nonzero exit.",
+    })
+    run_verifier.grade = grade_mock
+    return _minimal_attempt_ctx(
+        tmp_path, developer=developer, run_verifier=run_verifier, goal=goal,
+        architect_files=["app.py"], expected_files_upfront=["app.py"],
+    )
+
+
+def _gate_patches(run_result):
+    return (
+        patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
+              return_value={"success": True, "output": "compiled fine"}),
+        patch("kriya.tools.validate.PolymorphicValidator.run_tests", return_value={"success": True, "output": ""}),
+        patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence", return_value=run_result),
+    )
+
+
+@pytest.mark.asyncio
+async def test_prd025_llm_pass_cannot_override_undeclared_nonzero_exit(tmp_path):
+    """PRD-025 defect repro (main run_attempt path): before the fix the
+    grader's PASS over a nonzero exit was admitted whenever the process had
+    merely launched - the judge/grader (LLM) alone decided that exit was
+    expected. Now only the user's own goal text can declare it."""
+    state = GenerationState()
+    ctx = _nonzero_app_attempt(
+        tmp_path, goal="Print a greeting for the given name.",
+        grade_mock=AsyncMock(return_value={
+            "passed": True, "verdict": "PASS", "reasoning": "rejected as required", "likely_files": [],
+        }),
+    )
+    run_result = {
+        "success": False, "timed_out": False, "returncode": 2, "output": "INVALID_INPUT",
+        "steps": [{
+            "command": ["python3", "app.py", "invalid"], "exit_code": 2,
+            "stdout": "", "stderr": "INVALID_INPUT", "timed_out": False,
+        }],
+    }
+    first, second, third = _gate_patches(run_result)
+    with first, second, third, pytest.raises(QualityGateFailure):
+        await run_attempt(state, ctx)
+
+    outcome = next(g for g in state.gate_outcomes if g["type"] == "run_verification")
+    assert outcome["success"] is False
+    assert outcome["runtime_disposition"]["deterministic_reason"] == "NONZERO_EXIT_AUTHORITATIVE"
+    assert outcome["runtime_disposition"]["semantic"] == "PASS"
+    assert outcome["runtime_disposition"]["final"] == "FAIL"
+
+
+def _real_grader(reply: dict):
+    llm = LLMClient(AppConfig())
+    llm.complete = AsyncMock(return_value=json.dumps(reply))
+    return RunVerifierAgent("run_verifier", llm), llm
+
+
+@pytest.mark.asyncio
+async def test_prd025_real_grader_receives_bounded_package_with_middle_marker(tmp_path):
+    """Real producer + consumer: run_attempt -> _resolve_runtime_verification_
+    grade -> RunVerifierAgent.grade builds the package from the per-step
+    capture; the gate outcome records what the grader saw."""
+    grader, llm = _real_grader({"verdict": "PASS", "passed": True, "reasoning": "MIDDLE_OK seen"})
+    ctx = _nonzero_app_attempt(tmp_path, goal="Run the app and print MIDDLE_OK.", grade_mock=None)
+    ctx.run_verifier.grade = grader.grade
+    lines = ["INFO tick\n"] * 300_000
+    lines[150_000] = "RESULT MIDDLE_OK\n"
+    lines[150_001] = "java.lang.IllegalStateException: handled and logged\n"
+    big = "".join(lines)
+    run_result = {
+        "success": True, "timed_out": False, "returncode": 0, "output": big,
+        "steps": [{
+            "command": ["python3", "app.py"], "exit_code": 0, "stdout": big, "stderr": "", "timed_out": False,
+        }],
+    }
+    first, second, third = _gate_patches(run_result)
+    with first, second, third:
+        await run_attempt(GenerationState(), ctx)
+
+    user_prompt = llm.complete.call_args_list[0][0][1]
+    assert len(user_prompt) < len(big) // 4
+    assert "handled and logged" in user_prompt
+    assert "PACKAGE_TRUNCATION" in user_prompt
+
+
+@pytest.mark.asyncio
+async def test_prd025_capture_loss_turns_grader_pass_into_unknown_gate_failure(tmp_path):
+    grader, _ = _real_grader({"verdict": "PASS", "passed": True, "reasoning": "looks fine"})
+    ctx = _nonzero_app_attempt(tmp_path, goal="Run the app and print DONE.", grade_mock=None)
+    ctx.run_verifier.grade = grader.grade
+    state = GenerationState()
+    run_result = {
+        "success": True, "timed_out": False, "returncode": 0, "output": "DONE",
+        "steps": [{
+            "command": ["python3", "app.py"], "exit_code": 0, "stdout": "DONE", "stderr": "",
+            "timed_out": False, "stdout_lost_chars": 2_000_000,
+        }],
+    }
+    first, second, third = _gate_patches(run_result)
+    with first, second, third, pytest.raises(QualityGateFailure):
+        await run_attempt(state, ctx)
+
+    outcome = next(g for g in state.gate_outcomes if g["type"] == "run_verification")
+    assert outcome["success"] is False
+    assert outcome["runtime_disposition"]["final"] == "UNKNOWN"
+    assert outcome["runtime_disposition"]["semantic_reason"] == "CAPTURE_LOSS_UNRESOLVED"
+    [package] = outcome["verifier_evidence"]
+    assert package["truncation"] == ["CAPTURE_TRUNCATION"]
+    assert package["answered"] is True
 
 @pytest.mark.asyncio
 async def test_handle_attempt_failure_increments_retry_count_and_continues(tmp_path):

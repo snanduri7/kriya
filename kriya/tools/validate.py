@@ -1846,6 +1846,12 @@ class PolymorphicValidator:
                 "command": list(command), "exit_code": res["returncode"],
                 "stdout": res["stdout"], "stderr": res["stderr"],
                 "timed_out": res["timeout"], **execution_evidence(res),
+                # PRD-025: capture truncation travels with the step it came
+                # from; absent when nothing was lost.
+                **{
+                    key: res[key] for key in ("stdout_lost_chars", "stderr_lost_chars")
+                    if res.get(key)
+                },
             })
             sequence_toolchain = execution_evidence(res) or sequence_toolchain
             last_returncode = res["returncode"]

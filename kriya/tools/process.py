@@ -43,6 +43,10 @@ class ProcessResult:
     timeout: bool
     stdout_truncated: bool = False
     stderr_truncated: bool = False
+    # PRD-025: characters ProcessController dropped from the head of each
+    # stream (CAPTURE_TRUNCATION) - bytes no later consumer can ever scan.
+    stdout_lost_chars: int = 0
+    stderr_lost_chars: int = 0
     toolchain_identity: Optional[Dict[str, object]] = None
     # PRD-012: the outbound-network authority this contained process ran
     # under (see egress_evidence_for). None for an uncontained host process.
@@ -57,6 +61,9 @@ class ProcessResult:
             "stdout_truncated": self.stdout_truncated,
             "stderr_truncated": self.stderr_truncated,
         }
+        if self.stdout_lost_chars or self.stderr_lost_chars:
+            result["stdout_lost_chars"] = self.stdout_lost_chars
+            result["stderr_lost_chars"] = self.stderr_lost_chars
         if self.toolchain_identity is not None:
             result["toolchain_identity"] = self.toolchain_identity
         if self.egress is not None:
@@ -88,11 +95,17 @@ def egress_evidence_for(profile: ContainmentProfile, backend: ContainmentBackend
     }
 
 
-def _bounded_tail(value: str, limit: int) -> tuple[str, bool]:
+def _bounded_tail_counted(value: str, limit: int) -> tuple[str, int]:
+    """Keep the last ``limit`` characters; return (text, characters lost)."""
     if len(value) <= limit:
-        return value, False
+        return value, 0
     omitted = len(value) - limit
-    return f"[... {omitted} earlier characters omitted ...]\n" + value[-limit:], True
+    return f"[... {omitted} earlier characters omitted ...]\n" + value[-limit:], omitted
+
+
+def _bounded_tail(value: str, limit: int) -> tuple[str, bool]:
+    text, lost = _bounded_tail_counted(value, limit)
+    return text, bool(lost)
 
 
 def terminate_process_tree(process: Any) -> None:
@@ -368,8 +381,8 @@ class ProcessController:
             # sufficient for a VM-mediated container runtime.
             if resolved.cleanup is not None:
                 resolved.cleanup()
-        stdout, stdout_truncated = _bounded_tail(stdout or "", self.max_output_chars)
-        stderr, stderr_truncated = _bounded_tail(stderr or "", self.max_output_chars)
+        stdout, stdout_lost = _bounded_tail_counted(stdout or "", self.max_output_chars)
+        stderr, stderr_lost = _bounded_tail_counted(stderr or "", self.max_output_chars)
         if timed_out:
             stderr += f"\n[TIMEOUT] Command timed out after {timeout} seconds."
         return ProcessResult(
@@ -379,8 +392,10 @@ class ProcessController:
             stdout=stdout,
             stderr=stderr,
             timeout=timed_out,
-            stdout_truncated=stdout_truncated,
-            stderr_truncated=stderr_truncated,
+            stdout_truncated=bool(stdout_lost),
+            stderr_truncated=bool(stderr_lost),
+            stdout_lost_chars=stdout_lost,
+            stderr_lost_chars=stderr_lost,
             toolchain_identity=resolved.toolchain_identity,
             egress=resolved.egress,
         )
@@ -437,8 +452,8 @@ class ProcessController:
                 resolved.cleanup()
         stdout = (stdout_b or b"").decode("utf-8", errors="replace")
         stderr = (stderr_b or b"").decode("utf-8", errors="replace")
-        stdout, stdout_truncated = _bounded_tail(stdout, self.max_output_chars)
-        stderr, stderr_truncated = _bounded_tail(stderr, self.max_output_chars)
+        stdout, stdout_lost = _bounded_tail_counted(stdout, self.max_output_chars)
+        stderr, stderr_lost = _bounded_tail_counted(stderr, self.max_output_chars)
         if timed_out:
             stderr += f"\n[TIMEOUT] Command timed out after {timeout} seconds."
         return ProcessResult(
@@ -448,8 +463,10 @@ class ProcessController:
             stdout=stdout,
             stderr=stderr,
             timeout=timed_out,
-            stdout_truncated=stdout_truncated,
-            stderr_truncated=stderr_truncated,
+            stdout_truncated=bool(stdout_lost),
+            stderr_truncated=bool(stderr_lost),
+            stdout_lost_chars=stdout_lost,
+            stderr_lost_chars=stderr_lost,
             toolchain_identity=resolved.toolchain_identity,
             egress=resolved.egress,
         )
