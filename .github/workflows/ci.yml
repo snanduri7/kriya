@@ -53,6 +53,26 @@ jobs:
       - name: Run ruff
         run: ruff check .
 
+  static-check:
+    # Its own job, not a step after ruff: a ruff failure must not hide it.
+    # Narrow pylint gate (unbound/undefined names); rules in pyproject.toml's
+    # [tool.pylint], rationale in CLAUDE.md's "Mandatory quality bar".
+    name: Static check (pylint, unbound/undefined names)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          # No cache: pip - see the lint job's comment.
+
+      - name: Install Kriya (declared dependency ranges)
+        run: pip install -e ".[dev]"
+
+      - name: Run pylint gate
+        run: pylint kriya plugins/core_tools tests
+
   lock-file:
     name: Verify dependency lock file
     runs-on: ubuntu-latest

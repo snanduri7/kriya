@@ -28,6 +28,9 @@ dev = [
     "pytest-asyncio>=0.20.0",
     "pip-tools>=7.0.0",
     "ruff>=0.6.0",
+    # 3.2 introduced possibly-used-before-assignment (E0606), the rule the
+    # static-check gate exists for (see [tool.pylint] below).
+    "pylint>=3.2",
 ]
 
 [project.scripts]
@@ -99,3 +102,26 @@ ignore = [
 "kriya/agents/agent.py" = ["B024"]  # BaseAgent is a deliberate no-abstract-methods base
 "kriya/plugins/plugin.py" = ["B027"]  # empty initialize()/shutdown() are optional override hooks
 
+
+# Static-check gate (CLAUDE.md "Mandatory quality bar" rule 1). Deliberately
+# narrow and high-signal: a variable used on a path where it was never
+# assigned (E0601/E0606) and an undefined name (E0602). The Batch 5 enforce
+# defect - `requirement_closure_attempts` bound only inside the terminal
+# requirements block, so an early-stop run silently lost `requirements` from
+# its result - is E0606 at 0c19967. The tree is at zero findings, so every
+# new finding fails; there is no baseline file. E0611/E0603 are left off:
+# kriya/workflow/__init__.py's lazy PEP 562 WorkflowEngine export is a false
+# positive for both. Run: .venv/bin/pylint kriya plugins/core_tools tests
+[tool.pylint.main]
+jobs = 0
+
+[tool.pylint."messages control"]
+disable = ["all"]
+enable = [
+    "used-before-assignment",           # E0601
+    "possibly-used-before-assignment",  # E0606
+    "undefined-variable",               # E0602
+]
+
+[tool.pylint.reports]
+score = false

@@ -6,7 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-from typing import Dict
+from typing import Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

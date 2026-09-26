@@ -1,10 +1,14 @@
 import os
+from typing import TYPE_CHECKING
 
 import pytest
 
 from _plugin_test_support import load_core_tools_module
 
 from kriya.tools.tool import ToolExecutionError
+
+if TYPE_CHECKING:
+    from kriya.config.config import AppConfig
 
 _core_tools = load_core_tools_module()
 FilesystemTool, GitTool, ShellTool = _core_tools.FilesystemTool, _core_tools.GitTool, _core_tools.ShellTool
