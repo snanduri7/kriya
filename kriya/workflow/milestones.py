@@ -127,6 +127,18 @@ def _persist_contract_registry(
         logger.warning(f"Failed to persist ContractRegistry (non-fatal legacy path): {exc}")
 
 
+def _live_contract_registry(workspace_path: str, milestone_id: Optional[str] = None) -> Any:
+    """PRD-029: the registry as it is on disk now. A milestone unit's own
+    commit can promote public_api contract records into it, so every
+    milestone bookkeeping write builds on this live registry - never on a
+    copy loaded at the start of the run, which would silently overwrite
+    them. An unreadable registry fails closed."""
+    try:
+        return load_contract_registry(workspace_path)
+    except ContractRegistryCorruptError as exc:
+        raise MilestonePersistenceError(exc.reason_code, "contract_registry", str(exc), milestone_id) from exc
+
+
 def _persist_milestone_control_state(
     workspace_path: str, state: Any, *, authoritative: bool, milestone_id: Optional[str] = None,
 ) -> None:
@@ -145,7 +157,6 @@ def _update_milestone_control_state(
     group_id: str,
     milestone_id: str,
     milestone_status: str,
-    contract_registry: Any,
     artifact_registry: Any,
     *,
     authoritative: bool,
@@ -163,7 +174,8 @@ def _update_milestone_control_state(
     updated = state.with_updates(
         current_milestone_id=milestone_id,
         milestone_states={**state.milestone_states, milestone_id: milestone_status},
-        current_contract_hash=compute_registry_hash(contract_registry.to_dict()),
+        # The live registry, not a cached copy (see _live_contract_registry).
+        current_contract_hash=compute_registry_hash(_live_contract_registry(workspace_path, milestone_id).to_dict()),
         current_artifact_registry_hash=compute_registry_hash(artifact_registry.to_dict()),
     )
     _persist_milestone_control_state(
@@ -1124,7 +1136,6 @@ class _MilestonePlanDriver(PlanDriver):
             self.run_state.group_id,
             milestone.id,
             "in_progress",
-            self.contract_registry,
             self.artifact_registry,
             authoritative=self.authoritative,
         )
@@ -1163,6 +1174,7 @@ class _MilestonePlanDriver(PlanDriver):
         self._goal[unit.id] = build_milestone_goal_text(
             milestone, position, self.total, self.run_state.established_dependencies
         )
+        self.contract_registry = _live_contract_registry(self.workspace_path, milestone.id)
         self._consumed_context[unit.id] = render_consumed_contract_context(milestone, self.contract_registry)
         self._cycles_before[unit.id] = owning_run_commit_count(self.workspace_path)
         return None
@@ -1229,6 +1241,7 @@ class _MilestonePlanDriver(PlanDriver):
             result["dropped_dependencies"] = dropped
             return result
         if milestone.provides:
+            self.contract_registry = _live_contract_registry(self.workspace_path, milestone.id)
             mark_capabilities_implemented(self.contract_registry, milestone)
             _persist_contract_registry(
                 self.workspace_path,
@@ -1317,7 +1330,6 @@ class _MilestonePlanDriver(PlanDriver):
             self.run_state.group_id,
             milestone.id,
             "done",
-            self.contract_registry,
             self.artifact_registry,
             authoritative=self.authoritative,
         )

@@ -548,3 +548,44 @@ def test_generation_resume_fingerprints_carry_the_live_registry_identity(tmp_pat
     established = _established(workspace)
     fingerprints = generation_resume_fingerprints(AppConfig(), workspace, goal="g")
     assert fingerprints["contract_registry"].value == established.digest()
+
+
+# --- milestone bookkeeping never overwrites committed contract records -----------------------
+
+
+@pytest.mark.asyncio
+async def test_milestone_completion_bookkeeping_preserves_contracts_its_unit_committed(tmp_path):
+    """A milestone unit's commit promotes a public_api record into the live
+    registry; the milestone's own capability bookkeeping afterwards must
+    build on the LIVE registry, never write a start-of-run copy over it."""
+    from unittest.mock import MagicMock
+
+    from _strict_doubles import strict_engine
+    from test_milestones import mkv2
+
+    from kriya.workflow.milestones import MilestoneRunState, run_milestones
+
+    workspace = _workspace(tmp_path)
+    calls = {"n": 0}
+
+    async def unit_commits_a_contract(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            # What the commit seam promotes: a transition FROM the live registry.
+            transition = _derive(workspace, registry=load_contract_registry(workspace))
+            save_contract_registry(workspace, ContractRegistry.from_dict(transition.after_payload))
+        return {"quality_gates_passed": True, "design": "d", "files": [OWNER]}
+
+    we = strict_engine()
+    we.run_generation_workflow = AsyncMock(side_effect=unit_commits_a_contract)
+    we.run_verifier = MagicMock()
+    we.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
+    state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=[
+        mkv2("M1", goal="g1", provides=[{"name": "Pricing"}]),
+    ])
+    result = await run_milestones(we, state, workspace)
+
+    assert result["status"] == "success"
+    live = load_contract_registry(workspace)
+    assert live.get("api:src/Owner.java").source_revision == "tx1:hash1"
+    assert live.get("M1:Pricing").state is ContractState.IMPLEMENTED
