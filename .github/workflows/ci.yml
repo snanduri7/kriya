@@ -47,10 +47,14 @@ jobs:
           # noisy). This job does one pip install; caching isn't worth the
           # collision. Only the 5-way test matrix actually benefits.
 
-      - name: Install Kriya (declared dependency ranges)
-        run: pip install -e ".[dev]"
+      # CI-RUFF-001: the exact ruff the lock file pins (requirements.txt is
+      # the single source of the version). A floating `ruff>=0.6.0` would let
+      # a new ruff release add rules to the selected groups and turn this
+      # zero-finding gate red with no code change.
+      - name: Install ruff (lock-file version)
+        run: pip install "$(grep '^ruff==' requirements.txt)"
 
-      - name: Run ruff
+      - name: Run ruff (zero findings; any new finding fails)
         run: ruff check .
 
   static-check:
@@ -67,8 +71,12 @@ jobs:
           python-version: "3.14"
           # No cache: pip - see the lint job's comment.
 
-      - name: Install Kriya (declared dependency ranges)
-        run: pip install -e ".[dev]"
+      # pylint and astroid at the lock-file versions, for the same reason as
+      # the ruff pin above. Kriya is installed so imports resolve.
+      - name: Install Kriya and the lock-file pylint/astroid
+        run: |
+          pip install -e ".[dev]"
+          pip install "$(grep '^pylint==' requirements.txt)" "$(grep '^astroid==' requirements.txt)"
 
       - name: Run pylint gate
         run: pylint kriya plugins/core_tools tests
