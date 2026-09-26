@@ -30,6 +30,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
 from kriya.control.contracts import (
+    ContractRegistryCorruptError,
     mark_capabilities_implemented,
     register_provided_capabilities,
     wire_contract_consumers,
@@ -1516,7 +1517,12 @@ async def run_milestones(
     # as each one genuinely completes, below. Best-effort/non-fatal
     # throughout: a bookkeeping failure must never break a real milestone
     # run, matching every other control-plane persistence call site.
-    contract_registry = load_contract_registry(workspace_path)
+    try:
+        contract_registry = load_contract_registry(workspace_path)
+    except ContractRegistryCorruptError as exc:
+        # PRD-029: fail closed - never proceed (or later save) as though an
+        # unreadable registry were empty.
+        return MilestonePersistenceError(exc.reason_code, "contract_registry", str(exc)).to_result(run_state.group_id)
     # MA7.10 gave WorkflowController's own enforce-mode subtask loop real
     # ArtifactRegistry derivation (derive_from_workspace against the real,
     # post-apply workspace, only once a unit of work genuinely completes) -

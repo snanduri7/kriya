@@ -87,6 +87,23 @@ class ContractProviderResolutionError(ValueError):
     """A consumed capability has no unique provider; execution must not guess."""
 
 
+CONTRACT_REGISTRY_CORRUPT = "CONTRACT_REGISTRY_CORRUPT"
+
+
+class ContractRegistryCorruptError(RuntimeError):
+    """The persisted registry exists but cannot be read as a valid registry.
+    Never treated as an empty registry and never overwritten automatically:
+    contract verification must not silently proceed as though no contracts
+    exist (PRD-029)."""
+
+    reason_code = CONTRACT_REGISTRY_CORRUPT
+
+    def __init__(self, path: str, detail: str):
+        super().__init__(f"{CONTRACT_REGISTRY_CORRUPT}: {path}: {detail}")
+        self.path = path
+        self.detail = detail
+
+
 @dataclass(frozen=True)
 class ContractRecord:
     """One revision of one contract. Frozen - every lifecycle transition
@@ -353,8 +370,17 @@ class ContractRegistry:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ContractRegistry":
+        """Strict: a malformed payload raises (ValueError/KeyError/TypeError),
+        never degrades to a partial or empty registry."""
+        if not isinstance(data, dict):
+            raise TypeError("registry payload is not an object")
+        contracts = data.get("contracts", {})
+        if not isinstance(contracts, dict):
+            raise TypeError("registry 'contracts' is not an object")
         registry = cls()
-        for contract_id, records in data.get("contracts", {}).items():
+        for contract_id, records in contracts.items():
+            if not isinstance(records, list) or not records:
+                raise ValueError(f"contract {contract_id!r} has no revision history")
             registry._history[contract_id] = [ContractRecord.from_dict(r) for r in records]
         return registry
 

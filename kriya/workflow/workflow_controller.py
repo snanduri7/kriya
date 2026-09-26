@@ -91,7 +91,7 @@ from kriya.agents.contracts import (
 from kriya.analyzer.graph import DependencyGraph
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.commit_state import assess_workspace_commit_state
-from kriya.control.contracts import ContractRegistry
+from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError
 from kriya.control.decisions import (
     Decision,
     DecisionLedger,
@@ -3495,7 +3495,18 @@ class WorkflowController:
         if prior_control_state_ownerless:
             with open(control_state_path(workspace_path), "r", encoding="utf-8") as handle:
                 ControlState.from_dict(json.load(handle))
-        contract_registry = load_contract_registry(workspace_path)
+        try:
+            contract_registry = load_contract_registry(workspace_path)
+        except ContractRegistryCorruptError as exc:
+            # PRD-029: an unreadable registry is never treated as empty.
+            return WorkflowResult(
+                run_id=run_state.group_id, control_state=control_state, route=route,
+                legacy_result={
+                    "status": "needs_review", "group_id": run_state.group_id, "quality_gates_passed": False,
+                    "reason_codes": [exc.reason_code], "persistence_store": "contract_registry",
+                    "persistence_error": str(exc),
+                },
+            )
         artifact_registry = load_artifact_registry(workspace_path)
         # PRD-008 S4b: un-complete milestones whose completion proof fails
         # BEFORE milestone_states is derived from completed_milestone_ids,

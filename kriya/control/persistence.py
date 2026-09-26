@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.control.artifacts import ArtifactRegistry
-from kriya.control.contracts import ContractRegistry
+from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError
 from kriya.control.run_record import RunRecord
 from kriya.control.state import ControlState
 from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
@@ -299,21 +299,30 @@ def save_contract_registry(workspace_path: str, registry: ContractRegistry) -> N
 
 
 def load_contract_registry(workspace_path: str) -> ContractRegistry:
-    """Never returns None - an empty ContractRegistry (nothing registered
-    yet) is a perfectly valid starting state, unlike ControlState which has
-    a meaningful 'never initialized' None. A corrupt file still fails
-    closed to empty, logged, exactly like _load_json_document's own
-    contract."""
+    """Never returns None: a registry that was never saved is a valid, empty
+    starting state. PRD-029: a registry file that EXISTS but cannot be read
+    as a valid registry raises ContractRegistryCorruptError - it is never
+    interpreted as empty (which previously let the next save overwrite it,
+    and let resume/commit proceed as though no contracts existed)."""
 
-    data = _load_json_document(contract_registry_path(workspace_path), workspace_path)
-    if data is None:
+    path = contract_registry_path(workspace_path)
+    if not os.path.isfile(path):
         return ContractRegistry()
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError) as error:
+        raise ContractRegistryCorruptError(path, f"unreadable: {error}") from error
+    if not isinstance(data, dict):
+        raise ContractRegistryCorruptError(path, "registry payload is not an object")
+    validate_ownership(workspace_path, data, path)
+    data = dict(data)
     data.pop("_run_record", None)
+    data.pop("_workspace", None)
     try:
         return ContractRegistry.from_dict(data)
-    except Exception:
-        logger.warning("Failed to reconstruct ContractRegistry from %s - starting empty", contract_registry_path(workspace_path), exc_info=True)
-        return ContractRegistry()
+    except (KeyError, TypeError, ValueError) as error:
+        raise ContractRegistryCorruptError(path, f"invalid registry: {type(error).__name__}: {error}") from error
 
 
 def save_artifact_registry(workspace_path: str, registry: ArtifactRegistry) -> None:
