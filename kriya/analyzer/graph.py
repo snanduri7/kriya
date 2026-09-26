@@ -506,7 +506,7 @@ class DependencyGraph:
                 continue
                 
             cursor.execute("""
-                SELECT r.source, r.target, r.type, s.filepath, s.type as symbol_type
+                SELECT r.source, r.target, r.type, r.source_file, s.filepath, s.type as symbol_type
                 FROM relations r
                 LEFT JOIN symbols s ON (r.source = s.name OR r.target = s.name)
                 WHERE r.source = ? OR r.target = ?
@@ -519,6 +519,7 @@ class DependencyGraph:
                 rel_type = r["type"]
                 filepath = r["filepath"]
                 sym_type = r["symbol_type"]
+                weight = _RELATION_WEIGHTS.get(rel_type, _DEFAULT_RELATION_WEIGHT)
                 
                 neighbor = target if source == current else source
                 if neighbor not in visited:
@@ -526,7 +527,6 @@ class DependencyGraph:
                     queue.append((neighbor, hop + 1))
                     
                 if filepath:
-                    weight = _RELATION_WEIGHTS.get(rel_type, _DEFAULT_RELATION_WEIGHT)
                     results.append({
                         "name": neighbor,
                         "filepath": filepath,
@@ -535,9 +535,38 @@ class DependencyGraph:
                         "hop": hop + 1,
                         "score": weight / (hop + 1)
                     })
+                    # PRD-027: walk the defining file's own file-sourced
+                    # relations (its calls/imports) on the next hop - the
+                    # only way a two-hop dependency is ever reached.
+                    if filepath not in visited:
+                        visited.add(filepath)
+                        queue.append((filepath, hop + 1))
+                # PRD-027: calls/imports are recorded with the calling FILE as
+                # their source (both parsers), and the symbols join above can
+                # only ever report a DEFINER's file - so a caller was never a
+                # neighbor. The relation's own source file is that caller.
+                if r["source_file"] and neighbor == r["source_file"]:
+                    results.append({
+                        "name": neighbor,
+                        "filepath": neighbor,
+                        "relation_type": rel_type,
+                        "symbol_type": "file",
+                        "hop": hop + 1,
+                        "score": weight / (hop + 1)
+                    })
 
-        results.sort(key=lambda r: r["score"], reverse=True)
-        return results[:max_results]
+        # PRD-027: one entry per file (its best-scoring hit) BEFORE the cap.
+        # The symbol join emits a row per matching symbol, so capping the raw
+        # rows let duplicates of one file crowd distinct files out entirely
+        # (a real one-hop dependency was lost this way). Ties break on path
+        # for a deterministic order.
+        best_by_file: Dict[str, Dict[str, Any]] = {}
+        for hit in results:
+            known = best_by_file.get(hit["filepath"])
+            if known is None or hit["score"] > known["score"]:
+                best_by_file[hit["filepath"]] = hit
+        ranked = sorted(best_by_file.values(), key=lambda hit: (-hit["score"], hit["filepath"]))
+        return ranked[:max_results]
 
     def close(self) -> None:
         if hasattr(self, "conn") and self.conn:

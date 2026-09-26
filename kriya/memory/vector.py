@@ -159,6 +159,32 @@ def deserialize_embedding(blob: bytes) -> List[float]:
     num_floats = len(blob) // 4
     return list(struct.unpack(f"{num_floats}f", blob))
 
+# Short English function words that carry no retrieval signal in a goal.
+_LEXICAL_STOPWORDS = frozenset({
+    "the", "and", "for", "with", "from", "into", "onto", "that", "this", "these", "those", "than",
+    "then", "when", "where", "which", "while", "should", "would", "could", "must", "not", "are",
+    "was", "were", "has", "have", "had", "its", "their", "them", "they", "any", "all", "each",
+    "instead", "before", "after", "only", "also", "some", "such", "via", "per", "but", "our", "you",
+})
+_LEXICAL_TERM_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+_MAX_LEXICAL_TERMS = 32
+_LIKE_FALLBACK_TERMS = 8
+
+
+def lexical_query_terms(query_text: str) -> List[str]:
+    """Distinct lower-cased lexical terms of ``query_text``: each identifier
+    as written and its camelCase/snake_case parts, in first-seen order."""
+    terms: List[str] = []
+    seen = set()
+    for token in _LEXICAL_TERM_RE.findall(query_text or ""):
+        for candidate in [token, *split_camel_snake(token).split()]:
+            term = candidate.lower()
+            if len(term) >= 3 and term not in _LEXICAL_STOPWORDS and term not in seen:
+                seen.add(term)
+                terms.append(term)
+    return terms[:_MAX_LEXICAL_TERMS]
+
+
 def split_camel_snake(text: str) -> str:
     s1 = re.sub('(.)([A-Z][a-z]+)', r'\1 \2', text)
     s2 = re.sub('([a-z0-9])([A-Z])', r'\1 \2', s1)
@@ -506,28 +532,39 @@ class LocalVectorStore:
         self.conn.commit()
 
     def query_lexical(self, query_text: str, top_k: int = 20) -> List[Dict[str, Any]]:
-        if not query_text:
+        """BM25-ranked lexical match of the query's distinct terms (PRD-027).
+
+        Before PRD-027 this matched the ENTIRE query text as one FTS phrase,
+        so a natural-language goal essentially never matched and the lexical
+        leg of query_hybrid() contributed nothing; exact identifiers named
+        in a goal (``OrderService.computeDiscount``) were lost to it. Terms
+        are the query's identifiers and their camelCase/snake_case parts,
+        minus short function words, OR-ed together."""
+        terms = lexical_query_terms(query_text)
+        if not terms:
             return []
-            
+
         cursor = self.conn.cursor()
         results = []
         try:
             if self.use_fts:
-                clean_query = query_text.replace('"', ' ').replace("'", " ")
-                query_parts = f'"{clean_query}" OR "{split_camel_snake(clean_query)}"'
                 cursor.execute("""
                     SELECT filepath, chunk_index, text
                     FROM fts_chunks
                     WHERE fts_chunks MATCH ?
+                    ORDER BY rank
                     LIMIT ?
-                """, (query_parts, top_k))
+                """, (" OR ".join(f'"{term}"' for term in terms), top_k))
             else:
-                cursor.execute("""
-                    SELECT filepath, chunk_index, text
-                    FROM fts_chunks_fallback
-                    WHERE text LIKE ? OR split_text LIKE ?
-                    LIMIT ?
-                """, (f"%{query_text}%", f"%{query_text}%", top_k))
+                like_terms = terms[:_LIKE_FALLBACK_TERMS]
+                where = " OR ".join("lower(text) LIKE ? OR lower(split_text) LIKE ?" for _ in like_terms)
+                params: List[Any] = []
+                for term in like_terms:
+                    params.extend((f"%{term}%", f"%{term}%"))
+                cursor.execute(
+                    f"SELECT filepath, chunk_index, text FROM fts_chunks_fallback WHERE {where} LIMIT ?",
+                    (*params, top_k),
+                )
             rows = cursor.fetchall()
             for filepath, chunk_index, text in rows:
                 results.append({

@@ -1494,6 +1494,7 @@ async def _maybe_run_developer_investigation(
         try:
             return store.query_hybrid(
                 query, query_emb, top_k=5, model_name=ctx.kernel.config.embedding.model,
+                dimensions=len(query_emb),
             )
         finally:
             store.close()

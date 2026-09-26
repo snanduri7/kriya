@@ -62,7 +62,13 @@ async def retrieve_graph_context(
 
     result = GraphRetrievalResult()
     query_emb = await embed_client.get_embedding(goal, is_query=True)
-    matches = vector_store.query_hybrid(goal, query_emb, top_k=limits.top_k, model_name=embedding_model)
+    # The index is keyed by (model, dimension): pass the real query
+    # dimension, never query_hybrid's 768 default - a non-768 embedding
+    # model otherwise silently degraded code retrieval to lexical-only
+    # (found by the PRD-027 certification suite).
+    matches = vector_store.query_hybrid(
+        goal, query_emb, top_k=limits.top_k, model_name=embedding_model, dimensions=len(query_emb),
+    )
     good_matches = [m for m in matches if m.get("score", 0.0) > 0.0]
     grounding_resolver = CurrentSourceResolver(workspace_path, None)
     for m in good_matches:
@@ -118,6 +124,10 @@ async def retrieve_graph_context(
         for f in matched_files_list:
             symbols = graph.get_symbols_for_file(f)
             seed_symbols.extend(symbols or [os.path.splitext(os.path.basename(f))[0]])
+            # PRD-027: the file itself is a node too - calls/imports are
+            # recorded with the calling file as their source, so a matched
+            # file's own dependencies are reachable only from its path.
+            seed_symbols.append(f)
         neighbors = graph.get_neighborhood(
             seed_symbols, max_hops=limits.max_hops,
             max_results=limits.max_neighborhood_results,

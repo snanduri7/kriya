@@ -34,6 +34,15 @@ EXTENSION_MAP = {
     ".swift": "Swift"
 }
 
+# PRD-027: text configuration and build descriptors are indexed (generic
+# chunking) so Graph RAG can retrieve them - the context-recall
+# certification found every configuration file and every non-Maven build
+# descriptor unretrievable. JSON is deliberately excluded (lock files and
+# generated data would flood the index).
+CONFIGURATION_INDEX_EXTENSIONS = frozenset({
+    ".properties", ".yaml", ".yml", ".toml", ".gradle", ".kts", ".cfg", ".ini",
+})
+
 # Shared core of a Java method signature (modifiers, return type, captured
 # method name, parameter list) - independently duplicated three times before
 # this (here, kriya/analyzer/graph.py, kriya/workflow/context_budget.py),
@@ -760,15 +769,24 @@ class RepositoryAnalyzer:
         cfg: Any, 
         changed: bool = False,
         force: bool = False,
-        progress_callback: Optional[Callable[[str, int, int], None]] = None
+        progress_callback: Optional[Callable[[str, int, int], None]] = None,
+        embedding_client: Any = None,
+        generate_conventions_skill: bool = True,
     ) -> None:
-        """Walks the repository, chunks code files, generates semantic embeddings, and stores them in LocalVectorStore."""
+        """Walks the repository, chunks code files, generates semantic embeddings, and stores them in LocalVectorStore.
+
+        ``embedding_client`` (PRD-027) replaces the configured Ollama client -
+        the context-recall certification suite's deterministic CI embedder.
+        None (every production caller) builds the configured client.
+        ``generate_conventions_skill=False`` skips step 5 (an LLM call that
+        writes an auto-conventions skill); certification indexes fixtures
+        without calling any model."""
         from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
         
         # 1. Resolve storage paths
         vector_index_path = os.path.join(cfg.paths.memory, "vector_index.db")
         store = LocalVectorStore(vector_index_path)
-        client = OllamaEmbeddingClient(
+        client = embedding_client if embedding_client is not None else OllamaEmbeddingClient(
             base_url=cfg.embedding.base_url, model=cfg.embedding.model,
             egress_policy=cfg.autonomy.egress_policy,
         )
@@ -814,7 +832,7 @@ class RepositoryAnalyzer:
         # is unioned in separately since chunk_file_with_metadata_headers()
         # has dedicated Spring-bean-aware handling for it but EXTENSION_MAP
         # itself doesn't track XML as a "language" at all.
-        target_extensions = set(EXTENSION_MAP.keys()) | {".xml"}
+        target_extensions = set(EXTENSION_MAP.keys()) | {".xml"} | CONFIGURATION_INDEX_EXTENSIONS
         
         files_to_index = []
         gitignore_cache = {self.root_path: parse_gitignore(self.root_path)}
@@ -1010,6 +1028,8 @@ class RepositoryAnalyzer:
         graph.close()
         
         # 5. Auto-Generate Codebase Conventions Skill
+        if not generate_conventions_skill:
+            return
         repo_slug = os.path.basename(self.root_path).lower().strip(".")
         if not repo_slug:
             repo_slug = "root"
