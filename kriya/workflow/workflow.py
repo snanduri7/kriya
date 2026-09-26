@@ -84,12 +84,14 @@ from kriya.workflow.context_budget import (
     RetrievalLimits,
     _reserve_graph_context_budget,
     allocation_window,
-    build_code_context,
     retrieval_limits_for,
     review_batch_budget,
 )
 from kriya.workflow.context_budget import (
     _reserve_sibling_content_budget as _reserve_sibling_content_budget,
+)
+from kriya.workflow.context_budget import (
+    build_code_context as build_code_context,
 )
 from kriya.workflow.context_budget import (
     estimate_tokens as estimate_tokens,
@@ -178,6 +180,7 @@ from kriya.workflow.file_resolution import (
 from kriya.workflow.file_resolution import (
     normalize_written_filepath as normalize_written_filepath,
 )
+from kriya.workflow.graph_retrieval import retrieve_graph_context
 from kriya.workflow.live_lookup import (
     _augment_error_with_live_lookup as _augment_error_with_live_lookup,
 )
@@ -2265,126 +2268,25 @@ class WorkflowEngine:
                 ):
                     retrieval_limits = retrieval_limits_for(control.process_profile.context_depth)
 
-                query_emb = await embed_client.get_embedding(goal, is_query=True)
-                matches = vector_store.query_hybrid(goal, query_emb, top_k=retrieval_limits.top_k, model_name=self.kernel.config.embedding.model)
-                good_matches = [m for m in matches if m.get("score", 0.0) > 0.0]
-                from kriya.workflow.context_source import (
-                    CurrentSourceResolver,
-                    parse_controlled_chunk_header_name,
-                    resolve_verified_grounding_member_id,
+                # PRD-027: the retrieval itself lives in graph_retrieval.py so the
+                # context-recall certification suite measures this exact code path.
+                retrieval = await retrieve_graph_context(
+                    goal, workspace_path,
+                    embed_client=embed_client, vector_store=vector_store,
+                    dependency_graph_path=db_path, limits=retrieval_limits,
+                    embedding_model=self.kernel.config.embedding.model,
+                    budget_limit=lambda: _reserve_graph_context_budget(
+                        allocation_window(self.kernel.config), convention_prompt,
+                    ),
                 )
-                # PRE-PLAN GROUNDING (2026-09-19, VAL-001 G1 follow-up): the
-                # real, live-run root cause this closes - the Planner
-                # fabricated a specific function name
-                # (`_csharp_walk_invocation_expression`) that never existed
-                # anywhere in the corpus, and nothing checked that BEFORE the
-                # plan was accepted. retrieval_member_hints below (CTX-001 P1
-                # C2, unchanged) already parses a candidate name from each
-                # hit's own controlled chunk header, but only ever VALIDATES
-                # it against current structure later, in run_attempt() - and
-                # only for a path that already made it into known_target_
-                # files, i.e. only after the Planner already committed to a
-                # target. This block does that SAME validation (reusing
-                # member_boundaries_for/member_ids_matching_name - the exact
-                # primitives resolve_member_hints_from_chunk_header itself
-                # uses - not a new resolver) for EVERY retrieved candidate,
-                # right here, BEFORE the Planner ever runs, and explicitly
-                # separates the result into two buckets the Planner prompt
-                # renders distinctly below:
-                #   verified_grounding: the name resolves to exactly ONE real,
-                #     current member - "Planning specificity must not exceed
-                #     repository evidence specificity" - this is the ONLY
-                #     bucket the Planner may treat as fact.
-                #   hypothesis_candidates: a header name was parsed but did
-                #     NOT resolve to exactly one real current member (zero
-                #     matches - stale since indexing, or an unsupported
-                #     language; more than one - a genuinely ambiguous name,
-                #     e.g. an overloaded method) - surfaced as an explicit,
-                #     labeled "unconfirmed" lead, never silently dropped and
-                #     never presented as though it were verified.
-                # No previously-named target file is required for either
-                # bucket - this runs over the full retrieved candidate set,
-                # not merely files the Planner/Architect already chose.
-                _grounding_resolver = CurrentSourceResolver(workspace_path, None)
-                for m in good_matches:
-                    retrieved_chunks.append({
-                        "filepath": m.get("filepath", "unknown"),
-                        "score": m.get("score", 0.0),
-                        "text": m.get("text", "")[:300] + "..." if len(m.get("text", "")) > 300 else m.get("text", "")
-                    })
-                    # CTX-001 P1 C2: parse (never trust) a candidate member/
-                    # class name from this hit's own chunk text - the exact
-                    # "Method: X"/"Class: X" controlled header format
-                    # chunk_file_with_metadata_headers() already writes at
-                    # index time. Real validation against CURRENT structural
-                    # boundaries also happens later, in run_attempt() (for a
-                    # known target file only) - retrieval_member_hints itself
-                    # is unchanged, still candidate-only, still consumed the
-                    # same way there.
-                    fp = m.get("filepath")
-                    if fp:
-                        candidate_name = parse_controlled_chunk_header_name(m.get("text", ""))
-                        if candidate_name:
-                            names = retrieval_member_hints.setdefault(fp, [])
-                            if candidate_name not in names:
-                                names.append(candidate_name)
-
-                            resolved = _grounding_resolver.resolve(fp)
-                            verified_member_id = (
-                                resolve_verified_grounding_member_id(fp, resolved.content, candidate_name)
-                                if resolved.exists else None
-                            )
-                            if verified_member_id is not None:
-                                verified_list = verified_grounding.setdefault(fp, [])
-                                if verified_member_id not in verified_list:
-                                    verified_list.append(verified_member_id)
-                            else:
-                                hyp_list = hypothesis_candidates.setdefault(fp, [])
-                                if candidate_name not in hyp_list:
-                                    hyp_list.append(candidate_name)
-
-                if good_matches:
-                    matched_files_list = list(dict.fromkeys([m["filepath"] for m in good_matches if "filepath" in m]))
-                    related_files_set = set()
-                    # Matched-file relevance: the best (max) hybrid RRF score
-                    # across that file's own matched chunks.
-                    file_scores: Dict[str, float] = {}
-                    for m in good_matches:
-                        fp = m.get("filepath")
-                        if fp:
-                            file_scores[fp] = max(file_scores.get(fp, 0.0), m.get("score", 0.0))
-
-                    if os.path.exists(db_path):
-                        from kriya.analyzer.graph import DependencyGraph
-                        graph = DependencyGraph(db_path)
-
-                        # Real symbols this file's own parse produced, not a
-                        # filename-stem guess - falls back to the stem only
-                        # when the file has no indexed symbols at all (e.g. a
-                        # matched YAML/config file).
-                        seed_symbols = []
-                        for f in matched_files_list:
-                            symbols = graph.get_symbols_for_file(f)
-                            seed_symbols.extend(symbols or [os.path.splitext(os.path.basename(f))[0]])
-                        neighbors = graph.get_neighborhood(
-                            seed_symbols, max_hops=retrieval_limits.max_hops,
-                            max_results=retrieval_limits.max_neighborhood_results,
-                        )
-                        for n in neighbors:
-                            fp = n.get("filepath")
-                            if fp and fp not in matched_files_list:
-                                related_files_set.add(fp)
-                                file_scores[fp] = max(file_scores.get(fp, 0.0), n.get("score", 0.0))
-
-                    matched_files = matched_files_list
-                    related_files = list(related_files_set)
-
-                    # convention_prompt already holds the active skills' rules/instructions/
-                    # examples at this point (built above, before Graph RAG retrieval) - same
-                    # unaccounted-overhead gap _reserve_graph_context_budget's own docstring
-                    # describes for the retry loop, just on the very first attempt instead.
-                    primary_limit = _reserve_graph_context_budget(allocation_window(self.kernel.config), convention_prompt)
-                    graph_rag_context = build_code_context(matched_files, related_files, workspace_path, primary_limit, file_scores=file_scores)
+                retrieved_chunks.extend(retrieval.retrieved_chunks)
+                retrieval_member_hints = retrieval.retrieval_member_hints
+                verified_grounding = retrieval.verified_grounding
+                hypothesis_candidates = retrieval.hypothesis_candidates
+                if retrieval.matched:
+                    matched_files = retrieval.matched_files
+                    related_files = retrieval.related_files
+                    graph_rag_context = retrieval.graph_rag_context
         except Exception as ex:
             logger.warning(f"Failed to query Graph RAG: {ex}")
             
