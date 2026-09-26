@@ -1,6 +1,6 @@
 # PRD027-PRECISION-001: real-embedder certification misses the fixed precision target
 
-**Status: OPEN, P1. Phase 1 (diagnosis) is complete. No retrieval code has been changed. The fix waits for review.**
+**Status: P1, FIXED (Rule A, with the user's tighter fallback rules, 2026-09-27). The fix awaits pytest verification and the real-embedder `context certify`.** The diagnosis below is unchanged; the fix is described at the end.
 PRD-027 stays **NOT_VERIFIED** until `kriya context certify` with the real embedder reports `CERTIFIED=true`.
 
 ## Observed
@@ -174,3 +174,43 @@ The live test `test_live_prd027_certification_with_the_real_embedder` now record
 ## Closure logistics
 - **Doctor never read the record.** It reported NOT_APPLICABLE because `run-production/memory` has no code index. Before the final doctor run, index the demo-03 workspace under the same config (`kriya -c ../../config/generate-production.yaml analyze .`, run from `workspace/repo`). Then `context.recall_certification` must be PASS, read from the new record.
 - **qwen3.6 fallback.** The user re-qualifies the exact configured identity with `model qualify --model qwen3.6:35b-a3b-q4_K_M`, under the same config. If it does not qualify, stop and record the failure; the settings are not changed.
+
+## Fix (user decision 2026-09-27: Rule A with tighter fallback rules; Rule B rejected; 0.5 target unchanged)
+- **`LocalVectorStore.query_hybrid`.** Adds four annotations to every hit and changes neither the ranking nor the hit set:
+  - `vector_rank` and `lexical_rank`: the hit's rank in each leg, or None when that leg did not return it. A vector hit counts only with a positive cosine.
+  - `vector_valid_hits` and `lexical_valid_hits`: how many valid hits each leg has in its top_k.
+- **`graph_retrieval.select_expansion_seeds`.** A pure function. It decides which files may start the graph walk, and returns a reason code:
+  - **Both legs have valid top_k hits:** only hits ranked within top_k by both legs seed (`CORROBORATED_EXPANSION_SEED`). If there are none, nothing seeds (`NO_CORROBORATED_EXPANSION_SEED`). It never falls back to expanding every hit, and no similarity threshold is involved.
+  - **Only one leg has valid hits:** that leg's top_k hits seed (`EMBEDDING_ONLY_EXPANSION_SEED` / `LEXICAL_ONLY_EXPANSION_SEED`).
+  - **Neither leg has valid hits:** nothing seeds (`NO_VALID_RETRIEVAL_EVIDENCE`).
+  - **A hit without leg ranks:** it can't be classified, so nothing seeds (`EXPANSION_SEED_PROVENANCE_UNAVAILABLE`).
+  - **In every case,** every hit stays matched and packaged, under the normal ranking and budget.
+- **`retrieve_graph_context`.** Seeds the walk from those files only. It exposes `expansion_seed_files` and `expansion_seed_reason`.
+- **`run_generation_workflow`.** Records an ADVISORY `retrieval.expansion_seeds` run event with the reason code, the seed files and the matched files.
+- **Tests** (`tests/test_prd027_precision_expansion_seeds.py`, 9). They use their own repository: the search index holds 3 files and the dependency graph holds 6, so files reached through the graph are unambiguous. They cover:
+  - corroborated seed: its callers and dependencies are reached;
+  - weak embedding-only hit while keyword hits exist: kept, but doesn't seed;
+  - weak keyword-only hit while embedding hits exist: kept, but doesn't seed;
+  - a genuine embedding-only query and a genuine keyword-only query: both still expand;
+  - disagreement: hits kept and packaged, nothing seeds, the typed reason recorded;
+  - the rule table;
+  - the leg ranks `query_hybrid` reports;
+  - the run event from a real `run_generation_workflow`.
+- **Mutations:** 8, all KILLED:
+  - fall back to every hit when the legs disagree;
+  - corroboration ignoring top_k;
+  - seeding from every matched file;
+  - counting a non-positive cosine as a valid vector hit;
+  - the embedding-only branch seeding every hit;
+  - seeding when leg ranks are missing;
+  - the event kind;
+  - the reported seed files.
+- **Certification measured with the changed code** (`run_certification`, embedding-runtime placeholder, so not a production record). It matches the estimate exactly:
+
+| embedder | precision | classes | per case |
+|---|---|---|---|
+| real (nomic-embed-text) | **0.5814** (25/43) | all 1.0 | junit-upgrade 2/5, requests-upgrade 1/4, the others unchanged |
+| CI hashing | **0.5435** (25/46) | all 1.0 | charge-retry 7/7, requests-upgrade 1/4 |
+
+- **Record identity.** `index_implementation_digest` covers `query_hybrid` and `retrieve_graph_context`, so the earlier 0.4808 record (kept in `evidence/BATCH6/prd027-precision/`) no longer matches the current identity. The user's `context certify` writes the new record.
+- **Separate defect.** The score-scale mismatch is recorded as PRD027-SCORE-NORMALIZATION-001 (`handover/DEFECT_PRD027_SCORE_NORMALIZATION_001.md`, OPEN, P2). The Rule A work did not need it for correctness.

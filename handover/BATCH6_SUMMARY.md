@@ -107,20 +107,27 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 ```
 .venv/bin/pytest tests/test_prompt_budget_fit_001c.py tests/test_cli_smoke.py tests/test_generate_json_contract.py tests/test_dispatch_generation.py tests/test_traces_command.py tests/test_workflow.py tests/test_workflow_controller.py tests/test_workflow_controller_enforce.py tests/test_milestones.py tests/test_milestone2.py tests/test_prd020_milestone_requirements.py tests/test_prd020_requirement_lineage.py tests/test_prd008a_plan_executor.py tests/test_prd007_run_lifecycle.py tests/test_prd005_commit_transactions.py tests/test_prd026_retry_progress.py tests/test_prd029_contract_lifecycle.py tests/test_run_ownership.py tests/test_file_goal.py tests/test_deterministic_failure_diagnostic.py tests/test_d1_operation_mode_authority.py tests/test_model_evidence_hardening_001.py tests/test_model_evidence_hardening_final.py tests/test_performance_telemetry.py tests/test_ver006_distrust_containment.py tests/test_validation_baseline.py tests/test_prd011_toolchain_migration.py tests/test_failure_reporting.py tests/test_batch6_live_evidence_status.py tests/test_strict_doubles.py
 ```
+**PRD027-PRECISION-001 subset** (after the retrieval fix: retrieval, certification, the workflow stage and the live-evidence contract):
+```
+.venv/bin/pytest tests/test_prd027_precision_expansion_seeds.py tests/test_prd027_context_certification.py tests/test_prd027_retrieval_defects.py tests/test_batch6_live_evidence_status.py tests/test_dependency_graph.py tests/test_milestone2.py tests/test_workflow.py tests/test_context_package.py tests/test_dev_inv_001_investigation.py tests/test_prompt_budget_fit_001c.py tests/test_generate_json_contract.py tests/test_cli_smoke.py
+```
 **Full:**
 ```
 .venv/bin/pytest
 ```
 **Live** (real local Ollama, after pytest is green). The model must be qualified at 32K under the packaged llm settings (`kriya model qualify --model qwen3-coder:30b`); every case's `cfg` preflight fails as `LIVE FIXTURE CONFIG ERROR` otherwise and writes `preflight_identity.json`:
 ```
-KRIYA_BATCH6_EVIDENCE_DIR=handover/evidence/BATCH6/user-live-2 \
+KRIYA_BATCH6_EVIDENCE_DIR=handover/evidence/BATCH6/user-live-4 \
 KRIYA_LIVE_BASE_URL=http://localhost:11434/v1 KRIYA_LIVE_LLM_MODEL=qwen3-coder:30b \
 KRIYA_LIVE_EMBED_MODEL=nomic-embed-text:latest \
 .venv/bin/pytest -m live_model -ra -s tests/test_live_prd025_029_batch6.py
 ```
-Then produce the production recall record, which the doctor reads, from your own production config:
+Then, from `demo-03-brownfield/workspace/repo` with the production config (`K=<kriya repo>/.venv/bin/kriya`, `C=../../config/generate-production.yaml`):
 ```
-kriya -c <your kriya.yaml> context certify
+$K -c $C analyze .                                    # builds the code index the doctor needs; without it, context.recall_certification is NOT_APPLICABLE
+$K -c $C context certify                              # required: CERTIFIED=true, precision >= 0.5, every class at target
+$K -c $C model qualify --model qwen3.6:35b-a3b-q4_K_M # the exact configured fallback identity; if it fails, stop and record the failure
+$K -c $C doctor --production                          # required: model.qualification PASS, context.recall_certification PASS (not NOT_APPLICABLE), PRODUCTION_READY=true
 ```
 Each case writes its evidence with a status: `LIVE_EXERCISED` (the path ran and every assertion held), `NOT_LIVE_EXERCISED` (skipped, meaning the path never ran; this is never verification) or `FAILED`.
 - **PRD-028.** The escalation is triggered deterministically: one injected compile failure at `apply_fee`, whatever the model writes. It can be NOT_LIVE_EXERCISED only if the model never changes `ledger.py`.
@@ -146,6 +153,13 @@ Red (evidence in `handover/evidence/BATCH6/prd027-precision/`):
 - **`doctor --production`**: PRODUCTION_READY=false.
   - The only FAIL is `model.qualification`: the qwen3.6:35b-a3b-q4_K_M Developer fallback's record is STALE (policy /2, predates inference-settings identity). The user will re-qualify it.
   - `context.recall_certification` was NOT_APPLICABLE (no code index at `paths.memory`), so it is not integration evidence.
+
+## PRD027-PRECISION-001 fix (2026-09-27)
+- Graph expansion now starts only from hits both retrieval legs rank within top_k. If one leg has no valid hits, that leg's top_k seeds. If the legs disagree, nothing seeds (`NO_CORROBORATED_EXPANSION_SEED`). Every hit stays packaged.
+- Measured with the changed code: real embedder 0.5814, CI 0.5435, every recall class 1.0.
+- 9 tests; 8 mutations, all killed.
+- The score-scale mismatch is PRD027-SCORE-NORMALIZATION-001 (OPEN, P2).
+- Still OPEN: PROMPT-BUDGET-FIT-001A and 001B (P2), PRD027-SCORE-NORMALIZATION-001 (P2), KNOWLEDGE-READPATH-001 (P1).
 
 ## Static gates
 `.venv/bin/ruff check .`: All checks passed. `.venv/bin/pylint kriya plugins/core_tools tests`: exit 0. Both hold at the final commit.

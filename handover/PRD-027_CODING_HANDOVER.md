@@ -1,7 +1,17 @@
 # PRD-027 Coding Agent Handover: Context Recall Certification Suite
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop.
+**NOT_VERIFIED. The real-embedder certification failed, and the fix is ready for pytest verification.**
+- **The failure.** `kriya context certify` with the real embedder (demo-03 production config, 2026-09-27) gave precision 0.4808 against the 0.5 target: CERTIFIED=false, although every recall class was 1.0.
+- **The defect.** PRD027-PRECISION-001, recorded in `handover/DEFECT_PRD027_PRECISION_001.md`. Weak hits found by only one retrieval leg each seeded a 2-hop graph walk.
+- **The fix.** Graph expansion now starts only from hits that both the embedding and the keyword search ranked in their top 5 (the existing `top_k`). If only one leg returned valid hits, that leg's hits seed the walk. If the two legs disagree, nothing seeds. Every search hit is still shown. Measured with the changed code:
+  - real embedder: 0.5814;
+  - CI embedder: 0.5435;
+  - every recall class still 1.0.
+- **Production record.** The certification record is produced only by the user's `context certify` run.
+- **Separate defect.** The score-scale mismatch in `file_scores` is recorded as PRD027-SCORE-NORMALIZATION-001 (OPEN, P2).
+
+Earlier status: READY_FOR_PYTEST_VERIFICATION, part of the Batch 6 stop.
 
 ## Source identity
 - Base revision: the PRD-026 follow-up (2989636).
@@ -124,7 +134,7 @@ ruff: All checks passed. pylint: exit 0.
 - Certification covers the Graph RAG stage (the Developer's first-attempt semantic context). The known-target member-exact context and the planning candidate lists are separate mechanisms and are not certified here.
 - Precision is at the target (0.5), with no margin, under the CI embedder.
 - The certified graph budget is a fixed constant, not the production chat model's own allocation. Certification proves what retrieval delivers within that budget. A deployment whose chat window allocates a smaller graph pool may degrade more files at prompt assembly, and that degradation is not certified.
-- Seeding the graph walk with each matched file follows every call in that file. On a real repository, common method names can fill the 30 neighbourhood slots (one entry per file, ranked by relation weight and hop). The small fixtures cannot show that precision loss; the live certification with the real embedder is the measurement to watch.
+- (Superseded by PRD027-PRECISION-001: only corroborated hits seed now.) Seeding the graph walk with each matched file follows every call in that file. On a real repository, common method names can fill the 30 neighbourhood slots (one entry per file, ranked by relation weight and hop). The small fixtures cannot show that precision loss; the live certification with the real embedder is the measurement to watch.
 - `test_an_embedding_model_runtime_can_be_proven_exact` drives the real PRD-013 probe with an embedding-shaped endpoint and shows the runtime identity is provable. So `kriya context certify` and the doctor check do not block every indexed deployment.
 
 ## Verification-agent handoff
