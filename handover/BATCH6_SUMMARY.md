@@ -29,7 +29,8 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 | f3707c4 | AUTH-GOAL-CONTAMINATION-001: retrieved reference text never becomes authority (the `generate` pre-step no longer joins it to the goal) |
 | b351682 | AUTH-GOAL-CONTAMINATION-001 record, docs, tracker, summary |
 | 8f43d31 | Fix (my f3707c4): the structural tripwire missed conditional, `.format`/`.join`/`%` and keyword enrichment; plus controller-path and Planner mutation-scope tests |
-| (this) | AUTH-GOAL-CONTAMINATION-001 parity: the enforce structured Planner reads reference context again, fenced, on the first request and every repair round |
+| 85a5bfd | AUTH-GOAL-CONTAMINATION-001 parity: the enforce structured Planner reads reference context again, fenced, on the first request and every repair round |
+| a804134 | Fix (my 85a5bfd): the copied-plan API assertion had no control |
 
 ## The three suspected P0/P1 defects
 1. **PRD-025: nonzero exit overridden by an LLM PASS. Confirmed**, in a narrower form than suspected.
