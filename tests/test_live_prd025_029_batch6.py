@@ -19,21 +19,29 @@ invariants and writes the model-dependent evidence to
   the real embedder - the Developer's own prompt must carry the golden
   evidence (code quality is secondary).
 - PRD-028: a real repair on a Python module too large to be shown whole,
-  with Developer investigation enabled. Every member-authority expansion the
-  run records is revision-bound and inside the write scope, with its
-  pristine/candidate origin. The large file never gets whole-file authority
-  from an escalation.
+  with Developer investigation enabled. The escalation is triggered
+  deterministically: the first compile of the changed module fails once at
+  apply_fee's line, so the retry must request member authority for
+  Ledger.apply_fee against the real model's candidate (GRANTED, in scope,
+  origin CANDIDATE, present in pristine). Every recorded expansion is
+  revision-bound and inside the write scope.
 - PRD-029: an enforce-mode run makes a small, explicitly authorized API
   change (the goal names the owner, the symbol and the change - a DIRECT
   authorization). On success the ContractRegistry holds a public_api record
   bound to that commit, and the RunRecord cycle records the same registry
   identity; its consumer (the caller) is recorded, never claimed complete.
 
+Evidence status (one JSON file per case): LIVE_EXERCISED when the path ran
+and every assertion held; NOT_LIVE_EXERCISED when the case skipped because
+the model never reached the path (the PRD-029 verified commit depends on the
+model; a skip is never verification); FAILED otherwise.
+
 Run:
     KRIYA_BATCH6_EVIDENCE_DIR=handover/evidence/BATCH6/user-live \\
     KRIYA_LIVE_BASE_URL=http://localhost:11434/v1 KRIYA_LIVE_LLM_MODEL=qwen3-coder:30b \\
     .venv/bin/pytest -m live_model -ra -s tests/test_live_prd025_029_batch6.py
 """
+import contextlib
 import json
 import os
 import sys
@@ -57,11 +65,33 @@ PRIMARY = os.environ.get("KRIYA_LIVE_LLM_MODEL", "qwen3-coder:30b")
 WINDOW = 8192
 
 
-def _evidence(name, payload):
+def _write_evidence(name, payload):
     if EVIDENCE_DIR:
         os.makedirs(EVIDENCE_DIR, exist_ok=True)
         with open(os.path.join(EVIDENCE_DIR, name), "w", encoding="utf-8") as stream:
             json.dump(payload, stream, indent=2, sort_keys=True, default=str)
+
+
+LIVE_EXERCISED = "LIVE_EXERCISED"
+NOT_LIVE_EXERCISED = "NOT_LIVE_EXERCISED"
+LIVE_FAILED = "FAILED"
+
+
+@contextlib.contextmanager
+def _verdict(name):
+    """Evidence for one live case, written with its honest status: a SKIP is
+    NOT_LIVE_EXERCISED (the path never ran, so nothing was verified), never
+    counted as verification. The body fills the yielded dict."""
+    evidence: dict = {}
+    try:
+        yield evidence
+    except pytest.skip.Exception as skipped:
+        _write_evidence(name, {**evidence, "status": NOT_LIVE_EXERCISED, "reason": str(skipped)})
+        raise
+    except BaseException as error:
+        _write_evidence(name, {**evidence, "status": LIVE_FAILED, "error": f"{type(error).__name__}: {error}"})
+        raise
+    _write_evidence(name, {**evidence, "status": LIVE_EXERCISED})
 
 
 @pytest.fixture
@@ -111,90 +141,93 @@ def _run(tmp_path, max_output_chars=2_000_000):
 
 @pytest.mark.asyncio
 async def test_live_prd025_bounded_package_keeps_middle_failure(cfg, tmp_path):
-    run = _run(tmp_path)
-    assert len(run["output"]) > 1_500_000
-    llm = LLMClient(cfg)
-    verifier = RunVerifierAgent("run_verifier", llm)
-    grade = await verifier.grade(
-        goal="Process every record and report the correct total of 42.",
-        success_criteria="Output shows every record processed and total 42 with no assertion failure.",
-        output=run["output"], returncode=run["returncode"],
-        evidence=RetainedRuntimeEvidence.from_run_result(run),
-    )
-    [package] = [p for p in grade["evidence_packages"] if p["answered"]]
-    budget = allocation_window(cfg) * 4
-    _evidence("prd025_bounded_package.json", {"grade": grade, "allocation_bytes": budget})
+    with _verdict("prd025_bounded_package.json") as evidence:
+        run = _run(tmp_path)
+        assert len(run["output"]) > 1_500_000
+        llm = LLMClient(cfg)
+        verifier = RunVerifierAgent("run_verifier", llm)
+        grade = await verifier.grade(
+            goal="Process every record and report the correct total of 42.",
+            success_criteria="Output shows every record processed and total 42 with no assertion failure.",
+            output=run["output"], returncode=run["returncode"],
+            evidence=RetainedRuntimeEvidence.from_run_result(run),
+        )
+        [package] = [p for p in grade["evidence_packages"] if p["answered"]]
+        budget = allocation_window(cfg) * 4
+        evidence.update({"grade": grade, "allocation_bytes": budget})
 
-    assert package["rendered_bytes"] <= budget
-    assert package["package_truncated"] is True
-    assert any(window["kind"] == "assertion" for window in package["included_windows"])
-    assert package["decisive_windows_omitted"] is False
-    # The middle failure reached the grader (asserted above), so a grader
-    # that reads its evidence must not PASS this run. This is the one
-    # model-behaviour assertion in this test.
-    assert grade["verdict"] != "PASS"
+        assert package["rendered_bytes"] <= budget
+        assert package["package_truncated"] is True
+        assert any(window["kind"] == "assertion" for window in package["included_windows"])
+        assert package["decisive_windows_omitted"] is False
+        # The middle failure reached the grader (asserted above), so a grader
+        # that reads its evidence must not PASS this run. This is the one
+        # model-behaviour assertion in this test.
+        assert grade["verdict"] != "PASS"
 
 
 @pytest.mark.asyncio
 async def test_live_prd025_capture_loss_can_never_pass(cfg, tmp_path):
-    run = _run(tmp_path, max_output_chars=20_000)
-    assert run["steps"][0].get("stdout_lost_chars", 0) > 0
-    llm = LLMClient(cfg)
-    verifier = RunVerifierAgent("run_verifier", llm)
-    grade = await verifier.grade(
-        goal="Process every record and print 'finished all records'.",
-        success_criteria="Output ends with 'finished all records'.",
-        output=run["output"], returncode=run["returncode"],
-        evidence=RetainedRuntimeEvidence.from_run_result(run),
-    )
-    _evidence("prd025_capture_loss.json", grade)
-    assert grade["passed"] is False
-    assert grade["verdict"] in ("UNKNOWN", "FAIL")
-    [package] = [p for p in grade["evidence_packages"] if p["answered"]]
-    assert package["truncation"][0] == "CAPTURE_TRUNCATION"
+    with _verdict("prd025_capture_loss.json") as evidence:
+        run = _run(tmp_path, max_output_chars=20_000)
+        assert run["steps"][0].get("stdout_lost_chars", 0) > 0
+        llm = LLMClient(cfg)
+        verifier = RunVerifierAgent("run_verifier", llm)
+        grade = await verifier.grade(
+            goal="Process every record and print 'finished all records'.",
+            success_criteria="Output ends with 'finished all records'.",
+            output=run["output"], returncode=run["returncode"],
+            evidence=RetainedRuntimeEvidence.from_run_result(run),
+        )
+        evidence.update(grade)
+        assert grade["passed"] is False
+        assert grade["verdict"] in ("UNKNOWN", "FAIL")
+        [package] = [p for p in grade["evidence_packages"] if p["answered"]]
+        assert package["truncation"][0] == "CAPTURE_TRUNCATION"
 
 
 @pytest.mark.asyncio
 async def test_live_prd026_ineffective_repair_terminates(cfg, tmp_path):
-    from unittest.mock import patch
+    with _verdict("prd026_ineffective_repair.json") as evidence:
+        from unittest.mock import patch
 
-    from kriya.core.kernel import Kernel
-    from kriya.workflow.workflow import WorkflowEngine
+        from kriya.core.kernel import Kernel
+        from kriya.workflow.workflow import WorkflowEngine
 
-    cfg.llm.temperature = 0.0
-    cfg.autonomy.mode = "guardrails"
-    cfg.autonomy.run_verification_enabled = False
-    cfg.paths.skills = str(tmp_path / "skills")
-    workspace = tmp_path / "repo"
-    workspace.mkdir()
-    llm = LLMClient(cfg)
-    engine = WorkflowEngine(Kernel(config=cfg), llm)
-    calls = {"n": 0}
-    real_generation = engine.developer.run_generation
+        cfg.llm.temperature = 0.0
+        cfg.autonomy.mode = "guardrails"
+        cfg.autonomy.run_verification_enabled = False
+        cfg.paths.skills = str(tmp_path / "skills")
+        workspace = tmp_path / "repo"
+        workspace.mkdir()
+        llm = LLMClient(cfg)
+        engine = WorkflowEngine(Kernel(config=cfg), llm)
+        calls = {"n": 0}
+        real_generation = engine.developer.run_generation
 
-    async def counted(*args, **kwargs):
-        calls["n"] += 1
-        return await real_generation(*args, **kwargs)
+        async def counted(*args, **kwargs):
+            calls["n"] += 1
+            return await real_generation(*args, **kwargs)
 
-    engine.developer.run_generation = counted
-    with patch(
-        "kriya.tools.validate.PolymorphicValidator.run_compile_check",
-        return_value={"success": False, "output": "BUILD ERROR: toolchain rejects every candidate (injected)."},
-    ):
-        result = await engine.run_generation_workflow(
-            goal="Create calc.py with a function add(a, b) returning a + b.", workspace_path=str(workspace),
-        )
-    _evidence("prd026_ineffective_repair.json", {
-        "failure_category": result.get("failure_category"),
-        "retry_progress": result.get("retry_progress"),
-        "developer_calls": calls["n"],
-    })
-    assert result["quality_gates_passed"] is False
-    assert result["failure_category"] in ("no_progress", "quality_gates_exhausted")
-    assert result["retry_progress"]["distinct_vectors"] >= 1
-    # max_retries + targeted_max_retries + API recovery allowance: never an
-    # unbounded loop.
-    assert calls["n"] <= 12
+        engine.developer.run_generation = counted
+        with patch(
+            "kriya.tools.validate.PolymorphicValidator.run_compile_check",
+            return_value={"success": False, "output": "BUILD ERROR: toolchain rejects every candidate (injected)."},
+        ):
+            result = await engine.run_generation_workflow(
+                goal="Create calc.py with a function add(a, b) returning a + b.", workspace_path=str(workspace),
+            )
+        evidence.update({
+            "failure_category": result.get("failure_category"),
+            "retry_progress": result.get("retry_progress"),
+            "developer_calls": calls["n"],
+        })
+        assert result["quality_gates_passed"] is False
+        assert result["failure_category"] in ("no_progress", "quality_gates_exhausted")
+        assert result["retry_progress"]["distinct_vectors"] >= 1
+        # max_retries + targeted_max_retries + API recovery allowance: never an
+        # unbounded loop.
+        assert calls["n"] <= 12
 
 
 EMBED_MODEL = os.environ.get("KRIYA_LIVE_EMBED_MODEL", "nomic-embed-text:latest")
@@ -202,78 +235,80 @@ EMBED_MODEL = os.environ.get("KRIYA_LIVE_EMBED_MODEL", "nomic-embed-text:latest"
 
 @pytest.mark.asyncio
 async def test_live_prd027_certification_with_the_real_embedder(cfg):
-    from kriya.memory.vector import OllamaEmbeddingClient
-    from kriya.workflow import context_certification as cc
+    with _verdict("prd027_certification.json") as evidence:
+        from kriya.memory.vector import OllamaEmbeddingClient
+        from kriya.workflow import context_certification as cc
 
-    cfg.embedding.model = EMBED_MODEL
-    cfg.embedding.base_url = BASE_URL
-    runtime = cc.embedding_runtime_identity(cfg)
-    assert runtime != "unavailable", "the live embedding runtime must be exactly identifiable"
-    client = OllamaEmbeddingClient(base_url=BASE_URL, model=EMBED_MODEL, egress_policy=cfg.autonomy.egress_policy)
-    report = await cc.run_certification(
-        cfg, embedding_client=client, embedder=cc.EMBEDDER_CONFIGURED, embedding_runtime=runtime,
-    )
-    path = cc.save_certification(cfg, report)
-    data = report.to_dict()
-    _evidence("prd027_certification.json", {**data, "record_path": path})
-    # Mechanics: every class measured, every miss typed. Whether the real
-    # embedder certifies is the recorded result, not a test assumption.
-    assert set(data["classes"]) == set(cc.CLASS_RECALL_TARGETS)
-    for case in data["cases"]:
-        for item in case["items"]:
-            assert item["outcome"] in (cc.HIT, cc.NOT_RETRIEVED, cc.BUDGET_EXHAUSTED,
-                                       cc.TIER_INSUFFICIENT, cc.SOURCE_UNAVAILABLE)
+        cfg.embedding.model = EMBED_MODEL
+        cfg.embedding.base_url = BASE_URL
+        runtime = cc.embedding_runtime_identity(cfg)
+        assert runtime != "unavailable", "the live embedding runtime must be exactly identifiable"
+        client = OllamaEmbeddingClient(base_url=BASE_URL, model=EMBED_MODEL, egress_policy=cfg.autonomy.egress_policy)
+        report = await cc.run_certification(
+            cfg, embedding_client=client, embedder=cc.EMBEDDER_CONFIGURED, embedding_runtime=runtime,
+        )
+        path = cc.save_certification(cfg, report)
+        data = report.to_dict()
+        evidence.update({**data, "record_path": path})
+        # Mechanics: every class measured, every miss typed. Whether the real
+        # embedder certifies is the recorded result, not a test assumption.
+        assert set(data["classes"]) == set(cc.CLASS_RECALL_TARGETS)
+        for case in data["cases"]:
+            for item in case["items"]:
+                assert item["outcome"] in (cc.HIT, cc.NOT_RETRIEVED, cc.BUDGET_EXHAUSTED,
+                                           cc.TIER_INSUFFICIENT, cc.SOURCE_UNAVAILABLE)
 
 
 @pytest.mark.asyncio
 async def test_live_prd027_developer_prompt_receives_golden_evidence(cfg, tmp_path):
-    from unittest.mock import patch
+    with _verdict("prd027_developer_context.json") as evidence:
+        from unittest.mock import patch
 
-    from kriya.analyzer.analyzer import RepositoryAnalyzer
-    from kriya.core.kernel import Kernel
-    from kriya.core.role_metrics import current_model_role
-    from kriya.workflow.context_recall_fixtures import JAVA_SHOP
-    from kriya.workflow.workflow import WorkflowEngine
+        from kriya.analyzer.analyzer import RepositoryAnalyzer
+        from kriya.core.kernel import Kernel
+        from kriya.core.role_metrics import current_model_role
+        from kriya.workflow.context_recall_fixtures import JAVA_SHOP
+        from kriya.workflow.workflow import WorkflowEngine
 
-    cfg.embedding.model = EMBED_MODEL
-    cfg.embedding.base_url = BASE_URL
-    cfg.autonomy.mode = "guardrails"
-    cfg.autonomy.run_verification_enabled = False
-    repo = tmp_path / "java-shop"
-    for path, content in JAVA_SHOP.files:
-        (repo / path).parent.mkdir(parents=True, exist_ok=True)
-        (repo / path).write_text(content, encoding="utf-8")
-    cfg.paths.memory = str(tmp_path / "memory")
-    cfg.paths.skills = str(tmp_path / "skills")
-    os.makedirs(cfg.paths.memory)
-    await RepositoryAnalyzer(str(repo)).index_repository(cfg, force=True, generate_conventions_skill=False)
+        cfg.embedding.model = EMBED_MODEL
+        cfg.embedding.base_url = BASE_URL
+        cfg.autonomy.mode = "guardrails"
+        cfg.autonomy.run_verification_enabled = False
+        repo = tmp_path / "java-shop"
+        for path, content in JAVA_SHOP.files:
+            (repo / path).parent.mkdir(parents=True, exist_ok=True)
+            (repo / path).write_text(content, encoding="utf-8")
+        cfg.paths.memory = str(tmp_path / "memory")
+        cfg.paths.skills = str(tmp_path / "skills")
+        os.makedirs(cfg.paths.memory)
+        await RepositoryAnalyzer(str(repo)).index_repository(cfg, force=True, generate_conventions_skill=False)
 
-    case = JAVA_SHOP.cases[0]
-    developer_prompts = []
-    llm = LLMClient(cfg)
-    real_complete_result = llm.complete_result
+        case = JAVA_SHOP.cases[0]
+        developer_prompts = []
+        llm = LLMClient(cfg)
+        real_complete_result = llm.complete_result
 
-    async def recording(system_prompt, prompt, *args, **kwargs):
-        if current_model_role() == "developer":
-            developer_prompts.append(system_prompt + "\n" + prompt)
-        return await real_complete_result(system_prompt, prompt, *args, **kwargs)
+        async def recording(system_prompt, prompt, *args, **kwargs):
+            if current_model_role() == "developer":
+                developer_prompts.append(system_prompt + "\n" + prompt)
+            return await real_complete_result(system_prompt, prompt, *args, **kwargs)
 
-    engine = WorkflowEngine(Kernel(config=cfg), llm)
-    with patch.object(llm, "complete_result", side_effect=recording), \
-         patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
-               return_value={"success": True, "output": "compile skipped in live context test"}), \
-         patch("kriya.tools.validate.PolymorphicValidator.run_tests",
-               return_value={"success": True, "output": "tests skipped in live context test"}):
-        await engine.run_generation_workflow(goal=case.goal, workspace_path=str(repo))
+        engine = WorkflowEngine(Kernel(config=cfg), llm)
+        with patch.object(llm, "complete_result", side_effect=recording), \
+             patch("kriya.tools.validate.PolymorphicValidator.run_compile_check",
+                   return_value={"success": True, "output": "compile skipped in live context test"}), \
+             patch("kriya.tools.validate.PolymorphicValidator.run_tests",
+                   return_value={"success": True, "output": "tests skipped in live context test"}):
+            await engine.run_generation_workflow(goal=case.goal, workspace_path=str(repo))
 
-    assert developer_prompts, "the Developer must have been called"
-    first = developer_prompts[0]
-    present = {item.path: item.path in first for item in case.golden}
-    _evidence("prd027_developer_context.json", {"goal": case.goal, "golden_present": present})
-    for required in ("src/main/java/com/shop/order/OrderService.java",
-                     "src/main/java/com/shop/order/DiscountPolicy.java",
-                     "src/main/java/com/shop/order/OrderController.java"):
-        assert present[required], required
+        assert developer_prompts, "the Developer must have been called"
+        first = developer_prompts[0]
+        present = {item.path: item.path in first for item in case.golden}
+        evidence.update({"goal": case.goal, "golden_present": present})
+        for required in ("src/main/java/com/shop/order/OrderService.java",
+                         "src/main/java/com/shop/order/DiscountPolicy.java",
+                         "src/main/java/com/shop/order/OrderController.java"):
+            assert present[required], required
 
 
 def _large_module(methods=160):
@@ -286,34 +321,70 @@ def _large_module(methods=160):
 
 @pytest.mark.asyncio
 async def test_live_prd028_member_authority_is_revision_bound_and_in_scope(cfg, tmp_path):
-    import sqlite3
+    with _verdict("prd028_expansions.json") as evidence:
+        import sqlite3
+        from unittest.mock import patch
 
-    from kriya.core.kernel import Kernel
-    from kriya.core.state_paths import trace_db_path
-    from kriya.workflow.workflow import WorkflowEngine
+        from kriya.core.kernel import Kernel
+        from kriya.core.state_paths import trace_db_path
+        from kriya.tools.validate import PolymorphicValidator
+        from kriya.workflow.workflow import WorkflowEngine
 
-    cfg.autonomy.mode = "guardrails"
-    cfg.autonomy.run_verification_enabled = False
-    cfg.autonomy.developer_investigation_enabled = True
-    cfg.paths.skills = str(tmp_path / "skills")
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "ledger.py").write_text(_large_module(), encoding="utf-8")
-    engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
-    await engine.run_generation_workflow(
-        goal="In ledger.py, change Ledger.apply_fee so the fee is 7 instead of 5.", workspace_path=str(repo),
-    )
-    with sqlite3.connect(trace_db_path(cfg)) as db:
-        (events_json,) = db.execute("SELECT run_events FROM runs ORDER BY rowid DESC").fetchone()
-    expansions = [e["details"] for e in json.loads(events_json) if e["kind"] == "authority.expansion"]
-    _evidence("prd028_expansions.json", expansions)
-    if not expansions:
-        pytest.skip("the model never needed a member-authority expansion in this run (recorded as evidence)")
-    for record in expansions:
-        if record["outcome"] == "GRANTED":
-            assert record["in_write_scope"] is True
-            assert record["source_revision"] and record["source_origin"] in ("PRISTINE", "CANDIDATE")
-        assert record["mutation_boundary"] == "authorized_write_scope"
+        cfg.autonomy.mode = "guardrails"
+        cfg.autonomy.run_verification_enabled = False
+        cfg.autonomy.developer_investigation_enabled = True
+        cfg.paths.skills = str(tmp_path / "skills")
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        source = _large_module()
+        (repo / "ledger.py").write_text(source, encoding="utf-8")
+        fee_line = source.splitlines().index("        return amount - 5") + 1
+        # Deterministic trigger, independent of what the model writes: the
+        # first compile of a CHANGED ledger.py fails once at apply_fee's line
+        # (PolymorphicValidator's own Python error shape). The retry must then
+        # request member authority for that member against the real candidate.
+        real_compile = PolymorphicValidator.run_compile_check
+        injected = {"done": False}
+
+        def compile_failing_once(validator, files):
+            written = os.path.join(validator.workspace_path, "ledger.py")
+            if not injected["done"] and "ledger.py" in files and os.path.exists(written):
+                with open(written, encoding="utf-8") as stream:
+                    changed = stream.read() != source
+                if changed:
+                    injected["done"] = True
+                    return {"success": False,
+                            "output": f"Syntax error in ledger.py line {fee_line}: return amount (injected)"}
+            return real_compile(validator, files)
+
+        engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+        with patch.object(PolymorphicValidator, "run_compile_check", autospec=True,
+                          side_effect=compile_failing_once):
+            await engine.run_generation_workflow(
+                goal="In ledger.py, change Ledger.apply_fee so the fee is 7 instead of 5.",
+                workspace_path=str(repo),
+            )
+        with sqlite3.connect(trace_db_path(cfg)) as db:
+            (events_json,) = db.execute("SELECT run_events FROM runs ORDER BY rowid DESC").fetchone()
+        expansions = [e["details"] for e in json.loads(events_json) if e["kind"] == "authority.expansion"]
+        evidence.update({"injected_compile_failure": injected["done"], "fee_line": fee_line,
+                         "expansions": expansions})
+        if not injected["done"]:
+            pytest.skip("the model never wrote a changed ledger.py, so the retry path was never reached")
+        assert expansions, "a located failure in an authorized target must produce an authority request"
+        for record in expansions:
+            if record["outcome"] == "GRANTED":
+                assert record["in_write_scope"] is True
+                assert record["source_revision"] and record["source_origin"] in ("PRISTINE", "CANDIDATE")
+            assert record["mutation_boundary"] == "authorized_write_scope"
+        fee = [r for r in expansions if r["path"] == "ledger.py" and "apply_fee" in r["member_id"]]
+        # The located failure's own retry request, resolved against this
+        # run's changed candidate - labelled CANDIDATE, never PRISTINE - and
+        # apply_fee exists in the pristine file whatever the candidate did.
+        retry = [r for r in fee if r["evidence"].get("source") == "retry_member_hints"]
+        assert retry and retry[0]["outcome"] == "GRANTED"
+        assert retry[0]["source_origin"] == "CANDIDATE"
+        assert retry[0]["member_in_pristine"] is True
 
 
 _PRICING = "def total(items):\n    return sum(items)\n"
@@ -323,42 +394,43 @@ _TEST = ("from checkout import checkout\n\n\ndef test_checkout():\n    assert ch
 
 @pytest.mark.asyncio
 async def test_live_prd029_authorized_api_change_is_bound_to_its_commit(cfg, tmp_path):
-    import subprocess
+    with _verdict("prd029_registry.json") as evidence:
+        import subprocess
 
-    from kriya.control.contracts import KIND_PUBLIC_API
-    from kriya.control.persistence import load_contract_registry, scan_run_records
-    from kriya.core.kernel import Kernel
-    from kriya.workflow.workflow import WorkflowEngine
-    from kriya.workflow.workflow_controller import WorkflowController
+        from kriya.control.contracts import KIND_PUBLIC_API
+        from kriya.control.persistence import load_contract_registry, scan_run_records
+        from kriya.core.kernel import Kernel
+        from kriya.workflow.workflow import WorkflowEngine
+        from kriya.workflow.workflow_controller import WorkflowController
 
-    cfg.autonomy.mode = "guardrails"
-    cfg.autonomy.run_verification_enabled = False
-    cfg.paths.skills = str(tmp_path / "skills")
-    repo = tmp_path / "repo"
-    (repo / "tests").mkdir(parents=True)
-    (repo / "pricing.py").write_text(_PRICING)
-    (repo / "checkout.py").write_text(_CHECKOUT)
-    (repo / "tests" / "test_checkout.py").write_text(_TEST)
-    for args in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "t"],
-                 ["add", "-A"], ["commit", "-q", "-m", "base"]):
-        subprocess.run(["git", *args], cwd=repo, check=True)
-    goal = ("In pricing, change the method named total to take a second parameter tax_rate "
-            "with default 0.0 and return the sum multiplied by (1 + tax_rate).")
-    engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
-    result = await WorkflowController(engine).execute(goal, str(repo), migration_mode="enforce")
-    legacy = result.legacy_result or {}
-    registry = load_contract_registry(str(repo))
-    records = [r for r in registry.all_records() if r.kind == KIND_PUBLIC_API]
-    _evidence("prd029_registry.json", {
-        "quality_gates_passed": legacy.get("quality_gates_passed"),
-        "contract_registry": legacy.get("contract_registry"),
-        "registry": registry.to_dict(),
-    })
-    if not legacy.get("quality_gates_passed"):
-        pytest.skip("the enforce run did not reach a verified commit (model outcome, recorded as evidence)")
-    [record] = records
-    assert record.owner == "pricing.py" and record.source_revision
-    assert "checkout.py" in record.consumers and record.consumers_complete is False
-    committed = [cycle for run in scan_run_records(str(repo)).records for cycle in run.commits
-                 if cycle.get("contract_registry")]
-    assert committed and committed[-1]["contract_registry"]["after_digest"] == registry.digest()
+        cfg.autonomy.mode = "guardrails"
+        cfg.autonomy.run_verification_enabled = False
+        cfg.paths.skills = str(tmp_path / "skills")
+        repo = tmp_path / "repo"
+        (repo / "tests").mkdir(parents=True)
+        (repo / "pricing.py").write_text(_PRICING)
+        (repo / "checkout.py").write_text(_CHECKOUT)
+        (repo / "tests" / "test_checkout.py").write_text(_TEST)
+        for args in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "t"],
+                     ["add", "-A"], ["commit", "-q", "-m", "base"]):
+            subprocess.run(["git", *args], cwd=repo, check=True)
+        goal = ("In pricing, change the method named total to take a second parameter tax_rate "
+                "with default 0.0 and return the sum multiplied by (1 + tax_rate).")
+        engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+        result = await WorkflowController(engine).execute(goal, str(repo), migration_mode="enforce")
+        legacy = result.legacy_result or {}
+        registry = load_contract_registry(str(repo))
+        records = [r for r in registry.all_records() if r.kind == KIND_PUBLIC_API]
+        evidence.update({
+            "quality_gates_passed": legacy.get("quality_gates_passed"),
+            "contract_registry": legacy.get("contract_registry"),
+            "registry": registry.to_dict(),
+        })
+        if not legacy.get("quality_gates_passed"):
+            pytest.skip("the enforce run did not reach a verified commit (model outcome, recorded as evidence)")
+        [record] = records
+        assert record.owner == "pricing.py" and record.source_revision
+        assert "checkout.py" in record.consumers and record.consumers_complete is False
+        committed = [cycle for run in scan_run_records(str(repo)).records for cycle in run.commits
+                     if cycle.get("contract_registry")]
+        assert committed and committed[-1]["contract_registry"]["after_digest"] == registry.digest()
