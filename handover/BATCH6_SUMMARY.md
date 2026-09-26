@@ -25,7 +25,9 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 | 468039d | Live: a SKIP is NOT_LIVE_EXERCISED; a deterministic PRD-028 escalation trigger |
 | 9973d90 | Handovers, docs, the KNOWLEDGE-READPATH-001 defect record, the tracker |
 | 2196b72 | PRD-025: enforce subtask text and Developer-authored output cannot declare an expected exit (tests) |
-| (this) | Summary update |
+| 783558d | Summary update |
+| f3707c4 | AUTH-GOAL-CONTAMINATION-001: retrieved reference text never becomes authority (the `generate` pre-step no longer joins it to the goal) |
+| (this) | AUTH-GOAL-CONTAMINATION-001 record, docs, tracker, summary |
 
 ## The three suspected P0/P1 defects
 1. **PRD-025: nonzero exit overridden by an LLM PASS. Confirmed**, in a narrower form than suspected.
@@ -38,6 +40,10 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 3. **PRD-029: corrupt or missing registry failing open, or being overwritten. Confirmed and fixed** in its own commit, 61e4b26.
 
 ## Other defects found and fixed in this batch
+- **AUTH-GOAL-CONTAMINATION-001 (P0, f3707c4; handover/DEFECT_AUTH_GOAL_CONTAMINATION_001.md).**
+  - **The defect.** `kriya generate` appended its retrieved web-knowledge text to the goal. That one string fed requirement lineage, mutation scope, DIRECT contract authorization, expected-exit authority and the resume goal fingerprint.
+  - **The fix.** The goal now stays the user's exact words on every dispatch. The retrieved text reaches the models only as fenced `reference_context`.
+  - **Proof.** Each consumer is tested against a real run, with a pre-fix control. A structural test forbids rebinding an authority goal to an enriched version of itself.
 - **Retrieval** (8aa6d26, found by the PRD-027 measurement):
   - a missing embedding dimension silently degraded any non-768 model to lexical-only;
   - the lexical leg phrase-matched the whole goal;
@@ -65,7 +71,7 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
   - Non-git workspaces never reach the commit seam, so they never record contracts.
 
 ## Found, not fixed (follow-ups)
-- **KNOWLEDGE-READPATH-001 (P1, OPEN, tracker row added).** Learned knowledge is written but never read. `learn` writes `learned_knowledge` in `web_knowledge.db`. `ask` and the `generate` CLI pre-step read `vector_chunks` there, and the workflow's fenced reader reads `learned_knowledge` from `vector_index.db`. The docs claim it is consumed with fencing, hence P1. The fix must keep learned text out of the authoritative goal: the `generate` pre-step appends retrieved text to the goal unfenced. See handover/DEFECT_KNOWLEDGE_READPATH_001.md.
+- **KNOWLEDGE-READPATH-001 (P1, OPEN, tracker row added).** Learned knowledge is written but never read. `learn` writes `learned_knowledge` in `web_knowledge.db`. `ask` and the `generate` CLI pre-step read `vector_chunks` there, and the workflow's fenced reader reads `learned_knowledge` from `vector_index.db`. The docs claim it is consumed with fencing, hence P1. Its authority half is fixed by AUTH-GOAL-CONTAMINATION-001: retrieved text no longer reaches the goal. The read-path mismatch stays OPEN. See handover/DEFECT_KNOWLEDGE_READPATH_001.md.
 - Enforce contract records use DIRECT authorizations only; HUMAN approvals are per-subtask and not aggregated (PRD-029 handover).
 - Closed since the first summary: milestone capability records now go through the commit transaction (b75e4ec).
 
@@ -74,13 +80,14 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 - A milestone unit that commits nothing leaves its capabilities PROPOSED (previously marked IMPLEMENTED by bookkeeping).
 - A goal that names an exit code admits only that code. A test that asserted `quality_gates_exhausted` for a run that actually stopped on no progress would now see `no_progress`.
 - Retrieval now returns callers, dependencies and configuration files, and its lexical leg matches, so Graph RAG context content differs.
+- `kriya generate`'s retrieved reference text is no longer part of the goal. It reaches the models as fenced reference context, but not KnowledgeGuard, triage, skill matching, the retrieval queries or enforce's structured Planner.
 - `doctor --production` has a new pinned check, `context.recall_certification`. The fixture's `paths.memory` is now isolated.
 - Registry `to_dict()` gained schema 2 keys, so checkpoints saved before this batch fail `contract_hash` once. `kriya_runtime` invalidates them anyway.
 
 ## Verification commands (user-run)
 **Focused** (new tests plus the suites touched by this batch):
 ```
-.venv/bin/pytest tests/test_batch6_live_evidence_status.py tests/test_prd008_s4b_milestone_completion.py tests/test_prd008_s4c_milestone_resume.py tests/test_prd008a_cross_path.py tests/test_prd008a_execution_plan.py tests/test_prd008a_plan_adapters.py tests/test_prd008a_plan_executor.py tests/test_prd008a_resume_convergence.py tests/test_prd023_contract_classification.py tests/test_bootstrap_contract.py tests/test_strict_doubles.py tests/test_distribution_integrity.py tests/test_context_package.py tests/test_prd025_verifier_evidence.py tests/test_prd026_retry_progress.py tests/test_prd027_retrieval_defects.py tests/test_prd027_context_certification.py tests/test_prd028_authority_escalation.py tests/test_prd029_registry_integrity.py tests/test_prd029_contract_lifecycle.py tests/test_production_doctor.py tests/test_failure_reporting.py tests/test_agents.py tests/test_workflow.py tests/test_retry_policy.py tests/test_val001_g1r3_retry_context.py tests/test_dev_inv_001_investigation.py tests/test_d1_operation_mode_authority.py tests/test_context_source.py tests/test_java_members.py tests/test_dependency_graph.py tests/test_rag_queries.py tests/test_vector.py tests/test_indexing.py tests/test_analyzer.py tests/test_milestone2.py tests/test_ask_command_context.py tests/test_review_context.py tests/test_milestones.py tests/test_workflow_controller.py tests/test_workflow_controller_enforce.py tests/test_control_contracts.py tests/test_prd008_recovery.py tests/test_run_record.py tests/test_prd007_run_lifecycle.py tests/test_prd005_commit_transactions.py tests/test_prd004_commit_failure.py tests/test_prd008_commit_state_gate.py tests/test_prd008_resume_fingerprints.py tests/test_resume_integrity.py tests/test_checkpoint_control_plane_hashes.py tests/test_ver006_distrust_containment.py tests/test_polymorphic_validation.py tests/test_process_controller.py
+.venv/bin/pytest tests/test_auth_goal_contamination_001.py tests/test_dispatch_generation.py tests/test_generate_json_contract.py tests/test_corr016_planner_authority_gate.py tests/test_prd020_milestone_requirements.py tests/test_batch6_live_evidence_status.py tests/test_prd008_s4b_milestone_completion.py tests/test_prd008_s4c_milestone_resume.py tests/test_prd008a_cross_path.py tests/test_prd008a_execution_plan.py tests/test_prd008a_plan_adapters.py tests/test_prd008a_plan_executor.py tests/test_prd008a_resume_convergence.py tests/test_prd023_contract_classification.py tests/test_bootstrap_contract.py tests/test_strict_doubles.py tests/test_distribution_integrity.py tests/test_context_package.py tests/test_prd025_verifier_evidence.py tests/test_prd026_retry_progress.py tests/test_prd027_retrieval_defects.py tests/test_prd027_context_certification.py tests/test_prd028_authority_escalation.py tests/test_prd029_registry_integrity.py tests/test_prd029_contract_lifecycle.py tests/test_production_doctor.py tests/test_failure_reporting.py tests/test_agents.py tests/test_workflow.py tests/test_retry_policy.py tests/test_val001_g1r3_retry_context.py tests/test_dev_inv_001_investigation.py tests/test_d1_operation_mode_authority.py tests/test_context_source.py tests/test_java_members.py tests/test_dependency_graph.py tests/test_rag_queries.py tests/test_vector.py tests/test_indexing.py tests/test_analyzer.py tests/test_milestone2.py tests/test_ask_command_context.py tests/test_review_context.py tests/test_milestones.py tests/test_workflow_controller.py tests/test_workflow_controller_enforce.py tests/test_control_contracts.py tests/test_prd008_recovery.py tests/test_run_record.py tests/test_prd007_run_lifecycle.py tests/test_prd005_commit_transactions.py tests/test_prd004_commit_failure.py tests/test_prd008_commit_state_gate.py tests/test_prd008_resume_fingerprints.py tests/test_resume_integrity.py tests/test_checkpoint_control_plane_hashes.py tests/test_ver006_distrust_containment.py tests/test_polymorphic_validation.py tests/test_process_controller.py
 ```
 **Full:**
 ```
@@ -110,7 +117,8 @@ The new test files only, plus mutation checks against them. The final-correction
 - `tests/test_prd029_contract_lifecycle.py` (38);
 - `tests/test_batch6_live_evidence_status.py` (2);
 - 8 named `test_workflow.py` IDs;
-- one offline, mocked simulation of the PRD-028 live case.
+- one offline, mocked simulation of the PRD-028 live case;
+- AUTH-GOAL-CONTAMINATION-001: `tests/test_auth_goal_contamination_001.py` (9), `tests/test_dispatch_generation.py` and `tests/test_generate_json_contract.py` (31 in all), and 8 mutations, all killed.
 
 **Quota deviation (recorded once):** while building PRD-025..028 I also ran several existing suites (about 300 tests in total) as regression checks, which is more than the quota rule allows.
 

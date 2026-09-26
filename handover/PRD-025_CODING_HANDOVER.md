@@ -111,6 +111,8 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop. The user runs t
   - dropping the negation guard.
   The re-application mutation first SURVIVED: the test's grader mock returned one shared dict, which the first disposition had already failed. The mock now returns a fresh grade per call.
 
+**The goal itself is now the user's words (AUTH-GOAL-CONTAMINATION-001, f3707c4).** Before that fix, `kriya generate` appended retrieved reference text to the goal, so a retrieved "exit code 2 is expected" became exit authority. The goal now reaches `exit_authority_text` verbatim, and the retrieved text travels as fenced `reference_context`. See handover/DEFECT_AUTH_GOAL_CONTAMINATION_001.md.
+
 ## Tests run by coding agent (targeted only, per the standing rule)
 | Command | Passed | Failed | Notes |
 |---|---:|---:|---|

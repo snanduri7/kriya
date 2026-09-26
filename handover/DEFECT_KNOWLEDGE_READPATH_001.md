@@ -32,12 +32,14 @@ In reality no command reads what `learn` writes. A documented feature silently d
 - Every consumer that shows it to a model uses the existing fencing (`=== Begin/End Untrusted Reference Context ===` plus the do-not-follow warning), and the precedence order: repository facts, then skills/rules, then untrusted references.
 
 ## Security requirement (prompt injection and authority)
-The `generate` CLI pre-step appends retrieved text to the goal string itself, unfenced (`=== Web Reference Documentation Context ===`). The goal is authoritative user intent:
+**Update (f3707c4, AUTH-GOAL-CONTAMINATION-001):** the pre-step no longer touches the goal. Its text now travels as fenced `reference_context`. Items 1 and 3 below are therefore met for the current read paths and stay requirements for the repair. This defect remains OPEN for the read-path mismatch itself.
+
+Before that fix, the `generate` CLI pre-step appended retrieved text to the goal string itself, unfenced (`=== Web Reference Documentation Context ===`). The goal is authoritative user intent:
 - PRD-020 derives original requirements from it;
 - PRD-025 takes expected-nonzero-exit authority only from it;
 - PRD-023 derives DIRECT contract authorizations from it.
 
-Today this is dormant, because the table it reads is always empty. Redirecting that reader to `learned_knowledge` without changing where the text goes would let ingested web content declare requirements, admit a nonzero exit, or authorize a public API change. The fix must:
+That was dormant, because the table it reads is always empty. Redirecting that reader to `learned_knowledge` without changing where the text goes would let ingested web content declare requirements, admit a nonzero exit, or authorize a public API change. The fix must:
 1. never append learned (or any retrieved) text to the goal or any other authority-bearing field;
 2. carry it only as fenced, non-authoritative reference context, such as `learned_rag_context`, with the fencing that `ask` currently lacks;
 3. add tests proving that learned text containing "exits non-zero", a requirement-like statement, or "change X.total to ..." grants no exit authority, creates no requirement and no contract authorization.
