@@ -90,6 +90,7 @@ ruff: All checks passed. pylint: exit 0.
 ## Known limitations / residual risks
 - Revalidation (`expansion_is_current`) is exercised at the decision point and in tests. Hints are recomputed every attempt, so a grant is never carried stale into a later attempt's hints. A long-lived consumer of `state.authority_expansions` must call it.
 - `references` is PARTIAL for both languages: the graph edges are name-based, not type-resolved.
+- **Narrowing.** DEV-INV evidence becomes edit authority only for the call's `known_target_files`; all five `_run_developer_generation` call sites pass them. Where that list is empty, the evidence is shown read-only. Before PRD-028, any inspected member was merged as authority.
 
 ## Verification-agent handoff
 Run the Batch 6 focused command, then the full suite, then the live `-k prd028` case.

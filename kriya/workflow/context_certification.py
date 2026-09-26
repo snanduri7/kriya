@@ -295,6 +295,20 @@ def embedding_runtime_identity(config: Any) -> str:
     return fingerprint.digest if getattr(fingerprint, "exact", False) else "unavailable"
 
 
+def chat_runtime_exact(config: Any) -> bool:
+    """Whether the primary chat model's runtime is exactly identified. The
+    graph budget (``graph_budget_tokens``) is derived from its served window
+    and measured byte ratio, so a certification recorded without it would
+    bind a different budget than the one production retrieval (and doctor)
+    computes."""
+    from kriya.core.model_runtime import resolve_configured_model_runtime
+
+    try:
+        return bool(resolve_configured_model_runtime(config).exact)
+    except Exception:  # unprovable: the caller refuses to certify
+        return False
+
+
 def certification_identity(config: Any, *, embedder: str, embedding_runtime: str) -> Dict[str, Any]:
     from kriya import __version__
 

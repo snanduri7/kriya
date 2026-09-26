@@ -121,12 +121,21 @@ def _reference_scan(
     workspace_path: str, overlay: Mapping[str, str], names: Iterable[str], owner: str,
 ) -> Dict[str, List[str]]:
     """consumer path -> sorted API names it references (``name(``), over the
-    workspace with the candidate overlaid. Name-based: it can miss dynamic
-    or reflective use, so it is never a completeness claim."""
+    workspace with the candidate overlaid. Each file is matched as it is
+    read (never the whole workspace in memory). Name-based: it can miss
+    dynamic or reflective use, so it is never a completeness claim."""
     patterns = {name: re.compile(rf"(?<![\w$]){re.escape(name)}\s*\(") for name in sorted(set(names))}
     if not patterns:
         return {}
-    contents: Dict[str, str] = {}
+    consumers: Dict[str, List[str]] = {}
+
+    def match(relpath: str, text: str) -> None:
+        if relpath == owner:
+            return
+        hits = [name for name, pattern in patterns.items() if pattern.search(text)]
+        if hits:
+            consumers[relpath] = hits
+
     for root, dirs, files in os.walk(workspace_path):
         dirs[:] = [name for name in dirs if name not in _SCAN_IGNORED_DIRS]
         for filename in files:
@@ -135,17 +144,11 @@ def _reference_scan(
                 continue
             try:
                 with open(os.path.join(root, filename), "r", encoding="utf-8", errors="replace") as handle:
-                    contents[relpath] = handle.read()
+                    match(relpath, handle.read())
             except OSError:
                 continue
-    contents.update(overlay)
-    consumers: Dict[str, List[str]] = {}
-    for relpath, text in contents.items():
-        if relpath == owner:
-            continue
-        hits = [name for name, pattern in patterns.items() if pattern.search(text)]
-        if hits:
-            consumers[relpath] = hits
+    for relpath, text in overlay.items():
+        match(relpath, text)
     return dict(sorted(consumers.items()))
 
 

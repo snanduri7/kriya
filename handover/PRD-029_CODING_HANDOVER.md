@@ -63,6 +63,11 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop.
 ## Found during implementation (my own defect, fixed before commit)
 The end-to-end stop test showed a refused transition being retried until `no_progress`. `handle_attempt_failure` recomputes `environment_failure` from a fixed set of unretryable failure types, and `contract_registry` was not in it. It was registered there, with the failure-reporting category (VERIFICATION) and the pinned vocabulary test updated. `test_a_refused_contract_transition_is_a_deterministic_stop_not_a_retry` pins it; the mutation that removes the registration is killed.
 
+## A second defect of my own, found by review after commit (fixed in 7762590)
+- **The defect.** `run_milestones` held the registry it loaded at run start. After each milestone it marked capabilities on that copy and saved it, overwriting any `public_api` record the milestone unit's own commit had just promoted. The record, the registry revision and its source revision were lost, and the live digest no longer matched the cycle's `after_digest`. The control-state contract hash came from the same stale copy.
+- **The fix.** Every milestone bookkeeping point builds on the live registry, loaded strictly: unit start, completion, and the control-state hash.
+- **Test.** `test_milestone_completion_bookkeeping_preserves_contracts_its_unit_committed` reproduced the loss on a0a2d0a, and reverting the refresh is caught.
+
 ## Files changed
 - **Production:**
   - `kriya/control/contracts.py`: schema 2, kinds, `registry_digest`, `replace_current`, and the error types.
@@ -128,6 +133,9 @@ ruff: All checks passed. pylint: exit 0.
 - **Consumers** come from a name-reference scan: never complete, and they can over-include a same-named symbol.
 - **Checkpoint compatibility.** The registry payload now includes `schema_version`/`revision`/`source_revision`, so checkpoints saved before this commit fail their `contract_hash` comparison once and are not resumed. `kriya_runtime` already invalidates them on any code change, so this adds nothing in practice.
 - **Enforce's downstream verification** relies on the final subtask's own full suite having run on the final candidate.
+- **Stricter than before:** an authorized API change that invalidates consumers needs that suite with tests executed, so an enforce run in a repository with no tests cannot land one.
+- **Non-git workspaces** never reach the commit seam, so they never record contracts.
+- **The reference scan** matches each file as it is read and never holds the whole workspace in memory.
 
 ## Verification-agent handoff
 Run the Batch 6 focused command, which includes the recovery, run-record, commit, milestone, controller and doctor suites, then the full suite, then the live `-k prd029` case.

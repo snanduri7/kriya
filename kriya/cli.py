@@ -774,12 +774,20 @@ def context_certify(ctx: click.Context, as_json: bool) -> None:
     from kriya.memory.vector import OllamaEmbeddingClient
     from kriya.workflow.context_certification import (
         EMBEDDER_CONFIGURED,
+        chat_runtime_exact,
         embedding_runtime_identity,
         run_certification,
         save_certification,
     )
 
     cfg = _model_cfg(ctx)
+    if not chat_runtime_exact(cfg):
+        click.secho(
+            f"Error: the exact runtime of the chat model {cfg.llm.model} cannot be proven - the "
+            "certified retrieval budget is derived from its served window, so certify with it served.",
+            fg="red", err=True,
+        )
+        sys.exit(1)
     runtime = embedding_runtime_identity(cfg)
     if runtime == "unavailable":
         click.secho(

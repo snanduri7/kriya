@@ -15,6 +15,8 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 | 0ec07cc | Follow-up: embedding runtimes proven exact (a doctor-blocker guard); two residuals disclosed |
 | 61e4b26 | Fix (PRD-029 P0): a corrupt ContractRegistry was read as empty and then overwritten |
 | a0a2d0a | PRD-029: ContractRegistry lifecycle, committed in the same transaction as the source |
+| 7762590 | Fix (my a0a2d0a): milestone bookkeeping overwrote contract records its own unit had committed |
+| (final) | Hardening: `certify` requires an exact chat runtime (a stable budget identity); streaming reference scan; handovers updated |
 
 ## The three suspected P0/P1 defects
 1. **PRD-025: nonzero exit overridden by an LLM PASS. Confirmed**, in a narrower form than suspected.
@@ -35,7 +37,15 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
   - configuration and build files were not indexed.
 - **PRD-025:** after self-correction, re-verification replaced the grade and the nonzero-exit rule never ran again.
 - **Mine:** a PRD-029 contract refusal was retried until `no_progress`. It was caught by its end-to-end test before commit.
+- **Mine (7762590):** after a0a2d0a, `run_milestones` marked capabilities on its start-of-run registry copy and saved it. That overwrote any `public_api` record the milestone unit's own commit had just promoted. Every milestone bookkeeping point now builds on the live registry. The test reproduced the loss on a0a2d0a.
 - **Mine:** the PRD-026 handover claimed a mutation check that had not been run. Corrected in 2989636.
+
+## Disclosed behaviour narrowing
+- **PRD-027.** `kriya context certify` refuses unless the chat model's runtime is exact. The certified graph budget comes from its served window, so changing or requalifying the chat model, or its context window, makes the certification stale, and it must be re-run.
+- **PRD-028.** DEV-INV investigation evidence is always shown, but it becomes edit authority only for the call's `known_target_files` (all five call sites pass them). Previously any inspected member was merged.
+- **PRD-029.**
+  - An authorized API change whose consumers are invalidated needs a passing full suite with tests executed, so an enforce run in a repository with no tests can no longer land one.
+  - Non-git workspaces never reach the commit seam, so they never record contracts.
 
 ## Found, not fixed (follow-ups)
 - `kriya ask` and `kriya prompt generate` never read learned knowledge. They query the `vector_chunks` table of `web_knowledge.db`, but `kriya learn` writes `learned_knowledge`. The fix needs untrusted-content fencing in those prompts.
@@ -51,7 +61,7 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 ## Verification commands (user-run)
 **Focused** (new tests plus the suites touched by this batch):
 ```
-.venv/bin/pytest tests/test_prd025_verifier_evidence.py tests/test_prd026_retry_progress.py tests/test_prd027_retrieval_defects.py tests/test_prd027_context_certification.py tests/test_prd028_authority_escalation.py tests/test_prd029_registry_integrity.py tests/test_prd029_contract_lifecycle.py tests/test_production_doctor.py tests/test_failure_reporting.py tests/test_agents.py tests/test_workflow.py tests/test_retry_policy.py tests/test_val001_g1r3_retry_context.py tests/test_dev_inv_001_investigation.py tests/test_d1_operation_mode_authority.py tests/test_context_source.py tests/test_java_members.py tests/test_dependency_graph.py tests/test_rag_queries.py tests/test_vector.py tests/test_indexing.py tests/test_analyzer.py tests/test_milestone2.py tests/test_ask_command_context.py tests/test_review_context.py tests/test_milestones.py tests/test_workflow_controller.py tests/test_workflow_controller_enforce.py tests/test_control_contracts.py tests/test_prd008_recovery.py tests/test_run_record.py tests/test_prd007_run_lifecycle.py tests/test_prd005_commit_transactions.py tests/test_prd004_commit_failure.py tests/test_prd008_commit_state_gate.py tests/test_prd008_resume_fingerprints.py tests/test_resume_integrity.py tests/test_checkpoint_control_plane_hashes.py tests/test_ver006_distrust_containment.py tests/test_polymorphic_validation.py tests/test_process_controller.py
+.venv/bin/pytest tests/test_prd008_s4b_milestone_completion.py tests/test_prd008_s4c_milestone_resume.py tests/test_prd008a_cross_path.py tests/test_prd008a_execution_plan.py tests/test_prd008a_plan_adapters.py tests/test_prd008a_plan_executor.py tests/test_prd008a_resume_convergence.py tests/test_prd023_contract_classification.py tests/test_bootstrap_contract.py tests/test_strict_doubles.py tests/test_distribution_integrity.py tests/test_context_package.py tests/test_prd025_verifier_evidence.py tests/test_prd026_retry_progress.py tests/test_prd027_retrieval_defects.py tests/test_prd027_context_certification.py tests/test_prd028_authority_escalation.py tests/test_prd029_registry_integrity.py tests/test_prd029_contract_lifecycle.py tests/test_production_doctor.py tests/test_failure_reporting.py tests/test_agents.py tests/test_workflow.py tests/test_retry_policy.py tests/test_val001_g1r3_retry_context.py tests/test_dev_inv_001_investigation.py tests/test_d1_operation_mode_authority.py tests/test_context_source.py tests/test_java_members.py tests/test_dependency_graph.py tests/test_rag_queries.py tests/test_vector.py tests/test_indexing.py tests/test_analyzer.py tests/test_milestone2.py tests/test_ask_command_context.py tests/test_review_context.py tests/test_milestones.py tests/test_workflow_controller.py tests/test_workflow_controller_enforce.py tests/test_control_contracts.py tests/test_prd008_recovery.py tests/test_run_record.py tests/test_prd007_run_lifecycle.py tests/test_prd005_commit_transactions.py tests/test_prd004_commit_failure.py tests/test_prd008_commit_state_gate.py tests/test_prd008_resume_fingerprints.py tests/test_resume_integrity.py tests/test_checkpoint_control_plane_hashes.py tests/test_ver006_distrust_containment.py tests/test_polymorphic_validation.py tests/test_process_controller.py
 ```
 **Full:**
 ```

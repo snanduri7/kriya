@@ -203,9 +203,20 @@ def _config_file(tmp_path):
     return str(path)
 
 
-def test_cli_refuses_to_certify_an_unproven_embedding_runtime(tmp_path):
+def test_cli_refuses_to_certify_without_an_exact_chat_runtime(tmp_path):
+    """The certified graph budget comes from the chat model's served window:
+    certifying without it would bind a budget doctor never computes."""
     from kriya.cli import main
 
+    result = CliRunner().invoke(main, ["--config", _config_file(tmp_path), "context", "certify"])
+    assert result.exit_code == 1
+    assert "chat model" in result.output and "cannot be proven" in result.output
+
+
+def test_cli_refuses_to_certify_an_unproven_embedding_runtime(tmp_path, monkeypatch):
+    from kriya.cli import main
+
+    monkeypatch.setattr(cc, "chat_runtime_exact", lambda config: True)
     result = CliRunner().invoke(main, ["--config", _config_file(tmp_path), "context", "certify"])
     assert result.exit_code == 1
     assert "cannot be proven" in result.output
@@ -215,6 +226,7 @@ def test_cli_certifies_and_records(tmp_path, monkeypatch):
     from kriya.cli import main
 
     monkeypatch.setattr(cc, "embedding_runtime_identity", lambda config: "rt-1")
+    monkeypatch.setattr(cc, "chat_runtime_exact", lambda config: True)
     with patch("kriya.memory.vector.OllamaEmbeddingClient", lambda **kw: cc.DeterministicHashingEmbedder()):
         result = CliRunner().invoke(main, ["--config", _config_file(tmp_path), "context", "certify", "--json"])
     assert result.exit_code == 0, result.output
@@ -250,6 +262,7 @@ def test_cli_exits_nonzero_when_the_suite_does_not_certify(tmp_path, monkeypatch
     from kriya.cli import main
 
     monkeypatch.setattr(cc, "embedding_runtime_identity", lambda config: "rt-1")
+    monkeypatch.setattr(cc, "chat_runtime_exact", lambda config: True)
     monkeypatch.setattr(cc.CertificationReport, "certified", lambda self: False)
     with patch("kriya.memory.vector.OllamaEmbeddingClient", lambda **kw: cc.DeterministicHashingEmbedder()):
         result = CliRunner().invoke(main, ["--config", _config_file(tmp_path), "context", "certify"])
