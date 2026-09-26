@@ -8,7 +8,7 @@ import sys
 import urllib.error
 import urllib.request
 import uuid
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NoReturn, Optional, Tuple
 
 import click
 
@@ -2921,9 +2921,27 @@ def authority_group() -> None:
     pass
 
 
+# A configuration the operator must fix (StateDirectoryError, LogDirectoryError,
+# RemovedConfigFieldError, pydantic's ValidationError and the approval-store
+# errors are all ValueError subclasses; an unreadable file is an OSError; bad
+# YAML is a YAMLError). Deliberately not Exception: a coding error must still
+# show its traceback.
+def _authority_user_errors() -> tuple:
+    import yaml
+    return (ValueError, OSError, yaml.YAMLError)
+
+
+def _authority_fail(error: BaseException) -> NoReturn:
+    click.secho(f"Error: {error}", fg="red", err=True)
+    sys.exit(1)
+
+
 def _authority_state(ctx: click.Context):
     from kriya.config.config import resolve_config_state
-    return resolve_config_state(ctx.obj.get('config_path'))
+    try:
+        return resolve_config_state(ctx.obj.get('config_path'))
+    except _authority_user_errors() as error:
+        _authority_fail(error)
 
 
 def _print_pending(pending) -> None:
@@ -3023,7 +3041,10 @@ def authority_approve(ctx: click.Context, out: Optional[str], confirm: bool) -> 
 
     out_path = out or default_local_approval_path(state.workspace_root)
     if out:
-        validate_trust_path_outside_workspace(out_path, state.workspace_root)
+        try:
+            validate_trust_path_outside_workspace(out_path, state.workspace_root)
+        except _authority_user_errors() as error:
+            _authority_fail(error)
 
     if not confirm:
         if not click.confirm(
@@ -3033,8 +3054,11 @@ def authority_approve(ctx: click.Context, out: Optional[str], confirm: bool) -> 
             click.echo("Not approved - no artifact written.")
             sys.exit(1)
 
-    artifact = build_approval_artifact(state.violations, state.config_dict, state.workspace_root)
-    save_approval_artifact(out_path, artifact)
+    try:
+        artifact = build_approval_artifact(state.violations, state.config_dict, state.workspace_root)
+        save_approval_artifact(out_path, artifact)
+    except _authority_user_errors() as error:
+        _authority_fail(error)
     click.secho(
         f"\nApproved. Artifact written to {out_path} (set digest {artifact.set_digest[:16]}...).",
         fg="green", bold=True,
@@ -3057,7 +3081,10 @@ def authority_revoke(ctx: click.Context) -> None:
     from kriya.config.authority_approval import default_local_approval_path, revoke_local_approval
 
     state = _authority_state(ctx)
-    removed = revoke_local_approval(state.workspace_root)
+    try:
+        removed = revoke_local_approval(state.workspace_root)
+    except _authority_user_errors() as error:
+        _authority_fail(error)
     path = default_local_approval_path(state.workspace_root)
     if removed:
         click.secho(f"Revoked local approval at {path}.", fg="yellow", bold=True)

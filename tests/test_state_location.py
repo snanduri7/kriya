@@ -243,6 +243,40 @@ def test_external_state_needs_approval_and_then_works(home, tmp_path, monkeypatc
     assert sorted(os.listdir(workspace)) == ["kriya.yaml"]
 
 
+@pytest.mark.parametrize("args", [["inspect"], ["approve", "--confirm"], ["revoke"]])
+def test_authority_reports_a_bad_state_directory_as_a_clean_error(home, tmp_path, monkeypatch, args):
+    # demo-03 (2026-09-26): `kriya authority approve` run with a workspace-local
+    # paths.state printed a raw StateDirectoryError traceback.
+    workspace = _workspace_with_config(tmp_path, monkeypatch, {"paths": {"state": "./state"}})
+    result = CliRunner().invoke(main, ["authority", *args])
+    output = result.output  # stdout and stderr
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "Error: paths.state" in output and ".kriya/state" in output
+    assert "Traceback" not in output
+    assert not (tmp_path / "authority").exists()  # nothing approved or revoked
+    assert sorted(os.listdir(workspace)) == ["kriya.yaml"]
+
+
+def test_authority_approve_out_inside_the_workspace_is_a_clean_refusal(home, tmp_path, monkeypatch):
+    outside = tmp_path / "external-state"
+    workspace = _workspace_with_config(tmp_path, monkeypatch, {"paths": {"state": str(outside)}})
+    result = CliRunner().invoke(main, ["authority", "approve", "--confirm", "--out", "approval.json"])
+    output = result.output  # stdout and stderr
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert output.count("Error: ") == 1 and "Traceback" not in output
+    assert "paths.state" in output  # the pending field was still listed first
+    assert sorted(os.listdir(workspace)) == ["kriya.yaml"]
+
+
+def test_authority_does_not_hide_a_coding_error(home, tmp_path, monkeypatch):
+    _workspace_with_config(tmp_path, monkeypatch, {})
+    with patch("kriya.config.config.resolve_config_state", side_effect=TypeError("bug")):
+        result = CliRunner().invoke(main, ["authority", "inspect"])
+    assert isinstance(result.exception, TypeError)
+
+
 def test_a_null_state_directory_is_repository_safe(home, tmp_path, monkeypatch):
     _workspace_with_config(tmp_path, monkeypatch, {"paths": {"state": None}})
     assert load_config().paths.state is None
