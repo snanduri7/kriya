@@ -467,3 +467,112 @@ async def test_live_prd029_authorized_api_change_is_bound_to_its_commit(cfg, tmp
                      if cycle.get("contract_registry")]
         assert committed and committed[-1]["contract_registry"]["after_digest"] == registry.digest()
 
+
+# PRD-029 targeted fixture: the user's own tests call the new signatures, so
+# no candidate that keeps total(items) can pass - the authorized public
+# contract change is the only solution. Kriya is never told about the
+# registry; it must derive the contract delta from the committed code.
+TARGETED_PRD029_FILES = {
+    "pricing.py": "def total(items):\n    return sum(items)\n",
+    "checkout.py": "from pricing import total\n\n\ndef checkout(items):\n    return total(items)\n",
+    "tests/test_pricing.py": (
+        "from pricing import total\n\n\n"
+        "def test_total_applies_the_tax_rate():\n    assert total([10, 20], 0.5) == 45\n\n\n"
+        "def test_total_without_tax():\n    assert total([1, 2], 0.0) == 3\n"
+    ),
+    "tests/test_checkout.py": (
+        "from checkout import checkout\n\n\n"
+        "def test_checkout_passes_the_tax_rate_through():\n    assert checkout([10, 20], 0.5) == 45\n"
+    ),
+}
+TARGETED_PRD029_GOAL = (
+    "In pricing, change the method named total to take a required second parameter tax_rate and "
+    "return the sum multiplied by (1 + tax_rate). In checkout, change the method named checkout to "
+    "take a required second parameter tax_rate and pass it to total. The tests under tests/ define "
+    "the expected behaviour."
+)
+# Used only by the offline fixture test, never shown to the model.
+TARGETED_PRD029_REFERENCE_SOLUTION = {
+    "pricing.py": "def total(items, tax_rate):\n    return sum(items) * (1 + tax_rate)\n",
+    "checkout.py": (
+        "from pricing import total\n\n\ndef checkout(items, tax_rate):\n    return total(items, tax_rate)\n"
+    ),
+}
+
+
+def write_targeted_prd029_repo(repo, overrides=None):
+    import subprocess
+
+    for path, content in {**TARGETED_PRD029_FILES, **(overrides or {})}.items():
+        (repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / path).write_text(content, encoding="utf-8")
+    for args in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "t"],
+                 ["add", "-A"], ["commit", "-q", "-m", "base"]):
+        subprocess.run(["git", *args], cwd=repo, check=True)
+
+
+@pytest.mark.asyncio
+async def test_live_prd029_targeted_required_contract_change_is_committed_and_bound(cfg, tmp_path):
+    with _verdict("prd029_targeted_registry.json") as evidence:
+        import subprocess
+
+        from kriya.control.contracts import KIND_PUBLIC_API, compute_shape_hash
+        from kriya.control.persistence import load_contract_registry, scan_run_records
+        from kriya.core.kernel import Kernel
+        from kriya.workflow.contract_lifecycle import (
+            DOWNSTREAM_VERIFIED_BY,
+            INVALIDATED_BY_CONTRACT_REVISION,
+            public_api_contract_id,
+        )
+        from kriya.workflow.file_resolution import _normalized_public_signatures
+        from kriya.workflow.workflow import WorkflowEngine
+        from kriya.workflow.workflow_controller import WorkflowController
+
+        cfg.autonomy.mode = "guardrails"
+        cfg.autonomy.run_verification_enabled = False
+        cfg.paths.skills = str(tmp_path / "skills")
+        repo = tmp_path / "repo"
+        write_targeted_prd029_repo(repo)
+        base_head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
+                                   capture_output=True, text=True).stdout.strip()
+        engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+        result = await WorkflowController(engine).execute(TARGETED_PRD029_GOAL, str(repo), migration_mode="enforce")
+        legacy = result.legacy_result or {}
+        registry = load_contract_registry(str(repo))
+        evidence.update({
+            "goal": TARGETED_PRD029_GOAL,
+            "quality_gates_passed": legacy.get("quality_gates_passed"),
+            "contract_registry": legacy.get("contract_registry"),
+            "registry": registry.to_dict(),
+        })
+        if not legacy.get("quality_gates_passed"):
+            pytest.skip("the enforce run did not reach a verified commit (model outcome, recorded as evidence)")
+
+        committed = [cycle for run in scan_run_records(str(repo)).records for cycle in run.commits
+                     if cycle.get("contract_registry")]
+        assert committed, "a verified commit must carry its ContractRegistry transition"
+        cycle = committed[-1]
+        transition = cycle["contract_registry"]
+        evidence["commit_cycle"] = cycle
+        assert transition["after_digest"] == registry.digest()
+        pricing = registry.get(public_api_contract_id("pricing.py"))
+        assert pricing.kind == KIND_PUBLIC_API and pricing.owner == "pricing.py"
+        # Bound to this commit's own identity, and to the real committed code:
+        # the recorded shape is the public signature set of pricing.py on disk.
+        assert pricing.source_revision == f"{cycle['transaction_id']}:{cycle['candidate_hash']}"
+        with open(repo / "pricing.py", encoding="utf-8") as stream:
+            committed_pricing = stream.read()
+        assert pricing.content_hash == compute_shape_hash(
+            sorted(_normalized_public_signatures("pricing.py", committed_pricing)))
+        assert pricing.authorization["changed_symbols"] == ["total"]
+        assert all(item["provenance"] == "direct" for item in pricing.authorization["authorizations"])
+        # The consumer is invalidated with a reason and reverified by the
+        # terminal full suite on this candidate - never claimed complete.
+        assert "checkout.py" in pricing.consumers and pricing.consumers_complete is False
+        assert any(item["consumer"] == "checkout.py" and item["reason"] == INVALIDATED_BY_CONTRACT_REVISION
+                   for item in transition["invalidated_consumers"])
+        assert transition["downstream_verification"] == {
+            "required": True, "satisfied": True, "satisfied_by": DOWNSTREAM_VERIFIED_BY}
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True,
+                              capture_output=True, text=True).stdout.strip()
+        evidence["git"] = {"base": base_head, "head": head}

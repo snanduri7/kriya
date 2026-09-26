@@ -68,3 +68,55 @@ def test_the_live_cfg_fixture_does_not_override_the_qualified_identity():
         assert override not in source, override
     assert live.EXPECTED_CONTEXT_WINDOW == 32768
 
+
+def _suite_passes(repo):
+    import subprocess
+    import sys
+
+    completed = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests"],
+                               cwd=repo, capture_output=True, text=True, timeout=120, check=False)
+    return completed.returncode == 0
+
+
+def test_the_targeted_prd029_fixture_requires_the_authorized_contract_change(tmp_path):
+    """Offline proof of the targeted live fixture's design: the user's tests
+    fail on the unchanged API, the only kind of candidate that passes changes
+    the public signatures of both files, the goal alone authorizes exactly
+    those owners and symbols, and Kriya derives the registry delta from the
+    code (the model is never told about the registry)."""
+    from kriya.workflow.contract_authority import derive_direct_contract_authorizations
+    from kriya.workflow.contract_lifecycle import (
+        INVALIDATED_BY_CONTRACT_REVISION,
+        derive_contract_transition,
+        public_api_contract_id,
+    )
+    from kriya.workflow.file_resolution import _normalized_public_signatures
+    from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
+    from kriya.workflow.triage import ChangeKind
+
+    base, solved = tmp_path / "base", tmp_path / "solved"
+    live.write_targeted_prd029_repo(base)
+    live.write_targeted_prd029_repo(solved, live.TARGETED_PRD029_REFERENCE_SOLUTION)
+    assert not _suite_passes(base), "the unchanged API must not satisfy the user's tests"
+    assert _suite_passes(solved)
+    for owner, changed in live.TARGETED_PRD029_REFERENCE_SOLUTION.items():
+        assert _normalized_public_signatures(owner, live.TARGETED_PRD029_FILES[owner]) != \
+            _normalized_public_signatures(owner, changed), owner
+
+    plan = EngineeringPlan(plan_id="p", kind=ChangeKind.TASK, subtasks=[Subtask(
+        id="s1", description="apply the change", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path=path, action=FileAction.MODIFY) for path in ("pricing.py", "checkout.py")],
+    )])
+    authorizations = derive_direct_contract_authorizations(live.TARGETED_PRD029_GOAL, plan)
+    assert sorted(a.authorization_id for a in authorizations) == [
+        "grounding_goal::checkout.py::checkout::modify", "grounding_goal::pricing.py::total::modify"]
+
+    kwargs = {"workspace_path": str(base), "registry": None, "original_contents": dict(live.TARGETED_PRD029_FILES),
+              "final_contents": dict(live.TARGETED_PRD029_REFERENCE_SOLUTION), "transaction_id": "tx",
+              "candidate_hash": "c"}
+    transition = derive_contract_transition(authorizations=authorizations, downstream_verified=True, **kwargs)
+    assert set(transition.created) == {public_api_contract_id("pricing.py"), public_api_contract_id("checkout.py")}
+    assert {"consumer": "checkout.py", "contract": public_api_contract_id("pricing.py"), "symbols": ["total"],
+            "reason": INVALIDATED_BY_CONTRACT_REVISION} in [dict(i) for i in transition.invalidated_consumers]
+    # Without the goal's authorization nothing is recorded as authorized.
+    assert derive_contract_transition(authorizations=(), downstream_verified=True, **kwargs) is None
