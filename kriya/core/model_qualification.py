@@ -11,6 +11,15 @@ Records are keyed by the qualification identity (runtime digest + settings
 digest, MODEL-QUAL-IDENTITY-001), so a record qualified with
 ``reasoning_effort: none`` never qualifies the same runtime called without it.
 
+Functional evidence (every case but ``ENVIRONMENT_DEPENDENT_CAPABILITIES``)
+belongs to the runtime + settings. Capacity evidence (``context_capacity``)
+also depends on the machine serving the runtime, so a record keeps it per
+execution-environment digest (``environment_evidence``,
+kriya/core/execution_environment.py) and it counts only in that exact
+environment: a 64K FAIL on one machine never blocks, and a 64K PASS on
+another never qualifies, a different one. Re-qualifying in a new environment
+adds its evidence next to the others'.
+
 - Every case yields PASS, FAIL or UNAVAILABLE with its evidence. UNAVAILABLE
   is never PASS.
 - A runtime that is not ``exact`` (artifact digest and provider version
@@ -52,6 +61,11 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
 
+from kriya.core.execution_environment import (
+    ENVIRONMENT_DEPENDENT_CAPABILITIES,
+    ExecutionEnvironment,
+    environment_for_fingerprint,
+)
 from kriya.core.inference_settings import InferenceSettings, qualification_identity
 from kriya.core.model_runtime import MODEL_PROTOCOL_ADAPTER_VERSION, ModelRuntimeFingerprint
 
@@ -237,9 +251,10 @@ def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFing
     the operator declared it safe; a NOT_QUALIFIED or STALE record, or a
     record under other inference settings, overrides a declaration. Never above the policy ceiling or the model's
     trained length. The window can only be chosen per request on an exact
-    Ollama runtime (num_ctx is an Ollama request option); anywhere else the
-    adaptive policy behaves like strict and says so."""
-    from kriya.core.model_runtime import resolve_model_runtime
+    runtime whose adapter takes it per request
+    (``model_runtime.supports_per_request_context_window``); anywhere else
+    the adaptive policy behaves like strict and says so."""
+    from kriya.core.model_runtime import resolve_model_runtime, supports_per_request_context_window
     from kriya.core.token_budget import (
         POLICY_ADAPTIVE,
         TIER_SOURCE_OPERATOR_DECLARED,
@@ -257,7 +272,7 @@ def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFing
         sizes |= set(recorded_context_sizes(fingerprint, settings))
     if not sizes:
         return ContextTierOffer((), ceiling, "")
-    if not fingerprint.exact or fingerprint.provider != "ollama":
+    if not supports_per_request_context_window(fingerprint):
         return ContextTierOffer((), ceiling, "no larger tier: the context window can only be chosen per request "
                                              "on an exact Ollama runtime")
     preferred = fingerprint.effective_context_window or 0
@@ -320,8 +335,21 @@ def record_path(record_key: str, workspace_root: Optional[str] = None) -> str:
     return os.path.join(home, f"{record_key}.json")
 
 
+def _same_qualified_identity(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    return all(a.get(key) == b.get(key) for key in (
+        "qualification_identity", "fingerprint_digest", "inference_settings_digest", "adapter_version",
+        "policy_version", "schema_version"))
+
+
 def save_record(record: Dict[str, Any], workspace_root: Optional[str] = None) -> str:
+    """Save ``record``. Capacity evidence other execution environments
+    recorded for the same identity (and policy) is kept alongside it."""
     path = record_path(record["qualification_identity"], workspace_root)
+    existing = _read_record(record["qualification_identity"], workspace_root)
+    if existing is not None and _same_qualified_identity(existing, record):
+        merged = dict(existing.get("environment_evidence") or {})
+        merged.update(record.get("environment_evidence") or {})
+        record = {**record, "environment_evidence": merged}
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w", encoding="utf-8") as stream:
@@ -389,11 +417,24 @@ def record_is_current(record: Optional[Dict[str, Any]], fingerprint: ModelRuntim
     return not reasons, reasons
 
 
+def environment_case_statuses(record: Dict[str, Any], environment: ExecutionEnvironment) -> Dict[str, Any]:
+    """The environment-dependent case statuses ``record`` holds for exactly
+    ``environment`` ({} unless it is exact and was evaluated there)."""
+    if not environment.exact:
+        return {}
+    entry = (record.get("environment_evidence") or {}).get(environment.digest) or {}
+    return {case.get("capability"): case.get("status") for case in entry.get("cases", [])
+            if case.get("capability") in ENVIRONMENT_DEPENDENT_CAPABILITIES}
+
+
 def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str], *, settings: InferenceSettings,
-           record: Optional[Dict[str, Any]] = None, workspace_root: Optional[str] = None) -> QualificationAssessment:
+           record: Optional[Dict[str, Any]] = None, workspace_root: Optional[str] = None,
+           environment: Optional[ExecutionEnvironment] = None) -> QualificationAssessment:
     """``settings``: what the role sends this runtime
     (``inference_settings.role_inference_settings``); a record qualified
-    under other settings does not count."""
+    under other settings does not count. ``environment`` (default: the one
+    serving the runtime's endpoint) selects the capacity evidence that
+    counts; evidence from any other environment never does."""
     required = tuple(required)
     if not fingerprint.exact:
         return QualificationAssessment(
@@ -408,16 +449,26 @@ def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str], *, set
     current, reasons = record_is_current(record, fingerprint, settings)
     if not current:
         return QualificationAssessment(STALE, fingerprint.digest, required, (), tuple(reasons))
-    statuses = {case.get("capability"): case.get("status") for case in record.get("cases", [])}
+    statuses = {case.get("capability"): case.get("status") for case in record.get("cases", [])
+                if case.get("capability") not in ENVIRONMENT_DEPENDENT_CAPABILITIES}
+    environment = environment if environment is not None else environment_for_fingerprint(fingerprint)
+    statuses.update(environment_case_statuses(record, environment))
     failed = tuple(cap for cap in required if statuses.get(cap) == FAIL)
     missing = tuple(cap for cap in required if statuses.get(cap) not in (PASS, FAIL))
+
+    def missing_reason(cap: str) -> str:
+        if statuses.get(cap):
+            return f"{cap}: {statuses[cap]}"
+        if cap in ENVIRONMENT_DEPENDENT_CAPABILITIES:
+            where = ("the execution environment is not observable" if not environment.exact
+                     else f"not evaluated in this execution environment ({environment.digest[:19]})")
+            return f"{cap}: {where}"
+        return f"{cap}: not run"
+
     if failed or missing:
         return QualificationAssessment(
             NOT_QUALIFIED, fingerprint.digest, missing, failed,
-            tuple(
-                [f"{cap}: FAIL" for cap in failed]
-                + [f"{cap}: {statuses.get(cap) or 'not run'}" for cap in missing]
-            ),
+            tuple([f"{cap}: FAIL" for cap in failed] + [missing_reason(cap) for cap in missing]),
         )
     return QualificationAssessment(QUALIFIED, fingerprint.digest)
 
@@ -1051,7 +1102,8 @@ async def run_qualification(
         results.append(result)
         if progress is not None:
             progress(result)
-    return build_record(fingerprint, results, settings=settings)
+    return build_record(fingerprint, results, settings=settings,
+                        environment=environment_for_fingerprint(fingerprint))
 
 
 def qualification_config(config: Any, model: str, context_window: Optional[int] = None, *,
@@ -1062,25 +1114,20 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
     reasoning flag and extra_body qualified; LLMClient otherwise sends the
     primary binding's), and a strict budget policy so no case is itself sent
     with a different window."""
-    from kriya.core.model_runtime import binding_object
+    from kriya.core.model_runtime import binding_object, configured_context_window, with_context_window
 
     copy = config.model_copy(deep=True)
     binding = binding_object(copy, model) or copy.llm
     if settings is not None:
-        # Keep the binding's own num_ctx: it is the runtime input, not a setting.
-        options = dict((getattr(binding, "extra_body", None) or {}).get("options") or {})
+        # Keep the binding's own context window: it is the runtime input, not a setting.
+        window = configured_context_window(getattr(binding, "extra_body", None))
         extra_body = settings.extra_body
-        window = options.get("num_ctx")
-        if window is not None:
-            extra_body["options"] = {**dict(extra_body.get("options") or {}), "num_ctx": window}
-        binding.extra_body = extra_body
+        binding.extra_body = with_context_window(extra_body, window) if window is not None else extra_body
         binding.reasoning = settings.reasoning
         copy.llm.temperature = settings.temperature if settings.temperature is not None else copy.llm.temperature
         copy.llm.reasoning = settings.reasoning
     if context_window is not None:
-        extra_body = dict(getattr(binding, "extra_body", None) or {})
-        extra_body["options"] = {**dict(extra_body.get("options") or {}), "num_ctx": int(context_window)}
-        binding.extra_body = extra_body
+        binding.extra_body = with_context_window(getattr(binding, "extra_body", None), context_window)
         binding.context_window = int(context_window)
     if binding is not copy.llm:
         copy.llm.extra_body = dict(getattr(binding, "extra_body", None) or {})
@@ -1092,10 +1139,20 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
 
 
 def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult], *,
-                 settings: InferenceSettings) -> Dict[str, Any]:
+                 settings: InferenceSettings, environment: Optional[ExecutionEnvironment] = None) -> Dict[str, Any]:
+    """The record of one qualification run. Functional cases go to
+    ``cases``; environment-dependent ones to ``environment_evidence`` under
+    the digest of the environment that ran them (``environment``, default
+    the one serving the fingerprint's endpoint)."""
     from kriya import __version__ as kriya_version
 
+    environment = environment if environment is not None else environment_for_fingerprint(fingerprint)
     counts = {status: sum(1 for r in results if r.status == status) for status in (PASS, FAIL, UNAVAILABLE)}
+    functional = [r for r in results if r.capability not in ENVIRONMENT_DEPENDENT_CAPABILITIES]
+    dependent = [r for r in results if r.capability in ENVIRONMENT_DEPENDENT_CAPABILITIES]
+    qualified_at = datetime.now(timezone.utc).isoformat()
+    evidence = ({environment.digest: {"environment": environment.to_dict(), "qualified_at": qualified_at,
+                                      "cases": [asdict(r) for r in dependent]}} if dependent else {})
     return {
         "schema_version": QUALIFICATION_SCHEMA_VERSION,
         "policy_version": QUALIFICATION_POLICY_VERSION,
@@ -1107,8 +1164,12 @@ def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult]
         "inference_settings_digest": settings.digest,
         # output_ceiling inside is metadata (the configured max_tokens), never identity.
         "inference_settings": settings.to_dict(),
-        "qualified_at": datetime.now(timezone.utc).isoformat(),
-        "cases": [asdict(r) for r in results],
+        "qualified_at": qualified_at,
+        # The environment this run was served from (capacity evidence below
+        # is keyed by its digest; functional cases hold in any environment).
+        "environment": environment.to_dict(),
+        "cases": [asdict(r) for r in functional],
+        "environment_evidence": evidence,
         "measured_limits": measured_limits(results),
         "summary": counts,
     }
@@ -1121,6 +1182,6 @@ __all__ = [
     "CONTEXT_TIER_REQUIREMENTS", "ContextTierOffer", "UNAVAILABLE", "offered_context_tiers", "assess", "build_record", "context_tier_requirements",
     "load_record", "measured_limits", "measured_limits_for", "qualification_config", "qualification_home",
     "record_is_current", "record_path", "recorded_context_sizes", "required_capabilities", "role_models",
-    "runtime_has_records",
+    "runtime_has_records", "environment_case_statuses",
     "run_qualification", "save_record",
 ]

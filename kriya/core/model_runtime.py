@@ -119,11 +119,56 @@ def endpoint_identity(base_url: str) -> str:
     return urllib.parse.urlunsplit((parsed.scheme.lower(), netloc.lower(), parsed.path.rstrip("/"), "", ""))
 
 
+# --------------------------------------------------------------------------
+# Runtime adapter contract (INF-001 seam). Everything Kriya knows about HOW a
+# served runtime takes its per-request context window lives here, so generic
+# qualification, budgeting, routing and evidence code never names a provider.
+# Today's only adapter is Ollama (the ``options.num_ctx`` request option); a
+# future vLLM/other adapter (INF-001) replaces these functions, not callers.
+# --------------------------------------------------------------------------
+
+# Request-body path of the per-request context window (Ollama).
+CONTEXT_WINDOW_REQUEST_OPTION: Tuple[str, str] = ("options", "num_ctx")
+# Providers whose context window can be chosen per request.
+_PER_REQUEST_CONTEXT_PROVIDERS = frozenset({"ollama"})
+
+
 def configured_context_window(extra_body: Optional[Dict[str, Any]]) -> Optional[int]:
-    """The ``num_ctx`` Kriya actually sends with the request, if any."""
-    options = (extra_body or {}).get("options") if isinstance(extra_body, dict) else None
-    value = options.get("num_ctx") if isinstance(options, dict) else None
+    """The per-request context window Kriya actually sends, if any."""
+    section, key = CONTEXT_WINDOW_REQUEST_OPTION
+    options = (extra_body or {}).get(section) if isinstance(extra_body, dict) else None
+    value = options.get(key) if isinstance(options, dict) else None
     return value if isinstance(value, int) and value > 0 else None
+
+
+def with_context_window(extra_body: Optional[Dict[str, Any]], tokens: int) -> Dict[str, Any]:
+    """A copy of ``extra_body`` requesting a ``tokens`` context window."""
+    section, key = CONTEXT_WINDOW_REQUEST_OPTION
+    body = dict(extra_body or {})
+    body[section] = {**dict(body.get(section) or {}), key: int(tokens)}
+    return body
+
+
+def without_context_window(extra_body: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """A copy of ``extra_body`` without the context-window request field
+    (an emptied section is dropped): the window is runtime identity, not an
+    inference setting."""
+    section, key = CONTEXT_WINDOW_REQUEST_OPTION
+    body = dict(extra_body or {}) if isinstance(extra_body, dict) else {}
+    options = body.get(section)
+    if isinstance(options, dict):
+        options = {k: v for k, v in options.items() if k != key}
+        if options:
+            body[section] = options
+        else:
+            body.pop(section)
+    return body
+
+
+def supports_per_request_context_window(fingerprint: "ModelRuntimeFingerprint") -> bool:
+    """Whether this exact runtime takes its context window per request (so a
+    PRD-016 context tier can be selected for one request)."""
+    return bool(fingerprint.exact) and fingerprint.provider in _PER_REQUEST_CONTEXT_PROVIDERS
 
 
 def kriya_protocol_identity(config: Any, model: str) -> str:
@@ -500,7 +545,9 @@ def load_recorded_fingerprint(digest: str, config: Any = None) -> Optional[Dict[
 __all__ = [
     "EXACT_REQUIRED_COMPONENTS", "FINGERPRINT_SCHEMA_VERSION", "MODEL_PROTOCOL_ADAPTER_VERSION",
     "ModelRuntimeFingerprint", "PROBE_ENV_VAR", "UNAVAILABLE", "clear_model_runtime_cache",
-    "configured_context_window", "endpoint_identity", "fingerprint_store_dir", "kriya_protocol_identity",
+    "CONTEXT_WINDOW_REQUEST_OPTION", "configured_context_window", "endpoint_identity", "fingerprint_store_dir",
+    "kriya_protocol_identity", "supports_per_request_context_window", "with_context_window",
+    "without_context_window",
     "load_recorded_fingerprint", "probe_model_runtime", "probing_enabled", "record_fingerprint",
     "resolve_configured_model_runtime", "resolve_model_runtime",
 ]

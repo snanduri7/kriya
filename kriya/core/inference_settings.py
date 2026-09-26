@@ -18,8 +18,9 @@ keep their keys.
 Rules:
 - The settings are what the request carries: ``temperature``, the
   ``reasoning`` flag (it changes Kriya's own budget floor and reasoning
-  handling), and the whole ``extra_body`` except the per-call options PRD-016
-  chooses (``PER_CALL_OPTIONS``: ``num_ctx``, already part of the runtime
+  handling), and the whole ``extra_body`` except the per-request context
+  window PRD-016 chooses (the runtime adapter's field,
+  ``model_runtime.without_context_window``; already part of the runtime
   fingerprint).
 - ``max_tokens`` is not identity: PRD-016 changes it per call. The
   binding's configured output ceiling is kept as metadata only.
@@ -47,10 +48,6 @@ from typing import Any, Dict, Mapping, Optional
 
 INFERENCE_SETTINGS_VERSION = 1
 
-# Request options PRD-016 sets per call. num_ctx is part of the runtime
-# fingerprint (a context tier is a different runtime input), never of the
-# inference settings. LLMClient._request_options injects only these.
-PER_CALL_OPTIONS = frozenset({"num_ctx"})
 
 
 def _normalize(value: Any) -> Any:
@@ -70,15 +67,10 @@ def _normalize(value: Any) -> Any:
 def normalized_extra_body(extra_body: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     """``extra_body`` without the per-call options, with an empty
     ``options`` dropped and numbers normalized."""
-    body = copy.deepcopy(dict(extra_body or {})) if isinstance(extra_body, Mapping) else {}
-    options = body.get("options")
-    if isinstance(options, Mapping):
-        options = {key: item for key, item in options.items() if key not in PER_CALL_OPTIONS}
-        if options:
-            body["options"] = options
-        else:
-            body.pop("options")
-    return _normalize(body)
+    from kriya.core.model_runtime import without_context_window
+
+    body = copy.deepcopy(dict(extra_body)) if isinstance(extra_body, Mapping) else {}
+    return _normalize(without_context_window(body))
 
 
 @dataclass(frozen=True)
@@ -178,7 +170,7 @@ def qualification_identity(runtime_digest: str, settings: InferenceSettings) -> 
 
 
 __all__ = [
-    "INFERENCE_SETTINGS_VERSION", "InferenceSettings", "PER_CALL_OPTIONS", "binding_inference_settings",
+    "INFERENCE_SETTINGS_VERSION", "InferenceSettings", "binding_inference_settings",
     "normalized_extra_body", "qualification_identity", "request_settings", "role_binding_for_model",
     "role_inference_settings",
 ]

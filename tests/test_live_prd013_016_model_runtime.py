@@ -90,7 +90,9 @@ def test_prd014_full_qualification_campaign_reports_every_case(cfg):
     record = asyncio.run(mq.run_qualification(cfg))
     path = mq.save_record(record)
     _evidence("prd014-qualification.json", record)
-    statuses = {case["capability"]: case["status"] for case in record["cases"]}
+    # Capacity cases are kept per execution environment (qualification environment identity).
+    cases = record["cases"] + [case for entry in record["environment_evidence"].values() for case in entry["cases"]]
+    statuses = {case["capability"]: case["status"] for case in cases}
     assert set(statuses) == set(mq.CAPABILITIES)
     assert set(statuses.values()) <= {mq.PASS, mq.FAIL, mq.UNAVAILABLE}
     assert statuses["endpoint_restart_semantics"] == mq.UNAVAILABLE

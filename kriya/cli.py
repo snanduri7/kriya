@@ -1040,6 +1040,11 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
             click.echo(f"\nSummary: {record['summary']}  measured limits: {record['measured_limits']}")
             click.echo(f"Runtime fingerprint: {record['fingerprint_digest']}")
             click.echo(f"Qualification identity: {record['qualification_identity']}")
+            env = record.get("environment") or {}
+            click.echo(f"Execution environment: {env.get('digest')} ({env.get('os')}/{env.get('architecture')}, "
+                       f"{env.get('accelerator_backend')} {env.get('accelerator_model')}, "
+                       f"{env.get('system_memory_class_gib')} GiB class, {env.get('inference_runtime')}; "
+                       f"exact={env.get('exact')}) - capacity evidence counts only here")
             click.echo(f"Record: {path}" if path else "Partial run (--case): not saved as a qualification record.")
     output: Any = records[0] if len(records) == 1 else {"records": records}
     if out_path:
@@ -1054,6 +1059,7 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
 @click.pass_context
 def model_status(ctx: click.Context, json_output: bool) -> None:
     """Show each production role's models, exact runtimes and qualification."""
+    from kriya.core.execution_environment import environment_for_fingerprint
     from kriya.core.inference_settings import role_inference_settings
     from kriya.core.model_qualification import QUALIFIED, assess, required_capabilities, role_models
     from kriya.core.model_runtime import resolve_configured_model_runtime
@@ -1070,6 +1076,7 @@ def model_status(ctx: click.Context, json_output: bool) -> None:
                                 workspace_root=os.path.realpath(os.getcwd()))
             all_qualified &= assessment.status == QUALIFIED
             report[role].append({"model": model, "exact": runtime.exact, "inference_settings": settings.to_dict(),
+                                 "execution_environment": environment_for_fingerprint(runtime).to_dict(),
                                  **assessment.to_dict()})
     if json_output:
         click.echo(json.dumps(report, indent=2, sort_keys=True))

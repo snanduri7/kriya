@@ -269,11 +269,11 @@ class LLMClient:
     def _request_options(self, extra_body: Optional[Dict[str, Any]], budget) -> Optional[Dict[str, Any]]:
         """The request's extra_body with num_ctx set to the selected context
         tier (a copy; the configured extra_body is never changed)."""
+        from kriya.core.model_runtime import with_context_window
+
         if not budget.context_expanded:
             return extra_body
-        options = dict((extra_body or {}).get("options") or {})
-        options["num_ctx"] = budget.context_window
-        return {**(extra_body or {}), "options": options}
+        return with_context_window(extra_body, budget.context_window)
 
     def _note_budget_expansion(self, result, budget, *, reason: Optional[str] = None) -> None:
         """Evidence for an automatic enlargement (appended to

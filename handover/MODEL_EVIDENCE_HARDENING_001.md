@@ -205,3 +205,67 @@ The identities were computed offline (probe disabled, no model calls):
 - proceed to Batch 6 (PRD-025..029).
 
 Changing the demo-03 fallback to `reasoning_effort: none` is a separate proposal, made after qwen3.6 requalifies under that exact setting.
+
+## Addition A: qualification environment identity (user spec, 2026-09-26)
+
+**Split.** Functional qualification belongs to the runtime + inference settings. Environment-dependent evidence (`ENVIRONMENT_DEPENDENT_CAPABILITIES` = `context_capacity`: memory feasibility, near-window timeout) also belongs to the machine serving the runtime.
+
+**Environment fingerprint** (`kriya/core/execution_environment.py`):
+- **In the identity:**
+  - OS and architecture;
+  - inference runtime/version;
+  - accelerator backend (metal/cuda/rocm/cpu), model and count;
+  - accelerator memory class;
+  - system memory class and unified memory;
+  - runtime parallelism.
+- **Memory is a class,** not a measurement: the nearest 8 GiB from 16 GiB up, a power of two below that. So a 62.7 GiB MemTotal and a 64 GiB report are both class 64, and an 80 GiB GPU is 80, not 64.
+- **Never in the identity:** hostnames, serial numbers, MAC addresses, free memory, temperatures or load. They are not even read; a test checks which commands the probe runs.
+- **Observable only for a loopback endpoint.** A LAN endpoint's hardware is not this machine's, so its environment is unavailable and capacity evidence is never reused for it.
+- **Ollama does not report its server-side parallelism**, so `runtime_parallelism` is `unavailable` for it. The field stays for runtimes that do report it.
+- **Disable the probe** with `KRIYA_EXECUTION_ENVIRONMENT_PROBE=0`.
+
+**Records:**
+- Capacity cases are stored in `environment_evidence[<environment digest>]`; functional cases stay in `cases`.
+- `assess` counts capacity evidence only for the current, exact environment.
+- `save_record` keeps other environments' evidence for the same identity. So qwen3.8@64K's FAIL on the 64 GiB M1 Max and a future PASS on a 128 GiB machine coexist, and neither is used on the other machine.
+- `kriya model qualify` prints the environment, and `model status` reports it.
+
+**No hardware special cases.** Callers compare digests only; no WorkflowEngine or routing code names hardware.
+
+**Tests** (`tests/test_qual_environment_identity.py`):
+- same environment → reused;
+- memory class change → capacity not reused, functional still QUALIFIED;
+- backend change → capacity stale;
+- runtime version change → the whole record is stale;
+- volatile and identifying values → identity unchanged;
+- a stronger machine is freshly qualified for the failed tier, and neither environment's evidence leaks to the other;
+- an unobservable environment → capacity never counted;
+- PRD-016 tier offering follows the environment.
+
+The environment binding is mutation-checked.
+
+## Addition B: runtime portability invariant (user spec, 2026-09-26)
+
+- **Provider-neutral fingerprint.** The runtime fingerprint already distinguishes:
+  - provider and version;
+  - exact artifact and weights digest;
+  - context configuration;
+  - chat template, tool-call parser and Kriya protocol;
+  - adapter version.
+
+  With the inference settings and the environment added in this batch, the same weights under Ollama and vLLM have different runtime digests, qualification identities and environments, and share no evidence (tested).
+- **No new provider conditionals.** The batch had added its own `num_ctx` handling in three modules. Instead, the per-request context window is now one runtime-adapter contract in `model_runtime.py`:
+  - `CONTEXT_WINDOW_REQUEST_OPTION`;
+  - `configured_context_window` / `with_context_window` / `without_context_window`;
+  - `supports_per_request_context_window`.
+
+  Inference settings, LLMClient `_request_options`, `qualification_config` and PRD-016 tier offering (formerly `provider != "ollama"`) all go through it.
+- **Tripwire:** a test fails on any `provider ==/!=/in` or `"num_ctx"` literal in non-comment code anywhere in `kriya/` except `model_runtime.py`.
+- **Deliberately not done:**
+  - No vLLM adapter.
+  - The Ollama probe (`/api/version`, `/api/tags`, `/api/show`) stays inside `model_runtime.py`.
+  - The `context_capacity` case still sends the window via the adapter's request field.
+  - The user-facing tier note still says "exact Ollama runtime", which is accurate while Ollama is the only adapter; a test asserts on it.
+- **Follow-up recorded:** `INF-001` (Pluggable Inference Runtime Framework; tracker row, OPEN). It covers adapters for Ollama, vLLM and other OpenAI-compatible runtimes behind this seam, each owning its probe, per-request context control, capability reporting and environment/parallelism reporting. Generic orchestration, evidence, routing, retry and verification code must depend only on the abstraction.
+
+**Focused command:** add `tests/test_qual_environment_identity.py` and `tests/test_bootstrap_contract.py` to the focused list above.
