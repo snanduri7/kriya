@@ -346,8 +346,10 @@ def test_model_qualify_passes_the_context_window(monkeypatch, tmp_path):
 
     async def fake_run(cfg, model, **kw):
         seen.update(kw)
+        # A policy-/3 record's shape (MODEL-QUAL-IDENTITY-001: keyed by the
+        # qualification identity; the environment it ran in).
         return {"summary": {}, "measured_limits": {}, "fingerprint_digest": "d", "cases": [],
-                "fingerprint": {}}
+                "fingerprint": {}, "qualification_identity": "q", "environment": {}}
 
     monkeypatch.setattr(mq, "run_qualification", fake_run)
     monkeypatch.setattr(mq, "save_record", lambda record, workspace_root=None: str(tmp_path / "r.json"))
@@ -356,6 +358,7 @@ def test_model_qualify_passes_the_context_window(monkeypatch, tmp_path):
     result = CliRunner().invoke(main, ["--config", str(config), "model", "qualify", "--context-window", "65536"])
     assert result.exit_code == 0, result.output
     assert seen["context_window"] == 65536 and "num_ctx 65536" in result.output
+    assert seen["settings"].digest in result.output  # the inference identity qualified
 
 
 def test_the_context_policy_is_security_authority():
