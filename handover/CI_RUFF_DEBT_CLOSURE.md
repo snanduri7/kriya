@@ -1,6 +1,6 @@
 # CI-RUFF-001: Ruff CI restored to green
 
-**Status:** READY_FOR_PYTEST_VERIFICATION (2026-09-26). Local commits, not pushed.
+**Status:** VERIFIED (2026-09-26): the user's full `.venv/bin/pytest` gives 5864 passed, 22 deselected, 0 failed (1413 s), at 0dff706 (later commits are docs only). Local commits, not pushed.
 
 ## Result
 
