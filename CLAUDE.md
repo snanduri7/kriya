@@ -38,6 +38,20 @@ The user is quota-conscious in this repo specifically — apply these by default
 - **Watch context length in a long session — 73% of this account's usage has come from sessions sitting above 150k tokens.** Longer sessions cost more even with prompt caching. At a natural checkpoint (a chunk of work just committed, about to pivot to an unrelated task), suggest `/compact` to shrink the working context, or `/clear`/a fresh session when the next task doesn't need this thread's history at all — see `feedback_session_resume_hygiene.md` in this project's memory for the existing convention of resuming via explicit memory pointers rather than "continue where we left off."
 - Ordinary work stays in-session as normal: writing/editing code, quick targeted greps, `git status`/`git diff`/`git log`, doc updates, single fast commands.
 
+## Mandatory quality bar (every change, every session — standing user directive, 2026-09-26)
+
+Passing the happy-path tests is not "done". These rules are mandatory; don't wait to be asked. In Batch 5, two bugs got through: a variable left unbound on an early-stop path, which silently dropped a result field, and a bare-`MagicMock` fixture that turned a feature on by accident. Neither the suite nor a live success run would have caught them.
+
+1. **Static check before every commit.** Once the static-check gate exists, run it on changed files and fix what it finds. It is pyright/pylint on narrow high-signal rules (possibly-unbound, undefined names), set up in the first commit after Batch 5 is pushed. Until then, review every variable assigned inside a branch, `try` or loop for use on paths where it was never set.
+2. **Test failure paths and result contracts, not only decisions.** For any new or changed result field, event or record, test it on every terminal path that reports it: success, stopped early, gate failed and plan invalid. Asserting pass/fail alone is not enough.
+3. **Strict test doubles.** Never build a config, kernel or policy object as a bare `MagicMock`: its attributes are all truthy and silently enable features. Use a real `AppConfig` or `MagicMock(spec=...)`, and set every flag the code under test reads explicitly.
+4. **Broad catches must not hide coding errors.** A new `except Exception:` that logs and continues needs a test that asserts the normal (non-exception) output of that block, so a `NameError`/`TypeError` inside it fails a test instead of becoming a warning.
+5. **Honest verification.**
+   - The scratchpad plain runner is for iteration only. It must apply the module's autouse fixtures, and you must never compare against a baseline of runner-artifact failures: remove the artifact first.
+   - Put new or changed test IDs in the hand-off, and do not claim "verified" until the user's real pytest run is green.
+   - Mutation-check new safety or decision logic: each mutation must make a test fail.
+6. **Report your own bugs proactively.** A defect found in your own earlier work gets fixed, tested (with a check that the test fails without the fix), committed separately and reported, never folded silently into other work.
+
 ## Live-model CI tier (`tests/test_live_smoke.py`, `.github/workflows/ci.yml`'s `live-model-smoke` job)
 Every other test in this repo runs against mocks - zero live LLM/embedding calls. `pyproject.toml`'s `addopts = '-m "not live_model"'` excludes this tier by default (both locally and in the `test`/`lint`/`lock-file` CI jobs); pass `-m live_model` explicitly to run it. CI runs a blocking supported-primary-model job and a scheduled three-model matrix. The bar is deliberately narrow: "did the real pipeline complete without crashing on a real API response shape," not code-generation quality. `skills.load_global` and `skills.load_cwd` control the implicit skill sources independently; set both false for a reproducible plain-Kriya run using only the explicit `paths.skills` directory.
 
