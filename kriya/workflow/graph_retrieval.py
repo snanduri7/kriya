@@ -3,7 +3,9 @@
 This is the exact retrieval ``WorkflowEngine.run_generation_workflow`` runs:
 1. a hybrid vector + lexical query over the code index (``LocalVectorStore.query_hybrid``);
 2. pre-plan member grounding of each hit's controlled chunk header;
-3. dependency-graph neighbourhood expansion from the matched files' own symbols;
+3. dependency-graph neighbourhood expansion from the expansion seeds'
+   own symbols (``select_expansion_seeds``: corroborated hits only when
+   both retrieval legs produced evidence);
 4. the token-budgeted context build (``build_code_context_package``).
 It was moved here verbatim from workflow.py so that the context-recall
 certification suite (``kriya/workflow/context_certification.py``) measures
@@ -21,9 +23,59 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from kriya.workflow.context_budget import RetrievalLimits, build_code_context_package
+
+# PRD027-PRECISION-001: why the graph walk started from the files it did.
+EXPANSION_CORROBORATED = "CORROBORATED_EXPANSION_SEED"
+EXPANSION_EMBEDDING_ONLY = "EMBEDDING_ONLY_EXPANSION_SEED"
+EXPANSION_LEXICAL_ONLY = "LEXICAL_ONLY_EXPANSION_SEED"
+EXPANSION_NO_CORROBORATED = "NO_CORROBORATED_EXPANSION_SEED"
+EXPANSION_NO_VALID_EVIDENCE = "NO_VALID_RETRIEVAL_EVIDENCE"
+EXPANSION_PROVENANCE_UNAVAILABLE = "EXPANSION_SEED_PROVENANCE_UNAVAILABLE"
+EXPANSION_SEED_REASON_CODES = (
+    EXPANSION_CORROBORATED, EXPANSION_EMBEDDING_ONLY, EXPANSION_LEXICAL_ONLY,
+    EXPANSION_NO_CORROBORATED, EXPANSION_NO_VALID_EVIDENCE, EXPANSION_PROVENANCE_UNAVAILABLE,
+)
+_LEG_FIELDS = ("vector_rank", "lexical_rank", "vector_valid_hits", "lexical_valid_hits")
+
+
+def select_expansion_seeds(hits: Sequence[Dict[str, Any]], top_k: int) -> Tuple[List[str], str]:
+    """Which search hits may seed the dependency-graph walk, and why.
+
+    Search hits themselves are never removed; this decides only graph
+    expansion authority. E is the embedding leg's valid top_k, L the
+    lexical leg's (``LocalVectorStore.query_hybrid`` annotates every hit):
+    - E and L both non-empty: only hits in E and L seed; with none, no hit
+      seeds (NO_CORROBORATED_EXPANSION_SEED) - disagreement alone never
+      fans out, and no similarity threshold is invented to break it;
+    - only one leg produced valid hits: that leg's top_k hits seed, so a
+      genuinely embedding-only or lexical-only query keeps its expansion;
+    - neither: nothing seeds.
+    A hit without leg provenance cannot be classified, so nothing seeds.
+    Returns (seed files in hit order, reason code)."""
+    if not hits:
+        return [], EXPANSION_NO_VALID_EVIDENCE
+    if any(field not in hit for hit in hits for field in _LEG_FIELDS):
+        return [], EXPANSION_PROVENANCE_UNAVAILABLE
+
+    def within(rank: Any) -> bool:
+        return rank is not None and rank <= top_k
+
+    vector_valid = hits[0]["vector_valid_hits"] > 0
+    lexical_valid = hits[0]["lexical_valid_hits"] > 0
+    if vector_valid and lexical_valid:
+        seeds = [hit for hit in hits if within(hit["vector_rank"]) and within(hit["lexical_rank"])]
+        reason = EXPANSION_CORROBORATED if seeds else EXPANSION_NO_CORROBORATED
+    elif vector_valid:
+        seeds, reason = [hit for hit in hits if within(hit["vector_rank"])], EXPANSION_EMBEDDING_ONLY
+    elif lexical_valid:
+        seeds, reason = [hit for hit in hits if within(hit["lexical_rank"])], EXPANSION_LEXICAL_ONLY
+    else:
+        seeds, reason = [], EXPANSION_NO_VALID_EVIDENCE
+    files = list(dict.fromkeys(hit["filepath"] for hit in seeds if hit.get("filepath")))
+    return files, reason
 
 
 @dataclass
@@ -38,6 +90,9 @@ class GraphRetrievalResult:
     retrieval_member_hints: Dict[str, List[str]] = field(default_factory=dict)
     verified_grounding: Dict[str, List[str]] = field(default_factory=dict)
     hypothesis_candidates: Dict[str, List[str]] = field(default_factory=dict)
+    # PRD027-PRECISION-001: the files the graph walk started from and why.
+    expansion_seed_files: List[str] = field(default_factory=list)
+    expansion_seed_reason: Optional[str] = None
 
 
 async def retrieve_graph_context(
@@ -113,7 +168,12 @@ async def retrieve_graph_context(
         if fp:
             file_scores[fp] = max(file_scores.get(fp, 0.0), m.get("score", 0.0))
 
-    if dependency_graph_path and os.path.exists(dependency_graph_path):
+    # PRD027-PRECISION-001: only corroborated hits (or a single leg's own
+    # hits when the other leg found nothing) seed the walk; every matched
+    # file is still packaged below.
+    seed_files, result.expansion_seed_reason = select_expansion_seeds(good_matches, limits.top_k)
+    result.expansion_seed_files = seed_files
+    if seed_files and dependency_graph_path and os.path.exists(dependency_graph_path):
         from kriya.analyzer.graph import DependencyGraph
         graph = DependencyGraph(dependency_graph_path)
 
@@ -121,7 +181,7 @@ async def retrieve_graph_context(
         # guess - falls back to the stem only when the file has no indexed
         # symbols at all (e.g. a matched YAML/config file).
         seed_symbols = []
-        for f in matched_files_list:
+        for f in seed_files:
             symbols = graph.get_symbols_for_file(f)
             seed_symbols.extend(symbols or [os.path.splitext(os.path.basename(f))[0]])
             # PRD-027: the file itself is a node too - calls/imports are

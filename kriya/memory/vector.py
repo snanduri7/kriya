@@ -579,7 +579,23 @@ class LocalVectorStore:
     def query_hybrid(self, query_text: str, query_embedding: List[float], top_k: int = 5, model_name: str = "default", dimensions: int = 768) -> List[Dict[str, Any]]:
         vector_results = self.query(query_embedding, top_k=top_k * 4, model_name=model_name, dimensions=dimensions)
         lexical_results = self.query_lexical(query_text, top_k=top_k * 4)
-        
+
+        # PRD027-PRECISION-001: each hit also carries its rank in each leg
+        # (None when that leg did not return it) and how many valid top_k
+        # hits each leg produced, so graph expansion can tell a corroborated
+        # hit from a single-leg one. A vector hit is valid only with a
+        # positive cosine (read here, before the RRF score replaces it); a
+        # lexical hit always matched at least one query term.
+        vector_ranks = {
+            (res["filepath"], res["chunk_index"]): rank
+            for rank, res in enumerate(vector_results, 1) if res.get("score", 0.0) > 0.0
+        }
+        lexical_ranks = {}
+        for rank, res in enumerate(lexical_results, 1):
+            lexical_ranks.setdefault((res["filepath"], res["chunk_index"]), rank)
+        vector_valid_hits = sum(1 for rank in vector_ranks.values() if rank <= top_k)
+        lexical_valid_hits = sum(1 for rank in lexical_ranks.values() if rank <= top_k)
+
         rrf_scores = {}
         chunk_map = {}
         k = 60
@@ -601,6 +617,10 @@ class LocalVectorStore:
         for key in sorted_keys[:top_k]:
             res = chunk_map[key]
             res["score"] = rrf_scores[key]
+            res["vector_rank"] = vector_ranks.get(key)
+            res["lexical_rank"] = lexical_ranks.get(key)
+            res["vector_valid_hits"] = vector_valid_hits
+            res["lexical_valid_hits"] = lexical_valid_hits
             hybrid_results.append(res)
             
         return hybrid_results

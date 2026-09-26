@@ -2354,6 +2354,19 @@ class WorkflowEngine:
                     matched_files = retrieval.matched_files
                     related_files = retrieval.related_files
                     graph_rag_context = retrieval.graph_rag_context
+                    # PRD027-PRECISION-001: which hits seeded the graph walk,
+                    # and why (a disagreement of the two legs seeds none).
+                    state.record_event(RunEvent(
+                        kind="retrieval.expansion_seeds", attempt=0, source="graph_retrieval",
+                        authority=EventAuthority.ADVISORY,
+                        message=f"{retrieval.expansion_seed_reason}: {len(retrieval.expansion_seed_files)} "
+                                f"of {len(retrieval.matched_files)} matched files seeded graph expansion",
+                        details={
+                            "reason_code": retrieval.expansion_seed_reason,
+                            "seed_files": list(retrieval.expansion_seed_files),
+                            "matched_files": list(retrieval.matched_files),
+                        },
+                    ))
         except Exception as ex:
             logger.warning(f"Failed to query Graph RAG: {ex}")
             
