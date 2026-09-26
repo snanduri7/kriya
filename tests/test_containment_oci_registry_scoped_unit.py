@@ -82,9 +82,9 @@ def test_render_setup_script_contains_no_chmod_of_host_mounts():
     assert "chmod -R" not in script
     assert "chown" not in script
     assert "/kriya/workspace" not in script  # only ever mounted, never touched by the setup script
-    chmod_lines = [l for l in script.splitlines() if l.strip().startswith("chmod")]
+    chmod_lines = [line for line in script.splitlines() if line.strip().startswith("chmod")]
     assert chmod_lines, "expected the tmpfs-only chmod line to still be present"
-    assert all("/kriya/tmp/acqhome" in l for l in chmod_lines)  # the one allowed chmod targets tmpfs only
+    assert all("/kriya/tmp/acqhome" in line for line in chmod_lines)  # the one allowed chmod targets tmpfs only
 
 
 def test_render_setup_script_uses_the_given_uid_and_gid_not_a_fixed_constant():

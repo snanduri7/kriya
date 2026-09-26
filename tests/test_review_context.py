@@ -899,7 +899,7 @@ def test_proposal_cannot_be_built_for_unknown_finding_id():
 
     try:
         build_proposed_modification("F999", [adj], member_ids, {}, "X.java")
-        assert False, "expected ValueError"
+        raise AssertionError("expected ValueError")
     except ValueError as e:
         assert "Unknown finding id" in str(e)
 
@@ -914,7 +914,7 @@ def test_proposal_refused_when_finding_has_no_recommendation():
 
     try:
         build_proposed_modification("F1", [adj], member_ids, {}, "X.java")
-        assert False, "expected ValueError"
+        raise AssertionError("expected ValueError")
     except ValueError as e:
         assert "no recommendation" in str(e).lower()
 
@@ -929,7 +929,7 @@ def test_proposal_refused_when_no_evidence_id_resolves():
 
     try:
         build_proposed_modification("F1", [adj], member_ids, {}, "X.java")
-        assert False, "expected ValueError"
+        raise AssertionError("expected ValueError")
     except ValueError as e:
         assert "no evidence id" in str(e).lower()
 

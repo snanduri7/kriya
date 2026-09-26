@@ -107,7 +107,7 @@ def test_real_cli_full_lifecycle_a_through_f(tmp_path):
     code, out, err = _run_cli(["mcp", "approve", "fixture_echo", "--confirm"], cwd=str(ws), extra_env=env)
     assert code == 0, err
     assert "Approved" in out
-    approval_path_line = [l for l in out.splitlines() if "written to" in l]
+    approval_path_line = [line for line in out.splitlines() if "written to" in line]
     assert approval_path_line, out
     written_path = approval_path_line[0].split("written to", 1)[1].strip().rstrip(".")
     assert os.path.isfile(written_path)

@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from typing import Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -6261,8 +6262,6 @@ async def test_enforce_aggregated_status_is_failed_if_only_some_subtasks_ran(tmp
 
 
 # --- subtask-spanning resume (MA5.9 finally wired to something, 2026-08-24) ---
-
-import subprocess
 
 
 def _init_git_repo(path):

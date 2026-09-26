@@ -65,7 +65,7 @@ MODES = ["direct", "milestone"]
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_success_is_owned_recorded_attributed_and_terminal(mode, calc_workspace):
+def test_success_is_owned_recorded_attributed_and_terminal(mode, calc_workspace):  # noqa: F811 - pytest fixture
     engine, _ = _engine(CALC_WITH_SUB)
     _invoke(mode, calc_workspace, engine)
     [record] = scan_run_records(str(calc_workspace)).records
@@ -82,7 +82,7 @@ def test_success_is_owned_recorded_attributed_and_terminal(mode, calc_workspace)
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_failure_is_never_success_and_leaves_the_file_untouched(mode, calc_workspace):
+def test_failure_is_never_success_and_leaves_the_file_untouched(mode, calc_workspace):  # noqa: F811 - pytest fixture
     engine, _ = _engine("[]")
     _invoke(mode, calc_workspace, engine)
     [record] = scan_run_records(str(calc_workspace)).records
@@ -93,7 +93,7 @@ def test_failure_is_never_success_and_leaves_the_file_untouched(mode, calc_works
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_checkpoints_belong_to_the_unit_and_run_that_saved_them(mode, calc_workspace):
+def test_checkpoints_belong_to_the_unit_and_run_that_saved_them(mode, calc_workspace):  # noqa: F811 - pytest fixture
     engine, _ = _engine("[]")
     _invoke(mode, calc_workspace, engine)
     [record] = scan_run_records(str(calc_workspace)).records
@@ -107,7 +107,7 @@ def test_checkpoints_belong_to_the_unit_and_run_that_saved_them(mode, calc_works
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_resume_selects_the_units_checkpoint_and_prd008_judges_the_drift(mode, calc_workspace):
+def test_resume_selects_the_units_checkpoint_and_prd008_judges_the_drift(mode, calc_workspace):  # noqa: F811 - pytest fixture
     engine, _ = _engine("[]")
     _invoke(mode, calc_workspace, engine)
     [own] = [c["run_id"] for c in list_checkpoints(str(calc_workspace))]
@@ -120,7 +120,7 @@ def test_resume_selects_the_units_checkpoint_and_prd008_judges_the_drift(mode, c
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_an_uncertain_workspace_is_refused_before_any_model_work(mode, calc_workspace):
+def test_an_uncertain_workspace_is_refused_before_any_model_work(mode, calc_workspace):  # noqa: F811 - pytest fixture
     prior = RunRecord.new("prior", "workspace", None, None)
     running = prior.transition(RunLifecycle.RUNNING)
     eligible = running.begin_commit("tx-prior", intent="APPLY_VERIFIED_CANDIDATE", candidate_hash=None)
@@ -170,7 +170,7 @@ def test_a_blocked_downstream_unit_is_in_the_milestone_result(tmp_path):
     assert states["M3"]["reason_codes"] == [DEPENDENCY_FAILED] and states["M3"]["blocked_by"] == ["M2"]
 
 
-def test_a_direct_result_is_its_units_own_result_unchanged(calc_workspace):
+def test_a_direct_result_is_its_units_own_result_unchanged(calc_workspace):  # noqa: F811 - pytest fixture
     engine, _ = _engine(CALC_WITH_SUB)
     result = _invoke("direct", calc_workspace, engine)
     assert "work_unit_states" not in result
@@ -206,14 +206,14 @@ def _probing_engine(workspace, developer_answer, file_list='["calc.py"]', probes
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_the_workspace_lock_is_held_for_the_whole_unit(mode, calc_workspace):
+def test_the_workspace_lock_is_held_for_the_whole_unit(mode, calc_workspace):  # noqa: F811 - pytest fixture
     probes = []
     _invoke(mode, calc_workspace, _probing_engine(calc_workspace, CALC_WITH_SUB, probes=probes))
     assert probes and set(probes) == {"HELD"}
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_every_commit_is_an_eligible_verified_candidate_of_a_unit(mode, calc_workspace):
+def test_every_commit_is_an_eligible_verified_candidate_of_a_unit(mode, calc_workspace):  # noqa: F811 - pytest fixture
     engine, _ = _engine(CALC_WITH_SUB)
     _invoke(mode, calc_workspace, engine)
     [record] = scan_run_records(str(calc_workspace)).records
@@ -226,7 +226,7 @@ def test_every_commit_is_an_eligible_verified_candidate_of_a_unit(mode, calc_wor
 
 
 @pytest.mark.parametrize("mode", MODES)
-def test_a_write_outside_the_workspace_never_lands(mode, calc_workspace):
+def test_a_write_outside_the_workspace_never_lands(mode, calc_workspace):  # noqa: F811 - pytest fixture
     outside = Path(calc_workspace).parent / "outside.py"
     engine = _probing_engine(calc_workspace, "x = 1\n", file_list='["calc.py", "../outside.py"]')
     _invoke(mode, calc_workspace, engine)

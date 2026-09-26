@@ -362,7 +362,7 @@ def test_registry_scoped_untrusted_process_has_no_residual_capabilities(workspac
     # Real command output only - the setup script's own KRIYA_STEP_* lines
     # precede it (this backend never returns just the wrapped command's
     # own stdout in isolation).
-    lines = [l for l in result.stdout.strip().splitlines() if not l.startswith("KRIYA_STEP")]
+    lines = [line for line in result.stdout.strip().splitlines() if not line.startswith("KRIYA_STEP")]
     assert lines[0].strip() != "0", "acquisition command ran as root"
     for line in lines[1:]:
         assert "0000000000000000" in line, result.stdout
@@ -428,8 +428,8 @@ def test_registry_scoped_concurrent_authorities_do_not_cross_grant(tmp_path):
     t_b.join(timeout=120)
 
     # Real probe output only - strip the setup script's own preamble.
-    out_a = [l for l in results["authority_a"].stdout.splitlines() if not l.startswith("KRIYA_STEP")]
-    out_b = [l for l in results["authority_b"].stdout.splitlines() if not l.startswith("KRIYA_STEP")]
+    out_a = [line for line in results["authority_a"].stdout.splitlines() if not line.startswith("KRIYA_STEP")]
+    out_b = [line for line in results["authority_b"].stdout.splitlines() if not line.startswith("KRIYA_STEP")]
     assert "200" in out_a[0], out_a  # A reaches its own host
     assert "403" in out_a[1], out_a  # A denied B's host
     assert "200" in out_b[0], out_b  # B reaches its own host
@@ -517,7 +517,7 @@ def test_registry_scoped_runs_as_real_host_uid_not_a_fixed_value(workspace):
         ["/bin/sh", "-c", "id -u; id -g"], cwd=str(workspace), timeout=60,
         containment_profile=profile, containment_backend=OCIContainmentBackend(),
     )
-    lines = [l for l in result.stdout.strip().splitlines() if not l.startswith("KRIYA_STEP")]
+    lines = [line for line in result.stdout.strip().splitlines() if not line.startswith("KRIYA_STEP")]
     assert lines[0] == str(os.getuid()), result.stdout
     assert lines[1] == str(os.getgid()), result.stdout
 

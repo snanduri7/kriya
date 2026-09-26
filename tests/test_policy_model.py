@@ -42,7 +42,7 @@ def test_action_request_is_frozen():
     request = ActionRequest(action_type=ActionType.GIT_WRITE, target="main")
     try:
         request.target = "other"
-        assert False, "ActionRequest must be immutable"
+        raise AssertionError("ActionRequest must be immutable")
     except AttributeError:
         pass
 
@@ -82,6 +82,6 @@ def test_policy_result_is_frozen():
     result = PolicyResult(decision=PolicyDecision.ALLOW, reason_code="X", explanation="y")
     try:
         result.decision = PolicyDecision.DENY
-        assert False, "PolicyResult must be immutable"
+        raise AssertionError("PolicyResult must be immutable")
     except AttributeError:
         pass

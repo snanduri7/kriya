@@ -194,7 +194,7 @@ def test_prd022_duplicate_owner_first_and_second_attempt(cfg, tmp_path):
                                        result.get("quality_gates_passed")})
 
     assert developer_calls
-    for before, after in zip(developer_calls, developer_calls[1:]):
+    for after in developer_calls[1:]:
         if "candidate=" in str(after.get("prior_error_context") or ""):  # an ownership violation was retried
             assert after["known_target_files"] == ["src/pricing.py"]
 

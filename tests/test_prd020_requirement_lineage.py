@@ -330,7 +330,9 @@ async def test_a_paraphrasing_plan_cannot_drop_a_requirement_and_the_retry_names
     verifier finds REQ-3 missing on the first candidate, the retry is told
     exactly REQ-3 and its original text, and the run passes only once every
     requirement has the verifier's evidence."""
-    responses = lambda n, prompt: _verdict_json(prompt, missing=("REQ-3",) if n == 1 else ())
+    def responses(n, prompt):
+        return _verdict_json(prompt, missing=("REQ-3",) if n == 1 else ())
+
     cfg, engine, calls = _engine(tmp_path, responses)
     workspace = tmp_path / "ws"
     workspace.mkdir()

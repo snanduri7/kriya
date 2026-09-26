@@ -690,7 +690,7 @@ _A2_FAKE_RAW_RESPONSE = {
 def _hash_dir(d):
     import hashlib
     h = hashlib.sha256()
-    for root, dirs, files in sorted(os.walk(d)):
+    for root, _dirs, files in sorted(os.walk(d)):
         for fn in sorted(files):
             p = os.path.join(root, fn)
             h.update(p.encode())

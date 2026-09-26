@@ -109,7 +109,7 @@ def test_null_backend_block_is_a_containment_setup_error():
     )
     try:
         backend.prepare(profile, ["echo", "test"])
-        assert False, "expected BackendUnavailableError"
+        raise AssertionError("expected BackendUnavailableError")
     except ContainmentSetupError:
         pass
 

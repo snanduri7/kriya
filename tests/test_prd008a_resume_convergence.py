@@ -125,7 +125,7 @@ def test_another_workspaces_checkpoint_is_an_error_not_silently_skipped(tmp_path
 
 # --- direct resume end to end -----------------------------------------------------------
 
-def test_direct_resume_selects_its_own_checkpoint_and_prd008_still_judges_it(calc_workspace):
+def test_direct_resume_selects_its_own_checkpoint_and_prd008_still_judges_it(calc_workspace):  # noqa: F811 - pytest fixture
     _direct(calc_workspace, "[]")  # fails, keeps a direct checkpoint
     [own] = [c["run_id"] for c in list_checkpoints(str(calc_workspace))]
     _save(calc_workspace, "milestone-newer", 10 ** 12, work_unit=_milestone_record("M1"), milestone_group_id="G")
