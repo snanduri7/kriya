@@ -4773,6 +4773,9 @@ def _fake_kernel(*, self_correction_enabled=True, max_turns=4):
     kernel = MagicMock()
     kernel.config.autonomy.self_correction_loop_enabled = self_correction_enabled
     kernel.config.autonomy.self_correction_loop_max_turns = max_turns
+    # A bare MagicMock flag is truthy; these tests are about owner recovery,
+    # not PRD-020's terminal requirement verifier (a MagicMock check cannot be awaited).
+    kernel.config.autonomy.spec_compliance_enabled = False
     return kernel
 
 
@@ -4995,6 +4998,10 @@ async def test_enforce_recovery_plan_self_correction_still_wrong_fix_caught_by_n
     # fail) - self-correction's own no-progress candidate never triggered a
     # third (consumer was never resumed off the back of it).
     assert len(calls) == 2
+    # PRD-020: a run stopped before the terminal gates still reports its
+    # requirements (no closure was attempted).
+    assert result.legacy_result["requirements"]["closure_attempts"] == []
+    assert set(result.legacy_result["requirements"]["outcomes"]) == {"REQ-1"}
 
 
 @pytest.mark.asyncio

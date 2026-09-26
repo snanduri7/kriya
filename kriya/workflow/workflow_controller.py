@@ -6208,6 +6208,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         global_preserved_reference_gap: Optional[str] = None
         global_terminal_obligation_gap: Optional[str] = None
         global_requirement_gap: Optional[str] = None
+        # PRD-020 closure attempts; empty when the run stops before the terminal gates.
+        requirement_closure_attempts: List[Dict[str, Any]] = []
         artifact_error: Optional[str] = None
         candidate_derived_artifacts = ()
         terminal_observability_errors: List[Dict[str, str]] = []
@@ -6432,7 +6434,6 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 # PRD-020: the user's original requirements, judged against the
                 # whole verified candidate by the verifier (never by the plan's
                 # own acceptance text), then the requirement policy decides.
-                requirement_closure_attempts: List[Dict[str, Any]] = []
                 try:
                     autonomy_policy = getattr(getattr(
                         getattr(self.workflow_engine, "kernel", None), "config", None), "autonomy", None)
