@@ -114,6 +114,10 @@ PLANNER_VALIDATION_FAILURE_CODES = frozenset({
     "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM", "MODEL_SUBTASK_MISSING_PLANNED_FILES",
     "VERIFICATION_EVIDENCE_PATH_MISSING", "PLAN_REQUIREMENT_ID_UNKNOWN",
     "SEMANTIC_CONTRACT_REGRESSION_REJECTED", "PRESERVED_REFERENCE_REGRESSION_REJECTED",
+    # Milestone plans (kriya/workflow/milestone_validation.py): decided from
+    # the milestone list alone.
+    "DUPLICATE_MILESTONE_ID", "SELF_DEPENDENCY", "UNKNOWN_DEPENDENCY", "MILESTONE_DAG_CYCLE",
+    "INVALID_EXTENSION", "UNKNOWN_PROVIDER", "AMBIGUOUS_PROVIDER", "EMPTY_ACCEPTANCE", "DUPLICATE_ACCEPTANCE_ID",
 })
 # Deterministic policy rejection: a structurally valid plan refused by a
 # check against the repository, the route or the goal's own contract
@@ -124,10 +128,15 @@ PLANNER_POLICY_REJECTION_CODES = frozenset({
     "REFACTOR_BASELINE_MISSING", "APPLICATION_RUNTIME_OWNER_MISSING", "AUTHORITATIVE_STACK_SUBSTITUTION",
     "MISSING_GROUNDED_PRODUCTION_ARTIFACT", "MISWIRED_GROUNDED_DEPENDENCY_EDGE",
     "GROUNDED_SEMANTIC_PROVIDER_MISMATCH",
+    # Milestone plans (kriya/workflow/milestone_validation.py): judged
+    # against the repository's topology.
+    "UNJUSTIFIED_ENTRYPOINT", "UNJUSTIFIED_BUILD_BOUNDARY",
 })
 # Another typed failure: rejected, but the code does not say how (a
 # validation error without its own reason code).
 PLANNER_OTHER_FAILURE_CODES = frozenset({"PLAN_VALIDATION_FAILED"})
+# Warnings: a plan is never rejected for these, so they are no outcome.
+PLANNER_WARNING_CODES = frozenset({"EXTENSION_DEPENDENCY_NORMALIZED"})
 
 # The legacy (non-enforce) path's plan-completeness classifications. An
 # unauthorized planned-file path fails the plan schema's own path rule, as it
@@ -166,7 +175,8 @@ def planner_outcome_for_completeness(classification: str) -> str:
     return _COMPLETENESS_OUTCOMES.get(classification, rm.STRUCTURED_OTHER_FAILURE)
 
 
-def record_planner_outcome(planner: Any, outcome: str, *, model: Optional[str] = None) -> Optional[str]:
+def record_planner_outcome(planner: Any, outcome: str, *, model: Optional[str] = None,
+                           role: Optional[str] = None) -> Optional[str]:
     """Charge ``outcome`` to the Planner runtime that produced the response
     (``model``: the model that answered, default the one the client's last
     completion names). Returns the model charged, or None without metrics."""
@@ -178,7 +188,7 @@ def record_planner_outcome(planner: Any, outcome: str, *, model: Optional[str] =
     model = model if isinstance(model, str) and model else planner_response_model(planner)
     if model is None:
         return None
-    role = getattr(planner, "name", None)
+    role = role or getattr(planner, "name", None)
     metrics.record_structured_outcome(model=model, outcome=outcome, role=role if isinstance(role, str) else "planner")
     return model
 

@@ -145,9 +145,15 @@ def test_frozen_mode_refuses_any_drift(frozen, candidates, fragment):
 
 # --- the between-run table --------------------------------------------------------------------
 
-def _metrics_row(role, model, digest, **counters):
-    return {"role": role, "model": model, "runtime_digest": digest, "runtime_exact": True, "latency_seconds": 1.5,
-            **counters}
+def _metrics_row(role, model, digest, settings="sha256:s", **counters):
+    return {"role": role, "model": model, "runtime_digest": digest, "inference_settings_digest": settings,
+            "runtime_exact": True, "latency_seconds": 1.5, **counters}
+
+
+def _routed_settings(cfg, role, alias):
+    """The inference identity ``alias`` runs with when routed to ``role``."""
+    placed = mr.place_candidate(cfg, role, next(c for c in cfg.model_policy.routing.candidates if c.model == alias))
+    return role_inference_settings(placed, role, alias).digest
 
 
 def test_aggregation_is_deterministic_and_order_independent():
@@ -160,9 +166,9 @@ def test_aggregation_is_deterministic_and_order_independent():
     table = rm.aggregate_role_metrics(runs)
     assert table == rm.aggregate_role_metrics(list(reversed(runs)))
     assert table["runs"] == ["run-1", "run-2"]
-    reviewer = mr.metrics_row(table, "reviewer", "d1")
+    reviewer = mr.metrics_row(table, "reviewer", "d1", "sha256:s")
     assert (reviewer["calls"], reviewer["schema_failures"], reviewer["latency_seconds"]) == (5, 1, 3.0)
-    developer = mr.metrics_row(table, "developer", "d1")
+    developer = mr.metrics_row(table, "developer", "d1", "sha256:s")
     assert (developer["first_pass_runs"], developer["first_pass_successes"]) == (1, 0)
     assert table["digest"] == mr.table_digest(table)
 
@@ -349,8 +355,10 @@ def test_measured_outcomes_from_the_table_decide_between_qualified_candidates(tm
     digest_b = _qualify_placed(cfg, "reviewer", "cand-b")
     assert mr.plan_routes(cfg).decisions["reviewer"].model == "cand-a"  # unmeasured: operator order
     table = rm.aggregate_role_metrics([("r1", [
-        _metrics_row("reviewer", "cand-a", digest_a, calls=20, schema_failures=8),
-        _metrics_row("reviewer", "cand-b", digest_b, calls=20, schema_failures=1),
+        _metrics_row("reviewer", "cand-a", digest_a, _routed_settings(cfg, "reviewer", "cand-a"),
+                     calls=20, schema_failures=8),
+        _metrics_row("reviewer", "cand-b", digest_b, _routed_settings(cfg, "reviewer", "cand-b"),
+                     calls=20, schema_failures=1),
     ])])
     mr.write_table(cfg.model_policy.routing.table_path, table)
     decision = mr.plan_routes(cfg).decisions["reviewer"]
@@ -499,8 +507,10 @@ def test_a_candidate_identical_to_the_binding_it_aliases_is_accepted():
 
 def _measured_table(cfg, digest_a, digest_b):
     table = rm.aggregate_role_metrics([("r1", [
-        _metrics_row("reviewer", "cand-a", digest_a, calls=20, schema_failures=8),
-        _metrics_row("reviewer", "cand-b", digest_b, calls=20, schema_failures=1),
+        _metrics_row("reviewer", "cand-a", digest_a, _routed_settings(cfg, "reviewer", "cand-a"),
+                     calls=20, schema_failures=8),
+        _metrics_row("reviewer", "cand-b", digest_b, _routed_settings(cfg, "reviewer", "cand-b"),
+                     calls=20, schema_failures=1),
     ])])
     mr.write_table(cfg.model_policy.routing.table_path, table)
 

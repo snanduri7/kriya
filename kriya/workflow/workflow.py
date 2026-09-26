@@ -268,6 +268,7 @@ from kriya.workflow.review_context import (
     build_reviewer_verified_evidence,
 )
 from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.run_trace import note_run_trace, record_run_exceptions
 from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
 from kriya.workflow.semantic_scope_derivation import derive_semantic_authority_for_run
 from kriya.workflow.skill_extraction import (
@@ -337,6 +338,34 @@ _UNRESOLVED_GATE_MARKERS = (
     "quality gate skipped", "not confirmed", "no compile check available",
     "no test runner available", "no java test config found",
 )
+
+
+def _record_run_exception(engine: Any, trace: Dict[str, Any], error: BaseException) -> None:
+    """MODEL-EVIDENCE-HARDENING-001: a run that raises (e.g. mid-planning,
+    after Planner/Architect calls) still leaves a traces row,
+    ``<trace_id>.exception``, with the exception and every model call no
+    earlier row of it reported (each counted once). Not a RunRecord and never
+    a success; the exception is re-raised unchanged by the caller."""
+    from kriya.workflow.run_trace import write_outcome_trace
+
+    if not trace.get("trace_id"):
+        return
+    try:
+        trace_db = trace_db_path(engine.kernel.config)
+    except Exception as trace_error:  # the exception itself still propagates
+        logger.warning("No traces.db for the failed run %s: %s", trace.get("trace_id"), trace_error)
+        return
+    write_outcome_trace(
+        trace_db, run_id=f"{trace['trace_id']}.exception", goal=str(trace.get("goal") or ""), status="error",
+        llm=getattr(getattr(engine, "developer", None), "llm", None), source="workflow.run_generation_workflow",
+        started_at=trace.get("started_at"), failure_category=type(error).__name__,
+        milestone_group_id=trace.get("milestone_group_id"),
+        events=[RunEvent(
+            kind="run.exception", attempt=0, source="workflow.run_generation_workflow",
+            authority=EventAuthority.AUTHORITATIVE, message=f"{type(error).__name__}: {str(error)[:300]}",
+            details={"exception_type": type(error).__name__, "message": str(error)[:2000]},
+        ).to_dict()],
+    )
 
 
 def _role_metrics_of(client: Any) -> Any:
@@ -1149,6 +1178,7 @@ class WorkflowEngine:
         return assessment.to_payload(run_id=arguments.get("trace_id_override"))
 
     @coordinated_mutation
+    @record_run_exceptions
     async def run_generation_workflow(
         self, 
         goal: str, 
@@ -1727,6 +1757,9 @@ class WorkflowEngine:
         import uuid
         trace_id = trace_id_override or str(uuid.uuid4())[:8]
         start_time = time.time()
+        # MODEL-EVIDENCE-HARDENING-001: what the exception guard needs to
+        # attribute this run's calls if it raises (_record_run_exception).
+        note_run_trace(trace_id=trace_id, goal=goal, started_at=start_time, milestone_group_id=milestone_group_id)
 
         protected_relpath = _resolve_protected_relpath(workspace_path, protected_source_file)
 

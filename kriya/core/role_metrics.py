@@ -20,6 +20,13 @@ policy refused) or another typed failure. Malformed output and a structured
 plan validation failure are the model's fault and also count as schema
 failures, which PRD-019 routing ranks on; a policy rejection does not.
 
+Rows are keyed by the exact runtime AND the inference identity (the digest
+of the settings each call actually sent, MODEL-EVIDENCE-HARDENING-001), so
+qwen3.6 with ``reasoning_effort: none`` never shares reliability evidence
+with qwen3.6 at its default reasoning. A row written before this (no
+``inference_settings_digest``) reads as ``unavailable`` and matches no
+candidate.
+
 These are observations for the operator and for PRD-019's between-run
 aggregation. They never decide anything during the run, and a second
 model's opinion is never counted as verification evidence: deterministic
@@ -34,6 +41,7 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 UNATTRIBUTED = "unattributed"
 UNAVAILABLE_RUNTIME = "unavailable"
+UNAVAILABLE_SETTINGS = "unavailable"
 
 # CompletionResult statuses that mean the model/backend did not return a
 # usable answer at the protocol level.
@@ -84,6 +92,7 @@ class RoleRuntimeMetrics:
     model: str
     runtime_digest: str
     runtime_exact: bool
+    inference_settings_digest: str = UNAVAILABLE_SETTINGS
     calls: int = 0
     protocol_failures: int = 0
     schema_failures: int = 0
@@ -102,8 +111,8 @@ class RoleRuntimeMetrics:
     structured_other_failures: int = 0
 
     @property
-    def key(self) -> Tuple[str, str, str]:
-        return (self.role, self.model, self.runtime_digest)
+    def key(self) -> Tuple[str, str, str, str]:
+        return (self.role, self.model, self.runtime_digest, self.inference_settings_digest)
 
     def to_dict(self) -> Dict[str, Any]:
         data = asdict(self)
@@ -124,9 +133,9 @@ class RoleMetrics:
     planning) - and nothing is reported twice."""
 
     def __init__(self) -> None:
-        self._entries: Dict[Tuple[str, str, str], RoleRuntimeMetrics] = {}
-        self._last_runtime: Dict[Tuple[str, str], Tuple[str, bool]] = {}
-        self._reported: Dict[Tuple[str, str, str], RoleRuntimeMetrics] = {}
+        self._entries: Dict[Tuple[str, str, str, str], RoleRuntimeMetrics] = {}
+        self._last_runtime: Dict[Tuple[str, str], Tuple[str, bool, str]] = {}
+        self._reported: Dict[Tuple[str, str, str, str], RoleRuntimeMetrics] = {}
 
     def take_unreported(self) -> List[Dict[str, Any]]:
         """The rows recorded since the last call (see ``since``)."""
@@ -134,19 +143,22 @@ class RoleMetrics:
         self._reported = self.snapshot()
         return rows
 
-    def _entry(self, role: str, model: str, digest: str, exact: bool) -> RoleRuntimeMetrics:
-        key = (role, model, digest)
+    def _entry(self, role: str, model: str, digest: str, exact: bool,
+               settings: str = UNAVAILABLE_SETTINGS) -> RoleRuntimeMetrics:
+        key = (role, model, digest, settings)
         entry = self._entries.get(key)
         if entry is None:
-            entry = self._entries[key] = RoleRuntimeMetrics(role, model, digest, exact)
+            entry = self._entries[key] = RoleRuntimeMetrics(role, model, digest, exact, settings)
         return entry
 
     def record_call(self, *, model: str, runtime_digest: Optional[str], runtime_exact: bool, status: str,
                     latency_seconds: float, prompt_tokens: int, completion_tokens: int,
-                    tokens_estimated: bool, role: Optional[str] = None) -> None:
+                    tokens_estimated: bool, role: Optional[str] = None,
+                    inference_settings_digest: Optional[str] = None) -> None:
         role = role or current_model_role()
         digest = runtime_digest if runtime_exact and runtime_digest else UNAVAILABLE_RUNTIME
-        entry = self._entry(role, model, digest, bool(runtime_exact))
+        settings = inference_settings_digest or UNAVAILABLE_SETTINGS
+        entry = self._entry(role, model, digest, bool(runtime_exact), settings)
         entry.calls += 1
         if status in PROTOCOL_FAILURE_STATUSES:
             entry.protocol_failures += 1
@@ -155,14 +167,19 @@ class RoleMetrics:
         entry.completion_tokens += int(completion_tokens or 0)
         if tokens_estimated:
             entry.estimated_token_calls += 1
-        self._last_runtime[(role, model)] = (digest, bool(runtime_exact))
+        self._last_runtime[(role, model)] = (digest, bool(runtime_exact), settings)
 
     def record_schema_failure(self, *, model: str, role: Optional[str] = None) -> None:
         """A response the caller rejected against its role contract, charged
         to the runtime that produced it (the role's last call to ``model``)."""
         role = role or current_model_role()
-        digest, exact = self._last_runtime.get((role, model), (UNAVAILABLE_RUNTIME, False))
-        self._entry(role, model, digest, exact).schema_failures += 1
+        self._entry(role, model, *self._last_call(role, model)).schema_failures += 1
+
+    def _last_call(self, role: str, model: str) -> Tuple[str, bool, str]:
+        """(runtime digest, exact, inference settings digest) of the role's
+        last call to ``model``: the identity a judgment of its response is
+        charged to."""
+        return self._last_runtime.get((role, model), (UNAVAILABLE_RUNTIME, False, UNAVAILABLE_SETTINGS))
 
     def record_structured_outcome(self, *, model: str, outcome: str, role: Optional[str] = None) -> None:
         """One validated structured response's typed outcome, charged to the
@@ -171,8 +188,7 @@ class RoleMetrics:
         schema failure."""
         counter = STRUCTURED_OUTCOME_COUNTERS[outcome]
         role = role or current_model_role()
-        digest, exact = self._last_runtime.get((role, model), (UNAVAILABLE_RUNTIME, False))
-        entry = self._entry(role, model, digest, exact)
+        entry = self._entry(role, model, *self._last_call(role, model))
         setattr(entry, counter, getattr(entry, counter) + 1)
         if outcome in MODEL_FAULT_OUTCOMES:
             entry.schema_failures += 1
@@ -180,9 +196,12 @@ class RoleMetrics:
     def record_attempt(self, *, role: str, model: str, runtime_digest: str, runtime_exact: bool,
                        attempt_number: int, passed: bool) -> None:
         """One attempt's deterministic gate outcome, charged to the runtime
-        that generated its candidate. A failed attempt triggers a retry."""
+        and inference identity that generated its candidate (the role's last
+        call to ``model`` on that runtime). A failed attempt triggers a retry."""
         digest = runtime_digest if runtime_exact and runtime_digest else UNAVAILABLE_RUNTIME
-        entry = self._entry(role, model, digest, bool(runtime_exact))
+        last_digest, _, settings = self._last_call(role, model)
+        entry = self._entry(role, model, digest, bool(runtime_exact),
+                            settings if last_digest == digest else UNAVAILABLE_SETTINGS)
         entry.attempts += 1
         if passed:
             entry.attempts_passed += 1
@@ -191,10 +210,10 @@ class RoleMetrics:
         if attempt_number == 1:
             entry.first_pass_success = bool(passed)
 
-    def snapshot(self) -> Dict[Tuple[str, str, str], RoleRuntimeMetrics]:
+    def snapshot(self) -> Dict[Tuple[str, str, str, str], RoleRuntimeMetrics]:
         return {key: RoleRuntimeMetrics(**asdict(entry)) for key, entry in self._entries.items()}
 
-    def since(self, baseline: Optional[Dict[Tuple[str, str, str], RoleRuntimeMetrics]]) -> List[Dict[str, Any]]:
+    def since(self, baseline: Optional[Dict[Tuple[str, str, str, str], RoleRuntimeMetrics]]) -> List[Dict[str, Any]]:
         """What was recorded after ``baseline`` (a ``snapshot()``), sorted by
         role, model and runtime; entries with nothing new are left out."""
         baseline = baseline or {}
@@ -318,8 +337,9 @@ def runs_with_role_metrics(trace_db: str) -> List[Tuple[str, List[Dict[str, Any]
 def aggregate_role_metrics(runs: Sequence[Tuple[str, Sequence[Dict[str, Any]]]]) -> Dict[str, Any]:
     """Deterministic aggregation of ``model.role_metrics`` rows from finished
     runs ([(run_id, rows)]) into the routing table: summed counters per
-    (role, model, runtime digest), with the runs it covers."""
-    totals: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    (role, model, runtime digest, inference settings digest), with the runs
+    it covers."""
+    totals: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
     # Rows written before a counter existed read it as 0.
     counters = ("calls", "protocol_failures", "schema_failures", "prompt_tokens", "completion_tokens",
                 "estimated_token_calls", "attempts", "attempts_passed", "retries_triggered",
@@ -328,8 +348,10 @@ def aggregate_role_metrics(runs: Sequence[Tuple[str, Sequence[Dict[str, Any]]]])
     for run_id, rows in sorted(runs, key=lambda item: item[0]):
         run_ids.append(run_id)
         for row in rows:
-            key = (row["role"], row["model"], row["runtime_digest"])
+            key = (row["role"], row["model"], row["runtime_digest"],
+                   row.get("inference_settings_digest") or UNAVAILABLE_SETTINGS)
             total = totals.setdefault(key, {"role": key[0], "model": key[1], "runtime_digest": key[2],
+                                            "inference_settings_digest": key[3],
                                             "runtime_exact": bool(row.get("runtime_exact")),
                                             "latency_seconds": 0.0, **{name: 0 for name in counters}})
             for name in counters[:-2]:

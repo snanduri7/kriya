@@ -53,6 +53,9 @@ class CompletionResult:
     model: str = ""
     runtime_fingerprint: Optional[str] = None
     runtime_fingerprint_exact: bool = False
+    # MODEL-EVIDENCE-HARDENING-001: the executed inference identity (the
+    # digest of the settings this request actually sent).
+    inference_settings_digest: Optional[str] = None
     # What Kriya asked for: json_mode, streaming, tools, and whether the
     # JSON-mode-with-reasoning fallback (retry without response_format) or
     # the empty-content floor retry was used.
@@ -94,6 +97,7 @@ class CompletionResult:
             "model": self.model,
             "runtime_fingerprint": self.runtime_fingerprint,
             "runtime_fingerprint_exact": self.runtime_fingerprint_exact,
+            "inference_settings_digest": self.inference_settings_digest,
             "protocol": dict(self.protocol),
             "reasoning_present": self.reasoning_present,
             "reasoning_chars": self.reasoning_chars,

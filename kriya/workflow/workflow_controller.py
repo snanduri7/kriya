@@ -338,6 +338,10 @@ class _StructuredPlanUnavailable(Exception):
     was already applied to the real workspace."""
 
 
+# PRD-018 role bucket of shadow-mode planning (never read by PRD-019 routing).
+SHADOW_PLANNER_ROLE = "planner_shadow"
+
+
 class _UnsafeStructuredPlan(Exception):
     """A parsed plan violates an authoritative safety boundary."""
 
@@ -3354,6 +3358,14 @@ class WorkflowController:
                     "error": str(e),
                     "run_id": run_id,
                 }
+            except BaseException as error:
+                # A bug here still propagates (see above); its calls and the
+                # exception are recorded first (MODEL-EVIDENCE-HARDENING-001).
+                self._write_enforce_trace(run_id, goal, {
+                    "status": "error", "failure_type": type(error).__name__, "files": [],
+                    "error": str(error)[:2000],
+                }, enforce_started)
+                raise
 
             # MODEL-EVIDENCE-HARDENING-001: the enforce run's own trace row -
             # its terminal status, why planning failed, the original
@@ -3686,14 +3698,26 @@ class WorkflowController:
         notes: List[str] = []
         ledger = DecisionLedger()
 
-        plan_text = await self.workflow_engine.planner.run(goal)
+        # MODEL-EVIDENCE-HARDENING-001: shadow planning is observational, so
+        # its calls and typed outcomes go to their own role bucket and never
+        # reach the Planner's routing evidence.
+        planner = self.workflow_engine.planner
+        plan_text = await planner.run(goal, metrics_role=SHADOW_PLANNER_ROLE)
+        shadow_model = planner_response_model(planner)
+
+        def shadow_outcome(codes: List[str], *, valid: bool = False) -> None:
+            record_planner_outcome(planner, classify_planner_outcome(codes, valid=valid),
+                                   model=shadow_model, role=SHADOW_PLANNER_ROLE)
+
         structured_output, parse_issue = parse_planner_structured_output(plan_text)
         if structured_output is None:
+            shadow_outcome(classify_structured_plan_parse_issue(parse_issue))
             notes.append(f"no structured plan: {parse_issue}")
             return None, (), (), None, notes
 
         plan = build_engineering_plan_from_planner_output(structured_output, plan_id=run_id, kind=route.kind)
         if plan is None:
+            shadow_outcome(["STRUCTURED_PLAN_EMPTY"])
             notes.append("structured output parsed but produced zero subtasks")
             return None, (), (), None, notes
         plan, _ = canonicalize_planned_file_actions(plan, workspace_path)
@@ -3718,6 +3742,7 @@ class WorkflowController:
         log_stack_contract_boundary(
             "plan", shadow_stack_contract, None if validation.valid else "REJECT",
         )
+        shadow_outcome(list(validation.reason_codes), valid=validation.valid)
         if not validation.valid:
             notes.append(f"plan failed validation: {validation.errors}")
             return plan, (), ledger.all(), None, notes
@@ -3811,6 +3836,12 @@ class WorkflowController:
         source = "workflow_controller.enforce"
         status = str(result.get("status") or "unknown")
         events: List[Dict[str, Any]] = []
+        if status == "error":
+            events.append(RunEvent(
+                kind="run.exception", attempt=0, source=source, authority=EventAuthority.AUTHORITATIVE,
+                message=f"{result.get('failure_type')}: {str(result.get('error') or '')[:300]}",
+                details={"exception_type": result.get("failure_type"), "message": result.get("error")},
+            ).to_dict())
         if result.get("failure_type") == "PLANNING_ERROR":
             events.append(RunEvent(
                 kind="planning.failed", attempt=0, source=source, authority=EventAuthority.AUTHORITATIVE,

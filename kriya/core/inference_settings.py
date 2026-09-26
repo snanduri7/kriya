@@ -27,12 +27,14 @@ Rules:
 - Normalization: keys sorted; an empty ``options`` equals an absent one,
   which equals ``extra_body: None`` or ``{}``; an integral float equals the
   integer (``1.0`` == ``1``).
-- Per role, the temperature is the one the role's calls send
-  (``binding_inference_settings``): the Developer always sends the primary
-  ``llm.temperature`` (a fallback's own ``temperature`` field is not sent on
-  that path); a role with its own ``agent_llms`` binding sends that
-  binding's; a role on the primary binding sends ``llm.temperature``, except
-  the Reviewer, which sends ``llm.reviewer_temperature`` when set.
+- Per role, the settings are the ones the role's calls send
+  (``binding_inference_settings``), and a call to a model always executes
+  with that model's own binding settings (``LLMClient._binding``): a
+  Developer fallback or any ``agent_llms`` binding sends its own
+  ``temperature`` and ``extra_body``, never the primary's; a role on the
+  primary binding sends ``llm.temperature``, except the Reviewer, which
+  sends ``llm.reviewer_temperature`` when set. Qualified inference identity
+  == executed inference identity.
 - ``llm.retry_temperature`` is a per-call override on Developer retries, not
   a role setting. A retry call sent with it is a different inference
   identity at dispatch, so it gets no qualified tier or measured limit
@@ -117,7 +119,7 @@ def request_settings(*, temperature: Optional[float], reasoning: bool,
 
 def _role_temperature(config: Any, role: str, binding: Any) -> Optional[float]:
     llm = config.llm
-    if role == "developer" or binding is llm:
+    if binding is llm:
         if role == "reviewer" and getattr(llm, "reviewer_temperature", None) is not None:
             return llm.reviewer_temperature
         return llm.temperature

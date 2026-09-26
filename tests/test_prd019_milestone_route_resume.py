@@ -65,6 +65,12 @@ def _config(tmp_path):
     return cfg
 
 
+def _routed_settings(cfg, alias):
+    placed = mr.place_candidate(cfg, "reviewer", next(c for c in cfg.model_policy.routing.candidates
+                                                       if c.model == alias))
+    return role_inference_settings(placed, "reviewer", alias).digest
+
+
 def _qualify(cfg, alias):
     placed = mr.place_candidate(cfg, "reviewer", next(c for c in cfg.model_policy.routing.candidates
                                                        if c.model == alias))
@@ -151,9 +157,9 @@ def test_a_resumed_milestone_sequence_reuses_its_checkpointed_routes(milestone_r
     # Between the run and the resume the evidence changes: a fresh run would now route the reviewer to cand-b.
     table = rm.aggregate_role_metrics([("r1", [
         {"role": "reviewer", "model": "cand-a", "runtime_digest": digests["cand-a"], "runtime_exact": True,
-         "calls": 20, "schema_failures": 8},
+         "inference_settings_digest": _routed_settings(cfg, "cand-a"), "calls": 20, "schema_failures": 8},
         {"role": "reviewer", "model": "cand-b", "runtime_digest": digests["cand-b"], "runtime_exact": True,
-         "calls": 20, "schema_failures": 1},
+         "inference_settings_digest": _routed_settings(cfg, "cand-b"), "calls": 20, "schema_failures": 1},
     ])])
     mr.write_table(cfg.model_policy.routing.table_path, table)
     assert mr.plan_routes(cfg).decisions["reviewer"].model == "cand-b"

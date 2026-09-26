@@ -874,7 +874,13 @@ async def plan_milestones(
     for attempt in range(1, max(1, max_planning_attempts) + 1):
         prompt = base_prompt if not correction_feedback else f"{base_prompt}\n\n{correction_feedback}"
         _raw, milestones = await milestone_planner.run_with_milestone_list(prompt, stream_callback=stream_callback)
+        # MODEL-EVIDENCE-HARDENING-001: each milestone Planner response's
+        # typed outcome, charged to the model that answered.
+        from kriya.workflow.planner_repair import classify_planner_outcome, record_planner_outcome
+
         if milestones is None:
+            record_planner_outcome(milestone_planner, classify_planner_outcome(["STRUCTURED_PLAN_PARSE_FAILED"],
+                                                                               valid=False))
             _log_milestone_plan_telemetry(
                 trace_db, group_id, "malformed_output", [], attempt, accumulated_failure_codes, topology,
                 goal=goal, llm=getattr(milestone_planner, "llm", None),
@@ -883,6 +889,8 @@ async def plan_milestones(
 
         last_attempted_milestones = milestones
         validation_result = validator.validate(milestones, repository_topology=topology, goal_text=goal)
+        record_planner_outcome(milestone_planner, classify_planner_outcome(
+            [e.code for e in validation_result.errors], valid=validation_result.valid))
         if validation_result.valid:
             _log_milestone_plan_telemetry(
                 trace_db, group_id, "accepted", validation_result.milestones,

@@ -145,9 +145,9 @@ def test_role_temperatures_follow_what_each_role_sends():
     assert role_inference_settings(cfg, "reviewer", MODEL).temperature == 0.3
     assert role_inference_settings(cfg, "developer", MODEL).temperature == 0.7
     fallback = role_inference_settings(cfg, "developer", FALLBACK)
-    # The Developer path sends the primary temperature to a fallback; its own
-    # reasoning flag and extra_body do apply.
-    assert fallback.temperature == 0.7 and fallback.reasoning is True
+    # A fallback executes with its own settings (temperature, reasoning flag,
+    # extra_body), never the primary's.
+    assert fallback.temperature == 0.2 and fallback.reasoning is True
     assert fallback.extra_body == {"reasoning_effort": "none"}
     cfg.agent_llms.planner.llm = cfg.llm.model_copy(update={"temperature": 0.1})
     assert role_inference_settings(cfg, "planner", MODEL).temperature == 0.1

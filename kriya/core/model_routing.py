@@ -263,11 +263,16 @@ def write_table(path: str, table: Dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def metrics_row(table: Dict[str, Any], role: str, runtime_digest: Optional[str]) -> Optional[Dict[str, Any]]:
-    if not runtime_digest:
+def metrics_row(table: Dict[str, Any], role: str, runtime_digest: Optional[str],
+                inference_settings_digest: Optional[str]) -> Optional[Dict[str, Any]]:
+    """The measured row for exactly this role, runtime and inference identity
+    (MODEL-EVIDENCE-HARDENING-001): metrics from the same runtime called
+    with other settings are another identity's evidence and never count."""
+    if not runtime_digest or not inference_settings_digest:
         return None
     return next((row for row in table.get("rows", [])
-                 if row.get("role") == role and row.get("runtime_digest") == runtime_digest), None)
+                 if row.get("role") == role and row.get("runtime_digest") == runtime_digest
+                 and row.get("inference_settings_digest") == inference_settings_digest), None)
 
 
 @dataclass
@@ -347,17 +352,19 @@ def candidate_evidence(config: Any, role: str, model: str, *, order: int, explic
         fingerprint = resolve_configured_model_runtime(
             config, model, base_url=binding.base_url, api_key=binding.api_key, extra_body=binding.extra_body or {},
         )
-        assessment = assess(fingerprint, required_capabilities(config, role, model),
-                            settings=role_inference_settings(config, role, model))
+        settings = role_inference_settings(config, role, model)
+        assessment = assess(fingerprint, required_capabilities(config, role, model), settings=settings)
         exact, digest = bool(fingerprint.exact), fingerprint.digest if fingerprint.exact else None
         status, reasons = assessment.status, tuple(assessment.reasons)
         window = _served_window(fingerprint, binding)
+        settings_digest: Optional[str] = settings.digest
     except Exception as error:  # an unreachable runtime is simply not eligible
         exact, digest, status, reasons, window = False, None, "UNAVAILABLE", (str(error),), binding.context_window
+        settings_digest = None
     return CandidateEvidence(
         model=model, order=order, runtime_digest=digest, runtime_exact=exact, qualification=status,
         qualification_reasons=reasons, json_mode=bool(caps.json_mode), native_tool_calls=bool(caps.native_tool_calls),
-        context_window=window, explicit=explicit, metrics=metrics_row(table, role, digest),
+        context_window=window, explicit=explicit, metrics=metrics_row(table, role, digest, settings_digest),
     )
 
 

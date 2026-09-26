@@ -478,14 +478,17 @@ class BaseAgent(ABC):
         max_tokens_override: Optional[int] = None,
         system_prompt_override: Optional[str] = None,
         json_mode: bool = False,
+        metrics_role: Optional[str] = None,
     ) -> str:
         """Execute a text completion request, escalating through this role's chain
         only on a hard call failure (connection/timeout/HTTP/egress error) - a
         legitimately short-but-correct response is never wrongly retried just for
-        being brief."""
+        being brief. ``metrics_role`` attributes the calls to another PRD-018
+        role bucket (shadow-mode planning uses ``planner_shadow`` so its
+        evidence never reaches the Planner's routing metrics)."""
         return await call_with_escalation(
             self.llm, system_prompt_override or self.system_prompt, prompt, self._candidates(),
-            json_mode=json_mode, stream_callback=stream_callback, role=self.name,
+            json_mode=json_mode, stream_callback=stream_callback, role=metrics_role or self.name,
             temperature_override=temperature_override,
             max_tokens_override=(
                 max_tokens_override if max_tokens_override is not None else self.max_output_tokens

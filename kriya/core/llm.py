@@ -163,14 +163,19 @@ class LLMClient:
 
     def _binding(self, model: str) -> Dict[str, Any]:
         """Config for ``model``: primary llm, an llm_chain entry or an
-        agent_llms binding (the first exact, case-folded match)."""
+        agent_llms binding (the first exact, case-folded match), including
+        its own sampling settings (``temperature``, ``extra_body``): a call to
+        a model executes with that model's settings, never the primary's,
+        unless the caller overrides them (MODEL-EVIDENCE-HARDENING-001:
+        qualified inference identity == executed inference identity)."""
         from kriya.core.model_runtime import binding_output_tokens
 
         target = (model or "").casefold()
         cfg = self.config
         if cfg.llm.model.casefold() == target:
             return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning,
-                    "context_policy": cfg.llm.context_policy, "max_tokens": self.max_tokens}
+                    "context_policy": cfg.llm.context_policy, "max_tokens": self.max_tokens,
+                    "temperature": self.temperature, "extra_body": cfg.llm.extra_body or None}
         candidates = list(cfg.llm_chain)
         for role in ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance"):
             role_cfg = getattr(cfg.agent_llms, role, None)
@@ -181,11 +186,15 @@ class LLMClient:
             candidates.extend(role_cfg.llm_chain)
         for candidate in candidates:
             if candidate.model.casefold() == target:
+                own_temperature = getattr(candidate, "temperature", None)
                 return {"context_window": candidate.context_window, "reasoning": candidate.reasoning,
                         "context_policy": candidate.context_policy,
-                        "max_tokens": binding_output_tokens(cfg, candidate)}
+                        "max_tokens": binding_output_tokens(cfg, candidate),
+                        "temperature": own_temperature if own_temperature is not None else self.temperature,
+                        "extra_body": getattr(candidate, "extra_body", None) or None}
         return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning,
-                "context_policy": cfg.llm.context_policy, "max_tokens": self.max_tokens}
+                "context_policy": cfg.llm.context_policy, "max_tokens": self.max_tokens,
+                "temperature": self.temperature, "extra_body": cfg.llm.extra_body or None}
 
     async def _runtime_fingerprint(self, model: str, base_url: str, api_key: str,
                                    extra_body: Optional[Dict[str, Any]]):
@@ -320,6 +329,7 @@ class LLMClient:
             role_metrics.record_call(
                 model=result.model, runtime_digest=result.runtime_fingerprint,
                 runtime_exact=result.runtime_fingerprint_exact, status=result.status.value,
+                inference_settings_digest=result.inference_settings_digest,
                 latency_seconds=result.elapsed_seconds, prompt_tokens=result.prompt_tokens or 0,
                 completion_tokens=result.completion_tokens or 0, tokens_estimated=bool(result.tokens_estimated),
             )
@@ -472,7 +482,8 @@ class LLMClient:
                         is_reasoning = fb.reasoning
                         break
 
-        temperature = temperature_override if temperature_override is not None else self.temperature
+        own = self._binding(model)
+        temperature = temperature_override if temperature_override is not None else own["temperature"]
         base_max_tokens = (
             max_tokens_override if max_tokens_override is not None else self._binding(model)["max_tokens"]
         )
@@ -480,7 +491,7 @@ class LLMClient:
         if extra_body_override is not None:
             extra_body = extra_body_override or None
         else:
-            extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
+            extra_body = own["extra_body"]
         # Reasoning models are NOT excluded from response_format here - Ollama (at
         # least) keeps a reasoning model's <think>-equivalent output in a separate
         # "reasoning" field and json_object-constrains only the "content" field, so
@@ -496,12 +507,14 @@ class LLMClient:
         fingerprint = await self._runtime_fingerprint(
             model, url_to_check, api_key_override or self.config.llm.api_key, extra_body,
         )
+        # The executed inference identity (the settings actually sent).
+        settings = request_settings(temperature=temperature, reasoning=is_reasoning, extra_body=extra_body)
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
         api_key = api_key_override or self.config.llm.api_key
         budget = self._dispatch_budget(
             model=model, fingerprint=fingerprint, messages=messages, tools=None,
             max_tokens=max_tokens, is_reasoning=is_reasoning, base_url=url_to_check, api_key=api_key,
-            settings=request_settings(temperature=temperature, reasoning=is_reasoning, extra_body=extra_body),
+            settings=settings,
             expected_output=expected_output,
         )
         max_tokens = budget.max_tokens
@@ -516,6 +529,7 @@ class LLMClient:
         result = CompletionResult(
             status=CompletionStatus.OK, model=model,
             runtime_fingerprint=fingerprint.digest, runtime_fingerprint_exact=fingerprint.exact,
+            inference_settings_digest=settings.digest,
             protocol={"json_mode": json_mode, "streaming": stream_callback is not None, "tools": False,
                       "reasoning_model": is_reasoning, "response_format_dropped": False,
                       "empty_content_floor_retry": False},
@@ -814,12 +828,13 @@ class LLMClient:
                 base_url=base_url_override or self.config.llm.base_url
             )
 
-        temperature = temperature_override if temperature_override is not None else self.temperature
-        max_tokens = max_tokens_override if max_tokens_override is not None else self._binding(model)["max_tokens"]
+        own = self._binding(model)
+        temperature = temperature_override if temperature_override is not None else own["temperature"]
+        max_tokens = max_tokens_override if max_tokens_override is not None else own["max_tokens"]
         if extra_body_override is not None:
             extra_body = extra_body_override or None
         else:
-            extra_body = self.config.llm.extra_body if self.config.llm.extra_body else None
+            extra_body = own["extra_body"]
 
         self.last_call_metrics = None
         self.last_completion = None
@@ -827,13 +842,14 @@ class LLMClient:
             model, url_to_check, api_key_override or self.config.llm.api_key, extra_body,
         )
         api_key = api_key_override or self.config.llm.api_key
+        # The executed inference identity, with the binding's reasoning flag
+        # as the role identity records it (this path applies no reasoning
+        # floor of its own).
+        settings = request_settings(temperature=temperature, reasoning=bool(own["reasoning"]), extra_body=extra_body)
         budget = self._dispatch_budget(
             model=model, fingerprint=fingerprint, messages=messages, tools=tools,
             max_tokens=max_tokens, is_reasoning=False, base_url=url_to_check, api_key=api_key,
-            # The binding's reasoning flag, as the role identity records it
-            # (this path applies no reasoning floor of its own).
-            settings=request_settings(temperature=temperature, reasoning=bool(self._binding(model)["reasoning"]),
-                                      extra_body=extra_body),
+            settings=settings,
         )
         max_tokens = budget.max_tokens
         if budget.context_expanded:
@@ -843,6 +859,7 @@ class LLMClient:
         result = CompletionResult(
             status=CompletionStatus.OK, model=model,
             runtime_fingerprint=fingerprint.digest, runtime_fingerprint_exact=fingerprint.exact,
+            inference_settings_digest=settings.digest,
             protocol={"json_mode": False, "streaming": False, "tools": True, "tool_count": len(tools)},
             max_tokens=max_tokens,
         )

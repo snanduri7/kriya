@@ -1124,6 +1124,8 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
         extra_body = settings.extra_body
         binding.extra_body = with_context_window(extra_body, window) if window is not None else extra_body
         binding.reasoning = settings.reasoning
+        if settings.temperature is not None and hasattr(binding, "temperature"):
+            binding.temperature = settings.temperature
         copy.llm.temperature = settings.temperature if settings.temperature is not None else copy.llm.temperature
         copy.llm.reasoning = settings.reasoning
     if context_window is not None:

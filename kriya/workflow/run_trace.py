@@ -18,9 +18,11 @@ state, and never reports a status the work did not have.
 """
 from __future__ import annotations
 
+import functools
 import logging
 import time
-from typing import Any, Dict, Iterable, Optional
+from contextvars import ContextVar
+from typing import Any, Awaitable, Callable, Dict, Iterable, Optional
 
 from kriya.workflow.run_events import EventAuthority, RunEvent
 
@@ -77,4 +79,40 @@ def write_outcome_trace(
         return False
 
 
-__all__ = ["unreported_role_metrics_event", "write_outcome_trace"]
+# The active generation run's trace identity, set by the run once it has
+# one (``note_run_trace``) and read by ``record_run_exceptions``. One holder
+# per call, so a nested run (an enforce subtask) never overwrites its caller's.
+_RUN_TRACE: ContextVar[Optional[Dict[str, Any]]] = ContextVar("kriya_run_trace", default=None)
+
+
+def note_run_trace(**fields: Any) -> None:
+    holder = _RUN_TRACE.get()
+    if holder is not None:
+        holder.update(fields)
+
+
+def record_run_exceptions(func: Callable[..., Awaitable[Any]]) -> Callable[..., Awaitable[Any]]:
+    """Decorates ``WorkflowEngine.run_generation_workflow``: an exception
+    (or cancellation) escaping the run writes its ``.exception`` trace row
+    (``workflow._record_run_exception``) and is re-raised unchanged."""
+    @functools.wraps(func)
+    async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        holder: Dict[str, Any] = {}
+        token = _RUN_TRACE.set(holder)
+        try:
+            return await func(self, *args, **kwargs)
+        except BaseException as error:
+            from kriya.workflow.workflow import _record_run_exception
+
+            try:
+                _record_run_exception(self, holder, error)
+            except Exception as trace_error:  # never replaces the run's own exception
+                logger.warning("Could not record the run's exception trace: %s", trace_error)
+            raise
+        finally:
+            _RUN_TRACE.reset(token)
+
+    return wrapper
+
+
+__all__ = ["note_run_trace", "record_run_exceptions", "unreported_role_metrics_event", "write_outcome_trace"]

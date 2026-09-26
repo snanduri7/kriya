@@ -287,3 +287,53 @@ The environment binding is mutation-checked.
 **What `./setup.sh requalify` now records:** each `<arm>-32k.json` has an `environment` block (digest, os/arch, metal, "Apple M1 Max", 64 GiB class, `ollama/0.34.2`, exact) and an `environment_evidence` entry holding `context_capacity` under that digest.
 
 **Focused command:** add `tests/test_qual_environment_identity.py` and `tests/test_bootstrap_contract.py` to the focused list above.
+
+## Final closure: the four residual gaps (user review, 2026-09-26)
+
+**1. Executed identity == qualified identity.**
+- **Before:** the Developer's fallback calls sent the primary's temperature, and a bare `model_override` call sent the primary's `extra_body`.
+- **Now:** `LLMClient._binding` returns each binding's own `temperature` and `extra_body`, and both completion paths use them whenever the caller does not override them. A fallback therefore executes with its own temperature, `reasoning_effort`/`think`, top_p, top_k, seed and every other `extra_body` field, never the primary's. No inheritance is implied.
+- **Role identity follows the same rule:** a Developer fallback is identified by its own temperature.
+- **Qualification setup** sets the binding's own temperature too.
+- **Every `CompletionResult` carries `inference_settings_digest`,** the executed identity.
+- **Tests:** through the real `_run_developer_generation` path (the prd017 harness):
+  - the primary and the fallback send different temperatures and reasoning/sampling settings;
+  - the executed digest equals `role_inference_settings`;
+  - the fallback's qualification lookup is QUALIFIED;
+  - changing the fallback's temperature or `reasoning_effort` makes it MISSING.
+
+  Mutation-checked.
+- **One deliberate per-call override remains:** `retry_temperature`. It is off in every shipped and demo config, and a retry sent with it is its own identity.
+
+**2. Identity-keyed metrics.**
+- Role-metrics rows are keyed by (role, model, runtime digest, **inference settings digest**) from the executed call. Attempts, schema failures and structured outcomes are charged to the identity of the call that produced them.
+- Aggregation keeps identities apart, while identical identities aggregate normally.
+- PRD-019's `metrics_row` reads only the candidate's own role identity. A row from before this change (no digest) matches no candidate: it is unmeasured, never misattributed.
+- The table version is unchanged, so frozen route files stay valid. **Regenerate the routing table** (`kriya model metrics --write-table`) to measure under identities.
+- The bundle extractor now aggregates per identity for future runs.
+
+**3. Mid-planning exceptions.**
+- `run_generation_workflow` is wrapped by `record_run_exceptions`. Any exception or cancellation escaping a run writes `<trace_id>.exception`: status `error`, failure category = the exception type, a `run.exception` event, and every call no earlier row reported. It then re-raises unchanged.
+- A context-variable holder per call keeps nested enforce subtask runs apart.
+- An enforce run that raises writes its `.enforce` row with status `error` before re-raising.
+- No RunRecord, and never a success.
+- **Tested:** an exception after the Planner call. The row holds the calls, counted once, with the reason.
+
+**4. Planner outcomes everywhere.**
+- **Milestone Planner responses** use the same closed taxonomy. Malformed list → malformed output. The milestone validator's plan-internal codes → structured validation failure. `UNJUSTIFIED_ENTRYPOINT`/`UNJUSTIFIED_BUILD_BOUNDARY` → policy rejection. The `EXTENSION_DEPENDENCY_NORMALIZED` warning is no outcome.
+- **Shadow-mode planning** is classified too. Its calls and outcomes go to role `planner_shadow` (`BaseAgent.run(metrics_role=)`), which routing never reads, so shadow evidence cannot influence enforce routing. Before this, shadow calls were counted under `planner`.
+- **Tests:** shadow validation failure, malformed and policy rejection stay distinct; milestone malformed, validation failures and repaired; one outcome per response.
+
+**Kept as approved:**
+- `/3` policy; `/2` records are STALE;
+- per-role effective settings in the identity;
+- max_tokens as metadata only;
+- the `.enforce` row (approved) and the `.milestone-plan` row;
+- typed UNKNOWN reasons;
+- runtime-scoped tokenizer floors;
+- the extractor tests;
+- qwen3.8 64K: not re-run; the FAIL keeps 64K unavailable for this runtime and environment.
+
+**Verification:**
+- Claude: pylint 0, ruff 0, and 198 passed across the four new files plus prd017/prd018/prd019.
+- User: the focused list plus `tests/test_model_evidence_hardening_final.py tests/test_qual_environment_identity.py tests/test_bootstrap_contract.py`, then the full suite, then `./setup.sh requalify`.
