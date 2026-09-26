@@ -11,7 +11,7 @@ import logging
 import os
 import subprocess
 from contextlib import contextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
@@ -33,6 +33,7 @@ from kriya.core.logging_setup import (
     configure_logging,
     resolve_log_directory,
 )
+from _strict_doubles import strict_kernel
 
 
 @contextmanager
@@ -293,7 +294,7 @@ def test_generate_bootstrap_creates_no_cwd_logs(home, tmp_path, monkeypatch):
     before = _tree(cwd)
     cfg = _cfg()
     cfg.paths.memory = str(tmp_path / "memory")
-    kernel = MagicMock(start=AsyncMock(), stop=AsyncMock())
+    kernel = strict_kernel(cfg)
     with _fresh_root_logging(), \
          patch("kriya.cli.load_config", return_value=cfg), \
          patch("kriya.cli.Kernel", return_value=kernel), \

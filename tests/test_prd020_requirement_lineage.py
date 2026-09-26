@@ -43,6 +43,7 @@ from kriya.workflow.requirements import (
     requirement_outcomes,
     seed_requirement_obligations,
 )
+from _strict_doubles import strict_kernel
 
 GOAL = (
     "Create greeting.py with a greet(name) function.\n"
@@ -508,7 +509,7 @@ def test_the_fix_command_marks_its_goal_as_kriyas_own():
             captured.update(kwargs)
             return {"quality_gates_passed": True, "files": [], "review": "ok", "plan": "", "design": ""}
 
-    kernel = MagicMock()
+    kernel = strict_kernel()
     kernel.start = AsyncMock()
     kernel.stop = AsyncMock()
     runner = CliRunner()

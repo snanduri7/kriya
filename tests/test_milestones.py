@@ -37,6 +37,7 @@ from kriya.workflow.milestones import (
     save_milestone_run_state,
 )
 from kriya.workflow.repository_topology import RepositoryTopology
+from _strict_doubles import strict_engine
 
 
 def mkv2(id, goal="g", success_criterion="c", depends_on=None, mode=None, extends=None, provides=None, consumes=None):
@@ -696,7 +697,7 @@ async def test_run_milestones_success_path_through_all_milestones_and_integratio
     ]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]}
         )
@@ -727,7 +728,7 @@ async def test_run_milestones_registers_and_implements_declared_capabilities():
     ]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]}
         )
@@ -760,7 +761,7 @@ async def test_run_milestones_populates_real_contract_consumers_from_consumes():
     ]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]}
         )
@@ -828,7 +829,7 @@ async def test_run_milestones_invalidates_a_completed_consumer_when_its_provider
             current_plan_hash="old-plan",
             last_verified_checkpoint="stale-m3",
         ))
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": ["b.py"]}
         )
@@ -890,7 +891,7 @@ async def test_authoritative_milestones_stop_when_contract_registry_cannot_persi
         milestone_group_id="grp",
         milestone_states={"M1": "pending"},
     ))
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = AsyncMock()
 
     with patch(
@@ -916,7 +917,7 @@ async def test_authoritative_milestone_crash_leaves_m1_done_and_m2_current(tmp_p
         milestone_group_id="grp",
         milestone_states={"M1": "pending", "M2": "pending"},
     ))
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = AsyncMock(side_effect=[
         {"quality_gates_passed": True, "design": "d", "files": []},
         RuntimeError("process interrupted during M2"),
@@ -944,7 +945,7 @@ async def test_run_milestones_capability_stays_proposed_when_its_milestone_fails
     milestones = [mkv2("M1", goal="g1", success_criterion="c1", provides=[{"name": "ProtocolCodec"}])]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": False, "design": "d", "files": []}
         )
@@ -979,7 +980,7 @@ async def test_run_milestones_derives_and_persists_real_artifacts_per_milestone(
             f.write('[project]\nname = "myapp"\nversion = "0.1.0"\n')
 
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]}
         )
@@ -1011,7 +1012,7 @@ async def test_run_milestones_artifact_derivation_is_non_fatal_and_skips_an_unre
     milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": ["a.py"]}
         )
@@ -1044,7 +1045,7 @@ async def test_run_milestones_grounds_later_milestones_on_earlier_ones_real_file
     ]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
 
         real_signature = "public Protocol(byte f1, short f2, int f3, long f4, byte[] p) { ... }"
         os.makedirs(os.path.join(tmp, "src"), exist_ok=True)
@@ -1099,7 +1100,7 @@ async def test_run_milestones_passes_pom_content_to_judge_for_exec_shape_inferen
         with open(os.path.join(tmp, "pom.xml"), "w") as f:
             f.write(pom_content)
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": []}
         )
@@ -1117,7 +1118,7 @@ async def test_run_milestones_judge_build_file_content_none_without_pom():
     milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": []}
         )
@@ -1159,7 +1160,7 @@ async def test_run_milestones_grounds_python_verification_commands_before_captur
             )
 
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(return_value={
             "quality_gates_passed": True, "design": "d",
             "files": ["validation/email_rules.py"],
@@ -1186,7 +1187,7 @@ async def test_run_milestones_failure_defaults_to_abandon_with_no_callback():
     milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": False})
         result = await run_milestones(we, state, tmp)
     assert result["status"] == "milestone_failed"
@@ -1202,7 +1203,7 @@ async def test_run_milestones_failure_callback_abandon_stops_sequence():
     ]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": False})
         cb = MagicMock(return_value="abandon")
 
@@ -1218,7 +1219,7 @@ async def test_run_milestones_failure_callback_retry_then_succeeds():
     milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(side_effect=[
             {"quality_gates_passed": False},
             {"quality_gates_passed": True, "design": "d", "files": []},
@@ -1251,7 +1252,7 @@ async def test_run_milestones_dependency_regression_routes_through_failure_callb
             group_id="grp", original_goal="orig", milestones=milestones,
             established_dependencies=["org.apache.ignite:ignite-core"],
         )
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": []}
         )
@@ -1280,7 +1281,7 @@ async def test_run_milestones_dependency_regression_retry_recovers():
             group_id="grp", original_goal="orig", milestones=milestones,
             established_dependencies=["org.apache.ignite:ignite-core"],
         )
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": []}
         )
@@ -1317,7 +1318,7 @@ async def test_run_milestones_never_skips_a_completed_milestone_without_proof():
             group_id="grp", original_goal="orig", milestones=milestones,
             completed_milestone_ids=["M1"],
         )
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": []}
         )
@@ -1411,7 +1412,7 @@ async def test_run_milestones_stops_before_integration_call_on_replay_failure():
     milestones = [mkv2("M1", goal="g1", success_criterion="c1")]
     with tempfile.TemporaryDirectory() as tmp:
         state = MilestoneRunState(group_id="grp", original_goal="orig", milestones=milestones)
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = AsyncMock(
             return_value={"quality_gates_passed": True, "design": "d", "files": []}
         )

@@ -1,12 +1,13 @@
 """PRD-003: one JSON result on every callback terminal path."""
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from click.testing import CliRunner
 
 from kriya.cli import main
 from kriya.config import AppConfig
+from _strict_doubles import strict_kernel
 
 GAP = {"status": "knowledge_gap", "run_id": "gap-run", "gap_report": {"gaps": [
     {"library": "example", "version": "unspecified", "reason": "missing evidence", "risk_level": "high"}
@@ -20,7 +21,7 @@ def invoke(tmp_path, monkeypatch):
     cfg.paths.memory = str(tmp_path / "memory")
     cfg.logging.file_enabled = False
     cfg.logging.run_file_enabled = False
-    kernel = MagicMock(start=AsyncMock(), stop=AsyncMock())
+    kernel = strict_kernel(cfg)
 
     def run(payload=None, args=(), input_text=None, setup_error=None, workflow_error=None):
         with patch("kriya.cli.load_config", return_value=cfg), \

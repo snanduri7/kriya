@@ -15,14 +15,14 @@ import pytest
 
 from kriya.cli import _dispatch_generation, _dispatch_milestones
 from kriya.workflow.workflow_types import WorkflowResult
+from _strict_doubles import strict_config, strict_engine
 
 
 @pytest.mark.asyncio
 async def test_disabled_is_a_pure_passthrough_to_run_generation_workflow():
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = AsyncMock(return_value={"status": "success", "run_id": "abc"})
-    cfg = MagicMock()
-    cfg.workflow_controller.enabled = False
+    cfg = strict_config(workflow_controller={"enabled": False})
 
     res = await _dispatch_generation(we, cfg, goal="do x", workspace_path="/tmp/proj")
 
@@ -32,10 +32,8 @@ async def test_disabled_is_a_pure_passthrough_to_run_generation_workflow():
 
 @pytest.mark.asyncio
 async def test_enabled_routes_through_workflow_controller_and_returns_legacy_result(monkeypatch):
-    we = MagicMock()
-    cfg = MagicMock()
-    cfg.workflow_controller.enabled = True
-    cfg.workflow_controller.mode = "shadow"
+    we = strict_engine()
+    cfg = strict_config(workflow_controller={"enabled": True, "mode": "shadow"})
 
     fake_result = WorkflowResult(
         run_id="r1", control_state=None, route=None,
@@ -60,10 +58,8 @@ async def test_enabled_routes_through_workflow_controller_and_returns_legacy_res
 
 @pytest.mark.asyncio
 async def test_enabled_passes_the_configured_mode_through_unchanged(monkeypatch):
-    we = MagicMock()
-    cfg = MagicMock()
-    cfg.workflow_controller.enabled = True
-    cfg.workflow_controller.mode = "legacy"
+    we = strict_engine()
+    cfg = strict_config(workflow_controller={"enabled": True, "mode": "enforce"})
 
     fake_result = WorkflowResult(run_id="r1", control_state=None, route=None, legacy_result={"status": "success"})
     captured = {}
@@ -76,14 +72,13 @@ async def test_enabled_passes_the_configured_mode_through_unchanged(monkeypatch)
 
     await _dispatch_generation(we, cfg, goal="do z", workspace_path="/tmp/proj3")
 
-    assert captured["migration_mode"] == "legacy"
+    assert captured["migration_mode"] == "enforce"
 
 
 @pytest.mark.asyncio
 async def test_dispatch_milestones_disabled_is_a_pure_passthrough_to_run_milestones(monkeypatch):
-    we = MagicMock()
-    cfg = MagicMock()
-    cfg.workflow_controller.enabled = False
+    we = strict_engine()
+    cfg = strict_config(workflow_controller={"enabled": False})
     run_state = MagicMock()
 
     fake_run_milestones = AsyncMock(return_value={"status": "success"})
@@ -97,9 +92,8 @@ async def test_dispatch_milestones_disabled_is_a_pure_passthrough_to_run_milesto
 
 @pytest.mark.asyncio
 async def test_dispatch_milestones_enabled_routes_through_workflow_controller(monkeypatch):
-    we = MagicMock()
-    cfg = MagicMock()
-    cfg.workflow_controller.enabled = True
+    we = strict_engine()
+    cfg = strict_config(workflow_controller={"enabled": True})
     run_state = MagicMock()
 
     fake_result = WorkflowResult(

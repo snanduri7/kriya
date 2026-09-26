@@ -55,6 +55,7 @@ from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, Planned
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.workflow_controller import all_subtasks_completed, exclude_tool_subtasks_from_resume
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus
+from _strict_doubles import strict_kernel
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTS_DIR = os.path.join(REPO_ROOT, "tests")
@@ -145,7 +146,7 @@ async def test_scenario_a_benign_deterministic_tool_executes_through_real_path()
     subtask = _tool_subtask(tool_arguments={"path": "a.py"})
     tool = MagicMock()
     tool.execute = AsyncMock(return_value={"lint": "clean"})
-    kernel = MagicMock()
+    kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=tool)
 
     result = await subtask_executor.execute(
@@ -166,7 +167,7 @@ async def test_scenario_a_benign_deterministic_tool_executes_through_real_path()
 @pytest.mark.asyncio
 async def test_scenario_b_unknown_tool_fails_closed():
     subtask = _tool_subtask(tool_name="does_not_exist")
-    kernel = MagicMock()
+    kernel = strict_kernel()
     kernel.registry.get = MagicMock(side_effect=ComponentRegistryError("not found"))
 
     result = await subtask_executor.execute(
@@ -196,7 +197,7 @@ async def test_malformed_arguments_fail_closed_via_validation_error():
     FilesystemTool = load_core_tools_module().FilesystemTool
 
     subtask = _tool_subtask(tool_name="filesystem", tool_arguments={"operation": "read"})  # missing required 'path'
-    kernel = MagicMock()
+    kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=FilesystemTool())
 
     result = await subtask_executor.execute(
@@ -233,7 +234,7 @@ async def test_scenario_c_policy_denial_zero_side_effect(tmp_path):
 
     sentinel = tmp_path / "sudo_ran.txt"
     subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": f"sudo touch {sentinel}"})
-    kernel = MagicMock()
+    kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=ShellTool())
 
     result = await subtask_executor.execute(
@@ -262,7 +263,7 @@ async def test_policy_exception_fails_closed():
         raise RuntimeError("simulated broken policy engine")
 
     subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": "echo hi"})
-    kernel = MagicMock()
+    kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=tool)
     # enforce_hard_invariants swallows non-PolicyDeniedError exceptions by
     # design (documented "fails open on a broken check only" - unrelated
@@ -468,7 +469,7 @@ async def test_scenario_g_shelltool_ordinary_command_unaffected_when_uncontained
     ShellTool = load_core_tools_module().ShellTool
 
     subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": "echo hi"})
-    kernel = MagicMock()
+    kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=ShellTool())  # default AppConfig().autonomy
 
     result = await subtask_executor.execute(
@@ -492,7 +493,7 @@ async def test_scenario_g_shelltool_maven_registry_scoped_when_contained():
     core_tools_module.resolve_containment_backend = lambda name: backend
     try:
         subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": "mvn clean install"})
-        kernel = MagicMock()
+        kernel = strict_kernel()
         kernel.registry.get = MagicMock(return_value=ShellTool(autonomy_cfg=cfg.autonomy))
 
         result = await subtask_executor.execute(
@@ -519,7 +520,7 @@ async def test_scenario_g_shelltool_unmapped_manager_denied_when_contained():
     core_tools_module.resolve_containment_backend = lambda name: backend
     try:
         subtask = _tool_subtask(tool_name="shell", tool_arguments={"command": "npm install left-pad"})
-        kernel = MagicMock()
+        kernel = strict_kernel()
         kernel.registry.get = MagicMock(return_value=ShellTool(autonomy_cfg=cfg.autonomy))
 
         result = await subtask_executor.execute(
@@ -553,7 +554,7 @@ def test_scenario_g_real_pip_through_autonomous_path_authorized_vs_unauthorized(
 
     async def run_case(hosts, target_host):
         tool = contained_shell_tool(hosts)
-        kernel = MagicMock()
+        kernel = strict_kernel()
         kernel.registry.get = MagicMock(return_value=tool)
         subtask = _tool_subtask(
             tool_name="shell",
@@ -655,7 +656,7 @@ async def test_scenario_h_tool_failure_at_most_one_call_no_retry_widening():
 
     tool = MagicMock()
     tool.execute = AsyncMock(side_effect=_tracking_execute)
-    kernel = MagicMock()
+    kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=tool)
 
     subtask = _tool_subtask(tool_arguments={"path": "a.py"})
@@ -733,7 +734,7 @@ def test_reason_codes_captured_from_policy_denied_error_cause():
     tool = MagicMock()
     tool.execute = AsyncMock(side_effect=ToolExecutionError("Tool execution failed: x") )
     tool.execute.side_effect.__cause__ = cause
-    kernel = MagicMock()
+    kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=tool)
 
     async def run():

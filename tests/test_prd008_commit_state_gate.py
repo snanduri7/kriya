@@ -66,6 +66,7 @@ from kriya.workflow.terminal_commit import (
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow import WorkflowEngine
 from kriya.workflow.workflow_controller import WorkflowController
+from _strict_doubles import strict_engine
 
 # ---------------------------------------------------------------- helpers
 
@@ -231,7 +232,7 @@ def test_workflow_engine_returns_structured_refusal_before_any_model_call(tmp_pa
 @pytest.mark.parametrize("migration_mode", ["legacy", "shadow", "enforce"])
 def test_controller_refuses_in_every_migration_mode_before_triage(tmp_path, migration_mode):
     _evidence_file(tmp_path, "crashed", _raw_evidence("crashed", "in_progress"))
-    engine = MagicMock()
+    engine = strict_engine()
     engine.engineering_triage.classify = AsyncMock(return_value=_route())
     result = asyncio.run(WorkflowController(engine).execute(
         "goal", str(tmp_path), migration_mode=migration_mode,

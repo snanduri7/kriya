@@ -63,6 +63,7 @@ from kriya.workflow.terminal_commit import (
 )
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow_controller import WorkflowController
+from _strict_doubles import strict_config, strict_kernel
 
 MP = multiprocessing.get_context("fork")
 
@@ -368,18 +369,18 @@ def test_commit_is_refused_when_intent_cannot_be_persisted(tmp_path):
 
 
 def test_entry_point_records_the_resume_config_fingerprint(tmp_path):
-    config = {"llm": {"model": "m"}, "autonomy": {"mode": "guardrails"}}
+    config = strict_config(llm={"model": "m"}, autonomy={"mode": "guardrails"})
 
     class Engine:
-        kernel = MagicMock()
+        kernel = strict_kernel(config)
 
         @coordinated_mutation
         async def run(self, goal, workspace_path):
             return current_run_context()._lease.record
 
-    Engine.kernel.config.model_dump.return_value = config
     running = asyncio.run(Engine().run("goal", workspace_path=str(tmp_path)))
-    assert running.effective_config_fingerprint == compute_config_fingerprint(config)
+    assert running.effective_config_fingerprint == compute_config_fingerprint(config.model_dump())
+    assert running.effective_config_fingerprint != compute_config_fingerprint(strict_config().model_dump())
 
 
 # ---------------------------------------------------------------- crash

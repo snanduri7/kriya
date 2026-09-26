@@ -104,6 +104,7 @@ from kriya.workflow.workflow import (
 )
 from kriya.workflow.edit_safety import read_file_revision
 from kriya.workflow.requirements import RequirementOutcome
+from _strict_doubles import strict_config, strict_kernel
 
 
 @pytest.fixture(autouse=True)
@@ -1689,7 +1690,7 @@ async def test_enforce_knowledge_guard_stops_before_structured_planning(tmp_path
     config = AppConfig()
     config.paths.memory = str(tmp_path / "memory")
     config.paths.skills = str(tmp_path / "skills")
-    we.kernel = MagicMock(config=config)
+    we.kernel = strict_kernel(config)
 
     with patch(
         "kriya.tools.knowledge.KnowledgeGuard.check_goal", return_value=report,
@@ -1772,7 +1773,7 @@ async def test_enforce_reuses_one_skill_registry_and_projects_resolved_knowledge
     config = AppConfig()
     config.paths.memory = str(tmp_path / "memory")
     config.paths.skills = str(tmp_path / "skills")
-    we.kernel = MagicMock(config=config)
+    we.kernel = strict_kernel(config)
     calls = []
 
     async def fake_run(**kwargs):
@@ -4770,13 +4771,12 @@ def test_order_recovery_groups_fails_closed_on_cycle():
 # generation path already goes through. ---
 
 def _fake_kernel(*, self_correction_enabled=True, max_turns=4):
-    kernel = MagicMock()
-    kernel.config.autonomy.self_correction_loop_enabled = self_correction_enabled
-    kernel.config.autonomy.self_correction_loop_max_turns = max_turns
-    # A bare MagicMock flag is truthy; these tests are about owner recovery,
-    # not PRD-020's terminal requirement verifier (a MagicMock check cannot be awaited).
-    kernel.config.autonomy.spec_compliance_enabled = False
-    return kernel
+    # These tests are about owner recovery, not PRD-020's terminal requirement verifier.
+    return strict_kernel(strict_config(autonomy={
+        "self_correction_loop_enabled": self_correction_enabled,
+        "self_correction_loop_max_turns": max_turns,
+        "spec_compliance_enabled": False,
+    }))
 
 
 @pytest.mark.asyncio

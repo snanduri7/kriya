@@ -39,6 +39,7 @@ from kriya.control.run_coordinator import (
 from kriya.control.run_ownership import WorkspaceLockHeldError, acquire_run_lock
 from kriya.workflow.workflow import WorkflowEngine
 from kriya.workflow.workflow_controller import WorkflowController
+from _strict_doubles import strict_kernel
 
 MP = multiprocessing.get_context("fork")
 
@@ -386,7 +387,7 @@ def _mock_workflow_engine(fake_result=None, side_effect=None):
 
 
 def _mock_kernel():
-    mock_kernel = MagicMock()
+    mock_kernel = strict_kernel()
     mock_kernel.start = AsyncMock()
     mock_kernel.stop = AsyncMock()
     return mock_kernel

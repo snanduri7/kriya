@@ -66,6 +66,7 @@ from kriya.workflow.review_context import (
 )
 from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, RegionType
 from kriya.workflow.state import GenerationState
+from _strict_doubles import strict_engine
 
 TARGET_SRC = (
     "public class Target implements TargetInterface {\n"
@@ -494,7 +495,7 @@ def test_region_translation_reads_only_proposal_fields_no_planner_or_candidate()
 
 def test_valid_proposal_invokes_run_generation_workflow_exactly_once(tmp_path):
     ws, pid = _approved_promotable_workspace(tmp_path)
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "files": {}})
     asyncio.run(execute_approved_proposal(pid, ws, we))
     assert we.run_generation_workflow.await_count == 1
@@ -502,7 +503,7 @@ def test_valid_proposal_invokes_run_generation_workflow_exactly_once(tmp_path):
 
 def test_exact_authoritative_goal_passed(tmp_path):
     ws, pid = _approved_promotable_workspace(tmp_path)
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "files": {}})
     asyncio.run(execute_approved_proposal(pid, ws, we))
     prep = prepare_proposal_promotion(pid, ws)
@@ -512,7 +513,7 @@ def test_exact_authoritative_goal_passed(tmp_path):
 
 def test_exact_region_list_passed(tmp_path):
     ws, pid = _approved_promotable_workspace(tmp_path)
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "files": {}})
     asyncio.run(execute_approved_proposal(pid, ws, we))
     prep = prepare_proposal_promotion(pid, ws)
@@ -522,7 +523,7 @@ def test_exact_region_list_passed(tmp_path):
 
 def test_existing_generation_flags_preserved(tmp_path):
     ws, pid = _approved_promotable_workspace(tmp_path)
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "files": {}})
     stream_cb = MagicMock()
     asyncio.run(execute_approved_proposal(
@@ -542,7 +543,7 @@ def test_existing_generation_flags_preserved(tmp_path):
 def test_pending_plus_knowledge_risk_confirmed_still_rejects_before_generation(tmp_path):
     ws = str(tmp_path)
     pid = _build_and_persist_proposal(ws)
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = _raise_if_called
     with pytest.raises(ProposalPromotionError) as exc_info:
         asyncio.run(execute_approved_proposal(pid, ws, we, knowledge_risk_confirmed=True))
@@ -553,7 +554,7 @@ def test_rejected_plus_knowledge_risk_confirmed_still_rejects(tmp_path):
     ws = str(tmp_path)
     pid = _build_and_persist_proposal(ws)
     reject_proposal(pid, ws)
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = _raise_if_called
     with pytest.raises(ProposalPromotionError) as exc_info:
         asyncio.run(execute_approved_proposal(pid, ws, we, knowledge_risk_confirmed=True))
@@ -562,7 +563,7 @@ def test_rejected_plus_knowledge_risk_confirmed_still_rejects(tmp_path):
 
 def test_approved_valid_plus_knowledge_risk_confirmed_invokes_generation(tmp_path):
     ws, pid = _approved_promotable_workspace(tmp_path)
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "files": {}})
     asyncio.run(execute_approved_proposal(pid, ws, we, knowledge_risk_confirmed=True))
     assert we.run_generation_workflow.await_count == 1
@@ -646,7 +647,7 @@ def test_approve_then_target_file_mutated_then_execute_rejected(tmp_path):
     ws, pid = _approved_promotable_workspace(tmp_path)
     with open(os.path.join(ws, "Target.java"), "a") as f:
         f.write("\n// mutated after approval\n")
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = _raise_if_called
     with pytest.raises(ProposalPromotionError) as exc_info:
         asyncio.run(execute_approved_proposal(pid, ws, we))
@@ -675,7 +676,7 @@ def test_approve_then_evidence_file_mutated_then_execute_rejected(tmp_path):
     if any(eb.canonical_relpath == "Collaborator.java" for eb in load_proposal(pid, ws).proposal.evidence_bindings):
         with open(related_path, "a") as f:
             f.write("\n// mutated evidence after approval\n")
-        we = MagicMock()
+        we = strict_engine()
         we.run_generation_workflow = _raise_if_called
         with pytest.raises(ProposalPromotionError) as exc_info:
             asyncio.run(execute_approved_proposal(pid, ws, we))
@@ -811,7 +812,7 @@ def test_refused_execute_writes_no_source_files(tmp_path):
     ws = str(tmp_path)
     pid = _build_and_persist_proposal(ws)  # PENDING - execute must refuse
     before = _tree_hash(ws)
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = _raise_if_called
     with pytest.raises(ProposalPromotionError):
         asyncio.run(execute_approved_proposal(pid, ws, we))
@@ -837,7 +838,7 @@ def test_successful_execution_source_writes_only_through_mocked_generation_workf
     workspace outside .kriya/proposals when the mock performs no writes."""
     ws, pid = _approved_promotable_workspace(tmp_path)
     before = _tree_hash(ws)
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "files": {}})
     asyncio.run(execute_approved_proposal(pid, ws, we))
     after = _tree_hash(ws)
@@ -951,7 +952,7 @@ def test_preexisting_checkpoint_resume_unaffected_by_a3p2(tmp_path):
 
 def test_execution_does_not_call_build_proposed_modification(tmp_path):
     ws, pid = _approved_promotable_workspace(tmp_path)
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "files": {}})
 
     async def _raise(*a, **kw):
@@ -964,7 +965,7 @@ def test_execution_does_not_call_build_proposed_modification(tmp_path):
 
 def test_execution_does_not_call_a1_reviewer_run(tmp_path):
     ws, pid = _approved_promotable_workspace(tmp_path)
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "files": {}})
 
     def _raise(*a, **kw):
@@ -977,7 +978,7 @@ def test_execution_does_not_call_a1_reviewer_run(tmp_path):
 
 def test_execution_does_not_call_reviewer_llm_run(tmp_path):
     ws, pid = _approved_promotable_workspace(tmp_path)
-    we = MagicMock()
+    we = strict_engine()
     we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "files": {}})
 
     def _raise(*a, **kw):

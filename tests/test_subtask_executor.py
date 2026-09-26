@@ -12,6 +12,7 @@ from kriya.workflow.context_package import build_context_package
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.workflow_types import SubtaskStatus
+from _strict_doubles import strict_kernel
 
 
 def _model_subtask(**overrides):
@@ -125,7 +126,7 @@ async def test_tool_subtask_completes_with_tool_output():
     subtask = _tool_subtask(tool_arguments={"path": "a.py"})
     tool = MagicMock()
     tool.execute = AsyncMock(return_value={"lint": "clean"})
-    kernel = MagicMock()
+    kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=tool)
 
     result = await subtask_executor.execute(subtask=subtask, plan=_plan(subtask), context=build_context_package(), kernel=kernel)
@@ -139,7 +140,7 @@ async def test_tool_subtask_completes_with_tool_output():
 @pytest.mark.asyncio
 async def test_tool_subtask_unregistered_tool_yields_needs_review():
     subtask = _tool_subtask()
-    kernel = MagicMock()
+    kernel = strict_kernel()
     kernel.registry.get = MagicMock(side_effect=ComponentRegistryError("not found"))
 
     result = await subtask_executor.execute(subtask=subtask, plan=_plan(subtask), context=build_context_package(), kernel=kernel)
@@ -153,7 +154,7 @@ async def test_tool_subtask_execution_error_yields_failed():
     subtask = _tool_subtask()
     tool = MagicMock()
     tool.execute = AsyncMock(side_effect=ToolExecutionError("bad args"))
-    kernel = MagicMock()
+    kernel = strict_kernel()
     kernel.registry.get = MagicMock(return_value=tool)
 
     result = await subtask_executor.execute(subtask=subtask, plan=_plan(subtask), context=build_context_package(), kernel=kernel)

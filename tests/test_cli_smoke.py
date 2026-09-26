@@ -12,6 +12,7 @@ from click.testing import CliRunner
 # 3.14 (where PEP 649 made annotation evaluation lazy by default).
 from kriya.core.state_paths import trace_db_path
 from kriya.cli import _mark_run_in_progress, main
+from _strict_doubles import strict_kernel
 
 TOP_LEVEL_COMMANDS = [
     "version", "config", "doctor", "repl", "plugins", "analyze",
@@ -128,7 +129,7 @@ def _mock_workflow_engine(fake_result):
 
 
 def _mock_kernel():
-    mock_kernel = MagicMock()
+    mock_kernel = strict_kernel()
     mock_kernel.start = AsyncMock()
     mock_kernel.stop = AsyncMock()
     return mock_kernel

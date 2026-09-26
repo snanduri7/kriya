@@ -25,7 +25,6 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 from _milestone_proof_harness import (
@@ -45,6 +44,7 @@ from _milestone_proof_harness import (
     _workspace,
     git_workspace,  # noqa: F401 - pytest fixture
 )
+from _strict_doubles import strict_kernel
 
 from kriya.agents.contracts import AcceptanceCriterion, MilestoneV2
 from kriya.config.config import AppConfig
@@ -99,8 +99,7 @@ class GatedEngine(FakeEngine):
         super().__init__(milestones, outputs, integration)
         self.gates = gates or {}
         self.coverage = coverage or {}
-        self.kernel = MagicMock()
-        self.kernel.config = config or AppConfig()
+        self.kernel = strict_kernel(config or AppConfig())
         self.kwargs = []
 
     async def run_generation_workflow(self, goal, workspace_path, milestone_index=None, **kwargs):
