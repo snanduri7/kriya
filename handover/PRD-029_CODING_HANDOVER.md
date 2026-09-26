@@ -7,7 +7,10 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop.
 - Base revision: 0ec07cc.
 - Commits:
   - 61e4b26: the P0 fix, committed separately;
-  - the PRD-029 lifecycle commit (see `git log --grep PRD-029`).
+  - a0a2d0a: the PRD-029 lifecycle;
+  - 7762590: my milestone bookkeeping fix;
+  - b75e4ec: correction, milestone capabilities are established by the unit's own commit transaction;
+  - f6f3bf0: every deterministic registry refusal is a terminal typed stop.
 - Directives: handover/BATCH6_DIRECTIVES.md, the PRD-029 section.
 
 ## Suspected P0 defect: the outcome
@@ -22,7 +25,7 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop.
 
 ## Scope implemented
 - **Req 1 (who creates and updates, from what evidence).**
-  - Milestone capability records: `run_milestones` (planning intent; IMPLEMENTED after the milestone completes).
+  - Milestone capability records: registered PROPOSED by `run_milestones` at planning time. They become IMPLEMENTED only through the milestone unit's own terminal commit transaction (b75e4ec; see "Milestone capability transaction" below).
   - Public API records: only the terminal commit seam, derived from:
     - the deterministic `_normalized_public_signatures` diff, the same extractor as the PRD-023 detector;
     - exactly matching (owner, symbol) DIRECT (goal) or HUMAN (PRD-023 escalation) authorizations.
@@ -59,6 +62,39 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop.
     - Otherwise NEEDS_REVIEW: the record is left open and recover exits 1.
   - Real subprocess crash tests (`os._exit`) at the first source byte, before promotion and after promotion all recover to an exact registry.
 - **Not changed:** no Planner `provides`/`consumes` fields were added.
+
+## Milestone capability transaction (correction, b75e4ec)
+- **Input.** `WorkUnitInvocation.provided_capabilities` (`"<milestone id>:<capability>"`, from the unit's own provenance; unit digests are unchanged) is passed to `derive_contract_transition(capability_contracts=)` by the unit's terminal commit.
+- **The single transaction.** The capabilities, any `public_api` change and the source bytes are one transaction, in this order:
+  1. derive, validate and identify the delta before commit;
+  2. write the intent (`established_capabilities` included);
+  3. stage the registry;
+  4. commit the source;
+  5. compare-and-swap promote the registry;
+  6. settle the RunRecord as COMMITTED;
+  7. report SUCCESS.
+- **Idempotence.** An already-IMPLEMENTED capability is not transitioned twice. An id the run never registered is never invented.
+- **The driver no longer marks anything.** A unit that committed source without its capability transition is an incomplete transaction: status `contract_registry_incomplete`, reason `CONTRACT_REGISTRY_TRANSITION_INCOMPLETE`, never a successful milestone. A unit that committed nothing establishes nothing. Reconstructed completions get no post-hoc marking; recovery completes their transaction.
+- **Tests:**
+  - `test_a_crash_at_every_boundary_recovers_to_an_exact_registry`: real `os._exit` crashes, each carrying capability `M1:Pricing`, before the source commit, after the source commit before registry promotion, and after promotion before the RunRecord settles. Each asserts the exact recorded identities, no false SUCCESS, no stale registry and no duplicate transition on a second recovery.
+  - `test_capabilities_are_established_by_the_commit_transition`;
+  - `test_an_already_established_capability_is_not_transitioned_twice`;
+  - `test_a_committed_milestone_without_its_capability_transition_is_incomplete`;
+  - `test_a_milestone_units_commit_establishes_its_capabilities` (end to end);
+  - `test_milestone_completion_bookkeeping_preserves_contracts_its_unit_committed` (kept);
+  - the corrupt-registry tests in `tests/test_prd029_registry_integrity.py` (kept).
+
+## Registry refusals are terminal (f6f3bf0)
+- Every deterministic refusal ends the run with the typed contract-registry failure (`failure_category: contract_registry_blocked`, `environment_failure` starting with the reason code). There is one Developer call, no retry, and the run is never `no_progress` or `quality_gates_exhausted`. The refusals:
+  - `CONTRACT_CONSUMER_VERIFICATION_MISSING`;
+  - `CONTRACT_REGISTRY_CORRUPT`;
+  - `CONTRACT_REGISTRY_TRANSITION_INVALID` (new: an illegal registry lifecycle step inside the derivation, which previously escaped the commit seam as an untyped exception; any other exception, a coding error, still propagates);
+  - `CONTRACT_REGISTRY_STAGING_FAILED`;
+  - `CONTRACT_REGISTRY_TRANSITION_INCOMPLETE` (the promotion's before/after-state mismatch; the source bytes landed and the cycle stays open for `runs recover`).
+- An unauthorized public API change is deliberately not in this set. PRD-023's detector names the candidate change, which the model can repair, so it stays retryable.
+- Enforce's commit is the plan's last step after every subtask, so no retry exists after it; a refusal there returns its failure payload with the reason code.
+- **Tests:** `test_a_registry_refusal_is_a_terminal_stop_never_a_retry` (parametrized over all five), `test_an_illegal_registry_lifecycle_step_is_a_typed_refusal` and `test_a_coding_error_inside_the_derivation_is_never_turned_into_a_refusal`.
+- **Mutations**, all killed: dropping INVALID from the stop set; narrowing the typed catch; widening it to `Exception`; dropping the stop-type registration; dropping the workflow's stop branch.
 
 ## Found during implementation (my own defect, fixed before commit)
 The end-to-end stop test showed a refused transition being retried until `no_progress`. `handle_attempt_failure` recomputes `environment_failure` from a fixed set of unretryable failure types, and `contract_registry` was not in it. It was registered there, with the failure-reporting category (VERIFICATION) and the pinned vocabulary test updated. `test_a_refused_contract_transition_is_a_deterministic_stop_not_a_retry` pins it; the mutation that removes the registration is killed.
@@ -97,6 +133,7 @@ The end-to-end stop test showed a refused transition being retried until `no_pro
 |---|---:|---:|
 | `.venv/bin/pytest -q tests/test_prd029_registry_integrity.py` | 9 | 0 |
 | `.venv/bin/pytest -q tests/test_prd029_contract_lifecycle.py tests/test_failure_reporting.py` | 63 (+3 added later: 27 in the lifecycle file) | 0 |
+| `.venv/bin/pytest -q tests/test_prd029_contract_lifecycle.py` (after b75e4ec and f6f3bf0) | 38 | 0 |
 
 **Mutation checks.** Every one was killed:
 - 4 on the P0;
@@ -124,10 +161,10 @@ ruff: All checks passed. pylint: exit 0.
 - On a verified commit it asserts:
   - a `public_api` record for `pricing.py`, with `checkout.py` as a consumer and not claimed complete;
   - the live registry digest equals the committed cycle's `after_digest`.
-- If the model never reaches a verified commit, it skips with that reason and records the evidence.
+- If the model never reaches a verified commit, it skips, and the evidence file records `NOT_LIVE_EXERCISED` with the reason. A skip is never verification.
 
 ## Known limitations / residual risks
-- **Milestone capability records** become IMPLEMENTED after each milestone completes (post-commit bookkeeping), not through the commit seam. They share the schema, strict loader, digest, fingerprint and fail-closed load; their marking is not part of the source transaction. This is not claimed closed.
+- **Milestone capability records**: closed by b75e4ec (see above).
 - **Enforce uses DIRECT authorizations only.** HUMAN (PRD-023) approvals live in per-subtask state and are not aggregated to the plan-level commit. A HUMAN-approved enforce change therefore records no contract, which is fail-safe (not recorded as fact).
 - **Not recorded:** explicit-migration goals, which the PRD-023 detector bypasses and so never classifies, and unreferenced public changes on owners with no record.
 - **Consumers** come from a name-reference scan: never complete, and they can over-include a same-named symbol.

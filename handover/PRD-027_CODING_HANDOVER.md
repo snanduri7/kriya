@@ -8,7 +8,9 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop.
 - Commits:
   - 7c07a74: the retrieval extraction, behaviour unchanged;
   - 8aa6d26: the retrieval defect fixes found by the suite;
-  - the PRD-027 (2/2) commit: certification, CLI, doctor, tests and docs.
+  - 3c1822d: PRD-027 (2/2), certification, CLI, doctor, tests and docs;
+  - f5f72ed: hardening (superseded in part by 2982f1c);
+  - 2982f1c: correction, the identity holds only retrieval inputs (see Req 5).
 - Directives: handover/BATCH6_DIRECTIVES.md, the PRD-027 section.
 
 ## Scope implemented
@@ -25,14 +27,25 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop.
 - **Req 2 (golden items).** Each golden item has a required precision (full / skeleton / signatures). Graph RAG packages carry exactly these tiers; member-exact is the known-target path, not Graph RAG.
 - **Req 3 (measured before any LLM).** `run_certification` indexes and retrieves with no chat-model call (asserted by patching `LLMClient` to raise). Misses are typed: `NOT_RETRIEVED`, `BUDGET_EXHAUSTED`, `TIER_INSUFFICIENT`, `SOURCE_UNAVAILABLE`.
 - **Req 4 (thresholds).** Fixed, version-controlled targets: `CLASS_RECALL_TARGETS` (1.0 for the must-have classes, 0.5 for wider context) and `PRECISION_TARGET` = 0.5. They are pinned by a test. They were set before measuring and were not changed after.
-- **Req 5 (recorded result).** The record is written under `<state>/context_certification/<identity-digest>.json`, outside the workspace, atomically. The identity is:
+- **Req 5 (recorded result).** The record is written under `<state>/context_certification/<identity-digest>.json`, outside the workspace, atomically. The identity holds only what decides retrieval:
   - the suite version and the Kriya version;
   - the fixtures digest;
-  - the index/retrieval implementation source digest;
+  - the index/retrieval/chunker implementation source digest;
   - the embedder kind and embedding model;
   - the exact embedding runtime digest;
-  - every production retrieval-limit policy;
-  - the graph token budget.
+  - the embedding dimensions, probed from the embedder and matched against the index (`indexed_embedding_dimensions`; an index without exactly one dimension fails closed);
+  - every production retrieval-limit policy and the context tier policy;
+  - a fixed certification graph budget (`CERTIFICATION_GRAPH_BUDGET_TOKENS`).
+  The chat model is not part of it. Retrieval makes no chat inference, so changing or requalifying the chat model keeps the certification current, and `certify` runs with the chat endpoint unavailable.
+  - Tests:
+    - `test_embedding_dimension_change_stales_the_certification`;
+    - `test_index_or_retrieval_implementation_change_stales_the_certification`;
+    - `test_retrieval_limit_policy_change_stales_the_certification`;
+    - `test_a_different_embedding_runtime_is_a_stale_certification`;
+    - `test_chat_model_change_alone_keeps_the_certification_current`;
+    - `test_chat_qualification_or_window_is_never_consulted`;
+    - `test_certify_runs_with_the_chat_endpoint_unavailable`;
+    - `test_an_index_without_a_single_dimension_fails_closed`.
 - **Directive (CI vs production).** CI uses `DeterministicHashingEmbedder`; its reports are marked `deterministic_hashing` and can never satisfy the production status. `kriya context certify` uses the configured embedder and refuses an unprovable runtime.
 - **Directive (doctor).** `context.recall_certification` is pinned. It reads the record and never runs the benchmark; a test patches `run_certification` to raise.
   - Required only when a code index exists at `paths.memory`: that is the exact condition under which Graph RAG runs.
@@ -80,8 +93,7 @@ Five defects, each with a regression test, and each caught when its fix is rever
 - **Existing `doctor --production` test fixtures** now pin `paths.memory` to a temp directory. The CWD-relative default had been picking up this repository's own `memory/vector_index.db`.
 
 ## Found, not fixed (outside PRD-027 scope)
-- `kriya ask` and `kriya prompt generate` query the `vector_chunks` table of `web_knowledge.db`. `kriya learn` writes only `learned_knowledge`, so those commands never use learned knowledge at all.
-- Fixing it means routing untrusted learned content into those prompts with the untrusted-reference fencing CLAUDE.md requires, so it is recorded as a follow-up.
+- **KNOWLEDGE-READPATH-001 (P1)**: learned knowledge is written but never read. See handover/DEFECT_KNOWLEDGE_READPATH_001.md (affected commands and tables, expected semantics, and the rule that learned text must never reach the authoritative goal).
 - A local edit that passed the model identity there was reverted, because it changed nothing.
 
 ## Tests run by coding agent (targeted)
@@ -111,7 +123,7 @@ ruff: All checks passed. pylint: exit 0.
 - The benchmark is small (2 repositories, 6 cases, 2–4 golden items per class). Recall per class moves in steps of 0.5; it is a floor, not a statistical estimate.
 - Certification covers the Graph RAG stage (the Developer's first-attempt semantic context). The known-target member-exact context and the planning candidate lists are separate mechanisms and are not certified here.
 - Precision is at the target (0.5), with no margin, under the CI embedder.
-- `kriya context certify` refuses unless the chat model's runtime is exact. The certified graph budget is derived from its served window and measured byte ratio, so certifying without it would bind a budget doctor never computes. Changing or requalifying the chat model, or its context window, therefore makes the certification stale, and it must be re-run.
+- The certified graph budget is a fixed constant, not the production chat model's own allocation. Certification proves what retrieval delivers within that budget. A deployment whose chat window allocates a smaller graph pool may degrade more files at prompt assembly, and that degradation is not certified.
 - Seeding the graph walk with each matched file follows every call in that file. On a real repository, common method names can fill the 30 neighbourhood slots (one entry per file, ranked by relation weight and hop). The small fixtures cannot show that precision loss; the live certification with the real embedder is the measurement to watch.
 - `test_an_embedding_model_runtime_can_be_proven_exact` drives the real PRD-013 probe with an embedding-shaped endpoint and shows the runtime identity is provable. So `kriya context certify` and the doctor check do not block every indexed deployment.
 

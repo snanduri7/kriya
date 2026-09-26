@@ -84,8 +84,16 @@ ruff: All checks passed. pylint: exit 0.
 
 ## Live test additions
 - Required: YES.
-- The live case: a real repair of one method in a 160-method Python module, with DEV-INV enabled. Every recorded expansion is asserted to be in scope, revision-bound and origin-labelled.
-- If the real model never needs an escalation, the test SKIPS with that reason instead of passing vacuously, and the evidence file records it.
+- The live case: a real repair of one method in a 160-method Python module, with DEV-INV enabled.
+- **Deterministic trigger (468039d).** The first compile of the model's changed `ledger.py` fails once at `apply_fee`'s line, in PolymorphicValidator's own Python error shape. The retry must then request member authority for `Ledger.apply_fee`, whatever the model wrote.
+- **Asserted:**
+  - the request is GRANTED from `retry_member_hints`;
+  - it is in the write scope;
+  - its origin is CANDIDATE, since it was resolved against the real candidate;
+  - `member_in_pristine` is true;
+  - every recorded expansion is in scope and revision-bound.
+- Verified offline with a mocked model before commit: attempt 2 recorded exactly that record.
+- **Skip.** The test skips only if the model never wrote a changed `ledger.py`, in which case the retry path is unreachable. The evidence file then records `NOT_LIVE_EXERCISED`, never verification.
 
 ## Known limitations / residual risks
 - Revalidation (`expansion_is_current`) is exercised at the decision point and in tests. Hints are recomputed every attempt, so a grant is never carried stale into a later attempt's hints. A long-lived consumer of `state.authority_expansions` must call it.

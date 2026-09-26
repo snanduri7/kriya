@@ -5,7 +5,7 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop. The user runs t
 
 ## Source identity
 - Base revision: 510fd98 (branch `milestone-decomposition`, level with origin).
-- Final revision: the PRD-025 commit on top of 510fd98 (see `git log --grep PRD-025`).
+- Commits: 83a80fd (PRD-025); eefa8a1 (correction: exit authority only from the immutable user goal, bound to its declared code).
 - Directives: handover/BATCH6_DIRECTIVES.md (the user's approval with corrections).
 
 ## Scope implemented
@@ -46,7 +46,7 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop. The user runs t
    - Repro (fails on the base revision and passes after the fix):
      - `test_prd025_llm_pass_cannot_override_undeclared_nonzero_exit` (main path);
      - the new `[invalid-...-False]` parameter of the Java verification-only test.
-   - Fix: a nonzero exit is admitted only when the USER's goal text (`ctx.grounding_goal or ctx.goal`) declares it (`goal_declares_expected_nonzero_exit`, which is negation-aware), and the application launched.
+   - Fix: a nonzero exit is admitted only when the USER's goal text declares it (see "Exit authority source" below) (`goal_declares_expected_nonzero_exit`, which is negation-aware), and the application launched.
    - Pinned-test change (disclosed): both pinned tests now give a goal that declares the nonzero exit. The behaviour they protect is kept.
 2. **Real gap, confirmed by reading the source.**
    - `ProcessController` keeps the last 2 000 000 characters of each stream, and the grader received all of it, up to about 4 MB, unbounded.
@@ -76,10 +76,42 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop. The user runs t
 - **Disposition.** `apply_runtime_disposition` is idempotent. Its deterministic reasons are `DETERMINISTIC_PROCESS_EXIT`, `TIMEOUT_AUTHORITATIVE`, `NONZERO_EXIT_AUTHORITATIVE` and `EXPECTED_NONZERO_EXIT_GROUNDED`; the final verdict is PASS, FAIL or UNKNOWN.
 - **Persistence.** It is recorded on the gate outcome, which reaches `traces.db` through the existing `gate_outcomes` path.
 
+## Exit authority source (correction, eefa8a1)
+- **Authority text.** `exit_authority_text(ctx)` = `ctx.exit_authority_goal or ctx.grounding_goal or ctx.goal`.
+  - `exit_authority_goal` is set from the unit invocation's `authoritative_goal` (`WorkUnitInvocation`, `plan_executor.authoritative_goal_of`): the direct goal, or a milestone plan's `original_goal`.
+  - So a milestone's own goal text, which the Planner wrote, can never declare the exit, and neither can an enforce subtask's description.
+- **Declared code binding.** `declared_nonzero_exit_codes` returns:
+  - empty, when no exit is declared;
+  - ANY, when the exit is declared without a value ("exits non-zero");
+  - the named codes ("exit with code 2").
+  A different code (a crash's 1, a signal's 139) is `NONZERO_EXIT_AUTHORITATIVE`, whatever the grader says.
+- **Re-application.** The rule is applied at all four disposition sites. The final one runs after a self-correction re-verification has replaced the grade.
+- **Tests** (all in `tests/test_prd025_verifier_evidence.py` unless noted):
+  - explicit goal permits: `test_nonzero_exit_admitted_only_when_goal_declares_it_and_app_launched`;
+  - verifier text alone cannot: `test_verifier_text_declaring_the_exit_grants_nothing`;
+  - Planner/milestone text cannot, in `test_workflow.py`: `test_prd025_planner_or_milestone_text_cannot_declare_an_expected_exit` and `test_prd025_a_milestone_units_authority_is_the_users_original_goal`;
+  - timeout fails: `test_timeout_is_authoritative_over_a_pass_grade`;
+  - failed setup fails: `test_declared_nonzero_exit_still_fails_when_a_setup_step_failed`;
+  - launch failure fails: `test_a_declared_exit_from_an_application_that_never_launched_fails`;
+  - an unrelated code fails: `test_an_exit_code_other_than_the_declared_one_always_fails`;
+  - the semantic verdict still decides: `test_a_declared_exit_still_needs_the_semantic_verdict`;
+  - re-applied after self-correction, in `test_workflow.py`: `test_prd025_exit_rule_is_reapplied_after_self_correction_reverification`.
+- **Mutations**, all killed:
+  - removing the final re-application;
+  - reverting `exit_authority_text` to `ctx.goal` or to `grounding_goal or goal`;
+  - dropping `authoritative_goal` from the invocation;
+  - dropping the milestone branch of `authoritative_goal_of`;
+  - accepting any declared code;
+  - treating every declaration as ANY;
+  - dropping the application-launched requirement;
+  - dropping the negation guard.
+  The re-application mutation first SURVIVED: the test's grader mock returned one shared dict, which the first disposition had already failed. The mock now returns a fresh grade per call.
+
 ## Tests run by coding agent (targeted only, per the standing rule)
 | Command | Passed | Failed | Notes |
 |---|---:|---:|---|
-| `.venv/bin/pytest -q tests/test_prd025_verifier_evidence.py` | 44 | 0 | 0.6 s |
+| `.venv/bin/pytest -q tests/test_prd025_verifier_evidence.py` | 56 | 0 | 0.6 s (44 + 12 from the correction) |
+| `.venv/bin/pytest -q tests/test_workflow.py -k "prd025_exit_rule_is_reapplied or prd025_planner_or_milestone or prd025_a_milestone_units or prd025_llm_pass or accepts_expected_nonzero"` | 5 | 0 | correction |
 | `.venv/bin/pytest -q tests/test_workflow.py -k "prd025 or verification_only_packaged_java_uses_grounded or accepts_expected_nonzero_only"` | 7 | 0 | |
 | `... -k "missing_runtime_entrypoint_stops_without_source_repair or timeout_grades_captured_output_as_succeeded_then_hung"` + `tests/test_agents.py -k run_verifier` | 46 | 0 | Existing tests that combine a nonzero exit with a grader PASS |
 
@@ -120,7 +152,7 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop. The user runs t
 - Signature coverage is pattern-based. A failure that prints no recognized signature, in a range that was omitted, still relies on the head/tail samples. For that case the grader is instructed to answer UNKNOWN; the result is not enforced.
 - `allocation_window` uses the Developer role's inference settings for the byte-ratio lookup. It is the same served window, but a verifier-specific tokenizer ratio would be more exact.
 - Capture loss in ManagedProcess (managed services) is not counted. That output is never graded by `grade()`.
-- Goal grounding proves that a nonzero exit is declared behaviour. It does not prove that the final invocation is the case expected to exit nonzero. For example, a goal that declares "invalid input exits non-zero" admits a nonzero exit on a valid-input command too. The grader still judges the output; the exit is admissible, not a PASS.
+- Goal grounding proves that a nonzero exit is declared behaviour, and, when the goal names a code, that it is that code. It does not prove that the final invocation is the case expected to exit nonzero. For example, a goal that declares "invalid input exits non-zero" admits a nonzero exit on a valid-input command too. The grader still judges the output; the exit is admissible, not a PASS.
 
 ## Decisions recorded
 - A nonzero exit is admissible only on the user's own goal text (never on judge or grader text). The rationale is in handover/BATCH6_DIRECTIVES.md and in this handover.
