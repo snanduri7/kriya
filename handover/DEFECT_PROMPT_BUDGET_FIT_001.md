@@ -1,7 +1,14 @@
 # PROMPT-BUDGET-FIT-001: Planner and final-Reviewer sections are sized without reserving the rest of the request
 
 ## Status
-OPEN, P2. Found on 2026-09-27 while triaging the first Batch 6 live run. Not fixed: the live failures were a fixture defect (Case A of the user's triage: the live fixture ran at 8K with no qualification record; fixed in 3e6f273), and under Case A production budgeting is not changed. This record keeps the gap visible.
+Umbrella OPEN (user decision, 2026-09-27), split into three findings:
+- **001A** (OPEN, P2): the Planner graph context is sized without reserving the rest of the Planner request.
+- **001B** (OPEN, P2): Reviewer file batches are sized without reserving the system prompt, header, diff and evidence.
+- **001C** (P1, FIXED in 8600e2d, awaiting the user's pytest): a final-Reviewer refusal after the candidate was applied escaped as a raw exception.
+
+001A and 001B go to a dedicated prompt-fit follow-up; PRD-016 is not redesigned in Batch 6. Their fix budgets each variable section from `effective prompt capacity - mandatory fixed prompt cost - safety reserve`, and never by raising context limits.
+
+Original finding: Found on 2026-09-27 while triaging the first Batch 6 live run. Not fixed: the live failures were a fixture defect (Case A of the user's triage: the live fixture ran at 8K with no qualification record; fixed in 3e6f273), and under Case A production budgeting is not changed. This record keeps the gap visible.
 
 ## What happens
 Two prompt sections are sized as a share of the Developer-shaped allocation window (`context_budget.allocation_window`), which assumes about 10% of the window for the system prompt and task text. Neither reserves for the rest of its own request:
@@ -24,3 +31,15 @@ A harness that runs `run_generation_workflow` with canned responses, the determi
 
 ## Fix direction (for when it is scheduled)
 Size each section against the room its own request has left: `allocation_window(config, agent binding)` minus the agent's system prompt and every other section of that request, capped by the existing share. When the remainder cannot hold the section, rebuild it smaller (`build_code_context` at the remainder, `build_review_batches` at the remainder) or leave it out and record the omission; never force it in with a floor. Separately, a refusal of the advisory final review must not turn an applied success into an exception. Needs a deterministic regression test at an 8K window with no qualification record that fails before the fix, and a mutation check of the reservation.
+
+## 001C fix (8600e2d)
+- The final review catches `ContextBudgetUnsatisfiableError` and records `review.refused` (AUTHORITATIVE).
+- The run ends as `failure_category: final_review_refused`, and is never SUCCESS: `final_workflow_quality_passed()` is false while `state.final_review_refusal` is set. There is no retry and no rollback.
+- The result keeps what already happened:
+  - the gate results;
+  - `final_review_refusal`, with `reason_code`, `detail`, `candidate_applied`, `committed_work_units` (read from the RunRecord) and `rolled_back: false`.
+- An applied candidate leaves no resume checkpoint.
+- Enforce: the subtask fails with the refusal's reason code, and nothing reaches the live workspace.
+- Milestone: the plan fails, and it reports the units it leaves committed.
+- The `generate` and `fix` CLI output no longer claims the files were not applied.
+- Tests are in `tests/test_prompt_budget_fit_001c.py` (6 tests). Four of the five scenario tests fail before the fix; the control passes. 9 mutations were run and all were killed.
