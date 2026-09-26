@@ -128,8 +128,9 @@ def _mock_workflow_engine(fake_result):
     return mock_we
 
 
-def _mock_kernel():
-    mock_kernel = strict_kernel()
+def _mock_kernel(config=None):
+    # Patched in as Kernel's side_effect, so Kernel(config=cfg).config is the CLI's own cfg.
+    mock_kernel = strict_kernel(config)
     mock_kernel.start = AsyncMock()
     mock_kernel.stop = AsyncMock()
     return mock_kernel
@@ -158,7 +159,7 @@ def test_generate_json_flag_prints_only_json_on_stdout(runner, tmp_path):
     print only the final structured result - for CI/scripting use."""
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(_FAKE_GENERATE_RESULT)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["generate", "do a thing", "-y", "--json"])
 
@@ -177,7 +178,7 @@ def test_generate_json_flag_exit_code_reflects_quality_gates_failure(runner, tmp
     failing_result = dict(_FAKE_GENERATE_RESULT, quality_gates_passed=False)
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(failing_result)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["generate", "do a thing", "-y", "--json"])
 
@@ -188,7 +189,7 @@ def test_generate_json_flag_exit_code_reflects_quality_gates_failure(runner, tmp
 def test_generate_without_json_flag_is_unchanged(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(_FAKE_GENERATE_RESULT)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
@@ -209,7 +210,7 @@ def test_generate_without_json_returns_nonzero_when_quality_gates_fail(runner, t
     )
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(failing_result)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
@@ -228,7 +229,7 @@ def test_generate_renders_streamed_reviewer_report_only_once(runner, tmp_path):
     mock_we.run_generation_workflow = AsyncMock(side_effect=run_with_review_stream)
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
@@ -255,7 +256,7 @@ def test_generate_does_not_reprint_review_already_in_approval(runner, tmp_path):
     mock_we.run_generation_workflow = AsyncMock(side_effect=run_with_preapproval_review)
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
@@ -271,7 +272,7 @@ def test_fix_reprints_full_reviewer_report(runner, tmp_path):
     fake_result = dict(_FAKE_GENERATE_RESULT, review=long_review)
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(fake_result)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
 
@@ -294,7 +295,7 @@ def test_generate_labels_rejected_candidate_review_distinctly(runner, tmp_path):
     )
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
@@ -309,7 +310,7 @@ def test_generate_accepted_candidate_still_gets_run_instructions_header(runner, 
     header - this fix must not suppress legitimate run instructions."""
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(dict(_FAKE_GENERATE_RESULT))), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
@@ -326,7 +327,7 @@ def test_fix_labels_rejected_candidate_review_distinctly(runner, tmp_path):
     )
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
 
@@ -353,7 +354,7 @@ def test_generate_budget_exhausted_shows_no_toolchain_advice(runner, tmp_path):
     )
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
@@ -378,7 +379,7 @@ def test_generate_genuine_environment_failure_still_shows_toolchain_advice(runne
     )
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
@@ -398,7 +399,7 @@ def test_fix_does_not_mislabel_a_human_rejection_as_a_reviewer_report(runner, tm
                             review="Rejected by user during approval gate review.")
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
 
@@ -425,7 +426,7 @@ def test_fix_does_not_preview_or_reprint_review_already_in_approval(runner, tmp_
     mock_we.run_generation_workflow = AsyncMock(side_effect=run_with_preapproval_review)
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["fix", "--error", "compile failed", "-y"])
 
@@ -490,7 +491,7 @@ def test_generate_marks_in_progress_before_knowledge_gap_retry_runs(runner, tmp_
 
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"), \
              patch("kriya.cli._mark_run_in_progress", side_effect=_record_mark):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
@@ -639,7 +640,7 @@ def test_plan_milestones_bare_output_filename_does_not_crash(runner, tmp_path):
         mock_we.milestone_planner = MagicMock()
         mock_we.milestone_planner.run_with_milestone_list = AsyncMock(return_value=("raw", fake_milestones))
         with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
              patch("kriya.cli.LLMClient"):
             result = runner.invoke(main, ["plan-milestones", "a goal", "--output", "plan.json"])
 

@@ -155,7 +155,14 @@ def test_strict_config_is_real_validated_and_rejects_unknown_fields():
 def test_strict_config_paths_never_resolve_into_the_cwd(tmp_path):
     cfg = strict_config()
     assert Path(cfg.paths.memory).is_absolute() and Path(cfg.paths.skills).is_absolute()
+    assert not Path(cfg.paths.memory).is_relative_to(Path.cwd())
     assert strict_config(paths={"memory": str(tmp_path), "skills": str(tmp_path)}).paths.memory == str(tmp_path)
+
+
+def test_default_strict_configs_are_equal_within_a_test():
+    # A resume/reuse check compares config fingerprints across two engines.
+    assert strict_config().model_dump() == strict_config().model_dump()
+    assert strict_engine().kernel.config.model_dump() == strict_kernel().config.model_dump()
 
 
 def test_strict_kernel_and_engine_carry_real_config_and_reject_unknown_attributes():

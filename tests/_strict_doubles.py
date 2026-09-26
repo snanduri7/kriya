@@ -9,6 +9,7 @@ These helpers give the code a real ``AppConfig`` (packaged defaults, the same
 values production starts from) and a kernel that raises on any attribute
 Kernel does not have. ``tests/test_strict_doubles.py`` rejects new bare
 config/kernel/engine doubles."""
+import os
 import tempfile
 from typing import Any, Dict, Optional
 from unittest.mock import MagicMock
@@ -19,13 +20,28 @@ from kriya.core.kernel import Kernel
 from kriya.core.registry import ComponentRegistry
 
 
+_DEFAULT_ROOTS: Dict[str, str] = {}
+
+
+def _default_root() -> str:
+    """One temp root per test (per process when no test is running), so every
+    default ``strict_config()`` in a test is equal: a resume or reuse check
+    that compares config fingerprints across two engines must not differ on
+    a random path."""
+    test_id = os.environ.get("PYTEST_CURRENT_TEST", "").rsplit(" (", 1)[0]
+    if test_id not in _DEFAULT_ROOTS:
+        _DEFAULT_ROOTS[test_id] = tempfile.mkdtemp(prefix="kriya-strict-config-")
+    return _DEFAULT_ROOTS[test_id]
+
+
 def strict_config(**sections: Dict[str, Any]) -> AppConfig:
     """A validated ``AppConfig`` from packaged defaults plus overrides.
 
     ``strict_config(autonomy={"spec_compliance_enabled": True})``. Each value
     is validated by pydantic; an unknown section or field raises instead of
     being silently ignored. ``paths.skills``/``paths.memory`` default to a
-    fresh temp dir so code that opens them never writes into the CWD."""
+    temp dir (the same one for every call within a test) so code that opens
+    them never writes into the CWD."""
     fields = AppConfig.model_fields
     data: Dict[str, Any] = {}
     for section, values in sections.items():
@@ -41,7 +57,7 @@ def strict_config(**sections: Dict[str, Any]) -> AppConfig:
         data[section] = values
     paths = dict(data.get("paths") or {})
     if "skills" not in paths or "memory" not in paths:
-        root = tempfile.mkdtemp(prefix="kriya-strict-config-")
+        root = _default_root()
         paths.setdefault("skills", f"{root}/skills")
         paths.setdefault("memory", f"{root}/memory")
     data["paths"] = paths

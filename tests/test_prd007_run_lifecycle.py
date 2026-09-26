@@ -380,7 +380,9 @@ def test_entry_point_records_the_resume_config_fingerprint(tmp_path):
 
     running = asyncio.run(Engine().run("goal", workspace_path=str(tmp_path)))
     assert running.effective_config_fingerprint == compute_config_fingerprint(config.model_dump())
-    assert running.effective_config_fingerprint != compute_config_fingerprint(strict_config().model_dump())
+    # Same paths, so only the llm/autonomy overrides differ: they must reach the fingerprint.
+    baseline = strict_config(paths=config.paths.model_dump())
+    assert running.effective_config_fingerprint != compute_config_fingerprint(baseline.model_dump())
 
 
 # ---------------------------------------------------------------- crash

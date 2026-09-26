@@ -509,12 +509,9 @@ def test_the_fix_command_marks_its_goal_as_kriyas_own():
             captured.update(kwargs)
             return {"quality_gates_passed": True, "files": [], "review": "ok", "plan": "", "design": ""}
 
-    kernel = strict_kernel()
-    kernel.start = AsyncMock()
-    kernel.stop = AsyncMock()
     runner = CliRunner()
     with runner.isolated_filesystem():
-        with patch("kriya.cli.WorkflowEngine", Engine), patch("kriya.cli.Kernel", return_value=kernel), \
+        with patch("kriya.cli.WorkflowEngine", Engine), patch("kriya.cli.Kernel", side_effect=strict_kernel), \
              patch("kriya.cli.LLMClient"):
             runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
     assert captured.get("requirements_from_goal") is False
