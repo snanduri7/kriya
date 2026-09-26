@@ -33,7 +33,7 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.workflow.contract_authority import (
     ChangeCategory,
@@ -113,12 +113,16 @@ def classify_api_violations(
         still_present = api_name in set(_normalized_public_signatures(owner, final).values())
         category = "modify" if still_present else "remove"
         callers = list(violation.get("evidence_files") or [])
-        evidence: Dict[str, Any] = {"callers": callers}
 
-        def classified(status: ContractChangeStatus, reason: str, **extra: Any) -> None:
+        # This iteration's values are bound as defaults (B023), never read late.
+        def classified(status: ContractChangeStatus, reason: str, *,
+                       _identity: Tuple[str, str, str, str] = (owner, signature, api_name, category),
+                       _callers: Tuple[str, ...] = tuple(callers), **extra: Any) -> None:
+            bound_owner, bound_signature, bound_api_name, bound_category = _identity
             results.append(ContractChangeClassification(
-                owner=owner, signature=signature, api_name=api_name, change_category=category,
-                status=status, reason=reason, evidence={**evidence, **extra}))
+                owner=bound_owner, signature=bound_signature, api_name=bound_api_name,
+                change_category=bound_category, status=status, reason=reason,
+                evidence={"callers": list(_callers), **extra}))
 
         approval = human.get((owner, api_name, category))
         if (owner, signature) in authorized_keys and approval is None:

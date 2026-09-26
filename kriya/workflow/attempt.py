@@ -5291,8 +5291,8 @@ def _close_requirements_by_migration_gate(
             continue
         lowered = requirement.text.lower()
 
-        def _names(terms: set) -> bool:
-            return any(re.search(rf"\b{re.escape(term)}\b", lowered) for term in terms)
+        def _names(terms: set, text: str = lowered) -> bool:
+            return any(re.search(rf"\b{re.escape(term)}\b", text) for term in terms)
 
         if _names(source_terms) and _names(target_terms):
             record_requirement_closure(
@@ -6405,10 +6405,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     resolution = dict(zip(
         paths_to_resolve,
         prefer_existing_artifact_owners(paths_to_resolve, ctx.goal, ctx.workspace_path),
+        strict=False,  # unresolved paths fall back to themselves via .get() below
     )) if paths_to_resolve else {}
     resolved_paths = [resolution.get(path, path) for path in candidate_paths]
     if resolved_paths != candidate_paths:
-        for file_obj, resolved_path in zip(files, resolved_paths):
+        for file_obj, resolved_path in zip(files, resolved_paths, strict=True):  # one path per file
             original_path = file_obj["filepath"]
             if resolved_path != original_path:
                 logger.warning(

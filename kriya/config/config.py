@@ -1306,7 +1306,8 @@ class AppConfig(BaseModel):
 
         required = runtime_profile_preset_fields("production")
         violations = []
-        for (top, leaf), expected in required.items():
+        # The sealed value is checked by predicate, not equality with the preset.
+        for top, leaf in required:
             actual = getattr(getattr(self, top), leaf)
             # MCP containment is conditional on MCP execution being enabled. The
             # expanded preset still turns it on pre-emptively, so later adding an
@@ -1687,7 +1688,7 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
         preset_fields = runtime_profile_preset_fields(runtime_profile)
         if runtime_profile == "production":
             contradictory = []
-            for (top, leaf), required_value in preset_fields.items():
+            for top, leaf in preset_fields:
                 explicit_section = user_data.get(top)
                 if (
                     isinstance(explicit_section, dict)

@@ -52,7 +52,7 @@ async def _resolve_via_web_lookup(terms: List[str], search_base_url: str, top_k:
         return []
 
     resolved = []
-    for term, query in zip(request.terms, request.queries()):
+    for term, query in zip(request.terms, request.queries(), strict=True):  # one query per term
         try:
             results = await search_web(query, search_base_url, top_k=top_k)
         except Exception as ex:

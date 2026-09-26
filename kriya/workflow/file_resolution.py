@@ -331,7 +331,7 @@ def identify_redirected_test_obligations(
             f"must be the same length ({len(planned_files)} != {len(resolved_files)})"
         )
     obligations: Dict[str, str] = {}
-    for original, resolved_path in zip(planned_files, resolved_files):
+    for original, resolved_path in zip(planned_files, resolved_files, strict=True):  # lengths checked above
         if original == resolved_path:
             continue
         if not is_runnable_test_file(original):

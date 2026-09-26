@@ -122,12 +122,18 @@ async def run_attempt_with_best_of_n(state, attempt_ctx, n: int) -> None:
                 f"Best-of-N: candidate {i + 1}/{n} failed, trying an independent "
                 f"candidate {i + 2}/{n}."
             )
+            reset_error = None
             try:
                 create_git_worktree(attempt_ctx.workspace_path)
-            except Exception:
+            except Exception as error:
+                reset_error = error
+            if reset_error is not None:
                 # Can't get a clean sandbox for the next candidate - stop here
                 # rather than continue in a possibly-dirty worktree. Re-raise the
                 # ORIGINAL candidate failure (e), not this worktree-reset error -
                 # from the caller's point of view this is still "the attempt
                 # failed," just without a further independent retry available.
+                # Raised outside the reset's except block so e keeps its own
+                # context; the reset error did not cause e, so it is logged.
+                logger.warning(f"Best-of-N: worktree reset failed, no further candidate: {reset_error!r}")
                 raise e

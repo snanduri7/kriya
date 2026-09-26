@@ -378,7 +378,7 @@ def build_review_repository_context(
                     seen_files.add(rel)
                     break
 
-        for rel, content in candidates:
+        for rel, _content in candidates:
             if rel in seen_files:
                 continue
             if os.path.basename(rel) in test_names:

@@ -398,7 +398,7 @@ def skeletonize_braced_code(content: str, tier: str) -> str:
         # the raw content line: an example `import`/`package` statement
         # written inside a Javadoc/block comment would otherwise be emitted
         # as if it were real source (2026-08-18 review finding).
-        for line, structural_line in zip(content.splitlines(), structural.splitlines()):
+        for line, structural_line in zip(content.splitlines(), structural.splitlines(), strict=False):
             structural_strip = structural_line.strip()
             if structural_strip.startswith("import ") or structural_strip.startswith("package "):
                 result.append(line)
@@ -1255,7 +1255,7 @@ def build_known_target_context(
                             cache_member_id = f"{member_id}:{boundary.start_line}-{boundary.end_line}"
                             member_content, member_cost = cache.get_or_compute_derivation(
                                 path, cache_member_id, "member_exact", resolved.revision,
-                                lambda b=boundary: extract_member_body(resolved.content, b.start_line, b.end_line),
+                                lambda b=boundary, r=resolved: extract_member_body(r.content, b.start_line, b.end_line),
                             )
                         else:
                             member_content = extract_member_body(resolved.content, boundary.start_line, boundary.end_line)
@@ -1283,7 +1283,7 @@ def build_known_target_context(
                     if cache is not None:
                         sibling_text, sib_cost = cache.get_or_compute_derivation(
                             path, None, "signatures", resolved.revision,
-                            lambda: skeletonize_code(resolved.content, path, "signatures"),
+                            lambda r=resolved, p=path: skeletonize_code(r.content, p, "signatures"),
                         )
                     else:
                         sibling_text = skeletonize_code(resolved.content, path, "signatures")

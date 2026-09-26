@@ -194,7 +194,7 @@ def _normalize_file_list_paths(files: List[str]) -> List[str]:
             by_ext.setdefault(ext, []).append(f)
 
     corrections = {}
-    for ext, group in by_ext.items():
+    for group in by_ext.values():
         if len(group) < 2:
             continue
         bare = [f for f in group if not os.path.dirname(f)]

@@ -255,7 +255,7 @@ def _proposal_from_json_dict(d: Dict[str, Any]) -> ProposedModification:
             target_file_sha256=d["target_file_sha256"], evidence_bindings=evidence_bindings,
         )
     except KeyError as e:
-        raise ProposalStoreError(REASON_PROPOSAL_PARSE_INVALID, f"persisted proposal missing required field: {e}")
+        raise ProposalStoreError(REASON_PROPOSAL_PARSE_INVALID, f"persisted proposal missing required field: {e}") from e
 
 
 def _persisted_to_json_dict(persisted: PersistedProposal) -> Dict[str, Any]:
@@ -327,7 +327,7 @@ def load_proposal(proposal_id: str, workspace_root: str) -> PersistedProposal:
         with open(path, "r", encoding="utf-8") as fh:
             raw = json.load(fh)
     except (OSError, json.JSONDecodeError) as e:
-        raise ProposalStoreError(REASON_PROPOSAL_PARSE_INVALID, f"could not parse persisted proposal {proposal_id!r}: {e}")
+        raise ProposalStoreError(REASON_PROPOSAL_PARSE_INVALID, f"could not parse persisted proposal {proposal_id!r}: {e}") from e
 
     if not isinstance(raw, dict):
         raise ProposalStoreError(REASON_PROPOSAL_PARSE_INVALID, f"persisted proposal {proposal_id!r} is not a JSON object")
@@ -349,7 +349,7 @@ def load_proposal(proposal_id: str, workspace_root: str) -> PersistedProposal:
             created_at=metadata_dict["created_at"], updated_at=metadata_dict["updated_at"],
         )
     except KeyError as e:
-        raise ProposalStoreError(REASON_PROPOSAL_PARSE_INVALID, f"persisted proposal {proposal_id!r} missing required field: {e}")
+        raise ProposalStoreError(REASON_PROPOSAL_PARSE_INVALID, f"persisted proposal {proposal_id!r} missing required field: {e}") from e
 
 
 def verify_persisted_proposal(persisted: PersistedProposal, workspace_root: str) -> ProposalIntegrityResult:
