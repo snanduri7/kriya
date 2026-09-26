@@ -23,7 +23,9 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 | eefa8a1 | PRD-025 correction: nonzero-exit authority comes only from the immutable user goal, bound to its declared code |
 | f6f3bf0 | PRD-029: every deterministic registry refusal is a terminal typed stop (new `CONTRACT_REGISTRY_TRANSITION_INVALID`) |
 | 468039d | Live: a SKIP is NOT_LIVE_EXERCISED; a deterministic PRD-028 escalation trigger |
-| (this) | Handovers, the KNOWLEDGE-READPATH-001 defect record, the tracker |
+| 9973d90 | Handovers, docs, the KNOWLEDGE-READPATH-001 defect record, the tracker |
+| 2196b72 | PRD-025: enforce subtask text and Developer-authored output cannot declare an expected exit (tests) |
+| (this) | Summary update |
 
 ## The three suspected P0/P1 defects
 1. **PRD-025: nonzero exit overridden by an LLM PASS. Confirmed**, in a narrower form than suspected.
@@ -107,7 +109,7 @@ The new test files only, plus mutation checks against them. The final-correction
 - `tests/test_prd025_verifier_evidence.py` (56);
 - `tests/test_prd029_contract_lifecycle.py` (38);
 - `tests/test_batch6_live_evidence_status.py` (2);
-- 5 named `test_workflow.py` IDs;
+- 8 named `test_workflow.py` IDs;
 - one offline, mocked simulation of the PRD-028 live case.
 
 **Quota deviation (recorded once):** while building PRD-025..028 I also ran several existing suites (about 300 tests in total) as regression checks, which is more than the quota rule allows.
