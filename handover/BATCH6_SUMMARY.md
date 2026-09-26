@@ -27,7 +27,8 @@ Branch `milestone-decomposition`, base 510fd98 (level with origin). Everything i
 | 2196b72 | PRD-025: enforce subtask text and Developer-authored output cannot declare an expected exit (tests) |
 | 783558d | Summary update |
 | f3707c4 | AUTH-GOAL-CONTAMINATION-001: retrieved reference text never becomes authority (the `generate` pre-step no longer joins it to the goal) |
-| (this) | AUTH-GOAL-CONTAMINATION-001 record, docs, tracker, summary |
+| b351682 | AUTH-GOAL-CONTAMINATION-001 record, docs, tracker, summary |
+| (this) | Fix (my f3707c4): the structural tripwire missed conditional, `.format`/`.join`/`%` and keyword enrichment; plus controller-path and Planner mutation-scope tests |
 
 ## The three suspected P0/P1 defects
 1. **PRD-025: nonzero exit overridden by an LLM PASS. Confirmed**, in a narrower form than suspected.
@@ -118,7 +119,7 @@ The new test files only, plus mutation checks against them. The final-correction
 - `tests/test_batch6_live_evidence_status.py` (2);
 - 8 named `test_workflow.py` IDs;
 - one offline, mocked simulation of the PRD-028 live case;
-- AUTH-GOAL-CONTAMINATION-001: `tests/test_auth_goal_contamination_001.py` (9), `tests/test_dispatch_generation.py` and `tests/test_generate_json_contract.py` (31 in all), and 8 mutations, all killed.
+- AUTH-GOAL-CONTAMINATION-001: `tests/test_auth_goal_contamination_001.py` (23), `tests/test_dispatch_generation.py` and `tests/test_generate_json_contract.py`, and 11 mutations, all killed.
 
 **Quota deviation (recorded once):** while building PRD-025..028 I also ran several existing suites (about 300 tests in total) as regression checks, which is more than the quota rule allows.
 

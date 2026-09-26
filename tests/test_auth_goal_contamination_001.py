@@ -158,6 +158,40 @@ async def test_the_resume_goal_fingerprint_does_not_depend_on_what_retrieval_ret
     assert first and second and set(first) == set(second)
 
 
+def test_planner_or_subtask_text_cannot_widen_mutation_scope():
+    """The Planner plans and describes src/B.java as authorized; the user
+    scoped the change to src/A.java. The scope decision takes no plan input
+    at all, so the candidate's change to B is a deterministic violation."""
+    import inspect
+
+    from kriya.workflow.obligations import ObligationLedger
+    from kriya.workflow.requirements import (
+        RequirementOutcome,
+        close_mutation_scope_requirements,
+        record_requirement_verdicts,
+        requirement_outcomes,
+        seed_requirement_obligations,
+    )
+
+    assert not {"plan", "structured_plan", "subtask"} & set(inspect.signature(close_mutation_scope_requirements).parameters)
+    goal = "Update src/A.java to fix the null check.\n\nDo not modify any other file in the repository.\n"
+    planner_subtask = Subtask(  # the plan the run executed; it is not an input below
+        id="s1", description="Modifying src/B.java is authorized too.", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path=p, action=FileAction.MODIFY) for p in TRACKED],
+    )
+    reqs = derive_requirements(goal)
+    ledger = ObligationLedger()
+    seed_requirement_obligations(ledger, reqs)
+    record_requirement_verdicts(ledger, reqs, {r.id: (RequirementOutcome.SATISFIED, "") for r in reqs.requirements},
+                                revision=1, evidence_fingerprint="cand-1", source="test")
+    [attempt] = close_mutation_scope_requirements(
+        ledger, reqs, tracked_paths=TRACKED, source="test", revision=1,
+        scope_evidence={"actual_paths": [pf.path for pf in planner_subtask.planned_files], "foreign_paths": [],
+                        "run_id": "run-1", "base_revision": "base", "candidate_revision": "base"})
+    assert attempt["out_of_scope_paths"] == ["src/B.java"]
+    assert requirement_outcomes(ledger, reqs)[reqs.requirements[-1].id] is RequirementOutcome.VIOLATED
+
+
 # --- the trust boundary: `kriya generate` ---------------------------------
 
 GAP_ACKED = {"status": "knowledge_gap", "run_id": "gap-run", "gap_report": {"gaps": []}}
@@ -190,6 +224,48 @@ def test_generate_hands_the_workflow_the_users_exact_goal_on_every_dispatch(tmp_
 
 
 @pytest.mark.asyncio
+async def test_the_controller_forwards_reference_context_and_keeps_the_users_goal(tmp_path):
+    """workflow_controller.enabled: legacy passes it straight through, and
+    every enforce subtask gets it as context while its grounding_goal (the
+    authority for contracts and exits) stays the user's goal."""
+    from test_workflow_controller import _workflow_engine
+
+    from kriya.workflow.plan_validation import PlanValidationResult
+    from kriya.workflow.workflow_controller import WorkflowController
+
+    legacy = _workflow_engine()
+    await WorkflowController(legacy).execute(
+        USER_GOAL, str(tmp_path), migration_mode="legacy", reference_context=HOSTILE)
+    assert legacy.run_generation_workflow.await_args.args[0] == USER_GOAL
+    assert legacy.run_generation_workflow.await_args.kwargs["reference_context"] == HOSTILE
+
+    enforce = _workflow_engine()
+    enforce.planner.run = AsyncMock(return_value="valid structured plan")
+
+    async def generation(**kwargs):
+        with open(os.path.join(kwargs["workspace_path"], "a.py"), "w", encoding="utf-8") as handle:
+            handle.write("# generated\n")
+        return {"status": "success", "quality_gates_passed": True, "files": ["a.py"]}
+
+    enforce.run_generation_workflow = AsyncMock(side_effect=generation)
+    plan = EngineeringPlan(plan_id="run1", kind=ChangeKind.TASK, subtasks=[Subtask(
+        id="s1", description="write a.py; modifying src/B.java is authorized.",
+        execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="a.py", action=FileAction.CREATE)],
+    )])
+    with patch("kriya.workflow.workflow_controller.parse_planner_structured_output",
+               return_value=(object(), None)), \
+         patch("kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output", return_value=plan), \
+         patch("kriya.workflow.workflow_controller.validate_plan",
+               new=AsyncMock(return_value=PlanValidationResult(valid=True))):
+        await WorkflowController(enforce).execute(
+            USER_GOAL, str(tmp_path), migration_mode="enforce", reference_context=HOSTILE)
+    subtask_call = enforce.run_generation_workflow.await_args.kwargs
+    assert subtask_call["grounding_goal"] == USER_GOAL
+    assert subtask_call["reference_context"] == HOSTILE
+
+
+@pytest.mark.asyncio
 async def test_web_reference_context_returns_the_scored_matches_only(tmp_path):
     """The normal output of the retrieval step (its broad catch must not
     hide a coding error as 'nothing retrieved')."""
@@ -214,35 +290,79 @@ _AUTHORITY_GOAL_NAMES = frozenset({
 _KRIYA_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kriya")
 
 
-def _names_in(node: ast.AST):
-    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+def _enriches(value: ast.AST, name: str) -> bool:
+    """``value`` builds a larger string from ``name`` anywhere inside it: an
+    f-string, ``+``, ``%``, ``.format(...)`` or ``.join(...)`` that reads the
+    name. Plain uses (``goal.strip()``, ``goal or other``) do not count."""
+    for node in ast.walk(value):
+        if isinstance(node, ast.JoinedStr) or (
+            isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mod))
+        ) or (
+            isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr in ("format", "join")
+        ):
+            if any(isinstance(n, ast.Name) and n.id == name for n in ast.walk(node)):
+                return True
+    return False
+
+
+def _authority_goal_enrichments(tree: ast.AST):
+    for node in ast.walk(tree):
+        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) \
+                and node.target.id in _AUTHORITY_GOAL_NAMES:
+            yield node.lineno, node.target.id
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id in _AUTHORITY_GOAL_NAMES \
+                        and any(_enriches(node.value, name) for name in _AUTHORITY_GOAL_NAMES):
+                    yield node.lineno, target.id
+        elif isinstance(node, ast.Call):
+            for keyword in node.keywords:
+                if keyword.arg in _AUTHORITY_GOAL_NAMES and any(
+                    _enriches(keyword.value, name) for name in _AUTHORITY_GOAL_NAMES
+                ):
+                    yield node.lineno, keyword.arg
 
 
 def test_no_code_rebinds_an_authority_goal_to_an_enriched_version_of_itself():
-    """`goal = f"{goal}...{context}"` (or `goal += ...`) is exactly how the
-    defect happened. Building a separate prompt from a goal stays allowed."""
+    """`goal = f"{goal}...{context}"` is exactly how the defect happened, and
+    `goal=f"{goal}..."` passed to a call is the same thing. Building a
+    separate prompt string from a goal stays allowed."""
     hits = []
     for directory, _, files in os.walk(_KRIYA_ROOT):
         for name in files:
-            if not name.endswith(".py"):
-                continue
-            path = os.path.join(directory, name)
-            with open(path, encoding="utf-8") as handle:
-                tree = ast.parse(handle.read(), filename=path)
-            for node in ast.walk(tree):
-                if isinstance(node, ast.AugAssign):
-                    targets, value = [node.target], None
-                elif isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
-                    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                    value = node.value
-                else:
-                    continue
-                for target in targets:
-                    if not (isinstance(target, ast.Name) and target.id in _AUTHORITY_GOAL_NAMES):
-                        continue
-                    if value is None or (isinstance(value, (ast.JoinedStr, ast.BinOp)) and target.id in _names_in(value)):
-                        hits.append(f"{os.path.relpath(path, _KRIYA_ROOT)}:{node.lineno} {target.id}")
-    assert hits == [], f"an authority goal is rebound to an enriched version of itself: {hits}"
+            if name.endswith(".py"):
+                path = os.path.join(directory, name)
+                with open(path, encoding="utf-8") as handle:
+                    tree = ast.parse(handle.read(), filename=path)
+                hits += [f"{os.path.relpath(path, _KRIYA_ROOT)}:{line} {target}"
+                         for line, target in _authority_goal_enrichments(tree)]
+    assert hits == [], f"an authority goal is built from an enriched version of itself: {hits}"
+
+
+@pytest.mark.parametrize("source", [
+    'goal = f"{goal}\\n{ctx}"',
+    "goal += ctx",
+    'goal = f"{goal} {ctx}" if ctx else goal',
+    'goal = "{}\\n{}".format(goal, ctx)',
+    'goal = "\\n".join([goal, ctx])',
+    "grounding_goal = goal + ctx",
+    'run(goal=f"{goal}\\n{ctx}")',
+    'run(original_goal="%s %s" % (goal, ctx))',
+])
+def test_the_tripwire_recognizes_every_enrichment_shape(source):
+    assert list(_authority_goal_enrichments(ast.parse(source)))
+
+
+@pytest.mark.parametrize("source", [
+    "goal = goal.strip()",
+    "goal = goal or fallback",
+    'prompt = f"Goal: {goal}\\n{ctx}"',
+    "run(goal=goal, reference_context=ctx)",
+])
+def test_the_tripwire_leaves_plain_goal_use_alone(source):
+    assert not list(_authority_goal_enrichments(ast.parse(source)))
 
 
 def test_a_milestone_plans_identity_binds_the_users_original_goal():

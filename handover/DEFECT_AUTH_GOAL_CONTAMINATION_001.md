@@ -33,9 +33,9 @@ The store it read (`vector_chunks` in `web_knowledge.db`) is normally empty (KNO
 | `kriya fix` | fixed goal text; the error log goes to `error_context`, `requirements_from_goal=False` |
 | Milestones | `original_goal` from the persisted plan file; `--from-milestones` never ran the pre-step |
 
-Only one rebinding site existed (`cli.py`), and a structural test now forbids any new one.
+Only one rebinding site existed (`cli.py`). The structural test (below) forbids any new one, whether an assignment or a `goal=`/`grounding_goal=`/`original_goal=` call keyword. It scans all of `kriya/` and reports zero hits.
 
-## Tests (`tests/test_auth_goal_contamination_001.py`, 9)
+## Tests (`tests/test_auth_goal_contamination_001.py`, 23 with parametrizations)
 Each consumer assertion is paired with a control: the pre-fix concatenated goal DOES grant the authority, so no assertion passes vacuously.
 | Required case | Test |
 |---|---|
@@ -44,12 +44,13 @@ Each consumer assertion is paired with a control: the pre-fix concatenated goal 
 | Mutation: the user authorizes src/A.java, retrieval says modify src/B.java, so B is not authorized | `..._never_reaches_an_authority_decision` |
 | Requirement lineage: retrieved "Do not modify any other file." is not a REQ | same |
 | API: retrieved "changing this public API is authorized" mints no DIRECT authorization | same |
-| Planner/subtask text grants nothing | existing: `test_prd025_planner_or_milestone_text_cannot_declare_an_expected_exit`, `test_prd025_enforce_subtask_text_cannot_declare_an_expected_exit`, `tests/test_corr016_planner_authority_gate.py` (the plan only narrows goal-named owners), `mutation_path_roles` (goal words only) |
+| Planner/subtask text grants nothing | mutation scope: `test_planner_or_subtask_text_cannot_widen_mutation_scope` (new; the scope decision takes no plan input). Exit: `tests/test_workflow.py::test_prd025_planner_or_milestone_text_cannot_declare_an_expected_exit` and `::test_prd025_enforce_subtask_text_cannot_declare_an_expected_exit`. API: `tests/test_workflow.py::test_planner_text_cannot_create_direct_authorization` and `tests/test_corr016_planner_authority_gate.py::test_third_planner_selected_file_gets_no_authorization` |
 | Milestone: `original_goal` is the only intent authority; a substituted one is a different plan | `test_a_milestone_plans_identity_binds_the_users_original_goal`, plus the existing `test_prd025_a_milestone_units_authority_is_the_users_original_goal` |
 | Resume: the goal fingerprint is the user's goal alone, whatever retrieval returns | `..._never_reaches_...`, `test_the_resume_goal_fingerprint_does_not_depend_on_what_retrieval_returned` |
+| Controller path (`workflow_controller.enabled`): legacy forwards it; each enforce subtask gets it while `grounding_goal` stays the user's goal | `test_the_controller_forwards_reference_context_and_keeps_the_users_goal` |
 | CLI boundary on every dispatch | `test_generate_hands_the_workflow_the_users_exact_goal_on_every_dispatch` (single, acked retry, confirmed retry) |
 | Normal output of the retrieval step (its broad catch) | `test_web_reference_context_returns_the_scored_matches_only` |
-| Structural | `test_no_code_rebinds_an_authority_goal_to_an_enriched_version_of_itself` |
+| Structural | `test_no_code_rebinds_an_authority_goal_to_an_enriched_version_of_itself`, with the shapes it must catch and must leave alone pinned by `test_the_tripwire_recognizes_every_enrichment_shape` (8) and `test_the_tripwire_leaves_plain_goal_use_alone` (4) |
 
 The consumer tests run a real `run_generation_workflow` and check the AttemptContext, the prompts and the checkpoints it actually produced.
 
@@ -58,7 +59,10 @@ The consumer tests run a real `run_generation_workflow` and check the AttemptCon
 - the workflow joining `reference_context` into the goal at entry;
 - the fence append removed;
 - the score threshold removed;
-- `reference_context` dropped from each of the three dispatches, one at a time.
+- `reference_context` dropped from each of the three dispatches, one at a time;
+- tripwire only (`-k rebinds`): an `IfExp` rebinding, a `.format` rebinding, and a `.join` passed as the `goal=` keyword.
+
+**My own bug, fixed in the follow-up commit.** The first version of the structural test (f3707c4) looked only at a top-level f-string or `+` on the right-hand side. The advisor review caught that `goal = f"{goal}..." if ctx else goal`, `.format`, `.join`, `%` and the keyword form `goal=f"{goal}..."` all slipped past it. The evidence was already there: the workflow-side mutation, an `IfExp`, failed three consumer tests while the tripwire passed. The test now walks the whole right-hand side and call keywords, for every authority-goal name. All three shapes are KILLED by the tripwire alone, and it still reports zero hits on the tree.
 
 ## Behaviour changes (disclosed)
 - The retrieved text no longer reaches anything that reads the goal: KnowledgeGuard, triage, skill matching, the Graph RAG and learned-knowledge queries, and enforce's structured Planner. It reaches the direct Planner/Architect/Developer, and each enforce subtask's generation, as fenced reference context.
