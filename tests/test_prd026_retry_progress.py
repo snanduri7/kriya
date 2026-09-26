@@ -380,6 +380,17 @@ async def test_workflow_result_reports_terminal_no_progress(tmp_path):
     assert progress["distinct_vectors"] >= 1 and progress["last_vector_digest"]
     # 1 new vector + 3 repeats reach the no-progress bound (limit 3).
     assert we.developer.run_generation.await_count == 4
+    # The persisted trace carries the transition and terminal events.
+    import json
+    import sqlite3
+
+    from kriya.core.state_paths import trace_db_path
+    with sqlite3.connect(trace_db_path(cfg)) as db:
+        (events_json,) = db.execute("SELECT run_events FROM runs ORDER BY rowid DESC").fetchone()
+    kinds = [event["kind"] for event in json.loads(events_json)]
+    assert kinds.count("retry.progress_vector") == 4
+    assert "retry.strategy_transition" in kinds
+    assert kinds.count("retry.no_progress_terminal") == 1
 
 
 @pytest.mark.asyncio

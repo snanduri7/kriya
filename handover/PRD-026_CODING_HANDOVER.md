@@ -69,7 +69,7 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop.
 ## Tests run by coding agent (targeted)
 | Command | Passed | Failed |
 |---|---:|---:|
-| `.venv/bin/pytest -q tests/test_prd026_retry_progress.py tests/test_val001_g1r3_retry_context.py tests/test_retry_policy.py` | 74 (+1 added later) | 0 |
+| `.venv/bin/pytest -q tests/test_prd026_retry_progress.py tests/test_val001_g1r3_retry_context.py tests/test_retry_policy.py` | 75 | 0 |
 | `.venv/bin/pytest -q tests/test_workflow.py -k "fallback_chain or two_full_set_attempts or progress_gate or no_progress"` | 4 | 0 |
 | `.venv/bin/pytest -q tests/test_d1_operation_mode_authority.py -k "never_rewarded or whole_retry or full_file"` | 12 | 0 |
 
@@ -82,12 +82,12 @@ READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop.
 - the retry_temperature precedence;
 - the resample counter;
 - the terminal reason;
-- the diagnostics dimension (initially survived; test added);
+- the diagnostics dimension (initially SURVIVED; test added);
 - the workspace dimension;
 - the vector wiring;
 - the `no_progress` category;
-- the counter reset on a new vector (initially survived; test added);
-- the retry-strategy event.
+- the counter reset on a new vector (initially SURVIVED; test added);
+- the `retry.strategy_transition` event kind (asserted through the persisted `traces.db` run events).
 
 ## Static/lint/architecture checks
 ruff: All checks passed. pylint: exit 0.
