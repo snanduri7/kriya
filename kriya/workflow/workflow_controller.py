@@ -77,6 +77,7 @@ import logging
 import os
 import re
 import shutil
+import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -192,7 +193,10 @@ from kriya.workflow.plan_validation import canonicalize_planned_file_actions, va
 from kriya.workflow.planner_repair import (
     STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
     build_structured_plan_repair_prompt,
+    classify_planner_outcome,
     classify_structured_plan_parse_issue,
+    planner_response_model,
+    record_planner_outcome,
 )
 from kriya.workflow.planning_diagnostics import (
     bounded_repository_evidence,
@@ -211,12 +215,13 @@ from kriya.workflow.requirements import (
     RequirementSet,
     blocking_requirements,
     derive_requirements,
-    parse_requirement_verdicts,
     record_requirement_verdicts,
     requirement_evidence,
     requirement_outcomes,
+    requirement_verdict_details,
     requirements_prompt_block,
     seed_requirement_obligations,
+    verifier_result_verdicts,
 )
 from kriya.workflow.static_checks import (
     derive_stack_contract,
@@ -546,18 +551,17 @@ async def _verify_original_requirements(
     result = await spec_compliance.check(
         goal=goal, files_written=files, file_contents=contents, requirements=requirements,
     )
-    status = (result or {}).get("status")
-    verdicts, findings = ({}, [f"verifier status {status}"]) if status == "unknown" else (
-        parse_requirement_verdicts((result or {}).get("requirement_verdicts"), requirements)
-    )
-    if status == "unknown":
-        findings.append(str((result or {}).get("reasoning") or "no reason given"))
+    # MODEL-EVIDENCE-HARDENING-001: every verdict with its reason code and
+    # the verifier's identity; an id without one says why there is none.
+    verdicts, findings, missing_reason, missing_detail = verifier_result_verdicts(result, requirements)
     if findings:
         logger.warning("Original requirement verification findings: %s", findings)
     record_requirement_verdicts(
         ledger, requirements, verdicts, revision="terminal", evidence_fingerprint=fingerprint,
         source="workflow_controller.terminal_requirements",
         gate_evidence=["enforce terminal gates: every subtask verified"],
+        missing_reason=missing_reason, missing_detail=missing_detail,
+        verifier=(result or {}).get("verifier"),
     )
     return findings
 
@@ -3314,6 +3318,7 @@ class WorkflowController:
             # repair handles correctable structure; true unavailability is
             # surfaced for review below.
             plan: Optional[EngineeringPlan] = None
+            enforce_started = time.time()
             try:
                 legacy_result, plan, subtask_results, decisions, verification_report, control_state = (
                     await self._run_structured_enforce(
@@ -3349,6 +3354,12 @@ class WorkflowController:
                     "error": str(e),
                     "run_id": run_id,
                 }
+
+            # MODEL-EVIDENCE-HARDENING-001: the enforce run's own trace row -
+            # its terminal status, why planning failed, the original
+            # requirement verdicts, and every model call no subtask row
+            # reported (planning, the terminal verifier).
+            self._write_enforce_trace(run_id, goal, legacy_result, enforce_started)
 
             # Enforce mode is authoritative: repository progress without a
             # durable matching ControlState must stop before another unit
@@ -3783,6 +3794,52 @@ class WorkflowController:
         report = build_verification_report(plan.acceptance_criteria)
         return plan, tuple(results), ledger.all(), report, notes
 
+    def _write_enforce_trace(self, run_id: str, goal: str, result: Dict[str, Any], started_at: float) -> bool:
+        """One traces.db row (``<run_id>.enforce``, never a subtask's own id)
+        for an enforce run: its real terminal status, a ``planning.failed``
+        event when structured planning failed, the ``requirement.verdicts``
+        event when the terminal verifier ran, and the role metrics no subtask
+        row reported. Not a RunRecord and not a lifecycle state."""
+        from kriya.core.state_paths import trace_db_path
+        from kriya.workflow.run_events import EventAuthority, RunEvent
+        from kriya.workflow.run_trace import write_outcome_trace
+
+        engine = self.workflow_engine
+        kernel = getattr(engine, "kernel", None)
+        if kernel is None:
+            return False
+        source = "workflow_controller.enforce"
+        status = str(result.get("status") or "unknown")
+        events: List[Dict[str, Any]] = []
+        if result.get("failure_type") == "PLANNING_ERROR":
+            events.append(RunEvent(
+                kind="planning.failed", attempt=0, source=source, authority=EventAuthority.AUTHORITATIVE,
+                message=f"structured planning failed: {', '.join(result.get('reason_codes') or [])}",
+                details={key: result[key] for key in ("reason_codes", "invalid_subtask_ids",
+                                                     "plan_repair_attempts", "error") if key in result},
+            ).to_dict())
+        requirements = result.get("requirements") if isinstance(result.get("requirements"), dict) else {}
+        if requirements.get("verdicts"):
+            events.append(RunEvent(
+                kind="requirement.verdicts", attempt=0, source=source, authority=EventAuthority.ADVISORY,
+                message="original requirement outcomes: " + ", ".join(
+                    f"{rid}={verdict.get('outcome')}({verdict.get('reason_code')})"
+                    for rid, verdict in sorted(requirements["verdicts"].items())),
+                details={"requirement_set_digest": requirements.get("digest"),
+                         "outcomes": requirements.get("outcomes"), "verdicts": requirements["verdicts"]},
+            ).to_dict())
+        failure_category = None if status == "success" else str(result.get("failure_type") or status)
+        try:
+            trace_db = trace_db_path(kernel.config)
+        except Exception as error:  # the run's own result stands; tested for the normal output
+            logger.warning("No traces.db for enforce run %r: %s", run_id, error)
+            return False
+        return write_outcome_trace(
+            trace_db, run_id=f"{run_id}.enforce", goal=goal, status=status,
+            llm=getattr(getattr(engine, "developer", None), "llm", None), source=source, started_at=started_at,
+            failure_category=failure_category, events=events, files=result.get("files") or (),
+        )
+
     async def _run_structured_enforce(
         self, goal: str, workspace_path: str, route: Any, run_id: str,
         control_context: WorkflowControlContext, control_state: ControlState,
@@ -4069,6 +4126,10 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             system_prompt_override=AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
             json_mode=True,
         )
+        # MODEL-EVIDENCE-HARDENING-001: the model that answered (escalation
+        # may have used a chain model); each response's typed outcome is
+        # charged to it below.
+        plan_response_model = planner_response_model(self.workflow_engine.planner)
         _log_phase_banner("PLAN VALIDATION")
         repair_attempts = 0
         # MA8 (PRV-05 run #8, 2026-08-28) - kriya/workflow/obligations.py.
@@ -4298,6 +4359,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 )
                 reason_codes.append("PRESERVED_REFERENCE_REGRESSION_REJECTED")
                 reason_codes = list(dict.fromkeys(reason_codes))
+            # MODEL-EVIDENCE-HARDENING-001: one typed outcome per Planner
+            # response (valid / malformed / structured validation failure /
+            # policy rejection / other), into the role metrics.
+            record_planner_outcome(
+                self.workflow_engine.planner,
+                classify_planner_outcome(reason_codes, valid=plan is not None and not errors),
+                model=plan_response_model,
+            )
             if plan is not None and not errors:
                 approved_stack_contract = derive_stack_contract(goal)
                 log_stack_contract_boundary("plan", approved_stack_contract, None)
@@ -4495,6 +4564,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 system_prompt_override=AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
                 json_mode=True,
             )
+            plan_response_model = planner_response_model(self.workflow_engine.planner)
 
         assert plan is not None
         logger.info(
@@ -6650,6 +6720,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 "outcomes": {rid: outcome.value for rid, outcome in
                              requirement_outcomes(obligation_ledger, requirement_set).items()},
                 "evidence": requirement_evidence(obligation_ledger, requirement_set),
+                # Each verdict with its reason code, verifier and candidate.
+                "verdicts": requirement_verdict_details(obligation_ledger, requirement_set),
                 # Every closure attempt, closed or not, with why (a requirement
                 # left open by missing evidence is otherwise undiagnosable).
                 "closure_attempts": requirement_closure_attempts,

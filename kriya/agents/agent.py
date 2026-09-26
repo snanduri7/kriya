@@ -250,6 +250,20 @@ _JSON_DOCUMENT_BASENAMES = frozenset({
 FILE_LIST_PROTOCOL_ANSWER_AS_CONTENT = "FILE_LIST_PROTOCOL_ANSWER_AS_CONTENT"
 
 
+def _verifier_identity(llm: Any) -> Dict[str, Any]:
+    """The model and exact runtime of the client's latest completion (the
+    verifier that judged), with only well-typed values kept."""
+    last = getattr(llm, "last_completion", None)
+    model = getattr(last, "model", None)
+    digest = getattr(last, "runtime_fingerprint", None)
+    exact = getattr(last, "runtime_fingerprint_exact", None)
+    return {
+        "model": model if isinstance(model, str) and model else None,
+        "runtime_fingerprint": digest if isinstance(digest, str) and digest else None,
+        "runtime_exact": exact if isinstance(exact, bool) else False,
+    }
+
+
 def _record_schema_failure(llm: Any, model: str) -> None:
     """PRD-018: a response the caller rejected against its role contract."""
     metrics = getattr(llm, "role_metrics", None)
@@ -3171,6 +3185,15 @@ class SpecComplianceAgent(BaseAgent):
         # this gate has no such precondition. Same "optional judgment call, don't let
         # its own failure fail an otherwise-correct run" reasoning RunVerifierAgent.
         # judge() already documents for its identical exception path.
+        # MODEL-EVIDENCE-HARDENING-001: every unknown result names why
+        # (failure_reason_code) and every result names the model/runtime
+        # that judged (verifier), so an UNKNOWN requirement is diagnosable.
+        from kriya.workflow.requirements import (
+            MALFORMED_VERIFIER_RESULT,
+            VERIFIER_CALL_FAILED,
+            VERIFIER_REQUEST_REFUSED,
+        )
+
         try:
             response_str = await call_with_escalation(
                 self.llm, self.system_prompt, prompt, self._candidates(),
@@ -3178,15 +3201,21 @@ class SpecComplianceAgent(BaseAgent):
             )
         except Exception as e:
             logger.warning(f"Spec Compliance check() call failed entirely, skipping check: {e}")
-            return {"compliant": True, "status": "unknown", "reasoning": f"Check call failed: {e}", "missing_requirements": [], "likely_files": []}
+            refused = isinstance(e, ContextBudgetUnsatisfiableError)
+            return {"compliant": True, "status": "unknown", "reasoning": f"Check call failed: {e}", "missing_requirements": [], "likely_files": [],
+                    "failure_reason_code": VERIFIER_REQUEST_REFUSED if refused else VERIFIER_CALL_FAILED,
+                    "verifier": _verifier_identity(self.llm)}
+        verifier = _verifier_identity(self.llm)
         try:
             parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
         except Exception as e:
             logger.warning(f"Spec Compliance check() returned unparseable JSON, skipping check: {e}")
-            return {"compliant": True, "status": "unknown", "reasoning": f"Response could not be parsed: {e}", "missing_requirements": [], "likely_files": []}
+            return {"compliant": True, "status": "unknown", "reasoning": f"Response could not be parsed: {e}", "missing_requirements": [], "likely_files": [],
+                    "failure_reason_code": MALFORMED_VERIFIER_RESULT, "verifier": verifier}
 
         if not isinstance(parsed, dict):
-            return {"compliant": True, "status": "unknown", "reasoning": "Response was not a JSON object.", "missing_requirements": [], "likely_files": []}
+            return {"compliant": True, "status": "unknown", "reasoning": "Response was not a JSON object.", "missing_requirements": [], "likely_files": [],
+                    "failure_reason_code": MALFORMED_VERIFIER_RESULT, "verifier": verifier}
 
         # Same trust boundary as RunVerifierAgent.grade()'s likely_files: never let a
         # hallucinated/malformed entry reach the retry loop's file-scoping logic.
@@ -3255,6 +3284,7 @@ class SpecComplianceAgent(BaseAgent):
                 "reasoning": parsed.get("reasoning") or "",
                 "missing_requirements": [], "likely_files": likely_files,
                 "requirement_verdicts": requirement_verdicts,
+                "verifier": verifier,
             }
         return {
             "compliant": compliant,
@@ -3262,6 +3292,7 @@ class SpecComplianceAgent(BaseAgent):
             "missing_requirements": missing_requirements,
             "likely_files": likely_files,
             "requirement_verdicts": requirement_verdicts,
+            "verifier": verifier,
         }
 
 

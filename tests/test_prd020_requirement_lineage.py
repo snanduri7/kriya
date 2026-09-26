@@ -176,7 +176,13 @@ def test_verdict_parsing_ignores_invented_ids_and_unreadable_verdicts():
         {"id": "REQ-2", "verdict": "probably"},
         "junk",
     ], reqs)
-    assert verdicts == {"REQ-1": (RequirementOutcome.SATISFIED, "greeting.py greet")}
+    # MODEL-EVIDENCE-HARDENING-001: each verdict carries its reason code, and
+    # an unreadable verdict for a known id is UNKNOWN / MALFORMED_VERIFIER_RESULT
+    # (it was simply absent - UNKNOWN without a reason - before).
+    assert verdicts == {
+        "REQ-1": (RequirementOutcome.SATISFIED, "greeting.py greet", "VERIFIER_CONFIRMED"),
+        "REQ-2": (RequirementOutcome.UNKNOWN, "unreadable verdict 'probably'", "MALFORMED_VERIFIER_RESULT"),
+    }
     assert len(findings) == 3
 
 

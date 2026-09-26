@@ -48,6 +48,16 @@ user's text, verbatim:
 A plan that paraphrases or omits a requirement cannot remove it: the set is
 derived from the goal, not from the plan, and the terminal decision reads
 the set.
+
+Every recorded verdict carries a normalized reason code
+(MODEL-EVIDENCE-HARDENING-001, ``REQUIREMENT_REASON_CODES``), its evidence
+text, the verifier's model/runtime identity and the candidate it judged
+(``evidence_id`` + revision); ``requirement_verdict_details`` reports them.
+UNKNOWN is never unexplained: a verifier that returned no verdict for an id
+(MODEL_RETURNED_NO_VERDICT) is distinguishable from one whose answer could
+not be read (MALFORMED_VERIFIER_RESULT) or whose call failed
+(VERIFIER_CALL_FAILED), and all of them from a genuine "cannot confirm from
+code" (INSUFFICIENT_CODE_EVIDENCE, an UNVERIFIED outcome).
 """
 from __future__ import annotations
 
@@ -114,6 +124,31 @@ class RequirementOutcome(str, Enum):
     # requirement and candidate by deterministic evidence (a test run).
     CLOSED_BY_EVIDENCE = "closed_by_evidence"
 
+
+# MODEL-EVIDENCE-HARDENING-001: why a requirement has its verdict.
+VERIFIER_CONFIRMED = "VERIFIER_CONFIRMED"  # SATISFIED: the verifier found it in the code
+VERIFIER_REPORTED_MISSING = "VERIFIER_REPORTED_MISSING"  # VIOLATED: a concrete, named requirement is absent
+INSUFFICIENT_CODE_EVIDENCE = "INSUFFICIENT_CODE_EVIDENCE"  # UNVERIFIED: cannot be confirmed from source text
+MISSING_CLAIM_NOT_CONCRETE = "MISSING_CLAIM_NOT_CONCRETE"  # UNVERIFIED: "missing" for a non-concrete requirement
+CLAIM_CONTRADICTS_STRONGER_AUTHORITY = "CLAIM_CONTRADICTS_STRONGER_AUTHORITY"  # UNVERIFIED: suppressed claim
+MODEL_RETURNED_NO_VERDICT = "MODEL_RETURNED_NO_VERDICT"  # UNKNOWN: a readable answer without this id
+MALFORMED_VERIFIER_RESULT = "MALFORMED_VERIFIER_RESULT"  # UNKNOWN: the answer (or this entry) was unreadable
+VERIFIER_CALL_FAILED = "VERIFIER_CALL_FAILED"  # UNKNOWN: no answer at all (backend error, timeout)
+VERIFIER_REQUEST_REFUSED = "VERIFIER_REQUEST_REFUSED"  # UNKNOWN: PRD-016 refused the request before inference
+NOT_YET_VERIFIED = "NOT_YET_VERIFIED"  # PENDING: no verifier verdict recorded yet
+REQUIREMENT_REASON_CODES = frozenset({
+    VERIFIER_CONFIRMED, VERIFIER_REPORTED_MISSING, INSUFFICIENT_CODE_EVIDENCE, MISSING_CLAIM_NOT_CONCRETE,
+    CLAIM_CONTRADICTS_STRONGER_AUTHORITY, MODEL_RETURNED_NO_VERDICT, MALFORMED_VERIFIER_RESULT,
+    VERIFIER_CALL_FAILED, VERIFIER_REQUEST_REFUSED, NOT_YET_VERIFIED,
+})
+# The reason a verdict given without one has.
+_DEFAULT_REASON = {
+    "satisfied": VERIFIER_CONFIRMED,
+    "violated": VERIFIER_REPORTED_MISSING,
+    "unverified": INSUFFICIENT_CODE_EVIDENCE,
+    "unknown": MODEL_RETURNED_NO_VERDICT,
+    "pending": NOT_YET_VERIFIED,
+}
 
 _OUTCOME_STATUS = {
     RequirementOutcome.PENDING: ObligationStatus.PENDING,
@@ -305,20 +340,30 @@ def seed_requirement_obligations(ledger: ObligationLedger, requirements: Require
 
 def record_requirement_verdicts(
     ledger: ObligationLedger, requirements: RequirementSet,
-    verdicts: Mapping[str, Tuple[RequirementOutcome, str]], *,
+    verdicts: Mapping[str, Tuple[Any, ...]], *,
     revision: Any, evidence_fingerprint: str, source: str, gate_evidence: Iterable[str] = (),
     only: Optional[Iterable[str]] = None,
+    missing_reason: str = MODEL_RETURNED_NO_VERDICT, missing_detail: str = "no verdict",
+    verifier: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, RequirementOutcome]:
     """Record the verifier's outcome for every requirement (or just the ids
-    in ``only``). A requirement the verifier gave no verdict for is UNKNOWN.
-    Returns id -> outcome for what was recorded."""
+    in ``only``). ``verdicts`` maps id -> (outcome, detail[, reason code]);
+    without a reason code the outcome's default applies. A requirement the
+    verifier gave no verdict for is UNKNOWN with ``missing_reason`` (why
+    there was none) and ``missing_detail``. ``verifier`` is the model/runtime
+    that judged. Returns id -> outcome for what was recorded."""
     gate_evidence = list(gate_evidence)
     selected = set(only) if only is not None else None
     outcomes: Dict[str, RequirementOutcome] = {}
     for requirement in requirements.requirements:
         if selected is not None and requirement.id not in selected:
             continue
-        outcome, detail = verdicts.get(requirement.id, (RequirementOutcome.UNKNOWN, "no verdict"))
+        entry = verdicts.get(requirement.id)
+        if entry is None:
+            outcome, detail, reason = RequirementOutcome.UNKNOWN, missing_detail, missing_reason
+        else:
+            outcome, detail = entry[0], entry[1]
+            reason = entry[2] if len(entry) > 2 and entry[2] else _DEFAULT_REASON[outcome.value]
         outcomes[requirement.id] = outcome
         ledger.record(ObligationRecord(
             id=requirement_obligation_id(requirement.id), kind=ObligationKind.ORIGINAL_REQUIREMENT,
@@ -326,11 +371,34 @@ def record_requirement_verdicts(
             description=requirement.text, source=source, revision=revision,
             evidence={
                 "requirement_set_digest": requirements.digest, "outcome": outcome.value,
-                "detail": detail, "evidence_id": evidence_fingerprint, "gate_evidence": gate_evidence,
+                "reason_code": reason, "detail": detail, "evidence_id": evidence_fingerprint,
+                "gate_evidence": gate_evidence, "verifier": dict(verifier or {}),
             },
             terminal_required=True,
         ))
     return outcomes
+
+
+def requirement_verdict_details(ledger: ObligationLedger, requirements: RequirementSet) -> Dict[str, Dict[str, Any]]:
+    """Each requirement's recorded verdict with why: outcome, reason code,
+    evidence text, the verifier's identity and the candidate it judged
+    (evidence id and revision). A requirement no verdict was recorded for
+    is PENDING / NOT_YET_VERIFIED."""
+    details: Dict[str, Dict[str, Any]] = {}
+    for requirement in requirements.requirements:
+        record = ledger.current(requirement_obligation_id(requirement.id))
+        evidence = (record.evidence or {}) if record is not None else {}
+        outcome = str(evidence.get("outcome") or RequirementOutcome.PENDING.value)
+        details[requirement.id] = {
+            "outcome": outcome,
+            "reason_code": evidence.get("reason_code") or _DEFAULT_REASON.get(outcome, NOT_YET_VERIFIED),
+            "detail": evidence.get("detail") or "",
+            "verifier": evidence.get("verifier") or {},
+            "evidence_id": evidence.get("evidence_id"),
+            "revision": record.revision if record is not None else None,
+            "source": record.source if record is not None else None,
+        }
+    return details
 
 
 def record_requirement_closure(
@@ -690,14 +758,16 @@ def requirements_prompt_block(requirements: RequirementSet, *, instruction: str 
 
 def parse_requirement_verdicts(
     raw: Any, requirements: RequirementSet,
-) -> Tuple[Dict[str, Tuple[RequirementOutcome, str]], List[str]]:
-    """The verifier's per-requirement verdicts. Accepts a list of
-    {"id", "verdict", "evidence"}; verdict satisfied|missing|unverifiable.
-    Unknown ids and unreadable entries are returned as findings and ignored;
-    a requirement without a readable verdict stays absent (UNKNOWN)."""
+) -> Tuple[Dict[str, Tuple[RequirementOutcome, str, str]], List[str]]:
+    """The verifier's per-requirement verdicts as id -> (outcome, evidence,
+    reason code). Accepts a list of {"id", "verdict", "evidence"}; verdict
+    satisfied|missing|unverifiable. An unreadable verdict for a known id is
+    UNKNOWN / MALFORMED_VERIFIER_RESULT; unknown ids and entries without an
+    id are findings and ignored; a requirement the answer does not mention
+    stays absent (the caller records it UNKNOWN with the missing reason)."""
     mapping = {"satisfied": RequirementOutcome.SATISFIED, "missing": RequirementOutcome.VIOLATED,
                "unverifiable": RequirementOutcome.UNVERIFIED}
-    verdicts: Dict[str, Tuple[RequirementOutcome, str]] = {}
+    verdicts: Dict[str, Tuple[RequirementOutcome, str, str]] = {}
     findings: List[str] = []
     if not isinstance(raw, list):
         return verdicts, (["requirement_verdicts missing or not a list"] if raw is not None else [])
@@ -712,13 +782,38 @@ def parse_requirement_verdicts(
             continue
         if verdict not in mapping:
             findings.append(f"{rid}: unreadable verdict {verdict!r}")
+            verdicts[rid] = (RequirementOutcome.UNKNOWN, f"unreadable verdict {verdict!r}", MALFORMED_VERIFIER_RESULT)
             continue
         outcome = mapping[verdict]
+        reason = _DEFAULT_REASON[outcome.value]
         if outcome is RequirementOutcome.VIOLATED and not names_a_concrete_literal(requirements.get(rid).text):
             findings.append(f"{rid}: missing claim for a requirement naming nothing concrete; unverified")
-            outcome = RequirementOutcome.UNVERIFIED
-        verdicts[rid] = (outcome, str(entry.get("evidence") or ""))
+            outcome, reason = RequirementOutcome.UNVERIFIED, MISSING_CLAIM_NOT_CONCRETE
+        verdicts[rid] = (outcome, str(entry.get("evidence") or ""), reason)
     return verdicts, findings
+
+
+def verifier_result_verdicts(
+    result: Optional[Mapping[str, Any]], requirements: RequirementSet,
+) -> Tuple[Dict[str, Tuple[RequirementOutcome, str, str]], List[str], str, str]:
+    """(verdicts, findings, missing_reason, missing_detail) of one
+    SpecComplianceAgent.check() result: the per-id verdicts, and why any id
+    without one has none - the call failed or was refused
+    (``failure_reason_code``), the answer was unreadable or its
+    requirement_verdicts not a list (MALFORMED_VERIFIER_RESULT), or it simply
+    did not mention the id (MODEL_RETURNED_NO_VERDICT)."""
+    result = result or {}
+    if result.get("status") == "unknown":
+        reasoning = str(result.get("reasoning") or "no reason given")
+        reason = str(result.get("failure_reason_code") or MALFORMED_VERIFIER_RESULT)
+        return {}, [f"verifier status unknown ({reason})", reasoning], reason, reasoning
+    raw = result.get("requirement_verdicts")
+    verdicts, findings = parse_requirement_verdicts(raw, requirements)
+    if raw is None:
+        return verdicts, findings, MODEL_RETURNED_NO_VERDICT, "the verifier returned no requirement_verdicts"
+    if not isinstance(raw, list):
+        return verdicts, findings, MALFORMED_VERIFIER_RESULT, f"requirement_verdicts is {type(raw).__name__}, not a list"
+    return verdicts, findings, MODEL_RETURNED_NO_VERDICT, "the verifier's answer gave no verdict for this id"
 
 
 def close_unverified_requirements_with_named_tests(

@@ -215,6 +215,9 @@ from kriya.workflow.planner_repair import (
     STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
     build_structured_plan_repair_prompt,
     classify_structured_plan_parse_issue,
+    planner_outcome_for_completeness,
+    planner_response_model,
+    record_planner_outcome,
 )
 from kriya.workflow.requirements import (
     REQUIREMENTS_UNRESOLVED,
@@ -224,6 +227,7 @@ from kriya.workflow.requirements import (
     requirement_evidence,
     requirement_lineage,
     requirement_outcomes,
+    requirement_verdict_details,
     requirements_prompt_block,
     seed_requirement_obligations,
 )
@@ -1772,6 +1776,9 @@ class WorkflowEngine:
                     milestone_group_id=milestone_group_id,
                     milestone_index=milestone_index,
                     milestone_total=milestone_total,
+                    # MODEL-EVIDENCE-HARDENING-001: every early exit carries
+                    # the run's events, including its role metrics.
+                    run_events=self._trace_run_events(state),
                 )
             except Exception as trace_ex:
                 logger.warning(f"Failed to write run trace: {trace_ex}")
@@ -2578,6 +2585,10 @@ class WorkflowEngine:
             )
             plan_prompt += grounding_block
 
+        # MODEL-EVIDENCE-HARDENING-001: set only when this run's Planner
+        # produced the plan (never for a predetermined or resumed one), so
+        # only a real response's outcome reaches the role metrics.
+        plan_response_model: Optional[str] = None
         if predetermined_plan is not None:
             plan = predetermined_plan
             logger.info("Using predetermined plan (bounded subtask execution) - skipping Planner Agent call.")
@@ -2593,6 +2604,7 @@ class WorkflowEngine:
                 plan_prompt,
                 stream_callback=plan_stream
             )
+            plan_response_model = planner_response_model(self.planner)
             # R1 Deliverable 5 - observational only, same posture as
             # attempt.py's Developer-call wrapper: read after the await
             # already returned, never influences plan/control flow.
@@ -2658,6 +2670,9 @@ class WorkflowEngine:
         # membership semantics (kriya/workflow/planner_validation.py) for
         # the first time - previously this path had no such check at all.
         plan_completeness = classify_plan_completeness(plan, available_tool_names=available_tool_names)
+        if plan_response_model is not None:
+            record_planner_outcome(self.planner, planner_outcome_for_completeness(plan_completeness.classification),
+                                   model=plan_response_model)
         # PLANNER-ROBUST-001 (2026-09-19): bounded structured-plan repair,
         # reusing WorkflowController's own existing PLAN_REPAIR primitives
         # (kriya/workflow/planner_repair.py) rather than a second,
@@ -2739,6 +2754,7 @@ class WorkflowEngine:
             # same Planner-stage budget the initial call above used, never
             # a silent fallback to the general llm.max_tokens default.
             plan = await self.planner.run(repair_prompt)
+            plan_response_model = planner_response_model(self.planner)
             state.planner_calls += 1
             state.planner_llm_seconds += time.monotonic() - _repair_started
             _save_stage_checkpoint("plan", plan=plan)
@@ -2748,6 +2764,8 @@ class WorkflowEngine:
             # have drifted mid-operation (P5: no weaker validation path
             # for a repaired plan than for the initial one).
             plan_completeness = classify_plan_completeness(plan, available_tool_names=available_tool_names)
+            record_planner_outcome(self.planner, planner_outcome_for_completeness(plan_completeness.classification),
+                                   model=plan_response_model)
             state.record_event(RunEvent(
                 kind="structured_plan_repair_result", attempt=0, source="workflow.legacy_planner_repair",
                 authority=EventAuthority.ADVISORY,
@@ -2782,6 +2800,8 @@ class WorkflowEngine:
                     milestone_group_id=milestone_group_id,
                     milestone_index=milestone_index,
                     milestone_total=milestone_total,
+                    # The Planner's calls and outcomes survive the rejection.
+                    run_events=self._trace_run_events(state),
                 )
             except Exception as trace_ex:
                 logger.warning(f"Failed to write run trace: {trace_ex}")
@@ -3424,6 +3444,7 @@ class WorkflowEngine:
                     failure_category="baseline_indeterminate",
                     milestone_group_id=milestone_group_id, milestone_index=milestone_index,
                     milestone_total=milestone_total,
+                    run_events=self._trace_run_events(state),
                 )
             except Exception as trace_ex:
                 logger.warning(f"Failed to write run trace: {trace_ex}")
@@ -5342,5 +5363,8 @@ class WorkflowEngine:
                 "outcomes": {rid: outcome.value for rid, outcome in
                              requirement_outcomes(resolved_obligation_ledger, requirement_set).items()},
                 "evidence": requirement_evidence(resolved_obligation_ledger, requirement_set),
+                # MODEL-EVIDENCE-HARDENING-001: each verdict with its reason
+                # code, evidence, verifier identity and judged candidate.
+                "verdicts": requirement_verdict_details(resolved_obligation_ledger, requirement_set),
             }} if requirement_set is not None else {}),
         }

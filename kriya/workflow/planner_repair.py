@@ -89,6 +89,110 @@ def classify_structured_plan_parse_issue(
     return ["STRUCTURED_PLAN_PARSE_FAILED"]
 
 
+# MODEL-EVIDENCE-HARDENING-001: every reason code a Planner response can be
+# rejected with, by what it says about the response. Closed: a new code must
+# be placed here (tests/test_model_evidence_hardening_001.py fails on an
+# unmapped one). Precedence for a response with codes in several classes:
+# malformed output > structured plan validation failure > policy rejection >
+# other.
+#
+# Malformed output: not a parseable plan at the JSON/protocol level.
+PLANNER_MALFORMED_OUTPUT_CODES = frozenset({"STRUCTURED_PLAN_PARSE_FAILED"})
+# Structured plan validation failure: parseable, but not a valid plan under
+# Kriya's plan contract - schema, internal consistency (ids, dependencies,
+# ownership, requires/provides, invariants, verification evidence producers,
+# requirement ids, tool names), or a repair that regressed facts it had
+# already validated. Decided from the plan alone.
+PLANNER_VALIDATION_FAILURE_CODES = frozenset({
+    "STRUCTURED_PLAN_SCHEMA_INVALID", "STRUCTURED_PLAN_EMPTY", "TOOL_SUBTASK_MISSING_TOOL_NAME",
+    "UNREGISTERED_TOOL_NAME", "PLAN_GLOBAL_INVARIANTS_MISSING", "SUBTASK_SEMANTIC_CONTRACT_MISSING",
+    "SUBTASK_GLOBAL_INVARIANTS_MISSING", "DUPLICATE_SUBTASK_ID", "SUBTASK_DEPENDS_ON_UNKNOWN_ID",
+    "SUBTASK_DEPENDENCY_CYCLE", "AMBIGUOUS_PLANNED_FILE_OWNERSHIP", "AMBIGUOUS_SUBTASK_CAPABILITY_PROVIDER",
+    "UNKNOWN_GLOBAL_INVARIANT", "SUBTASK_REQUIREMENT_UNPROVIDED", "SEMANTIC_DEPENDENCY_EDGE_MISSING",
+    "PLANNED_ARTIFACT_PREREQUISITE_INVALID", "PLANNED_ARTIFACT_PREREQUISITE_UNDECLARED",
+    "PRESERVED_REFERENCE_CONFLICTS_WITH_OWNERSHIP", "INTEGRATION_RELATIONSHIP_UNKNOWN_SUBTASK",
+    "PLANNED_ARTIFACT_PROVIDER_NOT_UPSTREAM", "MODEL_SUBTASK_MISSING_PLANNED_FILES",
+    "VERIFICATION_EVIDENCE_PATH_MISSING", "PLAN_REQUIREMENT_ID_UNKNOWN",
+    "SEMANTIC_CONTRACT_REGRESSION_REJECTED", "PRESERVED_REFERENCE_REGRESSION_REJECTED",
+})
+# Deterministic policy rejection: a structurally valid plan refused by a
+# check against the repository, the route or the goal's own contract
+# (workspace files, grounded structural evidence, the goal's stack and
+# runtime contract, route obligations).
+PLANNER_POLICY_REJECTION_CODES = frozenset({
+    "PLANNED_FILE_ACTION_MISMATCH", "VERIFICATION_PREREQUISITE_MANIFEST_MISSING", "EXTENSION_POINT_REQUIRED",
+    "REFACTOR_BASELINE_MISSING", "APPLICATION_RUNTIME_OWNER_MISSING", "AUTHORITATIVE_STACK_SUBSTITUTION",
+    "MISSING_GROUNDED_PRODUCTION_ARTIFACT", "MISWIRED_GROUNDED_DEPENDENCY_EDGE",
+    "GROUNDED_SEMANTIC_PROVIDER_MISMATCH",
+})
+# Another typed failure: rejected, but the code does not say how (a
+# validation error without its own reason code).
+PLANNER_OTHER_FAILURE_CODES = frozenset({"PLAN_VALIDATION_FAILED"})
+
+# The legacy (non-enforce) path's plan-completeness classifications. An
+# unauthorized planned-file path fails the plan schema's own path rule, as it
+# does in enforce mode (STRUCTURED_PLAN_SCHEMA_INVALID there), so both paths
+# classify it the same way.
+_COMPLETENESS_OUTCOMES = {
+    "complete": "valid",
+    "incomplete_truncated": "malformed_output",
+    "schema_invalid": "structured_validation_failure",
+    "unauthorized_path": "structured_validation_failure",
+}
+
+
+def classify_planner_outcome(reason_codes: List[str], *, valid: bool) -> str:
+    """The typed outcome (kriya/core/role_metrics.py STRUCTURED_*) of one
+    Planner response from the reason codes its validation produced. An
+    unmapped code is ``other_failure``, never guessed into a model fault."""
+    from kriya.core import role_metrics as rm
+
+    if valid:
+        return rm.STRUCTURED_VALID
+    codes = set(reason_codes)
+    if codes & PLANNER_MALFORMED_OUTPUT_CODES:
+        return rm.STRUCTURED_MALFORMED
+    if codes & PLANNER_VALIDATION_FAILURE_CODES:
+        return rm.STRUCTURED_VALIDATION_FAILURE
+    if codes & PLANNER_POLICY_REJECTION_CODES:
+        return rm.STRUCTURED_POLICY_REJECTED
+    return rm.STRUCTURED_OTHER_FAILURE
+
+
+def planner_outcome_for_completeness(classification: str) -> str:
+    """The typed outcome of a legacy-path plan-completeness classification."""
+    from kriya.core import role_metrics as rm
+
+    return _COMPLETENESS_OUTCOMES.get(classification, rm.STRUCTURED_OTHER_FAILURE)
+
+
+def record_planner_outcome(planner: Any, outcome: str, *, model: Optional[str] = None) -> Optional[str]:
+    """Charge ``outcome`` to the Planner runtime that produced the response
+    (``model``: the model that answered, default the one the client's last
+    completion names). Returns the model charged, or None without metrics."""
+    from kriya.core.role_metrics import RoleMetrics
+
+    metrics = getattr(getattr(planner, "llm", None), "role_metrics", None)
+    if not isinstance(metrics, RoleMetrics):
+        return None
+    model = model if isinstance(model, str) and model else planner_response_model(planner)
+    if model is None:
+        return None
+    role = getattr(planner, "name", None)
+    metrics.record_structured_outcome(model=model, outcome=outcome, role=role if isinstance(role, str) else "planner")
+    return model
+
+
+def planner_response_model(planner: Any) -> Optional[str]:
+    """The model that produced the Planner's latest response (its client's
+    last completion; the client's own model when none is recorded)."""
+    llm = getattr(planner, "llm", None)
+    for value in (getattr(getattr(llm, "last_completion", None), "model", None), getattr(llm, "model", None)):
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 def build_structured_plan_repair_prompt(
     goal: str,
     previous_plan_text: str,

@@ -11,6 +11,15 @@ contract), latency and token usage; the Developer also gets its attempt
 outcomes (first-pass success and the retries its failed attempts
 triggered).
 
+Structured-output outcomes (MODEL-EVIDENCE-HARDENING-001) are typed, one per
+response a caller validated (today: every Planner plan, initial and
+repaired): valid, malformed output (JSON/protocol), structured plan
+validation failure (parseable, but not a valid plan under Kriya's plan
+contract), deterministic policy rejection (a valid plan a repository/route
+policy refused) or another typed failure. Malformed output and a structured
+plan validation failure are the model's fault and also count as schema
+failures, which PRD-019 routing ranks on; a policy rejection does not.
+
 These are observations for the operator and for PRD-019's between-run
 aggregation. They never decide anything during the run, and a second
 model's opinion is never counted as verification evidence: deterministic
@@ -31,6 +40,21 @@ UNAVAILABLE_RUNTIME = "unavailable"
 PROTOCOL_FAILURE_STATUSES = frozenset({
     "EMPTY_CONTENT", "MALFORMED_STRUCTURED_OUTPUT", "OUTPUT_TRUNCATED", "BACKEND_ERROR", "TIMEOUT",
 })
+
+STRUCTURED_VALID = "valid"
+STRUCTURED_MALFORMED = "malformed_output"
+STRUCTURED_VALIDATION_FAILURE = "structured_validation_failure"
+STRUCTURED_POLICY_REJECTED = "policy_rejected"
+STRUCTURED_OTHER_FAILURE = "other_failure"
+STRUCTURED_OUTCOME_COUNTERS: Dict[str, str] = {
+    STRUCTURED_VALID: "structured_valid",
+    STRUCTURED_MALFORMED: "structured_malformed",
+    STRUCTURED_VALIDATION_FAILURE: "structured_validation_failures",
+    STRUCTURED_POLICY_REJECTED: "structured_policy_rejections",
+    STRUCTURED_OTHER_FAILURE: "structured_other_failures",
+}
+# Outcomes that are negative evidence about the model itself.
+MODEL_FAULT_OUTCOMES = frozenset({STRUCTURED_MALFORMED, STRUCTURED_VALIDATION_FAILURE})
 
 _ROLE: ContextVar[Optional[str]] = ContextVar("kriya_model_role", default=None)
 
@@ -71,6 +95,11 @@ class RoleRuntimeMetrics:
     attempts_passed: int = 0
     first_pass_success: Optional[bool] = None
     retries_triggered: int = 0
+    structured_valid: int = 0
+    structured_malformed: int = 0
+    structured_validation_failures: int = 0
+    structured_policy_rejections: int = 0
+    structured_other_failures: int = 0
 
     @property
     def key(self) -> Tuple[str, str, str]:
@@ -83,7 +112,8 @@ class RoleRuntimeMetrics:
 
 
 _COUNTERS = ("calls", "protocol_failures", "schema_failures", "prompt_tokens", "completion_tokens",
-             "estimated_token_calls", "attempts", "attempts_passed", "retries_triggered")
+             "estimated_token_calls", "attempts", "attempts_passed", "retries_triggered",
+             *STRUCTURED_OUTCOME_COUNTERS.values())
 
 
 class RoleMetrics:
@@ -134,6 +164,19 @@ class RoleMetrics:
         digest, exact = self._last_runtime.get((role, model), (UNAVAILABLE_RUNTIME, False))
         self._entry(role, model, digest, exact).schema_failures += 1
 
+    def record_structured_outcome(self, *, model: str, outcome: str, role: Optional[str] = None) -> None:
+        """One validated structured response's typed outcome, charged to the
+        runtime that produced it (the role's last call to ``model``). A model
+        fault (malformed output, structured validation failure) is also a
+        schema failure."""
+        counter = STRUCTURED_OUTCOME_COUNTERS[outcome]
+        role = role or current_model_role()
+        digest, exact = self._last_runtime.get((role, model), (UNAVAILABLE_RUNTIME, False))
+        entry = self._entry(role, model, digest, exact)
+        setattr(entry, counter, getattr(entry, counter) + 1)
+        if outcome in MODEL_FAULT_OUTCOMES:
+            entry.schema_failures += 1
+
     def record_attempt(self, *, role: str, model: str, runtime_digest: str, runtime_exact: bool,
                        attempt_number: int, passed: bool) -> None:
         """One attempt's deterministic gate outcome, charged to the runtime
@@ -166,7 +209,8 @@ class RoleMetrics:
                 delta.latency_seconds = entry.latency_seconds - before.latency_seconds
                 if before.first_pass_success is not None:
                     delta.first_pass_success = None
-            if delta.calls or delta.schema_failures or delta.attempts:
+            if (delta.calls or delta.schema_failures or delta.attempts
+                    or any(getattr(delta, name) for name in STRUCTURED_OUTCOME_COUNTERS.values())):
                 rows.append(delta.to_dict())
         return rows
 
@@ -276,9 +320,10 @@ def aggregate_role_metrics(runs: Sequence[Tuple[str, Sequence[Dict[str, Any]]]])
     runs ([(run_id, rows)]) into the routing table: summed counters per
     (role, model, runtime digest), with the runs it covers."""
     totals: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    # Rows written before a counter existed read it as 0.
     counters = ("calls", "protocol_failures", "schema_failures", "prompt_tokens", "completion_tokens",
-                "estimated_token_calls", "attempts", "attempts_passed", "retries_triggered", "first_pass_runs",
-                "first_pass_successes")
+                "estimated_token_calls", "attempts", "attempts_passed", "retries_triggered",
+                *STRUCTURED_OUTCOME_COUNTERS.values(), "first_pass_runs", "first_pass_successes")
     run_ids = []
     for run_id, rows in sorted(runs, key=lambda item: item[0]):
         run_ids.append(run_id)

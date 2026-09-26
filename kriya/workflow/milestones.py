@@ -759,6 +759,9 @@ def _log_milestone_plan_telemetry(
     validation_attempts: int,
     validation_failures: List[str],
     topology: RepositoryTopology,
+    *,
+    goal: str = "",
+    llm: Any = None,
 ) -> None:
     """MA3.9 - no-op when trace_db isn't supplied (kriya plan-milestones
     passes the canonical trace database, kriya/core/state_paths.py; a caller that doesn't care about telemetry,
@@ -790,6 +793,17 @@ def _log_milestone_plan_telemetry(
         )
     finally:
         trace_logger.close()
+    # MODEL-EVIDENCE-HARDENING-001: the milestone Planner's calls reach the
+    # role metrics through a runs row of their own (plan-milestones is its
+    # own process; nothing else would ever report them), whatever the outcome.
+    from kriya.workflow.run_trace import write_outcome_trace
+
+    write_outcome_trace(
+        trace_db, run_id=f"{group_id}.milestone-plan", goal=goal, status=f"milestone_plan_{status}", llm=llm,
+        source="milestones.plan_milestones",
+        failure_category=None if status == "accepted" else f"milestone_plan_{status}",
+        milestone_group_id=group_id,
+    )
 
 
 async def plan_milestones(
@@ -863,6 +877,7 @@ async def plan_milestones(
         if milestones is None:
             _log_milestone_plan_telemetry(
                 trace_db, group_id, "malformed_output", [], attempt, accumulated_failure_codes, topology,
+                goal=goal, llm=getattr(milestone_planner, "llm", None),
             )
             return None, "Milestone Planner output did not produce a valid milestone list."
 
@@ -872,6 +887,7 @@ async def plan_milestones(
             _log_milestone_plan_telemetry(
                 trace_db, group_id, "accepted", validation_result.milestones,
                 attempt, accumulated_failure_codes, topology,
+                goal=goal, llm=getattr(milestone_planner, "llm", None),
             )
             return MilestoneRunState(
                 group_id=group_id, original_goal=goal, milestones=validation_result.milestones,
@@ -887,6 +903,7 @@ async def plan_milestones(
     _log_milestone_plan_telemetry(
         trace_db, group_id, "rejected", last_attempted_milestones,
         max(1, max_planning_attempts), accumulated_failure_codes, topology,
+        goal=goal, llm=getattr(milestone_planner, "llm", None),
     )
     return None, last_error
 

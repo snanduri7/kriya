@@ -167,13 +167,15 @@ from kriya.workflow.repair_contract import (
     derive_process_boundary_participants,
 )
 from kriya.workflow.requirements import (
+    CLAIM_CONTRADICTS_STRONGER_AUTHORITY,
     RequirementOutcome,
     RequirementSet,
-    parse_requirement_verdicts,
     record_requirement_closure,
     record_requirement_verdicts,
     requirement_obligation_id,
     requirement_outcomes,
+    requirement_verdict_details,
+    verifier_result_verdicts,
 )
 from kriya.workflow.resume_fingerprints import ResumePlan
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
@@ -5220,24 +5222,26 @@ def _record_original_requirement_verdicts(
     requirements = ctx.requirement_set
     if requirements is None or ctx.obligation_ledger is None:
         return
-    status = spec_result.get("status")
-    verdicts, findings = ({}, [f"verifier status {status}"]) if status == "unknown" else (
-        parse_requirement_verdicts(spec_result.get("requirement_verdicts"), requirements)
-    )
+    # MODEL-EVIDENCE-HARDENING-001: typed reasons and the verifier identity.
+    verdicts, findings, missing_reason, missing_detail = verifier_result_verdicts(spec_result, requirements)
     outcomes = record_requirement_verdicts(
         ctx.obligation_ledger, requirements, verdicts,
         revision=state.attempt_number, evidence_fingerprint=fingerprint,
         source="attempt.goal_spec_compliance",
         gate_evidence=[f"attempt {state.attempt_number}: deterministic gates passed"],
+        missing_reason=missing_reason, missing_detail=missing_detail,
+        verifier=spec_result.get("verifier"),
     )
+    details = requirement_verdict_details(ctx.obligation_ledger, requirements)
     state.record_event(RunEvent(
         kind="requirement.verdicts", attempt=state.attempt_number, source="attempt.goal_spec_compliance",
         authority=EventAuthority.ADVISORY,
         message="original requirement outcomes: " + ", ".join(
-            f"{rid}={outcome.value}" for rid, outcome in outcomes.items()),
+            f"{rid}={outcome.value}({details[rid]['reason_code']})" for rid, outcome in outcomes.items()),
         details={"requirement_set_digest": requirements.digest, "evidence_id": fingerprint,
                  "outcomes": {rid: outcome.value for rid, outcome in outcomes.items()},
-                 "evidence": {rid: detail for rid, (_, detail) in verdicts.items()},
+                 "evidence": {rid: entry[1] for rid, entry in verdicts.items()},
+                 "verdicts": {rid: details[rid] for rid in outcomes},
                  "findings": findings},
     ))
 
@@ -5256,7 +5260,8 @@ def _downgrade_suppressed_requirement_claims(
     ids = [rid for rid in requirements.ids if rid in claimed]
     if not ids:
         return
-    verdicts = {rid: (RequirementOutcome.UNVERIFIED, "missing claim contradicts stronger authority; suppressed")
+    verdicts = {rid: (RequirementOutcome.UNVERIFIED, "missing claim contradicts stronger authority; suppressed",
+                      CLAIM_CONTRADICTS_STRONGER_AUTHORITY)
                 for rid in ids}
     record_requirement_verdicts(
         ctx.obligation_ledger, requirements, verdicts, revision=state.attempt_number,
