@@ -105,10 +105,10 @@ ignore = [
 
 # Static-check gate (CLAUDE.md "Mandatory quality bar" rule 1). Deliberately
 # narrow and high-signal: a variable used on a path where it was never
-# assigned (E0601/E0606) and an undefined name (E0602). The Batch 5 enforce
-# defect - `requirement_closure_attempts` bound only inside the terminal
-# requirements block, so an early-stop run silently lost `requirements` from
-# its result - is E0606 at 0c19967. The tree is at zero findings, so every
+# assigned (E0601/E0606, W0631 for a loop variable) and an undefined name
+# (E0602). The Batch 5 enforce defect - `requirement_closure_attempts`
+# bound only inside the terminal requirements block, so an early-stop run
+# silently lost `requirements` from its result - is E0606 at 0c19967. The tree is at zero findings, so every
 # new finding fails; there is no baseline file. E0611/E0603 are left off:
 # kriya/workflow/__init__.py's lazy PEP 562 WorkflowEngine export is a false
 # positive for both. Run: .venv/bin/pylint kriya plugins/core_tools tests
@@ -121,6 +121,7 @@ enable = [
     "used-before-assignment",           # E0601
     "possibly-used-before-assignment",  # E0606
     "undefined-variable",               # E0602
+    "undefined-loop-variable",          # W0631: a loop variable used after a loop that may not run
 ]
 
 [tool.pylint.reports]
