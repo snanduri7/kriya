@@ -31,7 +31,7 @@ There is no separate lint/format command configured in this repo — don't inven
 
 The user is quota-conscious in this repo specifically — apply these by default, without being asked each session:
 
-- **Never run `.venv/bin/pytest` (any invocation, including a single file/test) as part of normal work.** Hand the exact command to the user and let them run it in their own terminal, reporting pass/fail back. This applies even to a quick sanity check after a small edit.
+- **Never run `.venv/bin/pytest` as part of normal work, except a very small targeted run (a few new/changed test IDs, seconds), per the Mandatory quality bar below.** Hand the exact command to the user and let them run it in their own terminal, reporting pass/fail back. This applies even to a quick sanity check after a small edit.
 - **Don't launch long-running or live-model work (a `kriya generate`/`fix` run, `-m live_model` tests, eval batches) and then poll it from inside the session** (repeated Bash/Read check-ins, `ScheduleWakeup` loops) — every check-in costs a turn even while "just waiting." Either hand the command to the user's terminal, or start it with `run_in_background` and wait for the actual completion notification; only peek at interim output when there's a concrete reason (e.g. confirming it didn't fail fast), not out of curiosity.
 - **Prefer fewer, well-scoped tool calls over several exploratory ones.** Batch independent reads/searches in parallel rather than trickling them out one at a time.
 - **Be deliberate about spawning subagents (the `Agent` tool) — don't reach for one by default.** Each subagent runs its own requests against the model, on top of whatever this session has already spent. Only spawn one when the task genuinely needs isolated context (a review that shouldn't pollute the main thread) or real parallelism, and confirm with the user first for anything nontrivial (a full-package review, multiple parallel agents) rather than launching it unasked. When a subagent's task is simple/mechanical (a lookup, a narrow lint pass, not a judgment call), pass a cheaper `model` override (e.g. `haiku`) instead of defaulting to the parent session's model.
@@ -48,7 +48,7 @@ Passing the happy-path tests is not "done". These rules are mandatory; don't wai
 4. **Broad catches must not hide coding errors.** A new `except Exception:` that logs and continues needs a test that asserts the normal (non-exception) output of that block, so a `NameError`/`TypeError` inside it fails a test instead of becoming a warning.
 5. **Honest verification.**
    - The scratchpad plain runner is for iteration only. It must apply the module's autouse fixtures, and you must never compare against a baseline of runner-artifact failures: remove the artifact first.
-   - Put new or changed test IDs in the hand-off, and do not claim "verified" until the user's real pytest run is green.
+   - Pytest stays with the user to save usage limits (the rule above). The one exception: a very small targeted run, i.e. one or a few new or changed test IDs that finish in seconds. Claude may run that itself to confirm a new test really works under pytest. Anything larger goes in the hand-off. Do not claim "verified" until the user's real pytest run is green.
    - Mutation-check new safety or decision logic: each mutation must make a test fail.
 6. **Report your own bugs proactively.** A defect found in your own earlier work gets fixed, tested (with a check that the test fails without the fix), committed separately and reported, never folded silently into other work.
 
