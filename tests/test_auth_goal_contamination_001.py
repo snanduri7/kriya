@@ -339,8 +339,11 @@ async def test_a_plan_that_copies_the_reference_gains_no_authority(tmp_path):
     assert "src/B.java" in mutation_path_roles(derive_requirements(contaminated), TRACKED)["authorized"]
     assert _exit_final(authority_goal, 2) == "FAIL"
     assert _exit_final(contaminated, 2) == "PASS"
-    assert derive_direct_contract_authorizations(authority_goal, copied) == []
-    assert derive_direct_contract_authorizations(authority_goal, _customer_plan()) == []
+    # The spec's API line names no owner, so it would mint nothing even
+    # inside the goal; a copied plan whose reference names its owner does.
+    copied_api = _plan_copying(HOSTILE, path="src/CustomerRecord.java")
+    assert derive_direct_contract_authorizations(authority_goal, copied_api) == []
+    assert derive_direct_contract_authorizations(f"{USER_GOAL}\n{HOSTILE}", copied_api)
 
 
 @pytest.mark.asyncio
