@@ -1,6 +1,7 @@
 """The Batch 6 live evidence writer must never record a skipped case as
 verified: a SKIP is NOT_LIVE_EXERCISED, a failure is FAILED, and only a case
-whose body completed is LIVE_EXERCISED."""
+whose body completed is LIVE_EXERCISED. A completed PRD-027 certification
+that does not certify is FAILED (live_status and certification_status apart)."""
 import json
 
 import pytest
@@ -118,3 +119,28 @@ def test_the_targeted_prd029_fixture_requires_the_authorized_contract_change(tmp
             "reason": INVALIDATED_BY_CONTRACT_REVISION} in [dict(i) for i in transition.invalidated_consumers]
     # Without the goal's authorization nothing is recorded as authorized.
     assert derive_contract_transition(authorizations=(), downstream_verified=True, **kwargs) is None
+
+
+def _certification(certified, precision):
+    return {"certified": certified, "precision": precision, "precision_target": 0.5,
+            "classes": {"same_class_member": {"passed": True}}}
+
+
+def test_a_completed_certification_that_does_not_certify_is_failed_not_green(tmp_path, monkeypatch):
+    monkeypatch.setattr(live, "EVIDENCE_DIR", str(tmp_path))
+    with pytest.raises(AssertionError, match="certification FAILED"):
+        with live._verdict("uncertified.json") as evidence:
+            live.accept_certification(evidence, _certification(False, 0.4808))
+    record = _status(tmp_path, "uncertified.json")
+    assert record["status"] == live.LIVE_FAILED
+    assert record["live_status"] == live.LIVE_EXERCISED
+    assert record["certification_status"] == live.CERTIFICATION_FAILED
+    # Only a literal True certifies: a missing or truthy non-bool value does not.
+    for value in (None, "true", 1):
+        with pytest.raises(AssertionError):
+            live.accept_certification({}, _certification(value, 0.6))
+    with live._verdict("certified.json") as evidence:
+        live.accept_certification(evidence, _certification(True, 0.58))
+    record = _status(tmp_path, "certified.json")
+    assert (record["status"], record["live_status"], record["certification_status"]) == (
+        live.LIVE_EXERCISED, live.LIVE_EXERCISED, live.CERTIFICATION_CERTIFIED)

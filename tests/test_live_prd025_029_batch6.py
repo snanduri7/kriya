@@ -14,7 +14,9 @@ invariants and writes the model-dependent evidence to
   temperature 0 the run must stop within the retry bound (NO_PROGRESS or
   budget exhaustion), with the retry-progress block recorded - never loop.
 - PRD-027: (a) the certification suite against the REAL configured embedding
-  model, persisted as the production record doctor reads; (b) a real
+  model, persisted as the production record doctor reads; it must certify
+  (a completed run that does not is FAILED, with live_status and
+  certification_status recorded separately); (b) a real
   generate run on the certification's Java fixture repository, indexed with
   the real embedder - the Developer's own prompt must carry the golden
   evidence (code quality is secondary).
@@ -95,6 +97,27 @@ def _verdict(name):
         _write_evidence(name, {**evidence, "status": LIVE_FAILED, "error": f"{type(error).__name__}: {error}"})
         raise
     _write_evidence(name, {**evidence, "status": LIVE_EXERCISED})
+
+
+CERTIFICATION_CERTIFIED = "CERTIFIED"
+CERTIFICATION_FAILED = "FAILED"
+
+
+def accept_certification(evidence, data):
+    """PRD-027 acceptance. The certification path having run
+    (``live_status``) and the certification result are recorded separately:
+    a completed run that does not certify is FAILED, never green (Batch 6,
+    2026-09-27: 0.4808 precision passed as LIVE_EXERCISED)."""
+    certified = data.get("certified") is True
+    evidence.update({
+        "live_status": LIVE_EXERCISED,
+        "certification_status": CERTIFICATION_CERTIFIED if certified else CERTIFICATION_FAILED,
+    })
+    assert certified, (
+        f"PRD-027 certification FAILED: certified={data.get('certified')!r}, "
+        f"precision {data.get('precision')} (target {data.get('precision_target')}), "
+        f"failed classes {sorted(k for k, v in data.get('classes', {}).items() if not v.get('passed'))}"
+    )
 
 
 def live_identity_problems(fingerprint, assessment, expected_window):
@@ -282,13 +305,14 @@ async def test_live_prd027_certification_with_the_real_embedder(cfg):
         path = cc.save_certification(cfg, report)
         data = report.to_dict()
         evidence.update({**data, "record_path": path})
-        # Mechanics: every class measured, every miss typed. Whether the real
-        # embedder certifies is the recorded result, not a test assumption.
+        # Mechanics: every class measured, every miss typed.
         assert set(data["classes"]) == set(cc.CLASS_RECALL_TARGETS)
         for case in data["cases"]:
             for item in case["items"]:
                 assert item["outcome"] in (cc.HIT, cc.NOT_RETRIEVED, cc.BUDGET_EXHAUSTED,
                                            cc.TIER_INSUFFICIENT, cc.SOURCE_UNAVAILABLE)
+        # Acceptance: the real embedder must certify.
+        accept_certification(evidence, data)
 
 
 @pytest.mark.asyncio
