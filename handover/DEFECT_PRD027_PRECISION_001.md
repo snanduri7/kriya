@@ -187,7 +187,7 @@ The live test `test_live_prd027_certification_with_the_real_embedder` now record
   - **In every case,** every hit stays matched and packaged, under the normal ranking and budget.
 - **`retrieve_graph_context`.** Seeds the walk from those files only. It exposes `expansion_seed_files` and `expansion_seed_reason`.
 - **`run_generation_workflow`.** Records an ADVISORY `retrieval.expansion_seeds` run event with the reason code, the seed files and the matched files.
-- **Tests** (`tests/test_prd027_precision_expansion_seeds.py`, 9). They use their own repository: the search index holds 3 files and the dependency graph holds 6, so files reached through the graph are unambiguous. They cover:
+- **Tests** (`tests/test_prd027_precision_expansion_seeds.py`, 10). They use their own repository: the search index holds 3 files and the dependency graph holds 6, so files reached through the graph are unambiguous. They cover:
   - corroborated seed: its callers and dependencies are reached;
   - weak embedding-only hit while keyword hits exist: kept, but doesn't seed;
   - weak keyword-only hit while embedding hits exist: kept, but doesn't seed;
@@ -195,7 +195,7 @@ The live test `test_live_prd027_certification_with_the_real_embedder` now record
   - disagreement: hits kept and packaged, nothing seeds, the typed reason recorded;
   - the rule table;
   - the leg ranks `query_hybrid` reports;
-  - the run event from a real `run_generation_workflow`.
+  - the run event from a real `run_generation_workflow`, on a successful run and on a human-rejected run.
 - **Mutations:** 8, all KILLED:
   - fall back to every hit when the legs disagree;
   - corroboration ignoring top_k;
@@ -214,3 +214,5 @@ The live test `test_live_prd027_certification_with_the_real_embedder` now record
 
 - **Record identity.** `index_implementation_digest` covers `query_hybrid` and `retrieve_graph_context`, so the earlier 0.4808 record (kept in `evidence/BATCH6/prd027-precision/`) no longer matches the current identity. The user's `context certify` writes the new record.
 - **Separate defect.** The score-scale mismatch is recorded as PRD027-SCORE-NORMALIZATION-001 (`handover/DEFECT_PRD027_SCORE_NORMALIZATION_001.md`, OPEN, P2). The Rule A work did not need it for correctness.
+- **My bug, fixed in ff6dd3f.** `index_implementation_digest` did not cover the new seed rule (a71dc60). Since 3c1822d it had also missed both legs of the hybrid query (`LocalVectorStore.query`, `query_lexical`, `lexical_query_terms`). It now hashes both legs and the whole `graph_retrieval` module. The test fails for all 4 inputs without the fix.
+- **Known limit, disclosed.** Seeds are chosen from the fused top_k hits. RRF can rank an uncorroborated chunk (for example vector rank 1, lexical rank 6) above a corroborated one (rank 5 in both). In a crowded query, a chunk in both legs' top_k can therefore fall outside the fused top_k. The run then records `NO_CORROBORATED_EXPANSION_SEED`, though a corroborated chunk existed outside the results. This fails safe: fewer seeds, and every hit is still packaged. Seeding from a chunk that isn't a search result would contradict "only results corroborated by both modalities may seed", so it is left as is.

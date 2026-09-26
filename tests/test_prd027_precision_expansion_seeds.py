@@ -169,10 +169,9 @@ def test_query_hybrid_reports_each_hit_s_leg_ranks(tmp_path):
     assert all(hit["vector_valid_hits"] == 1 and hit["lexical_valid_hits"] == 1 for hit in hits)
 
 
-@pytest.mark.asyncio
-async def test_the_run_records_which_hits_seeded_graph_expansion(tmp_path):
+async def _run_with_index(tmp_path, *, mode, responses, approval_callback=None):
     cfg = AppConfig()
-    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.mode = mode
     cfg.autonomy.run_verification_enabled = False
     cfg.paths.memory = str(tmp_path / "memory")
     cfg.paths.skills = str(tmp_path / "skills")
@@ -184,27 +183,46 @@ async def test_the_run_records_which_hits_seeded_graph_expansion(tmp_path):
     vs.add_document("Existing.txt", "chunk one", doc_emb, chunk_index=0, model_name=cfg.embedding.model,
                     dimensions=dim)
     vs.close()
-
     llm = LLMClient(cfg)
-    llm.complete = AsyncMock(side_effect=[
-        "Step 1: Write code",
-        "Design: Write math.py",
-        "def add(a,b):\n    return a+b",
-        "Review: Approved",
-    ])
+    llm.complete = AsyncMock(side_effect=responses)
     we = WorkflowEngine(Kernel(config=cfg), llm)
     with patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", new=AsyncMock(return_value=doc_emb)):
-        res = await we.run_generation_workflow(goal="Create math library", workspace_path=str(tmp_path))
-    assert res["quality_gates_passed"] is True
-
+        res = await we.run_generation_workflow(
+            goal="Create math library", workspace_path=str(tmp_path), approval_callback=approval_callback,
+        )
     connection = sqlite3.connect(trace_db_path(cfg))
     connection.row_factory = sqlite3.Row
-    rows = connection.execute("SELECT run_events FROM runs ORDER BY timestamp").fetchall()
+    row = connection.execute("SELECT status, run_events FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
     connection.close()
-    events = [event for row in rows for event in json.loads(row["run_events"] or "[]")
+    events = [event for event in json.loads(row["run_events"] or "[]")
               if event.get("kind") == "retrieval.expansion_seeds"]
+    return res, row["status"], events
+
+
+def _assert_embedding_only_seed_event(events):
     assert events, "the expansion-seed decision was not recorded"
     details = events[-1]["details"]
     assert details["reason_code"] == gr.EXPANSION_EMBEDDING_ONLY
     assert details["seed_files"] == ["Existing.txt"]
     assert details["matched_files"] == ["Existing.txt"]
+
+
+@pytest.mark.asyncio
+async def test_the_run_records_which_hits_seeded_graph_expansion(tmp_path):
+    res, _status, events = await _run_with_index(tmp_path, mode="guardrails", responses=[
+        "Step 1: Write code", "Design: Write math.py", "def add(a,b):\n    return a+b", "Review: Approved",
+    ])
+    assert res["quality_gates_passed"] is True
+    _assert_embedding_only_seed_event(events)
+
+
+@pytest.mark.asyncio
+async def test_the_seed_decision_is_recorded_on_a_human_rejected_run_too(tmp_path):
+    res, status, events = await _run_with_index(
+        tmp_path, mode="human-in-the-loop", approval_callback=lambda files, reason: False, responses=[
+            "Step 1: Write code", "Design: Write app.py", '[{"filepath": "app.py", "content": "print(1)"}]',
+            "Review: flagged for human judgment",
+        ])
+    assert res["quality_gates_passed"] is False
+    assert status == "human_rejected"
+    _assert_embedding_only_seed_event(events)

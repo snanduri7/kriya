@@ -157,7 +157,8 @@ Red (evidence in `handover/evidence/BATCH6/prd027-precision/`):
 ## PRD027-PRECISION-001 fix (2026-09-27)
 - Graph expansion now starts only from hits both retrieval legs rank within top_k. If one leg has no valid hits, that leg's top_k seeds. If the legs disagree, nothing seeds (`NO_CORROBORATED_EXPANSION_SEED`). Every hit stays packaged.
 - Measured with the changed code: real embedder 0.5814, CI 0.5435, every recall class 1.0.
-- 9 tests; 8 mutations, all killed.
+- 10 tests; 9 mutations, all killed.
+- **My bug, fixed in ff6dd3f:** the certification identity did not cover the new seed rule, nor both hybrid-query legs (the legs were missing since 3c1822d).
 - The score-scale mismatch is PRD027-SCORE-NORMALIZATION-001 (OPEN, P2).
 - Still OPEN: PROMPT-BUDGET-FIT-001A and 001B (P2), PRD027-SCORE-NORMALIZATION-001 (P2), KNOWLEDGE-READPATH-001 (P1).
 
