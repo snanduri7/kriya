@@ -24,11 +24,11 @@ from kriya.workflow.plan_schema import ChangeKind, EngineeringPlan, ExecutionMet
 from kriya.workflow.requirements import (
     MUTATION_SCOPE,
     RequirementOutcome,
-    authorized_mutation_paths,
     blocking_requirements,
     close_mutation_scope_requirements,
     derive_requirements,
     is_mutation_scope_requirement,
+    mutation_path_roles,
     record_requirement_verdicts,
     requirement_evidence,
     requirement_outcomes,
@@ -71,13 +71,87 @@ def test_only_a_whole_file_boundary_statement_is_a_mutation_scope_requirement(te
     assert is_mutation_scope_requirement(text) is scoped
 
 
-def test_the_authorized_set_is_the_exact_tracked_paths_the_goal_names():
-    reqs = derive_requirements(
-        "Fix `src/app/Service.java` (see Service and service.py).\n\nDo not modify any other file.\n")
-    tracked = ["src/app/Service.java", "src/app/ServiceTest.java", "service.py", "lib/service.py"]
-    # Exact paths only: no basename/stem match, so lib/service.py is not named.
-    assert authorized_mutation_paths(reqs, tracked) == ["service.py", "src/app/Service.java"]
-    assert authorized_mutation_paths(derive_requirements(UNSCOPED_GOAL), tracked) == []
+ROLE_TRACKED = ["src/A.java", "src/B.java", "tests/test_a.py", "lib/service.py"]
+SCOPE = " Do not modify any other file in the repository."
+
+
+def _roles(goal):
+    return mutation_path_roles(derive_requirements(goal), ROLE_TRACKED)
+
+
+def test_an_explicit_mutation_target_is_allowed():
+    assert _roles("Modify src/A.java." + SCOPE)["authorized"] == ["src/A.java"]
+
+
+def test_two_explicit_mutation_targets_are_allowed():
+    assert _roles("Modify src/A.java and src/B.java." + SCOPE)["authorized"] == ["src/A.java", "src/B.java"]
+
+
+def test_a_reference_path_is_not_allowed():
+    roles = _roles("Modify src/A.java. Compare it with src/B.java." + SCOPE)
+    assert roles["authorized"] == ["src/A.java"] and roles["references"] == ["src/B.java"]
+    assert roles["ambiguous"] == []
+
+
+@pytest.mark.parametrize("goal, ambiguous", [
+    # No cue in the path's own clause.
+    ("Fix src/A.java; the failure shows in tests/test_a.py." + SCOPE, ["tests/test_a.py"]),
+    # A relational word never decides a role.
+    ("Replace src/A.java logic with src/B.java." + SCOPE, ["src/B.java"]),
+    ("Create src/New.java next to src/A.java." + SCOPE, ["src/A.java"]),
+    # Different roles at different mentions.
+    ("Compare src/A.java with src/B.java and then modify src/A.java." + SCOPE, ["src/A.java"]),
+])
+def test_an_undeterminable_path_role_is_ambiguous_not_allowed(goal, ambiguous):
+    roles = _roles(goal)
+    assert roles["ambiguous"] == ambiguous
+    assert not set(ambiguous) & set(roles["authorized"])
+
+
+def test_exact_paths_only_and_negated_or_created_paths_keep_their_role():
+    roles = _roles("Modify src/A.java but do not modify src/B.java; see service.py." + SCOPE)
+    assert roles == {"authorized": ["src/A.java"], "references": [], "forbidden": ["src/B.java"],
+                     "ambiguous": []}  # service.py is not a tracked path (lib/service.py is)
+    assert _roles("Create src/New.java." + SCOPE)["authorized"] == ["src/New.java"]
+    assert _roles("Compare src/New.java." + SCOPE)["authorized"] == []  # untracked, not created
+
+
+def test_modifying_a_referenced_but_unauthorized_path_is_violated():
+    goal = "Modify src/A.java. Compare it with src/B.java." + SCOPE
+    reqs, ledger = _ledger(goal)
+    [attempt] = close_mutation_scope_requirements(
+        ledger, reqs, tracked_paths=ROLE_TRACKED, scope_evidence=_scope(["src/A.java", "src/B.java"]),
+        source="test", revision=1)
+    assert attempt["out_of_scope_paths"] == ["src/B.java"] and attempt["reference_paths"] == ["src/B.java"]
+    assert requirement_outcomes(ledger, reqs)[reqs.requirements[-1].id] is RequirementOutcome.VIOLATED
+
+
+def test_an_ambiguous_path_role_leaves_the_requirement_unresolved_even_when_in_scope():
+    goal = "Fix src/A.java; the failure shows in tests/test_a.py." + SCOPE
+    reqs, ledger = _ledger(goal)
+    [attempt] = close_mutation_scope_requirements(
+        ledger, reqs, tracked_paths=ROLE_TRACKED, scope_evidence=_scope(["src/A.java"]),
+        source="test", revision=1)
+    rid = reqs.requirements[-1].id
+    assert attempt["closed"] is False and "cannot be determined" in attempt["reason"]
+    assert attempt["ambiguous_paths"] == ["tests/test_a.py"]
+    assert requirement_outcomes(ledger, reqs)[rid] is RequirementOutcome.UNVERIFIED
+    assert [r.id for r, _ in blocking_requirements(ledger, reqs, **PRODUCTION)] == [rid]
+
+
+def test_the_demo03_goal_allows_only_the_file_it_asks_to_fix():
+    goal = (
+        "Fix a bug in the existing Spring Boot driver service: `DefaultDriverService.delete(Long driverId)` (in "
+        "`src/main/java/com/myapp/service/driver/DefaultDriverService.java`) marks a driver as deleted in memory "
+        "via `driverDO.setDeleted(true)`, but never persists that change - it does not call "
+        "`driverRepository.save(driverDO)`.\n\nFix only this method so that the deleted flag is actually "
+        "persisted, by saving the driver through `driverRepository` after setting `deleted` to true.\n\n"
+        "Do not change the method's signature, its `@Transactional`/`@Override` annotations, or any other method "
+        "in this class. Do not modify any other file in the repository.\n"
+    )
+    path = "src/main/java/com/myapp/service/driver/DefaultDriverService.java"
+    assert mutation_path_roles(derive_requirements(goal), [path, "pom.xml"]) == {
+        "authorized": [path], "references": [], "forbidden": [], "ambiguous": []}
 
 
 # ------------------------------------------------------------ the five required cases (pure)

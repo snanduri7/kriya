@@ -38,8 +38,9 @@ user's text, verbatim:
 - Mutation-scope requirements ("do not modify any other file", recognized
   only as a whole statement, ``is_mutation_scope_requirement``) are decided
   from Kriya's own mutation record (``close_mutation_scope_requirements``):
-  authorized paths = the repository files the goal itself names
-  (``authorized_mutation_paths``), actual paths = what the candidate and the
+  authorized paths = only the files the goal's own words establish as change
+  targets (``mutation_path_roles``: a reference, negated or undecidable
+  mention never authorizes; an undecidable one leaves it unresolved), actual paths = what the candidate and the
   run's committed history changed. In scope with nothing foreign closes it
   (MUTATION_SCOPE evidence); a path outside the set is deterministic VIOLATED
   evidence whatever the verifier said; no referent leaves it unresolved.
@@ -446,29 +447,109 @@ _MUTATION_SCOPE_REQUIREMENT = re.compile(
     r"(?:\s+in\s+(?:the|this)\s+(?:repository|repo|project|codebase|workspace))?\s*[.!]?",
     re.IGNORECASE,
 )
-_PATH_TOKEN = re.compile(r"`([^`]+)`|([\w./-]+)")
-
-
 def is_mutation_scope_requirement(text: str) -> bool:
     """Whether a requirement is, in its entirety, the file-boundary statement
     "do not modify any other file (in the repository)"."""
     return bool(_MUTATION_SCOPE_REQUIREMENT.fullmatch(_clean(text or "")))
 
 
-def authorized_mutation_paths(requirements: RequirementSet, tracked_paths: Iterable[str]) -> List[str]:
-    """The files the user's own goal names - the only deterministic referent
-    of "any other file". A token counts only when it is exactly a path the
-    repository tracks at the run's base (no basename, stem or fuzzy match);
-    the Planner's or Developer's file choices are never an input. Empty
-    means "other" has no authoritative referent."""
+# One token of a requirement, in order: a code span, a word/path, or a
+# clause boundary (";"). A path's role comes only from the words of its own
+# clause.
+_ROLE_TOKEN = re.compile(r"`(?P<code>[^`]+)`|(?P<word>[\w./-]+)|(?P<boundary>;)")
+
+
+def _forms(*bases: str) -> frozenset:
+    forms = set()
+    for base in bases:
+        stem = base[:-1] if base.endswith("e") else base
+        forms.update({base, base + "s", stem + "ed", stem + "ing", base + "d"})
+    return frozenset(forms)
+
+
+# Closed vocabularies (no model): a path is a mutation TARGET only when the
+# nearest cue before it, in its clause, is one of these verbs, un-negated.
+_MUTATION_CUES = _forms("modify", "change", "edit", "fix", "update", "patch", "rewrite", "refactor",
+                        "implement", "correct", "adjust", "alter", "amend", "add", "remove", "delete",
+                        "rename", "replace", "create", "write") | frozenset({"modifies", "modified", "fixes",
+                                                                             "patches", "written", "wrote"})
+# ... and a REFERENCE (never writable) when that cue is one of these.
+_REFERENCE_CUES = _forms("compare", "see", "refer", "reference", "read", "consult", "mirror", "follow",
+                         "inspect", "use", "reuse", "look") | frozenset({
+                             "like", "according", "based", "similar", "against", "per", "cf", "example",
+                             "template", "seen", "compared"})
+# Relational words whose object's role cannot be read deterministically
+# ("next to X", "replace it with X", "beside X"): the path's role is unknown,
+# so the scope requirement stays unresolved rather than guessed.
+_UNDECIDABLE_CUES = frozenset({"with", "next", "beside", "besides", "alongside", "near", "into", "onto"})
+# A new file is a target only under a creation verb (it is not tracked yet).
+_CREATION_CUES = _forms("create", "add", "write") | frozenset({"written", "wrote"})
+_NEGATIONS = frozenset({"not", "never", "don't", "dont", "doesn't", "without", "avoid", "no", "nor"})
+_NEW_FILE_SHAPE = re.compile(r"^[\w.-]+(?:/[\w.-]+)*\.[A-Za-z][\w]{0,9}$")
+
+
+def _path_token(raw: str) -> str:
+    return raw.strip().strip("'\"").rstrip(".,:!?)").lstrip("(").removeprefix("./")
+
+
+def mutation_path_roles(requirements: RequirementSet, tracked_paths: Iterable[str]) -> Dict[str, Any]:
+    """The role of every repository path the goal names, from the goal's own
+    words only - never the Planner's, Architect's or Developer's choices.
+
+    A named path is a path tracked at the run's base (exact match, no
+    basename/stem), or an untracked file-shaped path under a creation verb.
+    Its role at each mention is decided by the nearest cue word before it in
+    the same clause (code spans are skipped): a mutation verb makes it a
+    ``target`` (``Modify src/A.java and src/B.java`` - both), a reference
+    word a ``reference`` (``Compare it with src/B.java``), a negated
+    mutation verb ``forbidden``. No cue, or different roles at different
+    mentions, is ``ambiguous``. Returns sorted ``authorized`` (targets),
+    ``references``, ``forbidden`` and ``ambiguous`` path lists."""
     tracked = set(tracked_paths)
-    named: List[str] = []
+    roles: Dict[str, set] = {}
     for requirement in requirements.requirements:
-        for code, bare in _PATH_TOKEN.findall(requirement.text):
-            token = (code or bare).strip().strip("'\"").rstrip(".,;:!?)").lstrip("(").removeprefix("./")
-            if token in tracked and token not in named:
-                named.append(token)
-    return sorted(named)
+        tokens = [(m.group("code"), m.group("word"), m.group("boundary"))
+                  for m in _ROLE_TOKEN.finditer(requirement.text)]
+        for index, (code, word, _) in enumerate(tokens):
+            raw = code if code is not None else word
+            if raw is None:
+                continue
+            path = _path_token(raw)
+            role, cue, relational = None, None, False
+            for back in range(index - 1, -1, -1):
+                b_code, b_word, b_boundary = tokens[back]
+                if b_boundary:
+                    break
+                if b_word is None:
+                    continue  # a code span is never a cue
+                lowered = b_word.lower().strip(".,:!?")
+                if lowered in _UNDECIDABLE_CUES:
+                    relational = True
+                    continue
+                if lowered in _MUTATION_CUES or lowered in _REFERENCE_CUES:
+                    cue = lowered
+                    preceding = [w.lower() for _, w, _ in tokens[max(0, back - 3):back] if w]
+                    if lowered in _REFERENCE_CUES and lowered not in _MUTATION_CUES:
+                        role = "reference"  # "compare it with X": still a reference
+                    elif relational:
+                        role = None  # "replace it with X", "create N next to X": undecidable
+                    elif any(w in _NEGATIONS for w in preceding):
+                        role = "forbidden"
+                    else:
+                        role = "target"
+                    break
+            if path in tracked:
+                pass
+            elif role == "target" and cue in _CREATION_CUES and _NEW_FILE_SHAPE.match(path) and "(" not in raw:
+                pass  # a file the goal asks to create
+            else:
+                continue
+            roles.setdefault(path, set()).add(role or "unknown")
+    result: Dict[str, List[str]] = {"authorized": [], "references": [], "forbidden": [], "ambiguous": []}
+    key = {"target": "authorized", "reference": "references", "forbidden": "forbidden"}
+    for path, seen in sorted(roles.items()):
+        result[key[next(iter(seen))] if len(seen) == 1 and "unknown" not in seen else "ambiguous"].append(path)
+    return result
 
 
 def close_mutation_scope_requirements(
@@ -484,7 +565,8 @@ def close_mutation_scope_requirements(
     actual path outside the authorized set is deterministic VIOLATED
     evidence. No referent, no verdict to bind to, unavailable evidence or a
     foreign change leaves it as the verifier left it (fail closed)."""
-    authorized = authorized_mutation_paths(requirements, tracked_paths)
+    roles = mutation_path_roles(requirements, tracked_paths)
+    authorized = roles["authorized"]
     attempts: List[Dict[str, Any]] = []
     for requirement in requirements.requirements:
         if not is_mutation_scope_requirement(requirement.text):
@@ -496,8 +578,13 @@ def close_mutation_scope_requirements(
                                               RequirementOutcome.UNVERIFIED.value)
         entry: Dict[str, Any] = {"requirement": requirement.id, "kind": MUTATION_SCOPE, "closed": False,
                                  "authorized_paths": authorized}
-        if not authorized:
-            entry["reason"] = "the goal names no repository file, so 'other' has no authoritative referent"
+        entry.update({"reference_paths": roles["references"], "forbidden_paths": roles["forbidden"],
+                      "ambiguous_paths": roles["ambiguous"]})
+        if roles["ambiguous"]:
+            entry["reason"] = ("the goal names paths whose role (change target or reference) cannot be "
+                               "determined: " + ", ".join(roles["ambiguous"]))
+        elif not authorized:
+            entry["reason"] = "the goal names no file to change, so 'other' has no authoritative referent"
         elif not evidence_id:
             entry["reason"] = "no verifier verdict on this candidate to bind the evidence to"
         elif not scope_evidence or scope_evidence.get("unavailable"):
@@ -509,6 +596,7 @@ def close_mutation_scope_requirements(
             outside = [path for path in actual if path not in set(authorized)]
             detail = {
                 "kind": MUTATION_SCOPE, "requirement": requirement.id, "authorized_paths": authorized,
+                "reference_paths": roles["references"],
                 "actual_paths": actual, "out_of_scope_paths": outside, "foreign_paths": foreign,
                 **{key: scope_evidence.get(key) for key in ("run_id", "base_revision", "candidate_revision", "committed_history")},
             }
