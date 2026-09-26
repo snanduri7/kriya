@@ -36,6 +36,7 @@ from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.core.model_routing import resume_routes_from
 from kriya.core.state_paths import trace_db_path
+from kriya.core.token_budget import ContextBudgetUnsatisfiableError
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.filesystem import WriteScopeMode
@@ -1014,6 +1015,27 @@ class WorkflowEngine:
         # config access naturally in scope (see execution.py's own
         # docstring for why the other 5 real callers still don't).
         self.execution_policy = ExecutionPolicy(sensitive_path_patterns=kernel.config.autonomy.sensitive_paths)
+
+    @staticmethod
+    def _final_review_refusal_payload(state: GenerationState, workspace_path: str) -> Dict[str, Any]:
+        """PROMPT-BUDGET-FIT-001C: the refusal with what had already
+        happened. ``candidate_applied`` is whether this run's candidate reached
+        ``workspace_path``; ``committed_work_units`` comes from the owning
+        RunRecord's commit cycles (None when unavailable). Nothing is rolled
+        back."""
+        from kriya.control.run_coordinator import owning_run_committed_work_units
+
+        try:
+            committed = owning_run_committed_work_units(workspace_path)
+        except Exception as error:  # the refusal is still reported
+            logger.warning(f"Committed work units unavailable: {error}")
+            committed = None
+        return {
+            **state.final_review_refusal,
+            "candidate_applied": bool(state.quality_gates_succeeded),
+            "committed_work_units": committed,
+            "rolled_back": False,
+        }
 
     def _trace_run_events(self, state: GenerationState) -> List[Dict[str, Any]]:
         """The run's events for the trace, after moving any automatic budget
@@ -5110,11 +5132,30 @@ class WorkflowEngine:
                 batch_prompt = goal_header + batch
                 label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
                 _reviewer_started = time.monotonic()
-                review_text = await self.reviewer.run(
-                    batch_prompt, stream_callback=reviewer_stream,
-                    temperature_override=self.kernel.config.llm.reviewer_temperature,
-                    system_prompt_override=reviewer_system_prompt_override,
-                )
+                try:
+                    review_text = await self.reviewer.run(
+                        batch_prompt, stream_callback=reviewer_stream,
+                        temperature_override=self.kernel.config.llm.reviewer_temperature,
+                        system_prompt_override=reviewer_system_prompt_override,
+                    )
+                except ContextBudgetUnsatisfiableError as refusal:
+                    # PROMPT-BUDGET-FIT-001C: PRD-016 refused the request
+                    # before inference. The run ends as a typed non-success
+                    # that keeps what already happened (the candidate may be
+                    # applied and committed); nothing is retried or rolled back.
+                    state.final_review_refusal = {
+                        "reason_code": refusal.reason_code, "detail": str(refusal),
+                        "batch": i, "batches": len(review_batches),
+                    }
+                    state.record_event(RunEvent(
+                        kind="review.refused", attempt=state.attempt_number, source="workflow",
+                        authority=EventAuthority.AUTHORITATIVE,
+                        message="the final review request was refused before inference",
+                        details=dict(state.final_review_refusal),
+                    ))
+                    logger.error(f"Final review not performed: {refusal}")
+                    review_parts.append(label + f"Final review not performed: {refusal}")
+                    break
                 # Demo-01 Finding 3 (2026-09-11): the structural enforcement
                 # boundary itself - applied per-batch (not to the joined
                 # final text) so one batch's non-compliance with the marker
@@ -5244,7 +5285,8 @@ class WorkflowEngine:
                 for code in CONTRACT_REGISTRY_STOP_REASON_CODES
             )
             failure_category = (
-                "plan_scope_revision_required" if state.plan_scope_conflict
+                "final_review_refused" if state.final_review_refusal is not None
+                else "plan_scope_revision_required" if state.plan_scope_conflict
                 else "unauthorized_generation_target" if is_scope_defect_stop
                 else "candidate_independent_deterministic_failure" if is_candidate_independent_deterministic_failure
                 else "generation_budget_exhausted" if is_generation_budget_exhausted_stop
@@ -5316,8 +5358,9 @@ class WorkflowEngine:
         except Exception as trace_ex:
             logger.warning(f"Failed to write run trace: {trace_ex}")
 
-        if quality_passed:
-            # Full success - nothing left a resumed run would need to redo.
+        if quality_passed or (state.final_review_refusal is not None and state.quality_gates_succeeded):
+            # Full success, or an applied candidate whose final review was
+            # refused - nothing left a resumed run would need to redo.
             delete_checkpoint(workspace_path, run_id)
         else:
             # Deliberately just the total (state.attempt_number), not a
@@ -5374,6 +5417,8 @@ class WorkflowEngine:
                 ),
             "review": review,
             "review_included_in_approval": state.pre_approval_review is not None,
+            **({"final_review_refusal": self._final_review_refusal_payload(state, workspace_path)}
+               if state.final_review_refusal is not None else {}),
             "run_id": run_id,
             # PRD-021: grounded ownership findings (advisory evidence).
             **({"ownership_findings": [f.to_dict() for f in state.ownership_findings]}

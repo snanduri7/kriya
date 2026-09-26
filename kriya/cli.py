@@ -863,6 +863,23 @@ def _resumed_model_routes(workspace: Optional[str], resume: bool, resume_id: Opt
     return (checkpoint or {}).get("model_routes")
 
 
+def _echo_final_review_refusal(res: Dict[str, Any]) -> None:
+    """PROMPT-BUDGET-FIT-001C: gates passed but the final review was refused
+    before inference. Not a success, and never reported as unapplied or
+    rolled back."""
+    refusal = res["final_review_refusal"]
+    click.secho("Quality Gates: PASSED - run NOT successful (final review not performed)", bold=True, fg="red")
+    files = ", ".join(res.get("files") or [])
+    if refusal.get("candidate_applied"):
+        committed = refusal.get("committed_work_units")
+        where = f" and committed ({', '.join(committed)})" if committed else ""
+        click.echo(f"Files applied to workspace{where}, not rolled back: {files}")
+    else:
+        click.echo(f"Files not applied to workspace: {files}")
+    click.secho(f"[FINAL REVIEW REFUSED] {refusal.get('detail')}", fg="yellow", bold=True)
+    click.echo(f"Failure category: {res.get('failure_category')}")
+
+
 def _workflow_config(cfg: AppConfig, *, resume: bool = False, resume_id: Optional[str] = None,
                      workspace: Optional[str] = None, milestone_plan: Optional[str] = None) -> AppConfig:
     """The configuration a workflow command (generate, fix, proposal
@@ -2414,7 +2431,9 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             # signal about on its own.
             for warning in res["skill_staleness_warnings"]:
                 click.secho(f"[SKILL STALENESS] {warning}", fg="yellow")
-        if res.get("files"):
+        if res.get("files") and res.get("final_review_refusal"):
+            _echo_final_review_refusal(res)
+        elif res.get("files"):
             status_color = "green" if res.get('quality_gates_passed') else "red"
             status_text = "PASSED" if res.get('quality_gates_passed') else "FAILED"
             click.secho(f"Quality Gates: {status_text}", bold=True, fg=status_color)
@@ -3938,6 +3957,8 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                 click.secho(f"\n[SKILL STALENESS] {warning}", fg="yellow")
         if res["quality_gates_passed"]:
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
+        elif res.get("final_review_refusal"):
+            _echo_final_review_refusal(res)
         else:
             click.secho("\n[FAILURE] Repair attempts completed but compilation/tests still fail.", fg="red", bold=True)
             if res.get("failure_category"):

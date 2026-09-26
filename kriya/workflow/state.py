@@ -631,6 +631,10 @@ class GenerationState:
     # whenever no human-approval escalation happened this run (the common
     # autonomous-mode path), or the run never reached that gate at all.
     pre_approval_review: Optional[str] = None
+    # PROMPT-BUDGET-FIT-001C: set when PRD-016 refused the final Reviewer
+    # request before inference (reason_code, detail). The run is then not
+    # successful, whatever its gates and application did.
+    final_review_refusal: Optional[Dict[str, Any]] = None
     # Set when grounded failure attribution identifies a required repair
     # file outside an authoritative caller-provided write allowlist. This
     # is a plan/scope conflict, not another code-generation retry target.
@@ -713,6 +717,7 @@ class GenerationState:
             and self.overall_attempt_succeeded
             and self.quality_gates_succeeded
             and self.api_contract_recovery is None
+            and self.final_review_refusal is None
         )
 
     def retry_progress_summary(self) -> Dict[str, Any]:

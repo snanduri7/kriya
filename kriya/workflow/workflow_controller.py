@@ -6238,9 +6238,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 and not undeclared_files
                 and verification_status == SubtaskStatus.COMPLETED
             )
+            review_refusal = call_result.get("final_review_refusal")
             if not quality_gates_passed:
                 scope_conflict = call_result.get("plan_scope_conflict")
-                if scope_conflict:
+                if review_refusal:
+                    # PROMPT-BUDGET-FIT-001C: the subtask's gates passed but
+                    # its final review was refused before inference.
+                    error = f"subtask final review not performed: {review_refusal.get('detail')}"
+                elif scope_conflict:
                     error = (
                         "subtask repair requires approved-plan scope revision; grounded required "
                         f"files {scope_conflict.get('required_files', [])!r} are outside this stage's "
@@ -6270,7 +6275,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 undeclared_files=tuple(undeclared_files), error=error,
                 reason_codes=(
                     ("PLAN_SCOPE_REVISION_REQUIRED",)
-                    if call_result.get("plan_scope_conflict") else verification_reason_codes
+                    if call_result.get("plan_scope_conflict")
+                    else (review_refusal.get("reason_code"),) if review_refusal
+                    else verification_reason_codes
                 ),
             )
             subtask_results.append(result)
