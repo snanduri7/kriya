@@ -305,9 +305,15 @@ class RunRecord:
         return replace(self, revision=self.revision + 1, updated_at=_now(), **updates)
 
     def begin_commit(
-        self, transaction_id: str, *, intent: str, candidate_hash: Optional[str], **evidence: Any,
+        self, transaction_id: str, *, intent: str, candidate_hash: Optional[str],
+        contract_registry: Optional[Dict[str, Any]] = None, **evidence: Any,
     ) -> "RunRecord":
-        """Durable commit intent: must precede the first workspace byte."""
+        """Durable commit intent: must precede the first workspace byte.
+
+        PRD-029: ``contract_registry`` is the cycle's ContractRegistry
+        transition (before/after digests, pending payload, delta). It is part
+        of the same durable intent, so recovery can complete or discard it
+        exactly with the source commit it belongs to."""
         if self.unsettled_commits:
             raise self._refuse(RunLifecycle.COMMIT_ELIGIBLE, "a previous commit is unsettled")
         if self.terminal or self.lifecycle_state not in _COMMIT_SOURCES:
@@ -325,6 +331,8 @@ class RunRecord:
         }
         if self.active_work_unit is not None:
             cycle["work_unit"] = dict(self.active_work_unit)
+        if contract_registry is not None:
+            cycle["contract_registry"] = dict(contract_registry)
         return self._advance(
             RunLifecycle.COMMIT_ELIGIBLE,
             commits=[*self.commits, cycle], commit_intent=intent,
@@ -347,6 +355,17 @@ class RunRecord:
             return replace(self, commits=commits)._terminate(RunLifecycle.UNCERTAIN)
         next_state = RunLifecycle.COMMITTED if result == COMMIT_COMMITTED else RunLifecycle.CANDIDATE
         return self._advance(next_state, commits=commits, commit_result=result)
+
+    @property
+    def committed_contract_registry(self) -> Optional[Dict[str, Any]]:
+        """PRD-029: the ContractRegistry identity (after-digest, revision,
+        source revision) of the latest COMMITTED cycle that transitioned it,
+        or None when no commit of this run touched the registry."""
+        for cycle in reversed(self.commits):
+            transition = cycle.get("contract_registry")
+            if transition and cycle.get("result") == COMMIT_COMMITTED:
+                return {key: transition.get(key) for key in ("after_digest", "revision", "source_revision")}
+        return None
 
     @property
     def open_commit_cycles(self) -> Tuple[Dict[str, Any], ...]:

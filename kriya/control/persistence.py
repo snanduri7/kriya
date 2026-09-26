@@ -29,7 +29,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.control.artifacts import ArtifactRegistry
-from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError
+from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError, ContractRegistryTransitionError
 from kriya.control.run_record import RunRecord
 from kriya.control.state import ControlState
 from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 _CONTROL_DIR = os.path.join(".kriya", "control")
 _STATE_FILENAME = "state.json"
 _CONTRACTS_FILENAME = "contracts.json"
+_CONTRACTS_PENDING_DIRNAME = "contracts.pending"
 _ARTIFACTS_FILENAME = "artifacts.json"
 _DECISIONS_FILENAME = "decisions.jsonl"
 _APPROVED_PLANS_DIRNAME = "plans"
@@ -310,8 +311,16 @@ def load_contract_registry(workspace_path: str) -> ContractRegistry:
         return ContractRegistry()
     try:
         with open(path, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-    except (OSError, ValueError) as error:
+            text = handle.read()
+    except OSError as error:
+        raise ContractRegistryCorruptError(path, f"unreadable: {error}") from error
+    return _registry_from_text(path, text, workspace_path)
+
+
+def _registry_from_text(path: str, text: str, workspace_path: str) -> ContractRegistry:
+    try:
+        data = json.loads(text)
+    except ValueError as error:
         raise ContractRegistryCorruptError(path, f"unreadable: {error}") from error
     if not isinstance(data, dict):
         raise ContractRegistryCorruptError(path, "registry payload is not an object")
@@ -323,6 +332,65 @@ def load_contract_registry(workspace_path: str) -> ContractRegistry:
         return ContractRegistry.from_dict(data)
     except (KeyError, TypeError, ValueError) as error:
         raise ContractRegistryCorruptError(path, f"invalid registry: {type(error).__name__}: {error}") from error
+
+
+def pending_contract_registry_path(workspace_path: str, transaction_id: str) -> str:
+    """PRD-029: where a commit's after-state registry waits until its source
+    bytes are committed. Keyed by the commit transaction id."""
+    if not transaction_id or any(ch not in _RUN_ID_CHARS for ch in transaction_id):
+        raise ValueError(f"invalid transaction id {transaction_id!r}")
+    return os.path.join(_control_dir(workspace_path), _CONTRACTS_PENDING_DIRNAME, f"{transaction_id}.json")
+
+
+def stage_pending_contract_registry(workspace_path: str, transaction_id: str, payload: Dict[str, Any]) -> str:
+    """Write the after-state registry beside the live one - never
+    authoritative until promoted."""
+    path = pending_contract_registry_path(workspace_path, transaction_id)
+    _save_json_document(workspace_path, path, payload)
+    return path
+
+
+def read_pending_contract_registry(
+    workspace_path: str, transaction_id: str,
+) -> Optional[Tuple[str, ContractRegistry]]:
+    """(exact staged text, parsed registry), or None when nothing is staged."""
+    path = pending_contract_registry_path(workspace_path, transaction_id)
+    if not os.path.isfile(path):
+        return None
+    with open(path, "r", encoding="utf-8") as handle:
+        text = handle.read()
+    return text, _registry_from_text(path, text, workspace_path)
+
+
+def promote_pending_contract_registry(
+    workspace_path: str, transaction_id: str, *, before_digest: str, after_digest: str,
+) -> None:
+    """Make the staged after-state authoritative - exactly, or not at all.
+    The staged payload must be the one the commit intent recorded, and the
+    live registry must still be the before-state; the write is a
+    revision-checked (compare-and-swap) AuthorizedFileWriter commit of the
+    staged bytes, never a rebuilt object."""
+    staged = read_pending_contract_registry(workspace_path, transaction_id)
+    if staged is None:
+        raise ContractRegistryTransitionError(f"no staged registry for transaction {transaction_id!r}")
+    text, registry = staged
+    if registry.digest() != after_digest:
+        raise ContractRegistryTransitionError("staged registry is not the after-state the commit intent recorded")
+    if load_contract_registry(workspace_path).digest() != before_digest:
+        raise ContractRegistryTransitionError("the live registry changed since the commit intent was recorded")
+    path = contract_registry_path(workspace_path)
+    AuthorizedFileWriter(workspace_path).commit_file(path, text, expected_revision=read_file_revision(path))
+    discard_pending_contract_registry(workspace_path, transaction_id)
+
+
+def discard_pending_contract_registry(workspace_path: str, transaction_id: str) -> bool:
+    """Remove a staged transition whose commit did not happen (or that was
+    already promoted). Returns whether a file was removed."""
+    path = pending_contract_registry_path(workspace_path, transaction_id)
+    if not os.path.isfile(path):
+        return False
+    os.remove(path)
+    return True
 
 
 def save_artifact_registry(workspace_path: str, registry: ArtifactRegistry) -> None:

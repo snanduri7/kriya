@@ -50,6 +50,7 @@ _REAL_FAILURE_TYPES = {
     "retry_identity_not_qualified": FailureCategory.RESOURCE,
     # PRD-020: an original requirement without accepted evidence.
     "requirements_unresolved": FailureCategory.VERIFICATION,
+    "contract_registry": FailureCategory.VERIFICATION,
     "internal_framework_error": FailureCategory.INTERNAL,
     "general_error": FailureCategory.UNCLASSIFIED,
 }

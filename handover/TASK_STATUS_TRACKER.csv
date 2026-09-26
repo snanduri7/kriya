@@ -29,7 +29,7 @@ PRD-025,Bounded Runtime-Verifier Evidence Package,Wave 5,P0,PRD-024,REQUIRED,REA
 PRD-026,Universal Retry Progress Invariant Audit and Closure,Wave 5,P1,PRD-025,REQUIRED,READY_FOR_PYTEST_VERIFICATION,PRD-026 commit (see handover/PRD-026_CODING_HANDOVER.md),,
 PRD-027,Context Recall Certification Suite,Wave 5,P1,PRD-026,REQUIRED,READY_FOR_PYTEST_VERIFICATION,7c07a74 + 8aa6d26 + PRD-027 (2/2) commit (see handover/PRD-027_CODING_HANDOVER.md),,
 PRD-028,Dynamic Mutation Authority Escalation and Language Adapter Contract,Wave 5,P1,PRD-027,REQUIRED,READY_FOR_PYTEST_VERIFICATION,PRD-028 commit (see handover/PRD-028_CODING_HANDOVER.md),,
-PRD-029,ContractRegistry Lifecycle Closure,Wave 5,P1,PRD-028,REQUIRED,NOT_STARTED,,,
+PRD-029,ContractRegistry Lifecycle Closure,Wave 5,P1,PRD-028,REQUIRED,READY_FOR_PYTEST_VERIFICATION,61e4b26 (P0) + PRD-029 lifecycle commit (see handover/PRD-029_CODING_HANDOVER.md),,
 PRD-030,Extract TerminalGateService and CommitService,Wave 6,P2,PRD-029,NOT REQUIRED,NOT_STARTED,,,
 PRD-031,Extract Verification and Recovery Coordination Services,Wave 6,P2,PRD-030,NOT REQUIRED,NOT_STARTED,,,
 PRD-032,Adversarial and Crash Chaos Harness,Wave 7,P0,PRD-031,REQUIRED,NOT_STARTED,,,

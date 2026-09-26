@@ -23,6 +23,11 @@ invariants and writes the model-dependent evidence to
   run records is revision-bound and inside the write scope, with its
   pristine/candidate origin. The large file never gets whole-file authority
   from an escalation.
+- PRD-029: an enforce-mode run makes a small, explicitly authorized API
+  change (the goal names the owner, the symbol and the change - a DIRECT
+  authorization). On success the ContractRegistry holds a public_api record
+  bound to that commit, and the RunRecord cycle records the same registry
+  identity; its consumer (the caller) is recorded, never claimed complete.
 
 Run:
     KRIYA_BATCH6_EVIDENCE_DIR=handover/evidence/BATCH6/user-live \\
@@ -309,3 +314,51 @@ async def test_live_prd028_member_authority_is_revision_bound_and_in_scope(cfg, 
             assert record["in_write_scope"] is True
             assert record["source_revision"] and record["source_origin"] in ("PRISTINE", "CANDIDATE")
         assert record["mutation_boundary"] == "authorized_write_scope"
+
+
+_PRICING = "def total(items):\n    return sum(items)\n"
+_CHECKOUT = "from pricing import total\n\n\ndef checkout(items):\n    return total(items)\n"
+_TEST = ("from checkout import checkout\n\n\ndef test_checkout():\n    assert checkout([1, 2]) == 3\n")
+
+
+@pytest.mark.asyncio
+async def test_live_prd029_authorized_api_change_is_bound_to_its_commit(cfg, tmp_path):
+    import subprocess
+
+    from kriya.control.contracts import KIND_PUBLIC_API
+    from kriya.control.persistence import load_contract_registry, scan_run_records
+    from kriya.core.kernel import Kernel
+    from kriya.workflow.workflow import WorkflowEngine
+    from kriya.workflow.workflow_controller import WorkflowController
+
+    cfg.autonomy.mode = "guardrails"
+    cfg.autonomy.run_verification_enabled = False
+    cfg.paths.skills = str(tmp_path / "skills")
+    repo = tmp_path / "repo"
+    (repo / "tests").mkdir(parents=True)
+    (repo / "pricing.py").write_text(_PRICING)
+    (repo / "checkout.py").write_text(_CHECKOUT)
+    (repo / "tests" / "test_checkout.py").write_text(_TEST)
+    for args in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "t"],
+                 ["add", "-A"], ["commit", "-q", "-m", "base"]):
+        subprocess.run(["git", *args], cwd=repo, check=True)
+    goal = ("In pricing, change the method named total to take a second parameter tax_rate "
+            "with default 0.0 and return the sum multiplied by (1 + tax_rate).")
+    engine = WorkflowEngine(Kernel(config=cfg), LLMClient(cfg))
+    result = await WorkflowController(engine).execute(goal, str(repo), migration_mode="enforce")
+    legacy = result.legacy_result or {}
+    registry = load_contract_registry(str(repo))
+    records = [r for r in registry.all_records() if r.kind == KIND_PUBLIC_API]
+    _evidence("prd029_registry.json", {
+        "quality_gates_passed": legacy.get("quality_gates_passed"),
+        "contract_registry": legacy.get("contract_registry"),
+        "registry": registry.to_dict(),
+    })
+    if not legacy.get("quality_gates_passed"):
+        pytest.skip("the enforce run did not reach a verified commit (model outcome, recorded as evidence)")
+    [record] = records
+    assert record.owner == "pricing.py" and record.source_revision
+    assert "checkout.py" in record.consumers and record.consumers_complete is False
+    committed = [cycle for run in scan_run_records(str(repo)).records for cycle in run.commits
+                 if cycle.get("contract_registry")]
+    assert committed and committed[-1]["contract_registry"]["after_digest"] == registry.digest()

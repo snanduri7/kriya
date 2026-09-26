@@ -86,7 +86,7 @@ FINGERPRINT_NAMES: Tuple[str, ...] = (
     "workspace", "config", "goal", "approved_plan",
     "input_obligation_ledger", "effective_obligation_ledger",
     "skills", "model_runtime", "containment", "toolchain",
-    "verification_policy", "authority_context", "kriya_runtime",
+    "verification_policy", "authority_context", "contract_registry", "kriya_runtime",
 )
 
 # ---------------------------------------------------------------- matrix
@@ -95,7 +95,7 @@ STAGE_ORDER: Tuple[str, ...] = ("context", "planning", "model_protocol", "candid
 
 _PLANNING_DEPENDENCIES = frozenset({
     "workspace", "config", "goal", "skills", "approved_plan",
-    "input_obligation_ledger", "authority_context", "kriya_runtime",
+    "input_obligation_ledger", "authority_context", "contract_registry", "kriya_runtime",
 })
 
 ARTIFACT_STAGE: Dict[str, str] = {
@@ -615,8 +615,25 @@ def compute_resume_fingerprints(
             "verification-policy",
         ),
         "authority_context": authority_context_fingerprint(**authority_inputs),
+        "contract_registry": contract_registry_fingerprint(workspace_path),
         "kriya_runtime": kriya_runtime_fingerprint(),
     }
+
+
+def contract_registry_fingerprint(workspace_path: str) -> Fingerprint:
+    """PRD-029: the ContractRegistry's schema-versioned content digest,
+    through the strict loader. An absent registry is the valid empty
+    registry (so a checkpoint that recorded a non-empty one reads CHANGED);
+    an unreadable one is UNAVAILABLE, which never matches (fail closed)."""
+    from kriya.control.contracts import CONTRACT_REGISTRY_SCHEMA_VERSION, ContractRegistryCorruptError
+    from kriya.control.persistence import load_contract_registry
+    from kriya.control.workspace_identity import WorkspaceOwnershipError
+
+    try:
+        registry = load_contract_registry(workspace_path)
+    except (ContractRegistryCorruptError, WorkspaceOwnershipError, OSError) as error:
+        return Fingerprint.unavailable(f"contract registry unreadable: {error}")
+    return Fingerprint(registry.digest(), f"contract-registry-v{CONTRACT_REGISTRY_SCHEMA_VERSION}")
 
 
 def model_runtime_resume_fingerprint(config: Any) -> Fingerprint:

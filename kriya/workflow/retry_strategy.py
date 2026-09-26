@@ -605,6 +605,10 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             # a blocking policy. The Developer cannot supply the verifier's
             # missing verdict or confirm an unverifiable requirement.
             "requirements_unresolved",
+            # PRD-029: a ContractRegistry transition that cannot be made
+            # exactly (unverified invalidated consumers, a corrupt registry,
+            # an incomplete promotion). Regeneration cannot change it.
+            "contract_registry",
         }
         else classify_environment_failure(
             raw_error_context,

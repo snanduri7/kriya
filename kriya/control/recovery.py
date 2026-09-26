@@ -553,6 +553,9 @@ class RecoveryReport:
     removed_staged_files: List[str] = field(default_factory=list)
     recovered_runs: List[Dict[str, Any]] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+    # PRD-029: each open cycle's ContractRegistry transition, completed or
+    # discarded from the cycle's proven result.
+    contract_transitions: List[Dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -560,6 +563,7 @@ class RecoveryReport:
             "settled_evidence": self.settled_evidence, "rolled_forward": self.rolled_forward,
             "removed_staged_files": self.removed_staged_files,
             "recovered_runs": self.recovered_runs, "errors": self.errors,
+            "contract_transitions": self.contract_transitions,
             "remaining": self.after.to_dict(),
         }
 
@@ -655,6 +659,35 @@ def _remove_staged(paths: Tuple[str, ...], report: RecoveryReport) -> None:
         report.removed_staged_files.append(path)
 
 
+def _complete_contract_transitions(
+    workspace: str, record: RunRecord, proven: Dict[str, str], report: RecoveryReport,
+) -> bool:
+    """False when a transition needs review (the record then stays open)."""
+    from kriya.workflow.contract_lifecycle import TRANSITION_NEEDS_REVIEW, complete_contract_transition
+
+    complete = True
+    for cycle in record.open_commit_cycles:
+        intent = cycle.get("contract_registry")
+        transaction_id = cycle["transaction_id"]
+        if not intent or transaction_id not in proven:
+            continue
+        outcome = complete_contract_transition(
+            workspace, transaction_id, intent, committed=proven[transaction_id] == COMMIT_COMMITTED,
+        )
+        report.contract_transitions.append({
+            "run_id": record.run_id, "transaction_id": transaction_id, "outcome": outcome,
+            "after_digest": intent.get("after_digest"),
+        })
+        if outcome == TRANSITION_NEEDS_REVIEW:
+            report.errors.append(
+                f"run {record.run_id}: contract registry transition {transaction_id} needs review "
+                "(the live registry is neither the recorded before- nor after-state, or its staged "
+                "after-state is missing)"
+            )
+            complete = False
+    return complete
+
+
 def recover_workspace(workspace_path: str, *, complete_partial: bool = False) -> RecoveryReport:
     """``kriya runs recover``: settle everything the evidence proves.
 
@@ -717,6 +750,13 @@ def recover_workspace(workspace_path: str, *, complete_partial: bool = False) ->
             if not finding.recoverable or finding.record is None:
                 continue
             record = finding.record
+            # PRD-029: settle each open cycle's registry transition from the
+            # same proven result BEFORE the record is closed - a crash in
+            # between re-runs this idempotently (ALREADY_APPLIED), and one
+            # that needs review leaves the record open rather than closing a
+            # run whose contracts no longer match its committed source.
+            if not _complete_contract_transitions(workspace, record, finding.proven_cycle_results, report):
+                continue
             try:
                 recovered = record.recover(finding.proven_cycle_results, provenance)
                 save_run_record(workspace, recovered, expected_revision=record.revision)

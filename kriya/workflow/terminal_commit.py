@@ -10,7 +10,14 @@ they share one set of guarantees:
   recorded in its RunRecord BEFORE the first workspace byte changes, and a
   commit whose intent cannot be persisted is refused;
 * every outcome settles the run's commit cycle from the commit evidence -
-  COMMITTED, ROLLED_BACK/NOT_COMMITTED (workspace unchanged), or UNCERTAIN.
+  COMMITTED, ROLLED_BACK/NOT_COMMITTED (workspace unchanged), or UNCERTAIN;
+* PRD-029: the ContractRegistry transition the candidate implies is part
+  of the same transaction. It is derived before intent, and its digests go
+  into the cycle. It is staged before the first source byte, promoted only
+  after the source commit, and the cycle is settled COMMITTED only once the
+  promotion succeeded. A promotion failure after the bytes landed settles
+  UNCERTAIN (CONTRACT_REGISTRY_TRANSITION_INCOMPLETE), so `kriya runs
+  recover` completes it, never a silent stale registry.
 
 Callers map the returned TerminalCommitOutcome into their own result shape.
 """
@@ -19,7 +26,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from kriya.control.run_coordinator import begin_run_commit, settle_run_commit
 from kriya.control.run_record import (
@@ -112,6 +119,9 @@ class TerminalCommitOutcome:
     error: Optional[BaseException] = None
     # Record persistence failures AFTER the workspace outcome was decided.
     record_errors: List[Dict[str, str]] = field(default_factory=list)
+    # PRD-029: the committed ContractRegistry transition (RunRecord cycle
+    # intent), when this commit changed a contract.
+    contract_registry: Optional[Dict[str, Any]] = None
 
     def failure_payload(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
@@ -142,21 +152,48 @@ def _settled_state(workspace_path: str, transaction_id: str) -> str:
 def commit_terminal_candidate(
     writes: List[StagedFileWrite], *, workspace_path: str, transaction_id: str,
     evidence: Optional[Dict[str, Any]] = None,
+    contract_transition: Optional[Callable[[str], Optional[Any]]] = None,
 ) -> TerminalCommitOutcome:
     """Commit a materialized, verified candidate into the real workspace.
 
-    Controlled commit outcomes are returned, never raised. Any other
+    ``contract_transition`` (PRD-029) builds the ContractRegistry transition
+    from the candidate hash (contract_lifecycle.derive_contract_transition);
+    a refusal or an unreadable registry refuses the commit before any
+    intent. Controlled commit outcomes are returned, never raised. Any other
     exception settles the cycle from the durable evidence and propagates.
     """
+    from kriya.control.contracts import ContractRegistryCorruptError
+    from kriya.control.persistence import (
+        discard_pending_contract_registry,
+        promote_pending_contract_registry,
+        stage_pending_contract_registry,
+    )
+    from kriya.workflow.contract_lifecycle import (
+        CONTRACT_REGISTRY_STAGING_FAILED,
+        CONTRACT_REGISTRY_TRANSITION_INCOMPLETE,
+        ContractTransitionRefused,
+    )
+
     if not writes:
         return TerminalCommitOutcome(
             committed=True, workspace_state="UNCHANGED", commit_result="NO_CHANGES",
             transaction_id=transaction_id,
         )
+    candidate_hash = candidate_digest(writes, workspace_path)
+    transition = None
+    if contract_transition is not None:
+        try:
+            transition = contract_transition(candidate_hash=candidate_hash)
+        except (ContractTransitionRefused, ContractRegistryCorruptError) as error:
+            return TerminalCommitOutcome(
+                committed=False, workspace_state="UNCHANGED", commit_result=COMMIT_NOT_COMMITTED,
+                transaction_id=transaction_id, reason_code=error.reason_code, error=error,
+            )
     try:
         run = begin_run_commit(
-            workspace_path, transaction_id,
-            candidate_hash=candidate_digest(writes, workspace_path), **(evidence or {}),
+            workspace_path, transaction_id, candidate_hash=candidate_hash,
+            contract_registry=transition.intent() if transition is not None else None,
+            **(evidence or {}),
         )
     except Exception as error:
         # Without durable intent a crash inside the commit could never be
@@ -173,7 +210,19 @@ def commit_terminal_candidate(
             outcome.record_errors.append({
                 "operation": f"run_record_commit_{result.lower()}", "error": record_error,
             })
+        # A cycle proven not to have committed leaves nothing to promote.
+        if transition is not None and result in (COMMIT_ROLLED_BACK, COMMIT_NOT_COMMITTED):
+            discard_pending_contract_registry(workspace_path, transaction_id)
         return outcome
+
+    if transition is not None:
+        try:
+            stage_pending_contract_registry(workspace_path, transaction_id, transition.after_payload)
+        except Exception as error:
+            return settle(COMMIT_NOT_COMMITTED, TerminalCommitOutcome(
+                committed=False, workspace_state="UNCHANGED", commit_result=COMMIT_NOT_COMMITTED,
+                transaction_id=transaction_id, reason_code=CONTRACT_REGISTRY_STAGING_FAILED, error=error,
+            ))
 
     try:
         result = commit_revision_grounded_batch(
@@ -204,10 +253,28 @@ def commit_terminal_candidate(
     except BaseException:
         # Unexpected (including KeyboardInterrupt mid-commit): settle what
         # the evidence proves - IN_PROGRESS becomes UNCERTAIN - then raise.
-        settle_run_commit(run, _settled_state(workspace_path, transaction_id))
+        settled = _settled_state(workspace_path, transaction_id)
+        settle_run_commit(run, settled)
+        if transition is not None and settled in (COMMIT_ROLLED_BACK, COMMIT_NOT_COMMITTED):
+            discard_pending_contract_registry(workspace_path, transaction_id)
         raise
 
+    if transition is not None:
+        try:
+            promote_pending_contract_registry(
+                workspace_path, transaction_id,
+                before_digest=transition.before_digest, after_digest=transition.after_digest,
+            )
+        except Exception as error:
+            # The source bytes are committed; the registry is not. Never a
+            # silent stale registry: the cycle stays open for recovery.
+            return settle(COMMIT_UNCERTAIN, TerminalCommitOutcome(
+                committed=False, workspace_state="UNCERTAIN", commit_result=COMMIT_UNCERTAIN,
+                transaction_id=transaction_id, reason_code=CONTRACT_REGISTRY_TRANSITION_INCOMPLETE,
+                evidence=result.evidence, error=error,
+            ))
     return settle(COMMIT_COMMITTED, TerminalCommitOutcome(
         committed=True, workspace_state="COMMITTED", commit_result=COMMIT_COMMITTED,
         transaction_id=transaction_id, evidence=result.evidence,
+        contract_registry=transition.intent() if transition is not None else None,
     ))

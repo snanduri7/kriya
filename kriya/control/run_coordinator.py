@@ -202,7 +202,8 @@ def owning_run_work_unit(workspace_path: str) -> Optional[Dict[str, Any]]:
 
 def begin_run_commit(
     workspace_path: str, transaction_id: str, *, candidate_hash: Optional[str],
-    intent: str = "APPLY_VERIFIED_CANDIDATE", **evidence: Any,
+    intent: str = "APPLY_VERIFIED_CANDIDATE", contract_registry: Optional[Dict[str, Any]] = None,
+    **evidence: Any,
 ) -> Optional[RunContext]:
     """Durably record commit intent before any real-workspace byte changes.
 
@@ -214,7 +215,8 @@ def begin_run_commit(
     if context is None:
         return None
     _persist(context, lambda record: record.begin_commit(
-        transaction_id, intent=intent, candidate_hash=candidate_hash, **evidence,
+        transaction_id, intent=intent, candidate_hash=candidate_hash,
+        contract_registry=contract_registry, **evidence,
     ))
     return context
 

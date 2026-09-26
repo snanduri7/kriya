@@ -71,6 +71,7 @@ MA7.1's scope, left for a later increment.
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -81,7 +82,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
@@ -307,6 +308,45 @@ _ENFORCE_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE = 4000
 # oscillating diagnosis can't loop forever; once exhausted it falls
 # through to the existing upstream-owner fallback / termination path.
 _MAX_PLAN_SCOPE_REVISION_ATTEMPTS = 3
+
+
+def _enforce_contract_transition(
+    terminal_writes: List[Any], *, workspace_path: str, goal: str, plan: Any, transaction_id: str,
+    subtask_call_results: List[Dict[str, Any]],
+) -> Callable[..., Any]:
+    """PRD-029: the enforce commit's ContractRegistry transition builder.
+    Baseline = the live workspace (the candidate lives in the plan
+    workspace until this commit); authorizations = DIRECT ones from the
+    user's goal for this plan; downstream verification = the final
+    subtask's own terminal full suite, which ran on the final candidate with
+    tests executed."""
+    from kriya.workflow.contract_authority import derive_direct_contract_authorizations
+    from kriya.workflow.contract_lifecycle import derive_contract_transition
+
+    original, final = {}, {}
+    for write in terminal_writes:
+        if write.delete:
+            continue
+        relpath = (
+            os.path.relpath(write.target_path, workspace_path) if os.path.isabs(write.target_path)
+            else write.target_path
+        )
+        final[relpath] = write.content
+        path = os.path.join(workspace_path, relpath)
+        if os.path.isfile(path):
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                original[relpath] = handle.read()
+    last = subtask_call_results[-1] if subtask_call_results else {}
+    downstream_verified = any(
+        item.get("type") == "regression_test" and item.get("status") == "PASS_WITH_TESTS"
+        for item in (last.get("deterministic_gate_evidence") or [])
+    )
+    return functools.partial(
+        derive_contract_transition, workspace_path=workspace_path, registry=None,
+        original_contents=original, final_contents=final,
+        authorizations=tuple(derive_direct_contract_authorizations(goal, plan)),
+        transaction_id=transaction_id, downstream_verified=downstream_verified,
+    )
 
 
 class WorkflowControllerConfigurationError(ValueError):
@@ -3977,12 +4017,15 @@ class WorkflowController:
           derivation. PRD-004 derives those facts from the fully verified
           isolated candidate before commit, then persists the exact derived
           records after the one real-workspace batch commit succeeds.
-          ContractRegistry has NO equivalent hook: EngineeringPlan/Subtask
-          carry no contract-shaped metadata a real registration could key
-          off, so real contract invalidation through an actual workflow
-          remains open - a separate, later design decision (what should a
-          Subtask declare to make a contract registration meaningful),
-          not a shallow, invented schema addition bolted on here.
+          PRD-029: the ContractRegistry now has its hook too, without any
+          Planner-declared contract schema. The commit seam derives
+          public_api contract records from the verified candidate's
+          deterministic public-signature diff plus the goal's DIRECT
+          authorizations (_enforce_contract_transition ->
+          contract_lifecycle.derive_contract_transition). It invalidates
+          consumers, requires the final subtask's full suite on the
+          candidate, and commits the registry in the same transaction as
+          the source.
         - Context quality, verified by construction rather than measured:
           each subtask's Developer call goes through the UNMODIFIED
           run_generation_workflow(), so it receives the full legacy Graph
@@ -6411,9 +6454,15 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     "obligation_ledger_hash": ledger_hash,
                     "verification_evidence_ids": [f"commit:{transaction_id}"],
                 },
+                contract_transition=_enforce_contract_transition(
+                    terminal_writes, workspace_path=workspace_path, goal=goal, plan=plan,
+                    transaction_id=transaction_id, subtask_call_results=subtask_call_results,
+                ),
             )
             if not outcome.committed:
                 return outcome.failure_payload()
+            if outcome.contract_registry is not None:
+                committed_contract_registry.append(outcome.contract_registry)
             # The workspace now holds the verified candidate. Everything after
             # this line is persistence/observability and cannot undo that.
             workspace_commit_completed = True
@@ -6423,6 +6472,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             return None
 
         workspace_commit_failure: Optional[Dict[str, Any]] = None
+        committed_contract_registry: List[Dict[str, Any]] = []
 
         try:
             if subtasks_completed:
@@ -6835,6 +6885,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     "operation": "save_artifact_registry",
                     "error": f"{type(error).__name__}: {error}",
                 })
+        # PRD-029: the ContractRegistry transition committed with the source.
+        aggregated["contract_registry"] = committed_contract_registry[-1] if committed_contract_registry else None
         if terminal_observability_errors:
             aggregated["observability_errors"] = terminal_observability_errors
         if post_commit_persistence_errors:

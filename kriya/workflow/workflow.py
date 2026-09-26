@@ -1,6 +1,7 @@
 import asyncio
 import dataclasses
 import difflib
+import functools
 import hashlib
 import json
 import logging
@@ -106,6 +107,7 @@ from kriya.workflow.context_budget import (
     skeletonize_python as skeletonize_python,
 )
 from kriya.workflow.contract_authority import derive_direct_contract_authorizations
+from kriya.workflow.contract_lifecycle import CONTRACT_REGISTRY_STOP_REASON_CODES, derive_contract_transition
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
 from kriya.workflow.edit_safety import (
@@ -911,6 +913,40 @@ def close_requirements_by_mutation_scope(
         ledger, requirement_set, tracked_paths=tracked, scope_evidence=evidence,
         source="requirement_closure.mutation_scope", revision=revision,
     )
+
+
+def _terminal_contract_authorizations(
+    grounding_goal: str, structured_plan: Any, current_subtask_id: Optional[str], state: GenerationState,
+) -> List[Any]:
+    """The contract authorizations in force for this subtask at the terminal
+    boundary: DIRECT ones derived from the raw goal (CORR-016; none for a
+    plain legacy run) plus PRD-023 HUMAN approvals. The terminal API recheck
+    and the PRD-029 registry transition use exactly this list."""
+    return [
+        authorization
+        for authorization in derive_direct_contract_authorizations(grounding_goal, structured_plan)
+        if authorization.legal_scope.get("subtask_id") == current_subtask_id
+    ] + [
+        # PRD-023: a human-approved change passed the per-attempt gate with
+        # the same authority; never re-rejected here.
+        authorization for authorization in state.human_contract_authorizations
+        if authorization.legal_scope.get("subtask_id") == current_subtask_id
+    ]
+
+
+def _raise_contract_registry_stop(state: GenerationState, outcome: Any) -> None:
+    """PRD-029: a contract transition that cannot be made exactly is a
+    deterministic stop, never a retryable generation failure."""
+    reason = outcome.reason_code
+    message = f"{reason}: {outcome.error}" if outcome.error is not None else reason
+    state.environment_failure = message
+    failure = Failure(
+        type="contract_registry", message=message, raw_output=message,
+        source="contract_registry_gate", authority="deterministic",
+        attempt=state.attempt_number, diagnostics={"reason_code": reason},
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
 
 
 class WorkflowEngine:
@@ -4597,18 +4633,9 @@ class WorkflowEngine:
                 # gate is never re-rejected at this terminal regression
                 # check. [] for every plain Legacy run (structured_plan is
                 # None there).
-                terminal_direct_authorizations = [
-                    authorization
-                    for authorization in derive_direct_contract_authorizations(
-                        grounding_goal, structured_plan,
-                    )
-                    if authorization.legal_scope.get("subtask_id") == current_subtask_id
-                ] + [
-                    # PRD-023: a human-approved change passed the per-attempt
-                    # gate with the same authority; never re-rejected here.
-                    authorization for authorization in state.human_contract_authorizations
-                    if authorization.legal_scope.get("subtask_id") == current_subtask_id
-                ]
+                terminal_direct_authorizations = _terminal_contract_authorizations(
+                    grounding_goal, structured_plan, current_subtask_id, state,
+                )
                 api_violations = find_brownfield_public_api_changes(
                     workspace_path,
                     state.all_original_contents,
@@ -4769,6 +4796,19 @@ class WorkflowEngine:
                 )
                 # Unique per cycle: a resumed run reuses run_id.
                 terminal_transaction_id = uuid.uuid4().hex
+                # PRD-029: the ContractRegistry transition this candidate
+                # implies commits in the same transaction as its bytes.
+                contract_authorizations = _terminal_contract_authorizations(
+                    grounding_goal, structured_plan, current_subtask_id, state,
+                )
+                downstream_verified = bool(
+                    state.terminal_regression_succeeded
+                    and state.terminal_full_suite_result is not None
+                    and output_confirms_nonzero_test_execution(
+                        str(state.terminal_full_suite_result.get("output") or ""),
+                    )
+                )
+
                 commit_outcome = commit_terminal_candidate(
                     final_writes, workspace_path=workspace_path,
                     transaction_id=terminal_transaction_id,
@@ -4777,9 +4817,21 @@ class WorkflowEngine:
                             f"commit:{terminal_transaction_id}",
                         ],
                     },
+                    contract_transition=functools.partial(
+                        derive_contract_transition,
+                        workspace_path=workspace_path, registry=None,
+                        original_contents=dict(state.all_original_contents),
+                        final_contents=dict(final_candidate_contents),
+                        authorizations=tuple(contract_authorizations),
+                        transaction_id=terminal_transaction_id,
+                        downstream_verified=downstream_verified,
+                    ),
                 )
                 if not commit_outcome.committed:
+                    if commit_outcome.reason_code in CONTRACT_REGISTRY_STOP_REASON_CODES:
+                        _raise_contract_registry_stop(state, commit_outcome)
                     raise commit_outcome.error
+                state.contract_registry_transition = commit_outcome.contract_registry
                 for filepath in sorted(state.all_files_written):
                     logger.info(
                         "Applied terminally verified sandbox change to workspace: %s", filepath,
@@ -5170,6 +5222,12 @@ class WorkflowEngine:
                 bool(state.environment_failure)
                 and state.environment_failure.startswith(f"{REQUIREMENTS_UNRESOLVED}:")
             )
+            # PRD-029: same convention - a ContractRegistry transition that
+            # could not be made exactly (contract_lifecycle.py).
+            is_contract_registry_stop = bool(state.environment_failure) and any(
+                state.environment_failure.startswith(f"{code}:") or state.environment_failure == code
+                for code in CONTRACT_REGISTRY_STOP_REASON_CODES
+            )
             failure_category = (
                 "plan_scope_revision_required" if state.plan_scope_conflict
                 else "unauthorized_generation_target" if is_scope_defect_stop
@@ -5180,6 +5238,7 @@ class WorkflowEngine:
                 else "fallback_model_incompatible" if is_fallback_incompatible_stop
                 else "retry_identity_not_qualified" if is_retry_identity_stop
                 else "requirements_unresolved" if is_requirements_unresolved_stop
+                else "contract_registry_blocked" if is_contract_registry_stop
                 else "environment_failure" if state.environment_failure
                 # PRD-026: the retry-progress invariant ended the run.
                 else "no_progress" if state.no_progress_terminated
@@ -5285,6 +5344,9 @@ class WorkflowEngine:
             "environment_failure": state.environment_failure if not quality_passed else None,
             "failure_category": failure_category,
             "retry_progress": state.retry_progress_summary(),
+            # PRD-029: the ContractRegistry transition committed with this
+            # run's source (None when no contract changed).
+            "contract_registry": state.contract_registry_transition,
             "failure_report": failure_report_dicts,
             "plan_scope_conflict": state.plan_scope_conflict,
             "toolchain_warning": state.toolchain_warning,

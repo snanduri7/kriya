@@ -50,6 +50,12 @@ def compute_shape_hash(shape: Shape) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+CONTRACT_REGISTRY_SCHEMA_VERSION = 2
+KIND_MILESTONE_CAPABILITY = "milestone_capability"
+KIND_PUBLIC_API = "public_api"
+CONTRACT_KINDS = (KIND_MILESTONE_CAPABILITY, KIND_PUBLIC_API)
+
+
 class ContractState(str, Enum):
     PROPOSED = "proposed"
     APPROVED = "approved"
@@ -88,6 +94,15 @@ class ContractProviderResolutionError(ValueError):
 
 
 CONTRACT_REGISTRY_CORRUPT = "CONTRACT_REGISTRY_CORRUPT"
+CONTRACT_REGISTRY_TRANSITION_CONFLICT = "CONTRACT_REGISTRY_TRANSITION_CONFLICT"
+
+
+class ContractRegistryTransitionError(RuntimeError):
+    """A staged registry transition cannot be applied exactly: the pending
+    payload is missing or not the one the commit intent recorded, or the
+    live registry is no longer the before-state. Never forced."""
+
+    reason_code = CONTRACT_REGISTRY_TRANSITION_CONFLICT
 
 
 class ContractRegistryCorruptError(RuntimeError):
@@ -128,6 +143,22 @@ class ContractRecord:
     created_at: str = field(default_factory=_now_iso)
     updated_at: str = field(default_factory=_now_iso)
 
+    # PRD-029 (schema 2). ``kind`` separates milestone capabilities (planning
+    # intent, milestone lifecycle) from public API contracts (derived from
+    # committed code evidence). The remaining fields say where a record's
+    # fact comes from and how far it can be trusted: the committed source
+    # revision, consumers with provenance (never claimed complete unless the
+    # evidence proves it), the authorization evidence, why it is stale, and
+    # which consumers a change invalidated.
+    kind: str = KIND_MILESTONE_CAPABILITY
+    owner: Optional[str] = None
+    source_revision: Optional[str] = None
+    consumer_provenance: Tuple[Dict[str, Any], ...] = ()
+    consumers_complete: bool = False
+    authorization: Optional[Dict[str, Any]] = None
+    stale_reason: Optional[str] = None
+    invalidated_consumers: Tuple[Dict[str, Any], ...] = ()
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "id": self.id,
@@ -140,6 +171,14 @@ class ContractRecord:
             "content_hash": self.content_hash,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "kind": self.kind,
+            "owner": self.owner,
+            "source_revision": self.source_revision,
+            "consumer_provenance": [dict(item) for item in self.consumer_provenance],
+            "consumers_complete": self.consumers_complete,
+            "authorization": self.authorization,
+            "stale_reason": self.stale_reason,
+            "invalidated_consumers": [dict(item) for item in self.invalidated_consumers],
         }
 
     @classmethod
@@ -155,6 +194,14 @@ class ContractRecord:
             content_hash=data.get("content_hash", ""),
             created_at=data.get("created_at", _now_iso()),
             updated_at=data.get("updated_at", _now_iso()),
+            kind=data.get("kind", KIND_MILESTONE_CAPABILITY),
+            owner=data.get("owner"),
+            source_revision=data.get("source_revision"),
+            consumer_provenance=tuple(data.get("consumer_provenance", ())),
+            consumers_complete=bool(data.get("consumers_complete", False)),
+            authorization=data.get("authorization"),
+            stale_reason=data.get("stale_reason"),
+            invalidated_consumers=tuple(data.get("invalidated_consumers", ())),
         )
 
 
@@ -186,6 +233,12 @@ class ContractRegistry:
         # contract_id -> ordered list of ContractRecord revisions, oldest
         # first. get()/current state always reads the LAST entry.
         self._history: Dict[str, List[ContractRecord]] = {}
+        # PRD-029: the registry's own identity. ``revision`` counts committed
+        # transitions; ``source_revision`` names the committed source the
+        # latest transition is bound to (None for a registry no commit has
+        # touched yet).
+        self.revision: int = 0
+        self.source_revision: Optional[str] = None
 
     # --- registration ---
 
@@ -360,12 +413,28 @@ class ContractRegistry:
 
     # --- persistence ---
 
+    def replace_current(self, contract_id: str, record: ContractRecord) -> None:
+        """Replace the current revision's record in place (bookkeeping on
+        the same revision: staleness, consumer invalidation). A shape change
+        must still go through propose_change()/apply_change()."""
+        current = self.get(contract_id)
+        if record.id != contract_id or record.revision != current.revision:
+            raise ValueError("replace_current cannot change a record's id or revision")
+        self._history[contract_id][-1] = record
+
+    def digest(self) -> str:
+        """Content identity over the canonical payload (to_dict())."""
+        return registry_digest(self.to_dict())
+
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "schema_version": CONTRACT_REGISTRY_SCHEMA_VERSION,
+            "revision": self.revision,
+            "source_revision": self.source_revision,
             "contracts": {
                 contract_id: [record.to_dict() for record in history]
                 for contract_id, history in self._history.items()
-            }
+            },
         }
 
     @classmethod
@@ -374,6 +443,11 @@ class ContractRegistry:
         never degrades to a partial or empty registry."""
         if not isinstance(data, dict):
             raise TypeError("registry payload is not an object")
+        # A payload without schema_version is schema 1 (milestone capability
+        # records only); it migrates with every record's kind defaulted.
+        version = data.get("schema_version", 1)
+        if version not in (1, CONTRACT_REGISTRY_SCHEMA_VERSION):
+            raise ValueError(f"unsupported contract registry schema_version {version!r}")
         contracts = data.get("contracts", {})
         if not isinstance(contracts, dict):
             raise TypeError("registry 'contracts' is not an object")
@@ -382,7 +456,20 @@ class ContractRegistry:
             if not isinstance(records, list) or not records:
                 raise ValueError(f"contract {contract_id!r} has no revision history")
             registry._history[contract_id] = [ContractRecord.from_dict(r) for r in records]
+            if any(record.kind not in CONTRACT_KINDS for record in registry._history[contract_id]):
+                raise ValueError(f"contract {contract_id!r} has an unknown kind")
+        revision = data.get("revision", 0)
+        if not isinstance(revision, int) or revision < 0:
+            raise ValueError(f"invalid registry revision {revision!r}")
+        registry.revision = revision
+        registry.source_revision = data.get("source_revision")
         return registry
+
+
+def registry_digest(payload: Dict[str, Any]) -> str:
+    """sha256 over a registry payload (ContractRegistry.to_dict()), the same
+    canonical form checkpoints and resume fingerprints compare."""
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 def register_provided_capabilities(

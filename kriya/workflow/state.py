@@ -580,6 +580,9 @@ class GenerationState:
     # PRD-028 (kriya/workflow/authority_escalation.py): every member-authority
     # expansion decision this run, GRANTED or INDETERMINATE.
     authority_expansions: List[Any] = field(default_factory=list)
+    # PRD-029: the ContractRegistry transition committed with this run's
+    # source (RunRecord cycle intent), when a contract changed.
+    contract_registry_transition: Optional[Dict[str, Any]] = None
     # Current attempt's three distinct verification/application boundaries.
     candidate_gates_succeeded: bool = False
     terminal_regression_succeeded: bool = False
