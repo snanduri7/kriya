@@ -20,8 +20,8 @@ from kriya.config import AppConfig
 from kriya.config.config import FallbackModelConfig, ModelCapabilities
 from kriya.core import model_qualification as mq
 from kriya.core import model_routing as mr
-from kriya.core import role_metrics as rm
 from kriya.core import model_runtime
+from kriya.core import role_metrics as rm
 from kriya.core.llm import LLMClient
 from kriya.core.model_runtime import ModelRuntimeFingerprint
 from kriya.core.state_paths import trace_db_path

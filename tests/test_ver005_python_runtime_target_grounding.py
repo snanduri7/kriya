@@ -21,7 +21,6 @@ from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.acceptance import runtime_verification_infrastructure_reason
 from kriya.workflow.attempt import (
     _build_python_runtime_grounding,
-    _collect_python_runtime_grounding_facts,
     _validate_and_convert_managed_service_contract,
 )
 from kriya.workflow.file_resolution import (

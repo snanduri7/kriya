@@ -15,6 +15,17 @@ import shutil
 import pytest
 
 from kriya.analyzer.java_members import extract_java_members
+from kriya.workflow.proposal_binding import (
+    REASON_EVIDENCE_CHANGED,
+    REASON_EVIDENCE_FILE_STALE,
+    REASON_TARGET_FILE_STALE,
+    REASON_TARGET_MEMBER_MISSING,
+    REASON_WRONG_WORKSPACE,
+    bind_evidence,
+    proposal_to_authorized_semantic_regions,
+    sha256_file,
+    verify_proposal_bindings,
+)
 from kriya.workflow.review_context import (
     CONFIDENCE_STRONG_STATIC_INDICATION,
     StructuredFinding,
@@ -22,18 +33,6 @@ from kriya.workflow.review_context import (
     build_member_evidence_ids,
     build_proposed_modification,
     format_proposed_modification,
-)
-from kriya.workflow.proposal_binding import (
-    REASON_EVIDENCE_CHANGED,
-    REASON_EVIDENCE_FILE_STALE,
-    REASON_TARGET_FILE_STALE,
-    REASON_TARGET_MEMBER_MISSING,
-    REASON_WRONG_WORKSPACE,
-    EvidenceBinding,
-    bind_evidence,
-    proposal_to_authorized_semantic_regions,
-    sha256_file,
-    verify_proposal_bindings,
 )
 from kriya.workflow.semantic_region_authority import (
     RegionType,
@@ -536,8 +535,9 @@ def test_proposal_binding_module_never_imports_write_capable_components():
 # =====================================================================
 
 def test_existing_review_output_remains_valid(tmp_path):
-    from kriya.workflow.review_context import format_adjudicated_review
     import inspect
+
+    from kriya.workflow.review_context import format_adjudicated_review
     params = list(inspect.signature(format_adjudicated_review).parameters)
     assert "proposal" not in params and "workspace_root" not in params
 

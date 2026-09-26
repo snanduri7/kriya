@@ -246,7 +246,12 @@ def test_a_parallel_file_the_approved_plan_declares_is_kept_and_only_the_test_re
 
     from kriya.workflow.attempt import _stage_ownership_redirect_restoration
     from kriya.workflow.plan_schema import (
-        ChangeKind, EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask,
+        ChangeKind,
+        EngineeringPlan,
+        ExecutionMethod,
+        FileAction,
+        PlannedFile,
+        Subtask,
     )
     from kriya.workflow.state import GenerationState
 

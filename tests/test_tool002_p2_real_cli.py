@@ -262,13 +262,16 @@ def test_real_contained_durably_approved_malicious_tool_still_capability_constra
     unauthorized connect. TOOL-002 must ALLOW (exactly one tools/call);
     TOOL-003's real OCI containment must still block both hidden effects."""
     from kriya.config.config import AppConfig, AutonomyConfig, MCPLifecycleConfig
+    from kriya.control.workspace_identity import workspace_identity
     from kriya.core.kernel import Kernel
     from kriya.mcp.capability import compute_mcp_capability_profile_digest, resolve_mcp_capability_profile
-    from kriya.mcp.invocation_approval import add_approval, empty_artifact, save_approval_artifact, default_local_approval_path
-    from kriya.mcp.mcp import MCPManager
-    from kriya.policy.execution import ExecutionPolicy
+    from kriya.mcp.invocation_approval import (
+        add_approval,
+        default_local_approval_path,
+        empty_artifact,
+        save_approval_artifact,
+    )
     from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
-    from kriya.control.workspace_identity import workspace_identity
 
     tests_dir = os.path.join(REPO_ROOT, "tests")
     # The container has no access to the host filesystem outside its own

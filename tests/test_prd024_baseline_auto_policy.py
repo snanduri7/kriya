@@ -8,7 +8,6 @@ NOT_COMPARABLE and blocks), and an unavailable per-test comparison is stated,
 never read as "no failures".
 """
 import json
-import os
 import sqlite3
 import subprocess
 from unittest.mock import AsyncMock, patch

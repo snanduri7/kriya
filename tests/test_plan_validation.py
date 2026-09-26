@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from kriya.workflow.obligations import ObligationKind, ObligationLedger, ObligationStatus
 from kriya.workflow.plan_schema import (
     AcceptanceCriterion,
     EngineeringPlan,
@@ -20,10 +21,9 @@ from kriya.workflow.plan_schema import (
     VerificationMethodType,
     VerifierKind,
 )
-from kriya.workflow.obligations import ObligationKind, ObligationLedger, ObligationStatus
 from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
-from kriya.workflow.triage import ChangeKind
 from kriya.workflow.static_checks import derive_stack_contract
+from kriya.workflow.triage import ChangeKind
 from kriya.workflow.workflow_controller import revise_plan_for_grounded_scope_owner
 
 

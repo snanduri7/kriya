@@ -1,16 +1,8 @@
 """Standing invariant checklists (ecosystem preservation, resource lifecycle) and the three retry-prompt builders (targeted, full-set, missing-files) for the Developer retry loop. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
-import asyncio
-import difflib
-import hashlib
 import logging
 import os
-import re
-import shutil
-import subprocess
-import sys
-import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from kriya.workflow.context_budget import estimate_tokens
 from kriya.workflow.retry_package import RetryPackage

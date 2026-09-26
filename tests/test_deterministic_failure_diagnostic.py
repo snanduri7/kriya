@@ -18,7 +18,6 @@ own module docstring for the full incident. Two layers of tests:
 import hashlib
 import os
 import subprocess
-import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -35,9 +34,9 @@ from kriya.workflow.deterministic_failure_diagnostic import (
     replay_deterministic_verification_against_baseline,
 )
 from kriya.workflow.failure import Failure, QualityGateFailure
-from kriya.workflow.workflow import WorkflowEngine
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.state import GenerationState
+from kriya.workflow.workflow import WorkflowEngine
 
 _SIG_A = ("compile", ("locations", "digest", "aaaa"))
 _SIG_B = ("compile", ("locations", "digest", "bbbb"))

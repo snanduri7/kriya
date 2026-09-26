@@ -28,7 +28,7 @@ Test items A-T below map directly onto the closure task's own required-
 coverage list; each test's docstring names its letter(s)."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -44,19 +44,17 @@ from kriya.workflow.plan_schema import (
     GlobalInvariant,
     Subtask,
 )
+from kriya.workflow.plan_validation import validate_plan
 from kriya.workflow.planner_repair import (
     STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
     classify_structured_plan_parse_issue,
 )
 from kriya.workflow.planner_validation import (
-    ToolCapabilityValidationResult,
     validate_tool_capability_membership,
 )
-from kriya.workflow.plan_validation import validate_plan
 from kriya.workflow.state import GenerationState
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.workflow import WorkflowEngine
-
 
 # =====================================================================
 # Fixtures
@@ -592,7 +590,6 @@ def test_m_legacy_and_controller_paths_share_the_same_tool_capability_validator(
     """M: both plan_validation.py::validate_plan() and file_resolution.py
     ::classify_plan_completeness() delegate to the SAME shared function -
     proven by identity, not merely "produces the same result today"."""
-    import kriya.workflow.file_resolution as file_resolution_module
     import kriya.workflow.plan_validation as plan_validation_module
 
     # Deferred import inside classify_plan_completeness means this module-

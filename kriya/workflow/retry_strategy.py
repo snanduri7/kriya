@@ -26,7 +26,13 @@ from typing import Optional
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.tools.containment import ContainmentSetupError
-from kriya.workflow.attribution import AttributionResult, DETERMINISTIC_ATTRIBUTION_TIERS, _detect_missing_build_manifest, attribute_failure, read_worktree_file
+from kriya.workflow.attribution import (
+    DETERMINISTIC_ATTRIBUTION_TIERS,
+    AttributionResult,
+    _detect_missing_build_manifest,
+    attribute_failure,
+    read_worktree_file,
+)
 from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.deterministic_failure_diagnostic import (
     DeterministicFailureCorrectability,
@@ -52,10 +58,10 @@ from kriya.workflow.file_resolution import (
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.repair_contract import RepairContractStatus
-from kriya.workflow.state import APIContractRecovery, GenerationState
-from kriya.workflow.run_events import EventAuthority, RunEvent
-from kriya.workflow.worktree import remove_git_worktree
 from kriya.workflow.retry_policy import RetryAction, decide_for_state
+from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.state import APIContractRecovery, GenerationState
+from kriya.workflow.worktree import remove_git_worktree
 
 logger = logging.getLogger(__name__)
 

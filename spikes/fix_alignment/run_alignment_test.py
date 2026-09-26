@@ -29,7 +29,7 @@ from fixtures import FIXTURES  # noqa: E402
 from kriya.agents.agent import DeveloperAgent  # noqa: E402
 from kriya.config import AppConfig  # noqa: E402
 from kriya.core.llm import LLMClient  # noqa: E402
-from kriya.workflow.workflow import apply_anchored_edits, _build_error_source_context  # noqa: E402
+from kriya.workflow.workflow import _build_error_source_context, apply_anchored_edits  # noqa: E402
 
 # Imports the exact same text now wired to always-on in
 # kriya/workflow/workflow.py's retry loop (2026-08-10, once this spike's first

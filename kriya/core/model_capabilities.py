@@ -11,10 +11,10 @@ is the one production entry point every capability-sensitive call site
 should route through; `capabilities_for_model`/`generation_protocol_for_model`
 are thin, backward-compatible wrappers over it, not a second implementation.
 """
-from dataclasses import dataclass, field
 import json
 import logging
-from typing import Any, Dict, List
+from dataclasses import dataclass, field
+from typing import Dict, List
 
 from kriya.config.config import ModelCapabilities
 

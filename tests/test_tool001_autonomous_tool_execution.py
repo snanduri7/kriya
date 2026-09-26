@@ -27,22 +27,24 @@ import inspect
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
-
-import pytest
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from _plugin_test_support import load_core_tools_module
+from _strict_doubles import strict_kernel
 
-from kriya.config.config import AppConfig, AutonomyConfig, ExecutionPolicyConfig, MCPLifecycleConfig
+from kriya.config.config import AppConfig, AutonomyConfig, MCPLifecycleConfig
 from kriya.control.workspace_identity import workspace_identity
 from kriya.core.kernel import Kernel
 from kriya.core.registry import ComponentRegistryError
 from kriya.mcp.capability import compute_mcp_capability_profile_digest, resolve_mcp_capability_profile
 from kriya.mcp.invocation_approval import (
-    add_approval, default_local_approval_path, empty_artifact, save_approval_artifact,
+    add_approval,
+    default_local_approval_path,
+    empty_artifact,
+    save_approval_artifact,
 )
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
@@ -51,11 +53,10 @@ from kriya.tools.tool import ToolExecutionError
 from kriya.workflow import subtask_executor
 from kriya.workflow import workflow_controller as wc_module
 from kriya.workflow.context_package import build_context_package
-from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, PlannedFile, Subtask, FileAction
+from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.workflow_controller import all_subtasks_completed, exclude_tool_subtasks_from_resume
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus
-from _strict_doubles import strict_kernel
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTS_DIR = os.path.join(REPO_ROOT, "tests")
@@ -578,9 +579,9 @@ def test_scenario_g_real_pip_through_autonomous_path_authorized_vs_unauthorized(
 # =====================================================================
 
 def _workflow_module_sources():
-    import kriya.workflow.workflow_controller as controller_mod
     import kriya.workflow.subtask_executor as executor_mod
     import kriya.workflow.workflow as workflow_mod
+    import kriya.workflow.workflow_controller as controller_mod
     return {
         "workflow_controller.py": inspect.getsource(controller_mod),
         "subtask_executor.py": inspect.getsource(executor_mod),

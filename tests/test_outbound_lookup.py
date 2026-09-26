@@ -2,7 +2,9 @@ import pytest
 
 from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.outbound_lookup import (
-    OutboundLookupRequest, UnsafeLookupTerm, is_known_public_term,
+    OutboundLookupRequest,
+    UnsafeLookupTerm,
+    is_known_public_term,
     sanitize_public_technology_term,
 )
 

@@ -1,28 +1,21 @@
 """Context budget allocation and skeletonization tiers for the Graph RAG code context assembled into each generation prompt. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
-import asyncio
-import difflib
-import hashlib
 import io
 import logging
 import os
 import re
-import shutil
-import subprocess
-import sys
 import tokenize
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
-from kriya.workflow.edit_safety import _strip_java_comments_and_strings, content_revision
-from kriya.workflow.process_profile import ContextDepth
 
 # Annotation-only names, imported at runtime so typing.get_type_hints()
 # resolves (PRD-001); no cycle.
 from kriya.workflow.context_source import SourceDerivationCache
+from kriya.workflow.edit_safety import _strip_java_comments_and_strings, content_revision
+from kriya.workflow.process_profile import ContextDepth
 
 logger = logging.getLogger(__name__)
 
@@ -1150,7 +1143,10 @@ def build_known_target_context(
     from kriya.policy.trust import TrustLevel
     from kriya.workflow.context_package import build_context_package, make_context_item, make_omitted_entry
     from kriya.workflow.context_source import (
-        CurrentSourceResolver, boundaries_matching_member_id, extract_member_body, member_boundaries_for,
+        CurrentSourceResolver,
+        boundaries_matching_member_id,
+        extract_member_body,
+        member_boundaries_for,
     )
 
     exclude_set = set(exclude or ())

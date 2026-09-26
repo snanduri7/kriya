@@ -17,7 +17,6 @@ from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.workflow.edit_safety import read_file_revision
 from kriya.workflow.plan_schema import EngineeringPlan
 
-
 _MAX_TEXT_CHARS = 20_000
 _MAX_REPOSITORY_PATHS = 100
 

@@ -21,7 +21,7 @@ production change was justified there):
 
 import hashlib
 import os
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -30,12 +30,11 @@ from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.tools.validate import PolymorphicValidator
 from kriya.workflow.attempt import _resolve_retry_member_hints
-from kriya.workflow.context_source import SourceDerivationCache
 from kriya.workflow.context_package import make_context_item
+from kriya.workflow.context_source import SourceDerivationCache
 from kriya.workflow.failure import Failure, FileLocation
 from kriya.workflow.state import GenerationState
 from kriya.workflow.workflow import WorkflowEngine
-
 
 # ---------------------------------------------------------------------------
 # R1 - PERF/DEPENDENCY-001: duplicate dependency-acquisition calls

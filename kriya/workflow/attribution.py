@@ -159,10 +159,12 @@ from enum import Enum
 from typing import Any, Callable, Collection, Dict, FrozenSet, List, Literal, Optional, Tuple
 
 from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
-from kriya.workflow.edit_safety import normalize_whitespace, _strip_java_comments_and_strings
+from kriya.workflow.edit_safety import _strip_java_comments_and_strings, normalize_whitespace
 from kriya.workflow.failure import Failure
 from kriya.workflow.failure_grounding import (
-    extract_error_source_locations, extract_implicated_files, _files_by_basename,
+    _files_by_basename,
+    extract_error_source_locations,
+    extract_implicated_files,
 )
 from kriya.workflow.generation_manifest import FileRole, classify_file_role
 from kriya.workflow.plan_schema import EngineeringPlan

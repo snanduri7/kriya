@@ -90,6 +90,7 @@ async def test_fetch_url_text_logs_error_with_traceback_by_default(caplog):
     transport = httpx.MockTransport(handler)
 
     import logging
+
     import kriya.tools.web as web_mod
     orig_async_client = web_mod.httpx.AsyncClient
     try:
@@ -130,6 +131,7 @@ async def test_fetch_url_text_quiet_on_failure_logs_debug_without_traceback(capl
     transport = httpx.MockTransport(handler)
 
     import logging
+
     import kriya.tools.web as web_mod
     orig_async_client = web_mod.httpx.AsyncClient
     try:

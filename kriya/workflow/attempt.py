@@ -29,7 +29,13 @@ from kriya.agents.contracts import (
 from kriya.core.kernel import Kernel
 from kriya.core.token_budget import OutputBudgetUnsatisfiableError
 from kriya.policy.errors import PolicyDeniedError
-from kriya.policy.filesystem import AuthorizedFileWriter, WriteScopeMode, is_within_scope, make_workspace_scope, normalize_workspace_relpath
+from kriya.policy.filesystem import (
+    AuthorizedFileWriter,
+    WriteScopeMode,
+    is_within_scope,
+    make_workspace_scope,
+    normalize_workspace_relpath,
+)
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.tools.process import ProcessController
 from kriya.tools.service_runtime import (
@@ -40,24 +46,27 @@ from kriya.tools.service_runtime import (
     _prepare_required_artifact,
     run_managed_service_verification,
 )
-from kriya.tools.validate import get_pom_dependencies
-from kriya.workflow.edit_safety import (
-    StagedFileWrite,
-    apply_anchored_edits,
-    content_revision,
-    find_cross_file_type_conflict,
-    find_structural_corruption,
-    read_file_revision,
+
+# PolymorphicValidator, ContextItem and EngineeringPlan are annotation-only
+# names here, imported at runtime so typing.get_type_hints() on this module's
+# dataclasses and functions resolves (PRD-001; none of these modules imports
+# attempt.py, so there is no cycle).
+from kriya.tools.validate import PolymorphicValidator, execution_evidence, get_pom_dependencies
+from kriya.workflow.acceptance import (
+    output_confirms_nonzero_test_execution,
+    runtime_application_step_started,
+    runtime_verification_infrastructure_reason,
+    subtask_owns_test_obligation,
 )
-from kriya.workflow.dependency_invalidation import (
-    dependent_closure,
-    invalidate_validated_revisions,
+from kriya.workflow.attribution import (
+    extract_self_diagnosed_files,
+    find_edits_ignoring_own_diagnosis,
+    find_edits_ignoring_reported_line,
+    find_misdirected_edit_target,
+    find_whole_response_no_op,
+    resolve_fallback_model,
 )
-from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.workflow.failure_grounding import _build_quality_gate_failure, _build_test_quality_gate_failure, _capture_failed_content, build_cross_package_mismatch_message, classify_environment_failure, extract_missing_project_local_python_module, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
-from kriya.workflow.contract_authority import derive_direct_contract_authorizations
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, build_grounded_java_launch_command, correct_exec_main_class_property, discover_response_construction_owners, downgrade_ungrounded_goal_explicit_commands, ensure_maven_covers_nonconventional_java_files, extract_jvm_module_flags, extract_planner_code_blocks, extract_target_test, find_brownfield_public_api_changes, find_explanatory_prose_contamination, find_missing_expected_files, find_protected_api_reference_changes, find_runnable_test_files, find_unpreserved_test_obligation, find_unrequested_architectural_surfaces, find_unrestored_public_api_contracts, ground_java_entrypoint_in_no_build_file_projects, ground_python_runtime_target, is_runnable_test_file, normalize_written_filepath, prefer_existing_artifact_owners, python_command_targets_test_path, python_file_is_runnable_script, python_target_path_is_test_shaped, strip_package_declaration_matching_source_root
-from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
+from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.context_budget import (
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
@@ -67,33 +76,83 @@ from kriya.workflow.context_budget import (
     investigation_evidence_char_budget,
     retry_evidence_char_budget,
 )
-from kriya.workflow.context_package import make_context_item
+from kriya.workflow.context_package import ContextItem, make_context_item
 from kriya.workflow.context_source import (
     CurrentSourceResolver,
     SourceDerivationCache,
+    evaluate_member_hints_from_search_evidence,
     member_boundaries_for,
     member_ids_matching_name,
-    evaluate_member_hints_from_search_evidence,
     resolve_member_hints_from_failure_location,
 )
-# Annotation-only names, imported at runtime so typing.get_type_hints() on
-# this module's dataclasses and functions resolves (PRD-001; none of these
-# modules imports attempt.py, so there is no cycle).
-from kriya.tools.validate import PolymorphicValidator, execution_evidence
-from kriya.workflow.context_package import ContextItem
-from kriya.workflow.plan_schema import EngineeringPlan
-from kriya.workflow.resume_fingerprints import ResumePlan
-from kriya.workflow.retry_prompts import _build_coordinated_retry_prompt,_build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
-from kriya.workflow.retry_package import RetryPackage, build_retry_package
-from kriya.workflow.retry_policy import API_CONTRACT_RECOVERY_MAX_ATTEMPTS, RetryAction, decide_retry_action
-from kriya.workflow.skill_extraction import _skill_verification_context
-from kriya.workflow.state import (
-    APIContractRecovery,
-    APIContractRecoveryPhase,
-    GenerationState,
-    RecoveryPhaseAdvanced,
+from kriya.workflow.contract_authority import derive_direct_contract_authorizations
+from kriya.workflow.dependency_invalidation import (
+    dependent_closure,
+    invalidate_validated_revisions,
 )
-from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
+from kriya.workflow.edit_safety import (
+    StagedFileWrite,
+    apply_anchored_edits,
+    content_revision,
+    find_cross_file_type_conflict,
+    find_structural_corruption,
+    read_file_revision,
+)
+from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
+from kriya.workflow.failure_grounding import (
+    _build_quality_gate_failure,
+    _build_test_quality_gate_failure,
+    _capture_failed_content,
+    build_cross_package_mismatch_message,
+    classify_environment_failure,
+    extract_missing_project_local_python_module,
+    find_cross_package_symbol_mismatch,
+    find_locator_files_outside_known_scope,
+    resolve_repository_locator_files,
+)
+from kriya.workflow.file_resolution import (
+    IncompleteGenerationError,
+    _resolve_run_command,
+    build_grounded_java_launch_command,
+    correct_exec_main_class_property,
+    discover_response_construction_owners,
+    downgrade_ungrounded_goal_explicit_commands,
+    ensure_maven_covers_nonconventional_java_files,
+    extract_jvm_module_flags,
+    extract_planner_code_blocks,
+    extract_target_test,
+    find_brownfield_public_api_changes,
+    find_explanatory_prose_contamination,
+    find_missing_expected_files,
+    find_protected_api_reference_changes,
+    find_runnable_test_files,
+    find_unpreserved_test_obligation,
+    find_unrequested_architectural_surfaces,
+    find_unrestored_public_api_contracts,
+    ground_java_entrypoint_in_no_build_file_projects,
+    ground_python_runtime_target,
+    is_runnable_test_file,
+    normalize_written_filepath,
+    prefer_existing_artifact_owners,
+    python_command_targets_test_path,
+    python_file_is_runnable_script,
+    python_target_path_is_test_shaped,
+    strip_package_declaration_matching_source_root,
+)
+from kriya.workflow.migration import (
+    MigrationResolution,
+    MigrationResolutionStatus,
+    MigrationValidationScope,
+    find_migration_incomplete,
+)
+from kriya.workflow.obligations import (
+    ObligationAuthority,
+    ObligationKind,
+    ObligationLedger,
+    ObligationRecord,
+    ObligationStatus,
+)
 from kriya.workflow.operations import (
     CodeOperation,
     all_results_are_no_change,
@@ -101,30 +160,12 @@ from kriya.workflow.operations import (
     operation_for_file,
     validate_operation_result,
 )
-from kriya.workflow.static_checks import (
-    derive_stack_contract,
-    find_established_stack_drift,
-    find_goal_stack_mismatch,
-    log_stack_contract_boundary,
-    run_static_checks,
-    validate_stack_contract_artifacts,
+from kriya.workflow.plan_schema import EngineeringPlan, RequirementOwnershipRelation
+from kriya.workflow.repair_contract import (
+    RepairContractStatus,
+    build_repair_contract,
+    derive_process_boundary_participants,
 )
-from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
-from kriya.workflow.banners import log_gate_banner
-from kriya.workflow.acceptance import (
-    goal_explicitly_requires_tests,
-    output_confirms_nonzero_test_execution,
-    runtime_application_step_started,
-    runtime_verification_infrastructure_reason,
-    subtask_owns_test_obligation,
-)
-from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags, toolchain_declaration_mutable
-from kriya.workflow.verification_contract import ContractVerdictState, classify_contract_verdict
-from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
-from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope, find_migration_incomplete
-from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
-from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationLedger, ObligationRecord, ObligationStatus
-from kriya.workflow.plan_schema import RequirementOwnershipRelation
 from kriya.workflow.requirements import (
     RequirementOutcome,
     RequirementSet,
@@ -134,7 +175,41 @@ from kriya.workflow.requirements import (
     requirement_obligation_id,
     requirement_outcomes,
 )
-from kriya.workflow.repair_contract import RepairContractStatus, build_repair_contract, derive_process_boundary_participants
+from kriya.workflow.resume_fingerprints import ResumePlan
+from kriya.workflow.retry_package import RetryPackage, build_retry_package
+from kriya.workflow.retry_policy import API_CONTRACT_RECOVERY_MAX_ATTEMPTS, RetryAction, decide_retry_action
+from kriya.workflow.retry_prompts import (
+    _build_coordinated_retry_prompt,
+    _build_full_set_retry_prompt,
+    _build_missing_files_retry_prompt,
+    _build_targeted_retry_prompt,
+)
+from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
+from kriya.workflow.skill_extraction import _skill_verification_context
+from kriya.workflow.state import (
+    APIContractRecovery,
+    APIContractRecoveryPhase,
+    GenerationState,
+    RecoveryPhaseAdvanced,
+)
+from kriya.workflow.static_checks import (
+    derive_stack_contract,
+    find_established_stack_drift,
+    find_goal_stack_mismatch,
+    log_stack_contract_boundary,
+    run_static_checks,
+    validate_stack_contract_artifacts,
+)
+from kriya.workflow.toolchain import (
+    _check_java_toolchain_mismatch,
+    _pin_exec_plugin_executable_to_resolved_jdk,
+    _resolve_java_home_override,
+    _strip_jdk_incompatible_jvm_flags,
+    toolchain_declaration_mutable,
+)
+from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
+from kriya.workflow.verification_contract import ContractVerdictState, classify_contract_verdict
 from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
@@ -1340,7 +1415,9 @@ async def _maybe_run_developer_investigation(
 
     from kriya.core.model_capabilities import resolve_model_capability_profile
     from kriya.workflow.investigation import (
-        InvestigationDependencies, render_investigation_evidence, run_investigation_loop,
+        InvestigationDependencies,
+        render_investigation_evidence,
+        run_investigation_loop,
     )
 
     capability_profile = resolve_model_capability_profile(ctx.kernel.config, active_model)

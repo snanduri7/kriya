@@ -9,9 +9,9 @@ from kriya.control.decisions import DecisionLedger
 from kriya.control.telemetry import (
     record_artifact_derivation,
     record_artifact_drift,
+    record_context_package_summary,
     record_contract_access,
     record_contract_change,
-    record_context_package_summary,
     record_omitted_context,
     record_registry_hashes,
     record_resume_validation,

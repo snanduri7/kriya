@@ -22,18 +22,18 @@ import sys
 import pytest
 import yaml
 
-from kriya.config.config import AppConfig, MCPLifecycleConfig, load_config
 from kriya.config.authority import ConfigAuthorityError
+from kriya.config.config import AppConfig, MCPLifecycleConfig, load_config
 from kriya.core.kernel import Kernel
-from kriya.mcp.mcp import MCPClient, MCPManager
-from kriya.policy.execution import ExecutionPolicy
-from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
 from kriya.mcp.lifecycle import (
     MCPLifecycleError,
     MCPRequestTimeoutError,
     MCPStartupTimeoutError,
     terminate_mcp_process,
 )
+from kriya.mcp.mcp import MCPClient, MCPManager
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KRIYA_BIN = os.path.join(os.path.dirname(sys.executable), "kriya")

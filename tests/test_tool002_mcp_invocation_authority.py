@@ -19,7 +19,6 @@ three real-process differentials (DENY, ALLOW, and the honestly-reported
 malicious-metadata gap TOOL-003 must still close) through the real,
 unmodified MCPClient/MCPTool/MCPManager - no mocks in the adversarial core.
 """
-import asyncio
 import inspect
 import os
 import sys

@@ -28,7 +28,6 @@ from kriya.control.persistence import load_control_state, save_control_state
 from kriya.control.state import ControlState
 from kriya.workflow.checkpoint import (
     ResumeStatus,
-    compute_base_commit,
     compute_control_plane_hashes,
     compute_tree_hash,
     compute_workspace_content_hash,

@@ -45,6 +45,7 @@ continue under a stale, lighter profile.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -65,10 +66,8 @@ from kriya.workflow.plan_schema import (
     VerifierKind,
 )
 from kriya.workflow.planner_validation import validate_tool_capability_membership
-from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService, _workspace_appears_empty
 from kriya.workflow.static_checks import StackContract, validate_stack_contract_artifacts
-
-import os
+from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService, _workspace_appears_empty
 
 
 @dataclass(frozen=True)

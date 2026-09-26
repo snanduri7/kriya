@@ -26,7 +26,6 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from kriya.workflow.triage import ChangeKind
 
-
 _GLOB_WILDCARD_CHARS = frozenset("*?[")
 
 

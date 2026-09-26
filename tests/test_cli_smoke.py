@@ -4,15 +4,16 @@ import sqlite3
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import strict_kernel
 from click.testing import CliRunner
+
+from kriya.cli import _mark_run_in_progress, main
 
 # Importing `main` alone reproduces the historical bug: kriya/cli.py used
 # List[...]/Dict[...] type annotations without importing them from `typing`,
 # which raised NameError at module-import time on every Python version except
 # 3.14 (where PEP 649 made annotation evaluation lazy by default).
 from kriya.core.state_paths import trace_db_path
-from kriya.cli import _mark_run_in_progress, main
-from _strict_doubles import strict_kernel
 
 TOP_LEVEL_COMMANDS = [
     "version", "config", "doctor", "repl", "plugins", "analyze",

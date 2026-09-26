@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-
 METRICS = (
     "final_success", "first_attempt_success", "compile_success", "test_success",
     "llm_calls", "context_tokens", "files_planned", "files_touched",

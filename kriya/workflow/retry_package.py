@@ -7,7 +7,6 @@ from typing import Dict, Iterable, List, Optional, Sequence
 from kriya.workflow.context_projection import FileProjection, project_implementation_source
 from kriya.workflow.failure import Failure
 
-
 _OMISSION = "\n... [middle omitted from retry evidence; canonical evidence remains local] ...\n"
 
 

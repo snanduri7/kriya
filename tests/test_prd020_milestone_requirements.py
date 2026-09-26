@@ -12,7 +12,6 @@ import sqlite3
 import subprocess
 from unittest.mock import patch
 
-import pytest
 from click.testing import CliRunner
 
 from kriya.cli import main

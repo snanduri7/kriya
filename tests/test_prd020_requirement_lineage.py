@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import strict_kernel
 
 from kriya.agents.agent import SpecComplianceAgent
 from kriya.config import AppConfig
@@ -43,7 +44,6 @@ from kriya.workflow.requirements import (
     requirement_outcomes,
     seed_requirement_obligations,
 )
-from _strict_doubles import strict_kernel
 
 GOAL = (
     "Create greeting.py with a greet(name) function.\n"

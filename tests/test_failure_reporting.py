@@ -13,7 +13,6 @@ from kriya.workflow.failure_reporting import (
 )
 from kriya.workflow.retry_strategy import _REPAIR_FEEDBACK_FAILURE_TYPES
 
-
 # The full real Failure.type vocabulary, verified 2026-08-24 by grepping
 # every real construction site (Failure(type=...)/_build_quality_gate_failure) -
 # see failure_reporting.py's own module docstring. Pinned here so a

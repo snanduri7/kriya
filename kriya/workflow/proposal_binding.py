@@ -36,7 +36,7 @@ from __future__ import annotations
 import hashlib
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from kriya.analyzer.java_members import JavaMember
 from kriya.control.workspace_identity import workspace_identity

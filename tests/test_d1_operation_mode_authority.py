@@ -78,8 +78,7 @@ math explicit and reproducible rather than dependent on any specific real
 file's byte count.
 """
 import asyncio
-import os
-import tempfile
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -89,8 +88,6 @@ from kriya.core.llm import LLMClient
 from kriya.workflow.attempt import (
     AttemptContext,
     _completeness_gated_operation,
-    _has_authoritative_full_source,
-    _operation_map,
     _record_retry_projection_context_items,
     _validate_actual_mutation_authority,
     run_attempt,
@@ -103,9 +100,6 @@ from kriya.workflow.operations import CodeOperation, operation_for_attempt, vali
 from kriya.workflow.retry_package import build_retry_package
 from kriya.workflow.state import APIContractRecovery, GenerationState
 from kriya.workflow.workflow import WorkflowEngine
-
-from unittest.mock import AsyncMock, MagicMock
-
 
 # ---------------------------------------------------------------------------
 # Fixtures - large enough that a full 6000+ char reference clearly exceeds a
@@ -1041,7 +1035,8 @@ class TestValidationBaselinePreservedByD1Rejection:
 
     def test_captured_baseline_unchanged_by_a_d1_rejected_attempt(self, tmp_path):
         from kriya.workflow.validation_baseline import (
-            ValidationInvocation, capture_validation_baseline,
+            ValidationInvocation,
+            capture_validation_baseline,
         )
 
         baseline = _write(tmp_path, "target.py", _very_large_baseline_content())

@@ -18,6 +18,7 @@ import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import strict_engine
 from click.testing import CliRunner
 
 from kriya.analyzer.java_members import extract_java_members
@@ -36,11 +37,11 @@ from kriya.workflow.failure import QualityGateFailure
 from kriya.workflow.migration import resolve_migration_resolution
 from kriya.workflow.proposal_binding import proposal_to_authorized_semantic_regions
 from kriya.workflow.proposal_promotion import (
-    PromotedProposal,
-    ProposalPromotionError,
     REASON_PROPOSAL_NOT_APPROVED,
     REASON_PROPOSAL_NOT_CURRENTLY_VALID,
     REASON_PROPOSAL_PROMOTION_UNSUPPORTED,
+    PromotedProposal,
+    ProposalPromotionError,
     build_authoritative_goal,
     execute_approved_proposal,
     prepare_proposal_promotion,
@@ -66,7 +67,6 @@ from kriya.workflow.review_context import (
 )
 from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, RegionType
 from kriya.workflow.state import GenerationState
-from _strict_doubles import strict_engine
 
 TARGET_SRC = (
     "public class Target implements TargetInterface {\n"

@@ -10,9 +10,9 @@ import os
 import pytest
 import yaml
 
-from kriya.config.authority import ConfigAuthorityError, classify_field, FieldClassification
-from kriya.config.config import load_config, resolve_config_state
-from kriya.mcp.capability import resolve_mcp_capability_profile, compute_mcp_capability_profile_digest
+from kriya.config.authority import ConfigAuthorityError, FieldClassification, classify_field
+from kriya.config.config import load_config
+from kriya.mcp.capability import compute_mcp_capability_profile_digest, resolve_mcp_capability_profile
 from kriya.mcp.containment_adapter import MCPContainmentUnsupportedError, map_capability_profile_to_containment
 from kriya.mcp.mcp import MCPClient
 from kriya.tools.containment import (
@@ -251,6 +251,7 @@ def test_containment_cleanup_timeout_does_not_raise():
     logged and treated as terminal (mirrors terminate_mcp_process()'s own
     reap-timeout precedent)."""
     import time as _time
+
     from kriya.config.config import MCPLifecycleConfig
 
     async def run():

@@ -4,8 +4,8 @@ These records may contain proprietary paths, diagnostics, and source. They are
 for local trace persistence only and are intentionally incompatible with the
 sanitized outward-lookup request type.
 """
-from dataclasses import asdict, dataclass, field
 import time
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict
 
 

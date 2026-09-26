@@ -33,7 +33,6 @@ No live LLM anywhere in this file.
 """
 import asyncio
 import contextlib
-import json
 import os
 import shutil
 import socket
@@ -48,10 +47,12 @@ from kriya.control.workspace_identity import workspace_identity
 from kriya.core.kernel import Kernel
 from kriya.mcp.capability import compute_mcp_capability_profile_digest, resolve_mcp_capability_profile
 from kriya.mcp.invocation_approval import (
-    add_approval, default_local_approval_path, empty_artifact, is_tool_approved,
-    load_approval_artifact, save_approval_artifact,
+    add_approval,
+    default_local_approval_path,
+    empty_artifact,
+    load_approval_artifact,
+    save_approval_artifact,
 )
-from kriya.mcp.mcp import MCPManager
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType, MCPToolIdentity, compute_mcp_schema_digest
@@ -406,6 +407,7 @@ def test_revocation_gap_approval_persists_cannot_be_exercised_reactivates_if_ide
 
 def test_mcp_approve_revoke_cli_commands_accept_no_path_override():
     import inspect
+
     import kriya.cli as cli_module
 
     approve_params = set(inspect.signature(cli_module.mcp_approve.callback).parameters)

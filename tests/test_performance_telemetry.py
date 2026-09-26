@@ -6,7 +6,6 @@ that document's own "Control-flow equivalence" section for the exact
 guarantee PT-01 below proves.
 """
 import json
-import sys
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -110,7 +109,6 @@ def test_pt05_validator_timing_records_kind_duration_and_success():
     PolymorphicValidator call, driven through the real production wrapper
     in attempt.py (not a hand-built dict) - see _run_developer_generation's
     sibling compile-check wrapper."""
-    from kriya.tools.validate import PolymorphicValidator
 
     fake_times = iter([100.0, 102.5])  # _compile_started reads 100.0, the finally-block read gets 102.5
 

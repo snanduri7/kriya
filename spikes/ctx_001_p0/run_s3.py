@@ -20,6 +20,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fixtures  # noqa: E402
 import probes  # noqa: E402
+
 from kriya.analyzer.graph import DependencyGraph  # noqa: E402
 from kriya.memory.vector import LocalVectorStore  # noqa: E402
 

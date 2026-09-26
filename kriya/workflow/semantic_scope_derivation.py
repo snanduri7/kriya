@@ -58,7 +58,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from kriya.analyzer.java_members import extract_java_members
 from kriya.workflow.contract_authority import (
@@ -67,6 +67,10 @@ from kriya.workflow.contract_authority import (
     derive_direct_contract_authorizations,
 )
 from kriya.workflow.edit_safety import _strip_java_comments_and_strings
+
+# Annotation-only names, imported at runtime so typing.get_type_hints()
+# resolves (PRD-001); no cycle.
+from kriya.workflow.plan_schema import EngineeringPlan
 from kriya.workflow.semantic_region_authority import (
     AuthorizedSemanticRegion,
     RegionType,
@@ -74,10 +78,6 @@ from kriya.workflow.semantic_region_authority import (
     stable_member_key,
     stable_record_component_key,
 )
-
-# Annotation-only names, imported at runtime so typing.get_type_hints()
-# resolves (PRD-001); no cycle.
-from kriya.workflow.plan_schema import EngineeringPlan
 
 _RECORD_DECL_RE = re.compile(r"\brecord\s+([A-Za-z_$][\w$]*)\b")
 _INTERFACE_DECL_RE_TEMPLATE = r"\binterface\s+{name}\b"

@@ -83,11 +83,18 @@ VERIFIED_NO_CHANGE_INVALIDATED = "VERIFIED_NO_CHANGE_INVALIDATED"
 COMPLETION_RECONSTRUCTED = "COMPLETION_RECONSTRUCTED"
 COMPLETION_RECONSTRUCTION_UNVERIFIED = "COMPLETION_RECONSTRUCTION_UNVERIFIED"
 # Checkpoint selection is common to every work unit since PRD-008A.
-from kriya.workflow.plan_executor import (  # noqa: E402,F401 - compatibility names
+# Compatibility names; the renamed ones are re-exported for callers that import
+# them from here, and a renamed import cannot use the `name as name` form.
+from kriya.workflow.plan_executor import (  # noqa: E402,F401
     CHECKPOINT_IDENTITY_MISMATCH,
+)
+from kriya.workflow.plan_executor import (  # noqa: E402,F401
     CHECKPOINT_SELECTED as MILESTONE_CHECKPOINT_SELECTED,
+)
+from kriya.workflow.plan_executor import (  # noqa: E402,F401
     NO_COMPATIBLE_CHECKPOINT as NO_COMPATIBLE_MILESTONE_CHECKPOINT,
 )
+
 # A path's current bytes differ from the post-state of a LATER commit that
 # superseded this milestone's write (the integration pass, or a milestone
 # that did not finish): the milestone's contribution may be what was lost.

@@ -3,10 +3,9 @@
 This is the only value accepted by the outbound search broker. It cannot carry
 canonical evidence, source code, goals, paths, or raw diagnostics.
 """
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 from typing import Iterable, Tuple
-
 
 _PUBLIC_TERM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._:+@-]{0,127}$")
 _SOURCE_SUFFIXES = (

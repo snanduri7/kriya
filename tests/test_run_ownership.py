@@ -20,12 +20,11 @@ import multiprocessing
 import os
 import signal
 import subprocess
-import sys
-import tempfile
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import strict_kernel
 from click.testing import CliRunner
 
 from kriya.cli import main
@@ -39,7 +38,6 @@ from kriya.control.run_coordinator import (
 from kriya.control.run_ownership import WorkspaceLockHeldError, acquire_run_lock
 from kriya.workflow.workflow import WorkflowEngine
 from kriya.workflow.workflow_controller import WorkflowController
-from _strict_doubles import strict_kernel
 
 MP = multiprocessing.get_context("fork")
 

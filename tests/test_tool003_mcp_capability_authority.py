@@ -27,19 +27,17 @@ import pytest
 import yaml
 
 from kriya.config import authority_approval as aa
-from kriya.config.authority import ConfigAuthorityError, classify_field, compute_violations
+from kriya.config.authority import ConfigAuthorityError, classify_field
 from kriya.config.config import MCPCapabilityConfig, load_config, resolve_config_state
 from kriya.mcp.capability import (
+    PROCESS_AUTHORITY_STATEMENT,
     MCPCapabilityConfigError,
     MCPCapabilityProfile,
     MCPNetworkAuthority,
-    MCPPathScope,
-    PROCESS_AUTHORITY_STATEMENT,
     compute_mcp_capability_profile_digest,
     resolve_mcp_capability_profile,
 )
 from kriya.mcp.mcp import MCPClient, MCPTool
-from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import (
     ActionRequest,
@@ -47,7 +45,6 @@ from kriya.policy.model import (
     MCPCapabilityProfileIdentity,
     MCPToolIdentity,
     PolicyDecision,
-    compute_mcp_schema_digest,
 )
 from kriya.policy.telemetry import build_decision_record
 
@@ -186,6 +183,7 @@ def test_no_capability_profile_derived_from_tool_meta_or_args_in_source():
     from `mcp_client.capability_profile` only, never from `tool_meta`/`args` -
     immune to a future accidental wiring mistake, not just today's read."""
     import inspect
+
     import kriya.mcp.mcp as mcp_module
 
     tree = ast.parse(inspect.getsource(mcp_module))
@@ -377,6 +375,7 @@ def test_20_native_lifecycle_controls_not_mislabeled_as_process_restriction():
     lifecycle ownership only - it must never be represented in the
     capability profile as if it were a process CAPABILITY restriction."""
     import inspect
+
     import kriya.mcp.capability as capability_module
 
     source = inspect.getsource(capability_module)

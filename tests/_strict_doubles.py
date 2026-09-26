@@ -19,7 +19,6 @@ from kriya.core.events import EventSystem
 from kriya.core.kernel import Kernel
 from kriya.core.registry import ComponentRegistry
 
-
 _DEFAULT_ROOTS: Dict[str, str] = {}
 
 

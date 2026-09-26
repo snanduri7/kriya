@@ -1,5 +1,4 @@
 import pytest
-
 from _plugin_test_support import load_core_tools_module
 
 _core_tools = load_core_tools_module()

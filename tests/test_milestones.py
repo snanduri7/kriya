@@ -3,6 +3,7 @@ import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import strict_engine
 
 from kriya.agents.contracts import (
     AcceptanceCriterion,
@@ -37,7 +38,6 @@ from kriya.workflow.milestones import (
     save_milestone_run_state,
 )
 from kriya.workflow.repository_topology import RepositoryTopology
-from _strict_doubles import strict_engine
 
 
 def mkv2(id, goal="g", success_criterion="c", depends_on=None, mode=None, extends=None, provides=None, consumes=None):
@@ -1434,8 +1434,9 @@ async def test_run_milestones_stops_before_integration_call_on_replay_failure():
 # ============================================================
 
 def test_trace_logger_persists_milestone_columns():
-    from kriya.core.trace import TraceLogger
     import sqlite3
+
+    from kriya.core.trace import TraceLogger
 
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "traces.db")
@@ -1477,9 +1478,10 @@ def test_trace_logger_schema_migration_is_idempotent():
 # ============================================================
 
 def test_trace_logger_persists_milestone_plan_row():
-    from kriya.core.trace import TraceLogger
-    import sqlite3
     import json as _json
+    import sqlite3
+
+    from kriya.core.trace import TraceLogger
 
     with tempfile.TemporaryDirectory() as tmp:
         db_path = os.path.join(tmp, "traces.db")
@@ -1519,8 +1521,8 @@ def test_plan_structure_telemetry_counts_edges_and_modes():
 
 @pytest.mark.asyncio
 async def test_plan_milestones_logs_telemetry_when_accepted():
-    import sqlite3
     import json as _json
+    import sqlite3
 
     planner = MagicMock()
     milestones = [mkv2("M1", goal="g1", success_criterion="c1"), mkv2("M2", goal="g2", success_criterion="c2", depends_on=["M1"])]

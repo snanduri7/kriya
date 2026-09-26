@@ -9,7 +9,6 @@ from kriya.workflow.generation_manifest import FileRole, classify_file_role
 # resolves (PRD-001); no cycle.
 from kriya.workflow.plan_schema import EngineeringPlan, Subtask
 
-
 _EXPLICIT_TEST_REQUEST_RE = re.compile(
     r"\b(?:include|add|write|create|provide|with|run)\s+(?:appropriate\s+)?"
     r"(?:"

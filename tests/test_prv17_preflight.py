@@ -19,14 +19,15 @@ following the two live runs that surfaced the path-canonicalization,
 directory-artifact, and unrecoverable-scope-denial defects this same
 session fixed in kriya/policy/filesystem.py, kriya/workflow/plan_schema.py,
 and kriya/workflow/retry_strategy.py)."""
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from pydantic import ValidationError
-from unittest.mock import AsyncMock, MagicMock
 
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
-from kriya.policy.filesystem import WriteScopeMode
 from kriya.policy.errors import PolicyDeniedError
+from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow.attempt import AttemptContext, run_attempt
 from kriya.workflow.attribution import resolve_future_owner_verification_deferral
 from kriya.workflow.plan_schema import (

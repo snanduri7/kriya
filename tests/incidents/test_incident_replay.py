@@ -8,7 +8,6 @@ from kriya.workflow.retry_policy import decide_retry_action
 from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
 from kriya.workflow.state import GenerationState
 
-
 FIXTURES = Path(__file__).parent / "fixtures"
 
 

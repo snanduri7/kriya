@@ -6,9 +6,6 @@ import json
 import logging
 import os
 import re
-import shutil
-import subprocess
-import sys
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 # `name as name` marks an explicit re-export: the helper moved to its own module
@@ -26,10 +23,6 @@ from kriya.agents.agent import (
 )
 from kriya.agents.contracts import parse_planner_structured_output
 from kriya.analyzer.analyzer import RepositoryAnalyzer
-from kriya.core.kernel import Kernel
-from kriya.core.llm import LLMClient
-from kriya.core.model_routing import resume_routes_from
-from kriya.core.state_paths import trace_db_path
 from kriya.control.persistence import UnreadableRunRecordError, load_run_record
 from kriya.control.run_coordinator import (
     annotate_run,
@@ -38,7 +31,45 @@ from kriya.control.run_coordinator import (
     owning_run_work_unit,
 )
 from kriya.control.run_record import RunLifecycle
+from kriya.core.kernel import Kernel
+from kriya.core.llm import LLMClient
+from kriya.core.model_routing import resume_routes_from
+from kriya.core.state_paths import trace_db_path
+from kriya.policy.errors import PolicyDeniedError
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.filesystem import WriteScopeMode
+from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+from kriya.policy.telemetry import build_decision_record
+from kriya.tools.validate import PolymorphicValidator, execution_evidence
+from kriya.workflow.acceptance import goal_requires_runtime_behavior, output_confirms_nonzero_test_execution
+from kriya.workflow.architectural_choice import (
+    architecture_choice_invalidated_message,
+    classify_ownership_violations,
+)
+from kriya.workflow.attempt import AttemptContext, run_attempt
+from kriya.workflow.attribution import (
+    FutureOwnerVerificationDeferral,
+    resolve_future_owner_verification_deferral,
+)
+from kriya.workflow.attribution import (
+    _detect_missing_build_manifest as _detect_missing_build_manifest,
+)
+from kriya.workflow.attribution import (
+    find_edits_ignoring_own_diagnosis as find_edits_ignoring_own_diagnosis,
+)
+from kriya.workflow.attribution import (
+    find_edits_ignoring_reported_line as find_edits_ignoring_reported_line,
+)
+from kriya.workflow.attribution import (
+    find_misdirected_edit_target as find_misdirected_edit_target,
+)
+from kriya.workflow.attribution import (
+    find_whole_response_no_op as find_whole_response_no_op,
+)
+from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
 from kriya.workflow.checkpoint import (
+    ResumeAction,
+    ResumeStatus,
     compute_config_fingerprint,
     compute_workspace_content_hash,
     compute_workspace_fingerprint,
@@ -47,12 +78,154 @@ from kriya.workflow.checkpoint import (
     load_checkpoint,
     new_run_id,
     save_checkpoint,
-    ResumeAction,
-    ResumeStatus,
     validate_resume_against_reality,
 )
-from kriya.workflow.resume_fingerprints import (
-    CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
+from kriya.workflow.context_budget import (
+    RetrievalLimits,
+    _reserve_graph_context_budget,
+    allocation_window,
+    build_code_context,
+    retrieval_limits_for,
+    review_batch_budget,
+)
+from kriya.workflow.context_budget import (
+    _reserve_sibling_content_budget as _reserve_sibling_content_budget,
+)
+from kriya.workflow.context_budget import (
+    estimate_tokens as estimate_tokens,
+)
+from kriya.workflow.context_budget import (
+    skeletonize_braced_code as skeletonize_braced_code,
+)
+from kriya.workflow.context_budget import (
+    skeletonize_code as skeletonize_code,
+)
+from kriya.workflow.context_budget import (
+    skeletonize_python as skeletonize_python,
+)
+from kriya.workflow.contract_authority import derive_direct_contract_authorizations
+from kriya.workflow.control_context import WorkflowControlContext
+from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
+from kriya.workflow.edit_safety import (
+    apply_anchored_edits as apply_anchored_edits,
+)
+from kriya.workflow.edit_safety import (
+    atomic_write_file,
+    content_revision,
+)
+from kriya.workflow.edit_safety import (
+    find_structural_corruption as find_structural_corruption,
+)
+from kriya.workflow.egress_authority import egress_authority_details
+from kriya.workflow.evidence import EvidenceRecord
+from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
+from kriya.workflow.failure_grounding import (
+    _build_error_source_context as _build_error_source_context,
+)
+from kriya.workflow.failure_grounding import (
+    _build_quality_gate_failure,
+)
+from kriya.workflow.failure_grounding import (
+    _normalize_error_for_repeat_detection as _normalize_error_for_repeat_detection,
+)
+from kriya.workflow.failure_grounding import (
+    _resolve_file_locations as _resolve_file_locations,
+)
+from kriya.workflow.failure_grounding import (
+    classify_environment_failure as classify_environment_failure,
+)
+from kriya.workflow.failure_grounding import (
+    extract_error_search_terms as extract_error_search_terms,
+)
+from kriya.workflow.failure_grounding import (
+    extract_error_source_locations as extract_error_source_locations,
+)
+from kriya.workflow.failure_grounding import (
+    extract_implicated_files as extract_implicated_files,
+)
+from kriya.workflow.failure_reporting import build_failure_report_entry
+from kriya.workflow.file_resolution import (
+    IncompleteGenerationError as IncompleteGenerationError,
+)
+from kriya.workflow.file_resolution import (
+    _resolve_file_paths_from_design,
+    classify_plan_completeness,
+    extract_expected_files,
+    find_brownfield_public_api_changes,
+    find_brownfield_test_redirections,
+    identify_redirected_test_obligations,
+    include_response_construction_owners,
+    prefer_existing_artifact_owners,
+)
+from kriya.workflow.file_resolution import (
+    _resolve_maven_main_class as _resolve_maven_main_class,
+)
+from kriya.workflow.file_resolution import (
+    _resolve_run_command as _resolve_run_command,
+)
+from kriya.workflow.file_resolution import (
+    check_plan_completeness as check_plan_completeness,
+)
+from kriya.workflow.file_resolution import (
+    downgrade_ungrounded_goal_explicit_commands as downgrade_ungrounded_goal_explicit_commands,
+)
+from kriya.workflow.file_resolution import (
+    extract_planner_code_blocks as extract_planner_code_blocks,
+)
+from kriya.workflow.file_resolution import (
+    find_missing_expected_files as find_missing_expected_files,
+)
+from kriya.workflow.file_resolution import (
+    normalize_written_filepath as normalize_written_filepath,
+)
+from kriya.workflow.live_lookup import (
+    _augment_error_with_live_lookup as _augment_error_with_live_lookup,
+)
+from kriya.workflow.live_lookup import (
+    _extract_first_usable,
+    _resolve_via_web_lookup,
+)
+from kriya.workflow.lsp_integration import (
+    _build_lsp_diagnostics_context as _build_lsp_diagnostics_context,
+)
+from kriya.workflow.lsp_integration import (
+    _get_or_start_jdtls_client as _get_or_start_jdtls_client,
+)
+from kriya.workflow.migration import MigrationResolution, resolve_migration_resolution
+from kriya.workflow.obligations import (
+    ObligationAuthority,
+    ObligationKind,
+    ObligationLedger,
+    ObligationRecord,
+    ObligationStatus,
+)
+from kriya.workflow.ownership_findings import (
+    find_ownership_findings,
+    findings_prompt_block,
+    grounded_owner_candidates,
+    owner_candidates_prompt_block,
+    ownership_review_evidence,
+    parse_ownership_justifications,
+    record_findings,
+    settle_findings,
+)
+from kriya.workflow.plan_executor import WorkUnitInvocation
+from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS, EngineeringPlan
+from kriya.workflow.planner_repair import (
+    STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
+    build_structured_plan_repair_prompt,
+    classify_structured_plan_parse_issue,
+)
+from kriya.workflow.requirements import (
+    REQUIREMENTS_UNRESOLVED,
+    blocking_requirements,
+    cited_requirement_ids,
+    derive_requirements,
+    requirement_evidence,
+    requirement_lineage,
+    requirement_outcomes,
+    requirements_prompt_block,
+    seed_requirement_obligations,
 )
 from kriya.workflow.resume_fingerprints import (
     CANDIDATE_HASH_KEY,
@@ -67,210 +240,85 @@ from kriya.workflow.resume_fingerprints import (
     restore_effective_ledger,
     workspace_fingerprint,
 )
-from kriya.workflow.plan_executor import WorkUnitInvocation
-from kriya.workflow.ownership_findings import (
-    find_ownership_findings,
-    findings_prompt_block,
-    grounded_owner_candidates,
-    owner_candidates_prompt_block,
-    ownership_review_evidence,
-    parse_ownership_justifications,
-    record_findings,
-    settle_findings,
+from kriya.workflow.resume_fingerprints import (
+    CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
 )
-from kriya.workflow.requirements import (
-    REQUIREMENTS_UNRESOLVED,
-    blocking_requirements,
-    cited_requirement_ids,
-    derive_requirements,
-    requirement_lineage,
-    requirement_evidence,
-    requirement_outcomes,
-    requirements_prompt_block,
-    seed_requirement_obligations,
+from kriya.workflow.retry_prompts import (
+    RESOURCE_LIFECYCLE_HEADER,
+    VERIFICATION_CONTRACT_HEADER,
+    _build_ecosystem_invariant_block,
 )
-from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
-from kriya.workflow.egress_authority import egress_authority_details
+from kriya.workflow.retry_prompts import (
+    _build_full_set_retry_prompt as _build_full_set_retry_prompt,
+)
+from kriya.workflow.retry_prompts import (
+    _build_missing_files_retry_prompt as _build_missing_files_retry_prompt,
+)
+from kriya.workflow.retry_prompts import (
+    _build_targeted_retry_prompt as _build_targeted_retry_prompt,
+)
+from kriya.workflow.retry_strategy import handle_attempt_failure
+from kriya.workflow.review_context import (
+    build_candidate_diff_context,
+    build_review_batches,
+    build_reviewer_verified_evidence,
+)
 from kriya.workflow.run_events import EventAuthority, RunEvent
-from kriya.workflow.validation_baseline import (
-    build_validation_outcome,
-    capture_brownfield_baselines,
-    classify_baseline_delta,
-    render_blocking_regression_evidence,
-    parse_pytest_structured_outcomes,
-    DeltaClassification,
+from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
+from kriya.workflow.semantic_scope_derivation import derive_semantic_authority_for_run
+from kriya.workflow.skill_extraction import (
+    _filter_misattributed_extraction,
+    _sanitize_for_flat_file_line,
+    _scoped_skill_gap_description,
+    _skill_staleness_warning,
+    _split_rules_by_verification,
+    _stage_skill_conflicts,
+    _write_skill_extraction,
 )
-from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.workflow.failure_reporting import build_failure_report_entry
-from kriya.workflow.acceptance import goal_requires_runtime_behavior, output_confirms_nonzero_test_execution
-from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService
-from kriya.workflow.control_context import WorkflowControlContext
-from kriya.policy.errors import PolicyDeniedError
-from kriya.policy.execution import ExecutionPolicy
-from kriya.policy.filesystem import WriteScopeMode
-from kriya.workflow.migration import MigrationResolution, resolve_migration_resolution
-from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
-from kriya.workflow.obligations import (
-    ObligationAuthority,
-    ObligationKind,
-    ObligationLedger,
-    ObligationRecord,
-    ObligationStatus,
+from kriya.workflow.skill_extraction import (
+    _is_near_duplicate_rule as _is_near_duplicate_rule,
 )
-from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
-from kriya.policy.telemetry import build_decision_record
-
-from kriya.workflow.worktree import (
-    _resolve_repo_head,
-    _sync_uncommitted_changes_into_worktree,
-    create_git_worktree,
-    remove_git_worktree,
+from kriya.workflow.skill_extraction import (
+    _likely_misattributed_sibling as _likely_misattributed_sibling,
 )
-from kriya.workflow.context_budget import (
-    _MIN_GRAPH_CONTEXT_BUDGET,
-    RetrievalLimits,
-    _reserve_graph_context_budget,
-    _reserve_sibling_content_budget as _reserve_sibling_content_budget,
-    allocation_window,
-    build_code_context,
-    estimate_tokens as estimate_tokens,
-    retrieval_limits_for,
-    review_batch_budget,
-    skeletonize_braced_code as skeletonize_braced_code,
-    skeletonize_code as skeletonize_code,
-    skeletonize_python as skeletonize_python,
-)
-from kriya.workflow.edit_safety import (
-    StagedFileWrite,
-    _strip_java_comments_and_strings,
-    apply_anchored_edits as apply_anchored_edits,
-    atomic_write_file,
-    content_revision,
-    find_structural_corruption as find_structural_corruption,
-    normalize_whitespace,
-)
+from kriya.workflow.state import GenerationState, RecoveryPhaseAdvanced
 from kriya.workflow.terminal_commit import (
     CandidateFile,
     commit_terminal_candidate,
     materialize_candidate,
 )
-from kriya.workflow.attribution import (
-    FutureOwnerVerificationDeferral,
-    _detect_missing_build_manifest as _detect_missing_build_manifest,
-    find_edits_ignoring_own_diagnosis as find_edits_ignoring_own_diagnosis,
-    find_edits_ignoring_reported_line as find_edits_ignoring_reported_line,
-    find_misdirected_edit_target as find_misdirected_edit_target,
-    find_whole_response_no_op as find_whole_response_no_op,
-    resolve_future_owner_verification_deferral,
-)
-from kriya.workflow.contract_authority import derive_direct_contract_authorizations
-from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
-from kriya.workflow.semantic_scope_derivation import derive_semantic_authority_for_run
-from kriya.workflow.file_resolution import (
-    EXPECTED_FILE_EXTENSIONS,
-    IncompleteGenerationError as IncompleteGenerationError,
-    TEST_OR_DOC_REQUEST_PHRASES,
-    _goal_requests_tests_or_docs,
-    _is_test_or_doc_file,
-    _resolve_file_paths_from_design,
-    _resolve_maven_main_class as _resolve_maven_main_class,
-    _resolve_run_command as _resolve_run_command,
-    prefer_existing_artifact_owners,
-    check_plan_completeness as check_plan_completeness,
-    classify_plan_completeness,
-    downgrade_ungrounded_goal_explicit_commands as downgrade_ungrounded_goal_explicit_commands,
-    extract_expected_files,
-    extract_planner_code_blocks as extract_planner_code_blocks,
-    extract_target_test,
-    find_brownfield_test_redirections,
-    find_brownfield_public_api_changes,
-    find_missing_expected_files as find_missing_expected_files,
-    identify_redirected_test_obligations,
-    include_response_construction_owners,
-    normalize_written_filepath as normalize_written_filepath,
-)
-from kriya.workflow.architectural_choice import (
-    architecture_choice_invalidated_message,
-    classify_ownership_violations,
-)
-from kriya.workflow.evidence import EvidenceRecord
-from kriya.workflow.skill_extraction import (
-    _IDENTITY_GENERIC_WORDS,
-    _RULE_DEDUP_STOPWORDS,
-    _filter_misattributed_extraction,
-    _is_near_duplicate_rule as _is_near_duplicate_rule,
-    _likely_misattributed_sibling as _likely_misattributed_sibling,
-    _loose_identity_words,
-    _rule_content_words,
-    _sanitize_for_flat_file_line,
-    _scoped_skill_gap_description,
-    _skill_identity_words,
-    _skill_staleness_warning,
-    _skill_verification_context,
-    _split_rules_by_verification,
-    _stage_skill_conflicts,
-    _write_skill_extraction,
-)
-from kriya.workflow.live_lookup import (
-    _augment_error_with_live_lookup as _augment_error_with_live_lookup,
-    _extract_first_usable,
-    _resolve_via_web_lookup,
-)
-from kriya.workflow.failure_grounding import (
-    _BUILD_TIMING_NOISE_PATTERNS,
-    _ERROR_COORDINATE_PATTERN,
-    _ERROR_LOCATION_PATTERN,
-    _ERROR_UNRESOLVED_IMPORT_PATTERN,
-    _JVM_STARTUP_FAILURE_MARKERS,
-    _MISSING_EXECUTABLE_PATTERN,
-    _JDK24_SECURITY_MANAGER_API_MARKER,
-    _build_error_source_context as _build_error_source_context,
-    _build_quality_gate_failure,
-    _capture_failed_content,
-    _normalize_error_for_repeat_detection as _normalize_error_for_repeat_detection,
-    _resolve_file_locations as _resolve_file_locations,
-    classify_environment_failure as classify_environment_failure,
-    extract_error_search_terms as extract_error_search_terms,
-    extract_error_source_locations as extract_error_source_locations,
-    extract_implicated_files as extract_implicated_files,
+from kriya.workflow.toolchain import (
+    _check_java_toolchain_mismatch,
+    _java_toolchain_fact,
+    _resolve_java_home_override,
+    toolchain_declaration_mutable,
 )
 from kriya.workflow.toolchain import (
-    toolchain_declaration_mutable,
-    _JAVA_VERSION_MENTION_PATTERN,
-    _JDK_INCOMPATIBLE_JVM_FLAGS,
-    _check_java_toolchain_mismatch,
     _goal_or_repo_targets_java as _goal_or_repo_targets_java,
-    _java_toolchain_fact,
+)
+from kriya.workflow.toolchain import (
     _pin_exec_plugin_executable_to_resolved_jdk as _pin_exec_plugin_executable_to_resolved_jdk,
-    _resolve_java_home_override,
+)
+from kriya.workflow.toolchain import (
     _resolve_jdk_home_for_version as _resolve_jdk_home_for_version,
+)
+from kriya.workflow.toolchain import (
     _strip_jdk_incompatible_jvm_flags as _strip_jdk_incompatible_jvm_flags,
 )
-from kriya.workflow.lsp_integration import (
-    _build_lsp_diagnostics_context as _build_lsp_diagnostics_context,
-    _get_or_start_jdtls_client as _get_or_start_jdtls_client,
+from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService
+from kriya.workflow.validation_baseline import (
+    DeltaClassification,
+    build_validation_outcome,
+    capture_brownfield_baselines,
+    classify_baseline_delta,
+    render_blocking_regression_evidence,
 )
-from kriya.workflow.retry_prompts import (
-    ECOSYSTEM_INVARIANT_HEADER,
-    RESOURCE_LIFECYCLE_HEADER,
-    VERIFICATION_CONTRACT_HEADER,
-    _build_ecosystem_invariant_block,
-    _build_full_set_retry_prompt as _build_full_set_retry_prompt,
-    _build_missing_files_retry_prompt as _build_missing_files_retry_prompt,
-    _build_targeted_retry_prompt as _build_targeted_retry_prompt,
+from kriya.workflow.verification_contract import extract_contract_verdict as extract_contract_verdict
+from kriya.workflow.verification_contract import pass_verdict_is_grounded as pass_verdict_is_grounded
+from kriya.workflow.worktree import (
+    create_git_worktree,
+    remove_git_worktree,
 )
-from kriya.tools.validate import PolymorphicValidator, execution_evidence
-from kriya.workflow.attempt import AttemptContext, run_attempt
-from kriya.workflow.retry_strategy import handle_attempt_failure
-from kriya.workflow.review_context import build_candidate_diff_context, build_review_batches, build_reviewer_verified_evidence
-from kriya.workflow.state import GenerationState, RecoveryPhaseAdvanced
-from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS, EngineeringPlan
-from kriya.workflow.planner_repair import (
-    STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
-    build_structured_plan_repair_prompt,
-    classify_structured_plan_parse_issue,
-)
-from kriya.workflow.verification_contract import extract_contract_verdict as extract_contract_verdict, pass_verdict_is_grounded as pass_verdict_is_grounded
 
 logger = logging.getLogger(__name__)
 
@@ -1060,7 +1108,8 @@ class WorkflowEngine:
         already left the machine with zero human visibility, for zero benefit."""
         if self.kernel.config.autonomy.web_lookup_auto_approve:
             from kriya.workflow.outbound_lookup import (
-                UnsafeLookupTerm, is_known_public_term,
+                UnsafeLookupTerm,
+                is_known_public_term,
             )
             try:
                 all_terms_are_public = all(is_known_public_term(
@@ -2178,7 +2227,8 @@ class WorkflowEngine:
                 matches = vector_store.query_hybrid(goal, query_emb, top_k=retrieval_limits.top_k, model_name=self.kernel.config.embedding.model)
                 good_matches = [m for m in matches if m.get("score", 0.0) > 0.0]
                 from kriya.workflow.context_source import (
-                    CurrentSourceResolver, parse_controlled_chunk_header_name,
+                    CurrentSourceResolver,
+                    parse_controlled_chunk_header_name,
                     resolve_verified_grounding_member_id,
                 )
                 # PRE-PLAN GROUNDING (2026-09-19, VAL-001 G1 follow-up): the

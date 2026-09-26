@@ -11,15 +11,14 @@ import pytest
 
 from kriya.tools.containment import BackendUnavailableError, ContainmentProfile, NetworkAuthority, TrustClass
 from kriya.tools.containment_oci import (
-    RegistryAcquisitionSetupError,
     _SETUP_FAILURE_EXIT_CODE,
+    RegistryAcquisitionSetupError,
     _render_setup_script,
     _resolve_acquisition_identity,
     compute_authority_id,
     finalize_registry_acquisition_result,
 )
 from kriya.tools.process import ProcessResult
-
 
 # --- authority identity ---
 
@@ -136,8 +135,9 @@ def test_denied_network_argv_has_no_cap_admin_or_net_admin(tmp_path):
     """Adversarial R: target/execution containers (network=DENIED) must
     never gain NET_ADMIN - SEC-006 only ever adds that capability on the
     DEPENDENCY_REGISTRY_ONLY path."""
-    from kriya.tools.containment_oci import OCIContainmentBackend
     import shutil
+
+    from kriya.tools.containment_oci import OCIContainmentBackend
 
     if shutil.which("docker") is None:
         pytest.skip("docker CLI not available (only used to construct the backend object, no daemon call)")

@@ -12,7 +12,6 @@ pattern as tests/test_service_runtime.py) - no LLM, no network, no real
 Maven/JDK dependency.
 """
 import os
-import stat
 
 import pytest
 

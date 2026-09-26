@@ -1,7 +1,7 @@
 import sys
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, patch
 
 from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
 

@@ -7,10 +7,10 @@ from kriya.tools.containment import (
     BackendUnavailableError,
     ContainmentProfile,
     ContainmentSetupError,
+    DummyContainmentBackend,
     NetworkAuthority,
     NullContainmentBackend,
     ResourceLimitSetupError,
-    DummyContainmentBackend,
     TrustClass,
     resolve_containment_backend,
 )

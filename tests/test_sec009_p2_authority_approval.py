@@ -22,9 +22,9 @@ import sys
 import pytest
 import yaml
 
-from kriya.config.config import load_config, resolve_config_state
-from kriya.config.authority import ConfigAuthorityError
 from kriya.config import authority_approval as aa
+from kriya.config.authority import ConfigAuthorityError
+from kriya.config.config import load_config, resolve_config_state
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KRIYA_BIN = os.path.join(os.path.dirname(sys.executable), "kriya")
@@ -552,6 +552,7 @@ async def test_resume_path_reresolves_authority_not_stale_checkpoint(tmp_path, m
     patched to raise if it's ever called, so this is not just an inference
     from reading the code."""
     from click.testing import CliRunner
+
     from kriya.cli import main
 
     ws = tmp_path / "ws"

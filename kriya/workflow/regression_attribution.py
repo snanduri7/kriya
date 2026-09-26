@@ -81,7 +81,8 @@ import tempfile
 from typing import Any, Dict, Sequence, Tuple
 
 from kriya.workflow.validation_baseline import (
-    DeltaClassification, parse_pytest_structured_outcomes,
+    DeltaClassification,
+    parse_pytest_structured_outcomes,
 )
 
 logger = logging.getLogger(__name__)

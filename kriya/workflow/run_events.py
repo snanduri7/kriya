@@ -3,9 +3,9 @@
 The event log is deliberately local process state.  It is never transmitted to
 live lookup and contains no behavior that can weaken Kriya's local-only policy.
 """
+import time
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-import time
 from typing import Any, Dict, List, Optional
 
 

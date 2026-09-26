@@ -425,10 +425,11 @@ def test_milestone_final_check_uses_the_runs_exact_committed_path_history(tmp_pa
     itself only touches m1.py. The original requirement is judged on every
     path the run committed, so M2's earlier commit to m2.py is a violation
     even though the final candidate alone would look in scope."""
+    from test_prd020_milestone_requirements import _probe
+
     from kriya.cli import main
     from kriya.core import model_runtime
     from kriya.core.llm import LLMClient
-    from test_prd020_milestone_requirements import _probe
 
     monkeypatch.setattr(model_runtime, "probe_model_runtime", _probe)
     model_runtime.clear_model_runtime_cache()

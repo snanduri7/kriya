@@ -14,6 +14,7 @@ import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import strict_config, strict_engine
 
 from kriya.control.persistence import load_control_state
 from kriya.workflow.plan_schema import (
@@ -27,11 +28,12 @@ from kriya.workflow.plan_schema import (
 from kriya.workflow.plan_validation import PlanValidationResult
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow_controller import (
-    WorkflowController, WorkflowControllerConfigurationError,
-    compute_abandoned_plan_files, quarantine_abandoned_plan_files,
+    WorkflowController,
+    WorkflowControllerConfigurationError,
+    compute_abandoned_plan_files,
+    quarantine_abandoned_plan_files,
 )
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus
-from _strict_doubles import strict_config, strict_engine
 
 
 def _route(kind=ChangeKind.TASK):
@@ -482,8 +484,8 @@ async def test_shadow_context_includes_real_on_disk_planned_file_content(tmp_pat
 
 @pytest.mark.asyncio
 async def test_shadow_context_surfaces_persisted_contract_and_artifact_entries(tmp_path):
-    from kriya.control.contracts import ContractRegistry
     from kriya.control.artifacts import ArtifactRecord, ArtifactRegistry
+    from kriya.control.contracts import ContractRegistry
     from kriya.control.persistence import save_artifact_registry, save_contract_registry
 
     contracts = ContractRegistry()

@@ -7,7 +7,6 @@ production incident (an authorized method's body changed correctly, an
 UNRELATED method's body changed silently alongside it, signatures/tests
 stayed green) is now rejected.
 """
-import hashlib
 
 from kriya.workflow.semantic_region_authority import (
     REASON_DECLARATION_ADDED_UNAUTHORIZED,

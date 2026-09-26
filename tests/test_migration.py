@@ -5,7 +5,6 @@ explicitly requesting replacement of the existing JSON serialization
 library with the one already approved for the repository, where Quality
 Gates PASSED despite the migration never completing.
 """
-import os
 
 from kriya.workflow.migration import (
     MigrationObligation,

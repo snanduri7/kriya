@@ -1,20 +1,17 @@
 """Expected-vs-written file detection for the Developer retry loop completeness check and missing-file recovery. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
 import ast
-import asyncio
-import difflib
-import hashlib
 import json
 import logging
 import os
 import re
 import shlex
 import shutil
-import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
+
 from kriya.workflow.failure import Failure, FileLocation
 
 logger = logging.getLogger(__name__)

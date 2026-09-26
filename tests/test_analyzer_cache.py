@@ -17,13 +17,11 @@ design, so testing invalidation meaningfully requires real git semantics.
 """
 import os
 import subprocess
-import time
 
 from kriya.analyzer.analyzer import (
-    RepositoryAnalyzer,
-    _ANALYZE_CACHE,
     _ANALYZE_CACHE_HITS,
     _ANALYZE_CACHE_MISSES,
+    RepositoryAnalyzer,
 )
 
 

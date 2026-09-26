@@ -34,7 +34,7 @@ import re
 import shlex
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Sequence, Tuple
+from typing import List, Optional, Sequence
 
 from kriya.tools.containment import ContainmentBackend, ContainmentProfile, NetworkAuthority, TrustClass
 from kriya.tools.containment_oci import (

@@ -27,7 +27,6 @@ import shutil
 import subprocess
 
 import pytest
-
 from _plugin_test_support import load_core_tools_module
 
 from kriya.config import AppConfig

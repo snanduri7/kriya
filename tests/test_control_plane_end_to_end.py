@@ -41,9 +41,8 @@ from kriya.control.telemetry import (
 from kriya.workflow.checkpoint import (
     ResumeStatus,
     compute_control_plane_hashes,
-    compute_registry_hash,
-    save_checkpoint,
     load_checkpoint,
+    save_checkpoint,
     validate_resume_against_reality,
 )
 from kriya.workflow.context_orchestrator import ContextOrchestrator

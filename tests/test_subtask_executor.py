@@ -4,6 +4,7 @@ pytest coverage for this module."""
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from _strict_doubles import strict_kernel
 
 from kriya.core.registry import ComponentRegistryError
 from kriya.tools.tool import ToolExecutionError
@@ -12,7 +13,6 @@ from kriya.workflow.context_package import build_context_package
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.workflow_types import SubtaskStatus
-from _strict_doubles import strict_kernel
 
 
 def _model_subtask(**overrides):

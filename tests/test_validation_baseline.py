@@ -11,21 +11,17 @@ mocked `run_generation_workflow` integration test is extended (same LLM
 mocking convention every other test_workflow.py test already uses). No
 Graphify production source is copied here - fixtures are synthetic.
 """
-import os
 import subprocess
-import sys
-import tempfile
 from unittest.mock import AsyncMock
 
 import pytest
 
-from kriya.core.state_paths import trace_db_path
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.core.state_paths import trace_db_path
 from kriya.workflow.checkpoint import compute_workspace_content_hash
 from kriya.workflow.validation_baseline import (
-    BrownfieldBaselineCaptureResult,
     DeltaClassification,
     TestOutcome,
     TestStatus,
@@ -39,7 +35,6 @@ from kriya.workflow.validation_baseline import (
     classify_level1_delta,
     classify_level2_delta,
     compute_failure_fingerprint,
-    environment_failure_outcome,
     extract_test_failure_sections,
     is_baseline_reusable,
     normalize_failure_text,
@@ -47,7 +42,6 @@ from kriya.workflow.validation_baseline import (
     render_blocking_regression_evidence,
 )
 from kriya.workflow.workflow import WorkflowEngine
-
 
 # ---------------------------------------------------------------------------
 # Fingerprint normalization
@@ -334,6 +328,7 @@ def test_3_candidate_sandbox_cannot_become_baseline_authority():
     the caller could supply is injected, never constructed here)."""
     import ast
     import inspect
+
     import kriya.workflow.validation_baseline as vb_module
     source = inspect.getsource(vb_module)
     tree = ast.parse(source)
@@ -802,6 +797,7 @@ def test_18_module_never_references_ground_truth_or_evaluator_concepts():
     own already-visible PolymorphicValidator output; it has no code path
     that could reach an evaluator-only ground-truth fixture at all."""
     import inspect
+
     import kriya.workflow.validation_baseline as vb_module
     source = inspect.getsource(vb_module).lower()
     assert "ground_truth" not in source
@@ -818,6 +814,7 @@ def test_19_polymorphic_validator_signature_unmodified():
     structurally: run_tests/run_compile_check still take exactly the
     parameters every existing caller already passes."""
     import inspect
+
     from kriya.tools.validate import PolymorphicValidator
     run_tests_sig = inspect.signature(PolymorphicValidator.run_tests)
     assert list(run_tests_sig.parameters.keys()) == ["self", "target_test"]

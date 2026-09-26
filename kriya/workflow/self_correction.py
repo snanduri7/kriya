@@ -40,7 +40,8 @@ from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.tools.resolver import resolve_maven_class
 from kriya.tools.validate import PolymorphicValidator, get_pom_dependencies
 from kriya.workflow.edit_safety import (
-    FileRevisionConflict, apply_anchored_edits,
+    FileRevisionConflict,
+    apply_anchored_edits,
     content_revision,
 )
 from kriya.workflow.semantic_region_authority import (

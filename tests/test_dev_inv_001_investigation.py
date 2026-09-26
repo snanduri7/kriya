@@ -42,7 +42,7 @@ from kriya.workflow.attempt import (
     _maybe_run_developer_investigation,
     _preserve_member_exact_precision,
 )
-from kriya.workflow.context_budget import build_known_target_context, _reserve_graph_context_budget
+from kriya.workflow.context_budget import _reserve_graph_context_budget, build_known_target_context
 from kriya.workflow.context_package import ContextItem, make_context_item
 from kriya.workflow.context_source import SourceDerivationCache
 from kriya.workflow.edit_safety import content_revision
@@ -61,7 +61,6 @@ from kriya.workflow.investigation import (
 )
 from kriya.workflow.operations import CodeOperation
 from kriya.workflow.state import GenerationState
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures/helpers

@@ -12,16 +12,13 @@ import os
 import shutil
 import socket
 import subprocess
-import sys
 import threading
 import time
 
 import pytest
 
-from kriya.core.kernel import Kernel
 from kriya.config.config import AppConfig, AutonomyConfig, MCPLifecycleConfig
-from kriya.mcp.capability import MCPNetworkAuthority, resolve_mcp_capability_profile, compute_mcp_capability_profile_digest
-from kriya.mcp.containment_adapter import MCPContainmentUnsupportedError, map_capability_profile_to_containment
+from kriya.core.kernel import Kernel
 from kriya.mcp.mcp import MCPManager
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import MCPToolIdentity, compute_mcp_schema_digest

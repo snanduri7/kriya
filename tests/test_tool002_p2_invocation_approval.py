@@ -17,7 +17,6 @@ import os
 
 import pytest
 
-from kriya.config.authority import ConfigAuthorityError
 from kriya.control.workspace_identity import workspace_identity
 from kriya.mcp.invocation_approval import (
     MCPApprovalArtifactError,
@@ -431,7 +430,8 @@ def test_sec009_approval_cannot_substitute_for_mcp_invocation_approval(tmp_path,
     configuration (a completely separate store/artifact) must not grant
     MCP invocation approval - proven by using authority_approval.py's own
     real approve flow and confirming the MCP resolver still denies."""
-    from kriya.config.authority_approval import build_approval_artifact, save_approval_artifact as save_sec009
+    from kriya.config.authority_approval import build_approval_artifact
+    from kriya.config.authority_approval import save_approval_artifact as save_sec009
     from kriya.config.config import load_config
 
     authority_home = tmp_path / "_authority_home"
@@ -561,6 +561,7 @@ def test_no_production_module_populates_static_approved_set_nonempty():
     durable resolver wired in MCPManager.__init__ (mcp_invocation_approval_
     resolver)."""
     import ast
+
     import kriya
 
     package_root = os.path.dirname(kriya.__file__)

@@ -22,15 +22,12 @@ from kriya.workflow.review_context import (
     find_java_repo_root,
     format_adjudicated_review,
     format_java_member_inventory,
-    format_member_evidence_registry,
     format_proposed_modification,
-    format_relation_evidence_registry,
     format_review_repository_context,
     parse_and_validate_run_guidance,
     parse_member_reviews,
     parse_structured_findings,
 )
-
 
 _TARGET_SOURCE = (
     "public class Target implements TargetInterface {\n"

@@ -14,15 +14,15 @@ from kriya.tools.validate import (
     get_pom_own_coordinate,
     get_pom_reactor_modules,
 )
-from kriya.workflow.verification_authority import (
-    deterministic_sequence_kind,
-    deterministic_verification_kind,
-)
 from kriya.workflow.acceptance import (
     runtime_application_step_started,
     runtime_verification_infrastructure_reason,
 )
 from kriya.workflow.file_resolution import ground_java_entrypoint_in_no_build_file_projects
+from kriya.workflow.verification_authority import (
+    deterministic_sequence_kind,
+    deterministic_verification_kind,
+)
 
 
 def test_polymorphic_stack_detection(tmp_path):

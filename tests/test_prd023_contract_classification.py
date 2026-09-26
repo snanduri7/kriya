@@ -30,7 +30,12 @@ from kriya.workflow.failure import QualityGateFailure
 from kriya.workflow.file_resolution import find_brownfield_public_api_changes
 from kriya.workflow.obligations import ObligationKind, ObligationLedger
 from kriya.workflow.plan_schema import (
-    ChangeKind, EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask,
+    ChangeKind,
+    EngineeringPlan,
+    ExecutionMethod,
+    FileAction,
+    PlannedFile,
+    Subtask,
 )
 from kriya.workflow.state import GenerationState
 

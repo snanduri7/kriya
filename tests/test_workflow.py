@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from kriya.core.state_paths import trace_db_path
 from kriya.agents.agent import DeveloperAgent
 from kriya.agents.contracts import (
     AUTHORITATIVE_GOAL_SECTION_HEADER,
@@ -20,19 +19,21 @@ from kriya.agents.contracts import (
 from kriya.config import AppConfig, LLMConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.core.state_paths import trace_db_path
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+from kriya.tools.service_runtime import ManagedServiceVerificationResult, ServiceVerificationOutcomeKind
 from kriya.workflow.attempt import (
     AttemptContext,
     _brownfield_owner_contract_block,
     _diagnosis_mismatch_bypass_reason,
-    _directly_executable_runtime_verifiers,
     _directly_executable_verifiers,
+    _extract_requirement_identifier_tokens,
     _goal_spec_evidence_fingerprint,
     _goal_spec_requirement_obligation_id,
-    _stage_scoped_spec_compliance_goal,
     _initial_test_process_boundary_constraint,
+    _looks_like_shell_compound_command,
     _materialize_candidate_content,
     _operation_map,
     _process_boundary_obligation_id,
@@ -40,19 +41,66 @@ from kriya.workflow.attempt import (
     _record_self_correction_scope_conflict,
     _required_process_terminating_cases,
     _required_runtime_verification_missing_message,
-    _runtime_contract_requirements,
+    _resolve_execution_mode,
     _run_coordinated_repair_generation,
-    _extract_requirement_identifier_tokens,
-    find_in_process_terminating_test_invocations,
-    find_ungrounded_java_child_process_tests,
     _run_verification_basis_hash,
+    _runtime_contract_requirements,
     _spec_requirements_contradicting_authority,
     _spec_requirements_naming_planner_only_identifiers,
-    _sync_active_repair_contract,
-    _looks_like_shell_compound_command,
-    _resolve_execution_mode,
+    _stage_scoped_spec_compliance_goal,
     _validate_and_convert_managed_service_contract,
+    find_in_process_terminating_test_invocations,
+    find_ungrounded_java_child_process_tests,
     run_attempt,
+)
+from kriya.workflow.attribution import AttributionResult
+from kriya.workflow.checkpoint import (
+    checkpoint_path,
+    compute_config_fingerprint,
+    compute_workspace_content_hash,
+    compute_workspace_fingerprint,
+    find_latest_checkpoint,
+    load_checkpoint,
+    save_checkpoint,
+)
+from kriya.workflow.context_budget import _GRAPH_CONTEXT_SHARE, _SIBLING_CONTENT_BUDGET_FRACTION
+from kriya.workflow.context_package import make_context_item
+from kriya.workflow.contract_authority import derive_direct_contract_authorizations
+from kriya.workflow.edit_safety import (
+    BatchCommitError,
+    FileRevisionConflict,
+    StagedFileWrite,
+    commit_revision_grounded_batch,
+    content_revision,
+    find_cross_file_type_conflict,
+)
+from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
+from kriya.workflow.failure_grounding import (
+    build_cross_package_mismatch_message,
+    build_failure_signature,
+    find_cross_package_symbol_mismatch,
+    find_locator_files_outside_known_scope,
+    resolve_repository_locator_files,
+)
+from kriya.workflow.file_resolution import (
+    _goal_expresses_positive_response_mutation_intent,
+    classify_api_recovery_file_roles,
+    correct_exec_main_class_property,
+    discover_response_construction_owners,
+    ensure_maven_covers_nonconventional_java_files,
+    extract_target_test,
+    find_brownfield_public_api_changes,
+    find_brownfield_test_redirections,
+    find_explanatory_prose_contamination,
+    find_protected_api_reference_changes,
+    find_runnable_test_files,
+    find_unrequested_architectural_surfaces,
+    find_unrestored_public_api_contracts,
+    ground_java_entrypoint_in_no_build_file_projects,
+    include_response_construction_owners,
+    is_runnable_test_file,
+    prefer_existing_artifact_owners,
+    strip_package_declaration_matching_source_root,
 )
 from kriya.workflow.obligations import (
     ObligationAuthority,
@@ -61,6 +109,7 @@ from kriya.workflow.obligations import (
     ObligationRecord,
     ObligationStatus,
 )
+from kriya.workflow.operations import CodeOperation
 from kriya.workflow.plan_schema import (
     AcceptanceCriterion,
     EngineeringPlan,
@@ -70,53 +119,19 @@ from kriya.workflow.plan_schema import (
     PlannedFile,
     Subtask,
 )
-from kriya.workflow.triage import (
-    ChangeKind,
-    EngineeringRoute,
-    ExecutionWeight,
-    ImpactVector,
-    RiskClass,
-)
+from kriya.workflow.planner_repair import STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS
 from kriya.workflow.repair_contract import (
     RepairContract,
     RepairContractStatus,
     RepairKind,
 )
-from kriya.workflow.operations import CodeOperation
-from kriya.workflow.attribution import AttributionResult
-from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.tools.service_runtime import ManagedServiceVerificationResult, ServiceVerificationOutcomeKind
-from kriya.workflow.failure_grounding import build_cross_package_mismatch_message, build_failure_signature, find_cross_package_symbol_mismatch, find_locator_files_outside_known_scope, resolve_repository_locator_files
-from kriya.workflow.contract_authority import derive_direct_contract_authorizations
-from kriya.workflow.file_resolution import (
-    correct_exec_main_class_property,
-    ensure_maven_covers_nonconventional_java_files,
-    extract_target_test,
-    find_runnable_test_files,
-    ground_java_entrypoint_in_no_build_file_projects,
-    is_runnable_test_file,
-    prefer_existing_artifact_owners,
-    find_brownfield_test_redirections,
-    find_brownfield_public_api_changes,
-    classify_api_recovery_file_roles,
-    discover_response_construction_owners,
-    include_response_construction_owners,
-    _goal_expresses_positive_response_mutation_intent,
-    find_explanatory_prose_contamination,
-    find_protected_api_reference_changes,
-    find_unrequested_architectural_surfaces,
-    find_unrestored_public_api_contracts,
-    strip_package_declaration_matching_source_root,
+from kriya.workflow.resume_fingerprints import (
+    CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
 )
-from kriya.workflow.edit_safety import (
-    BatchCommitError,
-    FileRevisionConflict,
-    StagedFileWrite,
-    commit_revision_grounded_batch,
-    content_revision,
-    find_cross_file_type_conflict,
+from kriya.workflow.resume_fingerprints import (
+    fingerprint_block,
+    generation_resume_fingerprints,
 )
-from kriya.workflow.context_package import make_context_item
 from kriya.workflow.retry_strategy import (
     compute_effective_workspace_hash,
     handle_attempt_failure,
@@ -128,26 +143,12 @@ from kriya.workflow.state import (
     GenerationState,
     RecoveryPhaseAdvanced,
 )
-from kriya.workflow.workflow_controller import (
-    build_planning_structural_evidence,
-    find_missing_grounded_production_artifacts,
-)
-from kriya.workflow.planner_repair import STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS
-from kriya.workflow.checkpoint import (
-    checkpoint_path,
-    compute_config_fingerprint,
-    compute_workspace_content_hash,
-    compute_workspace_fingerprint,
-    find_latest_checkpoint,
-    load_checkpoint,
-    save_checkpoint,
-)
-from kriya.workflow.resume_fingerprints import (
-    CHECKPOINT_KEY as RESUME_FINGERPRINTS_KEY,
-)
-from kriya.workflow.resume_fingerprints import (
-    fingerprint_block,
-    generation_resume_fingerprints,
+from kriya.workflow.triage import (
+    ChangeKind,
+    EngineeringRoute,
+    ExecutionWeight,
+    ImpactVector,
+    RiskClass,
 )
 from kriya.workflow.workflow import (
     RESOURCE_LIFECYCLE_HEADER,
@@ -165,49 +166,52 @@ from kriya.workflow.workflow import (
     _detect_missing_build_manifest,
     _ensure_repository_indexed,
     _filter_misattributed_extraction,
-    _resolve_protected_relpath,
     _get_or_start_jdtls_client,
     _goal_or_repo_targets_java,
     _is_near_duplicate_rule,
     _java_toolchain_fact,
     _likely_misattributed_sibling,
     _normalize_error_for_repeat_detection,
+    _pin_exec_plugin_executable_to_resolved_jdk,
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
-    allocation_window,
-    build_code_context,
+    _resolve_file_locations,
     _resolve_file_paths_from_design,
-    _pin_exec_plugin_executable_to_resolved_jdk,
     _resolve_java_home_override,
     _resolve_jdk_home_for_version,
     _resolve_maven_main_class,
+    _resolve_protected_relpath,
     _resolve_run_command,
-    downgrade_ungrounded_goal_explicit_commands,
-    check_plan_completeness,
-    classify_plan_completeness,
-    extract_planner_code_blocks,
     _scoped_skill_gap_description,
     _strip_jdk_incompatible_jvm_flags,
+    allocation_window,
+    atomic_write_file,
+    build_code_context,
+    check_plan_completeness,
     classify_environment_failure,
+    classify_plan_completeness,
+    downgrade_ungrounded_goal_explicit_commands,
     estimate_tokens,
     extract_contract_verdict,
     extract_error_search_terms,
-    pass_verdict_is_grounded,
     extract_error_source_locations,
     extract_expected_files,
-    unresolved_knowledge_report,
     extract_implicated_files,
+    extract_planner_code_blocks,
     find_edits_ignoring_own_diagnosis,
     find_edits_ignoring_reported_line,
     find_misdirected_edit_target,
     find_missing_expected_files,
     find_structural_corruption,
     find_whole_response_no_op,
-    atomic_write_file,
     normalize_written_filepath,
-    _resolve_file_locations,
+    pass_verdict_is_grounded,
+    unresolved_knowledge_report,
 )
-from kriya.workflow.context_budget import _GRAPH_CONTEXT_SHARE, _SIBLING_CONTENT_BUDGET_FRACTION
+from kriya.workflow.workflow_controller import (
+    build_planning_structural_evidence,
+    find_missing_grounded_production_artifacts,
+)
 
 
 def test_restore_public_contract_diagnosis_mismatch_cannot_veto():
@@ -1041,8 +1045,8 @@ async def test_real_run_app_sequence_test_outcome_satisfies_judgment_runtime_req
     found live, this exact test failing only under a real pytest run. Not
     a production bug: `pytest`'s own basename is stable regardless of how
     THIS test itself was launched."""
-    from kriya.workflow.attempt import _execute_runtime_verification_directly
     from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.attempt import _execute_runtime_verification_directly
 
     (tmp_path / "test_sample.py").write_text("def test_ok():\n    assert True\n")
     pytest_executable = os.path.join(os.path.dirname(sys.executable), "pytest")
@@ -4742,7 +4746,6 @@ def test_managed_service_non_python_command_is_unchanged(tmp_path):
     wiring, not just the method in isolation."""
     (tmp_path / "pom.xml").write_text("<project/>", encoding="utf-8")
     from kriya.tools.validate import PolymorphicValidator
-    from kriya.workflow.attempt import _validate_and_convert_managed_service_contract
 
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "java"
@@ -4765,7 +4768,6 @@ def test_managed_service_python_command_falls_back_to_kriyas_own_interpreter_wit
     install_error - exercised through the real (unmocked) substitution path."""
     (tmp_path / "app.py").write_text("print('hi')\n", encoding="utf-8")
     from kriya.tools.validate import PolymorphicValidator
-    from kriya.workflow.attempt import _validate_and_convert_managed_service_contract
 
     validator = PolymorphicValidator(str(tmp_path))
     assert validator.stack == "python"
@@ -4790,7 +4792,6 @@ def test_managed_service_uses_the_identical_interpreter_the_finite_test_path_res
     with the actual finite-path behavior."""
     (tmp_path / "app.py").write_text("print('hi')\n", encoding="utf-8")
     from kriya.tools.validate import PolymorphicValidator
-    from kriya.workflow.attempt import _validate_and_convert_managed_service_contract
 
     validator = PolymorphicValidator(str(tmp_path))
     expected_interpreter, install_error = validator._resolve_python_interpreter()
@@ -4815,7 +4816,6 @@ def test_managed_service_grounding_does_not_mutate_the_original_judgment_command
     this locks that property in from the caller's own perspective."""
     (tmp_path / "app.py").write_text("print('hi')\n", encoding="utf-8")
     from kriya.tools.validate import PolymorphicValidator
-    from kriya.workflow.attempt import _validate_and_convert_managed_service_contract
 
     validator = PolymorphicValidator(str(tmp_path))
     original_command = ["python", "manage.py", "runserver"]
@@ -5643,7 +5643,7 @@ def test_apply_runtime_verification_contract_shapes():
     coverage of every recognized/unrecognized invocation shape, mirrors the
     spec's own Test A/B/C/D/E/G matrix without needing a full run_attempt()
     for each variant (the end-to-end tests below cover the wiring once)."""
-    from kriya.workflow.attempt import _apply_runtime_verification_contract, _RUNTIME_VERIFICATION_SYNTHETIC_INPUT
+    from kriya.workflow.attempt import _RUNTIME_VERIFICATION_SYNTHETIC_INPUT, _apply_runtime_verification_contract
 
     # Test A shape: mvn exec:java with no -Dexec.args gets one injected.
     cmds, stdin, reason = _apply_runtime_verification_contract(
@@ -10659,8 +10659,8 @@ def test_gate_outcomes_preserve_earlier_distinct_failure_alongside_later_budget_
     real failure on one attempt, budget exhaustion on a strictly later
     one) is inherently sensitive to real wall-clock timing to reproduce
     deterministically under fully-mocked, near-instant LLM calls."""
-    from kriya.workflow.state import GenerationState
     from kriya.workflow.failure import Failure
+    from kriya.workflow.state import GenerationState
 
     state = GenerationState()
     primary_failure = Failure(
@@ -23533,8 +23533,8 @@ def test_create_git_worktree_scopes_nested_workspace_without_enclosing_repo_mark
     not the enclosing repository. Its sandbox must not inherit unrelated parent
     build markers, which would make deterministic ecosystem checks reject the
     ecosystem explicitly requested for the nested project."""
-    from kriya.workflow.workflow import create_git_worktree, remove_git_worktree
     from kriya.workflow.static_checks import find_established_stack_drift
+    from kriya.workflow.workflow import create_git_worktree, remove_git_worktree
 
     _init_git_repo(tmp_path)
     (tmp_path / "requirements.txt").write_text("pytest\n")

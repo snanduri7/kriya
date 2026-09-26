@@ -6,8 +6,6 @@ test of the hooks-disabled flag in isolation."""
 import os
 import subprocess
 
-import pytest
-
 from kriya.workflow.worktree import create_git_worktree, remove_git_worktree
 
 

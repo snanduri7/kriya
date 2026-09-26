@@ -37,7 +37,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from kriya.workflow.obligations import (

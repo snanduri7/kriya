@@ -4,7 +4,6 @@ never affect whether the real command runs, and a broken/misconfigured
 policy engine for THIS second call must not break the RUN_COMMAND audit or
 the real subprocess execution either.
 """
-from unittest.mock import MagicMock
 
 from kriya.tools.validate import PolymorphicValidator
 

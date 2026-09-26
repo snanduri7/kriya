@@ -1,8 +1,8 @@
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
-import contextlib
 import os
 import sys
 import urllib.error
@@ -17,10 +17,10 @@ from kriya.agents import ReviewerAgent
 from kriya.analyzer import RepositoryAnalyzer
 from kriya.cli_output import GenerateOutput
 from kriya.config import AppConfig, load_config
-from kriya.control.run_coordinator import begin_mutating_run, transition_mutating_run
-from kriya.control.run_record import RunLifecycle
-from kriya.control.run_ownership import WorkspaceLockHeldError
 from kriya.control.commit_state import UncertainWorkspaceStateError
+from kriya.control.run_coordinator import begin_mutating_run, transition_mutating_run
+from kriya.control.run_ownership import WorkspaceLockHeldError
+from kriya.control.run_record import RunLifecycle
 from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
 from kriya.core.logging_setup import LogDirectoryError, configure_logging
@@ -251,7 +251,9 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
     workspace_path = os.getcwd()
     try:
         from kriya.control.persistence import (
-            load_artifact_registry, load_contract_registry, load_control_state,
+            load_artifact_registry,
+            load_contract_registry,
+            load_control_state,
         )
         from kriya.control.workspace_identity import workspace_identity
         from kriya.core.llm import is_local_url
@@ -1132,7 +1134,9 @@ def mcp_inspect(ctx: click.Context) -> None:
 
     from kriya.control.workspace_identity import workspace_identity
     from kriya.mcp.invocation_approval import (
-        default_local_approval_path, is_tool_approved, load_approval_artifact,
+        default_local_approval_path,
+        is_tool_approved,
+        load_approval_artifact,
     )
 
     workspace_root = _mcp_workspace_root()
@@ -1191,7 +1195,10 @@ def mcp_approve(ctx: click.Context, tool_name: str, confirm: bool) -> None:
 
     from kriya.control.workspace_identity import workspace_identity
     from kriya.mcp.invocation_approval import (
-        add_approval, default_local_approval_path, empty_artifact, load_approval_artifact,
+        add_approval,
+        default_local_approval_path,
+        empty_artifact,
+        load_approval_artifact,
         save_approval_artifact,
     )
 
@@ -1262,7 +1269,9 @@ def mcp_revoke(ctx: click.Context, tool_name: str) -> None:
         return
 
     from kriya.mcp.invocation_approval import (
-        default_local_approval_path, load_approval_artifact, remove_approvals_for_identity,
+        default_local_approval_path,
+        load_approval_artifact,
+        remove_approvals_for_identity,
         save_approval_artifact,
     )
 
@@ -2971,7 +2980,6 @@ def authority_inspect(ctx: click.Context) -> None:
     fields (field path, classification, provenance, and a secret-redacted
     value) and whether an existing local approval currently covers them.
     Read-only - never writes anything, never itself approves."""
-    from kriya.config.authority import compute_violations
     from kriya.config.authority_approval import (
         default_local_approval_path,
         describe_pending,

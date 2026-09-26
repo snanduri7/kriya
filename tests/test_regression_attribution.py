@@ -20,8 +20,8 @@ No live model/Ollama calls anywhere in this file.
 from unittest.mock import patch
 
 from kriya.config import AppConfig
-from kriya.workflow.validation_baseline import DeltaClassification
 from kriya.workflow.regression_attribution import confirm_ambiguous_regressions
+from kriya.workflow.validation_baseline import DeltaClassification
 
 
 def _cfg():

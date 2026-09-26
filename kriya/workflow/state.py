@@ -6,19 +6,19 @@ storage moved from bare names to attributes on this object - this is what
 makes the next slices (an isolable attempt executor and retry-decision
 function) possible to unit-test without invoking the whole method.
 """
+import time
 from dataclasses import dataclass, field
 from enum import Enum
-import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from kriya.workflow.architectural_choice import CandidateArchitecturalChange
-from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
-from kriya.workflow.evidence import EvidenceRecord
+from kriya.workflow.context_package import ContextItem
 from kriya.workflow.edit_safety import content_revision
-from kriya.workflow.triage import EngineeringRoute
+from kriya.workflow.evidence import EvidenceRecord
 from kriya.workflow.process_profile import ProcessProfile
 from kriya.workflow.repair_contract import RepairContract
-from kriya.workflow.context_package import ContextItem
+from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
+from kriya.workflow.triage import EngineeringRoute
 
 
 class APIContractRecoveryPhase(str, Enum):

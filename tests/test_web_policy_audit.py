@@ -4,7 +4,7 @@ fetch_url_text must never affect whether the real fetch happens (or is
 refused by the existing SSRF guard), under any condition including a
 misconfigured or outright broken policy engine.
 """
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import httpx
 import pytest

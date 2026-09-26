@@ -13,20 +13,12 @@ import os
 import pytest
 
 from kriya.analyzer.java_members import extract_java_members
-from kriya.workflow.review_context import (
-    CONFIDENCE_STRONG_STATIC_INDICATION,
-    StructuredFinding,
-    adjudicate_findings,
-    build_member_evidence_ids,
-    build_proposed_modification,
-)
 from kriya.workflow.proposal_binding import proposal_to_authorized_semantic_regions
 from kriya.workflow.proposal_store import (
     PROPOSALS_DIRNAME,
     REASON_PROPOSAL_ALREADY_APPROVED,
     REASON_PROPOSAL_BINDING_INVALID,
     REASON_PROPOSAL_ID_INVALID,
-    REASON_PROPOSAL_NOT_FOUND,
     REASON_PROPOSAL_REJECTED,
     REASON_PROPOSAL_SCHEMA_UNSUPPORTED,
     REASON_PROPOSAL_TAMPERED,
@@ -40,6 +32,13 @@ from kriya.workflow.proposal_store import (
     persist_proposal,
     reject_proposal,
     verify_persisted_proposal,
+)
+from kriya.workflow.review_context import (
+    CONFIDENCE_STRONG_STATIC_INDICATION,
+    StructuredFinding,
+    adjudicate_findings,
+    build_member_evidence_ids,
+    build_proposed_modification,
 )
 from kriya.workflow.semantic_region_authority import find_unauthorized_semantic_changes
 
@@ -138,7 +137,6 @@ def test_hard_digest_test_vector():
     """A pinned, hand-computed regression test - if canonicalization drifts
     in the future, THIS test fails first, loudly, rather than digests
     silently changing meaning across a Kriya upgrade."""
-    import dataclasses
     from kriya.workflow.review_context import ProposedModification
     fixed_proposal = ProposedModification(
         proposal_id="P1", source_finding_id="F1", target_file="A.java",

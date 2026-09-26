@@ -7,7 +7,6 @@ that informs planning and generation but never denies a plan, and that no
 model justification alone can mark satisfied.
 """
 import json
-import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -148,7 +147,11 @@ async def test_the_direct_run_surfaces_the_owner_before_planning_and_the_finding
     from kriya.core.kernel import Kernel
     from kriya.core.llm import LLMClient
     from kriya.workflow.triage import (
-        ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass,
+        ChangeKind,
+        EngineeringRoute,
+        ExecutionWeight,
+        ImpactVector,
+        RiskClass,
     )
     from kriya.workflow.workflow import WorkflowEngine
 
@@ -200,7 +203,12 @@ async def test_enforce_shows_candidates_to_the_planner_and_records_an_acknowledg
     from kriya.config import AppConfig
     from kriya.workflow import workflow_controller as wc
     from kriya.workflow.plan_schema import (
-        ChangeKind, EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask,
+        ChangeKind,
+        EngineeringPlan,
+        ExecutionMethod,
+        FileAction,
+        PlannedFile,
+        Subtask,
     )
     from kriya.workflow.plan_validation import PlanValidationResult
     from kriya.workflow.triage import EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass

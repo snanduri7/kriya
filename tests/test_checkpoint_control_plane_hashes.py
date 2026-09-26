@@ -9,7 +9,7 @@ import tempfile
 
 import pytest
 
-from kriya.control.artifacts import ArtifactRecord, ArtifactRegistry
+from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.contracts import ContractRegistry
 from kriya.control.state import ControlState
 from kriya.workflow.checkpoint import (

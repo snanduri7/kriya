@@ -15,13 +15,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 import yaml
+from _strict_doubles import strict_kernel
 from click.testing import CliRunner
 
 from kriya.cli import main
 from kriya.config import AppConfig
-from kriya.config.config import LoggingConfig, RemovedConfigFieldError
 from kriya.config.authority import ConfigAuthorityError
-from kriya.config.config import load_config, resolve_config_state
+from kriya.config.config import LoggingConfig, RemovedConfigFieldError, load_config, resolve_config_state
 from kriya.control.run_coordinator import begin_mutating_run
 from kriya.core import logging_setup
 from kriya.core.logging_setup import (
@@ -33,7 +33,6 @@ from kriya.core.logging_setup import (
     configure_logging,
     resolve_log_directory,
 )
-from _strict_doubles import strict_kernel
 
 
 @contextmanager

@@ -33,7 +33,7 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence
 
 from kriya.workflow.contract_authority import (
     ChangeCategory,

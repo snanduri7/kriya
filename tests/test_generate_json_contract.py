@@ -3,11 +3,11 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _strict_doubles import strict_kernel
 from click.testing import CliRunner
 
 from kriya.cli import main
 from kriya.config import AppConfig
-from _strict_doubles import strict_kernel
 
 GAP = {"status": "knowledge_gap", "run_id": "gap-run", "gap_report": {"gaps": [
     {"library": "example", "version": "unspecified", "reason": "missing evidence", "risk_level": "high"}

@@ -1,6 +1,10 @@
 from kriya.workflow.operations import (
-    CodeOperation, all_results_are_no_change, classify_result_operation,
-    operation_for_attempt, operation_for_file, validate_operation_result,
+    CodeOperation,
+    all_results_are_no_change,
+    classify_result_operation,
+    operation_for_attempt,
+    operation_for_file,
+    validate_operation_result,
 )
 from kriya.workflow.retry_policy import RetryAction, decide_retry_action
 

@@ -24,12 +24,11 @@ import json
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
-from kriya.control.run_coordinator import annotate_run, coordinated_mutation, owning_run_commits
 from kriya.control.contracts import (
     mark_capabilities_implemented,
     register_provided_capabilities,
@@ -43,18 +42,19 @@ from kriya.control.persistence import (
     save_contract_registry,
     save_control_state,
 )
+from kriya.control.run_coordinator import annotate_run, coordinated_mutation, owning_run_commits
 from kriya.control.workspace_identity import ownership_metadata, validate_ownership
 from kriya.policy.filesystem import AuthorizedFileWriter
-from kriya.workflow.edit_safety import read_file_revision
+from kriya.workflow.attempt import _build_python_runtime_grounding
+from kriya.workflow.checkpoint import compute_registry_hash, delete_checkpoint, list_checkpoints
 from kriya.workflow.context_projection import (
     project_implementation_source,
     render_established_file_context,  # MA5.8 - moved to context_projection.py, re-exported here for
-                                        # backward compatibility (tests/test_milestones.py's own import,
-                                        # any other existing consumer of kriya.workflow.milestones.render_established_file_context).
+    # backward compatibility (tests/test_milestones.py's own import,
+    # any other existing consumer of kriya.workflow.milestones.render_established_file_context).
 )
-from kriya.workflow.checkpoint import delete_checkpoint, list_checkpoints
-from kriya.workflow.checkpoint import compute_registry_hash
-from kriya.workflow.attempt import _build_python_runtime_grounding
+from kriya.workflow.edit_safety import read_file_revision
+from kriya.workflow.execution_plan import ExecutionPlan, TerminalPhase, WorkUnit, WorkUnitRole
 from kriya.workflow.file_resolution import _resolve_run_command, ground_python_runtime_target
 from kriya.workflow.milestone_completion import (
     COMPLETION_RECONSTRUCTED,
@@ -74,9 +74,6 @@ from kriya.workflow.milestone_completion import (
     record_milestone_commits,
     verification_policy_fingerprint,
 )
-from kriya.workflow.resume_fingerprints import FingerprintStatus
-from kriya.workflow.execution_plan import ExecutionPlan, TerminalPhase, WorkUnit, WorkUnitRole
-from kriya.workflow.plan_executor import PlanDriver, WorkUnitInvocation, execute_plan
 from kriya.workflow.milestone_normalization import normalize_legacy_milestones
 from kriya.workflow.milestone_validation import (
     MilestonePlanValidator,
@@ -84,7 +81,9 @@ from kriya.workflow.milestone_validation import (
     plan_structure_telemetry,
     topological_order,
 )
+from kriya.workflow.plan_executor import PlanDriver, WorkUnitInvocation, execute_plan
 from kriya.workflow.repository_topology import RepositoryTopology, detect_repository_topology
+from kriya.workflow.resume_fingerprints import FingerprintStatus
 from kriya.workflow.verification_contract import extract_contract_verdict
 from kriya.workflow.workflow import _log_phase_banner
 

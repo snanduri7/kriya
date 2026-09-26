@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-
 API_CONTRACT_RECOVERY_MAX_ATTEMPTS = 3
 
 

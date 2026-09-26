@@ -12,10 +12,10 @@ true for every other generate call."""
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from _strict_doubles import strict_config, strict_engine
 
 from kriya.cli import _dispatch_generation, _dispatch_milestones
 from kriya.workflow.workflow_types import WorkflowResult
-from _strict_doubles import strict_config, strict_engine
 
 
 @pytest.mark.asyncio

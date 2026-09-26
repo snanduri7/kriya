@@ -35,7 +35,7 @@ rather than an oversight):
     general-purpose version of this code.
 """
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from kriya.tools.lsp import JDTLS_INIT_TIMEOUT_SECONDS, JdtlsClient
 

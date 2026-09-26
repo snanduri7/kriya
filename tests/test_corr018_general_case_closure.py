@@ -18,10 +18,8 @@ import os
 
 from kriya.config.authority import _SECURITY_AUTHORITY_FIELDS
 from kriya.config.config import AppConfig
-from kriya.workflow.contract_authority import ChangeCategory
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
 from kriya.workflow.semantic_region_authority import (
-    REASON_DECLARATION_ADDED_UNAUTHORIZED,
     REASON_DECLARATION_UNAUTHORIZED,
     REASON_FILE_HAS_NO_SEMANTIC_AUTHORITY,
     REASON_MEMBER_ADDED_UNAUTHORIZED,

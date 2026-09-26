@@ -11,13 +11,12 @@ from kriya.tools.containment import (
     BackendUnavailableError,
     ContainmentProfile,
     ContainmentSetupError,
+    DummyContainmentBackend,
     NetworkAuthority,
     NullContainmentBackend,
-    DummyContainmentBackend,
     TrustClass,
 )
 from kriya.tools.process import ProcessController
-
 
 # --- happy path: containment-aware calls behave identically to today's
 # raw env/preexec_fn calls (existing behavior preserved). network=UNRESTRICTED

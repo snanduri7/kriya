@@ -18,7 +18,6 @@ Two pure, generic (no G1/C#/language-specific) functions close this:
 
 No live model/Ollama calls anywhere in this file.
 """
-import os
 
 import pytest
 
@@ -26,7 +25,6 @@ from kriya.workflow.file_resolution import (
     find_unpreserved_test_obligation,
     identify_redirected_test_obligations,
 )
-
 
 # ---------------------------------------------------------------------------
 # identify_redirected_test_obligations

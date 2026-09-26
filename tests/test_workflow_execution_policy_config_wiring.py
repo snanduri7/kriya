@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.config import AppConfig
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass

@@ -5,6 +5,7 @@ consumer-invalidation flow."""
 
 import pytest
 
+from kriya.agents.contracts import MilestoneV2, ProvidedCapability
 from kriya.control.contracts import (
     ContractChangeConflictError,
     ContractNotFoundError,
@@ -16,7 +17,6 @@ from kriya.control.contracts import (
     mark_capabilities_implemented,
     wire_contract_consumers,
 )
-from kriya.agents.contracts import MilestoneV2, ProvidedCapability
 
 
 def _registry_with_one_contract(consumers=("M2", "M3")):

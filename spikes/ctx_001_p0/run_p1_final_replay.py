@@ -56,7 +56,6 @@ def _load_test_workflow_module():
 # ---------------------------------------------------------------------------
 
 async def replay_c2_automatic():
-    import asyncio
     from unittest.mock import AsyncMock
 
     from kriya.analyzer.analyzer import chunk_file_with_metadata_headers

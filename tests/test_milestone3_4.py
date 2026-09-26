@@ -5,10 +5,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from kriya.core.state_paths import trace_db_path
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.core.state_paths import trace_db_path
 from kriya.core.trace import TraceLogger
 from kriya.workflow.workflow import WorkflowEngine
 

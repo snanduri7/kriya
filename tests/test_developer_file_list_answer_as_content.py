@@ -10,7 +10,6 @@ to end through both execution paths - a direct `generate` and a milestone
 sequence - with a real workflow, real gates and the real commit seam.
 """
 import asyncio
-import os
 import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock

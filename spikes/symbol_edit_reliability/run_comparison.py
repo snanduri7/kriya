@@ -18,9 +18,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from symbol_client import SymbolAwareJdtlsClient, replace_symbol_by_name  # noqa: E402
+
 from kriya.tools.lsp import find_jdtls  # noqa: E402
 from kriya.workflow.edit_safety import apply_anchored_edits, find_structural_corruption  # noqa: E402
-from symbol_client import SymbolAwareJdtlsClient, replace_symbol_by_name  # noqa: E402
 
 FIXTURE_PROJECT = str(Path(__file__).resolve().parent / "project")
 CALCULATOR_JAVA = str(Path(FIXTURE_PROJECT) / "src/main/java/com/example/Calculator.java")

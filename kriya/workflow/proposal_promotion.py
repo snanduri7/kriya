@@ -43,7 +43,7 @@ marker there), not here.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.workflow.proposal_binding import proposal_to_authorized_semantic_regions
 from kriya.workflow.proposal_store import (

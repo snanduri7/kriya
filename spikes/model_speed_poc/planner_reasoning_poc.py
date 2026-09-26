@@ -71,9 +71,8 @@ SPIKE_DIR = Path(__file__).parent
 REPO_ROOT = SPIKE_DIR.parent.parent
 sys.path.insert(0, str(SPIKE_DIR.parent / "eval_harness"))
 
-from goals import GOALS  # noqa: E402
-
 from bench import call_ollama  # noqa: E402
+from goals import GOALS  # noqa: E402
 
 from kriya.agents.agent import ArchitectAgent, PlannerAgent  # noqa: E402
 from kriya.agents.contracts import parse_file_list  # noqa: E402

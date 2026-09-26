@@ -1,4 +1,4 @@
-from kriya.policy.execution import ExecutionPolicy, _STAGE_METHOD_NAMES
+from kriya.policy.execution import _STAGE_METHOD_NAMES, ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision
 
 

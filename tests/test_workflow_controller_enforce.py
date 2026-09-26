@@ -14,14 +14,26 @@ from typing import Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import strict_config, strict_kernel
 
 import kriya.workflow.plan_validation as plan_validation_module
-import kriya.workflow.workflow_controller as workflow_controller_module
 import kriya.workflow.terminal_commit as terminal_commit_module
-
+import kriya.workflow.workflow_controller as workflow_controller_module
 from kriya.control.persistence import load_approved_plan, load_control_state
 from kriya.control.state import ControlState
 from kriya.policy.filesystem import WriteScopeMode
+from kriya.workflow.attribution import (
+    FutureOwnerVerificationDeferral,
+    resolve_future_owner_verification_deferral,
+)
+from kriya.workflow.edit_safety import read_file_revision
+from kriya.workflow.obligations import (
+    ObligationAuthority,
+    ObligationKind,
+    ObligationLedger,
+    ObligationRecord,
+    ObligationStatus,
+)
 from kriya.workflow.plan_schema import (
     AcceptanceCriterion,
     EngineeringPlan,
@@ -42,24 +54,16 @@ from kriya.workflow.planning_diagnostics import (
     persist_planning_attempt_diagnostic,
     planning_diagnostics_path,
 )
+from kriya.workflow.recovery_plan import RecoveryAction, RecoveryParticipant, RecoveryParticipantRole
+from kriya.workflow.requirements import RequirementOutcome
+from kriya.workflow.self_correction import SelfCorrectionResult
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
-from kriya.workflow.obligations import (
-    ObligationAuthority,
-    ObligationKind,
-    ObligationLedger,
-    ObligationRecord,
-    ObligationStatus,
+from kriya.workflow.workflow import (
+    _record_future_owner_verification_deferred,
+    _settle_future_owner_verification_obligations,
 )
 from kriya.workflow.workflow_controller import (
     AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
-    _StructuredPlanUnavailable,
-    _is_strict_regression,
-    _preserved_reference_must_preserve_lines,
-    _preserved_reference_pairs_mentioned,
-    _preserved_reference_regressions,
-    _semantic_contract_must_preserve_lines,
-    _semantic_contract_regression_subtasks,
-    _subtask_ids_mentioned,
     ArtifactOwnerResolutionBasis,
     WorkflowController,
     _attempt_owner_recovery_self_correction,
@@ -69,42 +73,36 @@ from kriya.workflow.workflow_controller import (
     _evaluate_integration_obligations,
     _get_or_create_cross_owner_obligation,
     _integration_reference_token,
+    _is_strict_regression,
     _order_recovery_groups,
+    _preserved_reference_must_preserve_lines,
+    _preserved_reference_pairs_mentioned,
+    _preserved_reference_regressions,
     _scope_conflict_evidence_authority,
+    _semantic_contract_must_preserve_lines,
+    _semantic_contract_regression_subtasks,
+    _StructuredPlanUnavailable,
+    _subtask_ids_mentioned,
     _transitive_upstream_ids,
     build_authoritative_planner_request,
     build_planning_structural_evidence,
-    enforce_preserved_reference_terminal_integrity,
-    find_missing_grounded_production_artifacts,
     build_recovery_execution_plan,
-    resolve_python_module_to_candidate_artifact_path,
-    resolve_runtime_plan_gap_owner,
-    revise_plan_for_planned_prerequisite,
-    revise_plan_for_runtime_plan_gap,
+    build_structured_plan_repair_prompt,
     build_subtask_constraint_context,
     build_subtask_goal_text,
     build_subtask_semantic_context,
-    build_structured_plan_repair_prompt,
     derive_recovery_participants,
+    enforce_preserved_reference_terminal_integrity,
+    find_missing_grounded_production_artifacts,
     resolve_effective_artifact_owner,
-    resolve_effective_scope_conflict_owners,
+    resolve_python_module_to_candidate_artifact_path,
+    resolve_runtime_plan_gap_owner,
     resolve_scope_conflict_owners,
     revise_plan_for_grounded_scope_owner,
+    revise_plan_for_planned_prerequisite,
+    revise_plan_for_runtime_plan_gap,
 )
-from kriya.workflow.recovery_plan import RecoveryAction, RecoveryParticipant, RecoveryParticipantRole
-from kriya.workflow.self_correction import SelfCorrectionResult
 from kriya.workflow.workflow_types import SubtaskStatus
-from kriya.workflow.attribution import (
-    FutureOwnerVerificationDeferral,
-    resolve_future_owner_verification_deferral,
-)
-from kriya.workflow.workflow import (
-    _record_future_owner_verification_deferred,
-    _settle_future_owner_verification_obligations,
-)
-from kriya.workflow.edit_safety import read_file_revision
-from kriya.workflow.requirements import RequirementOutcome
-from _strict_doubles import strict_config, strict_kernel
 
 
 @pytest.fixture(autouse=True)
@@ -6265,8 +6263,6 @@ async def test_enforce_aggregated_status_is_failed_if_only_some_subtasks_ran(tmp
 # --- subtask-spanning resume (MA5.9 finally wired to something, 2026-08-24) ---
 
 import subprocess
-
-from kriya.control.persistence import load_control_state
 
 
 def _init_git_repo(path):

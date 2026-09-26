@@ -16,6 +16,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fixtures  # noqa: E402
+
 from kriya.workflow.context_budget import build_code_context, estimate_tokens  # noqa: E402
 
 BUDGETS = [8000, 16000, 32000]

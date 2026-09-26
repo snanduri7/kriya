@@ -25,6 +25,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import strict_engine
 from click.testing import CliRunner
 
 import kriya.control.run_coordinator as run_coordinator_module
@@ -66,7 +67,6 @@ from kriya.workflow.terminal_commit import (
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow import WorkflowEngine
 from kriya.workflow.workflow_controller import WorkflowController
-from _strict_doubles import strict_engine
 
 # ---------------------------------------------------------------- helpers
 

@@ -14,7 +14,6 @@ from kriya.workflow.context_projection import (
     render_established_file_context,
 )
 
-
 # --- project_established_file_context ---
 
 def test_project_established_file_context_matches_render_established_file_context_exactly():

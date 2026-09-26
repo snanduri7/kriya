@@ -88,55 +88,53 @@ from kriya.agents.contracts import (
     parse_planner_structured_output,
 )
 from kriya.analyzer.graph import DependencyGraph
-from kriya.workflow.attribution import DETERMINISTIC_ATTRIBUTION_TIERS
-from kriya.workflow.file_resolution import is_runnable_test_file
-from kriya.workflow.generation_manifest import FileRole, classify_file_role
+from kriya.control.artifacts import ArtifactRegistry
+from kriya.control.commit_state import assess_workspace_commit_state
+from kriya.control.contracts import ContractRegistry
 from kriya.control.decisions import (
     Decision,
     DecisionLedger,
     stamp_legacy_decision_ledger_ownership,
 )
-from kriya.control.artifacts import ArtifactRegistry
-from kriya.control.contracts import ContractRegistry
 from kriya.control.persistence import (
     UnreadableRunRecordError,
-    load_run_record,
+    artifact_registry_path,
+    contract_registry_path,
+    control_state_path,
     load_artifact_registry,
     load_contract_registry,
     load_control_state,
     load_control_state_run_reference,
-    artifact_registry_path,
-    contract_registry_path,
-    control_state_path,
-    save_artifact_registry,
+    load_run_record,
     save_approved_plan,
+    save_artifact_registry,
     save_contract_registry,
     save_control_state,
 )
-from kriya.control.state import ControlState
-from kriya.control.commit_state import assess_workspace_commit_state
-from kriya.workflow.execution_plan import PlanSourceKind
-from kriya.workflow.plan_executor import WorkUnitInvocation
 from kriya.control.run_coordinator import (
-    authorize_candidate_workspace,
     annotate_run,
+    authorize_candidate_workspace,
     coordinated_mutation,
     current_run_context,
     mark_run_stage,
 )
 from kriya.control.run_record import RunLifecycle
+from kriya.control.state import ControlState
 from kriya.control.workspace_identity import json_document_is_ownerless
+from kriya.policy.filesystem import WriteScopeMode
 from kriya.workflow import subtask_executor
+from kriya.workflow.acceptance import goal_requires_runtime_behavior
+from kriya.workflow.attribution import DETERMINISTIC_ATTRIBUTION_TIERS
 from kriya.workflow.checkpoint import (
     ResumeStatus,
     compute_base_commit,
     compute_registry_hash,
     compute_tree_hash,
     compute_workspace_content_hash,
-    new_run_id,
-    validate_resume_against_reality,
     list_checkpoints,
+    new_run_id,
     save_checkpoint,
+    validate_resume_against_reality,
 )
 from kriya.workflow.context_orchestrator import ContextOrchestrator
 from kriya.workflow.context_package import (
@@ -147,12 +145,22 @@ from kriya.workflow.context_package import (
 )
 from kriya.workflow.context_projection import project_implementation_source, render_established_file_context
 from kriya.workflow.control_context import WorkflowControlContext
-from kriya.policy.filesystem import WriteScopeMode
-from kriya.workflow.migration import (
-    MigrationResolution, MigrationResolutionStatus, MigrationValidationScope,
-    find_migration_incomplete, resolve_migration_resolution,
-)
 from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
+from kriya.workflow.edit_safety import (
+    StagedFileWrite,
+    content_revision,
+    read_file_revision,
+)
+from kriya.workflow.execution_plan import PlanSourceKind
+from kriya.workflow.file_resolution import is_runnable_test_file
+from kriya.workflow.generation_manifest import FileRole, classify_file_role
+from kriya.workflow.migration import (
+    MigrationResolution,
+    MigrationResolutionStatus,
+    MigrationValidationScope,
+    find_migration_incomplete,
+    resolve_migration_resolution,
+)
 from kriya.workflow.obligations import (
     ObligationAuthority,
     ObligationKind,
@@ -160,6 +168,15 @@ from kriya.workflow.obligations import (
     ObligationRecord,
     ObligationStatus,
 )
+from kriya.workflow.ownership_findings import (
+    find_ownership_findings,
+    findings_prompt_block,
+    grounded_owner_candidates,
+    owner_candidates_prompt_block,
+    record_findings,
+    settle_findings,
+)
+from kriya.workflow.plan_executor import WorkUnitInvocation
 from kriya.workflow.plan_schema import (
     EngineeringPlan,
     ExecutionMethod,
@@ -171,6 +188,16 @@ from kriya.workflow.plan_schema import (
     VerificationMethodType,
     build_engineering_plan_from_planner_output,
 )
+from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
+from kriya.workflow.planner_repair import (
+    STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
+    build_structured_plan_repair_prompt,
+    classify_structured_plan_parse_issue,
+)
+from kriya.workflow.planning_diagnostics import (
+    bounded_repository_evidence,
+    persist_planning_attempt_diagnostic,
+)
 from kriya.workflow.recovery_plan import (
     RecoveryAction,
     RecoveryExecutionPlan,
@@ -178,26 +205,6 @@ from kriya.workflow.recovery_plan import (
     RecoveryOwnerGroup,
     RecoveryParticipant,
     RecoveryParticipantRole,
-)
-from kriya.workflow.edit_safety import (
-    StagedFileWrite,
-    content_revision,
-    read_file_revision,
-)
-from kriya.workflow.terminal_commit import (
-    CandidateFile,
-    CandidateMaterializationError,
-    commit_terminal_candidate,
-    materialize_candidate,
-)
-from kriya.workflow.plan_validation import canonicalize_planned_file_actions, validate_plan
-from kriya.workflow.ownership_findings import (
-    find_ownership_findings,
-    findings_prompt_block,
-    grounded_owner_candidates,
-    owner_candidates_prompt_block,
-    record_findings,
-    settle_findings,
 )
 from kriya.workflow.requirements import (
     REQUIREMENTS_UNRESOLVED,
@@ -211,11 +218,10 @@ from kriya.workflow.requirements import (
     requirements_prompt_block,
     seed_requirement_obligations,
 )
-from kriya.workflow.acceptance import goal_requires_runtime_behavior
-from kriya.workflow.static_checks import derive_stack_contract, log_stack_contract_boundary, validate_stack_contract_artifacts
-from kriya.workflow.planning_diagnostics import (
-    bounded_repository_evidence,
-    persist_planning_attempt_diagnostic,
+from kriya.workflow.static_checks import (
+    derive_stack_contract,
+    log_stack_contract_boundary,
+    validate_stack_contract_artifacts,
 )
 from kriya.workflow.subtask_checkpoint import topological_subtask_order
 from kriya.workflow.subtask_context_projection import project_for_subtask
@@ -225,10 +231,11 @@ from kriya.workflow.subtask_telemetry import (
     record_subtask_attempt,
     record_undeclared_file_touch,
 )
-from kriya.workflow.planner_repair import (
-    STRUCTURED_PLAN_REPAIR_MAX_ATTEMPTS,
-    build_structured_plan_repair_prompt,
-    classify_structured_plan_parse_issue,
+from kriya.workflow.terminal_commit import (
+    CandidateFile,
+    CandidateMaterializationError,
+    commit_terminal_candidate,
+    materialize_candidate,
 )
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.verification_report import build_verification_report

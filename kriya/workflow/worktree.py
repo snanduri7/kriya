@@ -1,16 +1,10 @@
 """Git worktree sandbox lifecycle for the Developer + Quality Gates retry loop - create/reset/sync/remove. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
-import asyncio
-import difflib
-import hashlib
 import logging
 import os
-import re
 import shutil
 import subprocess
-import sys
-import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import List, Optional
 
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError

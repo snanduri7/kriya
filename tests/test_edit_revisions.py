@@ -1,7 +1,9 @@
 import pytest
 
 from kriya.workflow.edit_safety import (
-    FileRevisionConflict, apply_anchored_edits, commit_revision_grounded_file,
+    FileRevisionConflict,
+    apply_anchored_edits,
+    commit_revision_grounded_file,
     content_revision,
 )
 

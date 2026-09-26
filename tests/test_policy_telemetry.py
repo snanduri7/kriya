@@ -9,8 +9,7 @@ import json
 import pytest
 
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
-from kriya.policy.telemetry import PolicyDecisionRecord, build_decision_record, scrub_potential_secrets
-
+from kriya.policy.telemetry import build_decision_record, scrub_potential_secrets
 
 # --- scrub_potential_secrets: real secret shapes get redacted ---
 

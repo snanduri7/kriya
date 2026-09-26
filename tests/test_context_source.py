@@ -7,16 +7,13 @@ from kriya.workflow.context_source import (
     extract_member_body,
     java_member_boundaries,
     member_boundaries_for,
-    member_ids_matching_name,
     parse_controlled_chunk_header_name,
-    python_member_boundaries,
     python_member_ranges,
     resolve_member_hints_from_chunk_header,
     resolve_member_hints_from_failure_location,
     resolve_member_hints_from_search_evidence,
     resolve_verified_grounding_member_id,
 )
-
 
 # --- WP4: CurrentSourceResolver ---------------------------------------------
 

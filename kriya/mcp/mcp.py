@@ -8,13 +8,13 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from pydantic import BaseModel, Field, create_model
 
 from kriya.core.kernel import Kernel
-from kriya.tools.containment import ContainmentSetupError, resolve_containment_backend
 from kriya.mcp.capability import (
     MCPCapabilityProfile,
     compute_mcp_capability_profile_digest,
     resolve_mcp_capability_profile,
 )
 from kriya.mcp.containment_adapter import map_capability_profile_to_containment
+from kriya.mcp.invocation_approval import resolve_mcp_invocation_approval
 from kriya.mcp.lifecycle import (
     MCPLifecycleError,
     MCPProtocolViolationError,
@@ -23,7 +23,6 @@ from kriya.mcp.lifecycle import (
     spawn_mcp_process,
     terminate_mcp_process,
 )
-from kriya.mcp.invocation_approval import resolve_mcp_invocation_approval
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import (
@@ -37,6 +36,7 @@ from kriya.policy.model import (
     compute_mcp_schema_digest,
 )
 from kriya.policy.telemetry import build_decision_record
+from kriya.tools.containment import ContainmentSetupError, resolve_containment_backend
 from kriya.tools.sandbox import build_restricted_env
 from kriya.tools.tool import BaseTool, ToolExecutionError
 

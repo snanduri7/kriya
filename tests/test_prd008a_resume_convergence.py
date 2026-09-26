@@ -130,8 +130,10 @@ def test_direct_resume_selects_its_own_checkpoint_and_prd008_still_judges_it(cal
     [own] = [c["run_id"] for c in list_checkpoints(str(calc_workspace))]
     _save(calc_workspace, "milestone-newer", 10 ** 12, work_unit=_milestone_record("M1"), milestone_group_id="G")
 
-    from test_prd008a_plan_executor import _config, _role_llm
     from unittest.mock import AsyncMock
+
+    from test_prd008a_plan_executor import _config, _role_llm
+
     from kriya.core.kernel import Kernel
     from kriya.workflow.workflow import WorkflowEngine
 

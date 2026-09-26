@@ -80,13 +80,16 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
-from kriya.workflow.obligations import ObligationAuthority, ObligationKind, ObligationRecord, ObligationStatus
-from kriya.workflow.plan_schema import FileOwnershipRelation
-
 # Annotation-only names, imported at runtime so typing.get_type_hints()
 # resolves (PRD-001); no cycle.
-from kriya.workflow.obligations import ObligationLedger
-from kriya.workflow.plan_schema import EngineeringPlan
+from kriya.workflow.obligations import (
+    ObligationAuthority,
+    ObligationKind,
+    ObligationLedger,
+    ObligationRecord,
+    ObligationStatus,
+)
+from kriya.workflow.plan_schema import EngineeringPlan, FileOwnershipRelation
 
 _IGNORED_DIRS = {".git", ".kriya", "target", "build", "dist", "node_modules", ".venv", "venv"}
 _NON_PRODUCTION_SCOPES = {"test", "provided", "system"}

@@ -1,7 +1,7 @@
+from kriya.core.trace import TraceLogger
 from kriya.workflow.failure import Failure
 from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
 from kriya.workflow.state import GenerationState
-from kriya.core.trace import TraceLogger
 
 
 def test_auxiliary_failure_cannot_replace_authoritative_primary():

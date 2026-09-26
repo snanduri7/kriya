@@ -26,7 +26,6 @@ exercised (a large function containing a nested closure with a
 grounded-vs-ungrounded branch), never real content. No live model/Ollama/
 embedding calls anywhere in this file.
 """
-from typing import Dict
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -36,8 +35,8 @@ from kriya.core.kernel import Kernel
 from kriya.workflow.attempt import (
     AttemptContext,
     _classify_retry_target_source_origin,
-    _compute_retry_evidence_fingerprint,
     _completeness_gated_operation,
+    _compute_retry_evidence_fingerprint,
     _prepare_retry_context,
     _record_retry_projection_context_items,
     _resolve_retry_member_hints,
@@ -49,7 +48,6 @@ from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
 from kriya.workflow.operations import CodeOperation
 from kriya.workflow.retry_package import build_retry_package
 from kriya.workflow.state import GenerationState
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures (this file's own copies - see _minimal_attempt_ctx's own

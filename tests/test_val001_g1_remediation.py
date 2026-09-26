@@ -24,7 +24,6 @@ never its actual content.
 
 No live model/Ollama/embedding calls anywhere in this file.
 """
-from typing import Dict
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -32,12 +31,12 @@ import pytest
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.workflow.attempt import (
-    _resolve_retry_member_hints,
     AttemptContext,
     _completeness_gated_operation,
     _operation_map,
     _record_all_files_written_as_exact_context,
     _record_retry_projection_context_items,
+    _resolve_retry_member_hints,
 )
 from kriya.workflow.context_budget import build_known_target_context, estimate_tokens
 from kriya.workflow.context_package import make_context_item
@@ -51,7 +50,6 @@ from kriya.workflow.file_resolution import (
 from kriya.workflow.operations import CodeOperation, operation_for_attempt
 from kriya.workflow.retry_package import build_retry_package
 from kriya.workflow.state import APIContractRecovery, APIContractRecoveryPhase, GenerationState
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -724,6 +722,7 @@ class TestD1MetaRegression:
         mechanism D1's own downgrade routes into. Verified against the real
         module's source, not asserted from the design doc alone."""
         import inspect
+
         import kriya.workflow.self_correction as self_correction_mod
         source = inspect.getsource(self_correction_mod)
         assert "apply_anchored_edits" in source
@@ -740,6 +739,7 @@ class TestD1MetaRegression:
         itself - those come from the retry-mode-specific builders it hands
         its augmented error text to, same as any other retry."""
         import inspect
+
         import kriya.workflow.live_lookup as live_lookup_mod
         source = inspect.getsource(live_lookup_mod)
         assert "ContextItem" not in source

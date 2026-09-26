@@ -8,7 +8,6 @@ classified here.
 from pathlib import Path
 from typing import List, Optional
 
-
 _MAVEN_LIFECYCLE_GOALS = {
     "validate", "compile", "test", "package", "verify", "install",
     "test-compile", "clean",

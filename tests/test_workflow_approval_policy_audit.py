@@ -6,9 +6,9 @@ misconfigured or outright broken policy engine.
 """
 from unittest.mock import MagicMock
 
+from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.config import AppConfig
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow import WorkflowEngine

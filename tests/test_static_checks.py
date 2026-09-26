@@ -10,9 +10,9 @@ from kriya.workflow.static_checks import (
     IgniteDuplicateSpringContextCheck,
     IgniteMethodMixingCheck,
     IgniteUnclosedResourceCheck,
+    MarkdownInlineCodeLeakCheck,
     MismatchedFileTypeContentCheck,
     TestContradictsVerificationMarkerCheck,
-    MarkdownInlineCodeLeakCheck,
     run_static_checks,
 )
 

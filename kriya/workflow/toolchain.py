@@ -1,16 +1,12 @@
 """JDK/JAVA_HOME toolchain detection and correction for the Java/Maven retry loop - version mismatches, JDK-incompatible JVM flags, missing build manifests. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
-import asyncio
-import difflib
-import hashlib
 import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
-import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 

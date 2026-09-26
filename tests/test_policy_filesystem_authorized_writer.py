@@ -13,7 +13,6 @@ import pytest
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import (
     AuthorizedFileWriter,
-    FilesystemScope,
     WriteScopeMode,
     is_within_scope,
     make_workspace_scope,

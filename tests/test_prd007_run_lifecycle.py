@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import strict_config, strict_kernel
 
 import kriya.control.persistence as persistence_module
 import kriya.control.run_coordinator as run_coordinator_module
@@ -63,7 +64,6 @@ from kriya.workflow.terminal_commit import (
 )
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
 from kriya.workflow.workflow_controller import WorkflowController
-from _strict_doubles import strict_config, strict_kernel
 
 MP = multiprocessing.get_context("fork")
 
@@ -554,12 +554,11 @@ async def test_generation_workflow_terminal_apply_goes_through_the_recorded_seam
     """The default (non-controller) path: a REAL WorkflowEngine run, with
     only the model mocked, applies its verified sandbox through the shared
     seam - byte-exact, with durable intent and a settled cycle."""
+    import kriya.workflow.workflow as workflow_module
     from kriya.config import AppConfig
     from kriya.core.kernel import Kernel
     from kriya.core.llm import LLMClient
     from kriya.workflow.workflow import WorkflowEngine
-
-    import kriya.workflow.workflow as workflow_module
 
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
