@@ -70,7 +70,6 @@ MA7.1's scope, left for a later increment.
 """
 from __future__ import annotations
 
-import asyncio
 import functools
 import hashlib
 import json
@@ -79,7 +78,6 @@ import os
 import re
 import shutil
 import time
-import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
@@ -138,6 +136,7 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
     validate_resume_against_reality,
 )
+from kriya.workflow.commit_service import TerminalCommitRequest, commit_verified_candidate
 from kriya.workflow.context_budget import CandidatePrompts, candidate_model, fit_reference_section
 from kriya.workflow.context_orchestrator import ContextOrchestrator
 from kriya.workflow.context_package import (
@@ -150,8 +149,6 @@ from kriya.workflow.context_projection import project_implementation_source, ren
 from kriya.workflow.control_context import WorkflowControlContext
 from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
 from kriya.workflow.edit_safety import (
-    StagedFileWrite,
-    content_revision,
     read_file_revision,
 )
 from kriya.workflow.execution_plan import PlanSourceKind
@@ -160,7 +157,6 @@ from kriya.workflow.generation_manifest import FileRole, classify_file_role
 from kriya.workflow.migration import (
     MigrationResolution,
     MigrationResolutionStatus,
-    MigrationValidationScope,
     find_migration_incomplete,
     resolve_migration_resolution,
 )
@@ -213,17 +209,13 @@ from kriya.workflow.recovery_plan import (
     RecoveryParticipantRole,
 )
 from kriya.workflow.requirements import (
-    REQUIREMENTS_UNRESOLVED,
-    RequirementSet,
     blocking_requirements,
     derive_requirements,
-    record_requirement_verdicts,
     requirement_evidence,
     requirement_outcomes,
     requirement_verdict_details,
     requirements_prompt_block,
     seed_requirement_obligations,
-    verifier_result_verdicts,
 )
 from kriya.workflow.static_checks import (
     derive_stack_contract,
@@ -238,11 +230,13 @@ from kriya.workflow.subtask_telemetry import (
     record_subtask_attempt,
     record_undeclared_file_touch,
 )
-from kriya.workflow.terminal_commit import (
-    CandidateFile,
-    CandidateMaterializationError,
-    commit_terminal_candidate,
-    materialize_candidate,
+from kriya.workflow.terminal_gate_service import (
+    TERMINAL_GATES_NOT_RUN,
+    TerminalGateRequest,
+    TerminalGateService,
+    TerminalGateValidators,
+    _verify_original_requirements,
+    enforce_preserved_reference_terminal_integrity,
 )
 from kriya.workflow.triage import ChangeKind
 from kriya.workflow.verification_report import build_verification_report
@@ -563,52 +557,6 @@ def build_subtask_plan_text(subtask: Subtask) -> str:
     gracefully to an ordinary fresh Developer generation call when it finds
     nothing - exactly the behavior a bounded subtask needs."""
     return f"Implement: {subtask.description}"
-
-
-def _terminal_candidate_paths(plan: EngineeringPlan) -> List[str]:
-    """Every path the plan leaves in the candidate (its final action is
-    not a delete), in plan order."""
-    final_action: Dict[str, FileAction] = {}
-    for subtask in plan.subtasks:
-        for planned in subtask.planned_files:
-            final_action[planned.path] = planned.action
-    return [path for path, action in final_action.items() if action != FileAction.DELETE]
-
-
-async def _verify_original_requirements(
-    spec_compliance: Any, requirements: RequirementSet, goal: str, candidate_root: str,
-    paths: List[str], ledger: ObligationLedger,
-) -> List[str]:
-    """PRD-020: one verifier pass over the whole candidate, recording each
-    original requirement's outcome (UNKNOWN when the verifier gave none)
-    with the candidate's content fingerprint as its evidence id. Returns
-    the verifier findings (an unavailable verdict, e.g. a call PRD-016
-    refused for size, invented ids) for the gate's message."""
-    contents: Dict[str, str] = {}
-    for path in paths:
-        full = os.path.join(candidate_root, path)
-        if os.path.isfile(full):
-            with open(full, "r", encoding="utf-8", errors="replace") as handle:
-                contents[path] = handle.read()
-    files = sorted(contents)
-    fingerprint = content_revision(
-        goal + "\x00" + "\x00".join(f"{path}\x01{contents[path]}" for path in files))
-    result = await spec_compliance.check(
-        goal=goal, files_written=files, file_contents=contents, requirements=requirements,
-    )
-    # MODEL-EVIDENCE-HARDENING-001: every verdict with its reason code and
-    # the verifier's identity; an id without one says why there is none.
-    verdicts, findings, missing_reason, missing_detail = verifier_result_verdicts(result, requirements)
-    if findings:
-        logger.warning("Original requirement verification findings: %s", findings)
-    record_requirement_verdicts(
-        ledger, requirements, verdicts, revision="terminal", evidence_fingerprint=fingerprint,
-        source="workflow_controller.terminal_requirements",
-        gate_evidence=["enforce terminal gates: every subtask verified"],
-        missing_reason=missing_reason, missing_detail=missing_detail,
-        verifier=(result or {}).get("verifier"),
-    )
-    return findings
 
 
 AUTHORITATIVE_PLANNER_SYSTEM_PROMPT = (
@@ -1462,42 +1410,6 @@ def find_missing_grounded_production_artifacts(
                 terminal_required=False,
             ))
     return gaps
-
-
-def enforce_preserved_reference_terminal_integrity(
-    obligation_ledger: ObligationLedger, workspace_path: str,
-) -> None:
-    """PRV-11 preservation extension (2026-09-06/07, Production Validation
-    P2): the terminal half of ObligationKind.PRESERVED_REFERENCE - see that
-    kind's own docstring (kriya/workflow/obligations.py) for why this
-    re-hash, not a heuristic, is the enforcement mechanism.
-
-    Re-checks only currently-SATISFIED records: a record already VIOLATED
-    or PENDING for some other reason needs no further evidence to already
-    disqualify the run via unresolved_terminal_obligations(); this
-    function's only job is catching the case that check alone cannot -
-    a preservation that was genuinely honored at plan-acceptance time but
-    silently violated somewhere during generation."""
-    for rec in obligation_ledger.current_by_kind(ObligationKind.PRESERVED_REFERENCE):
-        if rec.status != ObligationStatus.SATISFIED:
-            continue
-        target = rec.evidence.get("target")
-        baseline_hash = rec.evidence.get("baseline_hash")
-        if not target or baseline_hash is None:
-            continue
-        current_hash = read_file_revision(os.path.join(workspace_path, target))
-        if current_hash != baseline_hash:
-            obligation_ledger.record(ObligationRecord(
-                id=rec.id, kind=ObligationKind.PRESERVED_REFERENCE,
-                status=ObligationStatus.VIOLATED,
-                authority=ObligationAuthority.DETERMINISTIC,
-                description=rec.description,
-                source="workflow_controller.enforce_preserved_reference_terminal_integrity",
-                revision="terminal",
-                evidence={**rec.evidence, "current_hash": current_hash},
-                owner_subtask_id=rec.owner_subtask_id,
-                terminal_required=True,
-            ))
 
 
 def build_approved_plan_document(
@@ -6414,19 +6326,13 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         )
         all_completed = subtasks_completed
 
-        global_migration_gap: Optional[str] = None
-        global_stack_contract_gap: Optional[str] = None
-        global_preserved_reference_gap: Optional[str] = None
-        global_terminal_obligation_gap: Optional[str] = None
-        global_requirement_gap: Optional[str] = None
-        # PRD-020 closure attempts; empty when the run stops before the terminal gates.
-        requirement_closure_attempts: List[Dict[str, Any]] = []
-        artifact_error: Optional[str] = None
-        candidate_derived_artifacts = ()
+        gate_report = TERMINAL_GATES_NOT_RUN
         terminal_observability_errors: List[Dict[str, str]] = []
         post_commit_persistence_errors: List[Dict[str, str]] = []
         workspace_commit_completed = False
         workspace_commit_evidence: Optional[Dict[str, Any]] = None
+        workspace_commit_failure: Optional[Dict[str, Any]] = None
+        committed_contract_registry: Optional[Dict[str, Any]] = None
 
         async def _emit_terminal_event(event_name: str, **data: Any) -> None:
             """Terminal lifecycle events are telemetry, never correctness gates."""
@@ -6454,313 +6360,56 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 payload["reason"] = reason
             await _emit_terminal_event("terminal_gate_outcome", **payload)
 
-        def _materialize_terminal_writes() -> List[StagedFileWrite]:
-            """The verified candidate as one revision-grounded batch, in the
-            final action each approved path has after every subtask."""
-            subtasks_by_id = {subtask.id: subtask for subtask in plan.subtasks}
-            final_action_by_path: Dict[str, FileAction] = {}
-            for sid in topological_subtask_order(plan):
-                if sid in subtasks_by_id:
-                    for planned_file in subtasks_by_id[sid].planned_files:
-                        final_action_by_path[planned_file.path] = planned_file.action
-            return materialize_candidate(plan_workspace_path, workspace_path, [
-                CandidateFile(
-                    relpath=path, expected_base_revision=original_plan_revisions[path],
-                    expected_base_exists=(action != FileAction.CREATE),
-                    delete=(action == FileAction.DELETE),
-                )
-                for path, action in final_action_by_path.items()
-            ])
-
-        async def _commit_verified_candidate() -> Optional[Dict[str, Any]]:
-            """PRD-004: the one real-workspace transaction of an enforce run.
-
-            Returns None after a successful commit, or a structured failure
-            whose ``workspace_state`` says whether the real workspace is
-            UNCHANGED or UNCERTAIN. The commit itself, its durable RunRecord
-            intent and its settled result are kriya/workflow/terminal_commit.py's
-            (PRD-007), shared with the generation workflow's terminal apply.
-            """
-            nonlocal workspace_commit_completed, workspace_commit_evidence
-            try:
-                terminal_writes = _materialize_terminal_writes()
-            except CandidateMaterializationError as error:
-                return {
-                    "reason_code": "CANDIDATE_MATERIALIZATION_FAILED",
-                    "workspace_state": "UNCHANGED", "error": str(error),
-                }
-            ledger_revision, ledger_hash = obligation_ledger.fingerprint()
-            # Unique per cycle: run_id is shared by nested executes (the
-            # outer run's id) and reused by resume/trace overrides, and one
-            # commit-evidence file must only ever describe one transaction.
-            run_prefix = re.sub(r"[^A-Za-z0-9_-]", "", run_id).lstrip("-_")[:100] or "run"
-            transaction_id = f"{run_prefix}-{uuid.uuid4().hex[:12]}"
-            outcome = commit_terminal_candidate(
-                terminal_writes, workspace_path=workspace_path, transaction_id=transaction_id,
-                evidence={
-                    "approved_plan_hash": current_plan_hash,
-                    "obligation_ledger_revision": ledger_revision,
-                    "obligation_ledger_hash": ledger_hash,
-                    "verification_evidence_ids": [f"commit:{transaction_id}"],
-                },
-                contract_transition=_enforce_contract_transition(
-                    terminal_writes, workspace_path=workspace_path, goal=goal, plan=plan,
-                    transaction_id=transaction_id, subtask_call_results=subtask_call_results,
-                ),
-            )
-            if not outcome.committed:
-                return outcome.failure_payload()
-            if outcome.contract_registry is not None:
-                committed_contract_registry.append(outcome.contract_registry)
-            # The workspace now holds the verified candidate. Everything after
-            # this line is persistence/observability and cannot undo that.
-            workspace_commit_completed = True
-            if outcome.evidence is not None:
-                workspace_commit_evidence = outcome.evidence.to_dict()
-            post_commit_persistence_errors.extend(outcome.record_errors)
-            return None
-
-        workspace_commit_failure: Optional[Dict[str, Any]] = None
-        committed_contract_registry: List[Dict[str, Any]] = []
-
         try:
             if subtasks_completed:
                 # PRD-004: every blocking terminal gate runs against the one
                 # isolated candidate. The real workspace remains immutable
-                # until this complete set has passed.
+                # until this complete set has passed (PRD-030: the gates are
+                # terminal_gate_service's, the commit commit_service's).
                 mark_run_stage(workspace_path, RunLifecycle.VERIFYING)
                 await _emit_terminal_event(
                     "terminal_gates_started", candidate_workspace=plan_workspace_path,
                 )
-
-                try:
-                    if migration_resolution.status == MigrationResolutionStatus.RESOLVED:
-                        obligation = migration_resolution.obligation
-                        gap = find_migration_incomplete(
-                            obligation, plan_workspace_path,
-                            validation_scope=MigrationValidationScope.TERMINAL,
-                            obligation_ledger=obligation_ledger,
-                            revision="terminal", source="migration.terminal_gate",
-                        ) if obligation else None
-                        if gap:
-                            global_migration_gap = (
-                                "MIGRATION INCOMPLETE (global final-state check): the goal "
-                                f"explicitly requires replacing {gap['source_identity']} with "
-                                f"{gap['target_identity']}, but {', '.join(gap['reason_codes'])}."
-                            )
-                    elif migration_resolution.status == MigrationResolutionStatus.INDETERMINATE:
-                        global_migration_gap = (
-                            "MIGRATION OBLIGATION INDETERMINATE (global final-state check): the goal "
-                            "explicitly expresses replacement intent, but source/target dependency "
-                            f"identity could not be resolved confidently ({migration_resolution.reason}). "
-                            "Refusing to report success on an unconfirmed migration obligation."
-                        )
-                        if obligation_ledger is not None:
-                            obligation_ledger.record(ObligationRecord(
-                                id="migration.identity_resolution",
-                                kind=ObligationKind.MIGRATION_COMPLETION,
-                                status=ObligationStatus.INDETERMINATE,
-                                authority=ObligationAuthority.DETERMINISTIC,
-                                description="migration source/target dependency identity could not be "
-                                            "resolved confidently from the immutable pre-mutation baseline",
-                                source="migration.terminal_gate", revision="terminal",
-                                evidence={"reason": migration_resolution.reason},
-                                terminal_required=True,
-                            ))
-                except Exception as error:
-                    global_migration_gap = (
-                        "MIGRATION FINAL-STATE CHECK INDETERMINATE: the deterministic terminal "
-                        f"migration validator itself raised ({type(error).__name__}: {error}) - refusing to "
-                        "report success on an unverifiable terminal obligation rather than silently "
-                        "trusting the per-subtask gates."
-                    )
-                await _emit_gate_outcome(
-                    "migration", "failed" if global_migration_gap else "passed",
-                    global_migration_gap,
-                )
-
-                try:
-                    terminal_stack_contract = derive_stack_contract(goal)
-                    global_stack_contract_gap = validate_stack_contract_artifacts(
-                        terminal_stack_contract,
-                        (pf.path for st in plan.subtasks for pf in st.planned_files),
-                    )
-                    log_stack_contract_boundary(
-                        "terminal", terminal_stack_contract, global_stack_contract_gap,
-                    )
-                except Exception as error:
-                    global_stack_contract_gap = (
-                        "STACK CONTRACT FINAL-STATE CHECK INDETERMINATE: "
-                        f"{type(error).__name__}: {error}"
-                    )
-                await _emit_gate_outcome(
-                    "stack_contract", "failed" if global_stack_contract_gap else "passed",
-                    global_stack_contract_gap,
-                )
-
-                try:
-                    enforce_preserved_reference_terminal_integrity(
-                        obligation_ledger, plan_workspace_path,
-                    )
-                    violated_preserved = [
-                        record for record in obligation_ledger.current_by_kind(
-                            ObligationKind.PRESERVED_REFERENCE
-                        )
-                        if record.terminal_required
-                        and record.status != ObligationStatus.SATISFIED
-                    ]
-                    if violated_preserved:
-                        global_preserved_reference_gap = (
-                            "PRESERVED REFERENCES UNSATISFIED: "
-                            + "; ".join(
-                                f"{record.id} ({record.status.value})"
-                                for record in violated_preserved
-                            )
-                        )
-                except Exception as error:
-                    global_preserved_reference_gap = (
-                        "PRESERVED REFERENCE FINAL-STATE CHECK INDETERMINATE: "
-                        f"{type(error).__name__}: {error}"
-                    )
-                await _emit_gate_outcome(
-                    "preserved_references",
-                    "failed" if global_preserved_reference_gap else "passed",
-                    global_preserved_reference_gap,
-                )
-
-                try:
-                    unresolved_terminal = obligation_ledger.unresolved_terminal_obligations()
-                    if unresolved_terminal:
-                        global_terminal_obligation_gap = (
-                            "TERMINAL OBLIGATIONS UNSATISFIED (MA8 global aggregation check): "
-                            + "; ".join(
-                                f"{rec.id} ({rec.status.value}, authority={rec.authority.value})"
-                                for rec in unresolved_terminal
-                            )
-                        )
-                except Exception as error:
-                    global_terminal_obligation_gap = (
-                        "TERMINAL OBLIGATION AGGREGATION INDETERMINATE: "
-                        f"{type(error).__name__}: {error}"
-                    )
-                await _emit_gate_outcome(
-                    "terminal_obligations",
-                    "failed" if global_terminal_obligation_gap else "passed",
-                    global_terminal_obligation_gap,
-                )
-
-                # PRD-020: the user's original requirements, judged against the
-                # whole verified candidate by the verifier (never by the plan's
-                # own acceptance text), then the requirement policy decides.
-                try:
-                    autonomy_policy = getattr(getattr(
-                        getattr(self.workflow_engine, "kernel", None), "config", None), "autonomy", None)
-                    verifier_findings: List[str] = []
-                    if autonomy_policy is not None and autonomy_policy.spec_compliance_enabled:
-                        verifier_findings = await _verify_original_requirements(
-                            self.workflow_engine.spec_compliance, requirement_set, goal,
-                            plan_workspace_path, _terminal_candidate_paths(plan), obligation_ledger,
-                        )
-                        # "Do not modify any other file": decided from what this
-                        # final candidate (and the run's committed history)
-                        # actually changed, against the files the goal names.
-                        from kriya.workflow.workflow import (
-                            close_requirements_by_mutation_scope,
-                            close_requirements_with_named_tests,
-                        )
-
-                        scope_closures = await asyncio.to_thread(
-                            close_requirements_by_mutation_scope, obligation_ledger, requirement_set,
-                            plan_workspace_path, workspace_path,
-                            candidate_paths=[planned.path for subtask in plan.subtasks
-                                             for planned in subtask.planned_files],
-                            revision="terminal",
-                        )
-                        if scope_closures:
-                            logger.info("Original requirement mutation-scope evidence: %s", scope_closures)
-                        # An UNVERIFIED requirement naming existing tests: run
-                        # exactly those on this candidate (never a model citation).
-                        closures = await asyncio.to_thread(
-                            close_requirements_with_named_tests, autonomy_policy, obligation_ledger,
-                            requirement_set, plan_workspace_path, workspace_path,
-                            modified=_terminal_candidate_paths(plan), revision="terminal",
-                        )
-                        if closures:
-                            logger.info("Original requirement closure by named tests: %s", closures)
-                        requirement_closure_attempts = scope_closures + closures
-                        # The terminal migration gate just judged this same final
-                        # candidate; a requirement stating the migration itself
-                        # is closed by it (attempt._close_requirements_by_migration_gate).
-                        if not global_migration_gap and requirement_set.requirements:
-                            from types import SimpleNamespace
-
-                            from kriya.workflow.attempt import _close_requirements_by_migration_gate
-                            from kriya.workflow.requirements import requirement_obligation_id
-
-                            verdict = obligation_ledger.current(
-                                requirement_obligation_id(requirement_set.requirements[0].id))
-                            terminal_fingerprint = (verdict.evidence or {}).get("evidence_id") if verdict else None
-                            if terminal_fingerprint:
-                                _close_requirements_by_migration_gate(
-                                    SimpleNamespace(attempt_number="terminal"),
-                                    SimpleNamespace(requirement_set=requirement_set,
-                                                    obligation_ledger=obligation_ledger),
-                                    terminal_fingerprint,
-                                )
-                    blocking = blocking_requirements(
-                        obligation_ledger, requirement_set,
-                        unknown_policy=getattr(autonomy_policy, "requirement_unknown_policy", "record"),
-                        unverified_policy=getattr(autonomy_policy, "requirement_unverified_policy", "record"),
-                    )
-                    if blocking:
-                        global_requirement_gap = f"{REQUIREMENTS_UNRESOLVED}: " + "; ".join(
-                            f"{req.id} ({outcome.value}): {req.text}" for req, outcome in blocking)
-                        if verifier_findings:
-                            global_requirement_gap += " [verifier: " + "; ".join(verifier_findings) + "]"
-                except Exception as error:
-                    global_requirement_gap = (
-                        f"{REQUIREMENTS_UNRESOLVED}: original requirement verification failed "
-                        f"({type(error).__name__}: {error}); refusing success without it."
-                    )
-                await _emit_gate_outcome(
-                    "original_requirements",
-                    "failed" if global_requirement_gap else "passed",
-                    global_requirement_gap,
-                )
-
-                try:
-                    milestone_id = control_state.current_milestone_id or run_id
-                    artifact_registry = load_artifact_registry(workspace_path)
-                    candidate_derived_artifacts = ArtifactRegistry.derive_from_workspace(
-                        artifact_registry, plan_workspace_path, milestone_id,
-                    )
-                except Exception as error:
-                    artifact_error = str(error)
-                await _emit_gate_outcome(
-                    "artifact_registry", "failed" if artifact_error else "passed",
-                    artifact_error,
-                )
-
-                all_completed = not any((
-                    global_migration_gap,
-                    global_stack_contract_gap,
-                    global_preserved_reference_gap,
-                    global_terminal_obligation_gap,
-                    global_requirement_gap,
-                    artifact_error,
+                engine_config = getattr(getattr(self.workflow_engine, "kernel", None), "config", None)
+                # The validators are bound from this module's names on every
+                # run, so they stay the one place the gates' checks are chosen.
+                gate_service = TerminalGateService(TerminalGateValidators(
+                    find_migration_incomplete=find_migration_incomplete,
+                    validate_stack_contract_artifacts=validate_stack_contract_artifacts,
+                    enforce_preserved_reference_terminal_integrity=enforce_preserved_reference_terminal_integrity,
+                    blocking_requirements=blocking_requirements,
+                    verify_original_requirements=_verify_original_requirements,
                 ))
+                gate_report = await gate_service.run(TerminalGateRequest(
+                    plan=plan, goal=goal, candidate_root=plan_workspace_path, workspace_path=workspace_path,
+                    migration_resolution=migration_resolution, obligation_ledger=obligation_ledger,
+                    requirement_set=requirement_set, autonomy=getattr(engine_config, "autonomy", None),
+                    spec_compliance=getattr(self.workflow_engine, "spec_compliance", None),
+                    milestone_id=control_state.current_milestone_id or run_id,
+                ), _emit_gate_outcome)
+                all_completed = gate_report.commit_eligible
 
                 if all_completed:
                     await _emit_terminal_event("commit_eligible")
-                    if plan_workspace_path != workspace_path:
-                        workspace_commit_failure = await _commit_verified_candidate()
-                        if workspace_commit_failure is not None:
-                            all_completed = False
-                            await _emit_terminal_event(
-                                "workspace_commit_failed", **workspace_commit_failure,
-                            )
-                    else:
-                        workspace_commit_completed = True
+                    commit = commit_verified_candidate(gate_report, TerminalCommitRequest(
+                        plan=plan, candidate_root=plan_workspace_path, workspace_path=workspace_path,
+                        original_plan_revisions=original_plan_revisions, approved_plan_hash=current_plan_hash,
+                        obligation_ledger=obligation_ledger, run_id=run_id,
+                        contract_transition_for=lambda writes, transaction_id: _enforce_contract_transition(
+                            writes, workspace_path=workspace_path, goal=goal, plan=plan,
+                            transaction_id=transaction_id, subtask_call_results=subtask_call_results,
+                        ),
+                    ))
+                    workspace_commit_completed = commit.completed
+                    workspace_commit_failure = commit.failure
+                    workspace_commit_evidence = commit.evidence
+                    committed_contract_registry = commit.contract_registry
+                    post_commit_persistence_errors.extend(commit.record_errors)
+                    if workspace_commit_failure is not None:
+                        all_completed = False
+                        await _emit_terminal_event(
+                            "workspace_commit_failed", **workspace_commit_failure,
+                        )
                     if workspace_commit_completed:
                         await _emit_terminal_event(
                             "workspace_commit_completed",
@@ -6810,7 +6459,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
 
         needs_review = (
             any(r.status == SubtaskStatus.NEEDS_REVIEW for r in subtask_results)
-            or artifact_error is not None
+            or gate_report.artifact_error is not None
             or workspace_commit_failure is not None
         )
         final_plan_lifecycle = "completed" if all_completed else "needs_review" if needs_review else "failed"
@@ -6843,13 +6492,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             "files": sorted(established_file_context.keys()),
             "plan_repair_attempts": repair_attempts,
         }
-        for key, value in (
-            ("global_migration_gap", global_migration_gap),
-            ("global_stack_contract_gap", global_stack_contract_gap),
-            ("global_preserved_reference_gap", global_preserved_reference_gap),
-            ("global_terminal_obligation_gap", global_terminal_obligation_gap),
-            ("global_requirement_gap", global_requirement_gap),
-        ):
+        for key, value in gate_report.global_gaps():
             if value:
                 aggregated[key] = value
                 logger.error("WorkflowController enforce run %r: %s", run_id, value)
@@ -6865,16 +6508,16 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 "verdicts": requirement_verdict_details(obligation_ledger, requirement_set),
                 # Every closure attempt, closed or not, with why (a requirement
                 # left open by missing evidence is otherwise undiagnosable).
-                "closure_attempts": requirement_closure_attempts,
+                "closure_attempts": list(gate_report.requirement_closure_attempts),
             }
         except Exception as error:
             logger.warning(f"Original requirement outcomes unavailable for the result: {error}")
-        if artifact_error:
+        if gate_report.artifact_error:
             logger.error(
                 "WorkflowController enforce run %r: candidate artifact derivation failed: %s",
-                run_id, artifact_error,
+                run_id, gate_report.artifact_error,
             )
-            aggregated["artifact_error"] = artifact_error
+            aggregated["artifact_error"] = gate_report.artifact_error
         if workspace_commit_evidence is not None:
             aggregated["commit_evidence"] = workspace_commit_evidence
         if workspace_commit_failure is not None:
@@ -6916,6 +6559,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # those exact facts only after the source commit succeeds. A failure
         # here is a persistence/observability failure and cannot rewrite the
         # already-established verification result.
+        candidate_derived_artifacts = gate_report.candidate_derived_artifacts
         if workspace_commit_completed and candidate_derived_artifacts:
             try:
                 artifact_registry = load_artifact_registry(workspace_path)
@@ -6935,7 +6579,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     "error": f"{type(error).__name__}: {error}",
                 })
         # PRD-029: the ContractRegistry transition committed with the source.
-        aggregated["contract_registry"] = committed_contract_registry[-1] if committed_contract_registry else None
+        aggregated["contract_registry"] = committed_contract_registry
         if terminal_observability_errors:
             aggregated["observability_errors"] = terminal_observability_errors
         if post_commit_persistence_errors:
