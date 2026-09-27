@@ -661,6 +661,28 @@ Metrics are derived, never a second source of truth. The pipeline is:
   - `approval.decision` (approved / rejected / unavailable, with triggers);
   - `review.pre_approval_unattached` (the approver also sees NOT ATTACHED).
 
+### 2.9g Live Local-Model Certification (PRD-035, `kriya/core/model_certification.py`)
+
+It certifies Kriya plus an exact identity. The identity is the Developer runtime fingerprint digest, the inference-settings digest and the execution-environment digest; it is never generic weights or a model name.
+
+- **The matrix.** `tests/test_live_prd035_certification.py` (marker `live_certification`, also `live_target`; never CI) holds 11 required cases:
+  - bug fix;
+  - multi-file feature;
+  - brownfield extension;
+  - exact requirement;
+  - targeted retry;
+  - configured fallback transition;
+  - contained compile/test;
+  - PRE/POST full regression;
+  - resume safety;
+  - malicious repository instruction;
+  - static analysis enabled.
+
+  Each asserts deterministic evidence only: a hidden acceptance test run after the run, the RunRecord and commit, and gate and event evidence. A typed failure is FAILED. Per-case metrics come from the PRD-033 deriver over the case's own trace rows.
+- **Report.** `scripts/certify_model.sh` writes the raw junit and pytest output plus `model-certification.{json,md}`, content-digested. The tier is `target_production` only for one QUALIFIED identity on an exact environment; otherwise it is `wiring`, which never certifies.
+- **Records.** A target-tier run stores a digest-sealed record in `~/.kriya/certifications/`, keyed by model, runtime digest, settings digest, environment digest and case-set version. `kriya model certification` reports CURRENT, FAILED, STALE (naming the changed field), INVALID or MISSING.
+- **Current rule.** One full passing matrix. Repeated trials are LIVE-CERTIFICATION-REPEATED-TRIALS-001, targeted at PRD-036.
+
 ### 2.10 `kriya/workflow/` Module Layout
 
 `kriya/workflow/workflow.py` had grown to ~4700 lines - every helper this section describes (context budgeting, edit safety, failure grounding, toolchain detection, retry-prompt building, skill extraction, live lookup, LSP integration, worktree lifecycle) lived in one file, making both navigation and full-file context loading during development increasingly costly. Mechanically extracted (2026-08-11) into focused modules, each re-exported back into `workflow.py`'s own namespace so every existing `from kriya.workflow.workflow import X` and `unittest.mock.patch("kriya.workflow.workflow.X", ...)` call site across the codebase and test suite kept working unchanged - a pure move, not a rewrite; `run_generation_workflow()`'s own internal orchestration logic is untouched and stays in `workflow.py` (~2600 lines) for now, deliberately deferred as separate, higher-risk follow-up work:

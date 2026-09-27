@@ -786,6 +786,17 @@ kriya static-analysis scan --base HEAD   # read-only check of your working tree 
   - `kriya metrics adjudications` lists it.
 - **`--thresholds FILE`.** Evaluates your own release thresholds; Kriya ships none. Exit code 1 means a threshold FAILed. With too little evidence the result is INCONCLUSIVE, never a pass.
 
+### 2.1j Live model certification (PRD-035)
+
+`scripts/certify_model.sh [OUT_DIR]` runs the 11-case live certification matrix against your local endpoint on this machine.
+
+- **Settings.** `KRIYA_LIVE_BASE_URL`, `KRIYA_LIVE_LLM_MODEL` (default `qwen3-coder:30b`) and `KRIYA_LIVE_FALLBACK_MODEL` for the fallback case.
+- **Needs.** Docker (the contained case) and Semgrep 1.178.0 (the static-analysis case).
+- **Output.** The JSON and Markdown report. For a qualified target identity it also stores a certification record.
+- **Status.** `kriya model certification` says whether your configured Developer identity is CURRENT. It turns STALE the moment the model runtime, its inference settings, this machine's environment or the case set changes.
+
+Every case must succeed. A failed case, even a typed one, means the identity is not certified.
+
 ### 2.2 Control Plane, Policy, and Structured Execution
 
 A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.
