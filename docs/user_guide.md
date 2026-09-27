@@ -47,6 +47,9 @@ llm:
       top_p: 0.8                           # surface, this is also where reasoning_effort/presence_penalty go
       top_k: 20                            # (e.g. {"reasoning_effort": "none"} to force a thinking model into
                                             # non-thinking mode - see docs/kriya_backlog_and_lessons.md).
+  # inference_runtime: null                # The runtime adapter serving this model (null = the packaged default:
+                                            # the local runtime behind its OpenAI-compatible API). An unknown name is
+                                            # refused. Operator-level (SECURITY_AUTHORITY); leave unset.
   reasoning: false                         # Marks this model as reasoning-capable (raises the max_tokens floor,
                                             # strips inline <think> tags from the response). Leave false for a
                                             # non-thinking model.

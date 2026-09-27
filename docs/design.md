@@ -385,6 +385,20 @@ Found and fixed a related, genuinely pre-existing imprecision while building thi
 
 Verified end-to-end via three new tests (`tests/test_workflow.py`): the fallback-targeted fix succeeding (never reaches a full-set attempt at all, confirmed via call count), the fallback-targeted fix also failing (falls through to a real full-set escalation exactly once, never repeats), and no-fallback-chain-configured (regresses to exactly today's behavior). One pre-existing test (`test_workflow_fallback_chain`) needed updating - its scenario (exhaust the targeted budget, then succeed via full-set escalation) now has a genuinely new intermediate step in the middle, and its own sequencing/assertions were updated to match, verified by hand-tracing the new attempt-by-attempt flow before editing, not assumed.
 
+### 2.4a Inference runtime port (INF-001)
+The layering is `workflow/agents -> LLMClient -> InferenceRuntimePort -> runtime adapter` (`kriya/core/inference_runtime.py`).
+
+*   **What Kriya keeps (LLMClient and above).** Every decision: routing, qualification, fallback, retries, context and output budgets, egress and authority, evidence, metrics, tool-argument validation, and run state.
+*   **What an adapter owns.** Only what differs between runtimes:
+    *   the chat transport, translated into `ChatResponse` and `RawToolCall`;
+    *   how a per-request context window is expressed, and whether the runtime takes one;
+    *   the identity probe behind the exact runtime fingerprint;
+    *   classification of transport errors;
+    *   model discovery.
+*   **The default adapter.** `OllamaRuntimeAdapter`, in `kriya/core/model_runtime.py`, runs on the shared OpenAI-compatible transport. A binding's `inference_runtime` selects another registered adapter, and an unknown name is refused rather than defaulted.
+*   **Identity.** The default adapter's wire and runtime digest are pinned byte-identical to the pre-port code. The same weights under another runtime get a different digest, and therefore different qualification evidence.
+*   **Future runtimes.** A `VllmRuntimeAdapter` is a documented extension point only (see the module docstring).
+
 ### 2.5 Context Budget Allocator & Skeletonization
 To prevent context overflow, Kriya splits the LLM's context window:
 *   **Window vs Output Separation**: The configuration differentiates the input context window (e.g. `context_window: 32768` for Qwen3-30B) from the output limits (`max_tokens: 4096`).

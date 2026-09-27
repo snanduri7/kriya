@@ -14,7 +14,10 @@
 | 8892e3c | PROMPT-BUDGET-FIT-001A/B: one fixed-overhead-aware section budget for Planner and Reviewer requests |
 | 63e171c | Fix (my a314d45): learned reference overflowed Developer requests at small windows |
 | f324f91 | Fix (my 3c1822d): the certification identity did not cover how context is ranked and rendered |
-| (next) | PRD027-SCORE-NORMALIZATION-001: direct query evidence ranks above graph expansion |
+| 3c9f7db | PRD027-SCORE-NORMALIZATION-001: direct query evidence ranks above graph expansion |
+| abbdb4b | INF-001 (1/3): golden parity test - the wire and the runtime digest at 3c9f7db |
+| bda7e85 | INF-001 (2/3): the inference runtime port, the default adapter behind it, config selection |
+| (next) | INF-001 (3/3): docs, handover, tracker |
 
 ## Per item
 - **KNOWLEDGE-READPATH-001 (P1).** FIXED, awaiting pytest. See handover/DEFECT_KNOWLEDGE_READPATH_001.md, "Fix".
@@ -25,6 +28,10 @@
 - **PRD027-SCORE-NORMALIZATION-001 (P2).** FIXED, awaiting pytest and `context certify`. See handover/DEFECT_PRD027_SCORE_NORMALIZATION_001.md, "Fix".
   - CI certification: 0.5435, CERTIFIED.
   - The stored certification is invalidated by design, so `context certify` must be re-run.
+- **INF-001 (P2).** COMPLETE for its scoped framework deliverable, awaiting pytest and the live identity check. See handover/INF_001_RUNTIME_PORT.md.
+  - The port and the default adapter are in place, with byte-identical wire and runtime digest (pinned), config selection, a test-only fake and the contract suite.
+  - Port overhead is about 0.5 µs per call.
+  - vLLM is an extension point only.
 
 ## Findings recorded on the way
 - **Developer reference fit (own regression from a314d45/f136d7e). FIXED in its own commit.** With learned knowledge present, 8K REPAIR-mode Developer requests were refused, because the reference was reserved but never trimmed. `developer_reference` now trims it to the graph pool.
