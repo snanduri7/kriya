@@ -77,9 +77,12 @@ def pytest_addoption(parser):
                      help="PRD-034: an unexpected skip or xfail fails (tests/certification/skip_allowlist.yaml)")
     parser.addoption("--certification-report", default=None, metavar="DIR",
                      help="PRD-034: write skips.json (every skip, allowlisted or not) to DIR")
+    parser.addoption("--model-certification", default=None, metavar="DIR",
+                     help="PRD-035: write model-certification.json/.md (the live matrix report) to DIR")
 
 
 _SKIPS = pytest.StashKey[list]()
+_CERTIFICATION_CASES = pytest.StashKey[list]()
 _ALLOWLIST = pytest.StashKey[tuple]()
 
 
@@ -93,6 +96,7 @@ def pytest_configure(config):
 
     config.stash[RESULTS] = []
     config.stash[_SKIPS] = []
+    config.stash[_CERTIFICATION_CASES] = []
     # A malformed allowlist fails certification up front, never later.
     config.stash[_ALLOWLIST] = load_allowlist() if _certification_mode(config) else ()
 
@@ -146,12 +150,32 @@ def _record_chaos_phase(item, report):
         })
 
 
+def _record_certification_case(item, report):
+    """PRD-035: every live certification case's verdict and record."""
+    marker = item.get_closest_marker("certification_case")
+    if marker is None:
+        return
+    phases = item.stash.setdefault(_CERTIFICATION_PHASES, {})
+    phases[report.when] = report
+    if report.when == "teardown":
+        from _chaos_report import item_verdict
+
+        record = next((value for key, value in item.user_properties if key == "model_certification_case"), None)
+        item.config.stash[_CERTIFICATION_CASES].append({
+            "case_id": marker.args[0], "verdict": item_verdict(phases), "record": record or {},
+        })
+
+
+_CERTIFICATION_PHASES = pytest.StashKey[dict]()
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     outcome = yield
     report = outcome.get_result()
     _audit_skip(item, report)  # first: a certification failure is the verdict the chaos report records
     _record_chaos_phase(item, report)
+    _record_certification_case(item, report)
 
 
 @pytest.fixture
@@ -165,6 +189,12 @@ def chaos_case(request, tmp_path):
 
 
 def pytest_sessionfinish(session):
+    model_dir = session.config.getoption("--model-certification")
+    if model_dir:
+        from _model_certification import build_report as build_model_report
+        from _model_certification import write_report as write_model_report
+
+        write_model_report(model_dir, build_model_report(session.config.stash[_CERTIFICATION_CASES]))
     certification_dir = session.config.getoption("--certification-report")
     if certification_dir:
         from _certification import write_skips

@@ -78,6 +78,8 @@ markers = [
     "live_model: requires a real local LLM/embedding endpoint - excluded by default (see tests/test_live_smoke.py), run explicitly with `pytest -m live_model`",
     "chaos: PRD-032 chaos scenario (tests/_chaos_harness.py::SCENARIOS id as the marker argument) - deterministic cases run by default; `pytest -m chaos --chaos-report DIR` writes the chaos report",
     "live_target: a live_model test that needs the qualified TARGET production identity (the operator's machine: KRIYA_LIVE_LLM_MODEL, default qwen3-coder:30b); CI wiring smoke runs `-m \"live_model and not live_target\"`",
+    "live_certification: PRD-035 live local-model certification matrix (tests/test_live_prd035_certification.py via scripts/certify_model.sh); also live_model + live_target, never CI",
+    "certification_case: PRD-035 case identity (case id, task class) of a live_certification test",
     "live_static_analysis: requires the exact pinned static-analysis scanner (Semgrep 1.178.0; Docker + the pinned image for OCI cases) - excluded by default, run explicitly with `pytest -m live_static_analysis`",
 ]
 # Excluded by default so a bare `pytest` never unexpectedly hangs/fails for

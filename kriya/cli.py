@@ -1180,6 +1180,39 @@ def model_status(ctx: click.Context, json_output: bool) -> None:
         ctx.exit(1)
 
 
+@model_group.command(name="certification")
+@click.option("--json", "json_output", is_flag=True, help="Emit the certification status as JSON.")
+@click.pass_context
+def model_certification(ctx: click.Context, json_output: bool) -> None:
+    """PRD-035: is the configured Developer identity live-certified? CURRENT
+    only for the exact runtime, inference settings, execution environment and
+    case set a passing matrix (scripts/certify_model.sh) certified; exit 1
+    otherwise."""
+    from kriya.core.execution_environment import environment_for_fingerprint
+    from kriya.core.inference_settings import role_inference_settings
+    from kriya.core.model_certification import CURRENT, CertificationKey, certification_status
+    from kriya.core.model_runtime import resolve_configured_model_runtime
+
+    cfg = _model_cfg(ctx)
+    model = cfg.llm.model
+    runtime = resolve_configured_model_runtime(cfg, model, fresh=True)
+    key = CertificationKey(
+        model=model, runtime_digest=runtime.digest,
+        inference_settings_digest=role_inference_settings(cfg, "developer", model).digest,
+        environment_digest=environment_for_fingerprint(runtime).digest,
+    )
+    status = {"model": model, "runtime_exact": runtime.exact, "key": key.digest, **certification_status(key)}
+    if json_output:
+        click.echo(json.dumps(status, indent=2, sort_keys=True))
+    else:
+        color = "green" if status["status"] == CURRENT else "red"
+        click.secho(f"  developer {model:<40} {status['status']}", fg=color)
+        for field in status.get("changed", []):
+            click.echo(f"      - changed since certification: {field}")
+    if status["status"] != CURRENT:
+        ctx.exit(1)
+
+
 @main.group(name="metrics")
 def metrics_group() -> None:
     """PRD-033: production metrics derived from persisted run evidence, and
