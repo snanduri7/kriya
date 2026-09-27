@@ -132,11 +132,14 @@ _REMOVED_FIELD_PATTERNS = (
 
 
 def test_no_production_code_references_removed_config_fields():
-    """Repository guard for paths.logs, logs_path and logging.file."""
+    """Repository guard for paths.logs, logs_path and logging.file, over
+    kriya/ and the release tooling in scripts/ (PRD-034: the PRD-002 release
+    smoke still set both removed fields and failed every clean install)."""
     root = Path(kriya.__file__).parent
     allowed = (REMOVED_PATHS_LOGS_MESSAGE[:24], REMOVED_LOGGING_FILE_MESSAGE[:24])
     offenders = []
-    for path in list(root.rglob("*.py")) + list(root.rglob("*.yaml")):
+    scripts = root.parent / "scripts"
+    for path in list(root.rglob("*.py")) + list(root.rglob("*.yaml")) + list(scripts.glob("*.py")):
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if any(text in line for text in allowed):
                 continue

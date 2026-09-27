@@ -17,6 +17,10 @@ assert not Path(kriya.__file__).resolve().is_relative_to(source_root), "Source c
 
 with tempfile.TemporaryDirectory(prefix="kriya-release-smoke-") as work:
     os.chdir(work)
+    # State and logs stay inside this disposable directory, through the
+    # supported precedence (PRD-010 removed the old log-path config fields).
+    os.environ["KRIYA_STATE_DIR"] = str(Path(work, "state"))
+    os.environ["KRIYA_LOG_DIR"] = str(Path(work, "logs"))
     cfg = load_config()
     assert Path(cfg.plugins.directory, "core_tools", "__init__.py").is_file()
     # The bundled skill library ships in the wheel, at the installed global
@@ -30,8 +34,6 @@ with tempfile.TemporaryDirectory(prefix="kriya-release-smoke-") as work:
     assert bundled == ["activemq-artemis", "binary-wire-protocol", "ignite-java17", "qpid"], bundled
     assert Path(cfg.paths.skills, "qpid", "examples", "pom.xml").is_file()
     cfg.paths.memory = str(Path(work, "memory"))
-    cfg.paths.logs = str(Path(work, "logs"))
-    cfg.logging.file = None
     cfg.mcp = {}
     response = MagicMock()
     response.__enter__.return_value = response
