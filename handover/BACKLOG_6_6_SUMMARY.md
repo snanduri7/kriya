@@ -10,7 +10,8 @@ Directive: `handover/BACKLOG_6_6_DIRECTIVES.md`. Three existing defects only; no
 | e2a3dee | AUTHORITY-INSPECT-TRACEBACK-001 |
 | 7d7b0c0 | PROMPT-FIT-ROLE-CHAIN-001 |
 | cfe9590 | DEVELOPER-PROMPT-FIT-001 |
-| (this) | Docs, tracker, findings |
+| 6d7b6b9 | Docs, tracker, findings |
+| (next) | 8K test also asserts every registered section was located; summary scope notes |
 
 ## AUTHORITY-INSPECT-TRACEBACK-001 (e2a3dee)
 The refusal of an approval store inside the workspace is unchanged; only how it is reported changed.
@@ -19,6 +20,8 @@ The refusal of an approval store inside the workspace is unchanged; only how it 
 - Every "Error loading configuration" line (generate, fix, model, doctor without `--production`) renders the same code and remediation.
 - `doctor --production --json` stays one parseable report; its `config.load` check now carries `evidence.reason_code` and the error's own remediation.
 - Only the named operator error types are caught. An unexpected exception on the same path still escapes with its traceback (tested).
+- Scope of the formatting: `_user_error_text` and the doctor report render any error that carries `reason_code`/`remediation`; today only `TrustPathInsideWorkspaceError` does (checked: `ConfigAuthorityError`, `RemovedConfigFieldError`, `StateDirectoryError`, `LogDirectoryError`, `ApprovalArtifactError` carry neither), so no other message changed.
+- JSON modes checked: `doctor --production --json` stays one parseable report. `generate --json` on any config-load refusal writes nothing to stdout (only the stderr error line) - unchanged behaviour that predates this work, out of scope, noted here.
 
 Tests: `tests/test_authority_cli_refusal.py` (8). Pre-fix: 6 fail, the 2 controls pass. Mutations: broad `except Exception`, dropped remediation, `approve` unguarded; all 3 killed.
 
@@ -58,6 +61,8 @@ Optional Developer context is sized only after the mandatory text.
 
 What an 8K repair request does now: at 8K a repair request carried ~4,450 prompt tokens against 3,808 of room. It dispatched only because the dispatch check cut its output. Now the graph context gives way and every Developer request fits its capacity; the mandatory sections are all present.
 
+Branch coverage: the 8K run exercises the first attempt and the targeted retry and asserts every registered section was located exactly once. Missing-files, fallback-targeted and coordinated repair register their sections through the same helper (`_developer_optional_sections`) and reach the same choke point, but no test drives those branches at 8K. The sibling-names retry after a refusal (now starting from the fitted prompt) has no dedicated test.
+
 Tests: `tests/test_developer_prompt_fit_001.py` (11): byte-identical when it fits; order; mandatory never trimmed; unlocated sections; reference whole entries and fence; capacity per binding and expectation; choke-point wiring (fallback binding and sections); 8K boundary with every mandatory repair section present; 32K control unchanged; large reference at 12K shrinks first with its fence whole; mandatory-only overflow refused before inference.
 
 Pre-fix (worktree at 7d7b0c0): 9 fail; the 32K control passes. Mutations: 9 run, all killed (never fit, reversed order, always rebuild, agent skips the fit, capacity ignores the binding, ignores the expectation, choke point drops the binding, drops the sections, fence cut).
@@ -75,4 +80,5 @@ No new P0/P1.
 ## Verification owed (user)
 1. Focused pytest (below) and the full suite.
 2. Identity is untouched by construction: `MODEL_PROTOCOL_ADAPTER_VERSION` and every fingerprint input are unchanged, and `index_implementation_digest()` is identical before and after (b4501e5f…, checked at 211369c and at cfe9590), so the stored context certification stays current.
-3. Live: no role-chain or Developer-fit change is exercised by the qualified 32K profile (every request already fits, so the fit leaves it byte-identical). Live evidence here is the unchanged production gate: `model status` QUALIFIED for every role, `context certify` PASS, `doctor --production` PRODUCTION_READY=true.
+3. Live verdicts: PROMPT-FIT-ROLE-CHAIN-001 and DEVELOPER-PROMPT-FIT-001 are **NOT_LIVE_EXERCISED** - the qualified 32K profile has no smaller role-chain fallback and every Developer request already fits, so neither fit runs. They need the user's decision on pytest verification (as for 001C). AUTHORITY-INSPECT-TRACEBACK-001 can be exercised live (the same `authority inspect` with `KRIYA_AUTHORITY_HOME` inside the workspace that showed the traceback in 6.5).
+4. Exit gate (unchanged production profile, not evidence for the two prompt fits): `model status` QUALIFIED for every role, `context certify` PASS, `doctor --production` PRODUCTION_READY=true.

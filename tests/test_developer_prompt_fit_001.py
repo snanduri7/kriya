@@ -154,9 +154,11 @@ def test_at_8k_every_developer_request_fits_its_capacity_and_keeps_its_mandatory
     assert any("cannot find symbol: total" in user for user in repairs)
     reductions = [e for e in run.events if e.kind == "model.optional_context_reduced"
                   and e.details.get("reason") == "request_fit"]
-    assert reductions and all(
-        not any(s["reduced"] for kind, s in e.details["sections"].items() if kind not in budget.DEVELOPER_SECTION_ORDER)
-        for e in reductions)
+    # Every registered section was found exactly once (a section that is
+    # not would silently stay unfitted), and only optional kinds changed.
+    assert reductions and all(e.details["unlocated_sections"] == [] for e in reductions)
+    assert all(set(e.details["sections"]) <= set(budget.DEVELOPER_SECTION_ORDER) for e in reductions)
+    assert any(e.details["sections"].get("graph_context", {}).get("reduced") for e in reductions)
     assert run.result.get("failure_category") == "quality_gates_exhausted"
 
 
