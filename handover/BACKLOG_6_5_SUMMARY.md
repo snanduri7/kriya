@@ -20,7 +20,7 @@
 | 79750a8 | INF-001 (3/3): docs, handover, tracker |
 | 9062a5c | Summary and verification hand-off |
 | d10f50f | Fix (my 12c1b0a): the packaged default config's num_ctx outranked a user's context_window |
-| (next) | Final-review records: all-role assertion for the 8K learned run, milestone coverage, PROMPT-FIT-ROLE-CHAIN-001 |
+| 19561fd | Final-review records: all-role assertion for the 8K learned run, milestone coverage, PROMPT-FIT-ROLE-CHAIN-001 |
 
 ## Per item
 - **KNOWLEDGE-READPATH-001 (P1).** FIXED, awaiting pytest. See handover/DEFECT_KNOWLEDGE_READPATH_001.md, "Fix".
@@ -56,7 +56,8 @@
   tests/test_prd016_token_budget.py tests/test_prd017_fallback_transition.py tests/test_prd019_model_routing.py \
   tests/test_production_doctor.py tests/test_qual_environment_identity.py tests/test_model_qual_identity_001.py \
   tests/test_model_evidence_hardening_final.py tests/test_sec009_config_authority.py tests/test_workflow_controller.py \
-  tests/test_agents.py tests/test_self_correction.py
+  tests/test_agents.py tests/test_self_correction.py tests/test_config.py tests/test_config_extra.py \
+  tests/test_sec009_p2_authority_approval.py tests/test_prd012_egress.py
 ```
 
 ### 2. Full suite
