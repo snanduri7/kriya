@@ -258,16 +258,22 @@ def index_implementation_digest() -> str:
     from kriya.analyzer.analyzer import RepositoryAnalyzer, chunk_file_with_metadata_headers
     from kriya.analyzer.graph import DependencyGraph
     from kriya.memory.vector import LocalVectorStore, lexical_query_terms
-    from kriya.workflow import graph_retrieval
-    from kriya.workflow.context_budget import build_code_context_package
+    from kriya.workflow import context_budget, graph_retrieval
 
-    # Both legs of the hybrid query and the whole graph_retrieval module
-    # (retrieve_graph_context, the expansion-seed rule and its constants).
+    # Both legs of the hybrid query, the whole graph_retrieval module
+    # (retrieve_graph_context, the expansion-seed rule, the evidence ranking
+    # and their constants) and every step of context assembly: the package
+    # builder, the score-ordered tier degradation and omission it delegates
+    # to, the skeletonizers that render each tier and the token estimate
+    # the budget is counted with.
     sources = [
         inspect.getsource(obj) for obj in (
             chunk_file_with_metadata_headers, RepositoryAnalyzer.index_repository, DependencyGraph,
             LocalVectorStore.query, LocalVectorStore.query_lexical, lexical_query_terms,
-            LocalVectorStore.query_hybrid, graph_retrieval, build_code_context_package,
+            LocalVectorStore.query_hybrid, graph_retrieval, context_budget.build_code_context_package,
+            context_budget._build_file_tiers, context_budget._omit_over_budget, context_budget.skeletonize_code,
+            context_budget.skeletonize_python, context_budget.skeletonize_braced_code,
+            context_budget.estimate_tokens,
         )
     ]
     return hashlib.sha256("\n".join(sources).encode("utf-8")).hexdigest()
