@@ -761,6 +761,31 @@ kriya static-analysis scan --base HEAD   # read-only check of your working tree 
 - **Missing tools.** A missing scanner or model fails its scenario. It is never skipped.
 - **Reading the report.** Every scenario lists the injected failure, the invariant Kriya must keep, the observed typed outcome and content-free evidence. The live cases also carry the exact model runtime fingerprint. Two runs of the same revision give the same `content_digest`.
 
+### 2.1i Production metrics (PRD-033)
+
+- **`kriya metrics report [--since T] [--workspace DIR]... [--chaos-report FILE] [--thresholds FILE] [--out DIR] [--json]`.** Derives the metrics from this state directory's `traces.db`, and from the RunRecords of every `--workspace`, and writes a reproducible report. The same evidence always gives the same `content_digest`.
+  - **Contents.** The report covers:
+    - final verified success;
+    - first-pass compile;
+    - retries;
+    - no-progress stops;
+    - authority rejections;
+    - context insufficiency;
+    - fallbacks;
+    - containment failures;
+    - human escalations;
+    - LLM calls and tokens;
+    - wall time and verification share;
+    - static-analysis outcomes and waivers;
+    - adjudicated false success and regression escape.
+  - **Keys.** Model metrics are keyed by the exact runtime, the inference settings, the role and the task class.
+  - **Missing evidence.** Anything without evidence reads UNAVAILABLE.
+  - **Privacy.** No source, prompt or goal text is ever included.
+- **`kriya metrics adjudicate RUN_ID --verdict false_success|regression_escape|confirmed_success --evidence TEXT --adjudicator NAME [-y]`.** Records your verdict on a traced run. This is the only way false success is recorded; a model's opinion never is.
+  - The store is `~/.kriya/adjudications/` (`KRIYA_ADJUDICATION_HOME`), outside every workspace.
+  - `kriya metrics adjudications` lists it.
+- **`--thresholds FILE`.** Evaluates your own release thresholds; Kriya ships none. Exit code 1 means a threshold FAILed. With too little evidence the result is INCONCLUSIVE, never a pass.
+
 ### 2.2 Control Plane, Policy, and Structured Execution
 
 A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.

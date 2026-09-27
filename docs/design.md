@@ -636,6 +636,31 @@ A certification harness around existing seams. There is no production subsystem.
   - A non-committed direct terminal commit used to be retried; it is now the deterministic stop `workspace_commit_failed` (§2.9b).
   - The Planner/Architect workspace context used to carry the absolute `root_path`, which the structured plan schema refuses when a model copies it. Every path a model now sees is workspace-relative.
 
+### 2.9f Production Telemetry and False-Success Metrics (PRD-033, `kriya/metrics/`)
+
+Metrics are derived, never a second source of truth. The pipeline is:
+
+`traces.db` rows + RunRecords (`--workspace`) + the adjudication store + an optional chaos report → `derive_metrics` → a content-digested report.
+
+`kriya/workflow` never imports the package (a structural test enforces this).
+
+- **Content-free projections (`evidence.py`).**
+  - The loader selects only status, category, timings, generation metrics, failure families, gate `type/attempt/success`, typed event kinds, whitelisted event detail keys and the PRD-018 role-metric rows.
+  - It never reads the goal, prompts, retrieved chunks, gate output, failed content, event messages or evidence paths. A canary test covers this.
+- **Populations are never mixed.** They are generation units (including `.exception` rows), enforce terminals, and milestone plans. Enforce subtask rows are not linked to their enforce run in traces (TRACE-ENFORCE-SUBTASK-LINKAGE-001).
+- **Keys.** Outcomes are grouped by task class and by Developer runtime identity (exact runtime digest | inference-settings digest). Model protocol metrics are grouped by runtime, settings, role and task class.
+- **Missing evidence.** Every metric names its evidence. Without evidence it is `UNAVAILABLE`, never 0. An optional input that was not given is `NOT_PROVIDED`.
+- **Verification share.** It covers only compile and runtime-verification timings, because test runs are not timed, and it says so.
+- **Adjudication (`adjudication.py`).**
+  - False success and regression escape come only from `kriya metrics adjudicate` (source `human`; `deterministic` is reserved), stored outside the workspace (`KRIYA_ADJUDICATION_HOME`). Records are digest-sealed; a tampered store counts nothing.
+  - `false_success` and `regression_escape` apply only to a SUCCESS run.
+  - Rates are computed over adjudicated SUCCESS runs, and the report shows coverage alongside them.
+- **Thresholds (`thresholds.py`).** An operator file outside the workspace; none ship. Each threshold is PASS, FAIL, INSUFFICIENT_EVIDENCE or UNAVAILABLE; the overall result is FAIL, INCONCLUSIVE or PASS. Without a file it is NOT_CONFIGURED. PRD-036 consumes this.
+- **New typed events.** Each records a decision or terminal condition that had no structured evidence:
+  - `workspace_commit.failed`;
+  - `approval.decision` (approved / rejected / unavailable, with triggers);
+  - `review.pre_approval_unattached` (the approver also sees NOT ATTACHED).
+
 ### 2.10 `kriya/workflow/` Module Layout
 
 `kriya/workflow/workflow.py` had grown to ~4700 lines - every helper this section describes (context budgeting, edit safety, failure grounding, toolchain detection, retry-prompt building, skill extraction, live lookup, LSP integration, worktree lifecycle) lived in one file, making both navigation and full-file context loading during development increasingly costly. Mechanically extracted (2026-08-11) into focused modules, each re-exported back into `workflow.py`'s own namespace so every existing `from kriya.workflow.workflow import X` and `unittest.mock.patch("kriya.workflow.workflow.X", ...)` call site across the codebase and test suite kept working unchanged - a pure move, not a rewrite; `run_generation_workflow()`'s own internal orchestration logic is untouched and stays in `workflow.py` (~2600 lines) for now, deliberately deferred as separate, higher-risk follow-up work:

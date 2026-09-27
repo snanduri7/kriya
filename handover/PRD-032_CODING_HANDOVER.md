@@ -181,3 +181,14 @@ The generation pipeline embedded the repository model as JSON, including `root_p
 - `.venv/bin/pytest -m live_static_analysis tests/test_prd032_chaos_static_analysis.py`
 
 **Live agent:** the live command above. Each L row must PASS with the exact runtime fingerprint recorded.
+
+## Addendum — fix 3 (commit `16bc723`, after the PRD-032 closure commit)
+
+The PRD-033 live tier kept hitting `planner_output_schema_invalid`.
+
+- **Cause:** the Planner prompt showed the closed plan vocabularies only by example, so the real model invented `verifier_kind: "file_check"`.
+- **Fix:** the prompt now states every closed vocabulary, derived from the `plan_schema` enums.
+- **Regression test:** `tests/test_prd032_planner_vocabulary.py` fails without the fix.
+- **Live effect:** together with fix 2, 8 of 8 sampled real runs planned successfully, where 2 of 5 and 2 of 3 had been refused before.
+
+The chaos report at `ae29d0a` predates this fix. The wave's final every-tier chaos run, recorded in the Wave 7 summary, includes it.

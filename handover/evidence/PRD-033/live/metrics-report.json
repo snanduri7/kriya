@@ -1,0 +1,523 @@
+{
+  "content": {
+    "adjudication": {
+      "adjudicated_successes": 0,
+      "adjudication_coverage": {
+        "denominator": 2,
+        "numerator": 0,
+        "status": "MEASURED",
+        "value": 0.0
+      },
+      "false_success_rate": {
+        "reason": "no SUCCESS run in the window is adjudicated (false success needs deterministic or human adjudication)",
+        "status": "UNAVAILABLE"
+      },
+      "regression_escape_rate": {
+        "reason": "no SUCCESS run in the window is adjudicated (false success needs deterministic or human adjudication)",
+        "status": "UNAVAILABLE"
+      },
+      "sources": {},
+      "status": "MEASURED",
+      "store_status": "absent",
+      "successful_runs": 2,
+      "verdicts": {
+        "confirmed_success": 0,
+        "false_success": 0,
+        "regression_escape": 0
+      }
+    },
+    "by_developer_identity": {
+      "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276|sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b": {
+        "authority_expansions": {},
+        "authority_rejections": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "containment_failures": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "context_insufficiency": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "context_request_fit_reductions": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "failure_categories": {
+          "quality_gates_exhausted": 1
+        },
+        "fallback_selection_skips": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "fallback_transitions": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "final_verified_success": {
+          "denominator": 3,
+          "numerator": 2,
+          "status": "MEASURED",
+          "value": 0.6667
+        },
+        "first_pass_compile": {
+          "denominator": 2,
+          "numerator": 2,
+          "status": "MEASURED",
+          "value": 1.0
+        },
+        "human_escalations": {
+          "reason": "no approval.decision events (runs without human approval, or traced before PRD-033)",
+          "status": "UNAVAILABLE"
+        },
+        "llm_calls": {
+          "status": "MEASURED",
+          "value": 18
+        },
+        "no_progress_termination": {
+          "denominator": 3,
+          "numerator": 0,
+          "status": "MEASURED",
+          "value": 0.0
+        },
+        "pre_approval_review_unattached": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "retries": {
+          "full_set": {
+            "status": "MEASURED",
+            "value": 4
+          },
+          "targeted": {
+            "status": "MEASURED",
+            "value": 3
+          }
+        },
+        "runs": 3,
+        "verification_share": {
+          "coverage": "compile and runtime-verification timings only; test runs are not timed",
+          "runs": 3,
+          "status": "MEASURED",
+          "value": 0.0,
+          "verification_seconds": 0.0,
+          "wall_seconds": 112.969
+        },
+        "wall_time_seconds": {
+          "count": 3,
+          "max": 68.603,
+          "mean": 37.656,
+          "median": 27.416,
+          "status": "MEASURED",
+          "total": 112.969
+        },
+        "workspace_commit_failures": {}
+      }
+    },
+    "by_task_class": {
+      "task": {
+        "authority_expansions": {},
+        "authority_rejections": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "containment_failures": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "context_insufficiency": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "context_request_fit_reductions": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "failure_categories": {
+          "quality_gates_exhausted": 1
+        },
+        "fallback_selection_skips": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "fallback_transitions": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "final_verified_success": {
+          "denominator": 3,
+          "numerator": 2,
+          "status": "MEASURED",
+          "value": 0.6667
+        },
+        "first_pass_compile": {
+          "denominator": 2,
+          "numerator": 2,
+          "status": "MEASURED",
+          "value": 1.0
+        },
+        "human_escalations": {
+          "reason": "no approval.decision events (runs without human approval, or traced before PRD-033)",
+          "status": "UNAVAILABLE"
+        },
+        "llm_calls": {
+          "status": "MEASURED",
+          "value": 18
+        },
+        "no_progress_termination": {
+          "denominator": 3,
+          "numerator": 0,
+          "status": "MEASURED",
+          "value": 0.0
+        },
+        "pre_approval_review_unattached": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "retries": {
+          "full_set": {
+            "status": "MEASURED",
+            "value": 4
+          },
+          "targeted": {
+            "status": "MEASURED",
+            "value": 3
+          }
+        },
+        "runs": 3,
+        "verification_share": {
+          "coverage": "compile and runtime-verification timings only; test runs are not timed",
+          "runs": 3,
+          "status": "MEASURED",
+          "value": 0.0,
+          "verification_seconds": 0.0,
+          "wall_seconds": 112.969
+        },
+        "wall_time_seconds": {
+          "count": 3,
+          "max": 68.603,
+          "mean": 37.656,
+          "median": 27.416,
+          "status": "MEASURED",
+          "total": 112.969
+        },
+        "workspace_commit_failures": {}
+      }
+    },
+    "chaos": {
+      "status": "NOT_PROVIDED"
+    },
+    "model_protocol": [
+      {
+        "attempts": 0,
+        "attempts_passed": 0,
+        "calls": 3,
+        "completion_tokens": 269,
+        "estimated_token_calls": 0,
+        "first_pass_runs": 0,
+        "first_pass_success": {
+          "reason": "no first attempt was charged to this identity",
+          "status": "UNAVAILABLE"
+        },
+        "first_pass_successes": 0,
+        "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+        "latency_seconds": 9.571,
+        "models": [
+          "qwen3-coder:30b"
+        ],
+        "prompt_tokens": 3644,
+        "protocol_failure_rate": {
+          "denominator": 3,
+          "numerator": 0,
+          "status": "MEASURED",
+          "value": 0.0
+        },
+        "protocol_failures": 0,
+        "retries_triggered": 0,
+        "role": "architect",
+        "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276",
+        "runtime_exact": true,
+        "schema_failures": 0,
+        "structured_malformed": 0,
+        "structured_other_failures": 0,
+        "structured_output_failure_rate": {
+          "denominator": 3,
+          "numerator": 0,
+          "status": "MEASURED",
+          "value": 0.0
+        },
+        "structured_policy_rejections": 0,
+        "structured_valid": 0,
+        "structured_validation_failures": 0,
+        "task_class": "task"
+      },
+      {
+        "attempts": 9,
+        "attempts_passed": 2,
+        "calls": 11,
+        "completion_tokens": 741,
+        "estimated_token_calls": 0,
+        "first_pass_runs": 3,
+        "first_pass_success": {
+          "denominator": 3,
+          "numerator": 2,
+          "status": "MEASURED",
+          "value": 0.6667
+        },
+        "first_pass_successes": 2,
+        "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+        "latency_seconds": 43.969,
+        "models": [
+          "qwen3-coder:30b"
+        ],
+        "prompt_tokens": 21653,
+        "protocol_failure_rate": {
+          "denominator": 11,
+          "numerator": 0,
+          "status": "MEASURED",
+          "value": 0.0
+        },
+        "protocol_failures": 0,
+        "retries_triggered": 7,
+        "role": "developer",
+        "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276",
+        "runtime_exact": true,
+        "schema_failures": 0,
+        "structured_malformed": 0,
+        "structured_other_failures": 0,
+        "structured_output_failure_rate": {
+          "denominator": 11,
+          "numerator": 0,
+          "status": "MEASURED",
+          "value": 0.0
+        },
+        "structured_policy_rejections": 0,
+        "structured_valid": 0,
+        "structured_validation_failures": 0,
+        "task_class": "task"
+      },
+      {
+        "attempts": 0,
+        "attempts_passed": 0,
+        "calls": 3,
+        "completion_tokens": 1415,
+        "estimated_token_calls": 0,
+        "first_pass_runs": 0,
+        "first_pass_success": {
+          "reason": "no first attempt was charged to this identity",
+          "status": "UNAVAILABLE"
+        },
+        "first_pass_successes": 0,
+        "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+        "latency_seconds": 34.794,
+        "models": [
+          "qwen3-coder:30b"
+        ],
+        "prompt_tokens": 8244,
+        "protocol_failure_rate": {
+          "denominator": 3,
+          "numerator": 0,
+          "status": "MEASURED",
+          "value": 0.0
+        },
+        "protocol_failures": 0,
+        "retries_triggered": 0,
+        "role": "planner",
+        "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276",
+        "runtime_exact": true,
+        "schema_failures": 0,
+        "structured_malformed": 0,
+        "structured_other_failures": 0,
+        "structured_output_failure_rate": {
+          "denominator": 3,
+          "numerator": 0,
+          "status": "MEASURED",
+          "value": 0.0
+        },
+        "structured_policy_rejections": 0,
+        "structured_valid": 3,
+        "structured_validation_failures": 0,
+        "task_class": "task"
+      },
+      {
+        "attempts": 0,
+        "attempts_passed": 0,
+        "calls": 2,
+        "completion_tokens": 181,
+        "estimated_token_calls": 0,
+        "first_pass_runs": 0,
+        "first_pass_success": {
+          "reason": "no first attempt was charged to this identity",
+          "status": "UNAVAILABLE"
+        },
+        "first_pass_successes": 0,
+        "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+        "latency_seconds": 3.914,
+        "models": [
+          "qwen3-coder:30b"
+        ],
+        "prompt_tokens": 1892,
+        "protocol_failure_rate": {
+          "denominator": 2,
+          "numerator": 0,
+          "status": "MEASURED",
+          "value": 0.0
+        },
+        "protocol_failures": 0,
+        "retries_triggered": 0,
+        "role": "spec_compliance",
+        "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276",
+        "runtime_exact": true,
+        "schema_failures": 0,
+        "structured_malformed": 0,
+        "structured_other_failures": 0,
+        "structured_output_failure_rate": {
+          "denominator": 2,
+          "numerator": 0,
+          "status": "MEASURED",
+          "value": 0.0
+        },
+        "structured_policy_rejections": 0,
+        "structured_valid": 0,
+        "structured_validation_failures": 0,
+        "task_class": "task"
+      }
+    ],
+    "outcomes": {
+      "enforce": {
+        "reason": "no enforce terminal rows",
+        "status": "UNAVAILABLE"
+      },
+      "generation": {
+        "authority_expansions": {},
+        "authority_rejections": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "containment_failures": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "context_insufficiency": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "context_request_fit_reductions": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "failure_categories": {
+          "quality_gates_exhausted": 1
+        },
+        "fallback_selection_skips": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "fallback_transitions": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "final_verified_success": {
+          "denominator": 3,
+          "numerator": 2,
+          "status": "MEASURED",
+          "value": 0.6667
+        },
+        "first_pass_compile": {
+          "denominator": 2,
+          "numerator": 2,
+          "status": "MEASURED",
+          "value": 1.0
+        },
+        "human_escalations": {
+          "reason": "no approval.decision events (runs without human approval, or traced before PRD-033)",
+          "status": "UNAVAILABLE"
+        },
+        "llm_calls": {
+          "status": "MEASURED",
+          "value": 18
+        },
+        "no_progress_termination": {
+          "denominator": 3,
+          "numerator": 0,
+          "status": "MEASURED",
+          "value": 0.0
+        },
+        "pre_approval_review_unattached": {
+          "status": "MEASURED",
+          "value": 0
+        },
+        "retries": {
+          "full_set": {
+            "status": "MEASURED",
+            "value": 4
+          },
+          "targeted": {
+            "status": "MEASURED",
+            "value": 3
+          }
+        },
+        "runs": 3,
+        "verification_share": {
+          "coverage": "compile and runtime-verification timings only; test runs are not timed",
+          "runs": 3,
+          "status": "MEASURED",
+          "value": 0.0,
+          "verification_seconds": 0.0,
+          "wall_seconds": 112.969
+        },
+        "wall_time_seconds": {
+          "count": 3,
+          "max": 68.603,
+          "mean": 37.656,
+          "median": 27.416,
+          "status": "MEASURED",
+          "total": 112.969
+        },
+        "workspace_commit_failures": {}
+      },
+      "milestone_plans": {
+        "rows": 0,
+        "statuses": {}
+      }
+    },
+    "run_records": {
+      "status": "NOT_PROVIDED"
+    },
+    "schema": "kriya.metrics_report/1",
+    "static_analysis": {
+      "accepted_risk_runs": 0,
+      "distinct_waivers": 0,
+      "incomplete_coverage": 0,
+      "outcomes": {
+        "DISABLED": 2
+      },
+      "reason_codes": {
+        "STATIC_ANALYSIS_NOT_CONFIGURED": 2
+      },
+      "runs_evaluated": 2,
+      "stale_or_missing_authorization_at_commit": 0,
+      "status": "MEASURED",
+      "waiver_uses": 0
+    },
+    "thresholds": {
+      "status": "NOT_CONFIGURED"
+    },
+    "window": {
+      "first": "2026-09-27 21:10:58",
+      "last": "2026-09-27 21:12:24",
+      "run_ids": [
+        "28b1dc36",
+        "8877db33",
+        "1a970463"
+      ],
+      "trace_rows": 3
+    }
+  },
+  "content_digest": "82b7f3a7e2f154d03d32b1fa66c51d9f79944bf697c2c78265dded325b02d4d9",
+  "generated": {
+    "at": "first"
+  }
+}
