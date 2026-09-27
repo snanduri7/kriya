@@ -612,6 +612,30 @@ A provider-neutral static-analysis gate at **both** terminal commit boundaries: 
 - **Execution.** Contained when `autonomy.contained_execution_required`: OCI with `--network none`, a read-only snapshot, and a digest-pinned image via the new `ContainmentProfile.image_reference`, run with `--pull never`. There is no host fallback. Egress admission (PRD-012) happens before execution; source-uploading providers are refused in v1.
 - **Doctor and CLI.** Doctor has seven `static_analysis.*` rows and reuses PRD-027's NOT_APPLICABLE representation, with no schema change. The operator CLI is `kriya static-analysis status|scan|waive|revoke|waivers`.
 
+### 2.9e Adversarial and Crash Chaos Harness (PRD-032, `tests/_chaos_harness.py`)
+
+A certification harness around existing seams. There is no production subsystem.
+
+- **Scenarios.** `SCENARIOS` is a closed table of scenarios in six families: model/protocol, repository injection, tool/runtime/filesystem, commit/recovery/concurrency, PRD-031A attacks, and live model. Each has an injected failure, an expected invariant, a tier and an injection boundary, and each is bound to exactly one `@chaos(id)` test (`tests/test_prd032_chaos_harness.py`).
+- **The one invariant checker.** The `chaos_case` fixture asserts:
+  - no unauthorized mutation: the whole per-test tree, so an escape out of the workspace is seen too;
+  - no false PASS;
+  - an auditable RunRecord: every record parses, has a terminal lifecycle, and has no COMMITTED or unsettled cycle unless expected;
+  - bounded retry: the global attempt ceiling that `retry_policy.decide_for_state` computes;
+  - a typed, content-free outcome.
+- **Where hostility enters.** It enters at the one seam that owns each failure:
+  - the inference runtime port (`ChaosRuntime`, so the real LLMClient normalization runs);
+  - the real direct pipeline with a hostile model;
+  - a real adversarial MCP server;
+  - a docker CLI whose daemon is unreachable;
+  - the PRD-031A gate over the fake provider;
+  - `os.replace` / `mkstemp` inside the commit;
+  - `os._exit` at named commit windows, in a subprocess that runs the real pipeline.
+- **Report.** `pytest -m chaos --chaos-report DIR` (or `scripts/chaos_report.sh`) writes `chaos-report.json` and `chaos-report.md`. The content section carries no timestamps, durations, paths or random ids, so two runs of one revision have one `content_digest`. Scenarios outside the selected tier are NOT_RUN, never PASSED.
+- **Defects found and fixed.**
+  - A non-committed direct terminal commit used to be retried; it is now the deterministic stop `workspace_commit_failed` (§2.9b).
+  - The Planner/Architect workspace context used to carry the absolute `root_path`, which the structured plan schema refuses when a model copies it. Every path a model now sees is workspace-relative.
+
 ### 2.10 `kriya/workflow/` Module Layout
 
 `kriya/workflow/workflow.py` had grown to ~4700 lines - every helper this section describes (context budgeting, edit safety, failure grounding, toolchain detection, retry-prompt building, skill extraction, live lookup, LSP integration, worktree lifecycle) lived in one file, making both navigation and full-file context loading during development increasingly costly. Mechanically extracted (2026-08-11) into focused modules, each re-exported back into `workflow.py`'s own namespace so every existing `from kriya.workflow.workflow import X` and `unittest.mock.patch("kriya.workflow.workflow.X", ...)` call site across the codebase and test suite kept working unchanged - a pure move, not a rewrite; `run_generation_workflow()`'s own internal orchestration logic is untouched and stays in `workflow.py` (~2600 lines) for now, deliberately deferred as separate, higher-risk follow-up work:

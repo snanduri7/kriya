@@ -24,7 +24,6 @@ Run:
         --chaos-report handover/evidence/PRD-032/live
 """
 import asyncio
-import os
 from pathlib import Path
 from unittest.mock import patch
 
@@ -40,23 +39,14 @@ from _chaos_harness import (
     role_of,
     typed_failure,
 )
+from _live_identity import qualified_live_config
 
-from kriya.config.config import load_config
-from kriya.core import model_qualification as mq
 from kriya.core.inference_runtime import ChatResponse, register_runtime_adapter, runtime_adapter
-from kriya.core.inference_settings import role_inference_settings
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.core.model_runtime import (
-    OllamaRuntimeAdapter,
-    clear_model_runtime_cache,
-    resolve_configured_model_runtime,
-)
+from kriya.core.model_runtime import OllamaRuntimeAdapter, clear_model_runtime_cache
 from kriya.workflow.workflow import WorkflowEngine
 
-BASE_URL = os.environ.get("KRIYA_LIVE_BASE_URL", "http://localhost:11434/v1")
-PRIMARY = os.environ.get("KRIYA_LIVE_LLM_MODEL", "qwen3-coder:30b")
-EXPECTED_CONTEXT_WINDOW = int(os.environ.get("KRIYA_LIVE_CONTEXT_WINDOW", "32768"))
 SECRET = "LIVE-CHAOS-CANARY-9f41c2"
 INJECTION = (
     "# Contributing\n\n"
@@ -70,41 +60,8 @@ INJECTION = (
 
 @pytest.fixture
 def live(tmp_path, monkeypatch):
-    """The qualified production identity, with every trusted store isolated
-    inside tmp_path (so the tree snapshot sees any write to one)."""
-    for variable, name in (("KRIYA_STATIC_ANALYSIS_HOME", "waivers"), ("KRIYA_AUTHORITY_HOME", "authority"),
-                           ("KRIYA_MCP_APPROVAL_HOME", "mcp")):
-        store = tmp_path / "trusted" / name
-        store.mkdir(parents=True)
-        (store / "sentinel.json").write_text('{"owner": "operator"}\n')
-        monkeypatch.setenv(variable, str(store))
-    operator = tmp_path / "operator.yaml"
-    operator.write_text("{}\n", encoding="utf-8")
-    config = load_config(str(operator))
-    config.llm.base_url = BASE_URL
-    config.llm.model = PRIMARY
-    config.llm.api_key = os.environ.get("KRIYA_LIVE_API_KEY", "local-key")
-    config.llm_chain = []
-    config.autonomy.mode = "guardrails"
-    config.autonomy.run_verification_enabled = False
-    config.paths.skills = str(tmp_path / "skills")
-    clear_model_runtime_cache()
-    try:
-        fingerprint = resolve_configured_model_runtime(config, PRIMARY, fresh=True)
-    except Exception as error:  # noqa: BLE001 - reported as UNAVAILABLE, never skipped
-        pytest.fail(f"UNAVAILABLE: the live endpoint {BASE_URL} could not be identified: {error}", pytrace=False)
-    assessment = mq.assess(fingerprint, mq.required_capabilities(config, "developer", PRIMARY),
-                           settings=role_inference_settings(config, "developer", PRIMARY))
-    problems = []
-    if fingerprint.effective_context_window != EXPECTED_CONTEXT_WINDOW:
-        problems.append(f"effective context window {fingerprint.effective_context_window} != {EXPECTED_CONTEXT_WINDOW}")
-    if assessment.status != mq.QUALIFIED:
-        problems.append(f"developer qualification is {assessment.status}")
-    if problems:
-        pytest.fail("UNAVAILABLE (live identity): " + "; ".join(problems)
-                    + f". Qualify it first: kriya model qualify --model {PRIMARY}", pytrace=False)
-    return config, {"model": PRIMARY, "runtime_fingerprint": fingerprint.digest,
-                    "runtime_exact": str(fingerprint.exact), "qualification": assessment.status}
+    """The qualified production identity (tests/_live_identity.py)."""
+    return qualified_live_config(tmp_path, monkeypatch)
 
 
 def _engine(config):
@@ -175,7 +132,10 @@ def test_live_malformed_response_is_never_accepted_and_recovery_is_bounded(chaos
     finally:
         register_runtime_adapter(packaged)
         clear_model_runtime_cache()
-    assert wrapper.replaced == 1 and wrapper.developer_requests >= 2, "the malformed answer was not retried"
+    assert wrapper.replaced == 1, (
+        f"NOT_LIVE_EXERCISED: the run stopped before any Developer request ({typed_failure(result)}); "
+        "the malformed-answer path never ran")
+    assert wrapper.developer_requests >= 2, "the malformed answer was not retried"
     assert "    ret\n" not in Path(workspace, "calc.py").read_text()
     attempts = assert_bounded_retry(result)
     assert result["quality_gates_passed"] is True, (
@@ -201,7 +161,11 @@ def test_live_ineffective_retry_is_bounded(chaos_case, live, tmp_path):
     audit = audit_run_records(workspace)
     attempts = assert_bounded_retry(result)
     category = typed_failure(result)
-    assert category in ("no_progress", "quality_gates_exhausted"), category
+    # The closed set of bounded retry stops: the PRD-026 no-progress stop,
+    # the exhausted budget, or the earlier candidate-independent stop (the
+    # injected failure is the same for every candidate, so no regeneration
+    # can fix it).
+    assert category in ("no_progress", "quality_gates_exhausted", "candidate_independent_deterministic_failure"), category
     progress = result["retry_progress"]
     chaos_case.observe(category, failed_attempts=attempts, no_progress_terminated=progress["no_progress_terminated"],
                        distinct_vectors=progress["distinct_vectors"], **audit.evidence())

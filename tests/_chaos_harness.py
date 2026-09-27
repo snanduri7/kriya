@@ -345,8 +345,12 @@ def assert_no_false_pass(result: Mapping[str, Any]) -> None:
 
 
 def typed_failure(result: Mapping[str, Any]) -> str:
-    """The run's typed failure, from the closed failure-category table."""
+    """The run's typed failure: its failure category, or - for a run that
+    stopped before the Developer loop (a refused plan, a knowledge gap) - its
+    typed terminal status."""
     category = result.get("failure_category")
+    if not category and result.get("status") not in (None, "success"):
+        category = result.get("status")
     assert isinstance(category, str) and category, f"untyped failure: {sorted(result)}"
     return category
 

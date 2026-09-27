@@ -750,6 +750,17 @@ kriya static-analysis scan --base HEAD   # read-only check of your working tree 
 
 `kriya doctor --production` shows seven `static_analysis.*` rows: configuration, provider, capability, coverage, prerequisites, waivers and egress.
 
+### 2.1h Chaos certification report (PRD-032)
+
+`scripts/chaos_report.sh [OUT_DIR] [deterministic|scanner|all]` runs the chaos scenarios and writes `chaos-report.json` and `chaos-report.md` to `OUT_DIR` (default `handover/evidence/PRD-032/chaos`). The report covers hostile model output, repository prompt injection, tool and runtime failures, crash windows around the commit, and attacks on the static-analysis gate.
+
+- **Tiers.**
+  - `deterministic` needs nothing beyond the repository.
+  - `scanner` adds the scenario that needs Semgrep 1.178.0 exactly.
+  - `all` adds the live-model scenarios. Those need the qualified local model: `KRIYA_LIVE_BASE_URL` and `KRIYA_LIVE_LLM_MODEL`.
+- **Missing tools.** A missing scanner or model fails its scenario. It is never skipped.
+- **Reading the report.** Every scenario lists the injected failure, the invariant Kriya must keep, the observed typed outcome and content-free evidence. The live cases also carry the exact model runtime fingerprint. Two runs of the same revision give the same `content_digest`.
+
 ### 2.2 Control Plane, Policy, and Structured Execution
 
 A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.
