@@ -83,14 +83,16 @@ from kriya.workflow.checkpoint import (
     validate_resume_against_reality,
 )
 from kriya.workflow.context_budget import (
+    CandidatePrompts,
     RetrievalLimits,
     _reserve_graph_context_budget,
     agent_request_capacity,
     allocation_window,
     build_code_context_package,
+    candidate_model,
     fit_planner_request,
     retrieval_limits_for,
-    review_batches_for_request,
+    review_requests,
 )
 from kriya.workflow.context_budget import (
     _reserve_sibling_content_budget as _reserve_sibling_content_budget,
@@ -362,6 +364,21 @@ def _record_review_fit(state: Any, stage: str, fit: Any) -> None:
             details={"request": f"reviewer.{stage}", "batches": len(batches),
                      "truncated_files": list(truncated), **fit.to_dict()},
         ))
+
+
+def _review_refit_recorder(state: Any, stage: str, config: Any) -> Any:
+    """``review_requests``' on_refit: a ``context.request_fit`` event when a
+    role-chain fallback's review request carries less of a batch than the
+    first candidate's did (PROMPT-FIT-ROLE-CHAIN-001)."""
+    def record(candidate: Any, batch: int, details: Dict[str, Any]) -> None:
+        state.record_event(RunEvent(
+            kind="context.request_fit", attempt=state.attempt_number, source="workflow",
+            authority=EventAuthority.ADVISORY,
+            message=f"{stage} review batch {batch}: refitted for {candidate_model(config, candidate)}",
+            details={"request": f"reviewer.{stage}", "batch": batch,
+                     "model": candidate_model(config, candidate), **details},
+        ))
+    return record
 
 
 def _record_run_exception(engine: Any, trace: Dict[str, Any], error: BaseException) -> None:
@@ -2626,27 +2643,35 @@ class WorkflowEngine:
             # PROMPT-BUDGET-FIT-001A: the graph context and the reference get
             # the room this request has left after its system prompt and
             # every mandatory section (convention_prompt is skills + graph +
-            # fenced reference, in that order).
-            plan_prompt, plan_fit = fit_planner_request(
-                planner_capacity(), system_prompt=self.planner.system_prompt, head=plan_head,
-                skills_prompt=skills_prompt, graph_context=graph_rag_context, reference=reference_context,
-                suffix=plan_prompt[len(plan_head) + len(convention_prompt):],
-                rebuild_graph=lambda budget: build_code_context_package(
-                    graph_retrieval_result.matched_files, graph_retrieval_result.related_files, workspace_path,
-                    budget, file_scores=graph_retrieval_result.file_scores,
-                ),
-            )
-            if plan_fit:
-                state.record_event(RunEvent(
-                    kind="context.request_fit", attempt=0, source="workflow",
-                    authority=EventAuthority.ADVISORY,
-                    message="Planner request: graph context or reference text reduced to fit the request",
-                    details=plan_fit,
-                ))
+            # fenced reference, in that order) - for each role candidate's
+            # own request (PROMPT-FIT-ROLE-CHAIN-001).
+            plan_suffix = plan_prompt[len(plan_head) + len(convention_prompt):]
+
+            def planner_prompt_for(capacity: Any, candidate: Any) -> str:
+                fitted, plan_fit = fit_planner_request(
+                    capacity, system_prompt=self.planner.system_prompt, head=plan_head,
+                    skills_prompt=skills_prompt, graph_context=graph_rag_context, reference=reference_context,
+                    suffix=plan_suffix,
+                    rebuild_graph=lambda budget: build_code_context_package(
+                        graph_retrieval_result.matched_files, graph_retrieval_result.related_files,
+                        workspace_path, budget, file_scores=graph_retrieval_result.file_scores,
+                    ),
+                )
+                if plan_fit:
+                    state.record_event(RunEvent(
+                        kind="context.request_fit", attempt=0, source="workflow",
+                        authority=EventAuthority.ADVISORY,
+                        message="Planner request: graph context or reference text reduced to fit the request",
+                        details={**plan_fit, "model": candidate_model(self.kernel.config, candidate)},
+                    ))
+                return fitted
+
+            planner_prompts = CandidatePrompts(self.kernel.config, self.planner, "planner", planner_prompt_for)
             _planner_started = time.monotonic()
             plan = await self.planner.run(
-                plan_prompt,
-                stream_callback=plan_stream
+                planner_prompts.first(),
+                stream_callback=plan_stream,
+                candidate_prompt=planner_prompts,
             )
             plan_response_model = planner_response_model(self.planner)
             # R1 Deliverable 5 - observational only, same posture as
@@ -3945,11 +3970,13 @@ class WorkflowEngine:
                             ownership_review_evidence(resolved_obligation_ledger, state.all_files_written)
                         review_header = f"Goal: {goal}\n{verified_evidence}\nFiles generated:\n"
                         # PROMPT-BUDGET-FIT-001B: batches get the room this
-                        # request leaves after its system prompt and header.
-                        review_batches, _, review_fit = review_batches_for_request(
+                        # request leaves after its system prompt and header,
+                        # refitted for each role candidate that is called.
+                        review_batches, _, review_fit = review_requests(
                             self.kernel.config, self.reviewer,
                             [(fp, worktree_file_contents[fp]) for fp in sorted(state.all_files_written)],
                             self.reviewer.system_prompt, review_header,
+                            on_refit=_review_refit_recorder(state, "pre_approval", self.kernel.config),
                         )
                         _record_review_fit(state, "pre_approval", review_fit)
                         # The completed report is attached to the approval context
@@ -3961,13 +3988,13 @@ class WorkflowEngine:
                                 "Review", "Preparing automated code review for approval...\n",
                             )
                         review_parts = []
-                        for i, batch in enumerate(review_batches, 1):
-                            batch_prompt = review_header + batch
+                        for i, batch_prompts in enumerate(review_batches, 1):
                             label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
                             _reviewer_started = time.monotonic()
                             review_text = await self.reviewer.run(
-                                batch_prompt, stream_callback=None,
+                                batch_prompts.first(), stream_callback=None,
                                 temperature_override=self.kernel.config.llm.reviewer_temperature,
+                                candidate_prompt=batch_prompts,
                             )
                             # R1 Deliverable 5 - observational only, one
                             # entry per review batch (a multi-batch review
@@ -5161,9 +5188,10 @@ class WorkflowEngine:
                 )
                 if state.final_attempt_contents else None
             )
-            review_batches, _, review_fit = review_batches_for_request(
+            review_batches, _, review_fit = review_requests(
                 self.kernel.config, self.reviewer, file_contents_for_review,
                 reviewer_system_prompt_override or self.reviewer.system_prompt, goal_header,
+                on_refit=_review_refit_recorder(state, "final", self.kernel.config),
             )
             _record_review_fit(state, "final", review_fit)
             # Demo-01 Finding 3 follow-up (2026-09-11): a rejected/unapplied
@@ -5182,15 +5210,15 @@ class WorkflowEngine:
                 if stream_callback and not state.final_attempt_contents else None
             )
             review_parts = []
-            for i, batch in enumerate(review_batches, 1):
-                batch_prompt = goal_header + batch
+            for i, batch_prompts in enumerate(review_batches, 1):
                 label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
                 _reviewer_started = time.monotonic()
                 try:
                     review_text = await self.reviewer.run(
-                        batch_prompt, stream_callback=reviewer_stream,
+                        batch_prompts.first(), stream_callback=reviewer_stream,
                         temperature_override=self.kernel.config.llm.reviewer_temperature,
                         system_prompt_override=reviewer_system_prompt_override,
+                        candidate_prompt=batch_prompts,
                     )
                 except ContextBudgetUnsatisfiableError as refusal:
                     # PROMPT-BUDGET-FIT-001C: PRD-016 refused the request

@@ -836,36 +836,95 @@ def developer_reference(prompt_window: int, fenced_reference: str, *pool_texts: 
     return fence_untrusted_reference(trim_reference_text(fenced_reference_body(fenced_reference), room - fence_units))
 
 
+def _fit_review_groups(capacity: RequestCapacity, files: List[Tuple[str, str]], *fixed_texts: str) -> SectionFit:
+    """fit_review_batches with each batch's relpaths
+    (review_context.build_review_batch_groups)."""
+    from kriya.workflow.review_context import build_review_batch_groups
+
+    def largest(built: Tuple[List[Tuple[str, List[str]]], List[str]]) -> int:
+        return max((capacity.count(text) for text, _paths in built[0]), default=0)
+
+    return fit_variable_section(
+        capacity, fixed_texts, lambda budget: build_review_batch_groups(files, budget),
+        measure=largest, empty=([], [path for path, _ in files]),
+    )
+
+
 def fit_review_batches(capacity: RequestCapacity, files: List[Tuple[str, str]], *fixed_texts: str) -> SectionFit:
     """Review file batches (review_context.build_review_batches) sized so
     every batch request - its fixed text plus the batch - fits. ``value`` is
     build_review_batches' (batches, truncated_relpaths); no room at all
     leaves every file out (no batches) and reports each as truncated."""
-    from kriya.workflow.review_context import build_review_batches
+    fit = _fit_review_groups(capacity, files, *fixed_texts)
+    groups, truncated = fit.value
+    return replace(fit, value=([text for text, _paths in groups], truncated))
 
-    def largest(built: Tuple[List[str], List[str]]) -> int:
-        return max((capacity.count(batch) for batch in built[0]), default=0)
 
-    return fit_variable_section(
-        capacity, fixed_texts, lambda budget: build_review_batches(files, budget),
-        measure=largest, empty=([], [path for path, _ in files]),
-    )
+def candidate_request_capacity(config: Any, candidate: Any, role: str, *,
+                               max_tokens_override: Optional[int] = None) -> RequestCapacity:
+    """The RequestCapacity of the request call_with_escalation sends to one
+    role candidate (PROMPT-FIT-ROLE-CHAIN-001): ``candidate`` is a model
+    binding (the role's own llm or a role-chain model; anything else means
+    the primary), with the output that exact call asks for
+    (agent.candidate_output_tokens, the rule the call itself uses)."""
+    from pydantic import BaseModel
+
+    from kriya.agents.agent import candidate_output_tokens
+
+    binding = candidate if isinstance(candidate, BaseModel) else None
+    return request_capacity(config, binding, role=role,
+                            output_tokens=candidate_output_tokens(config, binding, max_tokens_override))
 
 
 def agent_request_capacity(config: Any, agent: Any, role: str, *,
                            output_tokens: Optional[int] = None) -> RequestCapacity:
-    """The RequestCapacity of ``agent``'s own request: its role binding
-    (``role_llm``, a config model; the primary otherwise) and the output it
-    asks for (``output_tokens``, else the agent's ``max_output_tokens``,
-    else the binding's own budget)."""
-    from pydantic import BaseModel
+    """The RequestCapacity of ``agent``'s request to its FIRST candidate: its
+    role binding (``role_llm``; the primary otherwise), asking for the
+    output ``output_tokens`` (else the agent's ``max_output_tokens``) makes
+    that call ask for. Every other candidate is sized by CandidatePrompts."""
+    from kriya.agents.agent import role_output_override
 
-    binding = getattr(agent, "role_llm", None)
-    if output_tokens is None:
-        own = getattr(agent, "max_output_tokens", None)
-        output_tokens = own if isinstance(own, int) else None
-    return request_capacity(config, binding if isinstance(binding, BaseModel) else None, role=role,
-                            output_tokens=output_tokens)
+    return candidate_request_capacity(config, getattr(agent, "role_llm", None), role,
+                                      max_tokens_override=role_output_override(agent, output_tokens))
+
+
+class CandidatePrompts:
+    """The prompts of ONE agent request, one per role candidate
+    (PROMPT-FIT-ROLE-CHAIN-001): ``build(capacity, candidate)`` makes the
+    prompt for that candidate's own RequestCapacity - its served window,
+    output budget and token counter - so a prompt fitted for one model is
+    never sent to another. Built lazily (a fallback's prompt only when the
+    escalation reaches it) and at most once per candidate. Pass ``first()``
+    as the agent's ``prompt`` and this object as ``candidate_prompt``."""
+
+    def __init__(self, config: Any, agent: Any, role: str,
+                 build: Callable[[RequestCapacity, Optional[Any]], str], *,
+                 max_tokens_override: Optional[int] = None) -> None:
+        from kriya.agents.agent import role_output_override
+
+        self._config, self._role, self._build = config, role, build
+        self._override = role_output_override(agent, max_tokens_override)
+        candidates = getattr(agent, "_candidates", None)
+        self._first = candidates()[0] if callable(candidates) else None
+        self._built: Dict[int, Tuple[Any, str]] = {}
+
+    def __call__(self, candidate: Optional[Any]) -> str:
+        key = id(candidate)
+        if key not in self._built:
+            capacity = candidate_request_capacity(self._config, candidate, self._role,
+                                                  max_tokens_override=self._override)
+            # The candidate is kept with its prompt, so its id is never reused.
+            self._built[key] = (candidate, self._build(capacity, candidate))
+        return self._built[key][1]
+
+    def first(self) -> str:
+        return self(self._first)
+
+
+def candidate_model(config: Any, candidate: Optional[Any]) -> str:
+    """The model a role candidate names (None: the primary)."""
+    model = getattr(candidate, "model", None)
+    return model if isinstance(model, str) else config.llm.model
 
 
 # The longest batch label a review request carries ("=== Batch i/n ===").
@@ -877,21 +936,65 @@ REVIEW_FILES_OMITTED_NOTE = (
 )
 
 
-def review_batches_for_request(config: Any, reviewer: Any, files: List[Tuple[str, str]],
-                               *fixed_texts: str) -> Tuple[List[str], List[str], SectionFit]:
-    """The review batches of one Reviewer request whose fixed text is
-    ``fixed_texts`` (the system prompt actually sent and the request's own
-    header - goal, candidate diff, evidence), sized by fit_review_batches
-    against the reviewer's own binding and output budget. Files with no room
-    at all become one request carrying REVIEW_FILES_OMITTED_NOTE: the fixed
-    text is still reviewed, and if even it does not fit the dispatch check
-    refuses the request (CONTEXT_BUDGET_UNSATISFIABLE)."""
-    fit = fit_review_batches(agent_request_capacity(config, reviewer, "reviewer"), files,
-                             *fixed_texts, REVIEW_BATCH_LABEL_BOUND)
-    batches, truncated = fit.value
-    if files and not batches:
-        batches = [REVIEW_FILES_OMITTED_NOTE]
-    return batches, list(truncated), fit
+# Sent after the files a role-chain fallback's request could carry, naming
+# the rest of that batch (PROMPT-FIT-ROLE-CHAIN-001).
+REVIEW_FILES_NOT_SHOWN_NOTE = (
+    "\n(Not shown in this request - no room for them beside the material above: {paths}. "
+    "Say that these files were not reviewed.)\n"
+)
+
+
+def review_requests(config: Any, reviewer: Any, files: List[Tuple[str, str]], system_prompt: str, header: str,
+                    *, on_refit: Optional[Callable[[Optional[Any], int, Dict[str, Any]], None]] = None,
+                    ) -> Tuple[List[CandidatePrompts], List[str], SectionFit]:
+    """The requests of one review: ``system_prompt`` (the one actually sent)
+    and ``header`` (goal, candidate diff, evidence) are fixed text, the file
+    batches are fitted (fit_review_batches) for the reviewer's first
+    candidate (PROMPT-BUDGET-FIT-001B). Files with no room at all become one
+    request carrying REVIEW_FILES_OMITTED_NOTE: the fixed text is still
+    reviewed, and if even it does not fit the dispatch check refuses the
+    request (CONTEXT_BUDGET_UNSATISFIABLE).
+
+    Each request is a CandidatePrompts (PROMPT-FIT-ROLE-CHAIN-001): a
+    candidate whose own capacity holds the batch gets it unchanged
+    (re-measured for that candidate, never assumed); one that cannot gets
+    that batch's own files refitted into one request of its room - the
+    files that fit, in order, plus REVIEW_FILES_NOT_SHOWN_NOTE naming the
+    rest (REVIEW_FILES_OMITTED_NOTE when none fits) - reported through
+    ``on_refit(candidate, batch_number, details)``. The fixed text is never
+    trimmed for any candidate. Returns the requests, the first candidate's
+    truncated relpaths and its fit."""
+    capacity = agent_request_capacity(config, reviewer, "reviewer")
+    fixed = (system_prompt, header, REVIEW_BATCH_LABEL_BOUND)
+    fit = _fit_review_groups(capacity, files, *fixed)
+    groups, truncated = fit.value
+    if files and not groups:
+        groups = [(REVIEW_FILES_OMITTED_NOTE, [])]
+    contents = dict(files)
+
+    def request(number: int, batch: str, paths: List[str]) -> CandidatePrompts:
+        def build(candidate_capacity: RequestCapacity, candidate: Optional[Any]) -> str:
+            if not paths or candidate_capacity.count(batch) <= candidate_capacity.room(*fixed):
+                return header + batch
+            note_bound = REVIEW_FILES_NOT_SHOWN_NOTE.format(paths=", ".join(paths))
+            refit = _fit_review_groups(candidate_capacity, [(path, contents[path]) for path in paths],
+                                       *fixed, note_bound)
+            sub_groups, cut = refit.value
+            shown = sub_groups[0][1] if sub_groups else []
+            not_shown = [path for path in paths if path not in shown]
+            text = sub_groups[0][0] if sub_groups else REVIEW_FILES_OMITTED_NOTE
+            if sub_groups and not_shown:
+                text += REVIEW_FILES_NOT_SHOWN_NOTE.format(paths=", ".join(not_shown))
+            if on_refit is not None:
+                on_refit(candidate, number, {
+                    "files": list(paths), "shown_files": list(shown), "not_shown_files": not_shown,
+                    "truncated_files": [path for path in cut if path in shown], **refit.to_dict(),
+                })
+            return header + text
+
+        return CandidatePrompts(config, reviewer, "reviewer", build)
+
+    return [request(number, batch, paths) for number, (batch, paths) in enumerate(groups, 1)], list(truncated), fit
 
 
 def investigation_evidence_char_budget(prompt_window: int) -> int:

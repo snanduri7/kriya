@@ -2871,7 +2871,7 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
             return
 
         click.secho(f"Reviewing {len(files_to_review)} file(s)...", fg="cyan", err=True)
-        from kriya.workflow.context_budget import review_batches_for_request
+        from kriya.workflow.context_budget import review_requests
 
         # Budget-aware batching (kriya/workflow/review_context.py - shared with the
         # generation workflow's own Reviewer stage). Confirmed live as a real, severe
@@ -2915,8 +2915,9 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
         )
 
         # PROMPT-BUDGET-FIT-001B: each batch gets the room its request leaves
-        # after the Reviewer system prompt and the review header.
-        batches, truncated_relpaths, _ = review_batches_for_request(
+        # after the Reviewer system prompt and the review header, refitted
+        # for each role candidate that is called (PROMPT-FIT-ROLE-CHAIN-001).
+        batches, truncated_relpaths, _ = review_requests(
             cfg, reviewer, file_contents, reviewer.system_prompt, review_context_header,
         )
         for rel in truncated_relpaths:
@@ -2996,7 +2997,10 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
 
                 member_ids, relation_ids, evidence_prefix, target_relpath_in_root, repo_root = structured_evidence
                 click.secho("\n=== Code Review Report ===", bold=True, fg="cyan", err=True)
-                prompt = "=== TARGET SOURCE ===\n" + batches[0] + evidence_prefix + "\n=== REVIEW TASK ===\n" + review_context_header
+                # The whole file, as the first candidate's batch carries it
+                # (this path requires one untruncated batch, see above).
+                target_batch = batches[0].first()[len(review_context_header):]
+                prompt = "=== TARGET SOURCE ===\n" + target_batch + evidence_prefix + "\n=== REVIEW TASK ===\n" + review_context_header
                 raw = await reviewer.run_structured_review(prompt)
                 if "_error" in raw:
                     click.secho(f"Structured review failed: {raw['_error']}", fg="red", err=True)
@@ -3040,11 +3044,10 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
                         )
                 return
 
-            for i, batch in enumerate(batches, 1):
+            for i, batch_prompts in enumerate(batches, 1):
                 label = "=== Code Review Report ===" if len(batches) == 1 else f"=== Code Review Report (batch {i}/{len(batches)}) ==="
                 click.secho(f"\n{label}", bold=True, fg="cyan", err=True)
-                prompt = review_context_header + batch
-                await reviewer.run(prompt, stream_callback=on_stream)
+                await reviewer.run(batch_prompts.first(), stream_callback=on_stream, candidate_prompt=batch_prompts)
                 click.echo()
 
         asyncio.run(run_review())

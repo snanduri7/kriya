@@ -31,7 +31,7 @@ from kriya.workflow.context_budget import (
     investigation_evidence_char_budget,
     prompt_allocation_window,
     retry_evidence_char_budget,
-    review_batches_for_request,
+    review_requests,
     skeletonize_code,
 )
 
@@ -191,10 +191,10 @@ def test_review_batches_fit_beside_the_output_budget():
     reviewer = ReviewerAgent("reviewer", None)
     header = "Goal: review\n" + "diff line\n" * 2000
     files = [(f"Big{i}.java", _java_class(80, i)) for i in range(4)]
-    batches, _, _ = review_batches_for_request(cfg, reviewer, files, reviewer.system_prompt, header)
+    requests, _, _ = review_requests(cfg, reviewer, files, reviewer.system_prompt, header)
     room = 32768 - 16384 - tb.TWO_MESSAGE_FRAMING_TOKENS - tb.DISPATCH_SAFETY_MARGIN_TOKENS
-    assert batches and all(
-        _dispatch_tokens(reviewer.system_prompt + header + batch) <= room for batch in batches)
+    assert requests and all(
+        _dispatch_tokens(reviewer.system_prompt + request.first()) <= room for request in requests)
 
 
 def test_investigation_evidence_keeps_whole_items_and_names_the_rest():

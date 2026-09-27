@@ -283,6 +283,27 @@ def _record_schema_failure(llm: Any, model: str) -> None:
         metrics.record_schema_failure(model=model)
 
 
+def candidate_output_tokens(config: Any, candidate: Optional[Any], max_tokens_override: Optional[int]) -> int:
+    """The output budget _call_with_escalation asks ``candidate`` for (None
+    is the primary): the role override, else the primary's own budget, for
+    the primary; an explicit candidate's own budget, clamped (never raised)
+    by the override. The one rule both the call and its request sizing use
+    (PROMPT-FIT-ROLE-CHAIN-001), so a prompt fitted for a candidate reserves
+    exactly the output that candidate is then asked for."""
+    if candidate is None:
+        return int(max_tokens_override) if max_tokens_override is not None else binding_output_tokens(config, None)
+    own = binding_output_tokens(config, candidate)
+    return min(own, max_tokens_override) if max_tokens_override is not None else own
+
+
+def role_output_override(agent: Any, max_tokens_override: Optional[int]) -> Optional[int]:
+    """The role-level output ceiling an agent request sends: the call's own
+    override, else the agent's ``max_output_tokens`` (BaseAgent.run and the
+    per-candidate prompt sizing both read it here)."""
+    value = max_tokens_override if max_tokens_override is not None else getattr(agent, "max_output_tokens", None)
+    return value if isinstance(value, int) else None
+
+
 async def call_with_escalation(
     llm: LLMClient,
     system_prompt: str,
@@ -351,11 +372,7 @@ async def _call_with_escalation(
                     **({"max_tokens_override": max_tokens_override} if max_tokens_override is not None else {}),
                 )
             else:
-                own_max_tokens = binding_output_tokens(llm.config, cand)
-                candidate_max_tokens = (
-                    min(own_max_tokens, max_tokens_override)
-                    if max_tokens_override is not None else own_max_tokens
-                )
+                candidate_max_tokens = candidate_output_tokens(llm.config, cand, max_tokens_override)
                 response = await llm.complete(
                     system_prompt, cand_prompt, stream_callback=stream_callback, json_mode=json_mode,
                     model_override=cand.model,
@@ -497,20 +514,23 @@ class BaseAgent(ABC):
         system_prompt_override: Optional[str] = None,
         json_mode: bool = False,
         metrics_role: Optional[str] = None,
+        candidate_prompt: Optional[Callable[[Optional[Any]], str]] = None,
     ) -> str:
         """Execute a text completion request, escalating through this role's chain
         only on a hard call failure (connection/timeout/HTTP/egress error) - a
         legitimately short-but-correct response is never wrongly retried just for
         being brief. ``metrics_role`` attributes the calls to another PRD-018
         role bucket (shadow-mode planning uses ``planner_shadow`` so its
-        evidence never reaches the Planner's routing metrics)."""
+        evidence never reaches the Planner's routing metrics).
+        ``candidate_prompt`` (PROMPT-FIT-ROLE-CHAIN-001) builds each
+        candidate's own prompt, sized for that candidate's request; ``prompt``
+        is then the first candidate's (context_budget.CandidatePrompts)."""
         return await call_with_escalation(
-            self.llm, system_prompt_override or self.system_prompt, prompt, self._candidates(),
+            self.llm, system_prompt_override or self.system_prompt, candidate_prompt or prompt,
+            self._candidates(),
             json_mode=json_mode, stream_callback=stream_callback, role=metrics_role or self.name,
             temperature_override=temperature_override,
-            max_tokens_override=(
-                max_tokens_override if max_tokens_override is not None else self.max_output_tokens
-            ),
+            max_tokens_override=role_output_override(self, max_tokens_override),
         )
 
 

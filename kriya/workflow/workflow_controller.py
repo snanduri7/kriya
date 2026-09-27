@@ -138,7 +138,7 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
     validate_resume_against_reality,
 )
-from kriya.workflow.context_budget import agent_request_capacity, fit_reference_section
+from kriya.workflow.context_budget import CandidatePrompts, candidate_model, fit_reference_section
 from kriya.workflow.context_orchestrator import ContextOrchestrator
 from kriya.workflow.context_package import (
     ContextPackage,
@@ -4210,26 +4210,33 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # first one and every repair round) leaves after its system prompt
         # and every goal-derived section, trimmed at whole entries.
         raw_reference = legacy_kwargs.get("reference_context", "")
-        planner_capacity_cache: List[Any] = []
 
-        def with_planner_reference(request: str) -> str:
+        def planner_prompts(request: str) -> Optional[CandidatePrompts]:
+            """``request`` plus the fenced reference, fitted for each Planner
+            candidate's own request (PROMPT-FIT-ROLE-CHAIN-001); None when
+            there is no reference to fit (the request goes out unchanged)."""
             if not raw_reference.strip():
-                return request
-            if not planner_capacity_cache:
-                planner_capacity_cache.append(agent_request_capacity(
-                    kernel.config, self.workflow_engine.planner, "planner",
-                    output_tokens=planner_token_cap if isinstance(planner_token_cap, int) else None,
-                ))
-            fit = fit_reference_section(planner_capacity_cache[0], (AUTHORITATIVE_PLANNER_SYSTEM_PROMPT, request),
-                                        raw_reference)
-            if fit.omitted or fit.builds > 1 or fit.value.count("\n[Source: ") < raw_reference.count("\n[Source: "):
-                ledger.record_and_persist(
-                    workspace_path, "context.request_fit", run_id=run_id,
-                    request="structured_planner", reference=fit.to_dict(),
-                )
-            return request + fit.value
+                return None
 
-        authoritative_planner_request = with_planner_reference(authoritative_planner_request)
+            def build(capacity: Any, candidate: Any) -> str:
+                fit = fit_reference_section(capacity, (AUTHORITATIVE_PLANNER_SYSTEM_PROMPT, request), raw_reference)
+                if fit.omitted or fit.builds > 1 or \
+                        fit.value.count("\n[Source: ") < raw_reference.count("\n[Source: "):
+                    ledger.record_and_persist(
+                        workspace_path, "context.request_fit", run_id=run_id,
+                        request="structured_planner", model=candidate_model(kernel.config, candidate),
+                        reference=fit.to_dict(),
+                    )
+                return request + fit.value
+
+            return CandidatePrompts(kernel.config, self.workflow_engine.planner, "planner", build,
+                                    max_tokens_override=planner_token_cap if isinstance(planner_token_cap, int)
+                                    else None)
+
+        # The persisted planning diagnostics show the first candidate's request.
+        authoritative_planner_prompts = planner_prompts(authoritative_planner_request)
+        if authoritative_planner_prompts is not None:
+            authoritative_planner_request = authoritative_planner_prompts.first()
         planning_repository_evidence = bounded_repository_evidence(
             workspace_path, planning_repository_candidates,
         )
@@ -4239,6 +4246,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             max_tokens_override=planner_token_cap,
             system_prompt_override=AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
             json_mode=True,
+            candidate_prompt=authoritative_planner_prompts,
         )
         # MODEL-EVIDENCE-HARDENING-001: the model that answered (escalation
         # may have used a chain model); each response's typed outcome is
@@ -4509,6 +4517,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 break
 
             repair_prompt = None
+            repair_prompts = None
             # Planner-convergence audit (2026-09-06, P2 run 7): classify
             # THIS attempt against the retained baseline before deciding
             # what seeds the next repair prompt (and, on exhaustion, the
@@ -4597,7 +4606,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     validation_evidence=prompt_validation_evidence,
                     available_tool_names=available_tool_names,
                 )
-                repair_prompt = with_planner_reference(repair_prompt)
+                repair_prompts = planner_prompts(repair_prompt)
+                if repair_prompts is not None:
+                    repair_prompt = repair_prompts.first()
             try:
                 persist_planning_attempt_diagnostic(
                     workspace_path, run_id,
@@ -4678,6 +4689,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 max_tokens_override=planner_token_cap,
                 system_prompt_override=AUTHORITATIVE_PLANNER_SYSTEM_PROMPT,
                 json_mode=True,
+                candidate_prompt=repair_prompts,
             )
             plan_response_model = planner_response_model(self.workflow_engine.planner)
 

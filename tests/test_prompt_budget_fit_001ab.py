@@ -130,9 +130,10 @@ def test_a_reviewer_with_no_room_still_sends_its_fixed_text_once():
     cfg.llm.context_window = 8192
     cfg.llm.extra_body = {}
     reviewer = ReviewerAgent("reviewer", None)
-    batches, truncated, fit = budget.review_batches_for_request(
+    requests, truncated, fit = budget.review_requests(
         cfg, reviewer, [("a.py", "a = 1\n"), ("b.py", "b = 2\n")], reviewer.system_prompt, "h" * 8000)
-    assert batches == [budget.REVIEW_FILES_OMITTED_NOTE] and truncated == ["a.py", "b.py"] and fit.omitted
+    assert [request.first() for request in requests] == ["h" * 8000 + budget.REVIEW_FILES_OMITTED_NOTE]
+    assert truncated == ["a.py", "b.py"] and fit.omitted
 
 
 def test_a_reviewer_binding_and_its_output_budget_size_its_own_requests():
@@ -420,13 +421,13 @@ def test_a_review_whose_fixed_text_alone_cannot_fit_is_still_refused(monkeypatch
     cfg.llm.extra_body = {}
     reviewer = ReviewerAgent("reviewer", LLMClient(cfg))
     header = "Goal: x\n" + UNFITTABLE_COMPILE_ERROR * 2
-    batches, _, fit = budget.review_batches_for_request(cfg, reviewer, [("a.py", "a = 1\n")],
-                                                        reviewer.system_prompt, header)
-    assert fit.omitted and batches == [budget.REVIEW_FILES_OMITTED_NOTE]
+    requests, _, fit = budget.review_requests(cfg, reviewer, [("a.py", "a = 1\n")],
+                                              reviewer.system_prompt, header)
+    assert fit.omitted and [request.first() for request in requests] == [header + budget.REVIEW_FILES_OMITTED_NOTE]
     create = AsyncMock()
     with patch.object(reviewer.llm.client.chat.completions, "create", new=create):
         with pytest.raises(tb.ContextBudgetUnsatisfiableError) as refusal:
-            asyncio.run(reviewer.llm.complete(reviewer.system_prompt, header + batches[0]))
+            asyncio.run(reviewer.llm.complete(reviewer.system_prompt, requests[0].first()))
     create.assert_not_called()
     assert refusal.value.reason_code == tb.CONTEXT_BUDGET_UNSATISFIABLE
 

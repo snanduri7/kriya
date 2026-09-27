@@ -81,7 +81,7 @@ def build_reviewer_verified_evidence(gate_outcomes: List[Dict[str, Any]]) -> str
 def build_review_batches(files: List[Tuple[str, str]], budget: int) -> Tuple[List[str], List[str]]:
     """Chunks and greedily batches (relpath, content) pairs into review-prompt blobs that
     each fit within `budget` tokens (the room its request leaves:
-    context_budget.review_batches_for_request, PROMPT-BUDGET-FIT-001B), counted with
+    context_budget.review_requests, PROMPT-BUDGET-FIT-001B), counted with
     workflow.py's estimate_tokens() heuristic - not duplicated here to avoid an import
     cycle with kriya.workflow.workflow.
 
@@ -96,6 +96,15 @@ def build_review_batches(files: List[Tuple[str, str]], budget: int) -> Tuple[Lis
     Returns (batches, truncated_relpaths) - the caller decides how to surface a truncation
     warning (CLI: click.secho; workflow: logger.warning), kept UI-agnostic here.
     """
+    groups, truncated_relpaths = build_review_batch_groups(files, budget)
+    return [text for text, _paths in groups], truncated_relpaths
+
+
+def build_review_batch_groups(
+    files: List[Tuple[str, str]], budget: int,
+) -> Tuple[List[Tuple[str, List[str]]], List[str]]:
+    """build_review_batches' batches, each with the relpaths it carries (a
+    role-chain fallback refits one batch's own files: PROMPT-FIT-ROLE-CHAIN-001)."""
     from kriya.workflow.workflow import estimate_tokens
 
     file_blobs: List[Tuple[str, str, int]] = []  # (rel, blob_text, token_estimate)
@@ -120,18 +129,21 @@ def build_review_batches(files: List[Tuple[str, str]], budget: int) -> Tuple[Lis
 
         file_blobs.append((rel, blob, estimate_tokens(blob)))
 
-    batches: List[str] = []
+    batches: List[Tuple[str, List[str]]] = []
     current_batch = ""
+    current_paths: List[str] = []
     current_tokens = 0
-    for _rel, blob, tokens in file_blobs:
+    for rel, blob, tokens in file_blobs:
         if current_batch and current_tokens + tokens > budget:
-            batches.append(current_batch)
+            batches.append((current_batch, current_paths))
             current_batch = ""
+            current_paths = []
             current_tokens = 0
         current_batch += blob
+        current_paths.append(rel)
         current_tokens += tokens
     if current_batch:
-        batches.append(current_batch)
+        batches.append((current_batch, current_paths))
 
     return batches, truncated_relpaths
 
