@@ -35,7 +35,8 @@ from kriya.core import model_qualification as mq
 from kriya.core.model_runtime import clear_model_runtime_cache
 from kriya.core.state_paths import trace_db_path
 
-pytestmark = pytest.mark.live_model
+# PRD-034: needs the qualified target identity, never the CI wiring-smoke model.
+pytestmark = [pytest.mark.live_model, pytest.mark.live_target]
 
 EVIDENCE_DIR = os.environ.get("KRIYA_BATCH5_EVIDENCE_DIR")
 BASE_URL = os.environ.get("KRIYA_LIVE_BASE_URL", "http://localhost:11434/v1")

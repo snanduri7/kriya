@@ -26,7 +26,8 @@ from kriya.metrics.evidence import load_trace_runs
 from kriya.metrics.report import build_report, write_report
 from kriya.workflow.workflow import WorkflowEngine
 
-pytestmark = pytest.mark.live_model
+# PRD-034: needs the qualified target identity, never the CI wiring-smoke model.
+pytestmark = [pytest.mark.live_model, pytest.mark.live_target]
 
 TEST_MUL = "from calc import mul\n\n\ndef test_mul():\n    assert mul(3, 4) == 12\n"
 

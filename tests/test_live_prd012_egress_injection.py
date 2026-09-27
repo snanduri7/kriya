@@ -41,7 +41,8 @@ from kriya.tools.containment_oci import OCIContainmentBackend
 from kriya.tools.process import ProcessController
 from kriya.workflow.workflow import WorkflowEngine
 
-pytestmark = pytest.mark.live_model
+# PRD-034: needs the qualified target identity, never the CI wiring-smoke model.
+pytestmark = [pytest.mark.live_model, pytest.mark.live_target]
 
 CANARY_HOST = os.environ.get("KRIYA_PRD012_CANARY_HOST", "host.docker.internal")
 

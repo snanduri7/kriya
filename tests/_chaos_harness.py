@@ -195,7 +195,8 @@ def chaos(scenario_id: str) -> Callable[[Callable[..., Any]], Callable[..., Any]
     def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
         function = pytest.mark.chaos(scenario_id)(function)
         if scenario.tier == LIVE_MODEL:
-            function = pytest.mark.live_model(function)
+            # PRD-034: the chaos live tier needs the qualified target identity.
+            function = pytest.mark.live_target(pytest.mark.live_model(function))
         elif scenario.tier == LIVE_STATIC_ANALYSIS:
             function = pytest.mark.live_static_analysis(function)
         return function

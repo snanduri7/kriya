@@ -1,0 +1,8 @@
+# PRD-034: skips allowed in certification mode (--certification /
+# KRIYA_CERTIFICATION=1). Every other skip or xfail fails certification.
+# Each entry: id, nodeid (fnmatch pattern), reason, owner, expires (YYYY-MM-DD);
+# optional reason_contains (text the skip reason must contain). An expired
+# entry allows nothing. Never allowlist a missing Docker, JDK, Maven or
+# scanner: the certification environment must provide them.
+schema_version: 1
+allowed_skips: []

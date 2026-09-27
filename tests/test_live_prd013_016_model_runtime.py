@@ -34,7 +34,8 @@ from kriya.core.completion import CompletionStatus
 from kriya.core.llm import LLMClient
 from kriya.core.model_runtime import clear_model_runtime_cache, resolve_configured_model_runtime
 
-pytestmark = pytest.mark.live_model
+# PRD-034: needs the qualified target identity, never the CI wiring-smoke model.
+pytestmark = [pytest.mark.live_model, pytest.mark.live_target]
 
 EVIDENCE_DIR = os.environ.get("KRIYA_BATCH3_EVIDENCE_DIR")
 

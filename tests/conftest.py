@@ -14,6 +14,7 @@
   PRD-014 qualification store is a per-test temp dir for the same reason.
 Tests of the precedence rules unset KRIYA_LOG_DIR / KRIYA_STATE_DIR themselves."""
 import os
+import sys
 
 import pytest
 
@@ -72,23 +73,69 @@ def _no_model_runtime_probe(request, monkeypatch, tmp_path_factory):
 def pytest_addoption(parser):
     parser.addoption("--chaos-report", default=None, metavar="DIR",
                      help="PRD-032: write the chaos report (JSON + Markdown) to DIR")
+    parser.addoption("--certification", action="store_true", default=False,
+                     help="PRD-034: an unexpected skip or xfail fails (tests/certification/skip_allowlist.yaml)")
+    parser.addoption("--certification-report", default=None, metavar="DIR",
+                     help="PRD-034: write skips.json (every skip, allowlisted or not) to DIR")
+
+
+_SKIPS = pytest.StashKey[list]()
+_ALLOWLIST = pytest.StashKey[tuple]()
+
+
+def _certification_mode(config):
+    return config.getoption("--certification") or os.environ.get("KRIYA_CERTIFICATION") == "1"
 
 
 def pytest_configure(config):
+    from _certification import load_allowlist
     from _chaos_report import RESULTS
 
     config.stash[RESULTS] = []
+    config.stash[_SKIPS] = []
+    # A malformed allowlist fails certification up front, never later.
+    config.stash[_ALLOWLIST] = load_allowlist() if _certification_mode(config) else ()
 
 
-@pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_makereport(item, call):
-    outcome = yield
+@pytest.fixture(scope="session", autouse=True)
+def _interpreter_tools_on_path():
+    """PRD-034: the environment under test is the interpreter running pytest.
+    Tests that exercise Kriya running `python`/`pip` from PATH resolve them
+    here, never from whatever the operator's shell happened to have first."""
+    previous = os.environ.get("PATH", "")
+    os.environ["PATH"] = os.pathsep.join([os.path.dirname(sys.executable), previous])
+    yield
+    os.environ["PATH"] = previous
+
+
+def _audit_skip(item, report):
+    """PRD-034: record every skip/xfail; in certification mode an
+    unallowlisted one becomes a failure."""
+    if not (report.skipped or hasattr(report, "wasxfail")):
+        return
+    from _certification import match_skip, skip_reason
+
+    reason = str(getattr(report, "wasxfail", "")) or skip_reason(report.longrepr)
+    entry, expired = match_skip(item.config.stash[_ALLOWLIST], item.nodeid, reason)
+    allowed = entry is not None and not expired
+    item.config.stash[_SKIPS].append({
+        "nodeid": item.nodeid, "phase": report.when, "reason": reason,
+        "kind": "xfail" if hasattr(report, "wasxfail") else "skip",
+        "allowlisted": entry.id if allowed else None, "expired_entry": entry.id if expired else None,
+    })
+    if _certification_mode(item.config) and not allowed:
+        report.outcome = "failed"
+        report.longrepr = (f"UNEXPECTED SKIP in certification mode: {reason}"
+                           + (f" (allowlist entry {entry.id} expired)" if expired else ""))
+
+
+def _record_chaos_phase(item, report):
+    """PRD-032: every @chaos test's phases, verdict and observation."""
     marker = item.get_closest_marker("chaos")
     if marker is None:
         return
     from _chaos_report import PHASE_REPORTS, RESULTS, item_verdict
 
-    report = outcome.get_result()
     phases = item.stash.setdefault(PHASE_REPORTS, {})
     phases[report.when] = report
     if report.when == "teardown":
@@ -97,6 +144,14 @@ def pytest_runtest_makereport(item, call):
             "scenario_id": marker.args[0], "nodeid": item.nodeid,
             "verdict": item_verdict(phases), "observation": observation,
         })
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    report = outcome.get_result()
+    _audit_skip(item, report)  # first: a certification failure is the verdict the chaos report records
+    _record_chaos_phase(item, report)
 
 
 @pytest.fixture
@@ -110,6 +165,11 @@ def chaos_case(request, tmp_path):
 
 
 def pytest_sessionfinish(session):
+    certification_dir = session.config.getoption("--certification-report")
+    if certification_dir:
+        from _certification import write_skips
+
+        write_skips(certification_dir, session.config.stash[_SKIPS], bool(_certification_mode(session.config)))
     directory = session.config.getoption("--chaos-report")
     if not directory:
         return

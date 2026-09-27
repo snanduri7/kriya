@@ -130,6 +130,51 @@ jobs:
             /tmp/kriya-release.*/*.jsonl
           retention-days: 7
 
+  production-certification:
+    # PRD-034: the canonical production certification (scripts/certify.sh,
+    # the same procedure the target machine runs). Non-root runner user;
+    # explicit JDK/Maven/Semgrep versions; Docker-dependent tests must
+    # execute (an unexpected skip fails); the pinned static-analysis tier runs
+    # (STATIC-ANALYSIS-CI-LIVE-JOB-001); junit, skip audits, exact tool
+    # versions and the production doctor JSON are archived.
+    name: Production certification
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          # No cache: pip - see the lint job's comment.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install pinned Maven
+        run: |
+          curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz \
+            | tar xz -C "$HOME"
+          echo "$HOME/apache-maven-3.9.9/bin" >> "$GITHUB_PATH"
+      - name: Refuse to certify as root
+        run: test "$(id -u)" != "0"
+      - name: Create the certification venv (lock-file versions)
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+          .venv/bin/pip install -e . --no-deps
+      - name: Install the pinned scanner and image
+        run: |
+          pipx install semgrep==1.178.0
+          docker pull semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b
+      - name: Certify
+        run: scripts/certify.sh certification-out/ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-certification
+          path: certification-out/ci
+          retention-days: 30
+
   live-model-smoke:
     name: Primary live model regression (blocking)
     runs-on: ubuntu-latest
@@ -174,8 +219,12 @@ jobs:
           ollama pull qwen2.5-coder:1.5b
           ollama pull all-minilm
 
+      # PRD-034: wiring smoke on the CI model only. Tests marked live_target
+      # need the qualified target identity and run on the target machine.
       - name: Run live-model smoke tests
-        run: pytest -q -m live_model
+        env:
+          KRIYA_LIVE_LLM_MODEL: qwen2.5-coder:1.5b
+        run: pytest -q -m "live_model and not live_target"
 
   nightly-live-model-matrix:
     name: Nightly live model (${{ matrix.model }})
@@ -206,4 +255,4 @@ jobs:
           ollama pull "${KRIYA_LIVE_LLM_MODEL}"
           ollama pull all-minilm
       - name: Run live-model regression
-        run: pytest -q -m live_model
+        run: pytest -q -m "live_model and not live_target"

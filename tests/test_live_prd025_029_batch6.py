@@ -59,7 +59,8 @@ from kriya.tools.process import ProcessController
 from kriya.workflow.context_budget import allocation_window
 from kriya.workflow.verifier_evidence import RetainedRuntimeEvidence
 
-pytestmark = pytest.mark.live_model
+# PRD-034: needs the qualified target identity, never the CI wiring-smoke model.
+pytestmark = [pytest.mark.live_model, pytest.mark.live_target]
 
 EVIDENCE_DIR = os.environ.get("KRIYA_BATCH6_EVIDENCE_DIR")
 BASE_URL = os.environ.get("KRIYA_LIVE_BASE_URL", "http://localhost:11434/v1")
