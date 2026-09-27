@@ -18,6 +18,8 @@
 | abbdb4b | INF-001 (1/3): golden parity test - the wire and the runtime digest at 3c9f7db |
 | bda7e85 | INF-001 (2/3): the inference runtime port, the default adapter behind it, config selection |
 | 79750a8 | INF-001 (3/3): docs, handover, tracker |
+| 9062a5c | Summary and verification hand-off |
+| (next) | Fix (my 12c1b0a): the packaged default config's num_ctx outranked a user's context_window |
 
 ## Per item
 - **KNOWLEDGE-READPATH-001 (P1).** FIXED, awaiting pytest. See handover/DEFECT_KNOWLEDGE_READPATH_001.md, "Fix".

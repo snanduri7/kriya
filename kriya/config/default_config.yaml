@@ -22,9 +22,11 @@ llm:
     streaming: true
     max_tool_argument_chars: 8192
     preferred_edit_protocol: "small_native_tools"
+  # The context window is llm.context_window (default 32768), sent to the
+  # runtime in its own form (FALLBACK-CONTEXT-WINDOW-001); it is not repeated
+  # here, where it would outrank a user's own context_window.
   extra_body:
     options:
-      num_ctx: 32768        # Sets a 32K context window so the code doesn't truncate
       top_p: 0.8
       top_k: 20
 

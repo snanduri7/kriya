@@ -70,3 +70,16 @@ There is one adapter today (Ollama). The window option is sent through the seam 
 **Mutations:** 11 of 12 killed. The survivor was a redundant `request_extra_body` in the qualification case context, which I removed. A mutation of the real guard, `qualification_config`, is killed.
 
 **Related existing suites** (`prd013/014/016/017/018/019`, doctor, qualification identity, production fallback identity): 379 passed, run as small targeted checks.
+
+## Own bug found in final review (fixed in its own commit)
+**The bug.** 12c1b0a left the packaged `default_config.yaml` with `llm.extra_body.options.num_ctx: 32768`. Config sections merge one level deep, so a user yaml that sets only `llm.context_window: 8192` kept that option. Under the explicit-option-wins rule, Kriya sent and budgeted 32768, and logged the user's own declaration as ignored.
+
+That breaks the directive ("config authors must not need duplicate `context_window` + provider-specific `num_ctx`") for the primary model. My `test_review_command` edit had worked around it by duplicating the two, exactly the pattern the directive forbids.
+
+**The fix.**
+- The packaged default no longer repeats the window. `llm.context_window`'s field default (32768) carries it and is sent in the runtime's own form.
+- The packaged default's window (32768) and inference-settings digest are unchanged (tested). demo-03 sets its own `llm.extra_body`, so it is unaffected.
+- Regression test through the real `load_config`: a user `context_window: 8192` alone is sent and budgeted as 8192. It fails at 9062a5c.
+- The `test_review_command` duplication is reverted.
+
+**Operator note.** This is a change to the packaged default config, not a model change.

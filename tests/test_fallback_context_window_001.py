@@ -160,6 +160,36 @@ async def test_a_genuinely_oversized_request_still_fails_closed():
     create.assert_not_called()
 
 
+def _load(tmp_path, text):
+    from kriya.config.config import load_config
+
+    (tmp_path / "kriya.yaml").write_text(text)
+    return load_config(str(tmp_path / "kriya.yaml"))
+
+
+@pytest.mark.asyncio
+async def test_a_user_context_window_alone_is_what_is_sent_and_budgeted(tmp_path):
+    """Through the real config layering: the packaged defaults must not
+    carry a provider window option that silently outranks the user's own
+    context_window (one-level merge keeps the default's extra_body)."""
+    config = _load(tmp_path, "llm:\n  model: primary-model:1\n  context_window: 8192\n")
+    assert context_window_overrides(config) == []
+    sent, budget = await _sent(config, "primary-model:1")
+    assert configured_context_window(sent) == 8192 and budget["context_window"] == 8192
+
+
+def test_the_packaged_defaults_keep_their_window_and_inference_identity(tmp_path):
+    """Removing the duplicated window option from the packaged defaults
+    changes neither the default window (32768) nor the default inference
+    settings (the window is not an inference setting)."""
+    config = _load(tmp_path, "llm:\n  model: primary-model:1\n")
+    assert requested_context_window(config.llm.extra_body, config.llm.context_window) == 32768
+    assert request_settings(temperature=config.llm.temperature, reasoning=config.llm.reasoning,
+                            extra_body=config.llm.extra_body).digest == request_settings(
+        temperature=config.llm.temperature, reasoning=config.llm.reasoning,
+        extra_body={"options": {"num_ctx": 32768, "top_p": 0.8, "top_k": 20}}).digest
+
+
 # --- evidence is truthful -------------------------------------------------------
 
 def test_an_unverified_fingerprint_records_the_request_never_a_served_window():

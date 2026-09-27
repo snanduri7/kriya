@@ -213,7 +213,7 @@ def test_review_multiple_files_over_budget_splits_into_batches(tmp_path):
     # most of it (PROMPT-BUDGET-FIT-001B reserves them), leaving room for one
     # blob but not two (~504).
     (tmp_path / "kriya.yaml").write_text(
-        "llm:\n  context_window: 4000\n  max_tokens: 512\n  extra_body:\n    options:\n      num_ctx: 4000\n"
+        "llm:\n  context_window: 4000\n  max_tokens: 512\n"
     )
     padding = "\n".join(f"x_{i} = {i}  # padding" for i in range(30))
     (tmp_path / "a.py").write_text(padding)
