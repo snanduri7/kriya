@@ -2021,7 +2021,11 @@ class WorkflowEngine:
         # depending on what's in the repo's manifests, even though the field's only
         # real consumer is kriya/knowledge/channels/repo_manifest.py, which reads
         # repo_model.dependency_versions directly and doesn't need it duplicated here.
-        repo_context = repo_model.model_dump_json(indent=2, exclude={"dependency_versions"})
+        # root_path (the absolute host path) is excluded too (PRD-032): every
+        # path a model sees is workspace-relative, and the structured plan
+        # schema refuses an absolute planned path - a model shown the absolute
+        # root copied it into planned_files and was refused for Kriya's own echo.
+        repo_context = repo_model.model_dump_json(indent=2, exclude={"dependency_versions", "root_path"})
         
         # Load local workspace conventions if present
         from kriya.skills.skill import SkillEngine
