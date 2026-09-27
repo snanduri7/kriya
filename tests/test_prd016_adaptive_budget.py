@@ -195,7 +195,7 @@ async def test_a_runtime_that_cannot_switch_windows_behaves_like_strict(monkeypa
     with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=_response())):
         with pytest.raises(tb.ContextBudgetUnsatisfiableError) as refused:
             await llm.complete_result("system", _prompt_of(41000))
-    assert "exact Ollama runtime" in refused.value.decision.tier_note
+    assert "exact runtime whose adapter takes it per request" in refused.value.decision.tier_note
 
 
 # --- output ---------------------------------------------------------------------------------------
@@ -288,7 +288,9 @@ def _capacity_client(*, recall_head=True, fill=0.97, usage=True):
     recalls the markers found in the request."""
     per_unit = 12
 
-    async def create(model, messages, max_tokens, temperature, extra_body):
+    async def create(model, messages, max_tokens, temperature, extra_body, **_):
+        # **_: the request shape of the runtime adapter's text transport
+        # (response_format=None), which the capacity probe goes through (INF-001).
         text = "".join(m["content"] for m in messages)
         units = text.count(mq._CAPACITY_UNIT)
         response = MagicMock()

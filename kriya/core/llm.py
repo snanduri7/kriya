@@ -5,17 +5,10 @@ import socket
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
-from openai import (
-    APIConnectionError,
-    APITimeoutError,
-    AsyncOpenAI,
-    AuthenticationError,
-    InternalServerError,
-    PermissionDeniedError,
-    RateLimitError,
-)
+from openai import AsyncOpenAI
 
 from kriya.config import AppConfig
+from kriya.core.inference_runtime import ChatRequest, InferenceRuntimePort, RuntimeErrorKind, runtime_for_binding
 from kriya.core.inference_settings import request_settings
 from kriya.core.model_runtime import context_window_overrides, request_extra_body
 from kriya.policy.execution import ExecutionPolicy
@@ -23,23 +16,9 @@ from kriya.policy.model import ActionRequest, ActionType
 
 logger = logging.getLogger(__name__)
 
-# Exception types that are clearly NOT about response_format/reasoning
-# compatibility - a connection refused, an expired API key, or a rate limit
-# has nothing to do with whether this backend supports JSON mode together
-# with reasoning, so retrying identically for these just adds latency while
-# reporting a misleading root cause (2026-08-12 SME review). Deliberately an
-# exclusion list, not an allowlist restricted to e.g. just BadRequestError -
-# the retry exists for real, previously-observed backend quirks whose exact
-# error shape isn't guaranteed across every OpenAI-compatible server, so an
-# unrecognized exception still gets the benefit of the doubt and retries.
 # A reasoning model's max_tokens covers hidden reasoning and visible output
 # together, so it never runs below this.
 REASONING_MIN_MAX_TOKENS = 12288
-
-_LLM_RETRY_EXCLUDED_EXCEPTIONS = (
-    APIConnectionError, APITimeoutError, AuthenticationError,
-    PermissionDeniedError, RateLimitError, InternalServerError,
-)
 
 class EgressViolationError(ValueError):
     """Raised when an LLM completion request violates local_only egress policy.
@@ -182,7 +161,8 @@ class LLMClient:
         if cfg.llm.model.casefold() == target:
             return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning,
                     "context_policy": cfg.llm.context_policy, "max_tokens": self.max_tokens,
-                    "temperature": self.temperature, "extra_body": cfg.llm.extra_body or None}
+                    "temperature": self.temperature, "extra_body": cfg.llm.extra_body or None,
+                    "inference_runtime": cfg.llm.inference_runtime}
         candidates = list(cfg.llm_chain)
         for role in ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance"):
             role_cfg = getattr(cfg.agent_llms, role, None)
@@ -198,10 +178,17 @@ class LLMClient:
                         "context_policy": candidate.context_policy,
                         "max_tokens": binding_output_tokens(cfg, candidate),
                         "temperature": own_temperature if own_temperature is not None else self.temperature,
-                        "extra_body": getattr(candidate, "extra_body", None) or None}
+                        "extra_body": getattr(candidate, "extra_body", None) or None,
+                        "inference_runtime": getattr(candidate, "inference_runtime", None)}
         return {"context_window": cfg.llm.context_window, "reasoning": cfg.llm.reasoning,
                 "context_policy": cfg.llm.context_policy, "max_tokens": self.max_tokens,
-                "temperature": self.temperature, "extra_body": cfg.llm.extra_body or None}
+                "temperature": self.temperature, "extra_body": cfg.llm.extra_body or None,
+                "inference_runtime": cfg.llm.inference_runtime}
+
+    def _runtime(self, model: str) -> InferenceRuntimePort:
+        """INF-001: the runtime adapter ``model``'s binding selects (cached
+        registry lookup; an unknown name is refused)."""
+        return runtime_for_binding(self._binding(model))
 
     async def _runtime_fingerprint(self, model: str, base_url: str, api_key: str,
                                    extra_body: Optional[Dict[str, Any]]):
@@ -212,20 +199,20 @@ class LLMClient:
         from kriya.control.run_coordinator import record_model_runtime_use
         from kriya.core.model_runtime import (
             ModelRuntimeFingerprint,
-            configured_context_window,
             endpoint_identity,
             kriya_protocol_identity,
             resolve_model_runtime,
         )
 
         try:
+            runtime = self._runtime(model)
             protocol = kriya_protocol_identity(self.config, model)
             fingerprint = await asyncio.to_thread(
                 resolve_model_runtime,
                 base_url=base_url, model=model, api_key=api_key,
                 egress_policy=self.config.autonomy.egress_policy,
-                configured_context=configured_context_window(extra_body),
-                kriya_protocol=protocol, config=self.config,
+                configured_context=runtime.configured_context_window(extra_body),
+                kriya_protocol=protocol, config=self.config, runtime=runtime,
             )
         except Exception as error:
             logger.warning("Model runtime fingerprint unavailable for %s: %s", model, error)
@@ -254,6 +241,7 @@ class LLMClient:
         policy = binding["context_policy"]
         limits = measured_limits_for(fingerprint, self.config, settings=settings) if fingerprint.exact else {}
         requested = fingerprint.configured_context_window
+        per_request = self._runtime(model).capabilities.per_request_context_window
         if fingerprint.effective_context_window:
             window, source = fingerprint.effective_context_window, "served_num_ctx"
             if requested and window < requested:
@@ -261,10 +249,15 @@ class LLMClient:
                 # trained length): budget what is served, and say so.
                 source = "runtime_capped"
                 logger.warning("%s serves a %d-token context window; %d was requested.", model, window, requested)
-        else:
+        elif per_request:
             # Unverified: the window requested of the runtime (sent with
             # the request), never a window the runtime reported serving.
             window, source = requested or binding.get("context_window"), "config_declared"
+        else:
+            # INF-001: a runtime that takes no per-request window serves
+            # whatever it was started with; the declared window is only an
+            # assumption about it, and is labelled as such.
+            window, source = binding.get("context_window"), "provider_managed"
         reasoning = 0
         if is_reasoning:
             reasoning = int(limits.get("reasoning_tokens_max") or DEFAULT_REASONING_ALLOWANCE_TOKENS)
@@ -290,14 +283,12 @@ class LLMClient:
             raise
         return replace(decision, tier_note=note) if note else decision
 
-    def _request_options(self, extra_body: Optional[Dict[str, Any]], budget) -> Optional[Dict[str, Any]]:
-        """The request's extra_body with num_ctx set to the selected context
-        tier (a copy; the configured extra_body is never changed)."""
-        from kriya.core.model_runtime import with_context_window
-
+    def _request_options(self, extra_body: Optional[Dict[str, Any]], budget, model: str) -> Optional[Dict[str, Any]]:
+        """The request's extra_body asking the runtime for the selected
+        context tier (a copy; the configured extra_body is never changed)."""
         if not budget.context_expanded:
             return extra_body
-        return with_context_window(extra_body, budget.context_window)
+        return self._runtime(model).with_context_window(extra_body, budget.context_window)
 
     def _note_budget_expansion(self, result, budget, *, reason: Optional[str] = None) -> None:
         """Evidence for an automatic enlargement (appended to
@@ -510,7 +501,7 @@ class LLMClient:
         # FALLBACK-CONTEXT-WINDOW-001: the request carries the window the
         # budget below plans against (the binding's declared context_window,
         # unless extra_body sets the provider option itself).
-        extra_body = request_extra_body(extra_body, own["context_window"])
+        extra_body = request_extra_body(extra_body, own["context_window"], self._runtime(model))
         # Reasoning models are NOT excluded from response_format here - Ollama (at
         # least) keeps a reasoning model's <think>-equivalent output in a separate
         # "reasoning" field and json_object-constrains only the "content" field, so
@@ -540,7 +531,7 @@ class LLMClient:
         if budget.context_expanded:
             # The selected tier is a different runtime input (num_ctx), so a
             # different fingerprint: the call is attributed to it.
-            extra_body = self._request_options(extra_body, budget)
+            extra_body = self._request_options(extra_body, budget, model)
             fingerprint = await self._runtime_fingerprint(model, url_to_check, api_key, extra_body)
 
         logger.info(f"Sending completion request to local LLM [Model: {model}, Stream: {stream_callback is not None}, JSON Mode: {json_mode}, Reasoning: {is_reasoning}]")
@@ -565,10 +556,11 @@ class LLMClient:
                 # Only reasoning models risk this combination being unsupported by some
                 # backend - a plain json_mode call already worked fine unconditionally
                 # before this change, so there's no need to retry that case. Also
-                # excludes exception types that are clearly unrelated to response_format
-                # (connection/timeout/auth/rate-limit/server errors) - see
-                # _LLM_RETRY_EXCLUDED_EXCEPTIONS.
-                if response_format is not None and is_reasoning and not isinstance(e, _LLM_RETRY_EXCLUDED_EXCEPTIONS):
+                # excludes failures that are clearly unrelated to response_format
+                # (connection/timeout/auth/rate-limit/server errors, as the
+                # runtime adapter classifies them - INF-001).
+                if (response_format is not None and is_reasoning
+                        and self._runtime(model).classify_error(e) is RuntimeErrorKind.REQUEST):
                     logger.warning(
                         f"Completion request with response_format={response_format} failed for "
                         f"reasoning model '{model}' ({e}) - retrying once without it (this backend/"
@@ -622,7 +614,8 @@ class LLMClient:
             self._finish(result, started=start_time, budget=budget)
             raise
         except Exception as e:
-            result.status = CompletionStatus.TIMEOUT if _is_timeout(e) else CompletionStatus.BACKEND_ERROR
+            result.status = (CompletionStatus.TIMEOUT if self._runtime(model).classify_error(e) is RuntimeErrorKind.TIMEOUT
+                             else CompletionStatus.BACKEND_ERROR)
             result.backend_status = "error"
             result.backend_error = f"{type(e).__name__}: {e}"[:500]
             result.error = e
@@ -652,105 +645,19 @@ class LLMClient:
         self, client, model, system_prompt, user_prompt, temperature, max_tokens,
         extra_body, response_format, stream_callback
     ) -> Dict[str, Any]:
-        """Issues a single completion request (streaming or not) and returns
-        the raw fields the normalizer needs: content, reasoning_chars (from a
-        separate provider reasoning field), prompt_tokens, completion_tokens,
-        finish_reason and provider_metadata. Split out from complete_result()
-        so a reasoning model's response_format can be retried once without it.
-
-        Every provider field is read defensively (``getattr(..., None)`` and
-        a type check, never a bare attribute access): a provider/SDK that
-        omits ``usage`` degrades the token counts to 0 (estimated later), and
-        one that omits ``finish_reason`` degrades it to None - never a
-        fabricated "stop" (VAL-001 G1-R3)."""
-        prompt_tokens = 0
-        completion_tokens = 0
-        finish_reason = None
-        reasoning_chars = 0
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-        if stream_callback:
-            try:
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    stream=True,
-                    stream_options={"include_usage": True},
-                    extra_body=extra_body,
-                    response_format=response_format
-                )
-            except Exception as e:
-                logger.debug(f"Streaming request with stream_options failed, retrying without it (server may not support it): {e}")
-                response = await client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    stream=True,
-                    extra_body=extra_body,
-                    response_format=response_format
-                )
-
-            chunks = []
-            metadata: Dict[str, Any] = {}
-            async for chunk in response:
-                if not metadata:
-                    metadata = _provider_metadata(chunk)
-                usage = getattr(chunk, "usage", None)
-                if usage:
-                    prompt_tokens = _int_or_zero(getattr(usage, "prompt_tokens", 0))
-                    completion_tokens = _int_or_zero(getattr(usage, "completion_tokens", 0))
-                if chunk.choices:
-                    # The finish_reason-carrying chunk is typically the LAST
-                    # one and usually has empty/None delta content - checked
-                    # unconditionally here, and only overwritten when a real
-                    # value is present, so an earlier chunk's null
-                    # finish_reason can never clobber a real one seen later.
-                    chunk_finish_reason = _str_or_none(getattr(chunk.choices[0], "finish_reason", None))
-                    if chunk_finish_reason:
-                        finish_reason = chunk_finish_reason
-                    delta = chunk.choices[0].delta
-                    reasoning_delta = _str_or_none(getattr(delta, "reasoning", None))
-                    if reasoning_delta:
-                        reasoning_chars += len(reasoning_delta)
-                    if delta.content:
-                        chunks.append(delta.content)
-                        stream_callback(delta.content)
-            content = "".join(chunks).strip()
-        else:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                extra_body=extra_body,
-                response_format=response_format
-            )
-            metadata = _provider_metadata(response)
-            usage = getattr(response, "usage", None)
-            if usage:
-                prompt_tokens = _int_or_zero(getattr(usage, "prompt_tokens", 0))
-                completion_tokens = _int_or_zero(getattr(usage, "completion_tokens", 0))
-            if response.choices:
-                finish_reason = _str_or_none(getattr(response.choices[0], "finish_reason", None))
-            message = response.choices[0].message
-            reasoning = _str_or_none(getattr(message, "reasoning", None)) or _str_or_none(
-                getattr(message, "reasoning_content", None)
-            )
-            reasoning_chars = len(reasoning) if reasoning else 0
-            content = (message.content or "").strip()
-        return {
-            "content": content,
-            "reasoning_chars": reasoning_chars,
-            "prompt_tokens": prompt_tokens,
-            "completion_tokens": completion_tokens,
-            "finish_reason": finish_reason,
-            "provider_metadata": metadata,
-        }
+        """Issues a single completion request (streaming or not) through
+        ``model``'s runtime adapter (INF-001) and returns the raw fields the
+        normalizer needs: content, reasoning_chars (from a separate provider
+        reasoning field), prompt_tokens, completion_tokens, finish_reason and
+        provider_metadata. Split out from complete_result() so a reasoning
+        model's response_format can be retried once without it."""
+        response = await self._runtime(model).complete(client, ChatRequest(
+            model=model,
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+            temperature=temperature, max_tokens=max_tokens, extra_body=extra_body,
+            response_format=response_format, stream_callback=stream_callback,
+        ))
+        return response.to_raw()
 
     async def complete_with_tools(
         self,
@@ -857,7 +764,7 @@ class LLMClient:
         # FALLBACK-CONTEXT-WINDOW-001: the request carries the window the
         # budget below plans against (the binding's declared context_window,
         # unless extra_body sets the provider option itself).
-        extra_body = request_extra_body(extra_body, own["context_window"])
+        extra_body = request_extra_body(extra_body, own["context_window"], self._runtime(model))
 
         self.last_call_metrics = None
         self.last_completion = None
@@ -876,7 +783,7 @@ class LLMClient:
         )
         max_tokens = budget.max_tokens
         if budget.context_expanded:
-            extra_body = self._request_options(extra_body, budget)
+            extra_body = self._request_options(extra_body, budget, model)
             fingerprint = await self._runtime_fingerprint(model, url_to_check, api_key, extra_body)
         start_time = time.time()
         result = CompletionResult(
@@ -886,34 +793,29 @@ class LLMClient:
             protocol={"json_mode": False, "streaming": False, "tools": True, "tool_count": len(tools)},
             max_tokens=max_tokens,
         )
+        runtime = self._runtime(model)
         try:
-            response = await client.chat.completions.create(
-                model=model,
-                messages=messages,
-                tools=tools,
-                tool_choice="auto",
-                temperature=temperature,
-                max_tokens=max_tokens,
-                extra_body=extra_body,
-            )
+            response = await runtime.complete_with_tools(client, ChatRequest(
+                model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
+                extra_body=extra_body, tools=tools,
+            ))
         except asyncio.CancelledError:
             result.status = CompletionStatus.CANCELLED
             result.backend_status = "cancelled"
             self._finish(result, started=start_time, budget=budget)
             raise
         except Exception as e:
-            result.status = CompletionStatus.TIMEOUT if _is_timeout(e) else CompletionStatus.BACKEND_ERROR
+            result.status = (CompletionStatus.TIMEOUT if self._runtime(model).classify_error(e) is RuntimeErrorKind.TIMEOUT
+                             else CompletionStatus.BACKEND_ERROR)
             result.backend_status = "error"
             result.backend_error = f"{type(e).__name__}: {e}"[:500]
             result.error = e
             self._finish(result, started=start_time, budget=budget)
             return result
 
-        message = response.choices[0].message
-        raw_tool_calls = message.tool_calls or []
         tool_calls = []
-        for tc in raw_tool_calls:
-            raw_arguments = tc.function.arguments
+        for tc in response.tool_calls:
+            raw_arguments = tc.arguments
             try:
                 arguments = json.loads(raw_arguments)
             except (json.JSONDecodeError, TypeError):
@@ -923,10 +825,10 @@ class LLMClient:
                 logger.warning(
                     "Local model returned malformed tool arguments for '%s'; "
                     "using an empty argument object.",
-                    tc.function.name,
+                    tc.name,
                 )
                 tool_calls.append({
-                    "id": tc.id, "name": tc.function.name, "arguments": {}, "source": "native",
+                    "id": tc.id, "name": tc.name, "arguments": {}, "source": "native",
                 })
                 result.parser_status = "malformed_tool_arguments"
                 continue
@@ -935,16 +837,16 @@ class LLMClient:
             if not sample.compatible:
                 logger.warning(
                     "Rejected incompatible local-model tool arguments for '%s': %s",
-                    tc.function.name, "; ".join(sample.violations),
+                    tc.name, "; ".join(sample.violations),
                 )
                 tool_calls.append({
-                    "id": tc.id, "name": tc.function.name, "arguments": {},
+                    "id": tc.id, "name": tc.name, "arguments": {},
                     "argument_error": "; ".join(sample.violations), "source": "native",
                 })
                 continue
-            tool_calls.append({"id": tc.id, "name": tc.function.name, "arguments": arguments, "source": "native"})
+            tool_calls.append({"id": tc.id, "name": tc.name, "arguments": arguments, "source": "native"})
 
-        content, hidden = split_reasoning(message.content or "")
+        content, hidden = split_reasoning(response.content)
         if not tool_calls and "<tool_call>" in content:
             recovered, content, errors = parse_textual_tool_calls(content)
             for call in recovered:
@@ -957,15 +859,14 @@ class LLMClient:
                 result.parser_status = "malformed_textual_tool_call"
         result.content = content
         result.tool_calls = tool_calls
-        reasoning = _str_or_none(getattr(message, "reasoning", None))
-        result.reasoning_chars = hidden + (len(reasoning) if reasoning else 0)
+        result.reasoning_chars = hidden + response.reasoning_chars
         result.reasoning_present = result.reasoning_chars > 0
-        result.reasoning_source = "reasoning_field" if reasoning else ("think_tags" if hidden else None)
-        result.finish_reason = _str_or_none(getattr(response.choices[0], "finish_reason", None))
-        result.provider_metadata = _provider_metadata(response)
-        usage = getattr(response, "usage", None)
-        prompt_tokens = _int_or_zero(getattr(usage, "prompt_tokens", 0)) if usage else 0
-        completion_tokens = _int_or_zero(getattr(usage, "completion_tokens", 0)) if usage else 0
+        result.reasoning_source = (
+            "reasoning_field" if response.reasoning_chars else ("think_tags" if hidden else None)
+        )
+        result.finish_reason = response.finish_reason
+        result.provider_metadata = response.provider_metadata
+        prompt_tokens, completion_tokens = response.prompt_tokens, response.completion_tokens
         result.tokens_estimated = prompt_tokens == 0 or completion_tokens == 0
         result.prompt_tokens = prompt_tokens or None
         result.completion_tokens = completion_tokens or None
@@ -976,26 +877,3 @@ class LLMClient:
             result.parser_status = "ok"
         self._finish(result, started=start_time, budget=budget)
         return result
-
-
-def _str_or_none(value: Any) -> Optional[str]:
-    return value if isinstance(value, str) and value else None
-
-
-def _int_or_zero(value: Any) -> int:
-    return value if isinstance(value, int) and not isinstance(value, bool) else 0
-
-
-def _provider_metadata(response: Any) -> Dict[str, Any]:
-    """Response identifiers only; anything that is not a plain string is dropped."""
-    return {
-        key: value
-        for key in ("id", "model", "system_fingerprint")
-        if isinstance(value := getattr(response, key, None), str) and value
-    }
-
-
-def _is_timeout(error: BaseException) -> bool:
-    import asyncio
-
-    return isinstance(error, (APITimeoutError, asyncio.TimeoutError, TimeoutError))

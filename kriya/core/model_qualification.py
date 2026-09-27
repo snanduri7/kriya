@@ -56,6 +56,7 @@ import asyncio
 import json
 import math
 import os
+import threading
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -66,6 +67,7 @@ from kriya.core.execution_environment import (
     ExecutionEnvironment,
     environment_for_fingerprint,
 )
+from kriya.core.inference_runtime import ChatRequest, runtime_adapter, runtime_for_binding
 from kriya.core.inference_settings import InferenceSettings, qualification_identity
 from kriya.core.model_runtime import MODEL_PROTOCOL_ADAPTER_VERSION, ModelRuntimeFingerprint
 
@@ -188,22 +190,45 @@ def context_tier_requirements(config: Any, model: str) -> Tuple[str, ...]:
     return tuple(dict.fromkeys([*required, *CONTEXT_TIER_REQUIREMENTS]))
 
 
-def _stored_records() -> Iterable[Dict[str, Any]]:
+# INF-001: qualification is looked up on every model call (measured limits,
+# context tiers). A record file is re-read and re-parsed only when its
+# (mtime, size) changed - never stale, never parsed twice while unchanged.
+# Cached records are shared: callers treat them as read-only.
+_RECORD_CACHE: Dict[str, Tuple[Tuple[int, int], Optional[Dict[str, Any]]]] = {}
+_RECORD_CACHE_LOCK = threading.Lock()
+
+
+def _cached_record_file(path: str) -> Optional[Dict[str, Any]]:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    stamp = (stat.st_mtime_ns, stat.st_size)
+    with _RECORD_CACHE_LOCK:
+        hit = _RECORD_CACHE.get(path)
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    try:
+        with open(path, encoding="utf-8") as stream:
+            record = json.load(stream)
+    except (OSError, ValueError):
+        record = None
+    record = record if isinstance(record, dict) else None
+    with _RECORD_CACHE_LOCK:
+        _RECORD_CACHE[path] = (stamp, record)
+    return record
+
+
+def _stored_records() -> Tuple[Dict[str, Any], ...]:
     home = qualification_home()
     try:
         names = sorted(os.listdir(home))
     except OSError:
-        return
-    for name in names:
-        if not name.endswith(".json"):
-            continue
-        try:
-            with open(os.path.join(home, name), encoding="utf-8") as stream:
-                record = json.load(stream)
-        except (OSError, ValueError):
-            continue
-        if isinstance(record, dict):
-            yield record
+        return ()
+    return tuple(
+        record for name in names if name.endswith(".json")
+        and (record := _cached_record_file(os.path.join(home, name))) is not None
+    )
 
 
 def recorded_context_sizes(fingerprint: ModelRuntimeFingerprint, settings: InferenceSettings) -> List[int]:
@@ -254,7 +279,8 @@ def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFing
     runtime whose adapter takes it per request
     (``model_runtime.supports_per_request_context_window``); anywhere else
     the adaptive policy behaves like strict and says so."""
-    from kriya.core.model_runtime import resolve_model_runtime, supports_per_request_context_window
+    from kriya.core.inference_runtime import runtime_for_binding
+    from kriya.core.model_runtime import _binding_for, resolve_model_runtime, supports_per_request_context_window
     from kriya.core.token_budget import (
         POLICY_ADAPTIVE,
         TIER_SOURCE_OPERATOR_DECLARED,
@@ -272,9 +298,10 @@ def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFing
         sizes |= set(recorded_context_sizes(fingerprint, settings))
     if not sizes:
         return ContextTierOffer((), ceiling, "")
-    if not supports_per_request_context_window(fingerprint):
+    runtime = runtime_for_binding(_binding_for(config, model))
+    if not supports_per_request_context_window(fingerprint, runtime):
         return ContextTierOffer((), ceiling, "no larger tier: the context window can only be chosen per request "
-                                             "on an exact Ollama runtime")
+                                             "on an exact runtime whose adapter takes it per request")
     preferred = fingerprint.effective_context_window or 0
     tiers, notes, evidence = [], [], []
     for size in sorted(sizes):
@@ -286,7 +313,7 @@ def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFing
             continue
         tier_runtime = resolve_model_runtime(
             base_url=base_url, model=model, api_key=api_key, egress_policy=config.autonomy.egress_policy,
-            configured_context=size, kriya_protocol=fingerprint.kriya_protocol, config=config,
+            configured_context=size, kriya_protocol=fingerprint.kriya_protocol, config=config, runtime=runtime,
         )
         assessment = assess(tier_runtime, context_tier_requirements(config, model), settings=settings)
         source = None
@@ -360,11 +387,10 @@ def save_record(record: Dict[str, Any], workspace_root: Optional[str] = None) ->
 
 def _read_record(record_key: str, workspace_root: Optional[str]) -> Optional[Dict[str, Any]]:
     try:
-        with open(record_path(record_key, workspace_root), encoding="utf-8") as stream:
-            record = json.load(stream)
-    except (OSError, ValueError, QualificationPathInsideWorkspaceError):
+        path = record_path(record_key, workspace_root)
+    except QualificationPathInsideWorkspaceError:
         return None
-    return record if isinstance(record, dict) else None
+    return _cached_record_file(path)
 
 
 def load_record(runtime_digest: str, settings: InferenceSettings,
@@ -969,16 +995,17 @@ async def case_context_capacity(llm, model, ctx):
     factory = ctx.get("client_factory")
     client = factory(600.0).client if factory is not None else llm.client
     extra_body = ctx.get("extra_body") or None
+    runtime = ctx.get("runtime") or runtime_adapter()
 
     async def send(messages, max_tokens):
-        return await client.chat.completions.create(
-            model=model, messages=messages, max_tokens=max_tokens, temperature=0.0, extra_body=extra_body,
-        )
+        # Through the model's runtime adapter (INF-001), straight to the
+        # endpoint - never LLMClient's own budget, which would refuse it.
+        return await runtime.complete(client, ChatRequest(
+            model=model, messages=messages, temperature=0.0, max_tokens=max_tokens, extra_body=extra_body,
+        ))
 
     def prompt_tokens(response) -> Optional[int]:
-        usage = getattr(response, "usage", None)
-        value = getattr(usage, "prompt_tokens", None)
-        return value if isinstance(value, int) and value > 0 else None
+        return response.prompt_tokens or None
 
     small = prompt_tokens(await send([{"role": "user", "content": _CAPACITY_UNIT * 40}], 1))
     large = prompt_tokens(await send([{"role": "user", "content": _CAPACITY_UNIT * 80}], 1))
@@ -997,8 +1024,7 @@ async def case_context_capacity(llm, model, ctx):
            "space, and nothing else."},
     ], 64)
     reported = prompt_tokens(response)
-    choice = response.choices[0]
-    content = str(getattr(choice.message, "content", "") or "")
+    content = response.content
     evidence = {
         # This probe measures the server's window, so it is sent at
         # temperature 0.0 whatever the qualified inference settings say.
@@ -1006,7 +1032,7 @@ async def case_context_capacity(llm, model, ctx):
         "context_window": int(window), "target_prompt_tokens": target, "reported_prompt_tokens": reported,
         "fill_ratio": round(reported / int(window), 4) if reported else None,
         "first_marker_recalled": head in content, "last_marker_recalled": tail in content,
-        "finish_reason": getattr(choice, "finish_reason", None),
+        "finish_reason": response.finish_reason,
     }
     if reported is None:
         return CaseResult("", UNAVAILABLE, {"reason": "the endpoint did not report prompt token usage", **evidence})
@@ -1090,14 +1116,16 @@ async def run_qualification(
                                    timeout=timeout, max_retries=0)
         return probe
 
+    runtime = runtime_for_binding(_binding_for(config, model))
     ctx: Dict[str, Any] = {
+        "runtime": runtime,
         "native_tool_calls_enabled": capabilities_for_model(config, model).native_tool_calls,
         "client_factory": client_factory or default_factory,
         # qualification_config put the requested window into extra_body.
         "extra_body": config.llm.extra_body,
         "base_url": (_binding_for(config, model).get("base_url") or config.llm.base_url),
         "context_window": (fingerprint.effective_context_window
-                           or requested_context_window(config.llm.extra_body, config.llm.context_window)),
+                           or requested_context_window(config.llm.extra_body, config.llm.context_window, runtime)),
     }
     wanted = set(only) if only else None
     results: List[CaseResult] = []
@@ -1120,22 +1148,27 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
     reasoning flag and extra_body qualified; LLMClient otherwise sends the
     primary binding's), and a strict budget policy so no case is itself sent
     with a different window."""
-    from kriya.core.model_runtime import binding_object, requested_context_window, with_context_window
+    from kriya.core.inference_runtime import runtime_for_binding
+    from kriya.core.model_runtime import binding_object, requested_context_window
 
     copy = config.model_copy(deep=True)
     binding = binding_object(copy, model) or copy.llm
     if settings is not None:
         # Keep the binding's own context window: it is the runtime input, not a setting.
-        window = requested_context_window(getattr(binding, "extra_body", None), getattr(binding, "context_window", None))
+        runtime = runtime_for_binding(binding)
+        window = requested_context_window(getattr(binding, "extra_body", None), getattr(binding, "context_window", None),
+                                          runtime)
         extra_body = settings.extra_body
-        binding.extra_body = with_context_window(extra_body, window) if window is not None else extra_body
+        binding.extra_body = (runtime.with_context_window(extra_body, window) if window is not None
+                              else extra_body)
         binding.reasoning = settings.reasoning
         if settings.temperature is not None and hasattr(binding, "temperature"):
             binding.temperature = settings.temperature
         copy.llm.temperature = settings.temperature if settings.temperature is not None else copy.llm.temperature
         copy.llm.reasoning = settings.reasoning
     if context_window is not None:
-        binding.extra_body = with_context_window(getattr(binding, "extra_body", None), context_window)
+        binding.extra_body = runtime_for_binding(binding).with_context_window(
+            getattr(binding, "extra_body", None), context_window)
         binding.context_window = int(context_window)
     if binding is not copy.llm:
         copy.llm.extra_body = dict(getattr(binding, "extra_body", None) or {})

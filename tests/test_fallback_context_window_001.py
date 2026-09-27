@@ -266,8 +266,9 @@ async def test_qualification_cases_are_sent_the_window_they_qualify(exact_ollama
 
 def test_only_the_seam_reads_the_provider_option_directly():
     """Every consumer asks requested_context_window (declared window plus
-    override rule); only the seam, and LLMClient reading back the request
-    body request_extra_body already built, read the provider option."""
+    override rule) or the binding's runtime adapter
+    (runtime.configured_context_window, INF-001); only the seam module calls
+    the provider-specific function itself."""
     root = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kriya")
     readers = set()
     for directory, _, files in os.walk(root):
@@ -277,7 +278,7 @@ def test_only_the_seam_reads_the_provider_option_directly():
             path = os.path.join(directory, name)
             with open(path, encoding="utf-8") as handle:
                 tree = ast.parse(handle.read())
-            if any(isinstance(node, ast.Call) and getattr(node.func, "id", getattr(node.func, "attr", None))
-                   == "configured_context_window" for node in ast.walk(tree)):
+            if any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                   and node.func.id == "configured_context_window" for node in ast.walk(tree)):
                 readers.add(os.path.relpath(path, root))
-    assert readers == {os.path.join("core", "model_runtime.py"), os.path.join("core", "llm.py")}
+    assert readers == {os.path.join("core", "model_runtime.py")}

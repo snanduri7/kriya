@@ -34,6 +34,12 @@ import urllib.request
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from kriya.core.inference_runtime import (
+    OpenAICompatibleTransport,
+    RuntimeCapabilities,
+    register_runtime_adapter,
+)
+
 logger = logging.getLogger(__name__)
 
 UNAVAILABLE = "unavailable"
@@ -120,11 +126,12 @@ def endpoint_identity(base_url: str) -> str:
 
 
 # --------------------------------------------------------------------------
-# Runtime adapter contract (INF-001 seam). Everything Kriya knows about HOW a
-# served runtime takes its per-request context window lives here, so generic
-# qualification, budgeting, routing and evidence code never names a provider.
-# Today's only adapter is Ollama (the ``options.num_ctx`` request option); a
-# future vLLM/other adapter (INF-001) replaces these functions, not callers.
+# The packaged default runtime adapter (INF-001, kriya/core/inference_runtime.py):
+# everything Kriya knows about HOW this served runtime takes its per-request
+# context window and identifies its model lives here, so generic
+# qualification, budgeting, routing and evidence code never names a
+# provider. The module functions below are its implementation; generic code
+# reaches them through the binding's adapter (runtime_for_binding).
 # --------------------------------------------------------------------------
 
 # Request-body path of the per-request context window (Ollama).
@@ -165,28 +172,39 @@ def without_context_window(extra_body: Optional[Dict[str, Any]]) -> Dict[str, An
     return body
 
 
-def requested_context_window(extra_body: Optional[Dict[str, Any]], declared: Optional[int]) -> Optional[int]:
-    """The context window Kriya requests for a binding
-    (FALLBACK-CONTEXT-WINDOW-001): an explicit provider option in its
-    ``extra_body`` wins, deterministically; otherwise its declared,
-    provider-neutral ``context_window``. The one definition every budget,
-    fingerprint, qualification and request uses, so the window Kriya budgets
-    is the window it asks the runtime to serve."""
-    explicit = configured_context_window(extra_body)
+def requested_context_window(extra_body: Optional[Dict[str, Any]], declared: Optional[int],
+                             runtime: Any = None) -> Optional[int]:
+    """The context window Kriya budgets a binding at and, where its runtime
+    takes one per request, asks it to serve (FALLBACK-CONTEXT-WINDOW-001): an
+    explicit provider option in its ``extra_body`` wins, deterministically;
+    otherwise its declared, provider-neutral ``context_window``. The one
+    definition every budget, fingerprint, qualification and request uses.
+    ``runtime`` is the binding's adapter (default: the default runtime)."""
+    explicit = _adapter(runtime).configured_context_window(extra_body)
     if explicit is not None:
         return explicit
     return int(declared) if isinstance(declared, int) and declared > 0 else None
 
 
-def request_extra_body(extra_body: Optional[Dict[str, Any]], declared: Optional[int]) -> Optional[Dict[str, Any]]:
+def request_extra_body(extra_body: Optional[Dict[str, Any]], declared: Optional[int],
+                       runtime: Any = None) -> Optional[Dict[str, Any]]:
     """``extra_body`` as sent: carrying the requested window in the
     runtime's own request representation (a copy when it has to be added;
-    ``extra_body`` itself when it already carries it or nothing is declared).
-    Config authors declare ``context_window`` once; this adapter translates it."""
-    window = requested_context_window(extra_body, declared)
-    if window is None or configured_context_window(extra_body) == window:
+    ``extra_body`` itself when it already carries it, nothing is declared, or
+    the runtime takes no per-request window - its window is then provider
+    managed). Config authors declare ``context_window`` once; the adapter
+    translates it."""
+    adapter = _adapter(runtime)
+    window = requested_context_window(extra_body, declared, adapter)
+    if window is None or adapter.configured_context_window(extra_body) == window:
         return extra_body
-    return with_context_window(extra_body, window)
+    return adapter.with_context_window(extra_body, window)
+
+
+def _adapter(runtime: Any) -> Any:
+    from kriya.core.inference_runtime import runtime_adapter
+
+    return runtime if runtime is not None else runtime_adapter()
 
 
 def context_window_overrides(config: Any) -> List[Dict[str, Any]]:
@@ -194,9 +212,11 @@ def context_window_overrides(config: Any) -> List[Dict[str, Any]]:
     declared ``context_window``: the provider option is what is requested
     and budgeted (requested_context_window); this lists the ignored
     declaration so an operator sees it."""
+    from kriya.core.inference_runtime import runtime_for_binding
+
     overrides = []
     for binding in _all_bindings(config):
-        explicit = configured_context_window(getattr(binding, "extra_body", None))
+        explicit = runtime_for_binding(binding).configured_context_window(getattr(binding, "extra_body", None))
         declared = getattr(binding, "context_window", None)
         if (explicit is not None and "context_window" in getattr(binding, "model_fields_set", ())
                 and declared != explicit):
@@ -205,10 +225,10 @@ def context_window_overrides(config: Any) -> List[Dict[str, Any]]:
     return overrides
 
 
-def supports_per_request_context_window(fingerprint: "ModelRuntimeFingerprint") -> bool:
+def supports_per_request_context_window(fingerprint: "ModelRuntimeFingerprint", runtime: Any = None) -> bool:
     """Whether this exact runtime takes its context window per request (so a
     PRD-016 context tier can be selected for one request)."""
-    return bool(fingerprint.exact) and fingerprint.provider in _PER_REQUEST_CONTEXT_PROVIDERS
+    return _adapter(runtime).supports_per_request_context_window(fingerprint)
 
 
 def kriya_protocol_identity(config: Any, model: str) -> str:
@@ -428,7 +448,7 @@ def _replace(fp: ModelRuntimeFingerprint, **changes: Any) -> ModelRuntimeFingerp
 # Per-process cache: one probe per distinct runtime input.
 # --------------------------------------------------------------------------
 
-_CACHE: Dict[Tuple[str, str, Optional[int], str], ModelRuntimeFingerprint] = {}
+_CACHE: Dict[Tuple[str, str, str, Optional[int], str], ModelRuntimeFingerprint] = {}
 _CACHE_LOCK = threading.Lock()
 
 
@@ -442,18 +462,22 @@ def resolve_model_runtime(
     kriya_protocol: str = UNAVAILABLE,
     fresh: bool = False,
     config: Any = None,
+    runtime: Any = None,
 ) -> ModelRuntimeFingerprint:
-    """Cached probe, keyed by every input that enters the fingerprint. Every
-    result is cached for the process, including a non-exact one (an unpulled
-    chain model or a non-Ollama server must not cost blocking probes on every
-    call); ``fresh=True`` (doctor, qualify, status) always re-probes."""
-    key = (endpoint_identity(base_url), (model or "").casefold(), configured_context, kriya_protocol)
+    """Cached probe through the binding's runtime adapter (``runtime``,
+    default: the default runtime), keyed by the adapter and every input that
+    enters the fingerprint. Every result is cached for the process,
+    including a non-exact one (an unpulled chain model or an unprobeable
+    server must not cost blocking probes on every call); ``fresh=True``
+    (doctor, qualify, status) always re-probes."""
+    adapter = _adapter(runtime)
+    key = (adapter.name, endpoint_identity(base_url), (model or "").casefold(), configured_context, kriya_protocol)
     if not fresh:
         with _CACHE_LOCK:
             cached = _CACHE.get(key)
         if cached is not None:
             return cached
-    fingerprint = probe_model_runtime(
+    fingerprint = adapter.probe(
         base_url=base_url, model=model, api_key=api_key, egress_policy=egress_policy,
         configured_context=configured_context, kriya_protocol=kriya_protocol,
     )
@@ -474,19 +498,24 @@ def resolve_configured_model_runtime(config: Any, model: Optional[str] = None, *
                                      extra_body: Optional[Dict[str, Any]] = None) -> ModelRuntimeFingerprint:
     """The fingerprint of ``model`` (default: the primary model) as this
     configuration would call it."""
+    from kriya.core.inference_runtime import runtime_for_binding
+
     model = model or config.llm.model
     binding = _binding_for(config, model)
     if base_url is None or extra_body is None:
         base_url = base_url or binding.get("base_url") or config.llm.base_url
         api_key = api_key if api_key is not None else binding.get("api_key", config.llm.api_key)
         extra_body = extra_body if extra_body is not None else binding.get("extra_body", config.llm.extra_body)
+    runtime = runtime_for_binding(binding)
     return resolve_model_runtime(
         base_url=base_url, model=model, api_key=api_key or "",
         egress_policy=config.autonomy.egress_policy,
         # The window this binding's requests carry (its declared window
-        # unless extra_body overrides it); none for the embedding model.
-        configured_context=requested_context_window(extra_body, binding.get("context_window")),
-        kriya_protocol=kriya_protocol_identity(config, model), fresh=fresh, config=config,
+        # unless extra_body overrides it; none for a runtime without a
+        # per-request window, or the embedding model).
+        configured_context=runtime.configured_context_window(
+            request_extra_body(extra_body, binding.get("context_window"), runtime)),
+        kriya_protocol=kriya_protocol_identity(config, model), fresh=fresh, config=config, runtime=runtime,
     )
 
 
@@ -542,7 +571,8 @@ def _binding_for(config: Any, model: str) -> Dict[str, Any]:
     target = (model or "").casefold()
     if config.llm.model.casefold() == target:
         return {"base_url": config.llm.base_url, "api_key": config.llm.api_key, "extra_body": config.llm.extra_body,
-                "context_window": config.llm.context_window}
+                "context_window": config.llm.context_window,
+                "inference_runtime": getattr(config.llm, "inference_runtime", None)}
     for candidate in _all_bindings(config)[1:]:
         if candidate.model.casefold() == target:
             return {
@@ -550,6 +580,7 @@ def _binding_for(config: Any, model: str) -> Dict[str, Any]:
                 "api_key": getattr(candidate, "api_key", config.llm.api_key),
                 "extra_body": getattr(candidate, "extra_body", {}) or {},
                 "context_window": getattr(candidate, "context_window", None),
+                "inference_runtime": getattr(candidate, "inference_runtime", None),
             }
     return {}
 
@@ -596,11 +627,46 @@ def load_recorded_fingerprint(digest: str, config: Any = None) -> Optional[Dict[
         return None
 
 
+class OllamaRuntimeAdapter(OpenAICompatibleTransport):
+    """The packaged default runtime (INF-001): its OpenAI-compatible chat API
+    (the transport), its native identity endpoints (probe_model_runtime) and
+    its per-request context window option (CONTEXT_WINDOW_REQUEST_OPTION).
+    The module functions are looked up at call time, so their existing test
+    doubles still apply."""
+
+    name = "ollama"
+    capabilities = RuntimeCapabilities(per_request_context_window=True, native_identity_probe=True)
+
+    def configured_context_window(self, extra_body: Optional[Dict[str, Any]]) -> Optional[int]:
+        return configured_context_window(extra_body)
+
+    def with_context_window(self, extra_body: Optional[Dict[str, Any]], tokens: int) -> Dict[str, Any]:
+        return with_context_window(extra_body, tokens)
+
+    def without_context_window(self, extra_body: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        return without_context_window(extra_body)
+
+    def supports_per_request_context_window(self, fingerprint: Any) -> bool:
+        return bool(fingerprint.exact) and fingerprint.provider in _PER_REQUEST_CONTEXT_PROVIDERS
+
+    def probe(self, *, base_url: str, model: str, api_key: str, egress_policy: str,
+              configured_context: Optional[int], kriya_protocol: str,
+              transport: Optional[Callable[..., Any]] = None) -> "ModelRuntimeFingerprint":
+        return probe_model_runtime(
+            base_url=base_url, model=model, api_key=api_key, egress_policy=egress_policy,
+            configured_context=configured_context, kriya_protocol=kriya_protocol, transport=transport,
+        )
+
+
+register_runtime_adapter(OllamaRuntimeAdapter(), default=True)
+
+
 __all__ = [
     "EXACT_REQUIRED_COMPONENTS", "FINGERPRINT_SCHEMA_VERSION", "MODEL_PROTOCOL_ADAPTER_VERSION",
     "ModelRuntimeFingerprint", "PROBE_ENV_VAR", "UNAVAILABLE", "clear_model_runtime_cache",
     "CONTEXT_WINDOW_REQUEST_OPTION", "configured_context_window", "context_window_overrides", "endpoint_identity",
-    "fingerprint_store_dir", "kriya_protocol_identity", "request_extra_body", "requested_context_window",
+    "OllamaRuntimeAdapter", "fingerprint_store_dir", "kriya_protocol_identity", "request_extra_body",
+    "requested_context_window",
     "supports_per_request_context_window", "with_context_window", "without_context_window",
     "load_recorded_fingerprint", "probe_model_runtime", "probing_enabled", "record_fingerprint",
     "resolve_configured_model_runtime", "resolve_model_runtime",

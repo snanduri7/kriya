@@ -66,6 +66,12 @@ class LLMConfig(BaseModel):
     extra_body: Dict[str, Any] = Field(default_factory=dict)
     reasoning: bool = Field(default=False)
     context_window: int = Field(default=32768)
+    # INF-001: the inference runtime adapter serving this binding
+    # (kriya/core/inference_runtime.py). None is the packaged default; an
+    # unregistered name is refused, never served by the default instead.
+    # SECURITY_AUTHORITY: it decides which native identity endpoints are
+    # probed and whether a context window is sent.
+    inference_runtime: Optional[str] = Field(default=None)
     knowledge_cutoff: str = Field(default="2023-12-01")
     knowledge_cutoff_confidence: str = Field(default="estimated")
     # Applied ONLY to Developer generation calls that are directly responding to a
@@ -809,6 +815,12 @@ class FallbackModelConfig(BaseModel):
     # fallback ignores unknown fields, but silently wrong whenever it doesn't.
     extra_body: Dict[str, Any] = Field(default_factory=dict)
     context_window: int = Field(default=32768)
+    # INF-001: the inference runtime adapter serving this binding
+    # (kriya/core/inference_runtime.py). None is the packaged default; an
+    # unregistered name is refused, never served by the default instead.
+    # SECURITY_AUTHORITY: it decides which native identity endpoints are
+    # probed and whether a context window is sent.
+    inference_runtime: Optional[str] = Field(default=None)
     knowledge_cutoff: str = Field(default="2023-12-01")
     knowledge_cutoff_confidence: str = Field(default="estimated")
     context_policy: ContextPolicyConfig = Field(default_factory=ContextPolicyConfig)

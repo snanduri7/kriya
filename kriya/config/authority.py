@@ -207,6 +207,9 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # "human-in-the-loop" -> a more permissive mode removes the approval gate
     ("autonomy", "mode"),
     ("llm", "base_url"), ("embedding", "base_url"), ("search", "base_url"),
+    # INF-001: which runtime adapter serves the model - which native identity
+    # endpoints are probed and whether a context window is sent.
+    ("llm", "inference_runtime"),
     # PRD-016: which larger context windows a request may be sent with, and
     # the hard context/output ceilings - resource authority over the host.
     ("llm", "context_policy"),
@@ -321,10 +324,11 @@ def agent_role_field_classification(role_value: object) -> FieldClassification:
     if not isinstance(role_value, dict):
         return FieldClassification.SECURITY_AUTHORITY
     llm_val = role_value.get("llm")
-    if isinstance(llm_val, dict) and "base_url" in llm_val:
+    authority_keys = ("base_url", "inference_runtime")
+    if isinstance(llm_val, dict) and any(key in llm_val for key in authority_keys):
         return FieldClassification.SECURITY_AUTHORITY
     for chain_entry in role_value.get("llm_chain") or []:
-        if isinstance(chain_entry, dict) and "base_url" in chain_entry:
+        if isinstance(chain_entry, dict) and any(key in chain_entry for key in authority_keys):
             return FieldClassification.SECURITY_AUTHORITY
     return FieldClassification.REPOSITORY_SAFE
 

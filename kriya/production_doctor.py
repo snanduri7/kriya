@@ -96,21 +96,23 @@ def _json_request(
 def probe_llm_runtime(cfg: AppConfig) -> Dict[str, Any]:
     """Connectivity plus the PRD-013 exact runtime fingerprint of the primary
     model, probed fresh (never from the per-process cache)."""
+    from kriya.core.inference_runtime import runtime_for_binding
     from kriya.core.llm import EgressViolationError, is_local_url
-    from kriya.core.model_runtime import kriya_protocol_identity, probe_model_runtime, requested_context_window
+    from kriya.core.model_runtime import kriya_protocol_identity, request_extra_body
 
     if cfg.autonomy.egress_policy == "local_only" and not is_local_url(cfg.llm.base_url):
         # PRD-012: never probe (or send the API key to) a refused endpoint.
         raise EgressViolationError(f"llm.base_url {cfg.llm.base_url!r} is not local under local_only; not probed")
-    models_url = f"{cfg.llm.base_url.rstrip('/')}/models"
-    listing = _json_request(models_url, api_key=cfg.llm.api_key)
-    models = [item for item in listing.get("data", []) if isinstance(item, dict)]
+    # INF-001: discovery and identity through the primary binding's adapter.
+    adapter = runtime_for_binding(cfg.llm)
+    models = adapter.list_models(cfg.llm.base_url, cfg.llm.api_key, _json_request)
     selected = next((item for item in models if item.get("id") == cfg.llm.model), None)
 
-    runtime = probe_model_runtime(
+    runtime = adapter.probe(
         base_url=cfg.llm.base_url, model=cfg.llm.model, api_key=cfg.llm.api_key,
         egress_policy=cfg.autonomy.egress_policy,
-        configured_context=requested_context_window(cfg.llm.extra_body, cfg.llm.context_window),
+        configured_context=adapter.configured_context_window(
+            request_extra_body(cfg.llm.extra_body, cfg.llm.context_window, adapter)),
         kriya_protocol=kriya_protocol_identity(cfg, cfg.llm.model),
         transport=lambda url, payload, api_key: _json_request(url, api_key=api_key, payload=payload),
     )

@@ -646,6 +646,7 @@ def request_capacity(config: Any, binding: Any = None, *, role: str = "developer
     room: every prompt section sized from it budgets against the same
     served window, output reserve and counting ratio the dispatch check uses
     for that call (kriya/core/llm.py::complete_result)."""
+    from kriya.core.inference_runtime import runtime_for_binding
     from kriya.core.llm import REASONING_MIN_MAX_TOKENS
     from kriya.core.model_runtime import binding_output_tokens, requested_context_window
     from kriya.core.token_budget import DISPATCH_SAFETY_MARGIN_TOKENS, TWO_MESSAGE_FRAMING_TOKENS
@@ -653,7 +654,7 @@ def request_capacity(config: Any, binding: Any = None, *, role: str = "developer
     binding = binding if binding is not None else config.llm
     # The window this binding's requests carry (FALLBACK-CONTEXT-WINDOW-001),
     # replaced below by the window the runtime reports serving, when known.
-    window = requested_context_window(binding.extra_body, binding.context_window)
+    window = requested_context_window(binding.extra_body, binding.context_window, runtime_for_binding(binding))
     limits: Dict[str, Any] = {}
     tokenizer = None
     try:
