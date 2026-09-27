@@ -3579,7 +3579,7 @@ async def test_run_attempt_uses_coordinated_generation_when_contract_active(tmp_
         "}\n"
     )
 
-    async def fake_coordinated(state_arg, ctx_arg, contract_arg, base_code_context, stream_callback, attempt_operation):
+    async def fake_coordinated(state_arg, ctx_arg, contract_arg, base_code_context, stream_callback, attempt_operation, optional_sections=()):
         assert contract_arg is contract
         return [
             {"filepath": app_path, "content": fixed_app, "edits": []},
@@ -25163,7 +25163,7 @@ async def test_run_attempt_coordinated_repair_denies_unauthorized_participant_at
         write_scope_mode=WriteScopeMode.ALLOWLIST,
     )
 
-    async def fake_coordinated(state_arg, ctx_arg, contract_arg, base_code_context, stream_callback, attempt_operation):
+    async def fake_coordinated(state_arg, ctx_arg, contract_arg, base_code_context, stream_callback, attempt_operation, optional_sections=()):
         return [
             {"filepath": app_path, "content": fixed_app, "edits": []},
             {"filepath": test_path, "content": fixed_test, "edits": []},
@@ -25287,7 +25287,7 @@ async def test_run_attempt_coordinated_contract_survives_compile_failure_across_
     )
 
     broken_app = "this is not valid java at all {{{"
-    async def fake_coordinated_first(state_arg, ctx_arg, contract_arg, base_code_context, stream_callback, attempt_operation):
+    async def fake_coordinated_first(state_arg, ctx_arg, contract_arg, base_code_context, stream_callback, attempt_operation, optional_sections=()):
         return [
             {"filepath": app_path, "content": broken_app, "edits": []},
             {"filepath": test_path, "content": "public class AppTest {}\n", "edits": []},
@@ -25314,7 +25314,7 @@ async def test_run_attempt_coordinated_contract_survives_compile_failure_across_
     fixed_app = (
         "public class App {\n    public static void main(String[] args) {}\n}\n"
     )
-    async def fake_coordinated_second(state_arg, ctx_arg, contract_arg, base_code_context, stream_callback, attempt_operation):
+    async def fake_coordinated_second(state_arg, ctx_arg, contract_arg, base_code_context, stream_callback, attempt_operation, optional_sections=()):
         return [
             {"filepath": app_path, "content": fixed_app, "edits": []},
             {"filepath": test_path, "content": "public class AppTest {}\n", "edits": []},
