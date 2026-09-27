@@ -126,6 +126,17 @@ UNKNOWN and UNAVAILABLE both block.
 4. **No doctor schema bump** (approved correction). The existing NOT_APPLICABLE representation is reused.
 5. **`ContainmentProfile.image_reference`** (new, additive, default None) plus **`--pull never`** in the OCI backend. A mutable tag is refused by the backend.
 6. **Relative rule-pack and waiver-store paths are anchored to `config_dir`** in `resolve_config_state`, with the same idiom as other path fields.
+7. **Disclosed, not implemented: the egress admission decision is not merged into the PRD-012 `egress.authority` run event** (§12.2).
+   - It is recorded in the evidence (`egress`) and the `static_analysis.result` event, per unit.
+   - Merging it would require probing the provider at run start.
+   - `tests/test_prd012_network_inventory.py` passes unchanged: the scanner is a subprocess, not an outbound client, and is contained with `--network none` in production.
+8. **Disclosed: the provider `identity_digest` is not added to the PRD-008 resume fingerprints** (§10.4).
+   - A resumed run always re-evaluates the gate: a reused candidate passes through `run_attempt` and back through the same boundary (traced in workflow.py), and a checkpoint never carries static-analysis authority.
+   - So recording it would be audit-only.
+9. **Disclosed: an in-place direct candidate is UNKNOWN** (`BASELINE_UNAVAILABLE_IN_PLACE`), even though §4.3 allowed `all_original_contents` as PRE. The reasons:
+   - the commit guard must re-derive the base from the real workspace, which an in-place run has already mutated;
+   - production always uses a worktree (`isolation.candidate_worktree`).
+10. **JSON output.** `kriya/cli_output.py::GenerateOutput` serializes the result dict intact, so `static_analysis`/`accepted_risk`/`accepted_risks` reach `generate --json` unchanged. A test covers the banner, the JSON payload, and "a clean pass prints no banner".
 
 ## Own bugs found and fixed before any commit
 Each has a regression test proven to fail without its fix.
@@ -184,9 +195,9 @@ Targeted runs only. The full suite is for the user.
 
 | Command | Passed | Failed |
 |---|---:|---:|
-| `pytest tests/test_prd031a_static_analysis.py` (core, fake provider) | 92 | 0 |
+| `pytest tests/test_prd031a_static_analysis.py` (core, fake provider; +1 CLI banner/JSON test after 1cd9960) | 93 | 0 |
 | `pytest tests/test_prd031a_semgrep_adapter.py` (recorded 1.178.0 fixtures) | 136 | 0 |
-| `pytest -m live_static_analysis tests/test_prd031a_semgrep_live.py` (helper agent; host and OCI, pinned image) | 26 | 0 |
+| `pytest -m live_static_analysis tests/test_prd031a_semgrep_live.py`, re-run by the lead at HEAD 1cd9960 (host and OCI, pinned image; 0 leftover containers) | 26 | 0 |
 | `pytest tests/test_prd030_terminal_services.py` | 27 | 0 |
 | enforce gate matrix and event-order tests (`-k` on the two PRD-004 tests) | 8 | 0 |
 | `pytest tests/test_production_doctor.py` | 63 | 0 |

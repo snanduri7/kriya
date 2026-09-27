@@ -1083,3 +1083,27 @@ def test_a_waiver_never_masks_another_blocking_finding(tmp_path):
     decisions = {f["path"]: f["decision"] for f in result.evidence["findings"]}
     assert decisions == {"A.java": "accepted", "B.java": "block"}
     assert set(result.reason_codes) >= {model.WAIVER_APPLIED, model.NEW_FINDING_BLOCKED}
+
+
+def test_cli_prints_the_accepted_risk_banner_and_json_keeps_the_distinct_outcome(tmp_path, capsys):
+    """Spec test 35: ACCEPTED_RISK exits like success (quality gates passed)
+    but is printed unmissably and stays ACCEPTED_RISK in the JSON payload
+    (kriya/cli_output.py::GenerateOutput serializes the result dict intact)."""
+    from kriya.cli import _print_static_analysis_banner
+    from kriya.cli_output import GenerateOutput
+
+    workspace = _workspace(tmp_path, {"A.java": BASE_A})
+    _waive(workspace)
+    with FakeRegistration():
+        result = _evaluate(_config(), workspace, [_write(workspace, "A.java", "x BAD_HIGH\n", base=BASE_A)], tmp_path)
+    payload = {"status": "success", "quality_gates_passed": result.permits_commit,
+               **static_analysis_result_fields(result)}
+    _print_static_analysis_banner(payload)
+    assert "ACCEPTED RISK — NOT A CLEAN PASS (waivers: SAW-1)" in capsys.readouterr().out
+    with GenerateOutput(True) as output:
+        output.result = payload
+    emitted = json.loads(capsys.readouterr().out)
+    assert emitted["quality_gates_passed"] is True
+    assert emitted["static_analysis"]["outcome"] == "ACCEPTED_RISK" and emitted["accepted_risk"] is True
+    _print_static_analysis_banner({"static_analysis": {"outcome": "PASS", "banner": "STATIC ANALYSIS: PASS"}})
+    assert capsys.readouterr().out == ""  # a clean pass needs no banner
