@@ -311,7 +311,11 @@ def test_an_io_error_inside_the_commit_is_settled_from_evidence(chaos_case, tmp_
     # Never silently partial: the file that had landed is restored.
     assert Path(workspace, "calc.py").read_text() == CALC and Path(workspace, "helper.py").read_text() == HELPER
     assert set(audit.commit_results) <= {"ROLLED_BACK", "NOT_COMMITTED"}, audit
-    chaos_case.observe(typed_failure(result), **audit.evidence())
+    # A deterministic stop, never a Developer retry (PRD-032 fix).
+    assert typed_failure(result) == "workspace_commit_failed"
+    assert result["workspace_commit_failure"]["reason_code"] == "WORKSPACE_COMMIT_FAILED"
+    chaos_case.observe(typed_failure(result), reason_code=result["workspace_commit_failure"]["reason_code"],
+                       **audit.evidence())
 
 
 @chaos("C09")
@@ -342,7 +346,9 @@ def test_disk_full_while_staging_leaves_the_workspace_unchanged(chaos_case, tmp_
     leftovers = [p.name for p in workspace.iterdir() if p.name.startswith(".kriya-stage-")]
     assert leftovers == [], leftovers
     assert set(audit.commit_results) <= {"ROLLED_BACK", "NOT_COMMITTED"}, audit
-    chaos_case.observe(typed_failure(result), **audit.evidence())
+    assert typed_failure(result) == "workspace_commit_failed"
+    chaos_case.observe(typed_failure(result), reason_code=result["workspace_commit_failure"]["reason_code"],
+                       **audit.evidence())
 
 
 @chaos("C10")

@@ -490,6 +490,10 @@ async def _record_attempt_failure(
             # Developer as retry evidence in v1 (and scanner text never
             # reaches a prompt).
             "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
+            # PRD-032: the verified candidate's terminal commit did not
+            # commit. Regeneration cannot change the workspace's revision,
+            # the commit evidence or a refused commit guard.
+            "workspace_commit",
         }
         else classify_environment_failure(
             raw_error_context,

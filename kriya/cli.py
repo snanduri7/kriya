@@ -2081,6 +2081,22 @@ def _print_static_analysis_banner(res: Dict[str, Any]) -> None:
         click.echo(f"Static-analysis evidence: {summary['evidence_path']}")
 
 
+def _print_workspace_commit_failure(res: Dict[str, Any]) -> None:
+    """PRD-032: the verified candidate's terminal commit did not commit -
+    neither a toolchain problem nor a retryable code defect."""
+    if res.get("failure_category") != "workspace_commit_failed":
+        return
+    failure = res.get("workspace_commit_failure") or {}
+    advice = (
+        "The workspace state is UNCERTAIN: run `kriya runs recover` before any other run."
+        if failure.get("workspace_state") == "UNCERTAIN"
+        else "The workspace is unchanged. Resolve the reason above (a concurrent edit, a disk or "
+             "permission problem, refused static-analysis evidence) and run again."
+    )
+    click.secho(f"\n[WORKSPACE COMMIT NOT COMPLETED] {res.get('environment_failure')}\n{advice}",
+                fg="yellow", bold=True)
+
+
 async def _dispatch_generation(we: "WorkflowEngine", cfg: AppConfig, **kwargs: Any) -> Dict[str, Any]:
     """MA7.1 - routes through WorkflowController when workflow_controller.enabled
     (kriya.yaml, default False) so its shadow-mode control-plane bookkeeping
@@ -2622,6 +2638,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                     "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
                     "fallback_model_incompatible", "requirements_unresolved", "contract_registry_blocked",
                     "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
+                    "workspace_commit_failed",
                 ):
                     click.secho(
                         f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
@@ -2730,6 +2747,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                         "or re-run `kriya model qualify` for it), or remove it from llm_chain.",
                         fg="yellow", bold=True
                     )
+                _print_workspace_commit_failure(res)
                 if res.get("failure_category") == "containment_setup_failed":
                     click.secho(
                         f"\n[CONTAINMENT SETUP FAILED] {res['environment_failure']}\n"
@@ -4145,6 +4163,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                 "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
                 "fallback_model_incompatible", "requirements_unresolved", "contract_registry_blocked",
                 "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
+                "workspace_commit_failed",
             ):
                 click.secho(
                     f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
@@ -4202,6 +4221,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                 )
             # SEC-001 (2026-09-11): see the matching branch above in this
             # file's other quality-gates-failure branch.
+            _print_workspace_commit_failure(res)
             if res.get("failure_category") == "containment_setup_failed":
                 click.secho(
                     f"\n[CONTAINMENT SETUP FAILED] {res['environment_failure']}\n"

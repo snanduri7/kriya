@@ -1019,6 +1019,33 @@ def _run_static_analysis_gate(
     raise QualityGateFailure(failure)
 
 
+# PRD-032: the environment_failure prefix of a terminal commit that did not
+# commit (failure_category ``workspace_commit_failed``).
+WORKSPACE_COMMIT_NOT_COMPLETED = "WORKSPACE_COMMIT_NOT_COMPLETED"
+
+
+def _raise_terminal_commit_stop(state: GenerationState, outcome: Any) -> None:
+    """PRD-032: a verified candidate whose terminal commit did not commit
+    (revision conflict, I/O failure rolled back, uncertain, refused static-
+    analysis evidence, unpersisted intent) is a deterministic stop, never a
+    Developer retry: regeneration cannot change the workspace's revision, the
+    commit evidence or a refused guard. The enforce terminal reports the same
+    payload (commit_service.commit_verified_candidate)."""
+    payload = outcome.failure_payload()
+    reason = payload["reason_code"] or "WORKSPACE_COMMIT_FAILED"
+    message = f"{WORKSPACE_COMMIT_NOT_COMPLETED}: {reason} (workspace {outcome.workspace_state}): {outcome.error}"
+    state.environment_failure = message
+    state.terminal_commit_failure = payload
+    failure = Failure(
+        type="workspace_commit", message=message, raw_output=message,
+        source="terminal_commit", authority="deterministic", attempt=state.attempt_number,
+        diagnostics={"reason_code": reason, "workspace_state": outcome.workspace_state,
+                     "commit_transaction_id": outcome.transaction_id},
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
 def _raise_contract_registry_stop(state: GenerationState, outcome: Any) -> None:
     """PRD-029: a contract transition that cannot be made exactly is a
     deterministic stop, never a retryable generation failure."""
@@ -5002,7 +5029,7 @@ class WorkflowEngine:
                 if not commit_outcome.committed:
                     if commit_outcome.reason_code in CONTRACT_REGISTRY_STOP_REASON_CODES:
                         _raise_contract_registry_stop(state, commit_outcome)
-                    raise commit_outcome.error
+                    _raise_terminal_commit_stop(state, commit_outcome)
                 state.contract_registry_transition = commit_outcome.contract_registry
                 for filepath in sorted(state.all_files_written):
                     logger.info(
@@ -5425,6 +5452,11 @@ class WorkflowEngine:
                 state.environment_failure.startswith(f"{code}:") or state.environment_failure == code
                 for code in CONTRACT_REGISTRY_STOP_REASON_CODES
             )
+            # PRD-032: same convention - the verified candidate's terminal
+            # commit did not commit (_raise_terminal_commit_stop).
+            is_workspace_commit_stop = bool(state.environment_failure) and (
+                state.environment_failure.startswith(f"{WORKSPACE_COMMIT_NOT_COMPLETED}:")
+            )
             # PRD-031A: a static-analysis gate stop (StaticAnalysisGateResult.gap).
             static_analysis_stop = next(
                 (
@@ -5446,6 +5478,7 @@ class WorkflowEngine:
                 else "requirements_unresolved" if is_requirements_unresolved_stop
                 else "contract_registry_blocked" if is_contract_registry_stop
                 else static_analysis_stop if static_analysis_stop is not None
+                else "workspace_commit_failed" if is_workspace_commit_stop
                 else "environment_failure" if state.environment_failure
                 # PRD-026: the retry-progress invariant ended the run.
                 else "no_progress" if state.no_progress_terminated
@@ -5555,6 +5588,9 @@ class WorkflowEngine:
             # PRD-029: the ContractRegistry transition committed with this
             # run's source (None when no contract changed).
             "contract_registry": state.contract_registry_transition,
+            # PRD-032: why the verified candidate was not committed (None
+            # unless its terminal commit did not commit).
+            "workspace_commit_failure": state.terminal_commit_failure,
             "failure_report": failure_report_dicts,
             "plan_scope_conflict": state.plan_scope_conflict,
             "toolchain_warning": state.toolchain_warning,

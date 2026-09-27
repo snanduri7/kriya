@@ -560,6 +560,8 @@ The enforce run's terminal decision is split into two services. `WorkflowControl
 
 Events, result keys and reason codes are unchanged. `tests/test_prd030_terminal_services.py` pins both contracts and the import direction controller -> services.
 
+**Direct/milestone parity (PRD-032).** The generation workflow's terminal apply reports a commit that did not commit the same way: `workflow._raise_terminal_commit_stop` makes it a deterministic stop, never a Developer retry. That covers a revision conflict, a rolled-back I/O failure, an uncertain state, refused static-analysis evidence and unpersisted intent. It surfaces as `failure_category: workspace_commit_failed`, with the `WORKSPACE_COMMIT_NOT_COMPLETED:` prefix in `environment_failure` and the enforce terminal's `workspace_commit_failure` payload (`reason_code`, `workspace_state`, `commit_transaction_id`). Before PRD-032 the error was re-raised into the generic attempt-failure path, which regenerated a candidate that could never commit and ended as `quality_gates_exhausted` / `no_progress` (found by the chaos harness; `tests/test_prd032_terminal_commit_stop.py`).
+
 
 ### 2.9c Recovery and Verification Coordination (PRD-031, `kriya/workflow/recovery_coordinator.py`, `verification_coordinator.py`)
 

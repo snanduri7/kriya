@@ -583,6 +583,9 @@ class GenerationState:
     # PRD-029: the ContractRegistry transition committed with this run's
     # source (RunRecord cycle intent), when a contract changed.
     contract_registry_transition: Optional[Dict[str, Any]] = None
+    # PRD-032: the terminal commit's failure payload (TerminalCommitOutcome.
+    # failure_payload()) when the verified candidate was not committed.
+    terminal_commit_failure: Optional[Dict[str, Any]] = None
     # Current attempt's three distinct verification/application boundaries.
     candidate_gates_succeeded: bool = False
     terminal_regression_succeeded: bool = False
