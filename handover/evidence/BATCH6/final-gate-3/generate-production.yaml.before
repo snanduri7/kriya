@@ -1,0 +1,59 @@
+# DEMO 03 - PRODUCTION PROFILE VARIANT (Batch 5 final review, 2026-09-25)
+#
+# Same target, goal, models and autonomy as generate.yaml, but with
+# runtime_profile: production instead of the hand-set workflow_controller block
+# (a config may set one or the other, never both). The production preset seals:
+# enforce mode, execution_policy enforce, OCI containment required
+# (containment_backend: oci - Docker must be running), brownfield baseline
+# 'required', shell_network denied, knowledge offline, and PRD-020 requirement
+# policies unknown=block and unverified=block. Every role model must be
+# QUALIFIED (kriya model qualify) or doctor --production fails and production
+# fallbacks are skipped. State/memory go to run-production/ so the original
+# demo's evidence is untouched.
+autonomy:
+  mode: human-in-the-loop
+  web_lookup_enabled: false
+  web_lookup_auto_approve: false
+  run_verification_enabled: true
+  self_correction_loop_enabled: false
+  generation_time_budget_seconds: 900
+search:
+  base_url: ''
+skills:
+  load_global: false
+  load_cwd: false
+paths:
+  skills: /Users/sriramnanduri/kriya-live-demo/demo-03-brownfield/config/skills-empty
+  state: /Users/sriramnanduri/kriya-live-demo/demo-03-brownfield/run-production/logs
+  memory: /Users/sriramnanduri/kriya-live-demo/demo-03-brownfield/run-production/memory
+llm:
+  provider: openai
+  model: qwen3-coder:30b
+  api_key: local-key
+  base_url: http://localhost:11434/v1
+  temperature: 0.7
+  reviewer_temperature: 0.7
+  max_tokens: 16384
+  capabilities:
+    native_tool_calls: true
+    json_mode: true
+    reliable_multiline_json: false
+    streaming: true
+    max_tool_argument_chars: 8192
+    preferred_edit_protocol: small_native_tools
+  extra_body:
+    options:
+      num_ctx: 32768
+      top_p: 0.8
+      top_k: 20
+llm_chain:
+- model: qwen3.6:35b-a3b-q4_K_M
+  base_url: http://localhost:11434/v1
+  api_key: local-key
+  reasoning: false
+  context_window: 32768
+  temperature: 0.2
+embedding:
+  model: nomic-embed-text:latest
+  base_url: http://localhost:11434/v1
+runtime_profile: production

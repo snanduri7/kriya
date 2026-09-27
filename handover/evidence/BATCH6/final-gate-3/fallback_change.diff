@@ -1,0 +1,31 @@
+--- handover/evidence/BATCH6/final-gate-3/generate-production.yaml.before	2026-09-27 07:42:32
++++ handover/evidence/BATCH6/final-gate-3/generate-production.yaml.after	2026-09-27 07:42:32
+@@ -46,13 +46,26 @@
+       num_ctx: 32768
+       top_p: 0.8
+       top_k: 20
++# Developer fallback (Batch 6, 2026-09-27): the qwen3.6 identity qualified
++# 18/18 under policy /3 (settings sha256:0f1e6b5c...). One reasoning control:
++# reasoning_effort none at the provider (Kriya's `reasoning` flag is only a
++# budget hint and stays at its default false). num_ctx is set in
++# extra_body.options like the primary's: Kriya sends a fallback's num_ctx only
++# from extra_body (context_window alone is not sent). Previous settings
++# (temperature 0.2, extra_body {}) were NOT_QUALIFIED: silent reasoning
++# truncated 6 required cases.
+ llm_chain:
+ - model: qwen3.6:35b-a3b-q4_K_M
+   base_url: http://localhost:11434/v1
+   api_key: local-key
+-  reasoning: false
+   context_window: 32768
+-  temperature: 0.2
++  temperature: 0.7
++  extra_body:
++    options:
++      num_ctx: 32768
++      top_p: 0.8
++      top_k: 20
++    reasoning_effort: none
+ embedding:
+   model: nomic-embed-text:latest
+   base_url: http://localhost:11434/v1

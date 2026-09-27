@@ -177,6 +177,14 @@ Not green:
 
 Recorded as PROD-FALLBACK-QUAL-001. The config is unchanged; the decision is the user's.
 
+## Fallback closure, Option A (2026-09-27)
+- **The change.** Only the demo-03 production config's qwen3.6 fallback changed: temperature 0.7, `reasoning_effort: none`, top_p 0.8, top_k 20, num_ctx 32768, and `reasoning: false` removed.
+- **The resolved identity** is exactly the settings digest of the qwen3.6 record that passed 18/18 under policy /3 (sha256:0f1e6b5c…). Pin test: `tests/test_production_fallback_identity.py`.
+- **Qualification is still required.** The runtime digest differs from that record, because the fallback resolves a different capability profile. The user's `model qualify` run decides.
+- **Approval needed first.** The `llm_chain` change needs SEC-009 re-approval before any command runs.
+- **New finding, for triage:** FALLBACK-CONTEXT-WINDOW-001. A chain entry's `context_window` is never sent as `num_ctx`.
+- Evidence: `handover/evidence/BATCH6/final-gate-3/`.
+
 ## Static gates
 `.venv/bin/ruff check .`: All checks passed. `.venv/bin/pylint kriya plugins/core_tools tests`: exit 0. Both hold at the final commit.
 
