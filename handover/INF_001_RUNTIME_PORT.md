@@ -1,7 +1,7 @@
 # INF-001: pluggable inference runtime framework (scoped deliverable)
 
 ## Status
-COMPLETE for the scoped runtime-framework deliverable (Backlog 6.5, 2026-09-27). It awaits the user's pytest run and the live identity check below.
+VERIFIED for the scoped runtime-framework deliverable (Backlog 6.5, 2026-09-27): user pytest green, live identity unchanged (primary ea90552d, fallback 64e12eef), doctor PRODUCTION_READY=true.
 
 Real vLLM support is not implemented. It is an extension point that needs separate approval.
 
@@ -68,7 +68,7 @@ Environment and capacity evidence stays separate from functional qualification. 
 ## Identity preservation (the real proof is live)
 - **What the tests show.** For the default adapter the wire and the runtime digest are byte-identical: `MODEL_PROTOCOL_ADAPTER_VERSION` was not bumped, and neither the adapter name nor the new config field enters `identity_fields`.
 - **Checkpoints.** The new config leaf changes the resume `config` fingerprint of checkpoints saved before it. Every code change already does this through `kriya_runtime`.
-- **Live check (user):** from demo-03 `workspace/repo`, run `kriya -c ../../config/generate-production.yaml model fingerprint` and `model status`. The primary must still read ea90552d… QUALIFIED and the qwen3.6 fallback fc063b9e… QUALIFIED.
+- **Live check (user):** from demo-03 `workspace/repo`, run `kriya -c ../../config/generate-production.yaml model fingerprint` and `model status`. The primary must still read ea90552d… QUALIFIED and the qwen3.6 fallback runtime 64e12eef… (qualification record fc063b9e) QUALIFIED.
 
 ## Extension point: VllmRuntimeAdapter (documented only)
 1. Subclass `OpenAICompatibleTransport`: vLLM serves the same chat API.

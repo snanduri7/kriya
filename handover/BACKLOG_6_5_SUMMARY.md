@@ -67,7 +67,7 @@
 
 ### 3. Live and gate runs
 Run these from demo-03 `workspace/repo`, with `K=<kriya repo>/.venv/bin/kriya` and `C=../../config/generate-production.yaml`:
-1. **Identity parity (INF-001, FALLBACK-CONTEXT-WINDOW-001).** Run `$K -c $C model fingerprint` and `$K -c $C model status`. The primary must still read ea90552d… QUALIFIED, and the qwen3.6 fallback fc063b9e… QUALIFIED.
+1. **Identity parity (INF-001, FALLBACK-CONTEXT-WINDOW-001).** Run `$K -c $C model fingerprint` and `$K -c $C model status`. The primary must still read ea90552d… QUALIFIED, and the qwen3.6 fallback runtime 64e12eef… (qualification record fc063b9e) QUALIFIED.
    - If either reads STALE or MISSING, stop and report it. Don't re-qualify to hide it: the digests are pinned unchanged by test.
 2. **Learned knowledge end to end (KNOWLEDGE-READPATH-001).**
    - `$K -c $C learn -t "<a fact about the repo>"`.
@@ -95,3 +95,13 @@ Run these from demo-03 `workspace/repo`, with `K=<kriya repo>/.venv/bin/kriya` a
 - **Checks:**
   - Mutation: pointing the query at LowRel makes the test fail.
   - ruff and pylint both at 0.
+
+## Verification result (user-run, 2026-09-27): ALL EXIT CRITERIA MET
+- pytest: focused 1045/0; full 6378/1, with the one failure a stale fixture, fixed in 96ce35b.
+- Live tier: 25/30 on the first run. The 5 failures were stale fixtures (5cac93e, 1023082); the rerun of those 5 passed. All 8 PRD-025..029 cases are LIVE_EXERCISED.
+- Identity: primary ea90552d and fallback 64e12eef (record fc063b9e) are unchanged and QUALIFIED for every role.
+- learn → ask: answered from the fenced learned reference.
+- context certify: CERTIFIED, precision 0.5814, every recall class 1.0.
+- doctor --production: PRODUCTION_READY=true, with model.qualification and context.recall_certification both PASS.
+- No open P0 or P1. Evidence: `handover/evidence/BACKLOG_6_5/user-live/`.
+- Open P2+: DEVELOPER-PROMPT-FIT-001, PROMPT-FIT-ROLE-CHAIN-001, the INF-001 follow-ups (vLLM adapter, per-adapter environment observation), and the `authority inspect` raw traceback when KRIYA_AUTHORITY_HOME sits inside the workspace (UX only; the refusal itself is correct).
