@@ -1,7 +1,7 @@
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
@@ -1225,6 +1225,99 @@ def production_sealed_requirement(key: Tuple[str, str]) -> str:
     return stricter[1] if stricter is not None else repr(runtime_profile_preset_fields("production")[key])
 
 
+_PolicyAction = Literal["allow", "warn", "block"]
+_CoverageAction = Literal["warn", "block"]
+
+
+class StaticAnalysisSeverityPolicy(BaseModel):
+    """PRD-031A: allow/warn/block per normalized severity (unknown is decided as high)."""
+
+    model_config = ConfigDict(extra="forbid")
+    critical: _PolicyAction = "block"
+    high: _PolicyAction = "block"
+    medium: _PolicyAction = "warn"
+    low: _PolicyAction = "allow"
+    info: _PolicyAction = "allow"
+
+
+class StaticAnalysisPolicyConfig(BaseModel):
+    """PRD-031A §7.3: Kriya-owned policy; adapters never see it. UNKNOWN is
+    not configurable: when analysis is enabled it always blocks."""
+
+    model_config = ConfigDict(extra="forbid")
+    introduced: StaticAnalysisSeverityPolicy = Field(default_factory=StaticAnalysisSeverityPolicy)
+    worsened: StaticAnalysisSeverityPolicy = Field(default_factory=StaticAnalysisSeverityPolicy)
+    existing: StaticAnalysisSeverityPolicy = Field(default_factory=lambda: StaticAnalysisSeverityPolicy(
+        critical="warn", high="warn", medium="allow", low="allow", info="allow",
+    ))
+    partial_coverage: _CoverageAction = "warn"
+    unsupported_language: _CoverageAction = "warn"
+    prerequisites_missing: _CoverageAction = "block"
+    # A required target that was not analyzed (scanner did not confirm it,
+    # or it is above max_target_bytes): block -> UNKNOWN, warn -> partial
+    # coverage. Never PASS either way.
+    analysis_errors: _CoverageAction = "block"
+    # UNAVAILABLE under requirement: optional (outside production).
+    when_unavailable: _CoverageAction = "warn"
+
+
+class StaticAnalysisWaiversConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # None -> ~/.kriya/static_analysis/waivers/<workspace_id>.json. An
+    # explicit path must resolve outside the workspace (checked at use).
+    store: Optional[str] = None
+
+
+class StaticAnalysisConfig(BaseModel):
+    """PRD-031A: the pluggable static-analysis gate (handover/PRD-031A_TASK.md).
+
+    Disabled by default; disabled is reported as DISABLED (or
+    NOT_CONFIGURED when never set), never PASS. Every field is
+    SECURITY_AUTHORITY (kriya/config/authority.py): a repository can neither
+    disable nor soften it. ``providers.<name>`` is validated by that
+    provider's own settings model (kriya/static_analysis/registry.py)."""
+
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1] = 1
+    enabled: bool = False
+    provider: Optional[str] = None
+    requirement: Literal["optional", "required"] = "optional"
+    # auto = the provider's minimum trustworthy scope; an explicit scope
+    # may be broader, never narrower.
+    scope: Literal["auto", "changed_files", "module", "repository", "build_graph"] = "auto"
+    # Trusted, auditable path globs; applied by Kriya's scope planner,
+    # never passed to the provider as targets.
+    exclusions: List[str] = Field(default_factory=list)
+    # Kriya-enforced before submission (the provider's own size flag is
+    # defense in depth only). An oversized target is recorded, never
+    # silently omitted.
+    max_target_bytes: int = Field(default=1_000_000, gt=0)
+    timeout_seconds: int = Field(default=300, gt=0)
+    policy: StaticAnalysisPolicyConfig = Field(default_factory=StaticAnalysisPolicyConfig)
+    waivers: StaticAnalysisWaiversConfig = Field(default_factory=StaticAnalysisWaiversConfig)
+    providers: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "StaticAnalysisConfig":
+        if self.requirement == "required" and not self.enabled:
+            raise ValueError("static_analysis.requirement is 'required' but static_analysis.enabled is false")
+        if not self.enabled:
+            return self
+        if not self.provider:
+            raise ValueError("static_analysis.enabled requires static_analysis.provider")
+        from kriya.static_analysis.registry import is_registered, validate_provider_settings
+
+        if not is_registered(self.provider):
+            raise ValueError(f"static_analysis.provider {self.provider!r} is not a registered provider")
+        # Normalize through the provider's own model: an invalid version,
+        # image reference or rule pack fails here, at load.
+        self.providers = {
+            **self.providers,
+            self.provider: validate_provider_settings(self.provider, self.providers.get(self.provider, {})),
+        }
+        return self
+
+
 class AppConfig(BaseModel):
     """runtime_profile (2026-08-25, external review P2) - a named
     preset in place of remembering which combination of independent
@@ -1280,6 +1373,7 @@ class AppConfig(BaseModel):
     process_profiles: ProcessProfilesConfig = Field(default_factory=ProcessProfilesConfig)
     execution_policy: ExecutionPolicyConfig = Field(default_factory=ExecutionPolicyConfig)
     workflow_controller: WorkflowControllerConfig = Field(default_factory=WorkflowControllerConfig)
+    static_analysis: StaticAnalysisConfig = Field(default_factory=StaticAnalysisConfig)
     runtime_profile: Optional[str] = Field(default=None)
     # PRD-019: the routing plan a workflow command applied to this (routed)
     # configuration, recorded by the run as model.route events. Not a
@@ -1330,6 +1424,22 @@ class AppConfig(BaseModel):
                 violations.append(
                     f"{top}.{leaf} must be {production_sealed_requirement((top, leaf))}, got {actual!r}"
                 )
+
+        # PRD-031A: production does not force static analysis on; when it is
+        # enabled, trustworthy evidence is mandatory (UNAVAILABLE, UNKNOWN,
+        # incomplete required coverage and scanner/config errors all block).
+        # A conditional seal, so it is checked here, not as a preset field.
+        static = self.static_analysis
+        if static.enabled:
+            for leaf, actual, required_value in (
+                ("requirement", static.requirement, "required"),
+                ("policy.analysis_errors", static.policy.analysis_errors, "block"),
+                ("policy.prerequisites_missing", static.policy.prerequisites_missing, "block"),
+            ):
+                if actual != required_value:
+                    violations.append(
+                        f"static_analysis.{leaf} must be {required_value!r} when static analysis is enabled, got {actual!r}"
+                    )
 
         if violations:
             raise ValueError(
@@ -1577,6 +1687,36 @@ def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionS
                     # same default MCPCapabilityConfig(), causing a spurious
                     # "approval invalidated" the moment an operator adds a
                     # no-op explicit empty block.
+                    # PRD-031A: static-analysis rule packs and the waiver
+                    # store are resolved against config_dir ONCE here (never
+                    # the process CWD), realpath'd, like every other path
+                    # field - the value SEC-009 digests is the value used.
+                    # static_analysis.* is SECURITY_AUTHORITY as a whole, so
+                    # a path may name a location outside config_dir (a rule
+                    # pack outside the workspace is the recommended layout).
+                    _static = user_data.get("static_analysis")
+                    if isinstance(_static, dict):
+                        def _anchor(raw: Any) -> Any:
+                            if not isinstance(raw, str) or not raw:
+                                return raw
+                            expanded = os.path.expanduser(raw)
+                            return os.path.realpath(
+                                expanded if os.path.isabs(expanded) else os.path.join(config_dir, expanded)
+                            )
+
+                        _waivers = _static.get("waivers")
+                        if isinstance(_waivers, dict) and _waivers.get("store"):
+                            _waivers["store"] = _anchor(_waivers["store"])
+                        _providers = _static.get("providers")
+                        if isinstance(_providers, dict):
+                            for _provider_cfg in _providers.values():
+                                packs = _provider_cfg.get("rule_packs") if isinstance(_provider_cfg, dict) else None
+                                if isinstance(packs, list):
+                                    _provider_cfg["rule_packs"] = [
+                                        {**pack, "path": _anchor(pack.get("path"))} if isinstance(pack, dict)
+                                        else _anchor(pack)
+                                        for pack in packs
+                                    ]
                     if isinstance(user_data.get("mcp"), dict):
                         for _server_name, _server_cfg in user_data["mcp"].items():
                             if not isinstance(_server_cfg, dict):

@@ -76,11 +76,12 @@ asyncio_mode = "strict"
 testpaths = ["tests"]
 markers = [
     "live_model: requires a real local LLM/embedding endpoint - excluded by default (see tests/test_live_smoke.py), run explicitly with `pytest -m live_model`",
+    "live_static_analysis: requires the exact pinned static-analysis scanner (Semgrep 1.178.0; Docker + the pinned image for OCI cases) - excluded by default, run explicitly with `pytest -m live_static_analysis`",
 ]
 # Excluded by default so a bare `pytest` never unexpectedly hangs/fails for
 # lacking a local Ollama instance - CI's live-model job opts back in with
 # `pytest -m live_model`, and so can a developer who has Ollama running.
-addopts = "-m \"not live_model\""
+addopts = "-m \"not live_model and not live_static_analysis\""
 
 [tool.ruff]
 line-length = 120

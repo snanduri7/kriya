@@ -42,6 +42,13 @@ from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.filesystem import WriteScopeMode
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.policy.telemetry import build_decision_record
+from kriya.static_analysis.service import (
+    StaticAnalysisCandidate,
+    StaticAnalysisService,
+    banner,
+    commit_guard,
+    static_analysis_result_fields,
+)
 from kriya.tools.validate import PolymorphicValidator, execution_evidence
 from kriya.workflow.acceptance import goal_requires_runtime_behavior, output_confirms_nonzero_test_execution
 from kriya.workflow.architectural_choice import (
@@ -968,6 +975,48 @@ def _terminal_contract_authorizations(
         authorization for authorization in state.human_contract_authorizations
         if authorization.legal_scope.get("subtask_id") == current_subtask_id
     ]
+
+
+def _direct_terminal_writes(worktree_path: str, workspace_path: str, state: GenerationState) -> List[Any]:
+    """The direct terminal batch, exactly as the terminal apply materializes it."""
+    return materialize_candidate(worktree_path, workspace_path, [
+        CandidateFile(
+            relpath=filepath,
+            expected_base_revision=content_revision(state.all_original_contents.get(filepath, "")),
+        )
+        for filepath in sorted(state.all_files_written)
+    ])
+
+
+def _run_static_analysis_gate(
+    cfg: Any, state: GenerationState, *, worktree_path: str, workspace_path: str, run_id: str, unit_id: str,
+) -> None:
+    """PRD-031A at the direct/milestone pre-apply boundary: the same
+    StaticAnalysisService the enforce TerminalGateService uses."""
+    result = StaticAnalysisService(cfg).evaluate_candidate(StaticAnalysisCandidate(
+        materialize=lambda: _direct_terminal_writes(worktree_path, workspace_path, state),
+        workspace_path=workspace_path, run_id=run_id, unit_id=unit_id,
+        in_place=worktree_path == workspace_path,
+    ))
+    state.static_analysis_result = result
+    state.record_event(RunEvent(
+        kind="static_analysis.result", attempt=state.attempt_number, source="static_analysis_gate",
+        authority=EventAuthority.AUTHORITATIVE, message=banner(result), details=result.summary(),
+    ))
+    if result.permits_commit:
+        return
+    message = result.gap or f"STATIC_ANALYSIS_{result.outcome.value}"
+    state.environment_failure = message
+    failure = Failure(
+        type=f"static_analysis_{result.outcome.value.lower()}", message=message, raw_output=message,
+        source="static_analysis_gate", authority="deterministic", attempt=state.attempt_number,
+        diagnostics={
+            "reason_code": f"STATIC_ANALYSIS_{result.outcome.value}",
+            "reason_codes": list(result.reason_codes), "evidence_digest": result.evidence_digest,
+        },
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
 
 
 def _raise_contract_registry_stop(state: GenerationState, outcome: Any) -> None:
@@ -3810,6 +3859,18 @@ class WorkflowEngine:
                         state.gate_outcomes.append(failure.to_gate_outcome())
                         raise QualityGateFailure(failure)
 
+                # PRD-031A: the static-analysis gate, on the exact batch the
+                # terminal apply below commits (it re-materializes it, and the
+                # commit guard proves the two are byte-identical). Before the
+                # approval gate, so a human sees the outcome. A non-permitting
+                # result is a deterministic stop, never a Developer retry, and
+                # its message carries no scanner text.
+                _run_static_analysis_gate(
+                    self.kernel.config, state, worktree_path=worktree_path, workspace_path=workspace_path,
+                    run_id=run_id,
+                    unit_id=f"{work_unit.work_unit_id if work_unit is not None else 'direct'}-attempt{state.attempt_number}",
+                )
+
                 # Candidate-only checkpoint: generation and inner gates passed, but
                 # terminal regression and application have not. Its name and payload
                 # preserve that distinction for resume and external inspection.
@@ -4011,6 +4072,10 @@ class WorkflowEngine:
                     # evidence; they never decide the approval themselves.
                     escalation_reason += ownership_review_evidence(
                         resolved_obligation_ledger, state.all_files_written)
+                    # PRD-031A: the approver sees the static-analysis outcome,
+                    # including accepted risks; approving the diff creates no waiver.
+                    if state.static_analysis_result is not None:
+                        escalation_reason += f"\n\n=== Static Analysis ===\n{banner(state.static_analysis_result)}"
 
                 def _abort_without_applying(status: str, review_text: str) -> Dict[str, Any]:
                     """Shared cleanup for both 'a human said no' and 'approval was
@@ -4118,6 +4183,7 @@ class WorkflowEngine:
                         "review": review_text,
                         "review_included_in_approval": state.pre_approval_review is not None,
                         "run_id": run_id,
+                        **static_analysis_result_fields(state.static_analysis_result),
                     }
 
                 if need_human_approval and approval_callback:
@@ -4885,15 +4951,7 @@ class WorkflowEngine:
                 # and a settled commit result. Every real-workspace base
                 # revision must still match what this run originally read; a
                 # partial write is rolled back.
-                final_writes = materialize_candidate(worktree_path, workspace_path, [
-                    CandidateFile(
-                        relpath=filepath,
-                        expected_base_revision=content_revision(
-                            state.all_original_contents.get(filepath, "")
-                        ),
-                    )
-                    for filepath in sorted(state.all_files_written)
-                ])
+                final_writes = _direct_terminal_writes(worktree_path, workspace_path, state)
                 annotate_run(
                     workspace_path,
                     retry_counters={
@@ -4919,6 +4977,7 @@ class WorkflowEngine:
 
                 commit_outcome = commit_terminal_candidate(
                     final_writes, workspace_path=workspace_path,
+                    static_analysis=commit_guard(self.kernel.config, state.static_analysis_result),
                     transaction_id=terminal_transaction_id,
                     evidence={
                         "verification_evidence_ids": [
@@ -5366,6 +5425,14 @@ class WorkflowEngine:
                 state.environment_failure.startswith(f"{code}:") or state.environment_failure == code
                 for code in CONTRACT_REGISTRY_STOP_REASON_CODES
             )
+            # PRD-031A: a static-analysis gate stop (StaticAnalysisGateResult.gap).
+            static_analysis_stop = next(
+                (
+                    f"static_analysis_{outcome.lower()}" for outcome in ("BLOCKED", "UNKNOWN", "UNAVAILABLE")
+                    if (state.environment_failure or "").startswith(f"STATIC_ANALYSIS_{outcome}:")
+                ),
+                None,
+            )
             failure_category = (
                 "final_review_refused" if state.final_review_refusal is not None
                 else "plan_scope_revision_required" if state.plan_scope_conflict
@@ -5378,6 +5445,7 @@ class WorkflowEngine:
                 else "retry_identity_not_qualified" if is_retry_identity_stop
                 else "requirements_unresolved" if is_requirements_unresolved_stop
                 else "contract_registry_blocked" if is_contract_registry_stop
+                else static_analysis_stop if static_analysis_stop is not None
                 else "environment_failure" if state.environment_failure
                 # PRD-026: the retry-progress invariant ended the run.
                 else "no_progress" if state.no_progress_terminated
@@ -5499,6 +5567,8 @@ class WorkflowEngine:
                 ),
             "review": review,
             "review_included_in_approval": state.pre_approval_review is not None,
+            # PRD-031A: the static-analysis outcome (ACCEPTED_RISK is never PASS).
+            **static_analysis_result_fields(state.static_analysis_result),
             **({"final_review_refusal": self._final_review_refusal_payload(state, workspace_path)}
                if state.final_review_refusal is not None else {}),
             "run_id": run_id,

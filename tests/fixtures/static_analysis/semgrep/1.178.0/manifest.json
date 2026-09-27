@@ -1,0 +1,119 @@
+{
+  "cases": {
+    "findings_exit0": {
+      "exit_code": 0,
+      "observation": "V3/V4/V6: findings at exit 0; nosemgrep reported under --disable-nosem; explicit targets under src/test/ and tests/ scanned",
+      "rule_packs": [
+        "rules"
+      ],
+      "targets": [
+        "src/main/java/app/App.java",
+        "src/test/java/app/AppTest.java",
+        "tests/test_x.py"
+      ]
+    },
+    "invalid_pattern": {
+      "exit_code": 2,
+      "observation": "V14: invalid pattern exits 2 with 'Rule parse error' and the valid rule's finding",
+      "rule_packs": [
+        "bad/invalid_pattern.yml"
+      ],
+      "targets": [
+        "src/main/java/app/App.java"
+      ]
+    },
+    "invalid_schema": {
+      "exit_code": 7,
+      "observation": "V14: invalid rule schema exits 7 (InvalidRuleSchemaError)",
+      "rule_packs": [
+        "bad/invalid_schema.yml"
+      ],
+      "targets": [
+        "src/main/java/app/App.java"
+      ]
+    },
+    "invalid_yaml": {
+      "exit_code": 7,
+      "observation": "V14: invalid YAML exits 7 (codes 5 and 7)",
+      "rule_packs": [
+        "bad/invalid_yaml.yml"
+      ],
+      "targets": [
+        "src/main/java/app/App.java"
+      ]
+    },
+    "missing_target": {
+      "exit_code": 2,
+      "observation": "V15: one nonexistent target aborts the scan (exit 2, empty scanned)",
+      "rule_packs": [
+        "rules"
+      ],
+      "targets": [
+        "src/main/java/app/App.java",
+        "missing/Nope.java"
+      ]
+    },
+    "partial_parse": {
+      "exit_code": 0,
+      "observation": "V10/V11: PartialParsing list-typed error with findings; string 'Syntax error' on a whole file; Python syntax error silently recovered",
+      "rule_packs": [
+        "rules"
+      ],
+      "targets": [
+        "src/main/java/app/Partial.java",
+        "src/main/java/app/Broken.java",
+        "tests/syntax_err.py",
+        "tests/test_x.py"
+      ]
+    },
+    "unknown_language": {
+      "exit_code": 8,
+      "observation": "V14: unknown language exits 8 (UnknownLanguageError)",
+      "rule_packs": [
+        "bad/unknown_language.yml"
+      ],
+      "targets": [
+        "src/main/java/app/App.java"
+      ]
+    }
+  },
+  "environment_keys": [
+    "HOME",
+    "PATH",
+    "SEMGREP_ENABLE_VERSION_CHECK",
+    "SEMGREP_SEND_METRICS",
+    "TMPDIR"
+  ],
+  "fixed_flags": [
+    "--metrics=off",
+    "--disable-version-check",
+    "--disable-nosem",
+    "--no-git-ignore",
+    "--oss-only",
+    "--json",
+    "--verbose",
+    "--timeout",
+    "5",
+    "--timeout-threshold",
+    "3",
+    "--max-target-bytes",
+    "1000000"
+  ],
+  "rule_pack_digest_algorithm": "canonical_digest (sorted-key compact JSON sha256) over sorted [pack-relative posix path, sha256(file bytes)] for every regular file in the pack",
+  "rule_pack_digests": {
+    "bad/invalid_pattern.yml": "d8473022de5454f27a3e998d481e775350959cf6927955cc89b3b2994922fc21",
+    "bad/invalid_schema.yml": "14dce01833b2f6b59a4d76735c973455c814d1be3d711c0dba829c261c453ef2",
+    "bad/invalid_yaml.yml": "5ed539dc18ad3a82924bc5fa75981e7b7d876bbe624b556ed2031d409eb66114",
+    "bad/unknown_language.yml": "65a224050b946fe26ac49db6bce197d063bd461939186c2435887cb7083b0d38",
+    "rules": "6abc9d9e5d10527a51e25d47594a984877a92d95e892cd3d2a233cd279fee591"
+  },
+  "semgrep_version": "1.178.0",
+  "sources": {
+    "src/main/java/app/App.java": "package app;\n\nimport java.security.MessageDigest;\n\npublic class App {\n    public void run(String cmd) throws Exception {\n        Runtime.getRuntime().exec(cmd);\n        MessageDigest.getInstance(\"MD5\");\n    }\n\n    public void quiet(String cmd) throws Exception {\n        Runtime.getRuntime().exec(cmd); // nosemgrep\n    }\n}\n",
+    "src/main/java/app/Broken.java": "package app;\n\npublic class Broken {\n    public void run(String cmd) throws Exception {\n        Runtime.getRuntime().exec(cmd);\n    }\n    public void bad( {{{ ;;\n}\n",
+    "src/main/java/app/Partial.java": "package app;\n\npublic class Partial {\n    public void run(String cmd) throws Exception {\n        Runtime.getRuntime().exec(cmd);\n    }\n\n    public void odd() {\n        int x = 1 +;\n    }\n}\n",
+    "src/test/java/app/AppTest.java": "package app;\n\npublic class AppTest {\n    public void t(String c) throws Exception {\n        Runtime.getRuntime().exec(c);\n    }\n}\n",
+    "tests/syntax_err.py": "def f(v):\n    eval(v)\ndef g(:\n    pass\n",
+    "tests/test_x.py": "def test_x(v):\n    print(eval(v))\n"
+  }
+}

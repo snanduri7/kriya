@@ -22,6 +22,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
+from kriya.static_analysis.service import StaticAnalysisCommitGuard
 from kriya.workflow.edit_safety import StagedFileWrite
 from kriya.workflow.obligations import ObligationLedger
 from kriya.workflow.plan_schema import EngineeringPlan, FileAction
@@ -57,6 +58,9 @@ class TerminalCommitRequest:
     obligation_ledger: ObligationLedger
     run_id: str
     contract_transition_for: ContractTransitionFor
+    # PRD-031A: built by kriya/static_analysis/service.py::commit_guard from
+    # the current configuration and the gate's result.
+    static_analysis: StaticAnalysisCommitGuard
 
 
 @dataclass(frozen=True)
@@ -74,23 +78,33 @@ class TerminalCommitResult:
     record_errors: Tuple[Dict[str, str], ...] = ()
 
 
-def terminal_writes(request: TerminalCommitRequest) -> List[StagedFileWrite]:
+def plan_terminal_writes(
+    plan: EngineeringPlan, candidate_root: str, workspace_path: str, original_plan_revisions: Mapping[str, str],
+) -> List[StagedFileWrite]:
     """The verified candidate as one revision-grounded batch, in the final
-    action each approved path has after every subtask."""
-    subtasks_by_id = {subtask.id: subtask for subtask in request.plan.subtasks}
+    action each approved path has after every subtask. The static-analysis
+    gate scans this batch; the commit materializes it again and the guard
+    proves the two are byte-identical (PRD-031A)."""
+    subtasks_by_id = {subtask.id: subtask for subtask in plan.subtasks}
     final_action_by_path: Dict[str, FileAction] = {}
-    for sid in topological_subtask_order(request.plan):
+    for sid in topological_subtask_order(plan):
         if sid in subtasks_by_id:
             for planned_file in subtasks_by_id[sid].planned_files:
                 final_action_by_path[planned_file.path] = planned_file.action
-    return materialize_candidate(request.candidate_root, request.workspace_path, [
+    return materialize_candidate(candidate_root, workspace_path, [
         CandidateFile(
-            relpath=path, expected_base_revision=request.original_plan_revisions[path],
+            relpath=path, expected_base_revision=original_plan_revisions[path],
             expected_base_exists=(action != FileAction.CREATE),
             delete=(action == FileAction.DELETE),
         )
         for path, action in final_action_by_path.items()
     ])
+
+
+def terminal_writes(request: TerminalCommitRequest) -> List[StagedFileWrite]:
+    return plan_terminal_writes(
+        request.plan, request.candidate_root, request.workspace_path, request.original_plan_revisions,
+    )
 
 
 def commit_verified_candidate(report: TerminalGateReport, request: TerminalCommitRequest) -> TerminalCommitResult:
@@ -126,6 +140,7 @@ def commit_verified_candidate(report: TerminalGateReport, request: TerminalCommi
             "verification_evidence_ids": [f"commit:{transaction_id}"],
         },
         contract_transition=request.contract_transition_for(writes, transaction_id),
+        static_analysis=request.static_analysis,
     )
     if not outcome.committed:
         return TerminalCommitResult(completed=False, failure=outcome.failure_payload())

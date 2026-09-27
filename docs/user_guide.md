@@ -700,6 +700,56 @@ failure is excused as pre-existing then, so any failure blocks, and a fully pass
 stops before generation (`baseline_indeterminate`). When the test output has no per-test parser, the result says so
 instead of reporting no failures.
 
+### 2.1g Static analysis and risk acceptance (PRD-031A)
+
+Kriya can run a static analyzer on every candidate before committing it. It is **off by default**. A run with it off reports `DISABLED`, never a pass.
+
+```yaml
+static_analysis:
+  enabled: true
+  provider: semgrep
+  requirement: required          # optional | required
+  providers:
+    semgrep:
+      version: "1.178.0"         # exact; "latest" and ranges are refused
+      rule_packs: [/opt/company/semgrep-rules]   # local only; relative paths are resolved against this file's directory
+      # image: semgrep/semgrep@sha256:...        # required when autonomy.contained_execution_required
+```
+
+**What it checks.**
+- Kriya scans the files your change touches, before and after the change. A provider that needs more context scans more, such as the module or the repository.
+- Each finding is classified as introduced, unchanged, worsened or resolved, so existing debt is not blamed on the change.
+- The default policy blocks new or worsened critical and high findings, and warns on medium ones. Existing high findings only warn.
+- The policy is configurable under `static_analysis.policy`.
+
+**Honest coverage.** A file only counts as analyzed when the scanner confirms it analyzed that file. The following are reported and never count as a clean pass:
+- a language your rule packs do not cover;
+- a file above `max_target_bytes`;
+- a file the scanner skipped.
+
+A crash, timeout or malformed output always blocks.
+
+**Accepting a risk.** Only you can accept a blocking finding, through the operator CLI. The model can't, and a file in the repository can't either:
+
+```bash
+kriya static-analysis waive --id SAW-2026-0001 --provider semgrep \
+  --rule semgrep:java.lang.security.audit.xxe.some-rule --path src/main/java/Legacy.java \
+  --classification existing --max-severity high --reason "legacy importer" --owner security \
+  --expires 2026-12-31T00:00:00Z
+kriya static-analysis waivers        # list;  kriya static-analysis revoke SAW-2026-0001
+kriya static-analysis scan --base HEAD   # read-only check of your working tree changes
+```
+
+**How accepted risk is reported.**
+- A run that relies on a waiver exits 0, but it prints `ACCEPTED RISK — NOT A CLEAN PASS`.
+- It reports `static_analysis.outcome: ACCEPTED_RISK` and `accepted_risk: true` in JSON.
+- Waivers live outside the repository, under `~/.kriya/static_analysis/waivers/` or `KRIYA_STATIC_ANALYSIS_HOME`.
+- A waiver must match the finding exactly: rule, path, classification, maximum severity, expiry and optional rule-pack digest. An expired or mismatched waiver is reported and never applies.
+
+**Production.** `runtime_profile: production` does not turn static analysis on. When you turn it on there, it must be `requirement: required`, and anything short of trustworthy evidence blocks the commit.
+
+`kriya doctor --production` shows seven `static_analysis.*` rows: configuration, provider, capability, coverage, prerequisites, waivers and egress.
+
 ### 2.2 Control Plane, Policy, and Structured Execution
 
 A second, opt-in configuration layer sits alongside the pipeline above - classifying how much process a request deserves, enforcing what it's allowed to touch, and (optionally) executing it as a validated set of bounded subtasks instead of one long undifferentiated run. See `docs/design.md` §8 for the full architecture and rationale; this section is the config reference. Every field below defaults to leaving current behavior completely unchanged.

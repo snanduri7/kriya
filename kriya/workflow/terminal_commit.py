@@ -17,7 +17,13 @@ they share one set of guarantees:
   after the source commit, and the cycle is settled COMMITTED only once the
   promotion succeeded. A promotion failure after the bytes landed settles
   UNCERTAIN (CONTRACT_REGISTRY_TRANSITION_INCOMPLETE), so `kriya runs
-  recover` completes it, never a silent stale registry.
+  recover` completes it, never a silent stale registry;
+* PRD-031A: static-analysis evidence is required by the current
+  configuration, never by the caller. Every commit takes a
+  StaticAnalysisCommitGuard (kriya/static_analysis/service.py::commit_guard)
+  and is refused before any intent when that evidence is missing, does not
+  permit the commit, or is stale (candidate, base, scope, provider runtime,
+  rule packs or settings changed after the scan).
 
 Callers map the returned TerminalCommitOutcome into their own result shape.
 """
@@ -26,7 +32,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional
 
 from kriya.control.run_coordinator import begin_run_commit, settle_run_commit
 from kriya.control.run_record import (
@@ -46,6 +52,13 @@ from kriya.workflow.edit_safety import (
     commit_revision_grounded_batch,
     commit_state_for_transaction,
 )
+
+if TYPE_CHECKING:
+    from kriya.static_analysis.service import StaticAnalysisCommitGuard
+
+
+class StaticAnalysisCommitRefused(RuntimeError):
+    """PRD-031A: the commit guard refused the static-analysis evidence."""
 
 
 class CandidateMaterializationError(RuntimeError):
@@ -151,6 +164,7 @@ def _settled_state(workspace_path: str, transaction_id: str) -> str:
 
 def commit_terminal_candidate(
     writes: List[StagedFileWrite], *, workspace_path: str, transaction_id: str,
+    static_analysis: "StaticAnalysisCommitGuard",
     evidence: Optional[Dict[str, Any]] = None,
     contract_transition: Optional[Callable[[str], Optional[Any]]] = None,
 ) -> TerminalCommitOutcome:
@@ -179,6 +193,17 @@ def commit_terminal_candidate(
             committed=True, workspace_state="UNCHANGED", commit_result="NO_CHANGES",
             transaction_id=transaction_id,
         )
+    refusal = static_analysis.verify(writes, workspace_path)
+    if refusal is not None:
+        return TerminalCommitOutcome(
+            committed=False, workspace_state="UNCHANGED", commit_result=COMMIT_NOT_COMMITTED,
+            transaction_id=transaction_id, reason_code=refusal.reason_code,
+            error=StaticAnalysisCommitRefused(refusal.detail),
+        )
+    static_evidence_id = static_analysis.evidence_id()
+    if static_evidence_id is not None:
+        evidence = dict(evidence or {})
+        evidence["verification_evidence_ids"] = [*evidence.get("verification_evidence_ids", []), static_evidence_id]
     candidate_hash = candidate_digest(writes, workspace_path)
     transition = None
     if contract_transition is not None:

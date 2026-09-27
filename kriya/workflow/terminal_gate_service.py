@@ -8,10 +8,16 @@ workspace (PRD-004). The gates run in a fixed order, and each emits one
 1. migration: the goal's migration obligation, judged on the final state;
 2. stack_contract: the goal's stack contract against every planned artifact;
 3. preserved_references: every preserved reference still byte-identical;
-4. terminal_obligations: the MA8 terminal aggregation over the ledger;
-5. original_requirements: the user's own requirements (PRD-020), judged by
+4. static_analysis (PRD-031A): the provider-neutral static-analysis gate
+   (kriya/static_analysis/service.py) on the exact batch the commit will
+   write. Deterministic, like 1-3, and before the model-backed requirement
+   gate. Its status is the outcome's (passed, passed_with_warnings,
+   accepted_risk, failed, unknown, unavailable, disabled - never "passed"
+   for disabled);
+5. terminal_obligations: the MA8 terminal aggregation over the ledger;
+6. original_requirements: the user's own requirements (PRD-020), judged by
    the verifier and closed by deterministic evidence where it exists;
-6. artifact_registry: the candidate's artifact facts, derived for recording
+7. artifact_registry: the candidate's artifact facts, derived for recording
    after the commit.
 
 A gate that raises is a failed gate with an INDETERMINATE message, never a
@@ -37,6 +43,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.persistence import load_artifact_registry
+from kriya.static_analysis.service import StaticAnalysisCandidate, StaticAnalysisGateResult, banner
 from kriya.workflow.edit_safety import content_revision, read_file_revision
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope
 from kriya.workflow.obligations import (
@@ -151,6 +158,10 @@ class TerminalGateValidators:
     enforce_preserved_reference_terminal_integrity: Callable[[ObligationLedger, str], None]
     blocking_requirements: Callable[..., List[Any]]
     verify_original_requirements: Callable[..., Awaitable[List[str]]]
+    # PRD-031A: StaticAnalysisService(cfg).evaluate_candidate. None only in
+    # callers that construct the service without it; the commit guard then
+    # refuses a commit whenever static analysis is enabled (no evidence).
+    evaluate_static_analysis: Optional[Callable[[StaticAnalysisCandidate], StaticAnalysisGateResult]] = None
 
 
 @dataclass(frozen=True)
@@ -170,6 +181,9 @@ class TerminalGateRequest:
     autonomy: Any
     spec_compliance: Any
     milestone_id: str
+    # PRD-031A: the batch the commit will write, materialized only when
+    # static analysis is enabled.
+    static_analysis_candidate: Optional[StaticAnalysisCandidate] = None
 
 
 @dataclass(frozen=True)
@@ -187,12 +201,16 @@ class TerminalGateReport:
     artifact_error: Optional[str] = None
     requirement_closure_attempts: Tuple[Dict[str, Any], ...] = ()
     candidate_derived_artifacts: Tuple[Any, ...] = ()
+    # PRD-031A: the gate's result (None when it was not evaluated) and its
+    # blocking message (None when the result permits the commit).
+    static_analysis: Optional[StaticAnalysisGateResult] = None
+    static_analysis_gap: Optional[str] = None
 
     @property
     def commit_eligible(self) -> bool:
         return self.ran and not any((
             self.migration_gap, self.stack_contract_gap, self.preserved_reference_gap,
-            self.terminal_obligation_gap, self.requirement_gap, self.artifact_error,
+            self.static_analysis_gap, self.terminal_obligation_gap, self.requirement_gap, self.artifact_error,
         ))
 
     def global_gaps(self) -> Tuple[Tuple[str, Optional[str]], ...]:
@@ -201,6 +219,7 @@ class TerminalGateReport:
             ("global_migration_gap", self.migration_gap),
             ("global_stack_contract_gap", self.stack_contract_gap),
             ("global_preserved_reference_gap", self.preserved_reference_gap),
+            ("global_static_analysis_gap", self.static_analysis_gap),
             ("global_terminal_obligation_gap", self.terminal_obligation_gap),
             ("global_requirement_gap", self.requirement_gap),
         )
@@ -227,6 +246,14 @@ class TerminalGateService:
             "preserved_references", "failed" if preserved_reference_gap else "passed", preserved_reference_gap,
         )
 
+        static_analysis, static_analysis_gap = self._static_analysis(request)
+        await emit_gate_outcome(
+            "static_analysis",
+            static_analysis.gate_status if static_analysis is not None
+            else "failed" if static_analysis_gap else "not_evaluated",
+            static_analysis_gap or (banner(static_analysis) if static_analysis is not None else None),
+        )
+
         terminal_obligation_gap = self._terminal_obligation_gap(request)
         await emit_gate_outcome(
             "terminal_obligations", "failed" if terminal_obligation_gap else "passed", terminal_obligation_gap,
@@ -250,9 +277,29 @@ class TerminalGateService:
         return TerminalGateReport(
             ran=True, migration_gap=migration_gap, stack_contract_gap=stack_contract_gap,
             preserved_reference_gap=preserved_reference_gap, terminal_obligation_gap=terminal_obligation_gap,
+            static_analysis=static_analysis, static_analysis_gap=static_analysis_gap,
             requirement_gap=requirement_gap, artifact_error=artifact_error,
             requirement_closure_attempts=tuple(closure_attempts), candidate_derived_artifacts=derived,
         )
+
+    def _static_analysis(
+        self, request: TerminalGateRequest,
+    ) -> Tuple[Optional[StaticAnalysisGateResult], Optional[str]]:
+        """(result, gap). The service fails closed internally (an error is
+        UNKNOWN); a validator that raises anyway is a failed gate, never a
+        pass. (None, None) only when the gate is not wired - the commit
+        guard then refuses whenever static analysis is enabled."""
+        evaluate = self._validators.evaluate_static_analysis
+        if evaluate is None or request.static_analysis_candidate is None:
+            return None, None
+        try:
+            result = evaluate(request.static_analysis_candidate)
+        except Exception as error:
+            return None, (
+                "STATIC ANALYSIS INDETERMINATE (global final-state check): the static-analysis "
+                f"gate itself raised ({type(error).__name__}: {error}) - refusing to report success."
+            )
+        return result, result.gap
 
     def _migration_gap(self, request: TerminalGateRequest) -> Optional[str]:
         resolution = request.migration_resolution

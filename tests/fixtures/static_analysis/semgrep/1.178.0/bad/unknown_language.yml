@@ -1,0 +1,6 @@
+rules:
+  - id: bad-lang
+    languages: [klingon]
+    severity: ERROR
+    message: "x"
+    pattern: foo()

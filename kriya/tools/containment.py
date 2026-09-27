@@ -184,6 +184,12 @@ class ContainmentProfile:
     # None preserves generic/MCP containment callers that have no project
     # toolchain.
     toolchain_identity: Optional["_toolchain_identity_module.ToolchainIdentity"] = None
+    # PRD-031A: an exact, digest-pinned image (``repo@sha256:<digest>``) for
+    # a Kriya-invoked tool that ships its own image (the static-analysis
+    # scanner). None (default) keeps every existing caller's image
+    # selection. Mutually exclusive with toolchain_identity; a tag without a
+    # digest is refused by the OCI backend, never resolved.
+    image_reference: Optional[str] = None
 
     @property
     def backend_required(self) -> bool:

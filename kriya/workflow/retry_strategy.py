@@ -485,6 +485,11 @@ async def _record_attempt_failure(
             # exactly (unverified invalidated consumers, a corrupt registry,
             # an incomplete promotion). Regeneration cannot change it.
             "contract_registry",
+            # PRD-031A: the static-analysis gate did not permit the commit.
+            # A deterministic stop: its findings are never fed back to the
+            # Developer as retry evidence in v1 (and scanner text never
+            # reaches a prompt).
+            "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
         }
         else classify_environment_failure(
             raw_error_context,

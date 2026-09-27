@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
 
 from kriya.control.contracts import (
     CONTRACT_REGISTRY_CORRUPT,
@@ -226,7 +227,7 @@ def _record(workspace):
 def test_committed_transition_is_bound_to_the_commit_and_recorded_in_the_run_record(tmp_path):
     workspace = _workspace(tmp_path)
     outcome = _in_run(workspace, lambda: commit_terminal_candidate(
-        _writes(workspace), workspace_path=workspace, transaction_id="tx1", contract_transition=_builder(workspace),
+        _writes(workspace), workspace_path=workspace, static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1", contract_transition=_builder(workspace),
     ))
     assert outcome.committed and outcome.workspace_state == "COMMITTED"
     live = load_contract_registry(workspace)
@@ -243,7 +244,7 @@ def test_committed_transition_is_bound_to_the_commit_and_recorded_in_the_run_rec
 def test_refused_transition_refuses_the_commit_before_any_intent(tmp_path):
     workspace = _workspace(tmp_path)
     outcome = _in_run(workspace, lambda: commit_terminal_candidate(
-        _writes(workspace), workspace_path=workspace, transaction_id="tx1",
+        _writes(workspace), workspace_path=workspace, static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1",
         contract_transition=_builder(workspace, verified=False),
     ))
     assert not outcome.committed and outcome.workspace_state == "UNCHANGED"
@@ -259,7 +260,7 @@ def test_corrupt_registry_refuses_the_commit_and_is_left_untouched(tmp_path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     Path(path).write_text("{bad")
     outcome = _in_run(workspace, lambda: commit_terminal_candidate(
-        _writes(workspace), workspace_path=workspace, transaction_id="tx1", contract_transition=_builder(workspace),
+        _writes(workspace), workspace_path=workspace, static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1", contract_transition=_builder(workspace),
     ))
     assert outcome.reason_code == CONTRACT_REGISTRY_CORRUPT and not outcome.committed
     assert Path(path).read_text() == "{bad" and Path(workspace, OWNER).read_text() == OWNER_V1
@@ -269,7 +270,7 @@ def test_staging_failure_leaves_the_workspace_unchanged(tmp_path):
     workspace = _workspace(tmp_path)
     with patch("kriya.control.persistence.stage_pending_contract_registry", side_effect=OSError("disk full")):
         outcome = _in_run(workspace, lambda: commit_terminal_candidate(
-            _writes(workspace), workspace_path=workspace, transaction_id="tx1",
+            _writes(workspace), workspace_path=workspace, static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1",
             contract_transition=_builder(workspace),
         ))
     assert outcome.reason_code == cl.CONTRACT_REGISTRY_STAGING_FAILED and outcome.workspace_state == "UNCHANGED"
@@ -282,7 +283,7 @@ def test_promotion_failure_is_uncertain_never_success_and_recovery_completes_it(
     before = load_contract_registry(workspace).digest()
     with patch("kriya.control.persistence.promote_pending_contract_registry", side_effect=OSError("io")):
         outcome = _in_run(workspace, lambda: commit_terminal_candidate(
-            _writes(workspace), workspace_path=workspace, transaction_id="tx1",
+            _writes(workspace), workspace_path=workspace, static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1",
             contract_transition=_builder(workspace),
         ))
     assert not outcome.committed and outcome.workspace_state == "UNCERTAIN"
@@ -304,7 +305,7 @@ def test_recovery_refuses_a_registry_changed_behind_the_transaction(tmp_path):
     workspace = _workspace(tmp_path)
     with patch("kriya.control.persistence.promote_pending_contract_registry", side_effect=OSError("io")):
         _in_run(workspace, lambda: commit_terminal_candidate(
-            _writes(workspace), workspace_path=workspace, transaction_id="tx1",
+            _writes(workspace), workspace_path=workspace, static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1",
             contract_transition=_builder(workspace),
         ))
     foreign = ContractRegistry()
@@ -325,6 +326,7 @@ from kriya.control.run_record import RunLifecycle
 from kriya.workflow import contract_lifecycle as cl
 from kriya.workflow.edit_safety import StagedFileWrite, read_file_revision
 from kriya.workflow.terminal_commit import commit_terminal_candidate
+from kriya.static_analysis.service import commit_guard
 
 workspace, crash_at = sys.argv[1], sys.argv[2]
 OWNER = "src/Owner.java"
@@ -362,7 +364,7 @@ def build(*, candidate_hash):
 with begin_mutating_run(workspace) as ctx:
     transition_mutating_run(ctx, RunLifecycle.RUNNING)
     transition_mutating_run(ctx, RunLifecycle.CANDIDATE)
-    commit_terminal_candidate(writes, workspace_path=ctx.workspace_path, transaction_id="tx1", contract_transition=build)
+    commit_terminal_candidate(writes, workspace_path=ctx.workspace_path, static_analysis=commit_guard(None, None), transaction_id="tx1", contract_transition=build)
 os._exit(0)
 '''
 

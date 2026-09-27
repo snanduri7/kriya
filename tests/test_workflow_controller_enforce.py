@@ -10218,6 +10218,8 @@ async def test_enforce_accepts_targeted_provides_change_for_implicated_subtask(t
         ("migration", "global_migration_gap", "failed"),
         ("stack_contract", "global_stack_contract_gap", "failed"),
         ("preserved_references", "global_preserved_reference_gap", "failed"),
+        # PRD-031A: a static-analysis gate that raises is a failed gate.
+        ("static_analysis", "global_static_analysis_gap", "failed"),
         ("terminal_obligations", "global_terminal_obligation_gap", "failed"),
         ("original_requirements", "global_requirement_gap", "failed"),
         ("artifact_registry", "artifact_error", "needs_review"),
@@ -10300,6 +10302,14 @@ async def test_enforce_terminal_gate_failure_discards_candidate_before_commit(
             stack.enter_context(patch(
                 "kriya.workflow.workflow_controller.enforce_preserved_reference_terminal_integrity",
                 side_effect=RuntimeError("preservation validator exploded"),
+            ))
+        elif failing_gate == "static_analysis":
+            # The engine here carries no config; bind a real one so the gate is
+            # wired, then make the service raise.
+            we.kernel = strict_kernel(strict_config())
+            stack.enter_context(patch(
+                "kriya.workflow.workflow_controller.StaticAnalysisService.evaluate_candidate",
+                side_effect=RuntimeError("static analysis service exploded"),
             ))
         elif failing_gate == "terminal_obligations":
             stack.enter_context(patch.object(
@@ -10437,13 +10447,19 @@ async def test_enforce_terminal_events_and_gate_inputs_precede_one_commit(tmp_pa
         "terminal_gate_outcome",
         "terminal_gate_outcome",
         "terminal_gate_outcome",
+        "terminal_gate_outcome",
         "commit_eligible",
         "workspace_commit_completed",
     ]
     assert [payload["gate"] for name, payload in events if name == "terminal_gate_outcome"] == [
-        "migration", "stack_contract", "preserved_references",
+        "migration", "stack_contract", "preserved_references", "static_analysis",
         "terminal_obligations", "original_requirements", "artifact_registry",
     ]
+    # PRD-031A: disabled (the packaged default) is reported, never "passed".
+    [static_event] = [p for name, p in events if name == "terminal_gate_outcome" and p["gate"] == "static_analysis"]
+    assert static_event["status"] == "disabled"
+    assert result.legacy_result["static_analysis"]["outcome"] == "DISABLED"
+    assert result.legacy_result["accepted_risk"] is False
 
 
 @pytest.mark.asyncio

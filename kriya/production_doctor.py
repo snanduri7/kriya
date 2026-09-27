@@ -372,6 +372,14 @@ PRODUCTION_DOCTOR_CHECK_IDS = (
     "lsp.java",
     "models.role_independence",
     "semantic.precision_boundary",
+    # PRD-031A: static analysis (NOT_APPLICABLE while disabled).
+    "static_analysis.configuration",
+    "static_analysis.provider",
+    "static_analysis.capability",
+    "static_analysis.coverage",
+    "static_analysis.prerequisites",
+    "static_analysis.waivers",
+    "static_analysis.egress",
     "release.integrity",
     "runtime.fixed_guarantees",
 )
@@ -405,6 +413,8 @@ class _Context:
     runtime_probe: Dict[str, Any] = field(default_factory=dict)
     toolchain: Optional[Any] = None
     checks: Dict[str, DoctorCheck] = field(default_factory=dict)
+    # PRD-031A: static-analysis rows, computed once per doctor run.
+    static_analysis: Optional[Dict[str, Any]] = None
 
 
 def _check_profile(ctx: _Context) -> DoctorCheck:
@@ -1089,6 +1099,40 @@ def _check_fixed_guarantees(ctx: _Context) -> DoctorCheck:
     )
 
 
+def _static_analysis_rows(ctx: _Context) -> Dict[str, Any]:
+    """PRD-031A: every static-analysis row from one provider probe."""
+    if ctx.static_analysis is None:
+        from kriya.static_analysis.doctor import evaluate_rows
+
+        ctx.static_analysis = evaluate_rows(ctx.cfg, ctx.workspace)
+    return ctx.static_analysis
+
+
+def _static_analysis_required(cfg: AppConfig) -> bool:
+    from kriya.static_analysis.doctor import rows_required
+
+    return rows_required(cfg)
+
+
+def _static_analysis_check(check_id: str) -> Callable[[_Context], DoctorCheck]:
+    def check(ctx: _Context) -> DoctorCheck:
+        row = _static_analysis_rows(ctx)[check_id]
+        required = _static_analysis_required(ctx.cfg)
+        # NOT_APPLICABLE is represented as PRD-027 established it: PASS,
+        # never required, with evidence.status NOT_APPLICABLE.
+        if row.status == "NOT_APPLICABLE":
+            return _check(check_id, CheckStatus.PASS, required=required, evidence=row.evidence)
+        status = {"PASS": CheckStatus.PASS, "WARN": CheckStatus.WARN, "FAIL": CheckStatus.FAIL}[row.status]
+        return _check(check_id, status, required=required, evidence=row.evidence, remediation=row.remediation)
+    return check
+
+
+_STATIC_ANALYSIS_CHECKS = tuple(
+    (check_id, _static_analysis_required, _static_analysis_check(check_id))
+    for check_id in PRODUCTION_DOCTOR_CHECK_IDS if check_id.startswith("static_analysis.")
+)
+
+
 _CHECKS: Tuple[Tuple[str, Union[bool, Callable[[AppConfig], bool]], Callable[[_Context], DoctorCheck]], ...] = (
     ("profile.production", True, _check_profile),
     ("plugins.core_tools", True, _check_core_plugins),
@@ -1112,6 +1156,7 @@ _CHECKS: Tuple[Tuple[str, Union[bool, Callable[[AppConfig], bool]], Callable[[_C
     ("lsp.java", False, _check_lsp),
     ("models.role_independence", _role_independence_required, _check_role_independence),
     ("semantic.precision_boundary", _precision_boundary_required, _check_precision_boundary),
+    *_STATIC_ANALYSIS_CHECKS,
     ("release.integrity", True, _check_release_integrity),
     ("runtime.fixed_guarantees", True, _check_fixed_guarantees),
 )

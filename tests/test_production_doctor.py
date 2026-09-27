@@ -187,7 +187,12 @@ def test_check_ids_are_pinned_unique_and_always_complete(tmp_path):
         "containment.oci_smoke", "containment.no_host_fallback", "egress.policy",
         "model.connectivity", "model.runtime_fingerprint", "model.qualification",
         "embedding.connectivity", "context.recall_certification", "lsp.java", "models.role_independence",
-        "semantic.precision_boundary", "release.integrity", "runtime.fixed_guarantees",
+        "semantic.precision_boundary",
+        # PRD-031A (deliberate characterization change): seven static-analysis rows.
+        "static_analysis.configuration", "static_analysis.provider", "static_analysis.capability",
+        "static_analysis.coverage", "static_analysis.prerequisites", "static_analysis.waivers",
+        "static_analysis.egress",
+        "release.integrity", "runtime.fixed_guarantees",
     )
 
 

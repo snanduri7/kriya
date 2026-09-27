@@ -122,6 +122,12 @@ from kriya.control.run_record import RunLifecycle
 from kriya.control.state import ControlState
 from kriya.control.workspace_identity import json_document_is_ownerless
 from kriya.policy.filesystem import WriteScopeMode
+from kriya.static_analysis.service import (
+    StaticAnalysisCandidate,
+    StaticAnalysisService,
+    commit_guard,
+    static_analysis_result_fields,
+)
 from kriya.workflow import subtask_executor
 from kriya.workflow.acceptance import goal_requires_runtime_behavior
 from kriya.workflow.attribution import DETERMINISTIC_ATTRIBUTION_TIERS
@@ -136,7 +142,7 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
     validate_resume_against_reality,
 )
-from kriya.workflow.commit_service import TerminalCommitRequest, commit_verified_candidate
+from kriya.workflow.commit_service import TerminalCommitRequest, commit_verified_candidate, plan_terminal_writes
 from kriya.workflow.context_budget import CandidatePrompts, candidate_model, fit_reference_section
 from kriya.workflow.context_orchestrator import ContextOrchestrator
 from kriya.workflow.context_package import (
@@ -6379,6 +6385,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     enforce_preserved_reference_terminal_integrity=enforce_preserved_reference_terminal_integrity,
                     blocking_requirements=blocking_requirements,
                     verify_original_requirements=_verify_original_requirements,
+                    evaluate_static_analysis=StaticAnalysisService(engine_config).evaluate_candidate
+                    if engine_config is not None else None,
                 ))
                 gate_report = await gate_service.run(TerminalGateRequest(
                     plan=plan, goal=goal, candidate_root=plan_workspace_path, workspace_path=workspace_path,
@@ -6386,6 +6394,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     requirement_set=requirement_set, autonomy=getattr(engine_config, "autonomy", None),
                     spec_compliance=getattr(self.workflow_engine, "spec_compliance", None),
                     milestone_id=control_state.current_milestone_id or run_id,
+                    static_analysis_candidate=StaticAnalysisCandidate(
+                        materialize=lambda: plan_terminal_writes(
+                            plan, plan_workspace_path, workspace_path, original_plan_revisions,
+                        ),
+                        workspace_path=workspace_path, run_id=run_id,
+                        unit_id=control_state.current_milestone_id or run_id,
+                        in_place=plan_workspace_path == workspace_path,
+                    ),
                 ), _emit_gate_outcome)
                 all_completed = gate_report.commit_eligible
 
@@ -6399,6 +6415,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                             writes, workspace_path=workspace_path, goal=goal, plan=plan,
                             transaction_id=transaction_id, subtask_call_results=subtask_call_results,
                         ),
+                        static_analysis=commit_guard(engine_config, gate_report.static_analysis),
                     ))
                     workspace_commit_completed = commit.completed
                     workspace_commit_failure = commit.failure
@@ -6492,6 +6509,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             "files": sorted(established_file_context.keys()),
             "plan_repair_attempts": repair_attempts,
         }
+        # PRD-031A: the static-analysis outcome (ACCEPTED_RISK is never PASS).
+        aggregated.update(static_analysis_result_fields(gate_report.static_analysis))
         for key, value in gate_report.global_gaps():
             if value:
                 aggregated[key] = value

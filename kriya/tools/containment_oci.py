@@ -82,6 +82,8 @@ from kriya.tools.toolchain_identity import ToolchainIdentity, ToolchainMismatchE
 logger = logging.getLogger(__name__)
 
 _CONTAINER_WORKSPACE = "/kriya/workspace"
+# PRD-031A: a pinned tool image reference - repository@sha256:<64 hex>.
+_PINNED_IMAGE_RE = re.compile(r"[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}")
 _CONTAINER_TEMP = "/kriya/tmp"
 _CONTAINER_CACHE_PREFIX = "/kriya/cache"
 
@@ -774,6 +776,8 @@ class OCIContainmentBackend:
         docker_path = self._require_docker()
 
         if profile.network is NetworkAuthority.DEPENDENCY_REGISTRY_ONLY:
+            if profile.image_reference is not None:
+                raise ValueError("ContainmentProfile.image_reference is not supported for registry-scoped acquisition.")
             self._probe_daemon(docker_path)
             return self._prepare_registry_scoped(docker_path, profile, command)
 
@@ -792,7 +796,17 @@ class OCIContainmentBackend:
 
         container_name = f"kriya-oci-{uuid.uuid4().hex[:12]}"
         resolved_toolchain = None
-        if profile.toolchain_identity is not None:
+        if profile.image_reference is not None:
+            # PRD-031A: a pinned tool image, run exactly as referenced.
+            if profile.toolchain_identity is not None:
+                raise ValueError("ContainmentProfile.image_reference and .toolchain_identity are mutually exclusive.")
+            if not _PINNED_IMAGE_RE.fullmatch(profile.image_reference):
+                raise BackendUnavailableError(
+                    f"ContainmentProfile.image_reference {profile.image_reference!r} is not pinned "
+                    "by digest (expected <repository>@sha256:<64 hex>); refusing a mutable reference."
+                )
+            image, cache_mount_point = profile.image_reference, None
+        elif profile.toolchain_identity is not None:
             image = profile.toolchain_identity.containment_image
             cache_mount_point = _toolchain_cache_mount(profile.toolchain_identity)
             resolved_toolchain = _attest_toolchain_image(
@@ -803,6 +817,9 @@ class OCIContainmentBackend:
 
         args: List[str] = [
             docker_path, "run", "--rm", "--name", container_name,
+            # PRD-031A: a pinned tool image must already be present; the
+            # daemon never pulls it (no implicit network I/O on its behalf).
+            *(["--pull", "never"] if profile.image_reference is not None else []),
             # Process/resource hardening - real cgroup/namespace controls,
             # not best-effort rlimits.
             "--cap-drop", "ALL",

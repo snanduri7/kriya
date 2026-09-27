@@ -635,6 +635,10 @@ class GenerationState:
     # request before inference (reason_code, detail). The run is then not
     # successful, whatever its gates and application did.
     final_review_refusal: Optional[Dict[str, Any]] = None
+    # PRD-031A: the static-analysis gate's result for the current candidate
+    # (kriya/static_analysis/service.py). The terminal commit's guard reads
+    # it; None when the gate has not run.
+    static_analysis_result: Optional[Any] = None
     # Set when grounded failure attribution identifies a required repair
     # file outside an authoritative caller-provided write allowlist. This
     # is a plan/scope conflict, not another code-generation retry target.

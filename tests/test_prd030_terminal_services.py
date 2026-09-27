@@ -16,11 +16,13 @@ import os
 from pathlib import Path
 
 import pytest
+from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
 
 import kriya.workflow.commit_service as commit_service
 import kriya.workflow.workflow as workflow_module
 from kriya.config import AppConfig
 from kriya.control.artifacts import ArtifactRegistry
+from kriya.static_analysis.service import StaticAnalysisCandidate, StaticAnalysisService
 from kriya.workflow.edit_safety import content_revision
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus
 from kriya.workflow.obligations import (
@@ -43,8 +45,11 @@ from kriya.workflow.terminal_gate_service import (
 from kriya.workflow.triage import ChangeKind
 
 REPO = Path(__file__).resolve().parent.parent
-GATES = ["migration", "stack_contract", "preserved_references", "terminal_obligations",
+# PRD-031A inserted static_analysis at position 4 (deterministic, before
+# the model-backed requirement gate).
+GATES = ["migration", "stack_contract", "preserved_references", "static_analysis", "terminal_obligations",
          "original_requirements", "artifact_registry"]
+DISABLED_EVENT = ("static_analysis", "disabled", "STATIC ANALYSIS: DISABLED (STATIC_ANALYSIS_NOT_CONFIGURED)")
 
 
 def _plan(*files):
@@ -65,6 +70,7 @@ def _validators(**overrides):
         "enforce_preserved_reference_terminal_integrity": lambda ledger, root: None,
         "blocking_requirements": lambda *args, **kwargs: [],
         "verify_original_requirements": verify,
+        "evaluate_static_analysis": StaticAnalysisService(AppConfig()).evaluate_candidate,
         **overrides,
     }
     return TerminalGateValidators(**fields)
@@ -82,6 +88,9 @@ def _request(tmp_path, *, autonomy=None, migration=None, ledger=None, goal="Upda
         migration_resolution=migration or MigrationResolution(MigrationResolutionStatus.NOT_APPLICABLE),
         obligation_ledger=ledger or ObligationLedger(), requirement_set=derive_requirements(goal),
         autonomy=autonomy, spec_compliance=None, milestone_id="m1",
+        static_analysis_candidate=StaticAnalysisCandidate(
+            materialize=list, workspace_path=str(workspace), run_id="run", unit_id="m1",
+        ),
     )
 
 
@@ -106,7 +115,7 @@ def test_every_gate_passes_in_order_and_the_report_is_commit_eligible(tmp_path):
     request = _request(tmp_path)
     before = _snapshot(request.workspace_path)
     report, events = _run(request, _validators())
-    assert events == [(gate, "passed", None) for gate in GATES]
+    assert events == [DISABLED_EVENT if gate == "static_analysis" else (gate, "passed", None) for gate in GATES]
     assert report.ran and report.commit_eligible
     assert all(value is None for _key, value in report.global_gaps())
     assert report.artifact_error is None and report.requirement_closure_attempts == ()
@@ -132,6 +141,7 @@ def _raise(message):
     ("migration", "migration_gap", "MIGRATION INCOMPLETE (global final-state check)"),
     ("stack_contract", "stack_contract_gap", "forced stack gap"),
     ("preserved_references", "preserved_reference_gap", "PRESERVED REFERENCE FINAL-STATE CHECK INDETERMINATE"),
+    ("static_analysis", "static_analysis_gap", "STATIC ANALYSIS INDETERMINATE (global final-state check)"),
     ("terminal_obligations", "terminal_obligation_gap", "TERMINAL OBLIGATIONS UNSATISFIED"),
     ("original_requirements", "requirement_gap", "REQUIREMENTS_UNRESOLVED: REQ-1 (violated)"),
     ("artifact_registry", "artifact_error", "derivation exploded"),
@@ -148,6 +158,8 @@ def test_one_failing_gate_fails_only_itself_and_blocks_the_commit(tmp_path, monk
         overrides["validate_stack_contract_artifacts"] = lambda *args, **kwargs: "forced stack gap"
     elif gate == "preserved_references":
         overrides["enforce_preserved_reference_terminal_integrity"] = _raise("exploded")
+    elif gate == "static_analysis":
+        overrides["evaluate_static_analysis"] = _raise("scanner service exploded")
     elif gate == "terminal_obligations":
         _violated_terminal_obligation(ledger)
     elif gate == "original_requirements":
@@ -268,6 +280,7 @@ def _commit_request(tmp_path, *, candidate=None, action=FileAction.MODIFY, run_i
         obligation_ledger=ObligationLedger(), run_id=run_id,
         contract_transition_for=lambda writes, transaction_id: transitions.append(
             ([w.target_path for w in writes], transaction_id)),
+        static_analysis=DISABLED_STATIC_ANALYSIS,
     ), transitions
 
 

@@ -1,0 +1,11 @@
+rules:
+  - id: bad-pattern
+    languages: [java]
+    severity: ERROR
+    message: "broken pattern"
+    pattern: Runtime.getRuntime().exec(
+  - id: good-rule
+    languages: [java]
+    severity: WARNING
+    message: "weak hash"
+    pattern: MessageDigest.getInstance("MD5")

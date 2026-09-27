@@ -575,6 +575,41 @@ One behaviour-preserving slice of the attempt/retry orchestration, each with typ
 
 Neither coordinator imports attempt.py, retry_strategy.py, workflow.py or workflow_controller.py; the callers import them. Not migrated in this slice: run_attempt's inline compile/test/runtime/spec gate sequence for implementation subtasks (it interleaves self-correction, which mutates) and the rest of `_record_attempt_failure`.
 
+### 2.9d Static Analysis, Policy and Risk Acceptance (PRD-031A, `kriya/static_analysis/`)
+
+A provider-neutral static-analysis gate at **both** terminal commit boundaries: the enforce `TerminalGateService`, where it is gate 4 of 7, after preserved_references and before terminal_obligations; and the direct/milestone pre-apply boundary in `run_generation_workflow`, which production `generate --from-milestones` uses. Both call the same `StaticAnalysisService`. Task file: `handover/PRD-031A_TASK.md`.
+
+- **Layering.**
+  - `kriya/workflow` imports only `static_analysis.service`/`model`.
+  - Providers are reached through `StaticAnalysisPort` via `registry.create_provider`.
+  - Only `static_analysis/adapters/` names a provider. Semgrep is the first adapter, CE engine, pinned exact version.
+  - Policy, coverage, scope and waivers are Kriya's; adapters never see policy.
+  - Structural tests are in `tests/test_prd031a_static_analysis.py`.
+- **Scope and snapshots.** The committed batch is the change set, not the scope. The scope is the provider's declared minimum (`CHANGED_FILES`/`MODULE`/`REPOSITORY`/`BUILD_GRAPH`) or a broader configured one, never narrower.
+  - `scope.build_scope` hashes the scope from the real workspace and materializes Kriya-owned PRE and POST snapshots in one read per file. The real workspace is the pristine base until commit, and every changed path's base is verified against the commit's `expected_base_revision`.
+  - An unchanged file is byte-identical in both snapshots, an added file is POST only, and a deleted file is PRE only. A nonexistent path is never passed.
+  - Kriya enforces `max_target_bytes`; an oversized target is recorded, never submitted. Operator exclusions are applied by Kriya.
+  - Scanner-control files (e.g. `.semgrepignore`) never enter a snapshot.
+- **Coverage.**
+  - Before the scan it comes from the declared capability: language, maturity, rules and prerequisites.
+  - After the scan it is confirmed against what the scanner reports it analyzed: scanned minus skipped minus errored.
+  - A required target that was not analyzed is UNKNOWN under `analysis_errors: block` (the default, sealed in production), otherwise partial coverage. It is never PASS.
+- **Diff.** Fingerprints are (rule id, path, whitespace-normalized matched source), so they survive line shifts. A multiset diff over the whole scope classifies findings as introduced/unchanged/worsened/resolved, including in files the candidate did not change. A different scanner version between PRE and POST is NOT_COMPARABLE: every POST finding counts as introduced.
+- **Outcomes.**
+  - PASS, PASS_WITH_WARNINGS, ACCEPTED_RISK (never PASS), BLOCKED, UNKNOWN (always blocks when enabled), UNAVAILABLE, DISABLED (never "passed"; NOT_CONFIGURED when never set).
+  - A scanner/config failure is never PASS. A blocked direct run is a deterministic stop (`static_analysis_*` failure types in retry_strategy's stop set), never a Developer retry. No scanner text reaches a prompt or a gap message.
+- **Waivers.**
+  - Only `kriya static-analysis waive|revoke` writes them. The store is outside the workspace and read fresh.
+  - A waiver binds rule, path/fingerprint scope, classification, max severity, expiry, rule-pack digest and workspace. It is digest-sealed with provenance.
+  - Coverage gaps and scanner failures are never waivable, and a waiver never masks another blocking finding.
+- **Commit binding.** `commit_terminal_candidate` requires a `StaticAnalysisCommitGuard` (`service.commit_guard(cfg, result)`), so whether evidence is needed comes from configuration, never from the caller. Before any intent it refuses:
+  - evidence that is missing or not permitting;
+  - evidence that is stale: batch, base scope, scope plan, provider runtime or rule packs (`runtime_fingerprint()`, recomputed without running the tool), or effective settings changed.
+
+  The evidence id goes into the commit's `verification_evidence_ids`.
+- **Execution.** Contained when `autonomy.contained_execution_required`: OCI with `--network none`, a read-only snapshot, and a digest-pinned image via the new `ContainmentProfile.image_reference`, run with `--pull never`. There is no host fallback. Egress admission (PRD-012) happens before execution; source-uploading providers are refused in v1.
+- **Doctor and CLI.** Doctor has seven `static_analysis.*` rows and reuses PRD-027's NOT_APPLICABLE representation, with no schema change. The operator CLI is `kriya static-analysis status|scan|waive|revoke|waivers`.
+
 ### 2.10 `kriya/workflow/` Module Layout
 
 `kriya/workflow/workflow.py` had grown to ~4700 lines - every helper this section describes (context budgeting, edit safety, failure grounding, toolchain detection, retry-prompt building, skill extraction, live lookup, LSP integration, worktree lifecycle) lived in one file, making both navigation and full-file context loading during development increasingly costly. Mechanically extracted (2026-08-11) into focused modules, each re-exported back into `workflow.py`'s own namespace so every existing `from kriya.workflow.workflow import X` and `unittest.mock.patch("kriya.workflow.workflow.X", ...)` call site across the codebase and test suite kept working unchanged - a pure move, not a rewrite; `run_generation_workflow()`'s own internal orchestration logic is untouched and stays in `workflow.py` (~2600 lines) for now, deliberately deferred as separate, higher-risk follow-up work:
@@ -592,6 +627,7 @@ Neither coordinator imports attempt.py, retry_strategy.py, workflow.py or workfl
 *   `self_correction.py` - bounded, tool-using compile-failure recovery loop (below), opt-in via `autonomy.self_correction_loop_enabled`.
 *   `terminal_gate_service.py` / `commit_service.py` - the enforce run's terminal gates and terminal commit (PRD-030, §2.9b).
 *   `recovery_coordinator.py` / `verification_coordinator.py` - failed-attempt recovery sequencing and verification-only subtask verification (PRD-031, §2.9c).
+*   (`kriya/static_analysis/`, outside this package) - the provider-neutral static-analysis gate both terminal boundaries call (PRD-031A, §2.9d).
 *   `attribution.py` - the single decision point for "which file(s) is this failure/edit about" (§7), replacing four previously-independent failure-attribution call sites AND (as of §7.8, 2026-08-14) colocating the edit-level and missing-manifest "which file" checks that used to live in `edit_safety.py`/`toolchain.py`.
 
 Verified behavior-preserving without any downstream code changes: `tests/test_workflow.py`, `tests/test_agents.py`, `kriya/cli.py`, and `spikes/fix_alignment/run_alignment_test.py` all compile and import cleanly against the new layout with zero edits, confirmed via direct Python import checks. A handful of rationale comments describing module-level constants (e.g. why `_MIN_GRAPH_CONTEXT_BUDGET` is 1000 tokens) needed manual re-attachment to their new file, since Python's `ast` module - used to script the bulk of the extraction by exact function/statement line ranges - captures a node's own span but not preceding standalone comment lines describing it.

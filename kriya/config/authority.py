@@ -260,13 +260,16 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
 
 # mcp.<any-server-name>.* is handled specially in classify_field() below
 # (dynamic keys - can't be enumerated by name), always SECURITY_AUTHORITY.
+# So is static_analysis.* (PRD-031A): the gate, its policy, rule packs,
+# waiver store and provider settings (dynamic provider keys) - a repository
+# can neither disable nor soften it.
 
 
 def classify_field(top_key: Optional[str], leaf_key: str) -> FieldClassification:
     """Classify a single (top_key, leaf_key) field. Unknown/unclassified
     fields fail closed as SECURITY_AUTHORITY - never REPOSITORY_SAFE by
     omission ("no permissive default")."""
-    if top_key == "mcp":
+    if top_key in ("mcp", "static_analysis"):
         return FieldClassification.SECURITY_AUTHORITY
     key = (top_key, leaf_key)
     if key in _REPOSITORY_SAFE_FIELDS:
@@ -283,7 +286,7 @@ def is_known_field(top_key: Optional[str], leaf_key: str) -> bool:
     classification tables (or is a dynamic mcp.<name> entry). Used purely to
     distinguish a genuinely unclassified/future field in error reporting -
     the deny decision itself does not depend on this."""
-    if top_key == "mcp":
+    if top_key in ("mcp", "static_analysis"):
         return True
     key = (top_key, leaf_key)
     return key in _REPOSITORY_SAFE_FIELDS or key in _PLATFORM_POLICY_FIELDS or key in _SECURITY_AUTHORITY_FIELDS

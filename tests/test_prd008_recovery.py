@@ -25,6 +25,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
 from click.testing import CliRunner
 
 import kriya.workflow.edit_safety as edit_safety_module
@@ -81,6 +82,7 @@ from kriya.control.run_coordinator import begin_mutating_run, transition_mutatin
 from kriya.control.run_record import RunLifecycle
 from kriya.workflow.edit_safety import StagedFileWrite, commit_revision_grounded_batch, read_file_revision
 from kriya.workflow.terminal_commit import commit_terminal_candidate
+from kriya.static_analysis.service import commit_guard
 
 workspace, crash_at, mode = sys.argv[1], sys.argv[2], sys.argv[3]
 real_replace = os.replace
@@ -108,7 +110,7 @@ def commit(root):
               write(root, "gone.py", b"", True, delete=True)]
     os.replace = crashing_replace
     if mode == "run":
-        commit_terminal_candidate(writes, workspace_path=root, transaction_id="tx1")
+        commit_terminal_candidate(writes, workspace_path=root, static_analysis=commit_guard(None, None), transaction_id="tx1")
     else:
         commit_revision_grounded_batch(writes, workspace_path=root, transaction_id="tx1")
 
@@ -417,7 +419,7 @@ def _interrupted_commit(tmp_path, monkeypatch, *, rollback_fails=False):
             monkeypatch.setattr(os, "replace", interrupting_replace)
             commit_terminal_candidate(
                 [write("a.py", A_AFTER, True), write("pkg/new.py", NEW_AFTER, False)],
-                workspace_path=workspace, transaction_id="tx1",
+                workspace_path=workspace, static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="tx1",
             )
     monkeypatch.setattr(os, "replace", real_replace)
     return workspace

@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from _fake_static_analysis import DISABLED_STATIC_ANALYSIS
 
 from kriya.agents.contracts import MilestoneV2
 from kriya.config.config import AppConfig
@@ -67,7 +68,7 @@ def _apply(workspace_path, changes):
         files.append(CandidateFile(relpath, read_file_revision(target)))
     outcome = commit_terminal_candidate(
         materialize_candidate(str(candidate), str(workspace_path), files),
-        workspace_path=str(workspace_path), transaction_id=uuid.uuid4().hex,
+        workspace_path=str(workspace_path), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id=uuid.uuid4().hex,
     )
     assert outcome.committed, outcome.failure_payload()
 
