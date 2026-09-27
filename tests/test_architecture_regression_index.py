@@ -77,6 +77,17 @@ category X covered," start here before assuming it needs a new test.
        MA7.4 ones specifically reproducing durable lesson #4's real
        incident and confirming it's now hard-refused, not just warned)
 
+7. Hostile model/tool/repository behavior and crash/concurrency windows
+   end in known safe or explicitly uncertain states (PRD-032):
+     tests/_chaos_harness.py::SCENARIOS (the closed scenario table) and its
+       one invariant checker; tests/test_prd032_chaos_*.py (families A-E),
+       tests/test_live_prd032_chaos.py (live_model L01-L03);
+       tests/test_prd032_chaos_harness.py (every scenario bound to exactly
+       one test; reproducible report); scripts/chaos_report.sh.
+     tests/test_prd032_terminal_commit_stop.py - the direct-path defect the
+       harness found (a non-committed terminal commit is a deterministic
+       stop, never a retry).
+
 Self-verifying, not just narrative: a smoke check below confirms every
 named function above still exists by that name, so a careless rename/
 removal fails loudly here instead of silently rotting this index.
@@ -92,6 +103,7 @@ def test_every_named_regression_guard_still_exists():
         ("kriya.workflow.static_checks", "find_goal_stack_mismatch"),
         ("kriya.core.llm", "is_local_url"),
         ("kriya.skills.skill", "is_accidental_shared_skill_write"),
+        ("kriya.workflow.workflow", "_raise_terminal_commit_stop"),
     ]
     missing = []
     for module_name, attr_name in checks:
@@ -108,6 +120,7 @@ def test_every_named_regression_test_file_still_exists():
         "test_milestone_validation.py", "test_repository_topology.py",
         "test_stack_drift.py", "test_workflow.py",
         "test_llm_egress_policy_integration.py", "test_learn_egress_policy.py",
-        "test_shared_skills_dir_guard.py",
+        "test_shared_skills_dir_guard.py", "test_prd032_chaos_harness.py",
+        "test_prd032_terminal_commit_stop.py",
     ):
         assert os.path.isfile(os.path.join(test_dir, filename)), f"{filename} referenced by this index is missing"

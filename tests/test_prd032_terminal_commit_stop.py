@@ -52,7 +52,7 @@ def _commit_stop_evidence(result, runtime):
 
 def test_a_concurrent_edit_before_the_commit_stops_with_the_conflict(tmp_path, monkeypatch):
     workspace = git_workspace(tmp_path, {"calc.py": CALC, "test_calc.py": TEST_SUB})
-    inject_after_static_analysis_gate(monkeypatch, lambda result: Path(workspace, "calc.py").write_text(USER_EDIT))
+    inject_after_static_analysis_gate(monkeypatch, lambda state: Path(workspace, "calc.py").write_text(USER_EDIT))
     runtime = _runtime()
     with RuntimeRegistration(runtime):
         result = run_direct(chaos_engine(chaos_config()), GOAL, workspace)
@@ -68,8 +68,8 @@ def test_refused_static_analysis_evidence_stops_without_a_retry(tmp_path, monkey
     workspace = git_workspace(tmp_path, {"calc.py": CALC})
     runtime = _runtime()
     with FakeRegistration() as fake:
-        def change_rule_pack(result):
-            assert result.permits_commit
+        def change_rule_pack(state):
+            assert state.static_analysis_result.permits_commit
             # The commit guard probes a fresh provider instance (built from
             # the registration's knobs), as production re-probes the scanner.
             fake.knobs.rule_pack_digest = "pack-digest-2"

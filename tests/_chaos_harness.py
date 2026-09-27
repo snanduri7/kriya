@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import os
 import re
 import stat
@@ -305,7 +306,21 @@ class ChaosCase:
         """Record the typed outcome. Evidence must be content-free and
         reproducible: codes, counts, lifecycles - never paths or ids."""
         assert re.fullmatch(r"[A-Za-z0-9_.:\-/ ]+", outcome), f"untyped outcome {outcome!r}"
+        encoded = json.dumps(evidence, sort_keys=True)  # TypeError for anything not JSON-safe
+        absolute = [v for v in _strings(json.loads(encoded)) if os.path.isabs(v) or str(self.root) in v]
+        assert absolute == [], f"evidence carries a path (not reproducible): {absolute}"
         self.observation = {"outcome": outcome, "evidence": evidence, "identity": dict(self.identity)}
+
+
+def _strings(value: Any) -> Iterable[str]:
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
 
 
 def open_case(request: Any, tmp_path: Path) -> ChaosCase:
@@ -459,9 +474,11 @@ def static_analysis_config(**static: Any) -> AppConfig:
 
 
 def inject_after_static_analysis_gate(monkeypatch: Any, action: Callable[[Any], None]) -> List[Any]:
-    """Run ``action(result)`` right after the direct pipeline's static-analysis
+    """Run ``action(state)`` right after the direct pipeline's static-analysis
     gate returns (the gate runs on every direct commit, enabled or not), i.e.
-    after verification and before the commit guard. Returns the gate results."""
+    after verification and before the commit guard; ``state`` is the run's
+    GenerationState (its ``static_analysis_result`` is the gate's result).
+    Returns the gate results."""
     from kriya.workflow import workflow as workflow_module
 
     real = workflow_module._run_static_analysis_gate
@@ -470,7 +487,7 @@ def inject_after_static_analysis_gate(monkeypatch: Any, action: Callable[[Any], 
     def gate_then_inject(cfg: Any, state: Any, **kwargs: Any) -> None:
         real(cfg, state, **kwargs)
         results.append(state.static_analysis_result)
-        action(state.static_analysis_result)
+        action(state)
 
     monkeypatch.setattr(workflow_module, "_run_static_analysis_gate", gate_then_inject)
     return results
