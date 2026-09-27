@@ -162,6 +162,21 @@ Red (evidence in `handover/evidence/BATCH6/prd027-precision/`):
 - The score-scale mismatch is PRD027-SCORE-NORMALIZATION-001 (OPEN, P2).
 - Still OPEN: PROMPT-BUDGET-FIT-001A and 001B (P2), PRD027-SCORE-NORMALIZATION-001 (P2), KNOWLEDGE-READPATH-001 (P1).
 
+## Final gate, second pass (2026-09-27, HEAD a04e8ac): Batch 6 still NOT closed
+Evidence: `handover/evidence/BATCH6/final-gate-2/`.
+
+Green:
+- the PRD027-PRECISION-001 subset and the full suite (user-reported);
+- **`context certify`: CERTIFIED=true**, precision 0.5814, all classes 1.0;
+- doctor's `context.recall_certification` is **PASS**, read from that stored record (not NOT_APPLICABLE).
+
+Not green:
+- **Live suite:** reported passed, but it wrote no evidence. `user-live-4` does not exist, so the live acceptance has to be re-run with `KRIYA_BATCH6_EVIDENCE_DIR` set.
+- **qwen3.6 fallback:** NOT_QUALIFIED (7 FAIL). Silent reasoning under `reasoning: false`/no provider control truncates the required cases.
+- **doctor:** `model.qualification` FAIL, PRODUCTION_READY=false.
+
+Recorded as PROD-FALLBACK-QUAL-001. The config is unchanged; the decision is the user's.
+
 ## Static gates
 `.venv/bin/ruff check .`: All checks passed. `.venv/bin/pylint kriya plugins/core_tools tests`: exit 0. Both hold at the final commit.
 
