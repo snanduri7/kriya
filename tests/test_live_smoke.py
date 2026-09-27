@@ -52,6 +52,11 @@ def _write_config(path):
     }
     (path / "kriya.yaml").write_text(yaml.dump(config))
     (path / "skills").mkdir(exist_ok=True)
+    # llm/embedding base_url and autonomy.mode are SECURITY_AUTHORITY
+    # (SEC-009): approve exactly this configuration, as an operator would,
+    # in a disposable trust store outside the workspace.
+    approval = _run_kriya(["authority", "approve", "--confirm"], cwd=path, timeout=30)
+    assert approval.returncode == 0, approval.stdout + approval.stderr
 
 
 def _kriya_executable():
@@ -62,10 +67,17 @@ def _kriya_executable():
     return candidate if os.path.exists(candidate) else "kriya"
 
 
+def _authority_home(workspace):
+    """A per-test SEC-009 trust store beside the workspace (a trust
+    artifact must live outside it), never the user's ~/.kriya/authority."""
+    return str(workspace.parent / f"{workspace.name}-authority")
+
+
 def _run_kriya(args, cwd, timeout):
     return subprocess.run(
         [_kriya_executable(), "--config", "kriya.yaml", *args],
         cwd=cwd, capture_output=True, text=True, timeout=timeout,
+        env=dict(os.environ, KRIYA_AUTHORITY_HOME=_authority_home(cwd)),
     )
 
 
