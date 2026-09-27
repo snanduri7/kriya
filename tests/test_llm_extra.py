@@ -77,7 +77,8 @@ async def test_complete_uses_fallback_extra_body_not_the_primarys():
     mock_create = AsyncMock(return_value=_mock_response("ok"))
     with patch.object(llm.client.chat.completions, "create", new=mock_create):
         await llm.complete("system", "user", model_override="qwen3.8:27b", extra_body_override={"reasoning_effort": "none"})
-        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none"}
+        # Plus the model's requested context window (FALLBACK-CONTEXT-WINDOW-001).
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none", "options": {"num_ctx": 32768}}
 
 
 @pytest.mark.asyncio
@@ -91,13 +92,14 @@ async def test_complete_falls_back_to_primary_extra_body_when_no_override_given(
     mock_create = AsyncMock(return_value=_mock_response("ok"))
     with patch.object(llm.client.chat.completions, "create", new=mock_create):
         await llm.complete("system", "user")
-        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "xhigh"}
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "xhigh", "options": {"num_ctx": 32768}}
 
 
 @pytest.mark.asyncio
 async def test_complete_empty_dict_extra_body_override_means_no_extra_body():
     """A fallback with no extra_body of its own (the common case - defaults to
-    {}) must send NO extra_body, not silently inherit the primary's."""
+    {}) must not silently inherit the primary's: it sends only its requested
+    context window (FALLBACK-CONTEXT-WINDOW-001), no sampling settings."""
     cfg = AppConfig()
     cfg.llm.extra_body = {"reasoning_effort": "xhigh"}
     llm = LLMClient(cfg)
@@ -105,7 +107,7 @@ async def test_complete_empty_dict_extra_body_override_means_no_extra_body():
     mock_create = AsyncMock(return_value=_mock_response("ok"))
     with patch.object(llm.client.chat.completions, "create", new=mock_create):
         await llm.complete("system", "user", model_override="some-other-model", extra_body_override={})
-        assert mock_create.call_args[1].get("extra_body") is None
+        assert mock_create.call_args[1].get("extra_body") == {"options": {"num_ctx": 32768}}
 
 
 @pytest.mark.asyncio
@@ -132,7 +134,7 @@ async def test_complete_with_tools_uses_fallback_extra_body_not_the_primarys():
             [{"role": "user", "content": "hi"}], [],
             model_override="qwen3.8:27b", extra_body_override={"reasoning_effort": "none"},
         )
-        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none"}
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none", "options": {"num_ctx": 32768}}
 
 
 @pytest.mark.asyncio
