@@ -448,7 +448,9 @@ def test_learned_reference_never_makes_a_developer_request_fail_at_8k(tmp_path, 
     (tmp_path / "learned").mkdir()
     plain = _run(tmp_path / "plain", monkeypatch, 8192, compile_error=gate_error)
     learned = _run(tmp_path / "learned", monkeypatch, 8192, compile_error=gate_error, reference=reference)
-    assert plain.refusals == [] and learned.refused("Developer Agent") == []
+    # No request of any role is refused: the Planner refits the reference,
+    # the Developer trims it, and the Architect carries it within its window.
+    assert plain.refusals == [] and learned.refusals == []
     assert learned.result.get("failure_category") == plain.result.get("failure_category") == "quality_gates_exhausted"
     assert all(user.count(UNTRUSTED_REFERENCE_BEGIN) == 1 for _, user in learned.transport.by("Developer Agent"))
 

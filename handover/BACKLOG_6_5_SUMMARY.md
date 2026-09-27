@@ -19,7 +19,8 @@
 | bda7e85 | INF-001 (2/3): the inference runtime port, the default adapter behind it, config selection |
 | 79750a8 | INF-001 (3/3): docs, handover, tracker |
 | 9062a5c | Summary and verification hand-off |
-| (next) | Fix (my 12c1b0a): the packaged default config's num_ctx outranked a user's context_window |
+| d10f50f | Fix (my 12c1b0a): the packaged default config's num_ctx outranked a user's context_window |
+| (next) | Final-review records: all-role assertion for the 8K learned run, milestone coverage, PROMPT-FIT-ROLE-CHAIN-001 |
 
 ## Per item
 - **KNOWLEDGE-READPATH-001 (P1).** FIXED, awaiting pytest. See handover/DEFECT_KNOWLEDGE_READPATH_001.md, "Fix".
@@ -80,5 +81,6 @@ Run these from demo-03 `workspace/repo`, with `K=<kriya repo>/.venv/bin/kriya` a
 
 ## Open backlog after 6.5 (P2+, not expanded into 6.5)
 - **DEVELOPER-PROMPT-FIT-001 (P2, new).** The Developer's fixed prompt text at 8K exceeds its preferred room.
+- **PROMPT-FIT-ROLE-CHAIN-001 (P2, new).** Planner and Reviewer requests are sized for the role's first candidate only.
 - **INF-001 follow-ups.** A real vLLM adapter (a documented extension point, needs approval). Environment observation per adapter.
 - **Batch 7 (PRD-030/031)** is not started and needs approval.
