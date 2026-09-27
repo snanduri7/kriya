@@ -34,6 +34,17 @@ def fence_untrusted_reference(body: str) -> str:
     return f"\n\n{UNTRUSTED_REFERENCE_BEGIN}\n{body}{UNTRUSTED_REFERENCE_END}\n{UNTRUSTED_REFERENCE_WARNING}"
 
 
+def fenced_reference_body(fenced: str) -> str:
+    """The body of text built by fence_untrusted_reference (its markers
+    inside the body are neutralized, so the first end marker is the fence's
+    own); ``""`` for anything else."""
+    start = fenced.find(UNTRUSTED_REFERENCE_BEGIN)
+    end = fenced.find(UNTRUSTED_REFERENCE_END, start)
+    if start < 0 or end < 0:
+        return ""
+    return fenced[start + len(UNTRUSTED_REFERENCE_BEGIN) + 1:end]
+
+
 def outside_untrusted_reference(text: str) -> str:
     """``text`` without its fenced reference bodies: what Kriya itself put in
     a prompt. A check for Kriya's own sections reads this, so the same words

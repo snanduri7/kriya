@@ -88,8 +88,12 @@ The broad `except Exception` blocks were removed; the reader catches only the na
 - **Fence markers.** `fence_untrusted_reference` neutralizes marker lines inside the body, so the text cannot close its own fence.
 - **Skill-conventions reminders.** The Planner, Architect and Developer reminders ("apply the Engineering Skill Conventions ... must not contradict any Rule") are now keyed on `outside_untrusted_reference(...)`. Before, fenced learned text containing that phrase earned the reminder.
 
-### Related own bug (separate commit a314d45)
-f3707c4 never gave the Developer the `reference_context`.
+### Related own bugs
+- **a314d45:** f3707c4 never gave the Developer the `reference_context`.
+- **Regression in a314d45, found in the PROMPT-BUDGET slice and fixed in its own commit.**
+  - The Developer reserved the reference inside its graph pool but never trimmed it. At 8K the REPAIR-mode Developer requests were pushed past the window: 4 refusals where the same run without learned knowledge had none.
+  - `context_budget.developer_reference` now trims the fenced reference, at whole entries, to what the pool leaves after skills, design, plan and the graph floor. It is used at all five Developer assembly sites for both the reservation and the append.
+  - At production windows the reference fits and is sent unchanged (tested at 32K).
 
 ### Tests
 **tests/test_knowledge_readpath_001.py, 23 tests:**

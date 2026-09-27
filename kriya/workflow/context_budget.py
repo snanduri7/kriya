@@ -815,6 +815,26 @@ def fit_planner_request(
     return head + skills_prompt + graph_text + ref_text + suffix, details
 
 
+def developer_reference(prompt_window: int, fenced_reference: str, *pool_texts: str) -> str:
+    """The fenced learned reference as a Developer request may carry it
+    (Fix of a314d45): never more than the PRD-016 graph pool leaves after
+    its fixed occupants (skills, design, plan) and the graph context's own
+    floor, trimmed at whole entries with the fence kept - optional untrusted
+    text is never the reason a Developer request is refused. Returned
+    unchanged when it fits (byte-identical prompts at production windows)."""
+    from kriya.workflow.untrusted_context import fence_untrusted_reference, fenced_reference_body
+
+    if not fenced_reference:
+        return ""
+    room = (int(prompt_window * _GRAPH_CONTEXT_SHARE)
+            - sum(estimate_tokens(text) for text in pool_texts if text)
+            - _proportional_floor(_MIN_GRAPH_CONTEXT_BUDGET, prompt_window))
+    if estimate_tokens(fenced_reference) <= room:
+        return fenced_reference
+    fence_units = estimate_tokens(fence_untrusted_reference("x"))
+    return fence_untrusted_reference(trim_reference_text(fenced_reference_body(fenced_reference), room - fence_units))
+
+
 def fit_review_batches(capacity: RequestCapacity, files: List[Tuple[str, str]], *fixed_texts: str) -> SectionFit:
     """Review file batches (review_context.build_review_batches) sized so
     every batch request - its fixed text plus the batch - fits. ``value`` is

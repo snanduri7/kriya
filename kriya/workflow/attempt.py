@@ -74,6 +74,7 @@ from kriya.workflow.context_budget import (
     allocation_window,
     build_code_context,
     build_known_target_context,
+    developer_reference,
     investigation_evidence_char_budget,
     retry_evidence_char_budget,
 )
@@ -847,7 +848,9 @@ def _prepare_retry_context(
     member_hint_rendered = ""
     if retry_member_hints:
         retry_member_limit = _reserve_graph_context_budget(
-            prompt_window, ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan, base_code_context,
+            prompt_window, ctx.skills_prompt,
+            developer_reference(prompt_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan),
+            ctx.design, ctx.plan, base_code_context,
         )
         retry_member_rendered, retry_member_package = build_known_target_context(
             list(retry_member_hints.keys()), ctx.workspace_path, ctx.worktree_path, retry_member_limit,
@@ -5843,8 +5846,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # Targeted retry: always the primary model, never escalated
         # (see the budget comment above) - so the context budget is
         # always the primary model's own window, not a fallback's.
+        reference_window = allocation_window(ctx.kernel.config)
+        learned_reference = developer_reference(
+            reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+        )
         current_limit = _reserve_graph_context_budget(
-            allocation_window(ctx.kernel.config), ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan
+            reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
         )
         model_override = None
         base_url_override = None
@@ -5869,8 +5876,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         base_code_context = ctx.skills_prompt
         if current_graph_context:
             base_code_context += current_graph_context
-        if ctx.learned_rag_context:
-            base_code_context += ctx.learned_rag_context
+        if learned_reference:
+            base_code_context += learned_reference
 
         if use_api_contract_recovery:
             state.last_implicated_files = sorted({
@@ -6065,8 +6072,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         state.budgets.fallback_targeted_attempted = True
         state.budgets.fallback_targeted_requested = False
         fallback = _select_developer_fallback(state, ctx, 1)
+        reference_window = allocation_window(ctx.kernel.config, fallback)
+        learned_reference = developer_reference(
+            reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+        )
         current_limit = _reserve_graph_context_budget(
-            allocation_window(ctx.kernel.config, fallback), ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan
+            reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
         )
         model_override = fallback.model
         base_url_override = fallback.base_url
@@ -6090,8 +6101,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         base_code_context = ctx.skills_prompt
         if current_graph_context:
             base_code_context += current_graph_context
-        if ctx.learned_rag_context:
-            base_code_context += ctx.learned_rag_context
+        if learned_reference:
+            base_code_context += learned_reference
 
         # VAL-001 G1-R3: centralized retry-time source/member-hint
         # preparation - previously this branch never called
@@ -6152,8 +6163,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # last_missing_files above) - asks for exactly the file(s) the
         # completeness check found missing, instead of re-describing an
         # error or regenerating the whole file set.
+        reference_window = allocation_window(ctx.kernel.config)
+        learned_reference = developer_reference(
+            reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+        )
         current_limit = _reserve_graph_context_budget(
-            allocation_window(ctx.kernel.config), ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan
+            reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
         )
         model_override = None
         base_url_override = None
@@ -6173,8 +6188,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         base_code_context = ctx.skills_prompt
         if current_graph_context:
             base_code_context += current_graph_context
-        if ctx.learned_rag_context:
-            base_code_context += ctx.learned_rag_context
+        if learned_reference:
+            base_code_context += learned_reference
 
         # last_missing_files (from find_missing_expected_files) is always
         # bare basenames (compared against written files by basename).
@@ -6226,8 +6241,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         )
     else:
         # Re-run context budget allocator dynamically for escalated model context window size
+        reference_window = allocation_window(ctx.kernel.config)
+        learned_reference = developer_reference(
+            reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+        )
         current_limit = _reserve_graph_context_budget(
-            allocation_window(ctx.kernel.config), ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan
+            reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
         )
         model_override = None
         base_url_override = None
@@ -6242,8 +6261,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             api_key_override = fallback.api_key
             extra_body_override = fallback.extra_body
             active_prompt_window = allocation_window(ctx.kernel.config, fallback)
+            reference_window = active_prompt_window
+            learned_reference = developer_reference(
+                reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+            )
             current_limit = _reserve_graph_context_budget(
-                active_prompt_window, ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan
+                reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
             )
             logger.info(f"Escalating compilation attempt to fallback model: {model_override} (Limit: {current_limit} tokens)")
 
@@ -6313,8 +6336,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         active_code_context = ctx.skills_prompt
         if current_graph_context:
             active_code_context += current_graph_context
-        if ctx.learned_rag_context:
-            active_code_context += ctx.learned_rag_context
+        if learned_reference:
+            active_code_context += learned_reference
 
         # VAL-001 G1-R3: centralized retry-time source/member-hint
         # preparation (target reachability, C3 member escalation, no-
@@ -6369,7 +6392,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             if owner_contract:
                 task_desc += owner_contract
             known_target_limit = _reserve_graph_context_budget(
-                active_prompt_window, ctx.skills_prompt, ctx.learned_rag_context, ctx.design, ctx.plan, current_graph_context,
+                active_prompt_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan, current_graph_context,
             )
             # CTX-001 P1 C2: a known-target file's member is only ever
             # supplied here when an INDEPENDENT retrieval signal grounded

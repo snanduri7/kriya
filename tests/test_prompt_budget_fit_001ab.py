@@ -431,6 +431,45 @@ def test_a_review_whose_fixed_text_alone_cannot_fit_is_still_refused(monkeypatch
     assert refusal.value.reason_code == tb.CONTEXT_BUDGET_UNSATISFIABLE
 
 
+# --- the Developer's learned reference (Fix of a314d45) -------------------------
+
+def test_learned_reference_never_makes_a_developer_request_fail_at_8k(tmp_path, monkeypatch):
+    """a314d45 routed reference_context into the Developer's reserved slot,
+    but a reservation never trims: at 8K the reference pushed the larger
+    REPAIR-mode Developer requests past the window (4 refusals at 8892e3c in
+    this scenario). It now takes at most what the graph pool leaves, so the
+    run ends exactly as the same run without it."""
+    reference = "".join(
+        f"\n[Source: https://docs.example/{i} (Fetched: 2026-09-27)]\n" + "Ledger entry arithmetic guidance. " * 30 + "\n"
+        for i in range(10)
+    )
+    gate_error = "[ERROR] LedgerReport.java:[3,9] cannot find symbol: total\n"
+    (tmp_path / "plain").mkdir()
+    (tmp_path / "learned").mkdir()
+    plain = _run(tmp_path / "plain", monkeypatch, 8192, compile_error=gate_error)
+    learned = _run(tmp_path / "learned", monkeypatch, 8192, compile_error=gate_error, reference=reference)
+    assert plain.refusals == [] and learned.refused("Developer Agent") == []
+    assert learned.result.get("failure_category") == plain.result.get("failure_category") == "quality_gates_exhausted"
+    assert all(user.count(UNTRUSTED_REFERENCE_BEGIN) == 1 for _, user in learned.transport.by("Developer Agent"))
+
+
+def test_at_32k_the_developer_carries_the_whole_reference(tmp_path, monkeypatch):
+    run = _run(tmp_path, monkeypatch, 32768, reference=REFERENCE)
+    developer_prompts = [user for _, user in run.transport.by("Developer Agent")]
+    assert developer_prompts and all(fence_untrusted_reference(REFERENCE) in user for user in developer_prompts)
+
+
+def test_developer_reference_keeps_whole_entries_inside_the_pool():
+    fenced = fence_untrusted_reference(REFERENCE)
+    assert budget.developer_reference(10**6, fenced) is fenced
+    trimmed = budget.developer_reference(2385, fenced, "p" * 1000)
+    assert trimmed.startswith(f"\n\n{UNTRUSTED_REFERENCE_BEGIN}\n") and 0 < trimmed.count("[Source: ") < 5
+    pool = int(2385 * 0.60) - 250 - min(1000, int(2385 * 0.15))
+    assert budget.estimate_tokens(trimmed) <= pool
+    assert budget.developer_reference(600, fenced, "p" * 1000) == ""
+    assert budget.developer_reference(2385, "") == ""
+
+
 # --- enforce: the structured Planner's reference, on every request --------------
 
 def _enforce(tmp_path, window, reference):
