@@ -14,4 +14,4 @@ PRD-031A must stay provider-neutral:
 - local, privacy and egress enforcement;
 - no authority and no waiver created by an LLM.
 
-Status: NOT_STARTED. There is no task file for it in the instructions package. Priority and live-test requirement are to be set when the spec is written; the tracker shows them as TBD.
+Status: SPEC_FOR_REVIEW. The task specification is `handover/PRD-031A_TASK.md` (2026-09-27); priority P1 and live-test posture are proposed there, pending user review. No production code until approved.
