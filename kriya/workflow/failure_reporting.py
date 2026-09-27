@@ -105,6 +105,10 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
     # PRD-020: an original requirement without accepted evidence.
     "requirements_unresolved": FailureCategory.VERIFICATION,
     "contract_registry": FailureCategory.VERIFICATION,
+    # PRD-031A: the static-analysis gate did not permit the commit.
+    "static_analysis_blocked": FailureCategory.VERIFICATION,
+    "static_analysis_unknown": FailureCategory.VERIFICATION,
+    "static_analysis_unavailable": FailureCategory.VERIFICATION,
     "test_acceptance": FailureCategory.VERIFICATION,
 
     # GENERATION_COMPLETENESS - the response itself was wrong-shaped
@@ -124,6 +128,9 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
 
     # RESOURCE - operational constraint, not a code defect
     "time_budget_exhausted": FailureCategory.RESOURCE,
+    # PRD-032: the verified candidate's terminal commit did not commit
+    # (a concurrent edit, an I/O failure, an uncertain state, refused evidence).
+    "workspace_commit": FailureCategory.RESOURCE,
     # PRD-016: the prompt plus the minimum output cannot fit the served window.
     "context_budget_unsatisfiable": FailureCategory.RESOURCE,
     "output_budget_unsatisfiable": FailureCategory.RESOURCE,

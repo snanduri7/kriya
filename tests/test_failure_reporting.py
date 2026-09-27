@@ -51,6 +51,12 @@ _REAL_FAILURE_TYPES = {
     # PRD-020: an original requirement without accepted evidence.
     "requirements_unresolved": FailureCategory.VERIFICATION,
     "contract_registry": FailureCategory.VERIFICATION,
+    # PRD-031A: static-analysis gate stops.
+    "static_analysis_blocked": FailureCategory.VERIFICATION,
+    "static_analysis_unknown": FailureCategory.VERIFICATION,
+    "static_analysis_unavailable": FailureCategory.VERIFICATION,
+    # PRD-032: a verified candidate's terminal commit that did not commit.
+    "workspace_commit": FailureCategory.RESOURCE,
     "internal_framework_error": FailureCategory.INTERNAL,
     "general_error": FailureCategory.UNCLASSIFIED,
 }

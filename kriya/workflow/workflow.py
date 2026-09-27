@@ -1036,6 +1036,12 @@ def _raise_terminal_commit_stop(state: GenerationState, outcome: Any) -> None:
     message = f"{WORKSPACE_COMMIT_NOT_COMPLETED}: {reason} (workspace {outcome.workspace_state}): {outcome.error}"
     state.environment_failure = message
     state.terminal_commit_failure = payload
+    state.record_event(RunEvent(
+        kind="workspace_commit.failed", attempt=state.attempt_number, source="terminal_commit",
+        authority=EventAuthority.AUTHORITATIVE, message=f"the verified candidate was not committed: {reason}",
+        details={"reason_code": reason, "workspace_state": outcome.workspace_state,
+                 "commit_transaction_id": outcome.transaction_id},
+    ))
     failure = Failure(
         type="workspace_commit", message=message, raw_output=message,
         source="terminal_commit", authority="deterministic", attempt=state.attempt_number,
@@ -1044,6 +1050,16 @@ def _raise_terminal_commit_stop(state: GenerationState, outcome: Any) -> None:
     )
     state.gate_outcomes.append(failure.to_gate_outcome())
     raise QualityGateFailure(failure)
+
+
+def _record_approval_decision(state: GenerationState, outcome: str, triggers: List[str]) -> None:
+    """PRD-033: one typed record of a human-approval decision (approved,
+    rejected, or unavailable when no approval callback exists)."""
+    state.record_event(RunEvent(
+        kind="approval.decision", attempt=state.attempt_number, source="workflow.approval_gate",
+        authority=EventAuthority.AUTHORITATIVE, message=f"human approval: {outcome}",
+        details={"outcome": outcome, "triggers": list(triggers)},
+    ))
 
 
 def _raise_contract_registry_stop(state: GenerationState, outcome: Any) -> None:
@@ -4016,6 +4032,14 @@ class WorkflowEngine:
                     process_profile_requires_review
                 )
 
+                # PRD-033: why approval was required, for the approval.decision event.
+                approval_triggers = [name for name, fired in (
+                    ("human_in_the_loop", autonomy_cfg.mode == "human-in-the-loop"),
+                    ("sensitive_path", bool(sensitive_match)),
+                    ("diff_size", total_diff_lines > autonomy_cfg.risk_threshold_lines),
+                    ("process_profile", process_profile_requires_review),
+                ) if fired]
+
                 escalation_reason = "Human-in-the-loop review policy"
                 if sensitive_match:
                     escalation_reason = sensitive_reason
@@ -4098,6 +4122,19 @@ class WorkflowEngine:
                         escalation_reason += f"\n\n=== Automated Code Review ===\n{state.pre_approval_review}"
                     except Exception as ex:
                         logger.warning(f"Pre-approval Reviewer call failed, proceeding without it: {ex}")
+                        # PRE-APPROVAL-REVIEW-REFUSAL-001 (PRD-033): the approver
+                        # and the trace both see that no review is attached, and why.
+                        unattached_reason = getattr(ex, "reason_code", None) or type(ex).__name__
+                        state.record_event(RunEvent(
+                            kind="review.pre_approval_unattached", attempt=state.attempt_number,
+                            source="workflow.pre_approval_review", authority=EventAuthority.ADVISORY,
+                            message="the pre-approval review was not performed; approval proceeds without it",
+                            details={"reason_code": unattached_reason},
+                        ))
+                        escalation_reason += (
+                            f"\n\n=== Automated Code Review ===\nNOT ATTACHED: the review request failed "
+                            f"({unattached_reason}). Review the diff without it."
+                        )
                 if need_human_approval and approval_callback:
                     # PRD-022: the approver sees open ownership findings as
                     # evidence; they never decide the approval themselves.
@@ -4231,6 +4268,7 @@ class WorkflowEngine:
                     approved = approval_callback(diffs_to_show, escalation_reason)
                     if asyncio.iscoroutine(approved):
                         approved = await approved
+                    _record_approval_decision(state, "approved" if approved else "rejected", approval_triggers)
                     if not approved:
                         logger.info("Human rejected changes. Aborting workflow.")
                         return _abort_without_applying(
@@ -4253,6 +4291,7 @@ class WorkflowEngine:
                         f"Approval required ({escalation_reason}) but no approval_callback was "
                         "provided - refusing to apply changes rather than proceeding unreviewed."
                     )
+                    _record_approval_decision(state, "unavailable", approval_triggers)
                     return _abort_without_applying(
                         "approval_required",
                         f"Not applied: human approval was required ({escalation_reason}) but no "
