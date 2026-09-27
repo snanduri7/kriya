@@ -109,7 +109,7 @@ New modules, all under `kriya/static_analysis/`, a new package that sits below `
 5. **Egress.** Admission checks the provider's declared network and source-upload needs against `autonomy.egress_policy` (§12). If refused → UNAVAILABLE (`EGRESS_NOT_PERMITTED`). This happens **before** any execution.
 6. **Coverage.** The coverage evaluator classifies every scan target (§6) and checks prerequisites. PREREQUISITES_MISSING or UNSUPPORTED (and PARTIAL, per policy) are decided **before** scanning. Nothing that was not analyzed is ever reported as analyzed.
 7. **Scan roots.** The scan-tree builder materializes two Kriya-owned roots under a temp dir outside the workspace and the candidate:
-   - **PRE** holds the base bytes of every target that existed at base. The bytes are read at `expected_base_revision`, the same revision identity the commit transaction is grounded on.
+   - **PRE** holds the base content of every target that existed at base. `expected_base_revision` is a content hash (`edit_safety.content_revision`: sha256 of the UTF-8 text), not a revision bytes can be read back from. So the PRE content is the real workspace file, which is untouched until commit, read now and accepted only if `content_revision(text) == expected_base_revision`. On the direct path `state.all_original_contents` is that same text and may be used directly. A mismatch gives UNKNOWN (`BASELINE_IDENTITY_MISMATCH`), and the revision-grounded commit would refuse that batch anyway.
    - **POST** holds the batch's bytes.
 
    The same relative paths are used in both roots, and both contain only files Kriya put there (§8.4).
@@ -182,7 +182,9 @@ class ProviderCapability:
   - `--timeout <per_file>`, `--timeout-threshold <n>` and `--max-target-bytes <n>`: files skipped under these limits are recorded as uncovered, never as clean.
   - `--config <pack>` repeated, each pack a **local** file or directory only.
   - `--scan-unknown-extensions` is **not** passed: detection stays with the provider, and Kriya's own coverage evaluator decides what counts.
-  - The environment sets `SEMGREP_SEND_METRICS=off`, `SEMGREP_ENABLE_VERSION_CHECK=0` and a scratch `HOME`/settings location inside the scan temp dir. The environment is otherwise the SEC-001 `build_restricted_env()` set.
+  - **Environment.** The adapter sets `SEMGREP_SEND_METRICS=off` and `SEMGREP_ENABLE_VERSION_CHECK=0` (both env vars appear in the documented list), plus a scratch `HOME` inside the scan temp dir.
+  - The rest of the environment is the SEC-001 `build_restricted_env()` set. No other `SEMGREP_*` variable is ever passed; the documented `SEMGREP_RULES` and `SEMGREP_BASELINE_COMMIT` would otherwise inject rules or change the baseline. A test asserts the exact environment.
+  - **To verify at implementation (not in the fetched docs):** where Semgrep writes its settings file, and whether a scratch `HOME` fully redirects it.
   - The flag set is part of `effective_options_digest`. The implementing agent must re-verify every flag against the installed version's `semgrep scan --help` (recorded in the handover). A flag that is missing or renamed in the pinned version is a probe failure, never silently dropped.
 - **Rejected at config validation (typed `StaticAnalysisConfigError`), never at scan time:**
   - rule-pack refs that are registry names (`p/...`, `r/...`, `auto`, `s/...`);
@@ -208,14 +210,21 @@ class ProviderCapability:
 
 | Adapter observation | `ScanResult.status` | Gate effect |
 |---|---|---|
-| exit 0 or 1 with parseable JSON, and every target is in `paths.scanned` | COMPLETE | normal |
+| exit 0 with parseable JSON, and every target is in `paths.scanned` | COMPLETE | normal |
 | parseable JSON, but a target is skipped (size, timeout-threshold, unknown language) or has a per-file `errors[]` entry (parse error) | INCOMPLETE | the target is uncovered (§6); policy `analysis_errors` applies |
 | process exceeds `timeout_seconds` (whole scan) | TIMEOUT | UNKNOWN |
-| exit code other than 0 or 1, crash or signal | FAILED | UNKNOWN |
+| exit 2 (failed), 14 (deprecated scan failure), 1 (never expected, since `--error` is not passed), any undocumented code, crash or signal | FAILED | UNKNOWN |
+| exit 4 (invalid rule pattern), 5 (config not valid YAML), 7 (invalid rule) | probe/config failure | UNAVAILABLE (`RULE_PACK_INVALID`) |
+| exit 8 (language not understood) | probe/config failure | UNAVAILABLE (`CAPABILITY_UNKNOWN`) |
+| exit 13 (invalid API key; should be impossible, since there is no login) | probe/config failure | UNAVAILABLE (`PROVIDER_PROBE_FAILED`) |
 | stdout not valid JSON, schema mismatch, or a missing `results`/`paths` key | MALFORMED_OUTPUT | UNKNOWN |
 | executable missing, or the image lacks semgrep | the probe fails | UNAVAILABLE |
 
-Semgrep exits 1 when it has findings, so the adapter treats 0 and 1 as normal exits and trusts only the JSON. Nothing from the scanner is ever interpreted as success on its own: there is no "zero findings because output was empty".
+Exit codes per docs.semgrep.dev/cli-reference (fetched 2026-09-27):
+- without `--error`, a scan with findings exits 0, so 0 is the only normal exit;
+- exit 3 needs `--strict`, which is not passed.
+
+The adapter trusts only the JSON for findings. Nothing from the scanner is ever interpreted as success on its own: there is no "zero findings because output was empty".
 
 ## 6. Capability and coverage contract
 
@@ -285,6 +294,9 @@ Each outcome carries `reason_codes`, a closed table with a tripwire test, for ex
 - `WAIVER_STORE_INVALID`
 - `STATIC_ANALYSIS_DISABLED`
 - `STATIC_ANALYSIS_EVIDENCE_STALE`
+- `RULE_PACK_INVALID`
+- `RULE_PACK_DIGEST_MISMATCH`
+- `BASELINE_IDENTITY_MISMATCH`
 
 ### 7.2 Truth table (requirement × outcome)
 
@@ -370,7 +382,7 @@ A candidate is written by a model. Anything in the candidate or the repository t
    Semgrep applies a **built-in default ignore list** when no `.semgrepignore` exists. That list includes `test/`, `tests/`, `build/`, `vendor/` and `node_modules/` (per docs.semgrep.dev/ignoring-files-folders-code). To stop it, the builder writes an explicit empty `.semgrepignore` owned by Kriya at the scan root.
 
    Any target that still appears in `paths.skipped` is `analysis_failed`, never clean. `--x-ignore-semgrepignore-files` is documented as `[INTERNAL]`, so it is deliberately **not** relied on.
-3. **Rule selection**: rule packs come only from trusted config (§13), are digest-bound, and are never read from the candidate root. A pack inside the workspace is allowed only with an explicit `sha256` pin in config. It is read from the **base** revision and verified against the pin (mismatch → UNAVAILABLE `RULE_PACK_DIGEST_MISMATCH`), so a candidate that edits the rules cannot change what judges it.
+3. **Rule selection**: rule packs come only from trusted config (§13), are digest-bound, and are never read from the candidate root. A pack inside the workspace is allowed only with an explicit `sha256` pin in config. It is read from the real workspace (the candidate lives in its sandbox, and the real workspace is untouched until commit), never from the candidate root, and verified against the pin (mismatch → UNAVAILABLE `RULE_PACK_DIGEST_MISMATCH`), so a candidate that edits the rules cannot change what judges it.
 4. **Provider config files in the repository** (for example a repository-level scanner settings file): these are never in the scan roots, and the adapter's settings location is a scratch dir.
 5. **Target selection**: the targets are exactly the committed batch's paths. Neither the candidate nor the model chooses them.
 
@@ -513,9 +525,24 @@ Ledger record: `ObligationRecord(id="static_analysis.terminal", kind=ObligationK
 
 ### 10.3 Direct and milestone boundary position
 
-The direct/milestone gate is called at the pre-apply boundary, immediately after the `REQUIREMENTS_UNRESOLVED` block (~3810) and before the candidate-only checkpoint. The batch it scans is the one `commit_terminal_candidate` will receive. The implementation must build `final_writes` once and hand the same list to both calls: the gate and the commit.
+The direct/milestone gate is called at the pre-apply boundary, immediately after the `REQUIREMENTS_UNRESOLVED` block (~3810) and before the candidate-only checkpoint. The batch it scans is the one `commit_terminal_candidate` will receive. The implementation builds the batch (`materialize_candidate`, a pure read of the worktree) once, at the gate, and hands that same list to `commit_terminal_candidate` at ~4888, instead of materializing again there.
 
-A non-permitting result raises `QualityGateFailure(Failure(type="static_analysis_blocked", reason_code=<outcome reason>))` with stop semantics, the way `REQUIREMENTS_UNRESOLVED` does. `failure_category` is `static_analysis_blocked` (BLOCKED), `static_analysis_unknown` or `static_analysis_unavailable`. **v1 does not feed findings back to the Developer for a repair retry** (§19).
+Verified in source (2026-09-27): between ~3810 and ~4888 nothing writes the worktree within the same attempt. A terminal-regression or ownership failure in that span raises into the retry loop, and the next attempt passes the gate again. The in-place rollback on approval rejection exits without committing. The implementing agent must re-verify this span. If any later change adds a write there, the commit's digest check refuses the batch (`STATIC_ANALYSIS_EVIDENCE_STALE`) rather than committing unscanned bytes.
+
+Placing the gate before approval is deliberate: the human sees the outcome, including accepted risks, before approving.
+
+A non-permitting result sets `state.environment_failure = "STATIC_ANALYSIS_<OUTCOME>: ..."` and raises `QualityGateFailure(Failure(type="static_analysis_<outcome>", source="static_analysis_gate", authority="deterministic", diagnostics={"reason_code": ...}))`.
+
+**Stop semantics follow the exact wiring `REQUIREMENTS_UNRESOLVED` and `contract_registry` use; there is no new mechanism:**
+1. The three types (`static_analysis_blocked`, `static_analysis_unknown`, `static_analysis_unavailable`) are added to the deterministic-stop failure-type set in `retry_strategy.py` (~470-488). Otherwise the recording step would treat the failure as retry evidence, and the next Developer prompt would carry its message.
+2. They are added to `workflow.py`'s `failure_category` chain (~5359, `is_static_analysis_stop`), giving `failure_category` `static_analysis_blocked`, `static_analysis_unknown` or `static_analysis_unavailable`.
+3. They are added to the CLI's user-facing stop message, so the failure is never described as a toolchain problem.
+
+**The Failure message carries only** the outcome, the reason codes, the counts per classification and severity, finding fingerprints, paths and rule ids, and waiver ids. It never carries scanner message or snippet text (§12.4).
+
+Tests:
+- `run_attempt` is called exactly once, i.e. there is no retry;
+- the recorded retry evidence and every later prompt contain no scanner text. **v1 does not feed findings back to the Developer for a repair retry** (§19).
 
 In a human-in-the-loop run the approval prompt shows the static-analysis outcome. For ACCEPTED_RISK it lists each waiver id and the finding it released. The human approves the diff; that approval does not create a waiver.
 
@@ -711,8 +738,8 @@ static_analysis:
 | 18 | `local_only` + provider declaring `network: service` or `source_upload: true` | D | UNAVAILABLE `EGRESS_NOT_PERMITTED`; zero scan calls; recorded in `egress.authority` |
 | 19 | `nosemgrep` comment added by the candidate on a known finding | S (+ D argv) | the finding is still reported and blocks |
 | 20 | candidate adds a `.semgrepignore` / `.gitignore`; the target sits under `tests/` (default-ignore list) | S (+ D scan-root contents) | still analyzed; scan roots contain only the targets + Kriya's empty ignore file |
-| 21 | an in-workspace rule pack edited by the candidate | D | rules read from base and digest-verified; a mismatch → UNAVAILABLE `RULE_PACK_DIGEST_MISMATCH` |
-| 22 | Semgrep adapter contract | D (fixtures) + S | exact argv/env (flags in §5.2); registry-ref pack rejected at config; severity map; namespaced `rule_id`; exit 0/1 both parsed; `paths.scanned` drives `analyzed` |
+| 21 | an in-workspace rule pack edited by the candidate | D | rules read from the real workspace (never the candidate root) and digest-verified; a mismatch → UNAVAILABLE `RULE_PACK_DIGEST_MISMATCH` |
+| 22 | Semgrep adapter contract | D (fixtures) + S | exact argv/env (flags in §5.2); registry-ref pack rejected at config; severity map; namespaced `rule_id`; exit-code table in §5.3 (0 normal; 1, 2 and 14 FAILED; 4, 5 and 7 RULE_PACK_INVALID; 8 and 13 UNAVAILABLE); `paths.scanned` drives `analyzed` |
 | 23 | fake adapter contract | D | the shared port contract suite runs against both adapters (fake in D, Semgrep in S) |
 | 24 | no LLM-granted authority | D | structural: single `write_waiver` caller; adversarial: a waiver-shaped file in the workspace/candidate root and "risk accepted" plan/Developer text → no effect |
 | 25 | layering | D | §4.2 invariants 1–6 (AST/grep) |
