@@ -62,3 +62,66 @@ def _no_model_runtime_probe(request, monkeypatch, tmp_path_factory):
     model_runtime.clear_model_runtime_cache()
     yield
     model_runtime.clear_model_runtime_cache()
+
+
+# --- PRD-032 chaos report ----------------------------------------------------------
+# Every @chaos test's verdict and observation is collected; with
+# `--chaos-report DIR` the session writes chaos-report.json/.md there
+# (tests/_chaos_report.py). Collection never changes a test's outcome.
+
+def pytest_addoption(parser):
+    parser.addoption("--chaos-report", default=None, metavar="DIR",
+                     help="PRD-032: write the chaos report (JSON + Markdown) to DIR")
+
+
+def pytest_configure(config):
+    from _chaos_report import RESULTS
+
+    config.stash[RESULTS] = []
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    outcome = yield
+    marker = item.get_closest_marker("chaos")
+    if marker is None:
+        return
+    from _chaos_report import PHASE_REPORTS, RESULTS, item_verdict
+
+    report = outcome.get_result()
+    phases = item.stash.setdefault(PHASE_REPORTS, {})
+    phases[report.when] = report
+    if report.when == "teardown":
+        observation = next((value for key, value in item.user_properties if key == "chaos_observation"), None)
+        item.config.stash[RESULTS].append({
+            "scenario_id": marker.args[0], "nodeid": item.nodeid,
+            "verdict": item_verdict(phases), "observation": observation,
+        })
+
+
+@pytest.fixture
+def chaos_case(request, tmp_path):
+    """PRD-032: the invariant checker of one @chaos scenario (tests/_chaos_harness.py)."""
+    from _chaos_harness import close_case, open_case
+
+    case = open_case(request, tmp_path)
+    yield case
+    close_case(request, case)
+
+
+def pytest_sessionfinish(session):
+    directory = session.config.getoption("--chaos-report")
+    if not directory:
+        return
+    import platform
+    import subprocess
+
+    from _chaos_harness import SCENARIOS, SUPPORTING_SUITES
+    from _chaos_report import RESULTS, build_report, write_report
+
+    revision = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True,
+                              cwd=str(session.config.rootpath), check=False).stdout.strip() or None
+    run = {"revision": revision, "python": platform.python_version(),
+           "selection": session.config.getoption("-m") or "",
+           "exit_status": int(session.exitstatus)}
+    write_report(directory, build_report(session.config.stash[RESULTS], SCENARIOS, SUPPORTING_SUITES, run))
