@@ -12,7 +12,9 @@
 | 12c1b0a | FALLBACK-CONTEXT-WINDOW-001: the budgeted context window is the one requested |
 | a828a67 | Fix (my 12c1b0a): `test_llm_extra` still expected a request body without the context window |
 | 8892e3c | PROMPT-BUDGET-FIT-001A/B: one fixed-overhead-aware section budget for Planner and Reviewer requests |
-| (next) | Fix (my a314d45): learned reference overflowed Developer requests at small windows |
+| 63e171c | Fix (my a314d45): learned reference overflowed Developer requests at small windows |
+| f324f91 | Fix (my 3c1822d): the certification identity did not cover how context is ranked and rendered |
+| (next) | PRD027-SCORE-NORMALIZATION-001: direct query evidence ranks above graph expansion |
 
 ## Per item
 - **KNOWLEDGE-READPATH-001 (P1).** FIXED, awaiting pytest. See handover/DEFECT_KNOWLEDGE_READPATH_001.md, "Fix".
@@ -20,6 +22,9 @@
   - demo-03 request bodies and runtime digests are unchanged.
   - A binding without an explicit option gets a new runtime digest and needs `kriya model qualify`.
 - **PROMPT-BUDGET-FIT-001A/B (P2).** FIXED, awaiting pytest. See handover/DEFECT_PROMPT_BUDGET_FIT_001.md, "001A + 001B fix".
+- **PRD027-SCORE-NORMALIZATION-001 (P2).** FIXED, awaiting pytest and `context certify`. See handover/DEFECT_PRD027_SCORE_NORMALIZATION_001.md, "Fix".
+  - CI certification: 0.5435, CERTIFIED.
+  - The stored certification is invalidated by design, so `context certify` must be re-run.
 
 ## Findings recorded on the way
 - **Developer reference fit (own regression from a314d45/f136d7e). FIXED in its own commit.** With learned knowledge present, 8K REPAIR-mode Developer requests were refused, because the reference was reserved but never trimmed. `developer_reference` now trims it to the graph pool.

@@ -83,6 +83,7 @@ class GraphRetrievalResult:
     matched: bool = False
     matched_files: List[str] = field(default_factory=list)
     related_files: List[str] = field(default_factory=list)
+    # evidence_scores(): direct hits in (1, 2], graph expansion in (0, 1].
     file_scores: Dict[str, float] = field(default_factory=dict)
     graph_rag_context: str = ""
     context_package: Optional[Any] = None
@@ -93,6 +94,36 @@ class GraphRetrievalResult:
     # PRD027-PRECISION-001: the files the graph walk started from and why.
     expansion_seed_files: List[str] = field(default_factory=list)
     expansion_seed_reason: Optional[str] = None
+
+
+# PRD027-SCORE-NORMALIZATION-001: the tier of direct query evidence. Each
+# evidence class is normalized into (0, 1] by its own best score, so this
+# offset - the upper bound of the lower tier - puts every direct hit above
+# every graph-expanded file. It is the tier boundary, not a tuned weight.
+DIRECT_EVIDENCE_TIER = 1.0
+
+
+def evidence_scores(direct: Dict[str, float], expanded: Dict[str, float]) -> Dict[str, float]:
+    """One comparable ranking over the two evidence classes
+    (PRD027-SCORE-NORMALIZATION-001). A direct hit's hybrid RRF score (at
+    most ~0.033) and a graph-expanded file's relation weight over hops
+    (0.5-1.0) are different scales; comparing them raw ranked every expanded
+    file above every file the query itself matched, so a binding budget
+    shrank or dropped the direct evidence first.
+
+    Each class is normalized by its own best score into (0, 1]: direct
+    evidence then occupies (1, 2], graph expansion (0, 1]. Any direct hit
+    outranks any expanded file, whatever the raw scales; the order within a
+    class is exactly its raw order; a file in both classes is direct. The
+    budget builders degrade and omit lowest score first, so graph expansion
+    gives way before direct evidence and stays available whenever it fits."""
+    def normalized(scores: Dict[str, float]) -> Dict[str, float]:
+        top = max(scores.values(), default=0.0)
+        return {path: (score / top if top > 0 else 0.0) for path, score in scores.items()}
+
+    ranked = normalized(expanded)
+    ranked.update({path: DIRECT_EVIDENCE_TIER + score for path, score in normalized(direct).items()})
+    return ranked
 
 
 async def retrieve_graph_context(
@@ -162,11 +193,12 @@ async def retrieve_graph_context(
     related_files_set = set()
     # Matched-file relevance: the best (max) hybrid RRF score across that
     # file's own matched chunks.
-    file_scores: Dict[str, float] = {}
+    direct_scores: Dict[str, float] = {}
+    expanded_scores: Dict[str, float] = {}
     for m in good_matches:
         fp = m.get("filepath")
         if fp:
-            file_scores[fp] = max(file_scores.get(fp, 0.0), m.get("score", 0.0))
+            direct_scores[fp] = max(direct_scores.get(fp, 0.0), m.get("score", 0.0))
 
     # PRD027-PRECISION-001: only corroborated hits (or a single leg's own
     # hits when the other leg found nothing) seed the walk; every matched
@@ -196,12 +228,12 @@ async def retrieve_graph_context(
             fp = n.get("filepath")
             if fp and fp not in matched_files_list:
                 related_files_set.add(fp)
-                file_scores[fp] = max(file_scores.get(fp, 0.0), n.get("score", 0.0))
+                expanded_scores[fp] = max(expanded_scores.get(fp, 0.0), n.get("score", 0.0))
 
     result.matched = True
     result.matched_files = matched_files_list
     result.related_files = list(related_files_set)
-    result.file_scores = file_scores
+    result.file_scores = file_scores = evidence_scores(direct_scores, expanded_scores)
     result.graph_rag_context, result.context_package = build_code_context_package(
         result.matched_files, result.related_files, workspace_path, budget_limit(), file_scores=file_scores,
     )

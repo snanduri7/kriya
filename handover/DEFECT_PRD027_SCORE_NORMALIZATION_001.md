@@ -20,3 +20,35 @@ P2. It becomes P1 if a deterministic budget-constrained regression shows a direc
 - **Invariant:** direct query evidence must not lose priority merely because graph scores are numerically larger.
 - **No arbitrary constants.** Evaluate a common ranking model: normalized per-source rank, reciprocal-rank fusion across sources, explicitly tiered evidence classes, or another deterministic comparable scoring.
 - **Keep what works:** useful graph expansion and the existing PRD-027 recall.
+
+## Fix (Backlog 6.5, 2026-09-27): FIXED, awaiting the user's pytest run and `context certify`
+**Strategy: explicit evidence tiers** (`kriya/workflow/graph_retrieval.py::evidence_scores`).
+- Each evidence class (direct query hits and graph-expanded files) is normalized by its own best score into (0, 1].
+- Direct hits are then lifted into (1, 2] by `DIRECT_EVIDENCE_TIER = 1.0`. That is the upper bound of the lower tier: the tier boundary, not a tuned weight.
+
+**Result:**
+- Any direct hit outranks any graph-expanded file, whatever the raw scales (tested at graph scales 1, 10 and 1000).
+- Order within a class is exactly its raw order.
+- A file in both classes is ranked as direct.
+- A missing class (embedding-only or keyword-only, or no graph walk) is simply absent.
+- The budget builders (`_build_file_tiers`, `_omit_over_budget`) are unchanged: they degrade and omit lowest-first, so graph expansion now gives way first and is kept in full whenever it fits.
+- The PRD027-PRECISION-001 seed rule is untouched.
+
+**Certification identity:**
+- `graph_retrieval` is digested as a whole, so this change invalidates the stored certification.
+- While testing that requirement I found my own gap from 3c1822d: the digest did not cover the tier degradation, omission, skeletonizers or token estimate. Fixed in its own commit, f324f91.
+- The user must re-run `kriya context certify`.
+- CI (deterministic) certification after the fix: precision **0.5435**, CERTIFIED, all 9 classes pass. That is unchanged, because the reference budget does not bind.
+
+**Tests:** `tests/test_prd027_score_normalization_001.py`, 16 tests.
+- **Ranking:** direct over expanded; any graph scale; order within a class; explicit bounded tiers; both classes; a missing class.
+- **Binding budget:**
+  - the graph file gives way first;
+  - a control with the raw pre-fix scores degrades the direct hit first;
+  - graph evidence is kept whenever it fits.
+- **Real retrieval** on the hashing-embedder index of the PRD-027 Java fixture:
+  - matched files rank above related files;
+  - under a binding budget (junit-upgrade) the golden `pom.xml` stays full, and no graph file keeps a better tier than a direct hit.
+- **Identity:** changing the ranking changes the digest.
+
+**Mutations: 5 run, all killed** after one change. The within-class normalization first survived, because the fixture's graph weights happen to be ≤ 1. The any-scale test was added, and it kills that mutation.
