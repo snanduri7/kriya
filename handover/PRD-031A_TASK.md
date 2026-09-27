@@ -175,10 +175,10 @@ class ProviderCapability:
 
 ### 5.1 Scan request and result
 
-- `ScanRequest(root, scope_plan, trusted_exclusions, timeout_seconds, per_file_timeout_seconds, max_target_bytes)`:
+- `ScanRequest(root, scope_plan, timeout_seconds, per_file_timeout_seconds, max_target_bytes)`:
   - `root` is a Kriya-owned snapshot root;
-  - the intended targets are `scope_plan.targets`;
-  - `trusted_exclusions` come only from operator config, are auditable, and are part of the settings digest.
+  - the intended targets are `scope_plan.targets`, which already exclude the trusted exclusions (§8.4);
+  - every target passed must exist in that snapshot. A deleted path is a target of the PRE scan only, because one missing target aborts the whole Semgrep run (§5.5).
 - `ScanResult` holds:
   - `status`: `COMPLETE`, `INCOMPLETE`, `FAILED`, `TIMEOUT` or `MALFORMED_OUTPUT`;
   - `findings: Tuple[Finding, ...]`;
@@ -218,13 +218,14 @@ class ProviderCapability:
   - `--disable-nosem`: inline `nosemgrep` comments do not suppress a finding (§8.4).
   - `--no-git-ignore`.
   - `--json`: structured output; SARIF is not needed, and the JSON carries `paths.scanned`, `paths.skipped` and `errors`, which coverage needs.
+  - `--verbose`: without it, 1.178.0 omits `paths.skipped` entirely (§5.5). It adds only stderr noise, and the adapter reads stdout JSON only.
   - `--timeout <per_file>`, `--timeout-threshold <n>` and `--max-target-bytes <n>`: files skipped under these limits are recorded as uncovered, never as clean.
   - `--config <pack>` repeated, each pack a **local** file or directory only.
   - `--scan-unknown-extensions` is **not** passed: detection stays with the provider, and Kriya's own coverage evaluator decides what counts.
   - **Environment.** The adapter sets `SEMGREP_SEND_METRICS=off` and `SEMGREP_ENABLE_VERSION_CHECK=0` (both env vars appear in the documented list), plus a scratch `HOME` inside the scan temp dir.
   - The rest of the environment is the SEC-001 `build_restricted_env()` set. No other `SEMGREP_*` variable is ever passed; the documented `SEMGREP_RULES` and `SEMGREP_BASELINE_COMMIT` would otherwise inject rules or change the baseline. A test asserts the exact environment.
-  - **To verify at implementation (not in the fetched docs):** where Semgrep writes its settings file, and whether a scratch `HOME` fully redirects it.
-  - The flag set is part of `effective_options_digest`. The implementing agent must re-verify every flag against the installed version's `semgrep scan --help` (recorded in the handover). A flag that is missing or renamed in the pinned version is a probe failure, never silently dropped.
+  - Verified (§5.5 V16): Semgrep writes `$HOME/.semgrep/{settings.yml,semgrep.log}`, and a scratch `HOME` redirects both.
+  - The flag set is part of `effective_options_digest`. `--help` is broken in 1.178.0 (§5.5 V1), so the real tier verifies every flag by use. A flag that is missing or renamed in the pinned version is a probe failure, never silently dropped.
 - **Rejected at config validation (typed `StaticAnalysisConfigError`), never at scan time:**
   - rule-pack refs that are registry names (`p/...`, `r/...`, `auto`, `s/...`);
   - URLs;
@@ -251,9 +252,9 @@ class ProviderCapability:
 The adapter keeps three things separate. Process status never stands in for either of the other two.
 
 1. **Findings.** Whenever stdout is valid JSON matching the pinned schema, the adapter parses and normalizes every entry in `results`, **whatever the exit code**. Findings are evidence, even from a run that then counts as failed.
-2. **Scanner and config errors.** Each `errors[]` entry is classified by its kind, not by the exit code:
+2. **Scanner and config errors.** Each `errors[]` entry is classified by its kind, not by the exit code. The kind wins over the exit code. `type` is either a string or a `[kind, spans]` list (1.178.0 `PartialParsing`), and both shapes are parsed:
    - a rule or config error (invalid pattern, invalid YAML, invalid rule, unknown language in a rule) → `RULE_PACK_INVALID`, which makes the result UNAVAILABLE;
-   - a target-level error (a parse error, a timeout on a file) → that target is `not_analyzed`;
+   - a target-level error (a parse error, including `PartialParsing` at level `warn`, or a timeout on a file) → that target is `not_analyzed`. A partially parsed file still produces findings in 1.178.0, and those findings are kept, but the file is **not** confirmed analyzed;
    - anything unrecognized → `SCAN_FAILED`, which makes the result UNKNOWN.
 3. **Process status.** It decides only whether the run completed:
 
@@ -262,7 +263,8 @@ The adapter keeps three things separate. Process status never stands in for eith
 | exit 0, valid JSON, no rule/config error, and every intended target is confirmed analyzed (§6) | COMPLETE | findings decided by policy |
 | exit 0, valid JSON, but at least one intended target is not confirmed (skipped, errored, or simply absent from `paths.scanned`) | INCOMPLETE | §6: those targets are not analyzed |
 | exit 0 **and** a rule/config error in `errors[]` | FAILED (config) | UNAVAILABLE `RULE_PACK_INVALID`; findings kept as evidence only |
-| exit 4, 5 or 7 (documented rule/config failures) | FAILED (config) | UNAVAILABLE `RULE_PACK_INVALID` |
+| exit 4, 5 or 7 (documented rule/config failures; 1.178.0 actually exits **7** for invalid YAML and for an invalid rule schema, carrying codes 4/5 only inside `errors[]`) | FAILED (config) | UNAVAILABLE `RULE_PACK_INVALID` |
+| exit 2 with a rule error in `errors[]` (1.178.0: an invalid **pattern** exits 2 with `type: "Rule parse error"`, and still returns the valid rules' findings) | FAILED (config) | UNAVAILABLE `RULE_PACK_INVALID`; the partial findings are evidence only |
 | exit 8 (language not understood) | FAILED (config) | UNAVAILABLE `CAPABILITY_UNKNOWN` |
 | exit 13 (invalid API key; impossible without login) | FAILED (config) | UNAVAILABLE `PROVIDER_PROBE_FAILED` |
 | exit 2, 14, 1 (never expected, since `--error` is not passed), any undocumented code, crash or signal | FAILED | UNKNOWN `SCAN_FAILED`; any parsed findings kept as evidence only |
@@ -274,10 +276,35 @@ The adapter keeps three things separate. Process status never stands in for eith
 
 There is no path from an empty or missing output to "zero findings".
 
+### 5.5 Verified behaviour of the pinned scanner (Semgrep 1.178.0, 2026-09-27)
+
+**Pinned version: Semgrep 1.178.0**, installed by the user via pipx (`~/.local/pipx/venvs/semgrep`). This is the exact version of the real tier. For OCI (test 29) the user pulls `semgrep/semgrep:1.178.0` and records its digest; no such image is present yet.
+
+Everything below was observed in a scratch fixture with local rules, `--metrics=off` and a scratch `HOME`. Nothing was fetched from the registry. The real tier re-asserts each item.
+
+| # | Observation | Consequence for the design |
+|---|---|---|
+| V1 | `semgrep scan --help` crashes (`cmdliner error: Illegal escape char`), so the help text is truncated | Flags cannot be verified from `--help`. The real tier verifies them by use (an unknown flag makes Semgrep reject the invocation) |
+| V2 | Every flag in §5.2 is accepted; exit 0 | — |
+| V3 | 5 findings, exit 0 | **Exit 0 is not clean** (§5.3), confirmed |
+| V4 | `nosemgrep` suppresses the finding without `--disable-nosem`, and is reported with it | `--disable-nosem` is required, confirmed |
+| V5 | A **directory** scan with no `.semgrepignore` silently drops `tests/`, `build/` and `src/test/` (the default ignores). `paths.skipped` is absent, even for those files | Silent omission is real. Coverage must be intended vs `scanned` (§6); targets are always passed explicitly |
+| V6 | **Explicitly passed** targets under `tests/`, `build/`, `src/test/` are scanned, and a project `.semgrepignore` naming them does not skip them | Explicit targets bypass ignore files. Still not relied on: confirmation decides |
+| V7 | A project `.semgrepignore`, even empty, replaces the defaults for directory scans | Recorded only. Not relied on (user directive), because the adapter never scans directories |
+| V8 | `--exclude` does **not** apply to explicitly passed targets | Trusted exclusions are applied by Kriya's scope planner (§8.4), not by `--exclude` |
+| V9 | `paths.skipped` is omitted unless `--verbose` is passed | `--verbose` added to the fixed flags (§5.2) |
+| V10 | A partially parsed Java file: findings are still reported; the file is in `scanned` **and** in `skipped` (`analysis_failed_parser_or_internal_error`); `errors[]` has `type: ["PartialParsing", spans]`, level `warn` | Confirmed = scanned − skipped − errored (§6). The list-shaped `type` is parsed (§5.3) |
+| V11 | A Python file with a syntax error was parsed by error recovery: no error, and findings reported | Semgrep's own report is the authority. Kriya does not second-guess parse quality it cannot observe. Disclosed |
+| V12 | A 2 MB explicit target with `--max-target-bytes 1000000` appears in `scanned` | The size limit is not observed to skip explicit targets. Confirmation still decides whatever the limit does |
+| V13 | A file with an unknown extension (`.xyz`) is silently absent from `scanned` and `skipped` | It is unclassified in Kriya. A classified source file that is silently absent is `not_analyzed` |
+| V14 | An invalid pattern exits **2** (`errors[].type` `"Rule parse error"`), and the valid rules' findings are still returned. Invalid YAML exits **7** (`errors[]` codes 5 and 7). Invalid rule schema exits **7** (`InvalidRuleSchemaError`). Unknown language exits **8** | The docs' exit numbers differ. Classification by `errors[]` kind first (§5.3) |
+| V15 | One nonexistent target aborts the whole scan: exit 2, empty `scanned` | Every target must exist in its snapshot (§5.1). This is UNKNOWN if it happens |
+| V16 | With a scratch `HOME`, Semgrep writes `$HOME/.semgrep/settings.yml` (containing `anonymous_user_id`) and `semgrep.log` there; stderr: "Not sending pseudonymous metrics since metrics are configured to OFF" | The scratch `HOME` redirects Semgrep's state (the §5.2 to-verify item is resolved), and metrics are confirmed off |
+
 ## 6. Capability and coverage contract
 
 - **Intended targets.** These are `ScopePlan.targets` (§5.4). For `CHANGED_FILES` that is the batch's paths; for broader scopes it is every classified source file in the scope. A deleted path is absent in POST, so it is scanned PRE only (for "resolved").
-- **Scanner-confirmed targets.** These are the paths the provider's structured output reports as analyzed (Semgrep: `paths.scanned`), minus any path with a target-level error. Every intended target of a supported language that is not confirmed is `not_analyzed`, whatever the reason: an explicit skip, a scanner default exclusion, size or timeout limits, a parse error, or silent omission. The adapter never infers "analyzed" from "passed as a target".
+- **Scanner-confirmed targets.** These are the paths the provider's structured output reports as analyzed (Semgrep: `paths.scanned`), **minus** any path in `paths.skipped` and any path with a target-level error. In 1.178.0 a partially parsed file appears in `scanned` **and** in `skipped` (`analysis_failed_parser_or_internal_error`), so `scanned` alone overstates coverage (§5.5). Every intended target of a supported language that is not confirmed is `not_analyzed`, whatever the reason: an explicit skip, a scanner default exclusion, size or timeout limits, a parse error, or silent omission. The adapter never infers "analyzed" from "passed as a target".
 - **Language of a target.** It comes from `coverage.LANGUAGE_BY_EXTENSION`, a Kriya-owned, provider-neutral table with language ids such as `java`, `python`, `javascript`, `typescript`, `go`, `ruby`, `kotlin`, `c`, `cpp`, `csharp`, `rust`, `php`, `swift` and `scala`. It is derived from, but separate from, `analyzer.EXTENSION_MAP`, whose values are display names.
 - **Extensions the table does not list** are `unclassified`. They are reported in the evidence, but they do not count toward coverage: text, data, docs and build files are not claimed as analyzed or unanalyzed source.
 
@@ -441,7 +468,9 @@ A candidate is written by a model. Anything in the candidate or the repository t
 1. **Inline suppression** (`nosemgrep`, or any provider equivalent): the adapter disables it (`--disable-nosem`). A test writes a `nosemgrep` comment on a known finding in the candidate and asserts that the finding is still reported and still blocks.
 2. **Ignore files and scanner defaults.**
    - The snapshots contain only scope files. The provider's `control_files` are never copied: for Semgrep that means repository and candidate `.semgrepignore`, and `.gitignore` is irrelevant because there is no `.git` and `--no-git-ignore` is passed. A repository or candidate ignore file therefore cannot remove a target.
-   - Trusted exclusions come only from operator config. They are passed through a **public, documented** interface (Semgrep: `--exclude`), recorded in the evidence, and included in the settings digest. They are legitimate and auditable.
+   - Trusted exclusions come only from operator config. They are applied by **Kriya's scope planner**: an excluded path is never an intended target and is never passed to the scanner. They are recorded in the evidence and included in the scope-plan digest, so they are legitimate and auditable.
+
+    The scanner's own `--exclude` is not relied on. In 1.178.0 it does not apply to explicitly passed targets (§5.5).
    - **No assumption is made about scanner defaults.** Semgrep documents a built-in default ignore list (including `test/`, `tests/`, `build/`, `vendor/`, `node_modules/`). The spec does **not** assume that any `.semgrepignore`, empty or not, disables it, and it relies on no internal flag (`--x-ignore-semgrepignore-files` is documented `[INTERNAL]` and is not used).
    - Correctness comes from confirmation instead (§6). Every intended target that the pinned scanner does not report as analyzed is `not_analyzed`, and a required file that was not analyzed is PARTIAL or UNKNOWN, never PASS.
    - The real tier records which intended targets the pinned version actually analyzes, including files under `src/test/`. If defaults do exclude them, the result is honest partial coverage, visible to the operator, until trusted configuration addresses it.
@@ -723,7 +752,7 @@ static_analysis:
   provider: null                 # v1: exactly one registered provider name, e.g. "semgrep"
   requirement: optional          # optional | required   (required + enabled:false -> config error)
   scope: auto                    # auto (= provider minimum) | changed_files | module | repository | build_graph; never narrower than the provider minimum
-  exclusions: []                 # trusted, auditable path globs (passed via the provider's public exclusion interface)
+  exclusions: []                 # trusted, auditable path globs, applied by Kriya's scope planner (never passed as targets)
   timeout_seconds: 300           # whole-scan bound, per scan (PRE and POST each)
   policy:
     introduced: {critical: block, high: block, medium: warn,  low: allow, info: allow}
@@ -828,7 +857,7 @@ The deterministic tier covers the fake adapter, policy, baseline diff, waivers, 
 | 12 | waiver expired / path mismatch / severity above max / rule-pack digest mismatch / tampered digest / other workspace | D | each → not applied, rejection reason recorded, stays BLOCKED |
 | 13 | waiver store corrupt | D | `WAIVER_STORE_INVALID`; no waiver applies; the gate still evaluates |
 | 14 | scanner timeout / crash (exit 2 or signal) / malformed JSON / missing keys | D (fake + fixture corruption) + S (crash via an invalid invocation) | UNKNOWN; never PASS; refused under **both** optional and required |
-| 15 | INCOMPLETE: an intended target skipped (size limit), errored (parse error), or silently absent from `paths.scanned` | D + S | `not_analyzed`; `analysis_errors: block` → UNKNOWN; `warn` → PARTIAL; never PASS |
+| 15 | INCOMPLETE: an intended target skipped, partially parsed (`PartialParsing`: in `scanned` and `skipped`, with findings), errored, or silently absent from `paths.scanned`; a deleted path never passed to the POST scan (V15) | D (1.178.0-recorded fixtures) + S | `not_analyzed`; `analysis_errors: block` → UNKNOWN; `warn` → PARTIAL; never PASS |
 | 16 | rule pack or version identity changes between PRE and POST (fake) | D + S (two pinned rule-pack versions: evidence identities differ) | NOT_COMPARABLE: all POST findings introduced; UNKNOWN unless POST is clean |
 | 17 | evidence stale at commit: a batch byte changed; an unchanged in-scope file edited in the real workspace; a file added to a MODULE/REPOSITORY scope; a rule pack re-hashed differently; the executable/image digest changed; policy/settings changed | D | commit refuses with `STATIC_ANALYSIS_EVIDENCE_STALE`, naming the component; workspace UNCHANGED; on both paths |
 | 17b | evidence missing: analysis enabled, and a call site passes `not_enabled()` for a non-permitted case | D | refused `STATIC_ANALYSIS_EVIDENCE_MISSING`; on both paths |
@@ -836,7 +865,7 @@ The deterministic tier covers the fake adapter, policy, baseline diff, waivers, 
 | 19 | `nosemgrep` comment added by the candidate on a known finding | S (+ D argv) | the finding is still reported and blocks |
 | 20 | candidate or repository `.semgrepignore`/`.gitignore` naming a target; a target under `src/test/` (the default-ignore list) | S (+ D snapshot contents) | repository and candidate control files are never in the snapshots; targets actually analyzed are confirmed from `paths.scanned`; any target the pinned version does not analyze is `not_analyzed` → PARTIAL/UNKNOWN, **never PASS**; the observed default-exclusion behaviour is recorded in the handover |
 | 21 | an in-workspace rule pack edited by the candidate | D | rules read from the real workspace (never the candidate root) and digest-verified; a mismatch → UNAVAILABLE `RULE_PACK_DIGEST_MISMATCH` |
-| 22 | Semgrep adapter contract | D (fixtures) + S | exact argv/env (§5.2); registry-ref pack, `latest` and a version range rejected at config; severity map; namespaced `rule_id`; §5.3: **findings with exit 0 are parsed and block** (S), a malformed rule is RULE_PACK_INVALID and not treated as findings (S), a rule/config error in `errors[]` at exit 0 is UNAVAILABLE, and findings parsed from a failed run are evidence only; `paths.scanned` drives `analyzed` |
+| 22 | Semgrep adapter contract | D (fixtures) + S | exact argv/env (§5.2); registry-ref pack, `latest` and a version range rejected at config; severity map; namespaced `rule_id`; §5.3: **findings with exit 0 are parsed and block** (S), a malformed rule is RULE_PACK_INVALID and not treated as findings, including an invalid pattern that exits 2 with partial findings (S, V14), a rule/config error in `errors[]` at exit 0 is UNAVAILABLE, and findings parsed from a failed run are evidence only; `paths.scanned` drives `analyzed` |
 | 23 | fake adapter contract | D | the shared port contract suite runs against both adapters (fake in D, Semgrep in S) |
 | 24 | no LLM-granted authority | D | structural: single `write_waiver` caller; adversarial: a waiver-shaped file in the workspace/candidate root and "risk accepted" plan/Developer text → no effect |
 | 25 | layering | D | §4.2 invariants 1–6 (AST/grep) |
@@ -879,7 +908,7 @@ It is not P2. The user placed it on the production path ahead of PRD-032 (P0). A
 - **Live-model: NOT_REQUIRED.** No model is involved in any decision. Proving "LLM output cannot grant a waiver" is structural plus adversarial with scripted model text; a real model adds nothing.
 - **Real pinned-scanner tier: REQUIRED for closure.**
   - Tests 7, 8, 9, 14, 15, 16, 19, 20, 22, 23, 29 and 36 run under the new `live_static_analysis` marker on a small brownfield fixture repository: Java + C++, one pre-existing Java finding, and a candidate that introduces one, fixes one and shifts one.
-  - Semgrep is **not installed** on this machine (checked 2026-09-27). The user installs **one exact version**, chosen at implementation and recorded: `pipx install semgrep==<x.y.z>`, and the `semgrep/semgrep:<x.y.z>@sha256:<digest>` image for the OCI test. `latest` is never used.
+  - Semgrep 1.178.0 is installed (§5.5). **Pinned: Semgrep 1.178.0**, installed by the user via pipx (2026-09-27). The OCI test needs `semgrep/semgrep:1.178.0`, pulled and recorded by digest. `latest` is never used.
   - The implementing agent records the exact version in the fixtures and the handover.
   - Being able to run the S tier is itself a verification step for the user.
 - **CI.** Proposed: an opt-in `static-analysis-live` job that installs the same exact pinned Semgrep, following the pattern of the existing live-model job. Non-blocking at first.
