@@ -108,9 +108,17 @@ else
 fi
 
 # --- production doctor (recorded as it is, never converted to PASS) -------------
+# The canonical production configuration is the certifying operator's own:
+# it is approved explicitly (SEC-009 P2, bound to its exact security fields)
+# into a trust file outside any workspace, exactly as an operator deploys it.
 DOCTOR_HOME="$(mktemp -d "${TMPDIR:-/tmp}/kriya-cert-doctor.XXXXXXXX")"
-printf 'runtime_profile: production\n' > "$DOCTOR_HOME/production.yaml"
-( cd "$DOCTOR_HOME" && "$VENV_BIN/kriya" --config "$DOCTOR_HOME/production.yaml" doctor --production --json ) \
+mkdir -p "$DOCTOR_HOME/operator" "$DOCTOR_HOME/workspace"
+git -C "$DOCTOR_HOME/workspace" init -q  # a real (empty) repository, as a deployment has
+printf 'runtime_profile: production\n' > "$DOCTOR_HOME/operator/production.yaml"
+( cd "$DOCTOR_HOME/workspace" && "$VENV_BIN/kriya" --config "$DOCTOR_HOME/operator/production.yaml" authority approve \
+    --out "$DOCTOR_HOME/operator/production.trust.json" --confirm ) > "$OUT/doctor-approval.txt" 2>&1
+( cd "$DOCTOR_HOME/workspace" && "$VENV_BIN/kriya" --config "$DOCTOR_HOME/operator/production.yaml" \
+    --trust-file "$DOCTOR_HOME/operator/production.trust.json" doctor --production --json ) \
   > "$OUT/doctor.json" 2> "$OUT/doctor.stderr.txt"
 if "$VENV_BIN/python" -c 'import json,sys; json.load(open(sys.argv[1]))' "$OUT/doctor.json" 2>/dev/null; then
   stage doctor RECORDED "production doctor JSON archived"
