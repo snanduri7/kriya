@@ -203,6 +203,16 @@ class WaiverRejection:
         return {"waiver_id": self.waiver_id, "fingerprint": self.fingerprint, "reason": self.reason}
 
 
+def _binding_key(record: WaiverRecord) -> Tuple[str, str]:
+    """The rule a waiver names: an opaque (provider, rule id) key, compared
+    for equality only - never a branch on which provider it is."""
+    return record.provider, record.rule_id
+
+
+def _finding_key(item: ClassifiedFinding) -> Tuple[str, str]:
+    return item.finding.provider, item.finding.rule_id
+
+
 def _classification_key(item: ClassifiedFinding) -> str:
     return "existing" if item.classification is Classification.UNCHANGED else item.classification.value
 
@@ -244,7 +254,7 @@ def match_waivers(
     rejections: List[WaiverRejection] = []
     for item in blocked:
         for record in store.records:
-            if record.provider != item.finding.provider or record.rule_id != item.finding.rule_id:
+            if _binding_key(record) != _finding_key(item):
                 continue
             reason = _mismatch(record, item, now=now, workspace_id=workspace_id, rule_pack_digests=rule_pack_digests)
             if reason is None:

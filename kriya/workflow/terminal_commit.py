@@ -32,7 +32,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Dict, Iterable, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from kriya.control.run_coordinator import begin_run_commit, settle_run_commit
 from kriya.control.run_record import (
@@ -41,6 +41,7 @@ from kriya.control.run_record import (
     COMMIT_ROLLED_BACK,
     COMMIT_UNCERTAIN,
 )
+from kriya.static_analysis.service import StaticAnalysisCommitGuard
 from kriya.workflow.edit_safety import (
     BatchCommitError,
     CommitEvidence,
@@ -52,9 +53,6 @@ from kriya.workflow.edit_safety import (
     commit_revision_grounded_batch,
     commit_state_for_transaction,
 )
-
-if TYPE_CHECKING:
-    from kriya.static_analysis.service import StaticAnalysisCommitGuard
 
 
 class StaticAnalysisCommitRefused(RuntimeError):
@@ -164,7 +162,7 @@ def _settled_state(workspace_path: str, transaction_id: str) -> str:
 
 def commit_terminal_candidate(
     writes: List[StagedFileWrite], *, workspace_path: str, transaction_id: str,
-    static_analysis: "StaticAnalysisCommitGuard",
+    static_analysis: StaticAnalysisCommitGuard,
     evidence: Optional[Dict[str, Any]] = None,
     contract_transition: Optional[Callable[[str], Optional[Any]]] = None,
 ) -> TerminalCommitOutcome:

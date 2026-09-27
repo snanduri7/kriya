@@ -80,7 +80,6 @@ from kriya.static_analysis.waivers import (
     waiver_store_path,
 )
 from kriya.tools.containment import ContainmentSetupError, resolve_containment_backend
-from kriya.workflow.terminal_commit import CandidateMaterializationError
 
 logger = logging.getLogger(__name__)
 
@@ -339,6 +338,9 @@ class StaticAnalysisService:
         )
         if candidate.in_place:
             return self.evaluate(request)
+        # Imported here: terminal_commit imports this module (its guard type).
+        from kriya.workflow.terminal_commit import CandidateMaterializationError
+
         try:
             writes = candidate.materialize()
         except CandidateMaterializationError as error:

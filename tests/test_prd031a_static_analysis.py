@@ -1107,3 +1107,12 @@ def test_cli_prints_the_accepted_risk_banner_and_json_keeps_the_distinct_outcome
     assert emitted["static_analysis"]["outcome"] == "ACCEPTED_RISK" and emitted["accepted_risk"] is True
     _print_static_analysis_banner({"static_analysis": {"outcome": "PASS", "banner": "STATIC ANALYSIS: PASS"}})
     assert capsys.readouterr().out == ""  # a clean pass needs no banner
+
+
+def test_a_waiver_for_another_provider_never_applies(tmp_path):
+    """The waiver's (provider, rule id) binding key must match exactly."""
+    workspace = _workspace(tmp_path, {"A.java": BASE_A})
+    _waive(workspace, provider="other-provider")
+    with FakeRegistration():
+        result = _evaluate(_config(), workspace, [_write(workspace, "A.java", "x BAD_HIGH\n", base=BASE_A)], tmp_path)
+    assert result.outcome is Outcome.BLOCKED and result.waiver_ids == ()

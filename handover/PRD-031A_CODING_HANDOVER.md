@@ -144,6 +144,16 @@ Each has a regression test proven to fail without its fix.
 - **A workspace reached through a symlink (macOS `/var` → `/private/var`) made every changed path look like it escaped the workspace.** It was found by the operator-scan test; pytest's `tmp_path` is already real, which had hidden it. Paths now compare as real paths. Tests: `test_a_workspace_reached_through_a_symlink_is_the_same_workspace` and `test_operator_scan_...` (both fail without the fix; shown).
 - **A static-analysis validator that raised emitted `not_evaluated` instead of `failed`.** Test: the PRD-030 matrix case `static_analysis`.
 
+## Own bugs found by the user's full run (fixed in a separate commit after 3737c32)
+The user ran it at 3737c32: 6711 passed, 2 failed. Both failures are fixed, and both tests now pass.
+- **`tests/test_bootstrap_contract.py::test_every_production_annotation_resolves_at_runtime`.**
+  - The cause: `commit_terminal_candidate`'s new `static_analysis: StaticAnalysisCommitGuard` annotation referred to a `TYPE_CHECKING`-only import.
+  - The fix: `terminal_commit` now imports the guard at module level. `service.py` imports `CandidateMaterializationError` lazily, which removes the import cycle. Import works in both orders.
+- **`tests/test_qual_environment_identity.py::test_generic_code_never_branches_on_a_provider_or_uses_its_native_api`.**
+  - The INF-001 tripwire forbids `provider ==/!=` outside the runtime adapter. `waivers.match_waivers` compared `record.provider != item.finding.provider`, which is an equality check on a waiver's opaque binding key, not a branch on which provider.
+  - The fix: it is now expressed as a `(provider, rule_id)` key comparison (`_binding_key`/`_finding_key`), with unchanged semantics.
+  - New test: `test_a_waiver_for_another_provider_never_applies`. A mutant that ignores the provider half of the key is killed.
+
 ## Characterization tests changed on purpose
 - `tests/test_prd030_terminal_services.py`:
   - GATES includes `static_analysis` at position 4;
