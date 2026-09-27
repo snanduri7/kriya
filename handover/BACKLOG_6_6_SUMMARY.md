@@ -2,7 +2,13 @@
 
 Directive: `handover/BACKLOG_6_6_DIRECTIVES.md`. Three existing defects only; no vLLM adapter, no per-adapter environment evidence, no legacy traces migration.
 
-**Status: FIXED, awaiting the user's pytest run and live gate** (READY_FOR_PYTEST_VERIFICATION). Local commits on `milestone-decomposition`, not pushed.
+**Status: CLOSED (2026-09-27).** All exit criteria met at f378c40 (evidence: `handover/evidence/BACKLOG_6_6/user-live/final_gate.md`):
+- focused pytest green; full suite 6419 passed, 0 failed;
+- PROMPT-FIT-ROLE-CHAIN-001 and DEVELOPER-PROMPT-FIT-001 VERIFIED_BY_PYTEST (NOT_LIVE_EXERCISED by design, accepted by the user); AUTHORITY-INSPECT-TRACEBACK-001 VERIFIED (LIVE_EXERCISED: `[TRUST_PATH_INSIDE_WORKSPACE]`, no traceback, exit=1);
+- every role QUALIFIED, runtimes unchanged (ea90552d, fallback 64e12eef); CERTIFIED=true, precision 0.5814, every recall class passing; model.qualification PASS, context.recall_certification PASS, PRODUCTION_READY=true;
+- no new P0/P1. Open: ARCHITECT-PROMPT-FIT-001 (P2), DEVELOPER-AUX-LOOP-PROMPT-FIT-001, MCP-APPROVAL-PATH-TRACEBACK-001, PRE-APPROVAL-REVIEW-REFUSAL-001 (P3), plus the INF-001 follow-ups and the legacy traces migration.
+
+Local commits on `milestone-decomposition`, not pushed. Batch 7 (PRD-030/031) starts only on the user's approval.
 
 | Commit | What |
 |---|---|
@@ -13,7 +19,8 @@ Directive: `handover/BACKLOG_6_6_DIRECTIVES.md`. Three existing defects only; no
 | 6d7b6b9 | Docs, tracker, findings |
 | 9f957e6 | 8K test also asserts every registered section was located; summary scope notes |
 | 69919f1 | **Fix (my cfe9590):** four `test_workflow.py` coordinated-repair fakes had a fixed signature and raised TypeError on the new `optional_sections` argument (3 tests failed; found before your run). Test-only. |
-| (next) | Final gate: branch and sibling-retry coverage; PRE-APPROVAL-REVIEW-REFUSAL-001 confirmed advisory |
+| f378c40 | Final gate: branch and sibling-retry coverage; PRE-APPROVAL-REVIEW-REFUSAL-001 confirmed advisory |
+| (closure) | User evidence, tracker verdicts |
 
 ## AUTHORITY-INSPECT-TRACEBACK-001 (e2a3dee)
 The refusal of an approval store inside the workspace is unchanged; only how it is reported changed.
