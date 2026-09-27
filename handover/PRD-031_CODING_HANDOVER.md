@@ -69,6 +69,11 @@ Mutation check: 15 mutations across the two coordinators, all killed. They cover
 - the recorder call;
 - verification: the compile and test failure checks, runtime gating, the failure outcome record, and the compile file order.
 
+Structural-test sweep (source-reading and file-set tests):
+- `test_architecture_regression_index`, `test_corr016`, `test_corr018`, `test_knowledge_readpath_001`, `test_auth_goal_contamination_001`, `test_prd012_network_inventory`, `test_inf001_runtime_port`, `test_prd008_commit_state_gate` and `test_strict_doubles` all pass (176).
+- No test patches `attempt._directly_executable_*` or the moved abandon helper.
+- No test asserts on the moved log lines by logger name.
+
 ## Static/lint/architecture checks
 - `.venv/bin/ruff check .`: all checks passed.
 - `.venv/bin/pylint kriya plugins/core_tools tests`: exit 0.
