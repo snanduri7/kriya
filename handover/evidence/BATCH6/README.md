@@ -9,3 +9,5 @@
 | `final-gate-2/` | The CERTIFIED record 9d2a3e44 (0.5814), and the qwen3.6 NOT_QUALIFIED record 317afb9a under the old fallback settings. | certification |
 | `final-gate-3/` | The fallback config change (before, after, diff), and the qwen3.6 QUALIFIED record fc063b9e. | qualification and doctor |
 | `user-live-4/` | **Closure live run.** 32K QUALIFIED qwen3-coder preflight (runtime ea90552d…). Every case LIVE_EXERCISED. PRD-027: `live_status` LIVE_EXERCISED and `certification_status` CERTIFIED at 0.5814. PRD-029 targeted: COMMITTED, DIRECT authorization, shape `total(items, tax_rate=0.0)`, consumers invalidated and re-verified by `terminal_full_regression`. | yes |
+
+**Closure commits.** The closure evidence is in 32d4f09. The user's final closure decision is recorded in the commit that follows it. Every failed or pre-fix record (`user-live`, `user-live-2`, `user-live-3`, `prd027-precision/`, `final-gate-2/` qwen3.6 317afb9a) is kept unchanged.

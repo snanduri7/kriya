@@ -199,16 +199,29 @@ Every closure gate is green on the evidence:
 4. **qwen3.6 production fallback:** QUALIFIED 18/18 (record fc063b9e).
 5. **`doctor --production`:** PRODUCTION_READY=true. `context.recall_certification` reads the stored record, with the code index present.
 
-**Statuses:**
-- VERIFIED: PRD-025, PRD-026, PRD-027, PRD-028, PRD-029, AUTH-GOAL-CONTAMINATION-001, PRD027-PRECISION-001.
-- VERIFIED_BY_PYTEST: PROMPT-BUDGET-FIT-001C.
-- CLOSED: PROD-FALLBACK-QUAL-001.
+**Statuses (user closure decision, 2026-09-27):**
+- **VERIFIED:** PRD-025, PRD-026, PRD-027, PRD-028, PRD-029, AUTH-GOAL-CONTAMINATION-001, PROMPT-BUDGET-FIT-001C.
+  - 001C was verified by pytest. It is NOT_LIVE_EXERCISED, because the qualified 32K profile does not trigger a final-review refusal, and the user accepted pytest verification.
+- **PRD027-PRECISION-001: VERIFIED.**
+  - Real-embedder precision 0.5814, against the 0.5 target.
+  - All 9 recall classes 1.0.
+  - CERTIFIED=true (record 9d2a3e44).
+  - doctor `context.recall_certification` = PASS.
+- **PROD-FALLBACK-QUAL-001: CLOSED.**
+
+**Final production gate** (demo-03 `config/generate-production.yaml`, `doctor --production`, 2026-09-27):
+- **Exact configured identities qualified:**
+  - primary qwen3-coder:30b (runtime ea90552d…, settings ed7bfc09…) is QUALIFIED for every role;
+  - Developer fallback qwen3.6:35b-a3b-q4_K_M (runtime 64e12eef…, settings 0f1e6b5c…) is QUALIFIED 18/18 (record fc063b9e).
+- `model.qualification` = PASS.
+- `context.recall_certification` = PASS, read from the stored CERTIFIED record with the code index present.
+- **PRODUCTION_READY=true.** The only remaining WARNs are non-blocking: the legacy trace db, role independence, Python region precision, and the fixed-guarantees summary.
 
 **Still OPEN:**
 - PROMPT-BUDGET-FIT-001A (P2);
 - PROMPT-BUDGET-FIT-001B (P2);
 - PRD027-SCORE-NORMALIZATION-001 (P2);
-- FALLBACK-CONTEXT-WINDOW-001 (triage, proposed P2);
+- FALLBACK-CONTEXT-WINDOW-001 (P2, triage);
 - KNOWLEDGE-READPATH-001 (P1).
 
 The evidence index is `handover/evidence/BATCH6/README.md`. Nothing has been pushed.
