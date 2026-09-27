@@ -1,7 +1,7 @@
 # PRD-029 Coding Agent Handover: ContractRegistry Lifecycle Closure
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop.
+**VERIFIED (Batch 6 closure, 2026-09-27).** Pytest: the 001C subset (1856) and full suite (6245) @ e34e0ee, and the PRD027 subset and full suite @ a04e8ac. Live: `handover/evidence/BATCH6/user-live-4`, every case LIVE_EXERCISED; the enforce case and the targeted case both reached a verified commit (COMMITTED, DIRECT authorization, consumers `checkout.py`/`tests/test_pricing.py` invalidated and re-verified by `terminal_full_regression`), 32K QUALIFIED qwen3-coder preflight. Production: `doctor --production` PRODUCTION_READY=true. Earlier status: READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop.
 
 ## Source identity
 - Base revision: 0ec07cc.

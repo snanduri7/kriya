@@ -1,7 +1,7 @@
 # AUTH-GOAL-CONTAMINATION-001: retrieved text became authoritative user intent
 
 ## Status
-FIXED in f3707c4, READY_FOR_PYTEST_VERIFICATION with Batch 6. A certification and production blocker until verified.
+**VERIFIED (Batch 6 closure, 2026-09-27):** the structural test and the suites are green (full 6245 @ e34e0ee, and again @ a04e8ac), and the live suite is green (`user-live-4`). Earlier status: FIXED in f3707c4, READY_FOR_PYTEST_VERIFICATION with Batch 6.
 
 ## Problem (confirmed)
 `kriya generate`'s knowledge pre-step (`kriya/cli.py` `run_workflow`) rebound the goal:

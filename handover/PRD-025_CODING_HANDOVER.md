@@ -1,7 +1,7 @@
 # PRD-025 Coding Agent Handover: Bounded Runtime-Verifier Evidence Package
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop. The user runs the pytest suites and the live tests.
+**VERIFIED (Batch 6 closure, 2026-09-27).** Pytest: the 001C subset (1856) and full suite (6245) @ e34e0ee, and the PRD027 subset and full suite @ a04e8ac. Live: `handover/evidence/BATCH6/user-live-4`, every case LIVE_EXERCISED, 32K QUALIFIED qwen3-coder preflight. Production: `doctor --production` PRODUCTION_READY=true. Earlier status: READY_FOR_PYTEST_VERIFICATION. This is part of the Batch 6 stop. The user runs the pytest suites and the live tests.
 
 ## Source identity
 - Base revision: 510fd98 (branch `milestone-decomposition`, level with origin).

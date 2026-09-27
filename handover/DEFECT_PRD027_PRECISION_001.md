@@ -1,7 +1,7 @@
 # PRD027-PRECISION-001: real-embedder certification misses the fixed precision target
 
-**Status: P1, FIXED (Rule A, with the user's tighter fallback rules, 2026-09-27). The fix awaits pytest verification and the real-embedder `context certify`.** The diagnosis below is unchanged; the fix is described at the end.
-PRD-027 stays **NOT_VERIFIED** until `kriya context certify` with the real embedder reports `CERTIFIED=true`.
+**Status: VERIFIED (2026-09-27).** Fix a71dc60 + ff6dd3f. The PRD027 subset and full suite passed. The real-embedder `context certify` reported CERTIFIED=true at 0.5814 (record 9d2a3e44), and the live PRD-027 case certified (`user-live-4`). Earlier status: P1, FIXED (Rule A, with the user's tighter fallback rules), awaiting pytest verification and the real-embedder `context certify`.** The diagnosis below is unchanged; the fix is described at the end.
+PRD-027 is VERIFIED: the real-embedder `kriya context certify` reported `CERTIFIED=true`.
 
 ## Observed
 The user ran `kriya -c demo-03/config/generate-production.yaml context certify` on 2026-09-27 at Kriya HEAD e34e0ee. The raw output and a copy of the record are in `handover/evidence/BATCH6/prd027-precision/`.

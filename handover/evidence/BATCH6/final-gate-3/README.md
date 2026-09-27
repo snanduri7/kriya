@@ -22,3 +22,16 @@ Only the demo-03 `config/generate-production.yaml` Developer fallback changed. T
 **Pin test:** `tests/test_production_fallback_identity.py` (2 tests).
 
 **SEC-009.** `llm_chain` is SECURITY_AUTHORITY, so the workspace's durable approval no longer matches the config. Until the user runs `kriya -c ../../config/generate-production.yaml authority inspect` and then `authority approve`, every command using this config is refused.
+
+## Result (2026-09-27)
+- **`authority approve`:** run by the user. The subsequent commands ran under the changed config.
+- **`model qualify --model qwen3.6:35b-a3b-q4_K_M`: QUALIFIED**, 18 PASS, 0 FAIL, 1 UNAVAILABLE, for the developer role.
+  - Record: `qwen36_qualification_record_fc063b9e.json`.
+  - Runtime 64e12eef…, with `configured_context_window` 32768 now part of the fingerprint.
+  - Settings sha256:0f1e6b5c….
+  - Policy kriya-qualification/3, qualified at 2026-09-27T02:28:29Z.
+- **Live suite:** 8 passed, into `../user-live-4/`, and every evidence file exists (`../README.md`).
+- **`doctor --production`: PRODUCTION_READY=true.** The user reported this; only the last lines of the output were pasted.
+  - `model.qualification` and `context.recall_certification` are required checks. PRODUCTION_READY=true means neither failed.
+  - The code index exists in `run-production/memory` (built 07:21), so `context.recall_certification` cannot have been NOT_APPLICABLE. It read the CERTIFIED record 9d2a3e44, as in pass 2.
+  - The remaining WARN is `persistence.traces` (the legacy trace db), which the fixed-guarantees summary inherits.

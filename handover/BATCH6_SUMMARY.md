@@ -185,6 +185,34 @@ Recorded as PROD-FALLBACK-QUAL-001. The config is unchanged; the decision is the
 - **New finding, for triage:** FALLBACK-CONTEXT-WINDOW-001. A chain entry's `context_window` is never sent as `num_ctx`.
 - Evidence: `handover/evidence/BATCH6/final-gate-3/`.
 
+## Batch 6 CLOSED (2026-09-27)
+Every closure gate is green on the evidence:
+1. **Pytest.**
+   - 001C subset: 1856 passed.
+   - Full suite: 6245 passed @ e34e0ee.
+   - The PRD027-PRECISION-001 subset and the full suite passed again @ a04e8ac.
+   - 4288643 added only the fallback pin test, which my narrow run passed (2).
+2. **Live:** `user-live-4`, 8 passed, every case LIVE_EXERCISED, with the 32K QUALIFIED preflight.
+   - PRD-027 certified at 0.5814.
+   - The targeted PRD-029 case is COMMITTED and bound: DIRECT authorization, consumers invalidated and re-verified.
+3. **`context certify`:** CERTIFIED=true, precision 0.5814, every class 1.0 (record 9d2a3e44).
+4. **qwen3.6 production fallback:** QUALIFIED 18/18 (record fc063b9e).
+5. **`doctor --production`:** PRODUCTION_READY=true. `context.recall_certification` reads the stored record, with the code index present.
+
+**Statuses:**
+- VERIFIED: PRD-025, PRD-026, PRD-027, PRD-028, PRD-029, AUTH-GOAL-CONTAMINATION-001, PRD027-PRECISION-001.
+- VERIFIED_BY_PYTEST: PROMPT-BUDGET-FIT-001C.
+- CLOSED: PROD-FALLBACK-QUAL-001.
+
+**Still OPEN:**
+- PROMPT-BUDGET-FIT-001A (P2);
+- PROMPT-BUDGET-FIT-001B (P2);
+- PRD027-SCORE-NORMALIZATION-001 (P2);
+- FALLBACK-CONTEXT-WINDOW-001 (triage, proposed P2);
+- KNOWLEDGE-READPATH-001 (P1).
+
+The evidence index is `handover/evidence/BATCH6/README.md`. Nothing has been pushed.
+
 ## Static gates
 `.venv/bin/ruff check .`: All checks passed. `.venv/bin/pylint kriya plugins/core_tools tests`: exit 0. Both hold at the final commit.
 

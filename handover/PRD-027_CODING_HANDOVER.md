@@ -1,7 +1,9 @@
 # PRD-027 Coding Agent Handover: Context Recall Certification Suite
 
 ## Status
-**NOT_VERIFIED. The real-embedder certification failed, and the fix is ready for pytest verification.**
+**VERIFIED (Batch 6 closure, 2026-09-27).** The real-embedder `context certify` reported CERTIFIED=true, precision 0.5814, every class 1.0 (record 9d2a3e44). Doctor's `context.recall_certification` is PASS, read from that record with the demo-03 code index present. The live PRD-027 case reports `live_status` LIVE_EXERCISED and `certification_status` CERTIFIED (`user-live-4`). History below.
+
+**Earlier status: NOT_VERIFIED. The real-embedder certification failed, and the fix was ready for pytest verification.**
 - **The failure.** `kriya context certify` with the real embedder (demo-03 production config, 2026-09-27) gave precision 0.4808 against the 0.5 target: CERTIFIED=false, although every recall class was 1.0.
 - **The defect.** PRD027-PRECISION-001, recorded in `handover/DEFECT_PRD027_PRECISION_001.md`. Weak hits found by only one retrieval leg each seeded a 2-hop graph walk.
 - **The fix.** Graph expansion now starts only from hits that both the embedding and the keyword search ranked in their top 5 (the existing `top_k`). If only one leg returned valid hits, that leg's hits seed the walk. If the two legs disagree, nothing seeds. Every search hit is still shown. Measured with the changed code:

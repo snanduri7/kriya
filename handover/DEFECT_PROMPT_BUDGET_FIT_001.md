@@ -4,7 +4,7 @@
 Umbrella OPEN (user decision, 2026-09-27), split into three findings:
 - **001A** (OPEN, P2): the Planner graph context is sized without reserving the rest of the Planner request.
 - **001B** (OPEN, P2): Reviewer file batches are sized without reserving the system prompt, header, diff and evidence.
-- **001C** (P1, FIXED in 8600e2d, awaiting the user's pytest): a final-Reviewer refusal after the candidate was applied escaped as a raw exception.
+- **001C** (P1, FIXED in 8600e2d, **VERIFIED_BY_PYTEST**: the 001C subset 1856 and full suite 6245 passed; NOT_LIVE_EXERCISED, because the qualified 32K profile does not trigger the refusal, and the user accepted pytest verification): a final-Reviewer refusal after the candidate was applied escaped as a raw exception.
 
 001A and 001B go to a dedicated prompt-fit follow-up; PRD-016 is not redesigned in Batch 6. Their fix budgets each variable section from `effective prompt capacity - mandatory fixed prompt cost - safety reserve`, and never by raising context limits.
 
