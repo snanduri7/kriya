@@ -51,8 +51,8 @@ def test_real_generate_emits_one_json_result(tmp_path):
     cfg = {'llm': {'model': model, 'base_url': endpoint, 'temperature': 0.2},
            'embedding': {'model': embedding, 'base_url': endpoint},
            'plugins': {'directory': str(root / 'plugins')},
-           'paths': {'skills': './skills', 'memory': './memory', 'logs': './logs'},
-           'logging': {'file': None},
+           'paths': {'skills': './skills', 'memory': './memory'},
+           'logging': {'file_enabled': False},
            'autonomy': {'web_lookup_enabled': False, 'generation_time_budget_seconds': 300}}
     config_text = yaml.safe_dump(cfg)
     (workspace / 'kriya.yaml').write_text(config_text)
