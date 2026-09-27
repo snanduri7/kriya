@@ -101,3 +101,5 @@ Focused:
 .venv/bin/pytest tests/test_authority_cli_refusal.py tests/test_prompt_fit_role_chain_001.py tests/test_developer_prompt_fit_001.py tests/test_developer_prompt_fit_branches.py tests/test_prompt_budget_fit_001ab.py tests/test_prompt_budget_fit_001c.py tests/test_prd016_allocation.py tests/test_prd016_adaptive_budget.py tests/test_review_command.py tests/test_review_context.py tests/test_agents.py tests/test_prd017_fallback_transition.py tests/test_dev_inv_001_investigation.py tests/test_sec009_p2_authority_approval.py tests/test_production_doctor.py tests/test_doctor_command.py tests/test_workflow_controller_enforce.py tests/test_workflow.py
 ```
 Full: `.venv/bin/pytest`. Live gate: `$K -c $C model status`, `$K -c $C context certify`, `$K -c $C doctor --production`, `KRIYA_AUTHORITY_HOME=$PWD/.authority-test $K -c $C authority inspect; echo "exit=$?"`.
+
+> **Status of open items:** the canonical registry `handover/BACKLOG_REGISTRY.csv` (2026-09-27) is authoritative for every open or deferred item named here. Its rows replace the former tracker rows.

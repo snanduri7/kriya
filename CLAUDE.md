@@ -41,6 +41,10 @@ The user is quota-conscious in this repo specifically — apply these by default
 - **Watch context length in a long session — 73% of this account's usage has come from sessions sitting above 150k tokens.** Longer sessions cost more even with prompt caching. At a natural checkpoint (a chunk of work just committed, about to pivot to an unrelated task), suggest `/compact` to shrink the working context, or `/clear`/a fresh session when the next task doesn't need this thread's history at all — see `feedback_session_resume_hygiene.md` in this project's memory for the existing convention of resuming via explicit memory pointers rather than "continue where we left off."
 - Ordinary work stays in-session as normal: writing/editing code, quick targeted greps, `git status`/`git diff`/`git log`, doc updates, single fast commands.
 
+## Backlog registry
+
+`handover/BACKLOG_REGISTRY.csv` is the one canonical registry for open and deferred items. Each row carries `id, priority, status, discovered_in, target_scope, blocking, closure_evidence`. `handover/TASK_STATUS_TRACKER.csv` holds tasks only and never duplicates a registry item. Other docs reference the registry for status. A batch may not close with a newly found P2/P3 missing `target_scope`, and an open P0/P1 is worked, never parked there (`tests/test_backlog_registry.py`).
+
 ## Mandatory quality bar (every change, every session — standing user directive, 2026-09-26)
 
 Passing the happy-path tests is not "done". These rules are mandatory; don't wait to be asked. In Batch 5, two bugs got through: a variable left unbound on an early-stop path, which silently dropped a result field, and a bare-`MagicMock` fixture that turned a feature on by accident. Neither the suite nor a live success run would have caught them.

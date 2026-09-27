@@ -124,3 +124,5 @@ Size each section against the room its own request has left: `allocation_window(
 - **ARCHITECT-PROMPT-FIT-001 (P2, new, recorded only).** The Architect's unfitted reference is refused at 16K with 30 entries.
 
 Details, evidence and the remaining findings: `handover/BACKLOG_6_6_SUMMARY.md`.
+
+> **Status of open items:** the canonical registry `handover/BACKLOG_REGISTRY.csv` (2026-09-27) is authoritative for every open or deferred item named here. Its rows replace the former tracker rows.

@@ -1,7 +1,7 @@
 # PRD-030 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION
+VERIFIED_BY_PYTEST (2026-09-27): focused 1700/0 and full 6477/0, run by the user at 04b6bd4; evidence in handover/evidence/BATCH7/pytest.md. Live test: NOT_REQUIRED.
 
 ## Source identity
 - Base revision: cd13d39 (Backlog 6.6 closed; pushed; user full suite 6419 passed / 0 failed at f378c40, tests-only delta to cd13d39)
@@ -64,6 +64,7 @@ Mutation check: 10 mutations in the new logic, all killed. They cover the eligib
 - Required by instruction: NO.
 
 ## Known limitations / residual risks
+The deferred items are tracked in the canonical registry `handover/BACKLOG_REGISTRY.csv`, which is authoritative for their status: ENFORCE-EXECUTE-PLAN-CONVERGENCE-001.
 - The validators are resolved from `workflow_controller`'s module globals at each run. Anyone moving that binding must keep it, or the characterization patches go stale (noted in CLAUDE.md).
 - The requirement gate still reads `kriya.workflow.workflow` lazily (unchanged cycle avoidance). PRD-031 is the place to revisit it, if at all.
 

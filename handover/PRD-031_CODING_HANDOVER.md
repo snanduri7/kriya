@@ -1,7 +1,7 @@
 # PRD-031 Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION
+VERIFIED_BY_PYTEST (2026-09-27): focused 1700/0 and full 6477/0, run by the user at 04b6bd4; evidence in handover/evidence/BATCH7/pytest.md. Live test: NOT_REQUIRED.
 
 ## Source identity
 - Base revision: 48a1a28 (PRD-030 handover; PRD-030 code 26e65c8)
@@ -87,6 +87,7 @@ Structural-test sweep (source-reading and file-set tests):
 - Required by instruction: NO.
 
 ## Known limitations / residual risks
+The deferred items are tracked in the canonical registry `handover/BACKLOG_REGISTRY.csv`, which is authoritative for their status: ENFORCE-EXECUTE-PLAN-CONVERGENCE-001 and RUN-ATTEMPT-GATE-EXTRACTION-001.
 - The recovery coordinator's `_abandon_active_repair_contract_if_any` keeps its persisted event source string `retry_strategy.handle_attempt_failure`. It is kept verbatim for trace compatibility.
 - Implementation-subtask verification inside `run_attempt` is still inline (see above). The coordinator is the extension point if it is ever migrated.
 
