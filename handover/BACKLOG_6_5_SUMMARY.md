@@ -85,3 +85,13 @@ Run these from demo-03 `workspace/repo`, with `K=<kriya repo>/.venv/bin/kriya` a
 - **PROMPT-FIT-ROLE-CHAIN-001 (P2, new).** Planner and Reviewer requests are sized for the role's first candidate only.
 - **INF-001 follow-ups.** A real vLLM adapter (a documented extension point, needs approval). Environment observation per adapter.
 - **Batch 7 (PRD-030/031)** is not started and needs approval.
+
+## Post-hand-off fix: full-suite failure (user's run: 6378 passed, 1 failed)
+- **Failure:** `tests/test_workflow.py::test_workflow_wires_hybrid_match_scores_into_graph_rag_context_degradation`. It was not in the focused set. It bisects to 8892e3c (PROMPT-BUDGET-FIT-001A).
+- **Cause:** a stale fixture, not a product defect.
+  - The test's 5910-token window cannot carry a real Planner request: the Planner system prompt alone (10,873 chars) exceeds the request capacity (2667 dispatch tokens).
+  - The 001A fit therefore correctly left the graph context out. The test had passed before only because `llm.complete` is mocked, which bypasses dispatch.
+- **Fix (test only):** the window is now 24576 tokens with a 1024-token output, and the fixtures are 560 lines. The score-driven degradation still binds (one full file plus one signatures file fits; two full files do not), and it is observed inside a Planner request that could actually be dispatched.
+- **Checks:**
+  - Mutation: pointing the query at LowRel makes the test fail.
+  - ruff and pylint both at 0.

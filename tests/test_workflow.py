@@ -22758,17 +22758,22 @@ async def test_workflow_wires_hybrid_match_scores_into_graph_rag_context_degrada
     # convention_prompt unpredictably and throw off the tuned budget below.
     cfg.paths.skills = str(tmp_path / "skills")
     # The graph budget is 0.60 of the prompt allocation window (PRD-016): a
-    # 5910-token window with the default 4096-token output budget reserves
-    # half the window for output and leaves ~999 tokens of graph context.
-    # Fixture sizes below (64 lines/8 words -> ~655 tokens full, ~161
-    # signatures) are chosen against that: two-full (~1310) exceeds it,
-    # one-full-one-signatures (~816) comfortably doesn't.
-    cfg.llm.context_window = 5910
-    assert 816 < _reserve_graph_context_budget(allocation_window(cfg)) < 1310
+    # 24576-token window with a 1024-token output budget leaves ~8724 tokens
+    # of graph context. Fixture sizes below (560 lines/8 words -> ~5824
+    # tokens full, ~161 signatures) are chosen against that: two-full
+    # (~11648) exceeds it, one-full-one-signatures (~5985) comfortably
+    # doesn't. The retrieval budget is also capped by the Planner request's
+    # own room (PROMPT-BUDGET-FIT-001A: its ~11K-char system prompt and its
+    # own 8192-token output reserve), so the window must leave that room
+    # above one-full-one-signatures too; at a smaller window the Planner
+    # rightly gets less graph context than the pool.
+    cfg.llm.context_window = 24576
+    cfg.llm.max_tokens = 1024
+    assert 5985 < _reserve_graph_context_budget(allocation_window(cfg)) < 11648
     os.makedirs(cfg.paths.memory, exist_ok=True)
 
-    _write_deterministic_text_file(tmp_path / "HighRel.txt", lines=64)
-    _write_deterministic_text_file(tmp_path / "LowRel.txt", lines=64)
+    _write_deterministic_text_file(tmp_path / "HighRel.txt", lines=560)
+    _write_deterministic_text_file(tmp_path / "LowRel.txt", lines=560)
 
     from kriya.memory.vector import LocalVectorStore
     dim = 768
