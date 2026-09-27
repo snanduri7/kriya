@@ -816,6 +816,144 @@ def fit_planner_request(
     return head + skills_prompt + graph_text + ref_text + suffix, details
 
 
+@dataclass(frozen=True)
+class OptionalSection:
+    """An optional section a Developer request carries verbatim
+    (DEVELOPER-PROMPT-FIT-001): ``text`` exactly as placed in the request,
+    ``rebuild(budget)`` the same section rebuilt within ``budget`` allocator
+    units ("" leaves it out). ``kind`` is one of DEVELOPER_SECTION_ORDER."""
+
+    kind: str
+    text: str
+    rebuild: Callable[[int], str]
+
+
+# The order a Developer request keeps its optional sections in when it does
+# not fit (the first gets room first; the last gives way first): the
+# batch's already-written siblings (the direct source of cross-file
+# consistency), repository graph context, investigation evidence, and last
+# the untrusted learned reference. Everything else in the request - system
+# prompt, task and authoritative goal, design and plan, skill conventions,
+# required blocks, retry evidence, known-target source, directives - is
+# mandatory and never trimmed.
+DEVELOPER_SECTION_ORDER = ("siblings", "graph_context", "investigation", "learned_reference")
+
+
+def fit_developer_request(capacity: RequestCapacity, system_prompt: str, prompt: str,
+                          sections: Sequence[OptionalSection]) -> Tuple[str, Dict[str, Any]]:
+    """One Developer request fitted into its capacity (DEVELOPER-PROMPT-FIT-001).
+    A request that fits is returned byte-identical. Otherwise each optional
+    section found exactly once in ``prompt`` (by offset; overlapping, missing
+    or repeated sections are reported, never guessed at) is refitted with
+    fit_variable_section into the room the mandatory text - everything else,
+    system prompt included - and the sections kept before it leave, in
+    DEVELOPER_SECTION_ORDER; a section that fits its room is kept unchanged.
+    The mandatory text is never trimmed: if it alone does not fit, every
+    section is left out and the dispatch check refuses the request
+    (CONTEXT_BUDGET_UNSATISFIABLE). Returns the prompt and the fit details
+    ({} when unchanged)."""
+    if capacity.count(system_prompt) + capacity.count(prompt) <= capacity.tokens:
+        return prompt, {}
+    unlocated: List[str] = []
+    located: List[Tuple[int, int, OptionalSection]] = []
+    for section in sections:
+        if not section.text:
+            continue
+        if prompt.count(section.text) != 1:
+            unlocated.append(section.kind)
+            continue
+        start = prompt.index(section.text)
+        located.append((start, start + len(section.text), section))
+    located.sort(key=lambda item: item[0])
+    spans: List[Tuple[int, int, OptionalSection]] = []
+    for start, end, section in located:
+        if spans and start < spans[-1][1]:
+            unlocated.append(section.kind)
+            continue
+        spans.append((start, end, section))
+    if unlocated:
+        logger.warning("Developer request fit: optional section(s) %s not found exactly once; kept as mandatory text",
+                       unlocated)
+    mandatory, cursor = [], 0
+    for start, end, _section in spans:
+        mandatory.append(prompt[cursor:start])
+        cursor = end
+    mandatory.append(prompt[cursor:])
+    fixed: List[str] = [system_prompt, "".join(mandatory)]
+    fits: Dict[int, SectionFit] = {}
+
+    def order(index: int) -> int:
+        kind = spans[index][2].kind
+        return DEVELOPER_SECTION_ORDER.index(kind) if kind in DEVELOPER_SECTION_ORDER else len(DEVELOPER_SECTION_ORDER)
+
+    for index in sorted(range(len(spans)), key=order):
+        section = spans[index][2]
+
+        def build(budget: int, section: OptionalSection = section) -> str:
+            return section.text if estimate_tokens(section.text) <= budget else section.rebuild(budget)
+
+        fits[index] = fit_variable_section(capacity, fixed, build)
+        fixed.append(fits[index].value)
+    fitted, cursor = [], 0
+    for index, (start, end, _section) in enumerate(spans):
+        fitted.append(prompt[cursor:start])
+        fitted.append(fits[index].value)
+        cursor = end
+    fitted.append(prompt[cursor:])
+    return "".join(fitted), {
+        "request": "developer", "capacity_tokens": capacity.tokens,
+        "sections": {spans[index][2].kind: {**fit.to_dict(), "reduced": fit.value != spans[index][2].text}
+                     for index, fit in fits.items()},
+        "unlocated_sections": unlocated,
+    }
+
+
+class DeveloperRequestFit:
+    """What a Developer request needs to fit itself (DEVELOPER-PROMPT-FIT-001):
+    the binding it is sent to (None: the primary) and the optional sections
+    its caller placed in existing_code_context. Capacities are resolved once
+    per output budget."""
+
+    def __init__(self, config: Any, binding: Any, sections: Sequence[OptionalSection]) -> None:
+        self.config, self.binding, self.sections = config, binding, tuple(sections)
+        self._capacities: Dict[Optional[int], RequestCapacity] = {}
+
+    def with_section(self, section: OptionalSection) -> "DeveloperRequestFit":
+        return DeveloperRequestFit(self.config, self.binding, self.sections + (section,))
+
+    def capacity(self, output_tokens: Optional[int] = None) -> RequestCapacity:
+        """The request's capacity when it asks for the binding's own output
+        or, for a full-file answer grounded to need more, that much."""
+        from kriya.core.model_runtime import binding_output_tokens
+
+        output = max(binding_output_tokens(self.config, self.binding), output_tokens or 0)
+        key = output if output_tokens else None
+        if key not in self._capacities:
+            self._capacities[key] = request_capacity(self.config, self.binding, output_tokens=output)
+        return self._capacities[key]
+
+    def fit(self, system_prompt: str, prompt: str, *extra: OptionalSection,
+            output_tokens: Optional[int] = None) -> Tuple[str, Dict[str, Any]]:
+        return fit_developer_request(self.capacity(output_tokens), system_prompt, prompt, self.sections + extra)
+
+
+def fenced_reference_section(fenced_reference: str) -> Optional[OptionalSection]:
+    """The fenced learned reference as an optional Developer section: rebuilt
+    at whole entries with the fence kept (never cut), "" when none fits."""
+    from kriya.workflow.untrusted_context import fence_untrusted_reference, fenced_reference_body
+
+    if not fenced_reference:
+        return None
+    body = fenced_reference_body(fenced_reference)
+    fence_units = estimate_tokens(fence_untrusted_reference("x"))
+
+    def rebuild(budget: int) -> str:
+        kept = trim_reference_text(body, budget - fence_units)
+        return fence_untrusted_reference(kept) if kept else ""
+
+    return OptionalSection("learned_reference", fenced_reference, rebuild)
+
+
 def developer_reference(prompt_window: int, fenced_reference: str, *pool_texts: str) -> str:
     """The fenced learned reference as a Developer request may carry it
     (Fix of a314d45): never more than the PRD-016 graph pool leaves after

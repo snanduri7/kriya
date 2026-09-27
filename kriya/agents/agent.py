@@ -1630,6 +1630,31 @@ class DeveloperAgent(BaseAgent):
     # Conservative fixed value, not tied to any specific model's context_window.
     DEFAULT_SIBLING_CONTENT_BUDGET = 3000
 
+    def _fit_request(
+        self, request_fit: Any, system_prompt: str, prompt: str, filepath: str, model_override: Optional[str],
+        sibling_section: str, reduced_sibling_section: Optional[str], expectation: Optional[Any],
+    ) -> str:
+        """One per-file request fitted into its binding's capacity
+        (DEVELOPER-PROMPT-FIT-001), the sibling contents being this call's
+        own optional section (names only, then nothing, when they do not
+        fit); a reduction is recorded as model.optional_context_reduced."""
+        from kriya.workflow.context_budget import OptionalSection, estimate_tokens
+
+        def siblings(budget: int) -> str:
+            if reduced_sibling_section and estimate_tokens(reduced_sibling_section) <= budget:
+                return reduced_sibling_section
+            return ""
+
+        extra = (OptionalSection("siblings", sibling_section, siblings),) if sibling_section else ()
+        fitted, details = request_fit.fit(system_prompt, prompt, *extra,
+                                          output_tokens=getattr(expectation, "tokens", None))
+        if details:
+            record = getattr(self.llm, "budget_expansions", None)
+            if isinstance(record, list):
+                record.append({"event_kind": "model.optional_context_reduced", "model": model_override,
+                               "reason": "request_fit", "file": filepath, **details})
+        return fitted
+
     async def _fill_missing_content(
         self,
         file_entries: List[Dict[str, Any]],
@@ -1652,6 +1677,7 @@ class DeveloperAgent(BaseAgent):
         default_operation: Optional[Any] = None,
         generation_protocol: Optional[Any] = None,
         expected_output_by_file: Optional[Dict[str, Any]] = None,
+        request_fit: Optional[Any] = None,
     ) -> List[Dict[str, str]]:
         """Passes through any entry that already has real content/edits unchanged (no
         extra call), and individually generates content for any entry that doesn't -
@@ -1717,7 +1743,13 @@ class DeveloperAgent(BaseAgent):
         retry-loop call sites) pass the active model's own
         _reserve_sibling_content_budget(context_window) so the budget scales with
         whichever model is generating; None (a caller that hasn't been updated, or
-        a direct test call) falls back to DEFAULT_SIBLING_CONTENT_BUDGET below."""
+        a direct test call) falls back to DEFAULT_SIBLING_CONTENT_BUDGET below.
+
+        request_fit (DEVELOPER-PROMPT-FIT-001): a context_budget.
+        DeveloperRequestFit; each file's request is fitted into its binding's
+        capacity before it is sent - the optional sections (these sibling
+        contents, and the ones the caller registered) shrink, the mandatory
+        text never does."""
         # Deferred because importing a kriya.workflow submodule at module load time
         # executes kriya.workflow.__init__, which imports WorkflowEngine and loops
         # back to this agent module.
@@ -2190,6 +2222,12 @@ class DeveloperAgent(BaseAgent):
                 f"{fix_analysis_instruction}"
             )
             file_prompt = prompt_head + sibling_section + prompt_tail
+            if request_fit is not None:
+                file_prompt = self._fit_request(
+                    request_fit, file_sys_prompt, file_prompt, filepath, model_override,
+                    sibling_section, reduced_sibling_section,
+                    None if prefer_anchored_edit else (expected_output_by_file or {}).get(filepath),
+                )
 
             # PRD-016: a full-file answer for an existing file is expected to
             # be about that file's size (a grounded expectation the caller
@@ -2220,7 +2258,8 @@ class DeveloperAgent(BaseAgent):
                     # request once more with their names only. A grounded
                     # output refusal is not a context problem - it goes to
                     # the caller's lower-output-protocol fallback instead.
-                    if reduced_sibling_section is None or isinstance(refusal, OutputBudgetUnsatisfiableError):
+                    if (reduced_sibling_section is None or isinstance(refusal, OutputBudgetUnsatisfiableError)
+                            or not sibling_section or sibling_section not in file_prompt):
                         raise
                     logger.warning(
                         "Developer: '%s' does not fit the context budget with sibling contents; retrying with "
@@ -2234,7 +2273,7 @@ class DeveloperAgent(BaseAgent):
                             "required_prompt_tokens": refusal.decision.prompt_tokens,
                             "selected_context_window": refusal.decision.context_window,
                         })
-                    file_prompt = prompt_head + reduced_sibling_section + prompt_tail
+                    file_prompt = file_prompt.replace(sibling_section, reduced_sibling_section, 1)
                     content = await self.llm.complete(file_sys_prompt, file_prompt, **completion_options)
             except ContextBudgetUnsatisfiableError as refusal:
                 # Which file could not be budgeted, for the caller's fallback
@@ -2434,6 +2473,7 @@ class DeveloperAgent(BaseAgent):
         operation_by_file: Optional[Dict[str, Any]] = None,
         default_operation: Optional[Any] = None,
         expected_output_by_file: Optional[Dict[str, Any]] = None,
+        request_fit: Optional[Any] = None,
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design. Prefers
         per-file generation for reliability (filling in only what's missing), falling
@@ -2493,6 +2533,7 @@ class DeveloperAgent(BaseAgent):
                 prior_error_context, implicated_files, error_source_context, retry_temperature,
                 extra_fix_instruction, files_with_current_content, sibling_content_budget,
                 operation_by_file, default_operation, generation_protocol, expected_output_by_file,
+                request_fit,
             )
 
         try:
@@ -2508,6 +2549,7 @@ class DeveloperAgent(BaseAgent):
                     prior_error_context, implicated_files, error_source_context, retry_temperature,
                     extra_fix_instruction, files_with_current_content, sibling_content_budget,
                     operation_by_file, default_operation, generation_protocol, expected_output_by_file,
+                    request_fit,
                 )
 
         except ContextBudgetUnsatisfiableError:
@@ -2555,6 +2597,9 @@ class DeveloperAgent(BaseAgent):
             f"{fix_context_block}\n\n"
             "Please generate the complete, production-grade files. Return ONLY the JSON list of files."
         )
+        if request_fit is not None:
+            prompt = self._fit_request(request_fit, self.system_prompt, prompt, "(single-stage)", model_override,
+                                       "", None, None)
 
         response_str = await self.llm.complete(
             self.system_prompt,

@@ -453,7 +453,13 @@ def test_learned_reference_never_makes_a_developer_request_fail_at_8k(tmp_path, 
     # the Developer trims it, and the Architect carries it within its window.
     assert plain.refusals == [] and learned.refusals == []
     assert learned.result.get("failure_category") == plain.result.get("failure_category") == "quality_gates_exhausted"
-    assert all(user.count(UNTRUSTED_REFERENCE_BEGIN) == 1 for _, user in learned.transport.by("Developer Agent"))
+    # DEVELOPER-PROMPT-FIT-001: at 8K the mandatory text leaves the
+    # untrusted reference little or no room - it shrinks first, and is
+    # carried whole-fenced or not at all (never a cut fence).
+    from kriya.workflow.untrusted_context import UNTRUSTED_REFERENCE_END
+
+    assert all(user.count(UNTRUSTED_REFERENCE_BEGIN) == user.count(UNTRUSTED_REFERENCE_END) <= 1
+               for _, user in learned.transport.by("Developer Agent"))
 
 
 def test_at_32k_the_developer_carries_the_whole_reference(tmp_path, monkeypatch):

@@ -69,12 +69,15 @@ from kriya.workflow.attribution import (
 from kriya.workflow.authority_escalation import grant_member_hints
 from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.context_budget import (
+    DeveloperRequestFit,
+    OptionalSection,
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
     allocation_window,
     build_code_context,
     build_known_target_context,
     developer_reference,
+    fenced_reference_section,
     investigation_evidence_char_budget,
     retry_evidence_char_budget,
 )
@@ -1625,6 +1628,12 @@ async def _maybe_run_developer_investigation(
     )
     if rendered:
         kwargs["existing_code_context"] = str(kwargs.get("existing_code_context") or "") + rendered
+        # DEVELOPER-PROMPT-FIT-001: optional evidence, re-rendered smaller
+        # when the request does not fit.
+        kwargs["optional_sections"] = tuple(kwargs.get("optional_sections") or ()) + (OptionalSection(
+            "investigation", rendered,
+            lambda budget: render_investigation_evidence(result.evidence, char_budget=budget * 4),
+        ),)
 
 
 # A full-file answer is expected to be about the current file's size plus
@@ -1980,6 +1989,26 @@ def _chain_binding(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
     return next((fallback for fallback in ctx.chain if fallback.model == model_override), None)
 
 
+def _developer_optional_sections(
+    ctx: "AttemptContext", graph_context: str, graph_exclude: Any, learned_reference: str,
+) -> Tuple[OptionalSection, ...]:
+    """The optional sections an attempt branch placed in its Developer
+    context (DEVELOPER-PROMPT-FIT-001): the graph context, rebuilt smaller
+    from the same candidates when the request does not fit, and the fenced
+    learned reference, trimmed at whole entries."""
+    sections: List[OptionalSection] = []
+    if graph_context:
+        sections.append(OptionalSection("graph_context", graph_context, lambda budget: build_code_context(
+            _filtered_candidates(ctx.matched_files, graph_exclude),
+            _filtered_candidates(ctx.related_files, graph_exclude),
+            ctx.worktree_path, budget, cache=ctx.source_cache,
+        )))
+    reference = fenced_reference_section(learned_reference)
+    if reference is not None:
+        sections.append(reference)
+    return tuple(sections)
+
+
 async def _run_developer_generation(
     state: GenerationState, ctx: "AttemptContext", **kwargs,
 ) -> List[Dict[str, str]]:
@@ -2003,6 +2032,12 @@ async def _run_developer_generation_as_developer(
         state, ctx, file_count=file_count, active_model=active_model,
     )
     await _maybe_run_developer_investigation(state, ctx, kwargs, active_model)
+    # DEVELOPER-PROMPT-FIT-001: every request is fitted into the capacity of
+    # the binding it is sent to, its optional sections shrinking first.
+    kwargs["request_fit"] = DeveloperRequestFit(
+        ctx.kernel.config, _chain_binding(ctx, kwargs.get("model_override")),
+        kwargs.pop("optional_sections", None) or (),
+    )
     if "expected_output_by_file" not in kwargs:
         kwargs["expected_output_by_file"] = _grounded_output_expectations(
             ctx, kwargs.get("known_target_files"), _chain_binding(ctx, kwargs.get("model_override")),
@@ -2480,7 +2515,7 @@ def _materialize_candidate_content(
 async def _run_coordinated_repair_generation(
     state: "GenerationState", ctx: "AttemptContext", contract: Any,
     base_code_context: str, stream_callback: Optional[Callable[[str], None]],
-    attempt_operation: Any,
+    attempt_operation: Any, optional_sections: Tuple[OptionalSection, ...] = (),
 ) -> Tuple[List[Dict[str, str]], Dict[str, str]]:
     """MA9 (2026-08-29): the coordinated counterpart to a single
     _run_developer_generation(known_target_files=state.last_implicated_files)
@@ -2583,6 +2618,7 @@ async def _run_coordinated_repair_generation(
             ))
             file_results = await _run_developer_generation(
                 state, ctx,
+                optional_sections=optional_sections,
                 task_description=task_desc,
                 design_context=ctx.design,
                 existing_code_context=active_code_context,
@@ -5923,6 +5959,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
             files, coordinated_candidate_view = await _run_coordinated_repair_generation(
                 state, ctx, active_repair_contract, base_code_context, dev_stream, attempt_operation,
+                optional_sections=_developer_optional_sections(
+                    ctx, current_graph_context, _graph_exclude, learned_reference),
             )
             # PRV-06 completion (2026-08-29): active_code_context was
             # previously left UNASSIGNED on this branch - live-reproduced
@@ -6039,6 +6077,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
                 files = await _run_developer_generation(
                     state, ctx,
+                    optional_sections=_developer_optional_sections(
+                        ctx, current_graph_context, _graph_exclude, learned_reference),
                     task_description=task_desc,
                     design_context=(task_desc if use_api_contract_recovery else ctx.design),
                     existing_code_context=active_code_context,
@@ -6136,6 +6176,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
         files = await _run_developer_generation(
             state, ctx,
+            optional_sections=_developer_optional_sections(
+                ctx, current_graph_context, _graph_exclude, learned_reference),
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -6224,6 +6266,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
         files = await _run_developer_generation(
             state, ctx,
+            optional_sections=_developer_optional_sections(
+                ctx, current_graph_context, _graph_exclude, learned_reference),
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -6518,6 +6562,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
             files = await _run_developer_generation(
                 state, ctx,
+                optional_sections=_developer_optional_sections(
+                    ctx, current_graph_context, _graph_exclude, learned_reference),
                 task_description=task_desc,
                 design_context=ctx.design,
                 existing_code_context=active_code_context,
