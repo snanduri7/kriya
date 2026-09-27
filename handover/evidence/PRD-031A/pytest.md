@@ -40,3 +40,13 @@ Verdict: VERIFIED_BY_PYTEST. Live-model: NOT_REQUIRED. The real pinned-scanner t
 - fixture rule-pack digest `6abc9d9e…fee591` (tests/fixtures/static_analysis/semgrep/1.178.0/manifest.json).
 
 **Final verdict: VERIFIED.**
+
+## Final focused rerun (user-run, 2026-09-27, at 35cb6c6, venv `bin` on PATH)
+
+| Gate | Result |
+|---|---|
+| Focused command from the handover | **1829 passed, 0 failed**, 145 warnings |
+
+This result **supersedes** the focused row of the table above (1828 passed, 1 failed). That earlier run was contaminated by the environment: the agent's tool shell had no `python`/`pip` on PATH. It is kept above as historical evidence and is not deleted. Between 85bf3d5 and 35cb6c6 only evidence and handover files changed, so this rerun covers the same code as the full run.
+
+**PRD-031A status: VERIFIED.**
