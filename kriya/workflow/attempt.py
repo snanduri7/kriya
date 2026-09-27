@@ -79,6 +79,7 @@ from kriya.workflow.context_budget import (
     developer_reference,
     fenced_reference_section,
     investigation_evidence_char_budget,
+    request_capacity,
     retry_evidence_char_budget,
 )
 from kriya.workflow.context_package import ContextItem, make_context_item
@@ -1606,6 +1607,13 @@ async def _maybe_run_developer_investigation(
         api_key_override=kwargs.get("api_key_override"),
         extra_body_override=kwargs.get("extra_body_override"),
         attempt_number=state.attempt_number,
+        # DEVELOPER-AUX-LOOP-PROMPT-FIT-001: the same fit the Developer
+        # request gets - the binding it goes to and the optional sections
+        # placed in existing_code_context.
+        request_fit=DeveloperRequestFit(
+            ctx.kernel.config, _chain_binding(ctx, kwargs.get("model_override")),
+            kwargs.get("optional_sections") or (),
+        ),
     )
     state.investigation_turns_used_by_attempt[state.attempt_number] = used_so_far + result.turns_used
     for event in result.events:
@@ -8142,6 +8150,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     authorized_semantic_regions=ctx.authorized_semantic_regions,
                     strict_existing_java_files=ctx.kernel.config.autonomy.semantic_region_enforcement_required,
                     baseline_contents=state.all_original_contents,
+                    # DEVELOPER-AUX-LOOP-PROMPT-FIT-001: the primary Developer
+                    # binding's request capacity bounds every turn.
+                    request_capacity=request_capacity(ctx.kernel.config),
                 ))
                 _record_self_correction_scope_conflict(
                     state, ctx, self_correction_result, "compile",
@@ -9085,6 +9096,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 authorized_semantic_regions=ctx.authorized_semantic_regions,
                                 strict_existing_java_files=ctx.kernel.config.autonomy.semantic_region_enforcement_required,
                                 baseline_contents=state.all_original_contents,
+                                request_capacity=request_capacity(ctx.kernel.config),
                             ))
                             _record_self_correction_scope_conflict(
                                 state, ctx, self_correction_result, "run_verification",

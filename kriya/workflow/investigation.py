@@ -59,6 +59,7 @@ from kriya.config.config import ModelCapabilities
 from kriya.core.llm import LLMClient
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import AuthorizedFileReader
+from kriya.workflow.context_budget import conversation_tokens
 from kriya.workflow.context_package import ContextItem, make_context_item
 from kriya.workflow.context_source import (
     CurrentSourceResolver,
@@ -839,6 +840,7 @@ async def run_investigation_loop(
     api_key_override: Optional[str] = None,
     extra_body_override: Optional[Dict[str, Any]] = None,
     attempt_number: int = 0,
+    request_fit: Optional[Any] = None,
 ) -> InvestigationLoopResult:
     """The bounded turn-loop (section 1). Protocol selection reads
     capabilities.native_tool_calls directly (resolved by the caller via
@@ -877,7 +879,15 @@ async def run_investigation_loop(
     max_turns' own default moved from 4 to 10) precisely because the loop
     now stops on its own the moment it has what it needs, so a higher
     ceiling costs nothing in the common case and only helps the case where
-    evidence is still genuinely improving turn over turn."""
+    evidence is still genuinely improving turn over turn.
+
+    ``request_fit`` (DEVELOPER-AUX-LOOP-PROMPT-FIT-001: the same
+    context_budget.DeveloperRequestFit the attempt's Developer request uses -
+    its binding's capacity and the optional sections placed in
+    existing_code_context): the first request is fitted like a Developer
+    request (optional sections shrink first; mandatory text is never
+    trimmed), and no later turn is sent whose conversation no longer fits -
+    the loop ends with terminal_reason REQUEST_FULL instead."""
     if max_turns <= 0:
         return InvestigationLoopResult(turns_used=0, terminal_reason="BUDGET_EXHAUSTED")
 
@@ -888,21 +898,36 @@ async def run_investigation_loop(
     terminal_reason = "PROPOSE"
 
     use_native = bool(capabilities.native_tool_calls)
+    system_prompt = _native_system_prompt() if use_native else _marker_system_prompt()
+    first_message = _initial_user_message(task_description, design_context, existing_code_context, known_target_files)
+    capacity = request_fit.capacity() if request_fit is not None else None
+    if request_fit is not None:
+        # The tool schemas are part of every native request's fixed cost
+        # (token_budget.dispatch_text counts them after the messages).
+        fixed = system_prompt + ("\n" + json.dumps(list(INVESTIGATION_TOOLS), sort_keys=True) if use_native else "")
+        first_message, fit_details = request_fit.fit(fixed, first_message)
+        if fit_details:
+            events.append(RunEvent(
+                kind="context.request_fit", attempt=attempt_number, source="investigation.run_investigation_loop",
+                authority=EventAuthority.ADVISORY,
+                message="Investigation request: optional context reduced to fit the request",
+                details={**fit_details, "request": "investigation"},
+            ))
     messages: List[Dict[str, Any]] = []
     transcript = ""
     if use_native:
-        messages = [
-            {"role": "system", "content": _native_system_prompt()},
-            {"role": "user", "content": _initial_user_message(
-                task_description, design_context, existing_code_context, known_target_files,
-            )},
-        ]
+        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": first_message}]
     else:
-        transcript = _initial_user_message(
-            task_description, design_context, existing_code_context, known_target_files,
-        )
+        transcript = first_message
 
     for turn in range(max_turns):
+        if capacity is not None and conversation_tokens(
+            capacity,
+            messages if use_native else [{"role": "system", "content": system_prompt}, {"role": "user", "content": transcript}],
+            list(INVESTIGATION_TOOLS) if use_native else None,
+        ) > capacity.tokens:
+            terminal_reason = "REQUEST_FULL"
+            break
         turns_used = turn + 1
         try:
             if use_native:

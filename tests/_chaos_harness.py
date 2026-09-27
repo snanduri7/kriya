@@ -32,7 +32,7 @@ import os
 import re
 import stat
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
@@ -399,6 +399,9 @@ class ChaosRuntime(FakeRuntimeAdapter):
         self.roles: List[str] = []
 
     def _next(self, request: ChatRequest) -> ChatResponse:
+        # A snapshot: callers keep appending to the same messages list after
+        # the call, and a request is what was sent, not what came later.
+        request = replace(request, messages=[dict(message) for message in request.messages])
         self.requests.append(request)
         role = role_of(request)
         self.roles.append(role)

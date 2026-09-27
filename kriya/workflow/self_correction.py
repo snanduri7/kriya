@@ -39,6 +39,7 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.tools.resolver import resolve_maven_class
 from kriya.tools.validate import PolymorphicValidator, get_pom_dependencies
+from kriya.workflow.context_budget import conversation_tokens
 from kriya.workflow.edit_safety import (
     FileRevisionConflict,
     apply_anchored_edits,
@@ -586,6 +587,7 @@ async def run_self_correction_loop(
     authorized_semantic_regions: Sequence[AuthorizedSemanticRegion] = (),
     strict_existing_java_files: bool = False,
     baseline_contents: Optional[Dict[str, str]] = None,
+    request_capacity: Optional[Any] = None,
 ) -> SelfCorrectionResult:
     """Runs up to max_turns of native tool-calling against the given llm,
     trying to fix a real failure using small-argument tools: the original 4
@@ -615,7 +617,13 @@ async def run_self_correction_loop(
     correctness stays owned by attempt.py's own run-verification cycle on
     the next attempt, this loop only fixes the INFRASTRUCTURE-shaped cause
     (wrong classpath, missing class, wrong sourceDirectory) that made the
-    run fail for a reason that was never really about application logic."""
+    run fail for a reason that was never really about application logic.
+
+    ``request_capacity`` (DEVELOPER-AUX-LOOP-PROMPT-FIT-001: the
+    RequestCapacity of the binding the loop calls): no request is sent whose
+    conversation no longer fits it; the loop ends there (resolved=False,
+    incident "request_full") - the same "as if it never ran" contract as any
+    other early end, never a request the dispatch check must refuse."""
     validation_tool_name = "retest" if target_test else "recompile"
     writable_file_set = set(files_in_scope if writable_files is None else writable_files)
     if target_test:
@@ -663,6 +671,14 @@ async def run_self_correction_loop(
 
     turns_used = 0
     for turn in range(max_turns):
+        if request_capacity is not None and conversation_tokens(request_capacity, messages, tools) > request_capacity.tokens:
+            logger.info("Self-correction loop: the conversation no longer fits its request; stopping (request_full).")
+            return SelfCorrectionResult(
+                resolved=False, turns_used=turns_used, final_compile_output=last_compile_output,
+                modified_files=modified_files, transcript=transcript,
+                incidents=[{"source": "self_correction", "type": "request_full",
+                            "message": f"conversation exceeds the request capacity ({request_capacity.tokens} tokens)"}],
+            )
         turns_used = turn + 1
         try:
             result = await llm.complete_with_tools(

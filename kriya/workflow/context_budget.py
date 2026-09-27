@@ -777,7 +777,7 @@ def fit_reference_section(capacity: RequestCapacity, fixed_texts: Sequence[str],
 
 def fit_planner_request(
     capacity: RequestCapacity, *, system_prompt: str, head: str, skills_prompt: str, graph_context: str,
-    reference: str, suffix: str, rebuild_graph: Callable[[int], Tuple[str, Any]],
+    reference: str, suffix: str, rebuild_graph: Callable[[int], Tuple[str, Any]], request: str = "planner",
 ) -> Tuple[str, Dict[str, Any]]:
     """The direct Planner request (PROMPT-BUDGET-FIT-001A): ``head`` (goal,
     error, repository model) + skills + graph context + fenced reference +
@@ -808,12 +808,26 @@ def fit_planner_request(
     details: Dict[str, Any] = {}
     if graph_text != graph_context or ref_text != fenced:
         details = {
-            "request": "planner",
+            "request": request,
             "graph": graph.to_dict() if graph is not None else None,
             "graph_omitted_files": omitted_files,
             "reference": ref.to_dict() if ref is not None else None,
         }
     return head + skills_prompt + graph_text + ref_text + suffix, details
+
+
+def conversation_tokens(capacity: RequestCapacity, messages: Sequence[Dict[str, Any]],
+                        tools: Optional[Sequence[Dict[str, Any]]] = None) -> int:
+    """What the dispatch check counts for a multi-turn request, comparable to
+    ``capacity.tokens``: every message's content, tool calls and tool
+    results plus the tool schemas (token_budget.dispatch_text), and the
+    framing of each message beyond the two RequestCapacity already reserves
+    (DEVELOPER-AUX-LOOP-PROMPT-FIT-001)."""
+    from kriya.core.token_budget import PER_MESSAGE_OVERHEAD_TOKENS, dispatch_text
+
+    extra_messages = max(0, len(messages) - 2)
+    return capacity.count(dispatch_text(list(messages), list(tools) if tools else None)) + \
+        PER_MESSAGE_OVERHEAD_TOKENS * extra_messages
 
 
 @dataclass(frozen=True)

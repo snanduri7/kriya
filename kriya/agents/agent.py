@@ -917,7 +917,8 @@ class ArchitectAgent(BaseAgent):
         )
 
     async def run_with_file_list(
-        self, prompt: str, stream_callback: Optional[Callable[[str], None]] = None
+        self, prompt: str, stream_callback: Optional[Callable[[str], None]] = None,
+        candidate_prompt: Optional[Callable[[Any], str]] = None,
     ) -> Tuple[str, Optional[List[str]]]:
         """Runs the Architect and additionally extracts+validates its structured
         file list (kriya/agents/contracts.py) - the one part of the design
@@ -934,7 +935,7 @@ class ArchitectAgent(BaseAgent):
         (kriya/workflow/workflow.py) has an older, heuristic fallback
         (extract_expected_files/_resolve_file_paths_from_design) for exactly
         this case, kept specifically as this method's safety net, not removed."""
-        design = await self.run(prompt, stream_callback=stream_callback)
+        design = await self.run(prompt, stream_callback=stream_callback, candidate_prompt=candidate_prompt)
         files, err = parse_file_list(design)
         if files is None:
             logger.warning(f"Architect file list didn't validate ({err}) - caller will fall back to heuristic extraction.")

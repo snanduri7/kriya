@@ -2984,7 +2984,8 @@ class WorkflowEngine:
         _record_requirement_lineage("plan", plan)
 
         # 3. Architect
-        design_prompt = f"Plan:\n{plan}\n\nWorkspace Context:\n{repo_context}" + convention_prompt
+        design_head = f"Plan:\n{plan}\n\nWorkspace Context:\n{repo_context}"
+        design_prompt = design_head + convention_prompt
         if requirement_set is not None:
             # PRD-020: the Architect otherwise sees only the Planner's prose,
             # so a requirement the plan dropped would never reach the design.
@@ -3016,10 +3017,38 @@ class WorkflowEngine:
             _log_phase_banner("ARCHITECTURE")
             logger.info("Architect Agent defining interface designs...")
             architect_stream = (lambda token: stream_callback("Architect Design", token)) if stream_callback else None
+            # ARCHITECT-PROMPT-FIT-001: the same fit as the Planner's request
+            # (convention_prompt is skills + graph + fenced reference) - the
+            # graph context, then the untrusted reference, get the room the
+            # plan, the repository model and every mandatory block leave, for
+            # each role candidate's own request.
+            design_suffix = design_prompt[len(design_head) + len(convention_prompt):]
+
+            def architect_prompt_for(capacity: Any, candidate: Any) -> str:
+                fitted, design_fit = fit_planner_request(
+                    capacity, system_prompt=self.architect.system_prompt, head=design_head,
+                    skills_prompt=skills_prompt, graph_context=graph_rag_context, reference=reference_context,
+                    suffix=design_suffix, request="architect",
+                    rebuild_graph=lambda budget: build_code_context_package(
+                        graph_retrieval_result.matched_files, graph_retrieval_result.related_files,
+                        workspace_path, budget, file_scores=graph_retrieval_result.file_scores,
+                    ),
+                )
+                if design_fit:
+                    state.record_event(RunEvent(
+                        kind="context.request_fit", attempt=0, source="workflow",
+                        authority=EventAuthority.ADVISORY,
+                        message="Architect request: graph context or reference text reduced to fit the request",
+                        details={**design_fit, "model": candidate_model(self.kernel.config, candidate)},
+                    ))
+                return fitted
+
+            architect_prompts = CandidatePrompts(self.kernel.config, self.architect, "architect", architect_prompt_for)
             _architect_started = time.monotonic()
             design, architect_files = await self.architect.run_with_file_list(
-                design_prompt,
-                stream_callback=architect_stream
+                architect_prompts.first(),
+                stream_callback=architect_stream,
+                candidate_prompt=architect_prompts,
             )
             # R1 Deliverable 5 - observational only, same posture as the
             # Planner wrapper immediately above.
