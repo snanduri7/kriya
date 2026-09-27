@@ -2407,12 +2407,13 @@ class WorkflowEngine:
         except Exception as ex:
             logger.warning(f"Failed to query Learned Knowledge RAG: {ex}")
             
-        if learned_rag_context:
-            convention_prompt += learned_rag_context
         # AUTH-GOAL-CONTAMINATION-001: the caller's retrieved reference text
         # is model context only, fenced like learned knowledge; `goal` (the
         # authority for requirements, scope, contracts and exits) never sees it.
-        convention_prompt += fence_untrusted_reference(reference_context)
+        # It travels in the learned-reference slot, so the Developer reads it
+        # too (budgeted by allocate_context_budget), not only Planner/Architect.
+        learned_rag_context += fence_untrusted_reference(reference_context)
+        convention_prompt += learned_rag_context
 
         # Fingerprints for any checkpoint saved during this run - computed once,
         # goal/workspace/config are all fixed for the remainder of the call.

@@ -145,6 +145,20 @@ async def test_retrieved_reference_text_never_reaches_an_authority_decision(tmp_
 
 
 @pytest.mark.asyncio
+async def test_the_developer_reads_the_reference_context_once_fenced(tmp_path):
+    """The docstring promise "shown to Planner, Architect and Developer":
+    the Developer's only reference slot is ``learned_rag_context`` (budgeted
+    with the prompt). f3707c4 left the Developer without it. It holds the
+    text exactly once, fenced, and the Planner prompt does not repeat it."""
+    contexts, prompts, _ = await _run_with_reference(tmp_path, USER_GOAL, HOSTILE)
+    assert contexts, "the run never reached an attempt"
+    for attempt_ctx in contexts:
+        assert attempt_ctx.learned_rag_context == fence_untrusted_reference(HOSTILE)
+        assert HOSTILE not in attempt_ctx.skills_prompt
+    assert prompts[0].count(UNTRUSTED_REFERENCE_BEGIN) == 1
+
+
+@pytest.mark.asyncio
 async def test_a_user_declared_exit_admits_only_its_code_whatever_retrieval_says(tmp_path):
     goal = "The program should reject the invalid input by exiting with code 2."
     contexts, _, _ = await _run_with_reference(
