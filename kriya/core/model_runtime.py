@@ -32,7 +32,7 @@ import threading
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +165,46 @@ def without_context_window(extra_body: Optional[Dict[str, Any]]) -> Dict[str, An
     return body
 
 
+def requested_context_window(extra_body: Optional[Dict[str, Any]], declared: Optional[int]) -> Optional[int]:
+    """The context window Kriya requests for a binding
+    (FALLBACK-CONTEXT-WINDOW-001): an explicit provider option in its
+    ``extra_body`` wins, deterministically; otherwise its declared,
+    provider-neutral ``context_window``. The one definition every budget,
+    fingerprint, qualification and request uses, so the window Kriya budgets
+    is the window it asks the runtime to serve."""
+    explicit = configured_context_window(extra_body)
+    if explicit is not None:
+        return explicit
+    return int(declared) if isinstance(declared, int) and declared > 0 else None
+
+
+def request_extra_body(extra_body: Optional[Dict[str, Any]], declared: Optional[int]) -> Optional[Dict[str, Any]]:
+    """``extra_body`` as sent: carrying the requested window in the
+    runtime's own request representation (a copy when it has to be added;
+    ``extra_body`` itself when it already carries it or nothing is declared).
+    Config authors declare ``context_window`` once; this adapter translates it."""
+    window = requested_context_window(extra_body, declared)
+    if window is None or configured_context_window(extra_body) == window:
+        return extra_body
+    return with_context_window(extra_body, window)
+
+
+def context_window_overrides(config: Any) -> List[Dict[str, Any]]:
+    """Bindings whose explicit provider option differs from an explicitly
+    declared ``context_window``: the provider option is what is requested
+    and budgeted (requested_context_window); this lists the ignored
+    declaration so an operator sees it."""
+    overrides = []
+    for binding in _all_bindings(config):
+        explicit = configured_context_window(getattr(binding, "extra_body", None))
+        declared = getattr(binding, "context_window", None)
+        if (explicit is not None and "context_window" in getattr(binding, "model_fields_set", ())
+                and declared != explicit):
+            overrides.append({"model": binding.model, "declared_context_window": declared,
+                              "requested_context_window": explicit})
+    return overrides
+
+
 def supports_per_request_context_window(fingerprint: "ModelRuntimeFingerprint") -> bool:
     """Whether this exact runtime takes its context window per request (so a
     PRD-016 context tier can be selected for one request)."""
@@ -287,7 +327,9 @@ def probe_model_runtime(
         alias=(model or "").strip(),
         endpoint=endpoint_identity(base_url),
         configured_context_window=configured_context,
-        effective_context_window=configured_context,
+        # Served window: only what the runtime itself reports (below). A
+        # requested window is not evidence that it is served.
+        effective_context_window=None,
         kriya_protocol=kriya_protocol,
     )
     if transport is None:
@@ -433,15 +475,17 @@ def resolve_configured_model_runtime(config: Any, model: Optional[str] = None, *
     """The fingerprint of ``model`` (default: the primary model) as this
     configuration would call it."""
     model = model or config.llm.model
+    binding = _binding_for(config, model)
     if base_url is None or extra_body is None:
-        binding = _binding_for(config, model)
         base_url = base_url or binding.get("base_url") or config.llm.base_url
         api_key = api_key if api_key is not None else binding.get("api_key", config.llm.api_key)
         extra_body = extra_body if extra_body is not None else binding.get("extra_body", config.llm.extra_body)
     return resolve_model_runtime(
         base_url=base_url, model=model, api_key=api_key or "",
         egress_policy=config.autonomy.egress_policy,
-        configured_context=configured_context_window(extra_body),
+        # The window this binding's requests carry (its declared window
+        # unless extra_body overrides it); none for the embedding model.
+        configured_context=requested_context_window(extra_body, binding.get("context_window")),
         kriya_protocol=kriya_protocol_identity(config, model), fresh=fresh, config=config,
     )
 
@@ -478,24 +522,34 @@ def binding_output_tokens(config: Any, binding: Any = None) -> int:
     return int(value) if value is not None else DEFAULT_OUTPUT_TOKENS
 
 
-def _binding_for(config: Any, model: str) -> Dict[str, Any]:
-    target = (model or "").casefold()
-    if config.llm.model.casefold() == target:
-        return {"base_url": config.llm.base_url, "api_key": config.llm.api_key, "extra_body": config.llm.extra_body}
-    candidates = list(config.llm_chain)
+def _all_bindings(config: Any) -> List[Any]:
+    """Every configured model binding, in lookup order: the primary llm,
+    llm_chain, then each agent_llms role's llm and llm_chain."""
+    bindings = [config.llm, *config.llm_chain]
     for role in ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance"):
         role_cfg = getattr(config.agent_llms, role, None)
         if role_cfg is None:
             continue
         if role_cfg.llm is not None:
-            candidates.append(role_cfg.llm)
-        candidates.extend(role_cfg.llm_chain)
-    for candidate in candidates:
+            bindings.append(role_cfg.llm)
+        bindings.extend(role_cfg.llm_chain)
+    return bindings
+
+
+def _binding_for(config: Any, model: str) -> Dict[str, Any]:
+    """The first binding of ``model`` (exact, case-folded); empty for a
+    model no chat binding names (the embedding model)."""
+    target = (model or "").casefold()
+    if config.llm.model.casefold() == target:
+        return {"base_url": config.llm.base_url, "api_key": config.llm.api_key, "extra_body": config.llm.extra_body,
+                "context_window": config.llm.context_window}
+    for candidate in _all_bindings(config)[1:]:
         if candidate.model.casefold() == target:
             return {
                 "base_url": candidate.base_url,
                 "api_key": getattr(candidate, "api_key", config.llm.api_key),
                 "extra_body": getattr(candidate, "extra_body", {}) or {},
+                "context_window": getattr(candidate, "context_window", None),
             }
     return {}
 
@@ -545,9 +599,9 @@ def load_recorded_fingerprint(digest: str, config: Any = None) -> Optional[Dict[
 __all__ = [
     "EXACT_REQUIRED_COMPONENTS", "FINGERPRINT_SCHEMA_VERSION", "MODEL_PROTOCOL_ADAPTER_VERSION",
     "ModelRuntimeFingerprint", "PROBE_ENV_VAR", "UNAVAILABLE", "clear_model_runtime_cache",
-    "CONTEXT_WINDOW_REQUEST_OPTION", "configured_context_window", "endpoint_identity", "fingerprint_store_dir",
-    "kriya_protocol_identity", "supports_per_request_context_window", "with_context_window",
-    "without_context_window",
+    "CONTEXT_WINDOW_REQUEST_OPTION", "configured_context_window", "context_window_overrides", "endpoint_identity",
+    "fingerprint_store_dir", "kriya_protocol_identity", "request_extra_body", "requested_context_window",
+    "supports_per_request_context_window", "with_context_window", "without_context_window",
     "load_recorded_fingerprint", "probe_model_runtime", "probing_enabled", "record_fingerprint",
     "resolve_configured_model_runtime", "resolve_model_runtime",
 ]

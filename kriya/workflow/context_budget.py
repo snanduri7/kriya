@@ -604,10 +604,12 @@ def allocation_window(config: Any, binding: Any = None) -> int:
     same served window, output budget and counting ratio LLMClient's dispatch
     check uses for that call (kriya/core/llm.py::complete_result)."""
     from kriya.core.llm import REASONING_MIN_MAX_TOKENS
-    from kriya.core.model_runtime import binding_output_tokens
+    from kriya.core.model_runtime import binding_output_tokens, requested_context_window
 
     binding = binding if binding is not None else config.llm
-    window = binding.context_window
+    # The window this binding's requests carry (FALLBACK-CONTEXT-WINDOW-001),
+    # replaced below by the window the runtime reports serving, when known.
+    window = requested_context_window(binding.extra_body, binding.context_window)
     ratio = None
     try:
         from kriya.core.inference_settings import binding_inference_settings

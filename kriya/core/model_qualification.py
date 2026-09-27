@@ -1062,7 +1062,11 @@ async def run_qualification(
     from kriya.core.inference_settings import role_inference_settings
     from kriya.core.llm import LLMClient
     from kriya.core.model_capabilities import capabilities_for_model
-    from kriya.core.model_runtime import _binding_for, configured_context_window, resolve_configured_model_runtime
+    from kriya.core.model_runtime import (
+        _binding_for,
+        requested_context_window,
+        resolve_configured_model_runtime,
+    )
 
     model = model or config.llm.model
     settings = settings or role_inference_settings(config, "developer", model)
@@ -1089,9 +1093,11 @@ async def run_qualification(
     ctx: Dict[str, Any] = {
         "native_tool_calls_enabled": capabilities_for_model(config, model).native_tool_calls,
         "client_factory": client_factory or default_factory,
+        # qualification_config put the requested window into extra_body.
         "extra_body": config.llm.extra_body,
         "base_url": (_binding_for(config, model).get("base_url") or config.llm.base_url),
-        "context_window": fingerprint.effective_context_window or configured_context_window(config.llm.extra_body),
+        "context_window": (fingerprint.effective_context_window
+                           or requested_context_window(config.llm.extra_body, config.llm.context_window)),
     }
     wanted = set(only) if only else None
     results: List[CaseResult] = []
@@ -1114,13 +1120,13 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
     reasoning flag and extra_body qualified; LLMClient otherwise sends the
     primary binding's), and a strict budget policy so no case is itself sent
     with a different window."""
-    from kriya.core.model_runtime import binding_object, configured_context_window, with_context_window
+    from kriya.core.model_runtime import binding_object, requested_context_window, with_context_window
 
     copy = config.model_copy(deep=True)
     binding = binding_object(copy, model) or copy.llm
     if settings is not None:
         # Keep the binding's own context window: it is the runtime input, not a setting.
-        window = configured_context_window(getattr(binding, "extra_body", None))
+        window = requested_context_window(getattr(binding, "extra_body", None), getattr(binding, "context_window", None))
         extra_body = settings.extra_body
         binding.extra_body = with_context_window(extra_body, window) if window is not None else extra_body
         binding.reasoning = settings.reasoning

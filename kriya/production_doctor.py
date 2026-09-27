@@ -97,7 +97,7 @@ def probe_llm_runtime(cfg: AppConfig) -> Dict[str, Any]:
     """Connectivity plus the PRD-013 exact runtime fingerprint of the primary
     model, probed fresh (never from the per-process cache)."""
     from kriya.core.llm import EgressViolationError, is_local_url
-    from kriya.core.model_runtime import configured_context_window, kriya_protocol_identity, probe_model_runtime
+    from kriya.core.model_runtime import kriya_protocol_identity, probe_model_runtime, requested_context_window
 
     if cfg.autonomy.egress_policy == "local_only" and not is_local_url(cfg.llm.base_url):
         # PRD-012: never probe (or send the API key to) a refused endpoint.
@@ -110,7 +110,7 @@ def probe_llm_runtime(cfg: AppConfig) -> Dict[str, Any]:
     runtime = probe_model_runtime(
         base_url=cfg.llm.base_url, model=cfg.llm.model, api_key=cfg.llm.api_key,
         egress_policy=cfg.autonomy.egress_policy,
-        configured_context=configured_context_window(cfg.llm.extra_body),
+        configured_context=requested_context_window(cfg.llm.extra_body, cfg.llm.context_window),
         kriya_protocol=kriya_protocol_identity(cfg, cfg.llm.model),
         transport=lambda url, payload, api_key: _json_request(url, api_key=api_key, payload=payload),
     )
@@ -771,10 +771,16 @@ def _check_model_connectivity(ctx: _Context) -> DoctorCheck:
 def _check_runtime_fingerprint(ctx: _Context) -> DoctorCheck:
     """PRD-013: PASS when the primary model's runtime is exact (artifact
     digest and provider version reported); every component is evidence."""
+    from kriya.core.model_runtime import context_window_overrides
+
     runtime = ctx.runtime_probe.get("runtime")
+    # FALLBACK-CONTEXT-WINDOW-001: a declared window an explicit provider
+    # option overrides (the option is what is requested and budgeted).
+    overrides = context_window_overrides(ctx.cfg)
     if runtime is not None and runtime.exact:
         return _check("model.runtime_fingerprint", CheckStatus.PASS, evidence={
             "model": ctx.cfg.llm.model, "fingerprint": runtime.digest, "runtime": runtime.to_dict(),
+            "context_window_overrides": overrides,
         })
     return _check(
         "model.runtime_fingerprint",
@@ -784,6 +790,7 @@ def _check_runtime_fingerprint(ctx: _Context) -> DoctorCheck:
             "fingerprint": None,
             "runtime": runtime.to_dict() if runtime is not None else None,
             "reason_code": RUNTIME_FINGERPRINT_NOT_COMPUTABLE,
+            "context_window_overrides": overrides,
         },
         remediation=(
             "Use a local endpoint exposing exact model metadata (Ollama /api/version, /api/tags, /api/show) "

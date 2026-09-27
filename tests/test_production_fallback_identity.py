@@ -31,8 +31,9 @@ def test_the_production_fallback_resolves_to_the_proven_qwen36_identity():
     # One reasoning control: the provider's reasoning_effort. Kriya's own
     # reasoning flag (a budget hint only) stays at its default.
     assert settings.reasoning is False and binding.reasoning is False
-    # num_ctx is runtime identity, not an inference setting, but it must be
-    # sent: a fallback's window reaches the provider only through extra_body.
+    # num_ctx is runtime identity, not an inference setting. It equals the
+    # declared window, so the request body (and the runtime digest the
+    # QUALIFIED record was made with) is unchanged by FALLBACK-CONTEXT-WINDOW-001.
     assert settings.extra_body == {"options": {"top_k": 20, "top_p": 0.8}, "reasoning_effort": "none"}
     assert configured_context_window(binding.extra_body) == 32768 == binding.context_window
 

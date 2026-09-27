@@ -335,7 +335,12 @@ def role_binding(config: Any, role: str) -> Any:
 
 
 def _served_window(fingerprint: Any, binding: Any) -> Optional[int]:
-    return getattr(fingerprint, "effective_context_window", None) or getattr(binding, "context_window", None)
+    """The window the runtime reports serving, else the one requested of it
+    (FALLBACK-CONTEXT-WINDOW-001: an explicit provider option wins)."""
+    from kriya.core.model_runtime import requested_context_window
+
+    return getattr(fingerprint, "effective_context_window", None) or requested_context_window(
+        getattr(binding, "extra_body", None), getattr(binding, "context_window", None))
 
 
 def candidate_evidence(config: Any, role: str, model: str, *, order: int, explicit: bool,
@@ -366,7 +371,7 @@ def candidate_evidence(config: Any, role: str, model: str, *, order: int, explic
         window = _served_window(fingerprint, binding)
         settings_digest: Optional[str] = settings.digest
     except Exception as error:  # an unreachable runtime is simply not eligible
-        exact, digest, status, reasons, window = False, None, "UNAVAILABLE", (str(error),), binding.context_window
+        exact, digest, status, reasons, window = False, None, "UNAVAILABLE", (str(error),), _served_window(None, binding)
         settings_digest = None
     return CandidateEvidence(
         model=model, order=order, runtime_digest=digest, runtime_exact=exact, qualification=status,

@@ -37,11 +37,13 @@ llm:
   api_key: "local-key"                     # Most local servers ignore this; set a real key for remote endpoints
   temperature: 0.3
   max_tokens: 4096
-  context_window: 32768                    # Native model input context window limit, used for context-budget
-                                            # allocation - not sent to the server.
+  context_window: 32768                    # The context window Kriya budgets AND requests: sent to the runtime in
+                                            # its own form (Ollama: options.num_ctx). Declare it once, here.
   extra_body:                              # Passed straight through into the completion request body - backend-
     options:                               # specific sampling knobs live here. For Ollama: num_ctx/top_p/top_k.
-      num_ctx: 32768                       # For a reasoning-capable model served through Ollama's OpenAI-compat
+      num_ctx: 32768                       # Optional: if set it wins over context_window (and doctor reports a
+                                            # differing declared context_window). For a reasoning-capable model
+                                            # served through Ollama's OpenAI-compat
       top_p: 0.8                           # surface, this is also where reasoning_effort/presence_penalty go
       top_k: 20                            # (e.g. {"reasoning_effort": "none"} to force a thinking model into
                                             # non-thinking mode - see docs/kriya_backlog_and_lessons.md).
@@ -389,9 +391,11 @@ The final check before a request leaves Kriya counts the whole dispatch (system 
 schemas and framing). Counting uses an exact tokenizer when one is registered for the runtime's tokenizer (none is by
 default: Ollama 0.34 has no tokenize endpoint and Kriya downloads nothing), else the qualified ratios measured for that
 tokenizer, else a documented approximation (2.5 ASCII bytes and 1.5 non-ASCII bytes per token). Every call records
-which method was used and compares its prediction with the provider's reported usage. The preferred window is the
-served `num_ctx` when known, otherwise `llm.context_window` as a declared assumption; set
-`llm.extra_body.options.num_ctx` so the two agree.
+which method was used and compares its prediction with the provider's reported usage. Every request carries the binding's
+requested window (its `context_window`, or `extra_body.options.num_ctx` when that is set), for the primary and every
+fallback alike, so the window budgeted is the window asked for (FALLBACK-CONTEXT-WINDOW-001). The preferred window is
+the window the runtime reports serving when that is known (`served_num_ctx`; `runtime_capped` when the runtime serves
+less than was requested, for example the model's trained length), otherwise the requested window (`config_declared`).
 
 **Adaptive budget.** The configured window and `max_tokens` are *preferred* values. With
 `llm.context_policy.mode: adaptive` (the default) a request that does not fit its preferred window is sent with the
@@ -1208,7 +1212,7 @@ On by default in the packaged config (`autonomy.spec_compliance_enabled: true` i
 Optimize your local inference engine (Ollama, LM Studio, etc.) to get maximum speed out of Mixtures-of-Experts (MoE) and large reasoning models:
 *   **Lock Memory (`mlock`)**: Set `OLLAMA_MLOCK=1` in your environment. This pins the model weights in your Unified Memory, avoiding swap delays when switching expert branches.
 *   **Pin Thread Count**: `kriya doctor` checks directory/LLM/embedding connectivity and (if Java/Maven are present) toolchain version consistency, but it does not detect CPU cores. Check your system's physical performance-core count yourself (e.g. via `sysctl -n hw.perflevel0.physicalcpu` on Apple Silicon) and pin your inference engine's thread count to match (e.g., 8 threads for M1 Max).
-*   **Configure Context Size (`num_ctx`)**: Ollama defaults to `num_ctx: 2048` or `4096`. You must explicitly configure `num_ctx` to match your model's native context window (e.g. `32768`) in Ollama API calls or your Modelfile, otherwise context chunks will be silently truncated.
+*   **Context Size**: Ollama defaults to `num_ctx: 2048` or `4096`. Kriya sends each model's `context_window` as `num_ctx` on every request, so set `context_window` to the window you want served (e.g. `32768`); a separate `extra_body.options.num_ctx` is optional and, when present, wins.
 
 ---
 

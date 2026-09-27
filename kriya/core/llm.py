@@ -17,6 +17,7 @@ from openai import (
 
 from kriya.config import AppConfig
 from kriya.core.inference_settings import request_settings
+from kriya.core.model_runtime import context_window_overrides, request_extra_body
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType
 
@@ -98,6 +99,12 @@ class LLMClient:
         self.model = config.llm.model
         self.temperature = config.llm.temperature
         self.max_tokens = config.llm.max_tokens
+        for override in context_window_overrides(config):
+            logger.warning(
+                "%s: extra_body sets a %s-token context window, which is requested and budgeted; its declared "
+                "context_window %s is ignored.", override["model"], override["requested_context_window"],
+                override["declared_context_window"],
+            )
         # MA4.3 - audit-only. See _audit_llm_network_access below; this is
         # never consulted for enforcement, only logged.
         self.execution_policy = ExecutionPolicy()
@@ -246,10 +253,18 @@ class LLMClient:
         binding = self._binding(model)
         policy = binding["context_policy"]
         limits = measured_limits_for(fingerprint, self.config, settings=settings) if fingerprint.exact else {}
+        requested = fingerprint.configured_context_window
         if fingerprint.effective_context_window:
             window, source = fingerprint.effective_context_window, "served_num_ctx"
+            if requested and window < requested:
+                # The runtime serves less than was asked (e.g. the model's
+                # trained length): budget what is served, and say so.
+                source = "runtime_capped"
+                logger.warning("%s serves a %d-token context window; %d was requested.", model, window, requested)
         else:
-            window, source = binding.get("context_window"), "config_declared"
+            # Unverified: the window requested of the runtime (sent with
+            # the request), never a window the runtime reported serving.
+            window, source = requested or binding.get("context_window"), "config_declared"
         reasoning = 0
         if is_reasoning:
             reasoning = int(limits.get("reasoning_tokens_max") or DEFAULT_REASONING_ALLOWANCE_TOKENS)
@@ -492,6 +507,10 @@ class LLMClient:
             extra_body = extra_body_override or None
         else:
             extra_body = own["extra_body"]
+        # FALLBACK-CONTEXT-WINDOW-001: the request carries the window the
+        # budget below plans against (the binding's declared context_window,
+        # unless extra_body sets the provider option itself).
+        extra_body = request_extra_body(extra_body, own["context_window"])
         # Reasoning models are NOT excluded from response_format here - Ollama (at
         # least) keeps a reasoning model's <think>-equivalent output in a separate
         # "reasoning" field and json_object-constrains only the "content" field, so
@@ -835,6 +854,10 @@ class LLMClient:
             extra_body = extra_body_override or None
         else:
             extra_body = own["extra_body"]
+        # FALLBACK-CONTEXT-WINDOW-001: the request carries the window the
+        # budget below plans against (the binding's declared context_window,
+        # unless extra_body sets the provider option itself).
+        extra_body = request_extra_body(extra_body, own["context_window"])
 
         self.last_call_metrics = None
         self.last_completion = None
