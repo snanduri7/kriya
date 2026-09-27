@@ -1,7 +1,7 @@
 # PRD-031A Coding Agent Handover
 
 ## Status
-READY_FOR_PYTEST_VERIFICATION (2026-09-27). Not self-certified.
+VERIFIED_BY_PYTEST (2026-09-27), user-run; evidence in handover/evidence/PRD-031A/pytest.md.
 - Live test: REQUIRED. This is the real pinned-scanner tier `-m live_static_analysis` (Semgrep 1.178.0; Docker plus the pinned image for the contained cases).
 - No live-model test.
 

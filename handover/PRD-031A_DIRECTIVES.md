@@ -14,4 +14,4 @@ PRD-031A must stay provider-neutral:
 - local, privacy and egress enforcement;
 - no authority and no waiver created by an LLM.
 
-Status: READY_FOR_PYTEST_VERIFICATION (2026-09-27). Spec: `handover/PRD-031A_TASK.md`; implementation handover: `handover/PRD-031A_CODING_HANDOVER.md`. Priority P1, live test REQUIRED (real pinned-scanner tier, Semgrep 1.178.0; no live-model test).
+Status: VERIFIED_BY_PYTEST (2026-09-27; evidence handover/evidence/PRD-031A/pytest.md). Spec: `handover/PRD-031A_TASK.md`; implementation handover: `handover/PRD-031A_CODING_HANDOVER.md`. Priority P1, live test REQUIRED (real pinned-scanner tier, Semgrep 1.178.0; no live-model test).
