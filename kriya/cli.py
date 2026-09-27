@@ -2861,8 +2861,7 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
             return
 
         click.secho(f"Reviewing {len(files_to_review)} file(s)...", fg="cyan", err=True)
-        from kriya.workflow.context_budget import review_batch_budget
-        from kriya.workflow.review_context import build_review_batches
+        from kriya.workflow.context_budget import review_batches_for_request
 
         # Budget-aware batching (kriya/workflow/review_context.py - shared with the
         # generation workflow's own Reviewer stage). Confirmed live as a real, severe
@@ -2872,7 +2871,6 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
         # received an unlabeled fragment of raw code with no indication it was even
         # being asked to review anything, produced a confused non-review response, and
         # Kriya still reported success (exit 0) with no warning at all.
-        budget = review_batch_budget(cfg)
         file_contents: List[Tuple[str, str]] = []
         for rel, full in files_to_review:
             try:
@@ -2880,18 +2878,6 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
                     file_contents.append((rel, f.read()))
             except Exception as e:
                 click.secho(f"Failed to read file {rel}: {e}", fg="yellow", err=True)
-
-        batches, truncated_relpaths = build_review_batches(file_contents, budget)
-        for rel in truncated_relpaths:
-            # Even this one file alone doesn't fit - keep as many whole chunks as fit
-            # and say so explicitly, both to the model (so it knows it's working from a
-            # partial view, not confidently reviewing what it thinks is the complete
-            # file) and to the user.
-            click.secho(
-                f"Warning: '{rel}' is too large to review in full within the "
-                f"configured context window - reviewing only the portion that fits.",
-                fg="yellow", err=True,
-            )
 
         # Stage 6 SME review, Finding 3 (2026-08-15): unlike the embedded pipeline's
         # Reviewer stage (workflow.py), which always prefixes "Goal: {goal}...", this
@@ -2918,6 +2904,22 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
             "partial file set.\n\n"
         )
 
+        # PROMPT-BUDGET-FIT-001B: each batch gets the room its request leaves
+        # after the Reviewer system prompt and the review header.
+        batches, truncated_relpaths, _ = review_batches_for_request(
+            cfg, reviewer, file_contents, reviewer.system_prompt, review_context_header,
+        )
+        for rel in truncated_relpaths:
+            # Even this one file alone doesn't fit - keep as many whole chunks as fit
+            # and say so explicitly, both to the model (so it knows it's working from a
+            # partial view, not confidently reviewing what it thinks is the complete
+            # file) and to the user.
+            click.secho(
+                f"Warning: '{rel}' is too large to review in full within the "
+                f"configured context window - reviewing only the portion that fits.",
+                fg="yellow", err=True,
+            )
+
         # Repository-aware Java review contract (A1-P1/A1-E2): only for the narrow,
         # unambiguous case of reviewing exactly one .java file whose content fit
         # in a single batch (untruncated/unsplit) - a deterministic member
@@ -2933,6 +2935,8 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
         if (
             len(files_to_review) == 1
             and len(batches) == 1
+            # Its whole content (never the files-omitted note or a cut prefix).
+            and not truncated_relpaths
             and files_to_review[0][0].endswith(".java")
         ):
             from kriya.analyzer.java_members import extract_java_members

@@ -138,6 +138,7 @@ from kriya.workflow.checkpoint import (
     save_checkpoint,
     validate_resume_against_reality,
 )
+from kriya.workflow.context_budget import agent_request_capacity, fit_reference_section
 from kriya.workflow.context_orchestrator import ContextOrchestrator
 from kriya.workflow.context_package import (
     ContextPackage,
@@ -244,7 +245,6 @@ from kriya.workflow.terminal_commit import (
     materialize_candidate,
 )
 from kriya.workflow.triage import ChangeKind
-from kriya.workflow.untrusted_context import fence_untrusted_reference
 from kriya.workflow.verification_report import build_verification_report
 from kriya.workflow.workflow import _log_phase_banner
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport, WorkflowResult
@@ -4206,8 +4206,30 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # decomposition as fenced, untrusted context, appended after every
         # goal-derived section (initial and repair requests alike). Nothing
         # above, and no authority decision, ever reads it.
-        planner_reference = fence_untrusted_reference(legacy_kwargs.get("reference_context", ""))
-        authoritative_planner_request += planner_reference
+        # PROMPT-BUDGET-FIT-001A: fitted into the room each request (the
+        # first one and every repair round) leaves after its system prompt
+        # and every goal-derived section, trimmed at whole entries.
+        raw_reference = legacy_kwargs.get("reference_context", "")
+        planner_capacity_cache: List[Any] = []
+
+        def with_planner_reference(request: str) -> str:
+            if not raw_reference.strip():
+                return request
+            if not planner_capacity_cache:
+                planner_capacity_cache.append(agent_request_capacity(
+                    kernel.config, self.workflow_engine.planner, "planner",
+                    output_tokens=planner_token_cap if isinstance(planner_token_cap, int) else None,
+                ))
+            fit = fit_reference_section(planner_capacity_cache[0], (AUTHORITATIVE_PLANNER_SYSTEM_PROMPT, request),
+                                        raw_reference)
+            if fit.omitted or fit.builds > 1 or fit.value.count("\n[Source: ") < raw_reference.count("\n[Source: "):
+                ledger.record_and_persist(
+                    workspace_path, "context.request_fit", run_id=run_id,
+                    request="structured_planner", reference=fit.to_dict(),
+                )
+            return request + fit.value
+
+        authoritative_planner_request = with_planner_reference(authoritative_planner_request)
         planning_repository_evidence = bounded_repository_evidence(
             workspace_path, planning_repository_candidates,
         )
@@ -4574,7 +4596,8 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     must_preserve=must_preserve,
                     validation_evidence=prompt_validation_evidence,
                     available_tool_names=available_tool_names,
-                ) + planner_reference
+                )
+                repair_prompt = with_planner_reference(repair_prompt)
             try:
                 persist_planning_attempt_diagnostic(
                     workspace_path, run_id,

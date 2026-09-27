@@ -397,6 +397,19 @@ fallback alike, so the window budgeted is the window asked for (FALLBACK-CONTEXT
 the window the runtime reports serving when that is known (`served_num_ctx`; `runtime_capped` when the runtime serves
 less than was requested, for example the model's trained length), otherwise the requested window (`config_declared`).
 
+**Optional context never crowds out a request (PROMPT-BUDGET-FIT-001A/B).** The Planner and Reviewer size their
+optional sections from the room their own request leaves. That room is the window minus the output the request asks
+for (for the Planner, `planner_max_tokens`), framing, the safety margin, and everything the request must carry: the
+system prompt, the goal, the repository model, the required blocks, and the candidate diff and evidence.
+
+For the Planner, the optional sections are retrieved code and learned reference text. For the Reviewer, they are file
+contents. Repository code keeps priority over learned text. What does not fit is cut at whole entries or files, or
+left out, and recorded as a `context.request_fit` event. It is never forced in.
+
+On a small window this is visible. At 8K the Planner's own instructions already fill its room, so it plans without
+retrieved code. Only a request whose mandatory text alone exceeds the window is refused (`CONTEXT_BUDGET_UNSATISFIABLE`;
+for the final review, `final_review_refused`).
+
 **Adaptive budget.** The configured window and `max_tokens` are *preferred* values. With
 `llm.context_policy.mode: adaptive` (the default) a request that does not fit its preferred window is sent with the
 **smallest larger context tier that is qualified** for the exact runtime, and nothing larger:

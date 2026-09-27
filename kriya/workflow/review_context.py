@@ -80,9 +80,10 @@ def build_reviewer_verified_evidence(gate_outcomes: List[Dict[str, Any]]) -> str
 
 def build_review_batches(files: List[Tuple[str, str]], budget: int) -> Tuple[List[str], List[str]]:
     """Chunks and greedily batches (relpath, content) pairs into review-prompt blobs that
-    each fit within `budget` tokens (context_budget.review_batch_budget(): 0.75 of the prompt allocation window, PRD-016
-    workflow.py, via the caller's own estimate_tokens() heuristic - not duplicated here to
-    avoid an import cycle with kriya.workflow.workflow).
+    each fit within `budget` tokens (the room its request leaves:
+    context_budget.review_batches_for_request, PROMPT-BUDGET-FIT-001B), counted with
+    workflow.py's estimate_tokens() heuristic - not duplicated here to avoid an import
+    cycle with kriya.workflow.workflow.
 
     A single oversized file is truncated in place (kept chunks + an explicit "TRUNCATED"
     marker) rather than ever spanning batches - a file's own review always sees a

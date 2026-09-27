@@ -43,3 +43,75 @@ Size each section against the room its own request has left: `allocation_window(
 - Milestone: the plan fails, and it reports the units it leaves committed.
 - The `generate` and `fix` CLI output no longer claims the files were not applied.
 - Tests are in `tests/test_prompt_budget_fit_001c.py` (6 tests). Four of the five scenario tests fail before the fix; the control passes. 9 mutations were run and all were killed.
+
+## 001A + 001B fix (Backlog 6.5, 2026-09-27): FIXED, awaiting the user's pytest run
+**One primitive** (`kriya/workflow/context_budget.py`):
+
+- **`request_capacity(config, binding, role=, output_tokens=)`**: the prompt room of one request, in the dispatch check's own units.
+  - Room = served or requested window − that request's preferred output (at most half the window, with the reasoning floor) − framing − the dispatch safety margin.
+  - The count uses the dispatch counter: an exact tokenizer, else the qualified ratios, else the defaults, non-ASCII included.
+  - `allocation_window` (Developer-shaped) is now this with the Developer's output.
+- **`fit_variable_section(capacity, fixed_texts, build)`**: the section gets `capacity − mandatory fixed text`.
+  - It is built at that room, re-measured, and rebuilt proportionally smaller at most 3 times.
+  - If it still doesn't fit, it is left out. It is never forced in with a floor.
+  - The fixed text is never trimmed, so a genuinely oversized request is still refused before inference.
+
+**Applied to:**
+- **Direct Planner (001A), `fit_planner_request`.**
+  - Fits the graph context first, then the fenced learned reference, trimmed at whole `[Source:]` entries. Repository evidence outranks untrusted text.
+  - The Planner's own binding and `planner_max_tokens` are reserved.
+  - The rebuild reuses `build_code_context_package` at the room, unchanged; the certification identity is untouched.
+  - The retrieval-time graph budget is `min(PRD-016 graph pool, Planner room with what is known so far)`. The pool stays the upper bound because the section is shared with the Architect, so at 32K the Planner prompt is byte-identical (tested).
+- **Enforce structured Planner (001A).** The reference is refitted on the first request and on every repair round; before, a fence built once was re-appended to a longer request. A reduction is recorded as a DecisionLedger `context.request_fit`.
+- **Reviewer (001B), `review_batches_for_request`**, for pre-approval, final and `kriya review`.
+  - Reserves the reviewer binding and its output, the system prompt actually sent (including the rejected-candidate override), the header (goal, candidate diff, gate and ownership evidence) and a batch-label bound. The fixed 0.75 share is gone.
+  - With no room at all, one request carries `REVIEW_FILES_OMITTED_NOTE`. Request count is at most the file count.
+  - `kriya review`'s structured Java path is taken only for a whole, untruncated file.
+- Reductions are `context.request_fit` run events.
+
+**What an 8K run gets** (no qualification record, 2.5 bytes/token; planner_max_tokens 8192 and max_tokens 4096 reserve half the window):
+- The Planner system prompt alone (≈4,350 tokens) exceeds its preferred room (3,816). The Planner therefore plans without graph context or reference, recorded, and dispatches with output reduced.
+- Before the fix the same request was refused: 9,637 prompt tokens in the harness, with the run ending in an exception.
+- At 16K the graph is rebuilt to the room. At 32K nothing changes.
+
+**001C is unchanged.** Its tests force the refusal through a 512-token stand-in, not batch overflow, so they are not made vacuous; re-run green. An oversized header still ends `final_review_refused` (tested end to end).
+
+**Tests:** `tests/test_prompt_budget_fit_001ab.py`, 23 tests:
+- primitive units: room math, no room, non-ASCII rebuild, bounded builds, whole-entry trim, byte-identical when it fits, fence never cut, request count bounded, no-room note, reviewer binding, output and reasoning reserve;
+- end to end through the real engine and dispatch check on a hashing-embedder index of the PRD-027 Java fixture:
+  - 8K baseline (positive control);
+  - 8K Planner omits and sends;
+  - 16K Planner rebuild within capacity;
+  - 32K Planner unchanged;
+  - 8K final review of a failing candidate;
+  - 8K pre-approval cut to room;
+  - 16K final cut to room;
+  - 32K whole files;
+  - an oversized header ends typed, and the primitive plus `LLMClient` refuse;
+- enforce: refit on the first and the repair request; no room leaves it out.
+
+**Pre-fix controls** (the same file run in a worktree at a828a67): 17 fail and 3 pass. The 3 are the baseline and the two 32K "unchanged" tests, which must pass on both trees. Probes at a828a67:
+- the 8K Planner request refused (9,637 tokens);
+- the 8K 50–80-method failing candidate ends `final_review_refused`.
+
+**Mutations: 15 run, all killed.** They covered:
+- ignoring the fixed text;
+- accepting an oversized build;
+- no entry trim;
+- the empty reference not reported omitted;
+- no omitted-files note;
+- no output reserve;
+- no reasoning floor;
+- ignoring the reviewer binding;
+- the reviewer fixed text dropped (unit, final site, pre-approval site, CLI);
+- the Planner fit bypassed;
+- the enforce refit bypassed.
+
+**Test changes:**
+- `test_prd016_allocation` asserted the removed `review_batch_budget` share; it now asserts that every batch request (system, header, batch) fits.
+- `test_review_command`'s multi-batch test used a 1500-token window, which cannot hold the ~2,456-token Reviewer system prompt. It now uses a 4000-token window with room for exactly one of the two files.
+
+## Findings from this slice (recorded, not in 6.5 scope)
+- **DEVELOPER-PROMPT-FIT-001 (P2, new).** At 8K with no reference, Developer requests reach ≈5,600 prompt tokens against 3,816 of preferred room. They dispatch only because the dispatch check reduces output. The PRD-016 allocator's "0.10 for system prompt, task and directives" assumption is false at small windows. Same class as 001A/B, for the Developer; not fixed here.
+- **Architect at 8K:** 1,817 prompt tokens in the harness. It fits; nothing to record.
+- **Learned reference at the Developer (own regression, a314d45/f136d7e).** With learned text present, 8K Developer requests are refused. Fixed in its own commit ("Fix (my a314d45)"); see handover/BACKLOG_6_5_SUMMARY.md.

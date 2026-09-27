@@ -85,9 +85,12 @@ from kriya.workflow.checkpoint import (
 from kriya.workflow.context_budget import (
     RetrievalLimits,
     _reserve_graph_context_budget,
+    agent_request_capacity,
     allocation_window,
+    build_code_context_package,
+    fit_planner_request,
     retrieval_limits_for,
-    review_batch_budget,
+    review_batches_for_request,
 )
 from kriya.workflow.context_budget import (
     _reserve_sibling_content_budget as _reserve_sibling_content_budget,
@@ -270,7 +273,6 @@ from kriya.workflow.retry_prompts import (
 from kriya.workflow.retry_strategy import handle_attempt_failure
 from kriya.workflow.review_context import (
     build_candidate_diff_context,
-    build_review_batches,
     build_reviewer_verified_evidence,
 )
 from kriya.workflow.run_events import EventAuthority, RunEvent
@@ -345,6 +347,21 @@ _UNRESOLVED_GATE_MARKERS = (
     "quality gate skipped", "not confirmed", "no compile check available",
     "no test runner available", "no java test config found",
 )
+
+
+def _record_review_fit(state: Any, stage: str, fit: Any) -> None:
+    """A ``context.request_fit`` event when a Reviewer request could not
+    carry every file whole (PROMPT-BUDGET-FIT-001B): what was cut or left
+    out, and the room the request had."""
+    batches, truncated = fit.value
+    if fit.omitted or truncated or fit.builds > 1:
+        state.record_event(RunEvent(
+            kind="context.request_fit", attempt=state.attempt_number, source="workflow",
+            authority=EventAuthority.ADVISORY,
+            message=f"{stage} review: {len(truncated)} file(s) cut or left out to fit the request",
+            details={"request": f"reviewer.{stage}", "batches": len(batches),
+                     "truncated_files": list(truncated), **fit.to_dict()},
+        ))
 
 
 def _record_run_exception(engine: Any, trace: Dict[str, Any], error: BaseException) -> None:
@@ -2297,6 +2314,16 @@ class WorkflowEngine:
         matched_files = []
         related_files = []
         graph_rag_context = ""
+        graph_retrieval_result: Optional[Any] = None
+        # The Planner request's own capacity (its binding, planner_max_tokens),
+        # resolved once and only if a Planner request is sized at all.
+        planner_capacity_cache: List[Any] = []
+
+        def planner_capacity() -> Any:
+            if not planner_capacity_cache:
+                planner_capacity_cache.append(agent_request_capacity(self.kernel.config, self.planner, "planner"))
+            return planner_capacity_cache[0]
+
         # CTX-001 P1 C2 production integration: path -> candidate member/
         # class NAMES parsed from this run's own vector hits, before
         # workflow.py's own file-level collapse below - see
@@ -2345,10 +2372,17 @@ class WorkflowEngine:
                     embed_client=embed_client, vector_store=vector_store,
                     dependency_graph_path=db_path, limits=retrieval_limits,
                     embedding_model=self.kernel.config.embedding.model,
-                    budget_limit=lambda: _reserve_graph_context_budget(
-                        allocation_window(self.kernel.config), convention_prompt,
+                    # The graph pool, never more than the Planner's own request
+                    # has room for beside its system prompt and the text known
+                    # so far (PROMPT-BUDGET-FIT-001A; the rest is fitted when
+                    # the request is complete).
+                    budget_limit=lambda: min(
+                        _reserve_graph_context_budget(allocation_window(self.kernel.config), convention_prompt),
+                        planner_capacity().allocator_units(planner_capacity().room(
+                            self.planner.system_prompt, goal, repo_context, convention_prompt)),
                     ),
                 )
+                graph_retrieval_result = retrieval
                 retrieved_chunks.extend(retrieval.retrieved_chunks)
                 retrieval_member_hints = retrieval.retrieval_member_hints
                 verified_grounding = retrieval.verified_grounding
@@ -2472,10 +2506,10 @@ class WorkflowEngine:
             })
 
         # 2. Plan
-        plan_prompt = f"Goal: {goal}\n\nWorkspace Context:\n{repo_context}"
+        plan_head = f"Goal: {goal}\n\nWorkspace Context:\n{repo_context}"
         if state.error_context:
-            plan_prompt = f"Fix the following compile/test error:\n{state.error_context}\n\n" + plan_prompt
-        plan_prompt += convention_prompt
+            plan_head = f"Fix the following compile/test error:\n{state.error_context}\n\n" + plan_head
+        plan_prompt = plan_head + convention_prompt
         # PRD-021: on a brownfield change (the routes the deterministic owner
         # rules apply to), existing files whose responsibility the goal names
         # are shown before planning - a suspicion, never a rule.
@@ -2589,6 +2623,26 @@ class WorkflowEngine:
             _log_phase_banner("PLANNING")
             logger.info("Planner Agent drafting execution steps...")
             plan_stream = (lambda token: stream_callback("Planning", token)) if stream_callback else None
+            # PROMPT-BUDGET-FIT-001A: the graph context and the reference get
+            # the room this request has left after its system prompt and
+            # every mandatory section (convention_prompt is skills + graph +
+            # fenced reference, in that order).
+            plan_prompt, plan_fit = fit_planner_request(
+                planner_capacity(), system_prompt=self.planner.system_prompt, head=plan_head,
+                skills_prompt=skills_prompt, graph_context=graph_rag_context, reference=reference_context,
+                suffix=plan_prompt[len(plan_head) + len(convention_prompt):],
+                rebuild_graph=lambda budget: build_code_context_package(
+                    graph_retrieval_result.matched_files, graph_retrieval_result.related_files, workspace_path,
+                    budget, file_scores=graph_retrieval_result.file_scores,
+                ),
+            )
+            if plan_fit:
+                state.record_event(RunEvent(
+                    kind="context.request_fit", attempt=0, source="workflow",
+                    authority=EventAuthority.ADVISORY,
+                    message="Planner request: graph context or reference text reduced to fit the request",
+                    details=plan_fit,
+                ))
             _planner_started = time.monotonic()
             plan = await self.planner.run(
                 plan_prompt,
@@ -3887,10 +3941,17 @@ class WorkflowEngine:
                     # finished minutes earlier.
                     _log_phase_banner("REVIEW")
                     try:
-                        review_batches, _ = build_review_batches(
+                        verified_evidence = build_reviewer_verified_evidence(state.gate_outcomes) + \
+                            ownership_review_evidence(resolved_obligation_ledger, state.all_files_written)
+                        review_header = f"Goal: {goal}\n{verified_evidence}\nFiles generated:\n"
+                        # PROMPT-BUDGET-FIT-001B: batches get the room this
+                        # request leaves after its system prompt and header.
+                        review_batches, _, review_fit = review_batches_for_request(
+                            self.kernel.config, self.reviewer,
                             [(fp, worktree_file_contents[fp]) for fp in sorted(state.all_files_written)],
-                            review_batch_budget(self.kernel.config),
+                            self.reviewer.system_prompt, review_header,
                         )
+                        _record_review_fit(state, "pre_approval", review_fit)
                         # The completed report is attached to the approval context
                         # below, where the human must see it before deciding. Streaming
                         # the same tokens first creates a second presentation of one
@@ -3899,11 +3960,9 @@ class WorkflowEngine:
                             stream_callback(
                                 "Review", "Preparing automated code review for approval...\n",
                             )
-                        verified_evidence = build_reviewer_verified_evidence(state.gate_outcomes) + \
-                            ownership_review_evidence(resolved_obligation_ledger, state.all_files_written)
                         review_parts = []
                         for i, batch in enumerate(review_batches, 1):
-                            batch_prompt = f"Goal: {goal}\n{verified_evidence}\nFiles generated:\n{batch}"
+                            batch_prompt = review_header + batch
                             label = "" if len(review_batches) == 1 else f"\n=== Batch {i}/{len(review_batches)} ===\n"
                             _reviewer_started = time.monotonic()
                             review_text = await self.reviewer.run(
@@ -5084,24 +5143,9 @@ class WorkflowEngine:
             # raw content with no token-budget check at all - the exact silent-
             # truncation-from-the-front failure mode the standalone `kriya review` CLI
             # command was already fixed for (see kriya/workflow/review_context.py).
-            review_batches, _ = build_review_batches(
-                file_contents_for_review, review_batch_budget(self.kernel.config),
-            )
-            # Demo-01 Finding 3 follow-up (2026-09-11): a rejected/unapplied
-            # candidate's review must never stream raw, unfiltered LLM
-            # tokens live to the user - extract_rejected_candidate_
-            # diagnostic() below only ever filters the FINAL joined text
-            # (review_text), so leaving live streaming on here would still
-            # leak the exact unfiltered "How to Run"/success-language
-            # content Finding 3 already closed for the final output, just
-            # earlier, token by token. Suppressed entirely for this case
-            # (not filtered after the fact - the raw tokens are simply
-            # never sent to stream_callback at all); the accepted-candidate
-            # path is completely unaffected.
-            reviewer_stream = (
-                (lambda token: stream_callback("Review", token))
-                if stream_callback and not state.final_attempt_contents else None
-            )
+            # PROMPT-BUDGET-FIT-001B: batches get the room this request
+            # leaves after the system prompt actually sent and the header
+            # (goal, candidate diff, gate and ownership evidence).
             # Authoritative disposition override (2026-09-11, Demo-01 Run A
             # finding): state.final_attempt_contents is populated ONLY on the
             # terminal-failure paths (retry_strategy.py's scope-conflict and
@@ -5116,6 +5160,26 @@ class WorkflowEngine:
                     state.error_context or "Quality gates did not pass within the retry budget."
                 )
                 if state.final_attempt_contents else None
+            )
+            review_batches, _, review_fit = review_batches_for_request(
+                self.kernel.config, self.reviewer, file_contents_for_review,
+                reviewer_system_prompt_override or self.reviewer.system_prompt, goal_header,
+            )
+            _record_review_fit(state, "final", review_fit)
+            # Demo-01 Finding 3 follow-up (2026-09-11): a rejected/unapplied
+            # candidate's review must never stream raw, unfiltered LLM
+            # tokens live to the user - extract_rejected_candidate_
+            # diagnostic() below only ever filters the FINAL joined text
+            # (review_text), so leaving live streaming on here would still
+            # leak the exact unfiltered "How to Run"/success-language
+            # content Finding 3 already closed for the final output, just
+            # earlier, token by token. Suppressed entirely for this case
+            # (not filtered after the fact - the raw tokens are simply
+            # never sent to stream_callback at all); the accepted-candidate
+            # path is completely unaffected.
+            reviewer_stream = (
+                (lambda token: stream_callback("Review", token))
+                if stream_callback and not state.final_attempt_contents else None
             )
             review_parts = []
             for i, batch in enumerate(review_batches, 1):

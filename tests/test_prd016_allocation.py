@@ -31,7 +31,7 @@ from kriya.workflow.context_budget import (
     investigation_evidence_char_budget,
     prompt_allocation_window,
     retry_evidence_char_budget,
-    review_batch_budget,
+    review_batches_for_request,
     skeletonize_code,
 )
 
@@ -179,12 +179,22 @@ def test_every_section_budget_fits_the_dispatch_room_together():
 
 
 def test_review_batches_fit_beside_the_output_budget():
+    """Every batch request - system prompt, header and batch - fits beside
+    the output budget (PROMPT-BUDGET-FIT-001B: the header and system prompt
+    are reserved, not assumed to fit a fixed 0.25 share)."""
+    from kriya.agents.agent import ReviewerAgent
+
     cfg = AppConfig()
     cfg.llm.context_window = 32768
     cfg.llm.max_tokens = 16384
     cfg.llm.extra_body = {}
-    budget = review_batch_budget(cfg)
-    assert _dispatch_tokens("x" * budget * 4) <= 32768 - 16384
+    reviewer = ReviewerAgent("reviewer", None)
+    header = "Goal: review\n" + "diff line\n" * 2000
+    files = [(f"Big{i}.java", _java_class(80, i)) for i in range(4)]
+    batches, _, _ = review_batches_for_request(cfg, reviewer, files, reviewer.system_prompt, header)
+    room = 32768 - 16384 - tb.TWO_MESSAGE_FRAMING_TOKENS - tb.DISPATCH_SAFETY_MARGIN_TOKENS
+    assert batches and all(
+        _dispatch_tokens(reviewer.system_prompt + header + batch) <= room for batch in batches)
 
 
 def test_investigation_evidence_keeps_whole_items_and_names_the_rest():

@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import tokenize
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
@@ -598,19 +598,64 @@ def prompt_allocation_window(context_window: int, output_budget: int, *,
     return max(0, int(room * ratio / _ALLOCATOR_CHARS_PER_TOKEN))
 
 
-def allocation_window(config: Any, binding: Any = None) -> int:
-    """The prompt allocation window of a Developer-shaped call to ``binding``
-    (the primary ``config.llm`` by default, or an ``llm_chain`` entry): the
-    same served window, output budget and counting ratio LLMClient's dispatch
-    check uses for that call (kriya/core/llm.py::complete_result)."""
+@dataclass(frozen=True)
+class RequestCapacity:
+    """The prompt room of one request (PROMPT-BUDGET-FIT-001A/B), in the
+    dispatch check's own units: the served (else requested) window minus the
+    request's preferred output budget (at most half the window), message
+    framing and the dispatch safety margin. Text is counted with the same
+    counter LLMClient's dispatch check uses (exact tokenizer, else the
+    qualified or default byte ratios, non-ASCII included), so a request
+    sized here is never refused by that check for its prompt."""
+
+    tokens: int
+    bytes_per_token: Optional[float] = None
+    non_ascii_bytes_per_token: Optional[float] = None
+    tokenizer_digest: Optional[str] = None
+
+    def count(self, text: str) -> int:
+        from kriya.core.token_budget import count_tokens
+
+        if not text:
+            return 0
+        return count_tokens(
+            text, tokenizer_digest=self.tokenizer_digest, qualified_bytes_per_token=self.bytes_per_token,
+            qualified_non_ascii_bytes_per_token=self.non_ascii_bytes_per_token,
+        ).tokens
+
+    def room(self, *fixed_texts: str) -> int:
+        """Tokens left for the request's variable sections after its
+        mandatory fixed text (system prompt, headers, required blocks)."""
+        return max(0, self.tokens - sum(self.count(text) for text in fixed_texts if text))
+
+    def allocator_units(self, tokens: int) -> int:
+        """``tokens`` in the section builders' len//4 units (exact for ASCII
+        text; fit_variable_section re-measures the built text)."""
+        from kriya.core.token_budget import DEFAULT_BYTES_PER_TOKEN
+
+        ratio = self.bytes_per_token or DEFAULT_BYTES_PER_TOKEN
+        return max(0, int(tokens * ratio / _ALLOCATOR_CHARS_PER_TOKEN))
+
+
+def request_capacity(config: Any, binding: Any = None, *, role: str = "developer",
+                     output_tokens: Optional[int] = None) -> RequestCapacity:
+    """The RequestCapacity of a ``role`` request to ``binding`` (the primary
+    ``config.llm`` by default, or any chat binding) that asks for
+    ``output_tokens`` (default: the binding's own output budget), with the
+    reasoning floor LLMClient applies. The one source of a request's prompt
+    room: every prompt section sized from it budgets against the same
+    served window, output reserve and counting ratio the dispatch check uses
+    for that call (kriya/core/llm.py::complete_result)."""
     from kriya.core.llm import REASONING_MIN_MAX_TOKENS
     from kriya.core.model_runtime import binding_output_tokens, requested_context_window
+    from kriya.core.token_budget import DISPATCH_SAFETY_MARGIN_TOKENS, TWO_MESSAGE_FRAMING_TOKENS
 
     binding = binding if binding is not None else config.llm
     # The window this binding's requests carry (FALLBACK-CONTEXT-WINDOW-001),
     # replaced below by the window the runtime reports serving, when known.
     window = requested_context_window(binding.extra_body, binding.context_window)
-    ratio = None
+    limits: Dict[str, Any] = {}
+    tokenizer = None
     try:
         from kriya.core.inference_settings import binding_inference_settings
         from kriya.core.model_qualification import measured_limits_for
@@ -621,25 +666,211 @@ def allocation_window(config: Any, binding: Any = None) -> int:
             extra_body=binding.extra_body or {},
         )
         window = fingerprint.effective_context_window or window
-        ratio = measured_limits_for(
-            fingerprint, config, settings=binding_inference_settings(config, "developer", binding),
-        ).get("bytes_per_token_floor")
+        limits = measured_limits_for(fingerprint, config, settings=binding_inference_settings(config, role, binding))
+        tokenizer = fingerprint.tokenizer_digest if fingerprint.tokenizer_digest != "unavailable" else None
     except Exception as error:  # never blocks context assembly
-        logger.debug("Allocation window for %s uses the configured window: %s", binding.model, error)
-    output = binding_output_tokens(config, binding)
+        logger.debug("Request capacity of %s uses the configured window: %s", binding.model, error)
+    output = output_tokens if output_tokens is not None else binding_output_tokens(config, binding)
     if binding.reasoning:
         output = max(output, REASONING_MIN_MAX_TOKENS)
-    return prompt_allocation_window(window, output, bytes_per_token=ratio)
+    reserve = min(max(0, int(output)), int(window) // 2)
+    return RequestCapacity(
+        tokens=max(0, int(window) - reserve - TWO_MESSAGE_FRAMING_TOKENS - DISPATCH_SAFETY_MARGIN_TOKENS),
+        bytes_per_token=limits.get("bytes_per_token_floor"),
+        non_ascii_bytes_per_token=limits.get("non_ascii_bytes_per_token_floor"),
+        tokenizer_digest=tokenizer,
+    )
 
 
-# A review prompt is the file batch plus a goal header and candidate diff.
-_REVIEW_BATCH_SHARE = 0.75
+def allocation_window(config: Any, binding: Any = None) -> int:
+    """The prompt allocation window (allocator units) of a Developer-shaped
+    call to ``binding``: its RequestCapacity in the builders' units."""
+    capacity = request_capacity(config, binding)
+    return capacity.allocator_units(capacity.tokens)
 
 
-def review_batch_budget(config: Any) -> int:
-    """Token budget (allocator units) of one review batch
-    (review_context.build_review_batches) for the primary model."""
-    return int(allocation_window(config) * _REVIEW_BATCH_SHARE)
+@dataclass(frozen=True)
+class SectionFit:
+    """How a variable prompt section was fitted into its request."""
+
+    value: Any
+    room_tokens: int
+    used_tokens: int
+    builds: int
+    omitted: bool
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"room_tokens": self.room_tokens, "used_tokens": self.used_tokens,
+                "builds": self.builds, "omitted": self.omitted}
+
+
+# How many times a section is rebuilt smaller before it is left out: the
+# first build uses the room in the builders' units, which is exact for
+# ASCII text; a rebuild corrects for non-ASCII text the builder undercounts.
+_MAX_SECTION_BUILDS = 3
+
+
+def fit_variable_section(
+    capacity: RequestCapacity, fixed_texts: Sequence[str], build: Callable[[int], Any],
+    *, measure: Optional[Callable[[Any], int]] = None, empty: Any = "",
+) -> SectionFit:
+    """The one fixed-overhead-aware sizing rule (PROMPT-BUDGET-FIT-001A/B):
+    a variable section gets ``capacity - mandatory fixed request cost``
+    (output reserve and safety margin are already out of ``capacity``), is
+    built at that room by its own ``build(allocator_budget)``, re-measured
+    with the dispatch counter, and rebuilt proportionally smaller while it
+    does not fit; when there is no room, or it still does not fit after
+    _MAX_SECTION_BUILDS builds, it is left out (``empty``), never forced in.
+    ``measure`` defaults to counting the built text; a caller whose build
+    returns several request bodies (review batches) measures the largest.
+    The fixed text is never trimmed: when it alone does not fit, the
+    dispatch check refuses the request (CONTEXT_BUDGET_UNSATISFIABLE)."""
+    measure = measure or capacity.count
+    room = capacity.room(*fixed_texts)
+    budget = capacity.allocator_units(room)
+    for builds in range(1, _MAX_SECTION_BUILDS + 1):
+        if budget <= 0:
+            return SectionFit(empty, room, 0, builds - 1, True)
+        value = build(budget)
+        used = measure(value)
+        if used <= room:
+            return SectionFit(value, room, used, builds, False)
+        budget = int(budget * room / used) - 1
+    return SectionFit(empty, room, 0, _MAX_SECTION_BUILDS, True)
+
+
+def trim_reference_text(text: str, budget: int) -> str:
+    """Untrusted reference text (learned knowledge) cut to ``budget``
+    allocator units at whole ``[Source: ...]`` entry boundaries: an entry is
+    shown whole or not at all, in retrieval order; text that fits is
+    returned byte-identical."""
+    kept, used = [], 0
+    for entry in _REFERENCE_ENTRY.split(text):
+        cost = estimate_tokens(entry)
+        if used + cost > budget:
+            break
+        kept.append(entry)
+        used += cost
+    return "".join(kept)
+
+
+_REFERENCE_ENTRY = re.compile(r"(?=\n\[Source: )")
+
+
+def fit_reference_section(capacity: RequestCapacity, fixed_texts: Sequence[str], reference: str) -> SectionFit:
+    """Fenced untrusted reference text fitted into the room its request has
+    left (fit_variable_section): the fence and warning always come whole,
+    the entries are trimmed first-kept; ``""`` when no entry fits."""
+    from kriya.workflow.untrusted_context import fence_untrusted_reference
+
+    fence_units = estimate_tokens(fence_untrusted_reference("x"))
+
+    def build(budget: int) -> str:
+        return fence_untrusted_reference(trim_reference_text(reference, budget - fence_units))
+
+    fit = fit_variable_section(capacity, fixed_texts, build)
+    # No whole entry fitting leaves the reference out, even though the
+    # (empty) section "fit".
+    return replace(fit, omitted=True) if reference.strip() and not fit.value else fit
+
+
+def fit_planner_request(
+    capacity: RequestCapacity, *, system_prompt: str, head: str, skills_prompt: str, graph_context: str,
+    reference: str, suffix: str, rebuild_graph: Callable[[int], Tuple[str, Any]],
+) -> Tuple[str, Dict[str, Any]]:
+    """The direct Planner request (PROMPT-BUDGET-FIT-001A): ``head`` (goal,
+    error, repository model) + skills + graph context + fenced reference +
+    ``suffix`` (owner, requirement, tool and grounding blocks). The graph
+    context, then the untrusted reference, get the room the system prompt
+    and every mandatory section leave (repository evidence outranks
+    untrusted reference text). The graph context is rebuilt at its room by
+    ``rebuild_graph(budget) -> (text, ContextPackage)`` only when it does not
+    fit. Returns the prompt and the fit details (empty when both sections
+    went in unchanged, so the prompt is byte-identical to the unfitted one)."""
+    from kriya.workflow.untrusted_context import fence_untrusted_reference
+
+    fixed = (system_prompt, head, skills_prompt, suffix)
+    omitted_files: List[str] = []
+
+    def build_graph(budget: int) -> str:
+        if estimate_tokens(graph_context) <= budget:
+            return graph_context
+        text, package = rebuild_graph(budget)
+        omitted_files[:] = [entry.get("path") for entry in getattr(package, "omitted", ()) if entry.get("path")]
+        return text
+
+    graph = fit_variable_section(capacity, fixed, build_graph) if graph_context else None
+    graph_text = graph.value if graph is not None else ""
+    fenced = fence_untrusted_reference(reference)
+    ref = fit_reference_section(capacity, fixed + (graph_text,), reference) if fenced else None
+    ref_text = ref.value if ref is not None else ""
+    details: Dict[str, Any] = {}
+    if graph_text != graph_context or ref_text != fenced:
+        details = {
+            "request": "planner",
+            "graph": graph.to_dict() if graph is not None else None,
+            "graph_omitted_files": omitted_files,
+            "reference": ref.to_dict() if ref is not None else None,
+        }
+    return head + skills_prompt + graph_text + ref_text + suffix, details
+
+
+def fit_review_batches(capacity: RequestCapacity, files: List[Tuple[str, str]], *fixed_texts: str) -> SectionFit:
+    """Review file batches (review_context.build_review_batches) sized so
+    every batch request - its fixed text plus the batch - fits. ``value`` is
+    build_review_batches' (batches, truncated_relpaths); no room at all
+    leaves every file out (no batches) and reports each as truncated."""
+    from kriya.workflow.review_context import build_review_batches
+
+    def largest(built: Tuple[List[str], List[str]]) -> int:
+        return max((capacity.count(batch) for batch in built[0]), default=0)
+
+    return fit_variable_section(
+        capacity, fixed_texts, lambda budget: build_review_batches(files, budget),
+        measure=largest, empty=([], [path for path, _ in files]),
+    )
+
+
+def agent_request_capacity(config: Any, agent: Any, role: str, *,
+                           output_tokens: Optional[int] = None) -> RequestCapacity:
+    """The RequestCapacity of ``agent``'s own request: its role binding
+    (``role_llm``, a config model; the primary otherwise) and the output it
+    asks for (``output_tokens``, else the agent's ``max_output_tokens``,
+    else the binding's own budget)."""
+    from pydantic import BaseModel
+
+    binding = getattr(agent, "role_llm", None)
+    if output_tokens is None:
+        own = getattr(agent, "max_output_tokens", None)
+        output_tokens = own if isinstance(own, int) else None
+    return request_capacity(config, binding if isinstance(binding, BaseModel) else None, role=role,
+                            output_tokens=output_tokens)
+
+
+# The longest batch label a review request carries ("=== Batch i/n ===").
+REVIEW_BATCH_LABEL_BOUND = "\n=== Batch 9999/9999 ===\n"
+# Sent in place of file contents when the review request has no room for any.
+REVIEW_FILES_OMITTED_NOTE = (
+    "\n(File contents omitted: this review request has no room for them beside the "
+    "material above. Review from that material and say that the files themselves were not shown.)\n"
+)
+
+
+def review_batches_for_request(config: Any, reviewer: Any, files: List[Tuple[str, str]],
+                               *fixed_texts: str) -> Tuple[List[str], List[str], SectionFit]:
+    """The review batches of one Reviewer request whose fixed text is
+    ``fixed_texts`` (the system prompt actually sent and the request's own
+    header - goal, candidate diff, evidence), sized by fit_review_batches
+    against the reviewer's own binding and output budget. Files with no room
+    at all become one request carrying REVIEW_FILES_OMITTED_NOTE: the fixed
+    text is still reviewed, and if even it does not fit the dispatch check
+    refuses the request (CONTEXT_BUDGET_UNSATISFIABLE)."""
+    fit = fit_review_batches(agent_request_capacity(config, reviewer, "reviewer"), files,
+                             *fixed_texts, REVIEW_BATCH_LABEL_BOUND)
+    batches, truncated = fit.value
+    if files and not batches:
+        batches = [REVIEW_FILES_OMITTED_NOTE]
+    return batches, list(truncated), fit
 
 
 def investigation_evidence_char_budget(prompt_window: int) -> int:
