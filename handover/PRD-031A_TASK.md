@@ -1,10 +1,10 @@
 # PRD-031A — Pluggable Static Analysis, Policy and Risk-Acceptance Gate
 
 **Phase:** Wave 6 (roadmap correction, 2026-09-27: before PRD-032)
-**Priority:** P1 (proposed, pending user review; see §17)
+**Priority:** P1 (approved 2026-09-27)
 **Dependencies:** PRD-030 (TerminalGateService), PRD-031
-**Live test:** live-model NOT_REQUIRED. A real-Semgrep integration tier is REQUIRED for closure (proposed; see §18).
-**Status:** SPECIFICATION, for review. No production code is written under this document until the user approves it.
+**Live test:** REQUIRED. This means the real, pinned-scanner tier `live_static_analysis` (§18). No live-model test is required (approved 2026-09-27).
+**Status:** SPEC_APPROVED (2026-09-27, with the corrections in §20). Implementation has not started and begins only on the user's instruction.
 
 Requirement source: the user's PRD-031A specification directive (2026-09-27), summarized in `handover/PRD-031A_DIRECTIVES.md`. This document is the task file. The instructions package has none for PRD-031A.
 
@@ -26,10 +26,10 @@ Add a provider-neutral static-analysis gate with these properties:
 - It sits at every terminal commit boundary.
 - It can be disabled, but disabled is never reported as PASS.
 - It checks the provider's capability against the candidate's languages before claiming any coverage.
-- It compares PRE and POST findings on exactly the bytes the commit will write.
+- It compares PRE and POST findings over the minimum scan scope the provider needs for trustworthy analysis (§5.4). That can be the changed files, their module, the repository or the build graph. POST is exactly the bytes the commit will write, laid over the unchanged base.
 - Its policy is configurable and owned by Kriya, not by the adapter.
 - A blocking finding can be released only by an operator-created waiver, and a run that relies on one reports ACCEPTED_RISK, never PASS.
-- The evidence it produces is bound to the candidate the commit writes.
+- The evidence it produces is bound to all of the following: the candidate, the base/workspace identity of the scope, the scope itself, the provider runtime, the rule packs and the effective settings. A commit refuses evidence that is missing or stale (§10.4).
 
 Semgrep (local CLI, Community Edition engine, local rule packs) is the first adapter. It is not the architecture: no Semgrep type crosses the port.
 
@@ -66,7 +66,8 @@ TerminalGateService (enforce)  ─┴─> StaticAnalysisService.evaluate(request
                                         ├─ port.probe()                     -> ProviderIdentity + ProviderCapability
                                         ├─ CoverageEvaluator                -> CoverageReport (before any scan)
                                         ├─ EgressAdmission                  -> permitted | EGRESS_NOT_PERMITTED
-                                        ├─ ScanTreeBuilder (PRE, POST)      -> Kriya-owned, isolated scan roots
+                                        ├─ port.plan_scope(...)             -> ScopePlan (provider-required scope, §5.4)
+                                        ├─ SnapshotBuilder (PRE, POST)      -> Kriya-owned, isolated scope snapshots
                                         ├─ port.scan(ScanRequest) x2        -> ScanResult (normalized findings)
                                         ├─ BaselineDiff                     -> ClassifiedFinding[]
                                         ├─ WaiverRegistry.load() (fresh)    -> Waiver[] (+ rejections)
@@ -83,7 +84,8 @@ New modules, all under `kriya/static_analysis/`, a new package that sits below `
 | `model.py` | Every provider-neutral type (§6, §7, §9). No provider names. |
 | `port.py` | `StaticAnalysisPort` (Protocol), `ScanRequest`, `ScanResult`, `ProviderIdentity`, `ProviderCapability` |
 | `registry.py` | `register_provider(name, factory)`, `create_provider(cfg) -> StaticAnalysisPort` |
-| `coverage.py` | `LANGUAGE_BY_EXTENSION` (Kriya-owned, provider-neutral language ids), `evaluate_coverage(capability, targets, prerequisites)` |
+| `coverage.py` | `LANGUAGE_BY_EXTENSION` (Kriya-owned, provider-neutral language ids), `evaluate_coverage(capability, scope_plan, prerequisites)`, `confirm_coverage(scope_plan, scan_result)` |
+| `scope.py` | `ScanScope`, `ScopePlan`, provider-neutral module resolution (nearest build descriptor), `SnapshotBuilder`, `scope_digest()` |
 | `baseline.py` | fingerprinting, the `diff_findings(pre, post)` multiset diff, NOT_COMPARABLE |
 | `policy.py` | `decide(...)`, pure and deterministic |
 | `waivers.py` | store (outside the workspace), `load_waivers()` read fresh every time, `match_waiver()`, `write_waiver()` (CLI only) |
@@ -102,24 +104,39 @@ New modules, all under `kriya/static_analysis/`, a new package that sits below `
 
 ### 4.3 End-to-end flow at a terminal boundary
 
-1. **Inputs.** The boundary hands the service the exact batch it is about to commit, as `List[StagedFileWrite]` (`materialize_candidate` output). For each path that gives the POST bytes or a delete, plus `expected_base_revision` and `expected_base_exists`. The service is also given `workspace_path`, `run_id`, a `unit_id` (the WorkUnit, or the enforce milestone id) and the config.
+1. **Inputs.** The boundary hands the service:
+   - the exact batch it is about to commit, as `List[StagedFileWrite]` (`materialize_candidate` output). For each path this gives the POST bytes or a delete, plus `expected_base_revision` and `expected_base_exists`;
+   - `workspace_path`, `run_id`, a `unit_id` (the WorkUnit, or the enforce milestone id) and the config.
+
+   The batch is the *change set*. It is not the scan scope.
 2. **DISABLED.** If `enabled: false`, the service returns DISABLED with no probe and no scan (§7.2).
 3. **Provider.** `create_provider` either returns a port or UNAVAILABLE (`PROVIDER_NOT_REGISTERED`).
 4. **Probe.** `port.probe()` returns `ProviderIdentity` + `ProviderCapability`. A probe failure → UNAVAILABLE (`PROVIDER_PROBE_FAILED`).
 5. **Egress.** Admission checks the provider's declared network and source-upload needs against `autonomy.egress_policy` (§12). If refused → UNAVAILABLE (`EGRESS_NOT_PERMITTED`). This happens **before** any execution.
-6. **Coverage.** The coverage evaluator classifies every scan target (§6) and checks prerequisites. PREREQUISITES_MISSING or UNSUPPORTED (and PARTIAL, per policy) are decided **before** scanning. Nothing that was not analyzed is ever reported as analyzed.
-7. **Scan roots.** The scan-tree builder materializes two Kriya-owned roots under a temp dir outside the workspace and the candidate:
-   - **PRE** holds the base content of every target that existed at base. `expected_base_revision` is a content hash (`edit_safety.content_revision`: sha256 of the UTF-8 text), not a revision bytes can be read back from. So the PRE content is the real workspace file, which is untouched until commit, read now and accepted only if `content_revision(text) == expected_base_revision`. On the direct path `state.all_original_contents` is that same text and may be used directly. A mismatch gives UNKNOWN (`BASELINE_IDENTITY_MISMATCH`), and the revision-grounded commit would refuse that batch anyway.
-   - **POST** holds the batch's bytes.
+6. **Scope and coverage.** `port.plan_scope(capability, change_set, workspace, configured_scope)` returns the `ScopePlan` (§5.4). The coverage evaluator then classifies every intended target (§6) and checks prerequisites. PREREQUISITES_MISSING or UNSUPPORTED (and PARTIAL, per policy) are decided **before** scanning. Nothing that was not analyzed is ever reported as analyzed.
+7. **Snapshots.** The snapshot builder materializes two Kriya-owned roots under a temp dir, outside both the workspace and the candidate. They are equivalent snapshots of the **whole scope**, not just of the changed files:
+   - **PRE** holds every scope file as it is in the real workspace. The real workspace is untouched until commit. For a changed path, `expected_base_revision` is a content hash (`edit_safety.content_revision`: sha256 of the UTF-8 text), not a revision bytes can be read back from. So the real workspace file is read now and accepted only if `content_revision(text) == expected_base_revision`. On the direct path `state.all_original_contents` is that same text and may be used directly. A mismatch gives UNKNOWN (`BASELINE_IDENTITY_MISMATCH`), and the revision-grounded commit would refuse that batch anyway.
+   - **POST** is PRE with the batch laid over it: every write replaced and every delete removed. Unchanged scope files are byte-identical in the two roots.
+   - Both roots use the same relative paths, and both hold only files Kriya put there. Repository and candidate scanner-control files are never copied (§8.4).
+   - The builder records `base_scope_digest` over PRE and `post_scope_digest` over POST (§10.4).
+8. **Scans.** The two scans run through the port, POST first. Both must succeed under one `scan_identity` (§8.3), or the result is UNKNOWN or NOT_COMPARABLE.
 
-   The same relative paths are used in both roots, and both contain only files Kriya put there (§8.4).
-8. **Scans.** The two scans run through the port, POST first. Both must succeed under one `scan_identity` (§8.3). Otherwise the result is UNKNOWN or NOT_COMPARABLE.
-9. **Diff.** The PRE/POST diff classifies each finding as introduced, unchanged, worsened or resolved (§8.2).
+   Coverage is then **confirmed** against what the scanner reports it actually analyzed (§6).
+9. **Diff.** The PRE/POST diff classifies every finding in the scope as introduced, unchanged, worsened or resolved (§8.2), including findings in files the candidate did not change.
 10. **Waivers.** The waiver store is read fresh from disk, and each waiver is matched against the findings (§9).
 11. **Policy.** The policy turns the findings, coverage and waivers into one `StaticAnalysisOutcome`, a list of per-finding decisions, and `permits_commit` (§7).
-12. **Result.** The service returns `StaticAnalysisGateResult`, which carries the evidence (§11) and a `StaticAnalysisAuthorization` bound to the batch digest (§10.4).
+12. **Result.** The service returns `StaticAnalysisGateResult`, which carries the evidence (§11) and a `StaticAnalysisAuthorization` bound to the full evidence identity (§10.4).
 
-**Why PRE is scanned at the terminal boundary, from the immutable base.** PRD-024's full-suite baseline is captured before the first mutation. That is required there: test outcomes depend on the whole tree, and the tree mutates. This PRD makes a deliberate choice instead: PRE here is the base bytes of the exact paths the candidate commits, read at the base revision the commit transaction itself is grounded on. That content is immutable, and if the real workspace drifted from it the commit is refused already (revision-grounded batch), so a PRE scan made now is byte-identical to one made before mutation. Doing both scans in one step gives the same scanner binary, rule pack and flags by construction. That removes the main NOT_COMPARABLE source in PRD-024: environment drift between PRE and POST. It also costs nothing when the run fails before commit, and it scans only the changed paths, not the whole repository. A whole-repository PRE capture at the PRD-024 point is reserved for `scope: repository` (§19, v2).
+**Why both snapshots are built at the terminal boundary.**
+
+PRD-024 captures its full-suite baseline before the first mutation. It has to, because the real workspace is where tests run. Here the real workspace is never mutated before commit: the candidate lives in its sandbox. So the scope as it is in the real workspace at the terminal boundary *is* the pristine base. For every changed path this is proven by `content_revision` (`BASELINE_IDENTITY_MISMATCH` otherwise). For every other scope file it is bound by `base_scope_digest`, which the commit re-checks (§10.4).
+
+Building both snapshots and running both scans in one step gives three things:
+- the same scanner binary, rule packs and flags, by construction. That removes PRD-024's main NOT_COMPARABLE source, environment drift between PRE and POST;
+- no cost when the run fails before commit;
+- an exact scope, because the scope depends on the change set, which is known only at the terminal boundary.
+
+Scanning more than the changed files is not assumed away. The provider declares the minimum trustworthy scope, and findings in unchanged files are diffed like any other (§5.4, §8.2).
 
 ## 5. Port and adapter contract
 
@@ -127,7 +144,9 @@ New modules, all under `kriya/static_analysis/`, a new package that sits below `
 class StaticAnalysisPort(Protocol):
     name: str                                    # registry key, e.g. "semgrep"
     def probe(self) -> ProviderProbe: ...        # identity + capability; never scans; bounded time
-    def check_prerequisites(self, targets: Sequence[ScanTarget], workspace: str) -> Sequence[PrerequisiteResult]: ...
+    def plan_scope(self, capability: ProviderCapability, change_set: ChangeSet, workspace: str,
+                   configured: ScanScopeSetting) -> ScopePlan: ...   # §5.4; never narrower than capability.minimum_scope
+    def check_prerequisites(self, scope: ScopePlan, workspace: str) -> Sequence[PrerequisiteResult]: ...
     def scan(self, request: ScanRequest) -> ScanResult: ...   # never raises for a scanner failure (§5.3)
 
 @dataclass(frozen=True)
@@ -146,6 +165,9 @@ class ProviderCapability:
     languages: Mapping[str, LanguageSupport]   # Kriya language id -> maturity ("ga"|"beta"|"experimental"),
                                                #   language_versions (tuple or None = unknown), rules_available (int)
     analysis_scope: str           # "file_local" | "cross_file"
+    supported_scopes: FrozenSet[ScanScope]   # CHANGED_FILES | MODULE | REPOSITORY | BUILD_GRAPH
+    minimum_scope: ScanScope      # the narrowest scope for which this provider's evidence is trustworthy
+    control_files: Tuple[str, ...]           # scanner-control file names never copied into a snapshot (e.g. ignore files)
     network_requirement: str      # "none" | "rule_download" | "service"
     source_upload: bool
     prerequisites: Mapping[str, Tuple[str, ...]]   # language -> prerequisite ids (e.g. "compiled_classes")
@@ -153,9 +175,10 @@ class ProviderCapability:
 
 ### 5.1 Scan request and result
 
-- `ScanRequest(root, targets, timeout_seconds, per_file_timeout_seconds, max_target_bytes)`:
-  - `root` is a Kriya-owned scan root;
-  - `targets` are relative paths, always passed explicitly (never "scan the directory").
+- `ScanRequest(root, scope_plan, trusted_exclusions, timeout_seconds, per_file_timeout_seconds, max_target_bytes)`:
+  - `root` is a Kriya-owned snapshot root;
+  - the intended targets are `scope_plan.targets`;
+  - `trusted_exclusions` come only from operator config, are auditable, and are part of the settings digest.
 - `ScanResult` holds:
   - `status`: `COMPLETE`, `INCOMPLETE`, `FAILED`, `TIMEOUT` or `MALFORMED_OUTPUT`;
   - `findings: Tuple[Finding, ...]`;
@@ -166,6 +189,22 @@ class ProviderCapability:
   - `duration_ms`.
 
   `analyzed` is derived from what the provider reports it scanned, never assumed from the targets passed in.
+
+### 5.4 Scan scope (provider-required, not changed-files-only)
+
+`ScanScope` is a closed, provider-neutral enum:
+
+| Scope | Meaning |
+|---|---|
+| `CHANGED_FILES` | the change set only; trustworthy only for a `file_local` provider, where a finding depends on the bytes of one file |
+| `MODULE` | every source file in each build module that contains a changed path. The module is resolved provider-neutrally from the nearest build descriptor, reusing the markers `PolymorphicValidator` already detects (pom.xml, build.gradle, package.json, pyproject.toml, ...). No descriptor → the repository. |
+| `REPOSITORY` | every source file in the workspace, excluding `.kriya/`, VCS metadata and trusted exclusions |
+| `BUILD_GRAPH` | the changed modules plus the modules they depend on, as the provider resolves them. It is for providers that analyze compiled or linked artifacts, and it carries prerequisites. |
+
+- **Minimum scope.** The provider declares `minimum_scope`. Config `scope: auto` (the default) uses it. An explicit `scope` may be broader, never narrower: narrower → `StaticAnalysisConfigError` at load when the adapter's minimum is static, or UNAVAILABLE `SCOPE_BELOW_PROVIDER_MINIMUM` at probe when it depends on the version.
+- **The plan.** `ScopePlan(kind, targets, change_set, module_roots, trusted_exclusions, plan_digest)`. `targets` is the full intended target list: POST paths, plus PRE-only paths for deletions. It is built by Kriya's `scope.py` for the first three kinds, and by the provider for `BUILD_GRAPH`, which Kriya then validates stays inside the workspace.
+- **Findings anywhere in the scope count.** A candidate can cause a finding in a file it did not change: a cross-file taint path, or a changed callee signature. The diff (§8.2) therefore runs over every finding in the scope, keyed by fingerprint. A finding that appears in an unchanged file is `introduced`, and one that disappears there is `resolved`.
+- **Semgrep CE.** It declares `analysis_scope: file_local`, `minimum_scope: CHANGED_FILES` and `supported_scopes: {CHANGED_FILES, MODULE, REPOSITORY}`. That minimum is justified because the CE engine (`--oss-only`) analyzes within one file: the Pro engine is needed for inter-file analysis, per Semgrep's CLI reference. An operator may still configure a broader scope. The fake adapter declares `cross_file` with `minimum_scope: MODULE`, so the unchanged-file path is exercised in the deterministic tier.
 
 ### 5.2 Semgrep adapter (first production adapter)
 
@@ -192,7 +231,8 @@ class ProviderCapability:
   - any pack path that does not exist.
 - **Version.**
   - `semgrep --version` is recorded exactly.
-  - `providers.semgrep.min_version` (optional) → a probe failure below it.
+  - An operator configures an exact version (`providers.semgrep.version: "<x.y.z>"`), and a probe reporting a different version → UNAVAILABLE (`PROVIDER_VERSION_MISMATCH`).
+  - `latest` and version ranges are rejected at config load, for the image tag as well. An image is referenced by digest.
   - The image digest is used under OCI.
 - **Languages.**
   - The capability comes from a version-pinned, adapter-owned table. Its key is the semgrep version range; its value is `language → maturity`, taken from docs.semgrep.dev/supported-languages and re-checked at implementation.
@@ -206,29 +246,38 @@ class ProviderCapability:
   - CWE and OWASP come from `metadata.cwe`/`metadata.owasp` when present.
 - **Prerequisites.** Semgrep CE needs no build, so it declares no language prerequisites. A later adapter that does (CodeQL, SpotBugs: compiled classes, a build database) declares them here, and the evaluator enforces them. The contract is exercised in v1 by the fake adapter.
 
-### 5.3 Failure mapping (never PASS)
+### 5.3 Process result, findings and errors (never PASS)
 
-| Adapter observation | `ScanResult.status` | Gate effect |
+The adapter keeps three things separate. Process status never stands in for either of the other two.
+
+1. **Findings.** Whenever stdout is valid JSON matching the pinned schema, the adapter parses and normalizes every entry in `results`, **whatever the exit code**. Findings are evidence, even from a run that then counts as failed.
+2. **Scanner and config errors.** Each `errors[]` entry is classified by its kind, not by the exit code:
+   - a rule or config error (invalid pattern, invalid YAML, invalid rule, unknown language in a rule) → `RULE_PACK_INVALID`, which makes the result UNAVAILABLE;
+   - a target-level error (a parse error, a timeout on a file) → that target is `not_analyzed`;
+   - anything unrecognized → `SCAN_FAILED`, which makes the result UNKNOWN.
+3. **Process status.** It decides only whether the run completed:
+
+| Observation | `ScanResult.status` | Gate effect |
 |---|---|---|
-| exit 0 with parseable JSON, and every target is in `paths.scanned` | COMPLETE | normal |
-| parseable JSON, but a target is skipped (size, timeout-threshold, unknown language) or has a per-file `errors[]` entry (parse error) | INCOMPLETE | the target is uncovered (§6); policy `analysis_errors` applies |
-| process exceeds `timeout_seconds` (whole scan) | TIMEOUT | UNKNOWN |
-| exit 2 (failed), 14 (deprecated scan failure), 1 (never expected, since `--error` is not passed), any undocumented code, crash or signal | FAILED | UNKNOWN |
-| exit 4 (invalid rule pattern), 5 (config not valid YAML), 7 (invalid rule) | probe/config failure | UNAVAILABLE (`RULE_PACK_INVALID`) |
-| exit 8 (language not understood) | probe/config failure | UNAVAILABLE (`CAPABILITY_UNKNOWN`) |
-| exit 13 (invalid API key; should be impossible, since there is no login) | probe/config failure | UNAVAILABLE (`PROVIDER_PROBE_FAILED`) |
-| stdout not valid JSON, schema mismatch, or a missing `results`/`paths` key | MALFORMED_OUTPUT | UNKNOWN |
-| executable missing, or the image lacks semgrep | the probe fails | UNAVAILABLE |
+| exit 0, valid JSON, no rule/config error, and every intended target is confirmed analyzed (§6) | COMPLETE | findings decided by policy |
+| exit 0, valid JSON, but at least one intended target is not confirmed (skipped, errored, or simply absent from `paths.scanned`) | INCOMPLETE | §6: those targets are not analyzed |
+| exit 0 **and** a rule/config error in `errors[]` | FAILED (config) | UNAVAILABLE `RULE_PACK_INVALID`; findings kept as evidence only |
+| exit 4, 5 or 7 (documented rule/config failures) | FAILED (config) | UNAVAILABLE `RULE_PACK_INVALID` |
+| exit 8 (language not understood) | FAILED (config) | UNAVAILABLE `CAPABILITY_UNKNOWN` |
+| exit 13 (invalid API key; impossible without login) | FAILED (config) | UNAVAILABLE `PROVIDER_PROBE_FAILED` |
+| exit 2, 14, 1 (never expected, since `--error` is not passed), any undocumented code, crash or signal | FAILED | UNKNOWN `SCAN_FAILED`; any parsed findings kept as evidence only |
+| whole-scan timeout | TIMEOUT | UNKNOWN `SCAN_TIMEOUT` |
+| stdout not valid JSON, schema mismatch, or a missing `results`/`paths`/`errors` key | MALFORMED_OUTPUT | UNKNOWN `SCAN_OUTPUT_MALFORMED` |
+| executable or image missing, or a version mismatch | probe failure | UNAVAILABLE |
 
-Exit codes per docs.semgrep.dev/cli-reference (fetched 2026-09-27):
-- without `--error`, a scan with findings exits 0, so 0 is the only normal exit;
-- exit 3 needs `--strict`, which is not passed.
+**Exit 0 is not "clean".** Semgrep exits 0 whether or not it found anything, because `--error` is not passed (docs.semgrep.dev/cli-reference, 2026-09-27). Clean means exactly this: a COMPLETE scan whose normalized findings, after diff and policy, leave nothing to warn or block on.
 
-The adapter trusts only the JSON for findings. Nothing from the scanner is ever interpreted as success on its own: there is no "zero findings because output was empty".
+There is no path from an empty or missing output to "zero findings".
 
 ## 6. Capability and coverage contract
 
-- **Targets.** The targets are the committed batch's paths. A deleted path has POST=absent, and it is scanned PRE only (for "resolved").
+- **Intended targets.** These are `ScopePlan.targets` (§5.4). For `CHANGED_FILES` that is the batch's paths; for broader scopes it is every classified source file in the scope. A deleted path is absent in POST, so it is scanned PRE only (for "resolved").
+- **Scanner-confirmed targets.** These are the paths the provider's structured output reports as analyzed (Semgrep: `paths.scanned`), minus any path with a target-level error. Every intended target of a supported language that is not confirmed is `not_analyzed`, whatever the reason: an explicit skip, a scanner default exclusion, size or timeout limits, a parse error, or silent omission. The adapter never infers "analyzed" from "passed as a target".
 - **Language of a target.** It comes from `coverage.LANGUAGE_BY_EXTENSION`, a Kriya-owned, provider-neutral table with language ids such as `java`, `python`, `javascript`, `typescript`, `go`, `ruby`, `kotlin`, `c`, `cpp`, `csharp`, `rust`, `php`, `swift` and `scala`. It is derived from, but separate from, `analyzer.EXTENSION_MAP`, whose values are display names.
 - **Extensions the table does not list** are `unclassified`. They are reported in the evidence, but they do not count toward coverage: text, data, docs and build files are not claimed as analyzed or unanalyzed source.
 
@@ -240,7 +289,7 @@ Per-target coverage status:
 | `unsupported_language` | the provider does not support the language, or only below the maturity bar |
 | `no_rules` | the language is supported, but no configured rule targets it |
 | `prerequisite_missing` | the language is supported, but a declared prerequisite is not met |
-| `analysis_failed` | the scan skipped or errored on this file (INCOMPLETE) |
+| `not_analyzed` | supported, with rules and prerequisites met, but the scanner did not confirm analyzing it (INCOMPLETE) |
 
 Aggregate `CoverageReport.status`:
 
@@ -255,7 +304,13 @@ Aggregate `CoverageReport.status`:
 
 The report names every uncovered file with its reason, and gives a count per language.
 
-Pre-scan gating: coverage is computed from the capability before scanning, and refined after scanning with `analysis_failed`. Policy is applied to the refined report.
+**Pre-scan gating.** Coverage is computed from the capability before scanning, then confirmed after scanning, which adds `not_analyzed`. Policy is applied to the confirmed report.
+
+**Normalized consequence of `not_analyzed`.** A required file that was not actually analyzed can never yield PASS.
+- Under `policy.analysis_errors: block` it gives UNKNOWN (`SCAN_INCOMPLETE`). That is the default, and it is sealed in production when enabled.
+- Under `warn` it gives coverage PARTIAL (`COVERAGE_PARTIAL`), which `policy.partial_coverage` then decides.
+
+Either way, the file appears in `coverage.uncovered` with its reason.
 
 **The honesty invariant.** No outcome, result field, CLI line or doctor row may say "analyzed", "clean" or PASS for a file whose status is not `covered`. A test asserts this for every row of the matrix in §16.
 
@@ -268,7 +323,7 @@ Pre-scan gating: coverage is computed from the capability before scanning, and r
 - `PASS_WITH_WARNINGS`: nothing blocks. At least one finding or coverage gap is `warn`, and no waiver was needed.
 - `ACCEPTED_RISK`: at least one finding would **block** and was released by a valid waiver. Nothing else blocks. **This is never PASS.**
 - `BLOCKED`: at least one finding or coverage condition blocks, with no valid waiver.
-- `UNKNOWN`: the scanner ran but the evidence is incomplete or untrustworthy: TIMEOUT, FAILED, MALFORMED_OUTPUT, NOT_COMPARABLE, or an INCOMPLETE scan under `analysis_errors: block`.
+- `UNKNOWN`: the scanner ran but the evidence is incomplete or untrustworthy: TIMEOUT, FAILED, MALFORMED_OUTPUT, NOT_COMPARABLE, a base-identity mismatch, or an INCOMPLETE scan under `analysis_errors: block`. **When analysis is enabled, UNKNOWN always blocks** (approved decision 4).
 - `UNAVAILABLE`: the scanner could not run: provider not registered, probe failed, unknown capability, egress refused, or prerequisites missing where policy blocks.
 - `DISABLED`: `enabled: false`. The evidence records whether that is the packaged default or operator-set, from provenance (`configured_by`).
 
@@ -297,6 +352,9 @@ Each outcome carries `reason_codes`, a closed table with a tripwire test, for ex
 - `RULE_PACK_INVALID`
 - `RULE_PACK_DIGEST_MISMATCH`
 - `BASELINE_IDENTITY_MISMATCH`
+- `SCOPE_BELOW_PROVIDER_MINIMUM`
+- `PROVIDER_VERSION_MISMATCH`
+- `STATIC_ANALYSIS_EVIDENCE_MISSING`
 
 ### 7.2 Truth table (requirement × outcome)
 
@@ -306,12 +364,14 @@ Each outcome carries `reason_codes`, a closed table with a tripwire test, for ex
 | PASS_WITH_WARNINGS | yes | yes | `passed_with_warnings` | PASS_WITH_WARNINGS | false |
 | ACCEPTED_RISK | yes | yes | `accepted_risk` | ACCEPTED_RISK | **true** |
 | BLOCKED | **no** | **no** | `failed` | BLOCKED | false |
-| UNKNOWN | yes, reported (see note) | **no** | `unknown` | UNKNOWN | false |
-| UNAVAILABLE | yes, reported (see note) | **no** | `unavailable` | UNAVAILABLE | false |
+| UNKNOWN | **no** | **no** | `unknown` | UNKNOWN | false |
+| UNAVAILABLE | per `policy.when_unavailable` (default `warn`); never PASS; not reachable under the production profile (see note) | **no** | `unavailable` | UNAVAILABLE | false |
 | DISABLED | yes | not reachable: `required` + `enabled: false` is rejected at config load | `disabled` | DISABLED | false |
 
 - **BLOCKED blocks under either requirement.** `optional` means "a scanner that cannot run does not stop the run". It does not mean "blocking findings are advisory". Softening findings belongs in the severity policy (`warn`/`allow`), where it is explicit per class.
-- **Note on UNKNOWN/UNAVAILABLE under `optional`.** `policy.when_unavailable` (default `warn`) and `policy.when_unknown` (default `block`) decide these. The default for UNKNOWN is `block` even when optional: a scan that ran and produced untrustworthy evidence is not the same as "no scanner". Either way the result never says PASS.
+- **UNKNOWN always blocks when analysis is enabled** (approved decision 4). A scan that ran and produced untrustworthy evidence is not the same as "no scanner". The earlier `when_unknown` setting is removed.
+- **UNAVAILABLE under `optional`.** Outside production, `policy.when_unavailable` decides it, and the result still says UNAVAILABLE, never PASS.
+- **Production** (approved decision 2): the profile does not force `enabled: true`. When analysis *is* enabled, a sealed-profile validator requires `requirement: required` and `policy.analysis_errors: block`. Trustworthy evidence is therefore mandatory, and UNAVAILABLE and UNKNOWN both block.
 - **DISABLED** never emits `passed`. The disabled gate is still emitted as a `terminal_gate_outcome` with status `disabled`, so the sequence of gate events is identical whether the gate is on or off.
 
 ### 7.3 Policy (Kriya-owned, `kriya/static_analysis/policy.py`, pure)
@@ -363,11 +423,13 @@ The policy's inputs are the classified findings, the `CoverageReport`, the scan 
 
 A finding whose `location_key` is unchanged but whose severity is higher in POST is also `worsened`. With one scan identity that can only happen through severity metadata that depends on the target, so it is rare, but it is defined.
 
+The diff covers every file in the scope, not only changed ones (§5.4). Paths are snapshot-relative, which equals workspace-relative, so an unchanged file keeps its keys across PRE and POST, and a new finding in it is `introduced`.
+
 A renamed or moved file is `introduced` at its new path and `resolved` at its old one. That is conservative, and it is disclosed. Rename tracking is a non-goal (§19).
 
 ### 8.3 Comparability
 
-PRE and POST are comparable only when their `ProviderIdentity.identity_digest` values are equal. That digest covers the version, the executable or image digest, every rule-pack digest, the effective options and the severity-map version. Because both scans run in one service call, drift is only possible if the adapter misbehaves. A mismatch is still handled explicitly, mirroring PRD-024's `classify_baseline_delta(post_environment=)`:
+PRE and POST are comparable only when their `ProviderIdentity.identity_digest` values are equal. That digest covers the version, the executable or image digest, every rule-pack digest, the effective options and the severity-map version. The two scans also share one `ScopePlan` (same `plan_digest`). Because both scans run in one service call, drift is only possible if the adapter misbehaves. A mismatch is still handled explicitly, mirroring PRD-024's `classify_baseline_delta(post_environment=)`:
 - the result is `BASELINE_NOT_COMPARABLE`;
 - every POST finding is treated as `introduced`, so no failure is excused;
 - the outcome is UNKNOWN unless the POST scan alone is clean and complete, in which case PASS stands, exactly as a green suite passes in PRD-024.
@@ -377,20 +439,22 @@ PRE and POST are comparable only when their `ProviderIdentity.identity_digest` v
 A candidate is written by a model. Anything in the candidate or the repository that can switch the scanner off is an LLM-created or repository-created waiver, so the design closes each route:
 
 1. **Inline suppression** (`nosemgrep`, or any provider equivalent): the adapter disables it (`--disable-nosem`). A test writes a `nosemgrep` comment on a known finding in the candidate and asserts that the finding is still reported and still blocks.
-2. **Ignore files** (`.semgrepignore`, `.gitignore`): the scan roots are Kriya-owned directories that contain only the materialized target files. They have no `.git` and no repository ignore files, and `--no-git-ignore` is passed.
-
-   Semgrep applies a **built-in default ignore list** when no `.semgrepignore` exists. That list includes `test/`, `tests/`, `build/`, `vendor/` and `node_modules/` (per docs.semgrep.dev/ignoring-files-folders-code). To stop it, the builder writes an explicit empty `.semgrepignore` owned by Kriya at the scan root.
-
-   Any target that still appears in `paths.skipped` is `analysis_failed`, never clean. `--x-ignore-semgrepignore-files` is documented as `[INTERNAL]`, so it is deliberately **not** relied on.
+2. **Ignore files and scanner defaults.**
+   - The snapshots contain only scope files. The provider's `control_files` are never copied: for Semgrep that means repository and candidate `.semgrepignore`, and `.gitignore` is irrelevant because there is no `.git` and `--no-git-ignore` is passed. A repository or candidate ignore file therefore cannot remove a target.
+   - Trusted exclusions come only from operator config. They are passed through a **public, documented** interface (Semgrep: `--exclude`), recorded in the evidence, and included in the settings digest. They are legitimate and auditable.
+   - **No assumption is made about scanner defaults.** Semgrep documents a built-in default ignore list (including `test/`, `tests/`, `build/`, `vendor/`, `node_modules/`). The spec does **not** assume that any `.semgrepignore`, empty or not, disables it, and it relies on no internal flag (`--x-ignore-semgrepignore-files` is documented `[INTERNAL]` and is not used).
+   - Correctness comes from confirmation instead (§6). Every intended target that the pinned scanner does not report as analyzed is `not_analyzed`, and a required file that was not analyzed is PARTIAL or UNKNOWN, never PASS.
+   - The real tier records which intended targets the pinned version actually analyzes, including files under `src/test/`. If defaults do exclude them, the result is honest partial coverage, visible to the operator, until trusted configuration addresses it.
 3. **Rule selection**: rule packs come only from trusted config (§13), are digest-bound, and are never read from the candidate root. A pack inside the workspace is allowed only with an explicit `sha256` pin in config. It is read from the real workspace (the candidate lives in its sandbox, and the real workspace is untouched until commit), never from the candidate root, and verified against the pin (mismatch → UNAVAILABLE `RULE_PACK_DIGEST_MISMATCH`), so a candidate that edits the rules cannot change what judges it.
 4. **Provider config files in the repository** (for example a repository-level scanner settings file): these are never in the scan roots, and the adapter's settings location is a scratch dir.
-5. **Target selection**: the targets are exactly the committed batch's paths. Neither the candidate nor the model chooses them.
+5. **Target and scope selection**: the scope comes from the provider's declared minimum and the operator's config, and the targets come from Kriya's `scope.py` (or the provider, for `BUILD_GRAPH`, validated by Kriya). Neither the candidate nor the model chooses or narrows them.
+6. **Environment**: the adapter's environment is fixed (§5.2). No inherited `SEMGREP_*` variable, repository file or candidate file can add rules, change the baseline, or re-enable inline suppression.
 
 ### 8.5 Scan execution
 
 The scan runs through the existing process layer (`kriya/tools/process.py` plus the `ContainmentBackend`), never through a bare `subprocess`.
 
-- **Containment required** (`autonomy.contained_execution_required: true`, sealed by the production profile). The scan runs in OCI with `NetworkAuthority.DENIED`. The scan roots are mounted read-only. The rule packs are mounted read-only at fixed paths. The image is `providers.semgrep.image`, which must be pinned by digest. There is **no host fallback**: a missing or unpinned image, or no backend, gives UNAVAILABLE.
+- **Containment required** (`autonomy.contained_execution_required: true`, sealed by the production profile). The scan runs in OCI with `NetworkAuthority.DENIED`. The scan roots are mounted read-only. The rule packs are mounted read-only at fixed paths. The image is `providers.semgrep.image`, which must be pinned by digest (`@sha256:`). A tag alone, including `latest`, is rejected at config load. There is **no host fallback**: a missing or unpinned image, or no backend, gives UNAVAILABLE.
 - **Containment not required.** The scan runs as a host process with the restricted environment. The network is not enforced at the OS level. The honest statement is that network discipline in this mode comes from the fixed flag set (§5.2), not from containment. Evidence records `execution_location: local_process` and `network_enforced: false`.
 
 ## 9. Waiver / risk-acceptance model
@@ -494,7 +558,7 @@ The directive says "plug into PRD-030 `TerminalGateService`". That alone would l
 
 So the gate is specified at **both** boundaries, through the same `StaticAnalysisService`. This follows the PRD-020 precedent: `close_requirements_by_mutation_scope`, one function called at both sites.
 
-**Decision for the user:** approve both sites (recommended), or scope the direct/milestone boundary out with a registry row. The latter leaves production milestone runs ungated.
+**Approved (decision 1, 2026-09-27):** enforcement at both commit paths, and `commit_terminal_candidate` refuses evidence that is missing or stale (§10.4).
 
 ### 10.2 Position among the enforce gates
 
@@ -550,9 +614,29 @@ Each milestone unit is gated at its own boundary, because each unit commits.
 
 ### 10.4 Binding evidence to the commit (candidate identity)
 
-- **Batch digest.** `batch_digest = sha256` over the sorted entries `(relpath, delete, sha256(bytes) | "∅", expected_base_revision, expected_base_exists)` of the exact `StagedFileWrite` list. This one digest binds the POST bytes **and** the PRE identity (the base revisions), which is exactly what the scan judged.
-- **The commit takes the authorization as a required keyword.** `commit_terminal_candidate` gains a **required** keyword argument `static_analysis: StaticAnalysisAuthorization`, with no default, so every call site must decide. The authorization is either `StaticAnalysisAuthorization.not_required(outcome=DISABLED|UNAVAILABLE|UNKNOWN, requirement="optional")` or `StaticAnalysisAuthorization.bound(batch_digest, outcome, evidence_digest)`.
-- **What the commit checks.** Before any intent is written, it recomputes `batch_digest` over the writes it was handed. A mismatch → a controlled refusal `STATIC_ANALYSIS_EVIDENCE_STALE` (UNCHANGED workspace, like `CANDIDATE_MATERIALIZATION_FAILED`). An authorization whose outcome does not permit a commit → the same kind of refusal (defence in depth; the gate should already have stopped it).
+- **Identity components.** The evidence identity binds every input that could change the verdict:
+  - `batch_digest`: sha256 over the sorted `(relpath, delete, sha256(bytes) | "∅", expected_base_revision, expected_base_exists)` of the exact `StagedFileWrite` list. It binds the candidate and the changed paths' base revisions.
+  - `base_scope_digest`: sha256 over the sorted `(relpath, sha256(bytes))` of every PRE scope file, read from the real workspace. It binds the base and workspace identity of the unchanged scope.
+  - `scope_plan_digest`: the scope kind, the intended targets, the module roots and the trusted exclusions.
+  - `provider.identity_digest`: provider, exact version, edition, executable or image digest, and severity-map version.
+  - `rule_pack_digests`: sha256 over each pack's canonical rule files.
+  - `effective_settings_digest`: the adapter flag set, the timeouts and limits, and the policy config.
+
+  `authorization_digest = sha256(all of the above)`.
+- **The commit requires the authorization.** `commit_terminal_candidate` gains a **required** keyword argument `static_analysis: StaticAnalysisAuthorization`, with no default, so every call site must decide. There are only two forms:
+  - `StaticAnalysisAuthorization.not_enabled()`: the only form accepted when analysis is disabled. It is also accepted when `requirement: optional` with UNAVAILABLE under `when_unavailable: warn`, outside production; the outcome is recorded.
+  - `StaticAnalysisAuthorization.bound(authorization_digest, components, outcome, evidence_digest)`: required whenever analysis is enabled and the outcome permits a commit.
+
+  If analysis is enabled, `not_enabled()` for any other outcome is refused as `STATIC_ANALYSIS_EVIDENCE_MISSING`.
+- **What the commit checks, before any intent is written.**
+  - It recomputes `batch_digest` over the writes it was handed.
+  - It recomputes `base_scope_digest` over the real workspace for the plan's file list, and re-enumerates the scope's membership for `MODULE`/`REPOSITORY`, so a new file added into the scope is caught.
+  - It re-hashes the rule packs and the executable or image reference.
+  - It recomputes the settings digest from the current config.
+
+  Any mismatch is a controlled refusal, `STATIC_ANALYSIS_EVIDENCE_STALE`, naming the component. The workspace stays UNCHANGED, as with `CANDIDATE_MATERIALIZATION_FAILED`. An authorization whose outcome does not permit a commit is refused the same way, as defence in depth.
+
+  The provider is not re-probed at commit. The executable or image digest stands in for it, so the check stays cheap and runs without a scanner process.
 - **Why it is enforced in the one shared commit function.** Neither boundary can skip it. `commit_verified_candidate` passes it through.
 - **Transaction evidence.** The transaction evidence adds `static_analysis: {outcome, evidence_digest, batch_digest, accepted_risk}` to the durable commit record (RunRecord commit evidence), so accepted risk is on the audit trail of the commit that took it.
 - **Resume.** A checkpoint never carries static-analysis authority. A resumed run re-evaluates at its boundary: the scan is cheap and the waiver store may have changed. The adapter's `identity_digest` is recorded in the run's resume fingerprints for audit, but it is never used to skip a scan.
@@ -576,10 +660,13 @@ Each milestone unit is gated at its own boundary, because each unit commits.
                "effective_options_digest": "sha256:...", "severity_map_version": 1, "identity_digest": "sha256:..."},
   "egress": {"policy": "local_only", "provider_network_requirement": "none", "source_upload": false, "admitted": true},
   "candidate": {"batch_digest": "sha256:...", "paths": 7, "base_revisions_bound": true},
+  "scope": {"kind": "CHANGED_FILES", "provider_minimum": "CHANGED_FILES", "targets": 7, "module_roots": [],
+            "trusted_exclusions": [], "plan_digest": "sha256:...", "base_scope_digest": "sha256:...", "post_scope_digest": "sha256:..."},
+  "authorization_digest": "sha256:...",
   "coverage": {"status": "PARTIAL",
                "per_language": [{"language": "java", "files": 5, "maturity": "ga", "rules_available": 212, "covered": 5},
                                 {"language": "cpp", "files": 2, "maturity": null, "rules_available": 0, "covered": 0}],
-               "uncovered": [{"path": "native/codec.cpp", "status": "no_rules"}],
+               "uncovered": [{"path": "native/codec.cpp", "status": "no_rules"}], "confirmed_analyzed": 5, "not_analyzed": [],
                "unclassified": ["README.md"]},
   "scans": {"pre": {"status": "COMPLETE", "identity_digest": "sha256:...", "duration_ms": 812, "raw_sha256": "..."},
             "post": {"status": "COMPLETE", "identity_digest": "sha256:...", "duration_ms": 845, "raw_sha256": "..."},
@@ -597,8 +684,8 @@ Each milestone unit is gated at its own boundary, because each unit commits.
 
 **CLI and JSON surfaces:**
 - **Result JSON.** The `generate`/`fix` result carries `static_analysis` (the evidence minus raw findings beyond a bounded count) plus the top-level `accepted_risk: bool` and `accepted_risks: [waiver ids]`. The PRD-003 JSON contract is extended additively, and its contract tests are updated in the same change.
-- **Human output.** When the outcome is not PASS, it prints a banner line that cannot be missed: `STATIC ANALYSIS: ACCEPTED RISK - not a clean pass (1 finding released by waiver SAW-2026-0001)`. The same kind of banner is printed for UNKNOWN, UNAVAILABLE and DISABLED.
-- **Exit codes.** They are unchanged in v1. A run with ACCEPTED_RISK exits 0, like SUCCESS: exit codes are a PRD-003 contract. The distinction is carried in JSON and text. **Decision for the user:** keep exit 0, or add a distinct code. A distinct code is recommended only if CI consumers need it.
+- **Human output.** For ACCEPTED_RISK the banner is exactly `ACCEPTED RISK — NOT A CLEAN PASS`, followed by the waiver ids and the findings they released (approved decision 3). UNKNOWN, UNAVAILABLE, PASS_WITH_WARNINGS and DISABLED each print their own banner. None of them ever prints PASS.
+- **Exit codes.** They are unchanged in v1: a run with ACCEPTED_RISK exits 0 (approved decision 3). The outcome stays distinct in the JSON (`static_analysis.outcome: ACCEPTED_RISK`, `accepted_risk: true`) and in the banner.
 
 ## 12. Security and privacy
 
@@ -620,7 +707,7 @@ Each milestone unit is gated at its own boundary, because each unit commits.
    - They are length-bounded and control-character-stripped in human output.
    - They are never used as a policy input beyond the normalized `rule_id`/`severity`/`path`/`range`.
 5. **Isolated state.** The scans run on Kriya-owned copies (§8.4), never on the real workspace and never in place on the candidate root.
-6. **Candidate identity.** §10.4: a batch that changes between scan and commit is refused.
+6. **Evidence identity.** §10.4. A change to any of these between scan and commit is refused: the batch, the base scope, the scope plan, the provider runtime, the rule packs or the effective settings.
 7. **Config authority.** Every `static_analysis.*` field is SECURITY_AUTHORITY: none of them is added to `_REPOSITORY_SAFE_FIELDS`.
 
    A repository config can therefore neither disable the gate nor soften the policy, choose rule packs, point at a waiver store, or change the provider. The alternative, allowing a repository to make the policy stricter only, is noted as a future refinement.
@@ -635,7 +722,8 @@ static_analysis:
   enabled: false                 # packaged default: the gate reports DISABLED, never PASS
   provider: null                 # v1: exactly one registered provider name, e.g. "semgrep"
   requirement: optional          # optional | required   (required + enabled:false -> config error)
-  scope: changed_files           # v1 only value; "repository" reserved (v2)
+  scope: auto                    # auto (= provider minimum) | changed_files | module | repository | build_graph; never narrower than the provider minimum
+  exclusions: []                 # trusted, auditable path globs (passed via the provider's public exclusion interface)
   timeout_seconds: 300           # whole-scan bound, per scan (PRE and POST each)
   policy:
     introduced: {critical: block, high: block, medium: warn,  low: allow, info: allow}
@@ -644,16 +732,16 @@ static_analysis:
     partial_coverage: warn       # warn | block
     unsupported_language: warn   # warn | block
     prerequisites_missing: block # warn | block
-    analysis_errors: block       # warn | block  (INCOMPLETE scans)
-    when_unavailable: warn       # warn | block  (only meaningful when requirement: optional)
-    when_unknown: block          # warn | block  (only meaningful when requirement: optional)
+    analysis_errors: block       # block -> UNKNOWN | warn -> PARTIAL coverage (not-analyzed required files; never PASS)
+    when_unavailable: warn       # warn | block  (only for requirement: optional outside production)
+    # UNKNOWN is not configurable: when enabled it always blocks (approved decision 4)
   waivers:
     store: null                  # null -> ~/.kriya/static_analysis/waivers/<workspace_id>.json; explicit path must be outside the workspace
   providers:                     # provider-specific settings, keyed by provider name; only the selected one is validated
     semgrep:
       executable: semgrep        # host mode only
       image: null                # required (digest-pinned) when contained_execution_required
-      min_version: null
+      version: null              # required when enabled: exact "x.y.z"; ranges and "latest" rejected
       min_language_maturity: ga  # ga | beta | experimental
       rule_packs: []             # local paths; outside the workspace, or {path, sha256} pinned
       per_file_timeout_seconds: 5
@@ -667,20 +755,22 @@ static_analysis:
   - `enabled: true` with no `provider`, or with an unregistered one, is rejected;
   - a selected provider's settings must pass that adapter's own settings model, which the adapter registers;
   - `rule_packs` must be non-empty and local, with no registry refs or URLs;
+  - `providers.<p>.version` must be an exact version, and `image` must be pinned by digest;
+  - `scope` must not be narrower than the adapter's static minimum;
   - an in-workspace pack must be pinned;
   - `waivers.store` must be outside the workspace;
   - `providers` blocks for unselected providers are shape-checked only.
 - **Multiple scanners later.** v2 can add `providers_enabled: [..]` alongside `provider`, keyed by `schema_version: 2`. The finding model already namespaces `rule_id` by provider, so no field in v1 has to change meaning.
-- **Production profile.** It does **not** seal `enabled: true`, because that would make Semgrep a hard production dependency, which the directive rules out. **Decision for the user:** should the production profile seal "if enabled, then `requirement: required`" and `when_unknown: block`? This is recommended: an enabled but optional scanner in production is mostly a false sense of assurance.
+- **Production profile** (approved decision 2). The profile does **not** force `enabled: true`. A sealed-profile validator requires, *when enabled*, `requirement: required` and `policy.analysis_errors: block`. Violating it is the usual sealed-profile error. `runtime_profile_preset_fields` cannot express a conditional, so this is a validator next to the existing `runtime_profile: production` checks in `AppConfig`, not a preset field.
 
 ## 14. Doctor
 
 `kriya doctor --production` gains the following rows. They use the same registry, probe, coverage and waiver code as the gate: there is no second implementation.
 
-| Check id | PASS | WARN | FAIL | NOT_APPLICABLE |
+| Check id | PASS | WARN | FAIL | NOT_APPLICABLE (row status PASS, `evidence.status: "NOT_APPLICABLE"`) |
 |---|---|---|---|---|
-| `static_analysis.configuration` | consistent | enabled + optional with `when_unknown: warn` | `required` + disabled (unreachable after load validation, reported through the config-load failure row); an unregistered provider | disabled + optional |
-| `static_analysis.provider` | probe OK; version ≥ min | optional and probe failed | required and probe failed; version < min | disabled |
+| `static_analysis.configuration` | consistent | enabled + optional + `when_unavailable: warn` (outside production) | `required` + disabled (unreachable after load validation, reported through the config-load failure row); an unregistered provider; a non-exact version or an unpinned image | disabled + optional |
+| `static_analysis.provider` | probe OK; the exact configured version | optional and probe failed | required and probe failed; version mismatch | disabled |
 | `static_analysis.capability` | capability known; every rule pack's digest valid; pinned packs match | a language only at beta or experimental maturity | capability unknown; pack digest mismatch; zero rules | disabled |
 | `static_analysis.coverage` | every classified repository language (bounded walk, `.kriya`/VCS excluded) has coverage | partial coverage and policy `warn` | partial or unsupported coverage and policy `block` | disabled, or no classified source |
 | `static_analysis.prerequisites` | met | unmet and policy `warn` | unmet and policy `block` | none declared, or disabled |
@@ -689,21 +779,25 @@ static_analysis:
 
 `required` for each row = `static_analysis.enabled and requirement == "required"`.
 
-**Doctor schema change.** `CheckStatus` gains `NOT_APPLICABLE`, and `ProductionDoctorReport.schema_version` goes 1 → 2. `_report` treats NOT_APPLICABLE as non-blocking, and `render_production_report` prints it. The current workaround, where `context_certification` maps NOT_APPLICABLE to PASS, is left unchanged in v1; converting it is noted as a follow-up. The PRD-010 and PRD-003 doctor JSON contract tests are updated in the same change.
+**No doctor schema change.** The current contract was inspected (2026-09-27):
+- `CheckStatus` is `PASS/WARN/FAIL/UNAVAILABLE`, and `ProductionDoctorReport.schema_version` is 1, pinned by `tests/test_production_doctor.py`.
+- A NOT_APPLICABLE representation already exists. `context.recall_certification` (PRD-027) reports `CheckStatus.PASS`, `required=False`, `evidence.status: "NOT_APPLICABLE"` with a `detail`. `render_production_report` prints the evidence, so the text output shows it.
+
+The static-analysis rows reuse that representation exactly. They add no enum value and no schema bump, and PRD-003 compatibility is unaffected. A schema bump would be justified only if a consumer had to tell NOT_APPLICABLE apart without reading the evidence. None does today. If that ever changes, it is a separate change with PRD-003 compatibility and migration tests.
 
 ## 15. Migration and backward compatibility
 
 - **Packaged default.** `enabled: false`. Every existing config, test and run behaves as today, except for four things:
   1. a 7th `terminal_gate_outcome` event, `static_analysis` / `disabled`, in enforce runs;
   2. the result keys `static_analysis`, `accepted_risk` and `global_static_analysis_gap` (null);
-  3. the doctor schema_version 2 plus seven rows, which are NOT_APPLICABLE by default;
+  3. seven doctor rows, NOT_APPLICABLE by default (PASS with `evidence.status: "NOT_APPLICABLE"`), schema_version unchanged at 1;
   4. `commit_terminal_candidate` gaining a required keyword argument.
 - **Characterization tests that change deliberately.** The implementing agent must list each one in the handover with its reason:
   - `tests/test_prd030_terminal_services.py:47` and `:137` (gate list and gap matrix);
   - `tests/test_workflow_controller_enforce.py` ~10223–10445 (gate matrix and the ordered gate list);
   - every direct test of `commit_terminal_candidate` / `commit_verified_candidate` (new keyword);
   - the PRD-003 result-JSON contract tests;
-  - the PRD-010 doctor report tests.
+  - the PRD-010 doctor tests that enumerate the full check list (row count and ids only).
 
   No other characterization test may change.
 - **No data migration.** No existing record is reinterpreted. Old RunRecords simply have no static-analysis evidence, and readers treat absence as "not evaluated", never as PASS.
@@ -714,13 +808,15 @@ static_analysis:
 ## 16. Test matrix
 
 **D** = deterministic, run in the normal suite. It uses a `FakeStaticAnalysisAdapter` (`tests/_fake_static_analysis.py`; `kriya/` must never register it; tripwire like INF-001's fake runtime) and **recorded Semgrep fixtures**: real `semgrep --json` output, captured once, stamped with its semgrep version and rule-pack digest, and stored under `tests/fixtures/static_analysis/semgrep/<version>/`.
-**S** = real Semgrep, behind a new opt-in marker `live_static_analysis`. It is excluded by default like `live_model` (added to `addopts`), and skipped with a clear reason when `semgrep` is absent. It does not need a model.
+**S** = the real scanner tier. It runs **one exact pinned Semgrep version** (never `latest`; the image by digest), recorded in the fixtures and the handover, behind a new opt-in marker `live_static_analysis`. It is excluded by default like `live_model` (added to `addopts`), and skipped with a clear reason when that exact version is absent. A different installed version skips, never runs. It does not need a model.
+
+The deterministic tier covers the fake adapter, policy, baseline diff, waivers, coverage, scope, stale evidence and commit blocking. The real tier covers actual target coverage, `--disable-nosem`, malformed rules, findings with exit 0, scanner error handling, PRE/POST classification, and rule-pack and runtime identity.
 
 | # | Case | Tier | Asserts |
 |---|---|---|---|
 | 1 | disabled (packaged default) | D | DISABLED; `permits_commit`; gate event `disabled`, never `passed`; zero probe or scan calls; result `accepted_risk: false` |
 | 2 | required + disabled | D | config load raises the typed error; doctor config-load row FAIL |
-| 3 | provider not registered / probe fails | D | UNAVAILABLE; optional → commit per `when_unavailable`, the result never says PASS; required → commit refused, workspace UNCHANGED |
+| 3 | provider not registered / probe fails / version mismatch | D | UNAVAILABLE; optional (outside production) → commit per `when_unavailable`, never PASS; required or production → commit refused, workspace UNCHANGED |
 | 4 | Java supported, C++ unsupported (fake capability) | D | per-file statuses; PARTIAL; policy warn → PASS_WITH_WARNINGS; policy block → BLOCKED; C++ file never reported as analyzed |
 | 5 | mixed-language, language supported but zero rules | D | `no_rules` → uncovered; the honesty invariant holds on every output surface |
 | 6 | prerequisite missing (fake declares `compiled_classes`) | D | PREREQUISITES_MISSING decided before the scan (zero scan calls); warn and block variants |
@@ -731,23 +827,30 @@ static_analysis:
 | 11 | explicit valid waiver | D | ACCEPTED_RISK; `permits_commit`; `accepted_risk: true`; banner text; waiver id in the commit evidence; **outcome ≠ PASS** everywhere |
 | 12 | waiver expired / path mismatch / severity above max / rule-pack digest mismatch / tampered digest / other workspace | D | each → not applied, rejection reason recorded, stays BLOCKED |
 | 13 | waiver store corrupt | D | `WAIVER_STORE_INVALID`; no waiver applies; the gate still evaluates |
-| 14 | scanner timeout / crash (exit 2 or signal) / malformed JSON / missing keys | D (fake + fixture corruption) | UNKNOWN; never PASS; required → refused; optional + `when_unknown: block` → refused |
-| 15 | INCOMPLETE: a target in `paths.skipped` (size limit) or a per-file parse error | D + S | `analysis_failed`; policy `analysis_errors` applied |
-| 16 | rule pack or version identity changes between PRE and POST (fake) | D | NOT_COMPARABLE: all POST findings introduced; UNKNOWN unless POST is clean |
-| 17 | candidate mutated after scan (a byte changed in a write, or a base revision changed) | D | commit refuses with `STATIC_ANALYSIS_EVIDENCE_STALE`; workspace UNCHANGED; on both paths |
+| 14 | scanner timeout / crash (exit 2 or signal) / malformed JSON / missing keys | D (fake + fixture corruption) + S (crash via an invalid invocation) | UNKNOWN; never PASS; refused under **both** optional and required |
+| 15 | INCOMPLETE: an intended target skipped (size limit), errored (parse error), or silently absent from `paths.scanned` | D + S | `not_analyzed`; `analysis_errors: block` → UNKNOWN; `warn` → PARTIAL; never PASS |
+| 16 | rule pack or version identity changes between PRE and POST (fake) | D + S (two pinned rule-pack versions: evidence identities differ) | NOT_COMPARABLE: all POST findings introduced; UNKNOWN unless POST is clean |
+| 17 | evidence stale at commit: a batch byte changed; an unchanged in-scope file edited in the real workspace; a file added to a MODULE/REPOSITORY scope; a rule pack re-hashed differently; the executable/image digest changed; policy/settings changed | D | commit refuses with `STATIC_ANALYSIS_EVIDENCE_STALE`, naming the component; workspace UNCHANGED; on both paths |
+| 17b | evidence missing: analysis enabled, and a call site passes `not_enabled()` for a non-permitted case | D | refused `STATIC_ANALYSIS_EVIDENCE_MISSING`; on both paths |
 | 18 | `local_only` + provider declaring `network: service` or `source_upload: true` | D | UNAVAILABLE `EGRESS_NOT_PERMITTED`; zero scan calls; recorded in `egress.authority` |
 | 19 | `nosemgrep` comment added by the candidate on a known finding | S (+ D argv) | the finding is still reported and blocks |
-| 20 | candidate adds a `.semgrepignore` / `.gitignore`; the target sits under `tests/` (default-ignore list) | S (+ D scan-root contents) | still analyzed; scan roots contain only the targets + Kriya's empty ignore file |
+| 20 | candidate or repository `.semgrepignore`/`.gitignore` naming a target; a target under `src/test/` (the default-ignore list) | S (+ D snapshot contents) | repository and candidate control files are never in the snapshots; targets actually analyzed are confirmed from `paths.scanned`; any target the pinned version does not analyze is `not_analyzed` → PARTIAL/UNKNOWN, **never PASS**; the observed default-exclusion behaviour is recorded in the handover |
 | 21 | an in-workspace rule pack edited by the candidate | D | rules read from the real workspace (never the candidate root) and digest-verified; a mismatch → UNAVAILABLE `RULE_PACK_DIGEST_MISMATCH` |
-| 22 | Semgrep adapter contract | D (fixtures) + S | exact argv/env (flags in §5.2); registry-ref pack rejected at config; severity map; namespaced `rule_id`; exit-code table in §5.3 (0 normal; 1, 2 and 14 FAILED; 4, 5 and 7 RULE_PACK_INVALID; 8 and 13 UNAVAILABLE); `paths.scanned` drives `analyzed` |
+| 22 | Semgrep adapter contract | D (fixtures) + S | exact argv/env (§5.2); registry-ref pack, `latest` and a version range rejected at config; severity map; namespaced `rule_id`; §5.3: **findings with exit 0 are parsed and block** (S), a malformed rule is RULE_PACK_INVALID and not treated as findings (S), a rule/config error in `errors[]` at exit 0 is UNAVAILABLE, and findings parsed from a failed run are evidence only; `paths.scanned` drives `analyzed` |
 | 23 | fake adapter contract | D | the shared port contract suite runs against both adapters (fake in D, Semgrep in S) |
 | 24 | no LLM-granted authority | D | structural: single `write_waiver` caller; adversarial: a waiver-shaped file in the workspace/candidate root and "risk accepted" plan/Developer text → no effect |
 | 25 | layering | D | §4.2 invariants 1–6 (AST/grep) |
 | 26 | both boundaries | D | the direct/milestone pre-apply boundary and the enforce `TerminalGateService` both gate, **with the same service**; the milestone unit is gated per unit |
 | 27 | result contract on every terminal path | D | the `static_analysis`/`accepted_risk` fields are present and correct on success, BLOCKED stop, other gate failed, plan invalid, and subtask incomplete (`NOT_RUN`) (CLAUDE.md quality bar rule 2) |
-| 28 | doctor rows | D | each row × PASS/WARN/FAIL/NOT_APPLICABLE; schema_version 2; NOT_APPLICABLE non-blocking |
+| 28 | doctor rows | D | each row × PASS/WARN/FAIL/NOT_APPLICABLE; NOT_APPLICABLE = PASS + `evidence.status: "NOT_APPLICABLE"` + `required=False` (the PRD-027 representation); schema_version still 1; `production_ready` unaffected by NOT_APPLICABLE |
 | 29 | OCI execution | S (+ Docker) | contained scan, network DENIED, read-only mounts; a missing image → UNAVAILABLE (no host fallback) |
 | 30 | strict doubles | D | every config double is `strict_config(static_analysis={...})`; `tests/test_strict_doubles.py` stays green |
+| 31 | provider-required scope | D | the fake `cross_file` provider with `minimum_scope: MODULE` → the snapshots hold the whole module; a configured `scope: changed_files` below that minimum → config error / `SCOPE_BELOW_PROVIDER_MINIMUM`; `scope: auto` = the provider minimum |
+| 32 | a finding in an unchanged file caused by the candidate | D (fake cross-file) | the changed callee makes the fake report a finding in an unchanged caller → `introduced` → BLOCKED; a finding that disappears from an unchanged file → `resolved` |
+| 33 | PRE/POST snapshot equivalence | D | unchanged scope files are byte-identical in PRE and POST; POST = PRE + writes − deletes; `base_scope_digest`/`post_scope_digest` recorded |
+| 34 | production seal | D | `runtime_profile: production` + enabled + `requirement: optional` (or `analysis_errors: warn`) → sealed-profile error; production + `enabled: false` → allowed, DISABLED |
+| 35 | ACCEPTED_RISK surfaces | D | exit code 0; `static_analysis.outcome == "ACCEPTED_RISK"`; `accepted_risk: true`; the human output contains exactly `ACCEPTED RISK — NOT A CLEAN PASS`; no surface prints PASS |
+| 36 | rule-pack and runtime identity | S | the evidence carries the exact pinned version, the image or executable digest and the rule-pack digest; editing one rule changes the rule-pack digest, and so `authorization_digest` |
 
 **Mutation check (required):**
 - policy severity/classification lookup;
@@ -756,64 +859,75 @@ static_analysis:
 - the expiry comparison;
 - the diff counts;
 - the fingerprint normalization;
-- the batch-digest recompute;
+- every identity-component recompute at commit (batch, base scope, scope membership, rule pack, runtime, settings);
+- the scope-minimum guard;
+- the `not_analyzed` → UNKNOWN/PARTIAL mapping;
 - the `permits_commit` guard;
 - the `commit_eligible` conjunct;
-- the adapter's exit-code and skipped-path mapping.
+- the adapter's exit-code, `errors[]`-kind and confirmation mapping.
 
 Every mutation must make a test fail.
 
-## 17. Priority recommendation: P1
+## 17. Priority: P1 (approved 2026-09-27)
 
 It is not P0. No existing guarantee is false today. Kriya does not claim static-analysis assurance, and the gate is off by default.
 
 It is not P2. The user placed it on the production path ahead of PRD-032 (P0). A production deployment that is asked "was this change security-scanned, and was any risk accepted?" currently has no answer. The accepted-risk ≠ PASS distinction is also a false-success concern, the same family as PRD-033.
 
-## 18. Live-test recommendation
+## 18. Live-test posture (approved 2026-09-27)
 
 - **Live-model: NOT_REQUIRED.** No model is involved in any decision. Proving "LLM output cannot grant a waiver" is structural plus adversarial with scripted model text; a real model adds nothing.
-- **Real-Semgrep tier: REQUIRED for closure.**
-  - Tests 7, 8, 9, 15, 19, 20, 22, 23 and 29 run under the new `live_static_analysis` marker on a small brownfield fixture repository: Java + C++, one pre-existing Java finding, and a candidate that introduces one, fixes one and shifts one.
-  - Semgrep is **not installed** on this machine (checked 2026-09-27). The user installs a pinned version, for example `pipx install semgrep==<pinned>` or the `semgrep/semgrep:<pinned>@sha256:...` image for the OCI test.
+- **Real pinned-scanner tier: REQUIRED for closure.**
+  - Tests 7, 8, 9, 14, 15, 16, 19, 20, 22, 23, 29 and 36 run under the new `live_static_analysis` marker on a small brownfield fixture repository: Java + C++, one pre-existing Java finding, and a candidate that introduces one, fixes one and shifts one.
+  - Semgrep is **not installed** on this machine (checked 2026-09-27). The user installs **one exact version**, chosen at implementation and recorded: `pipx install semgrep==<x.y.z>`, and the `semgrep/semgrep:<x.y.z>@sha256:<digest>` image for the OCI test. `latest` is never used.
   - The implementing agent records the exact version in the fixtures and the handover.
   - Being able to run the S tier is itself a verification step for the user.
-- **CI.** Proposed: an opt-in `static-analysis-live` job that installs the pinned Semgrep, following the pattern of the existing live-model job. Non-blocking at first.
+- **CI.** Proposed: an opt-in `static-analysis-live` job that installs the same exact pinned Semgrep, following the pattern of the existing live-model job. Non-blocking at first.
 
 ## 19. Explicit non-goals (v1)
 
 These are recorded in `handover/BACKLOG_REGISTRY.csv` with a target scope where they are real deferrals:
 - **Remediation loop.** Feeding BLOCKED findings back to the Developer as fenced, untrusted retry evidence. This changes retry semantics, so it is a separate PRD after PRD-032 (`STATIC-ANALYSIS-REMEDIATION-LOOP-001`).
 - **Multiple providers at once.** Merged findings and cross-provider dedup (`STATIC-ANALYSIS-MULTI-PROVIDER-001`).
-- **`scope: repository`.** Whole-repository PRE/POST at the PRD-024 capture point.
 - **Dependency and supply-chain (SCA) findings.** The waiver `package`/`version_range` fields are reserved, not applied.
 - **Remote or SaaS providers and source upload.** Refused in v1.
 - **Rename and move tracking in the diff.**
 - **Semgrep Pro / cross-file analysis.**
 - **Repository-supplied "stricter-only" policy.**
-- **Converting `context_certification`'s NOT_APPLICABLE→PASS mapping** to the new doctor status.
+- **A first-class doctor `NOT_APPLICABLE` status or a schema bump** (§14).
+- **Providers that must upload the scope or build it themselves.** `BUILD_GRAPH` is in the port and exercised by the fake adapter, but no v1 production adapter needs it.
 - **Any change to the enforce subtask loop or `execute_plan()` convergence** (ENFORCE-EXECUTE-PLAN-CONVERGENCE-001 stays separate).
 
-## 20. Decisions requested from the user before implementation
+## 20. Approved decisions and corrections (2026-09-27)
 
-1. **Both terminal boundaries (§10.1).** Recommended: yes. The alternative leaves production `--from-milestones` ungated.
-2. **Production profile seal (§13).** Recommended: seal "enabled ⇒ required" and `when_unknown: block`, but not `enabled` itself.
-3. **Exit code for ACCEPTED_RISK (§11).** Recommended: keep 0, with the distinction carried in JSON and a banner.
-4. **UNKNOWN under `optional` (§7.2).** Recommended: `when_unknown` defaults to `block`.
-5. **Priority P1 and live-test posture (§17, §18).**
+Decisions:
+1. **Enforcement at both commit paths.** `commit_terminal_candidate` refuses evidence that is missing or stale (§10.1, §10.4).
+2. **Production.** It does not force `enabled: true`. When analysis is enabled, trustworthy evidence is mandatory and UNKNOWN blocks (§7.2, §13).
+3. **ACCEPTED_RISK.** It may exit 0, but it stays a distinct outcome and displays `ACCEPTED RISK — NOT A CLEAN PASS` (§11).
+4. **UNKNOWN.** When analysis is enabled, UNKNOWN blocks even when static analysis is otherwise optional (§7.2).
+5. **Priority and testing.** P1, live test REQUIRED. No live-model test; a real pinned-scanner tier is required (§17, §18).
+
+Corrections applied in this revision:
+- **Scan scope.** It is provider-required (`CHANGED_FILES`/`MODULE`/`REPOSITORY`/`BUILD_GRAPH`), never mandated as changed-files-only. Equivalent PRE/POST snapshots are built over the scope, and findings in unchanged files are diffed (§5.4, §4.3, §8.2).
+- **Evidence identity.** It binds the candidate, the base scope, the scope plan, the provider runtime, the rule packs and the effective settings, and the commit refuses stale or mismatched evidence (§10.4).
+- **Target coverage.** No assumption about scanner defaults or `.semgrepignore`, and only public interfaces are used. Intended targets are compared with scanner-confirmed ones, and a required file that was not analyzed is PARTIAL or UNKNOWN, never PASS. `--disable-nosem` is kept. Repository and candidate control files and the environment cannot weaken policy, while trusted exclusions stay legitimate and auditable (§5.2, §6, §8.4).
+- **Semgrep process result.** Exit 0 is not clean. Findings are parsed independently of process status, and scanner and config errors are kept separate from findings. The exact version is pinned, and `latest` is never used (§5.2, §5.3).
+- **Doctor.** The existing NOT_APPLICABLE representation is reused, with no schema bump (§14).
+- **Verification tiers.** As in §16 and §18.
 
 ## Acceptance criteria
 
 - [ ] A provider-neutral port, registry, service, policy and waiver registry exist. No Semgrep name appears above the adapter (structural test).
 - [ ] Disabled never reports PASS; required + disabled fails at config load.
-- [ ] Coverage is evaluated before scanning. No uncovered file is ever reported analyzed.
-- [ ] PRE/POST on the committed batch; introduced, unchanged, worsened and resolved classified with line-shift-stable fingerprints; NOT_COMPARABLE handled.
+- [ ] Coverage is evaluated before scanning and confirmed against the scanner's reported analysis. A required file that was not analyzed is PARTIAL or UNKNOWN, never PASS.
+- [ ] PRE/POST over the provider-required scope; findings in unchanged files diffed; introduced, unchanged, worsened and resolved classified with line-shift-stable fingerprints; NOT_COMPARABLE handled.
 - [ ] Policy is owned by Kriya, and every outcome and requirement combination follows §7.2.
 - [ ] Waivers come only from the operator CLI, are stored outside the workspace and read fresh; expired or mismatched waivers never apply; ACCEPTED_RISK ≠ PASS on every surface.
 - [ ] Inline suppression, ignore files, rule packs and scanner settings controlled by the repository or the candidate cannot suppress a finding.
-- [ ] The gate runs at both terminal boundaries. The evidence is bound to the committed batch through `commit_terminal_candidate`, and a stale batch is refused.
+- [ ] The gate runs at both terminal boundaries. `commit_terminal_candidate` refuses evidence that is missing, or stale in any identity component (batch, base scope, scope plan, runtime, rule packs, settings).
 - [ ] Egress admission happens before execution; no execution under `local_only` for a network-requiring or source-uploading provider; OCI with no host fallback when containment is required.
-- [ ] Doctor rows with PASS/WARN/FAIL/NOT_APPLICABLE; doctor schema_version 2.
-- [ ] Every test in §16 D green in the user's pytest; S tier green against a pinned real Semgrep; the mutation check done; ruff and pylint at zero.
+- [ ] Doctor rows with PASS/WARN/FAIL/NOT_APPLICABLE, using the existing NOT_APPLICABLE representation; doctor schema_version unchanged.
+- [ ] Every test in §16 D green in the user's pytest; S tier green against one exact pinned Semgrep version; the mutation check done; ruff and pylint at zero.
 
 ## Required handover
 
@@ -821,4 +935,4 @@ Follow `00_GLOBAL_EXECUTION_CONTRACT.md` and `templates/CODING_AGENT_HANDOVER_TE
 
 The coding agent ends by producing `handover/PRD-031A_CODING_HANDOVER.md` and setting the status to `READY_FOR_PYTEST_VERIFICATION`. It does not self-certify. The handover must list:
 - every characterization test changed on purpose, with its reason (§15);
-- the exact Semgrep version and `--help` flag verification.
+- the exact Semgrep version (and image digest), the `--help` flag verification, and the observed default-exclusion behaviour (§8.4).
