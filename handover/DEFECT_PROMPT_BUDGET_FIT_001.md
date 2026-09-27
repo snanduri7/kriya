@@ -117,3 +117,10 @@ Size each section against the room its own request has left: `allocation_window(
 - **Milestone coverage.** Milestone units run the same direct Planner and Reviewer path (`run_generation_workflow` with a WorkUnitInvocation), so 001A/B apply to every unit unchanged. The milestone terminal semantics of a refused final review are 001C's existing milestone test (`tests/test_prompt_budget_fit_001c.py`), re-run green. No separate 8K milestone run was added.
 - **PROMPT-FIT-ROLE-CHAIN-001 (P2, new).** Planner and Reviewer requests are sized for the role's first candidate: its `role_llm`, else the primary. A role-chain fallback with a smaller window receives the same request, is refused by the dispatch check if it cannot hold it, and escalation continues. `call_with_escalation` accepts a per-candidate prompt, so per-candidate sizing is the follow-up. Not in 6.5 scope.
 - **Learned reference at the Developer (own regression, a314d45/f136d7e).** With learned text present, 8K Developer requests are refused. Fixed in its own commit ("Fix (my a314d45)"); see handover/BACKLOG_6_5_SUMMARY.md.
+
+## Backlog 6.6 follow-ups (2026-09-27)
+- **PROMPT-FIT-ROLE-CHAIN-001: FIXED in 7d7b0c0**, awaiting the user's pytest run. Planner and Reviewer requests are fitted per role candidate (`CandidatePrompts`, `review_requests`).
+- **DEVELOPER-PROMPT-FIT-001: FIXED in cfe9590**, awaiting the user's pytest run. Every Developer request is fitted into the capacity of the binding it is sent to (`fit_developer_request`).
+- **ARCHITECT-PROMPT-FIT-001 (P2, new, recorded only).** The Architect's unfitted reference is refused at 16K with 30 entries.
+
+Details, evidence and the remaining findings: `handover/BACKLOG_6_6_SUMMARY.md`.
