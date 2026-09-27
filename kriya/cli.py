@@ -86,6 +86,16 @@ async def _initialize_plugins_tolerant(kernel: Kernel, pm: PluginManager) -> Dic
             results[p.name] = e
     return results
 
+def _user_error_text(error: BaseException) -> str:
+    """An expected operator error as one message: its typed reason code and
+    remediation first when it carries them (e.g. SEC-009's
+    TRUST_PATH_INSIDE_WORKSPACE)."""
+    code = getattr(error, "reason_code", None)
+    remediation = getattr(error, "remediation", None)
+    text = f"[{code}] {error}" if isinstance(code, str) and code else str(error)
+    return f"{text}\nRemediation: {remediation}" if isinstance(remediation, str) and remediation else text
+
+
 def _bootstrap_logging(cfg: AppConfig, file_logging: bool = True) -> None:
     """configure_logging() with a typed log-directory failure turned into a
     clean CLI error instead of a traceback."""
@@ -128,7 +138,7 @@ def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -
             # (failing) report; the doctor itself decides how to render this.
             ctx.obj['config_error'] = e
             return
-        click.secho(f"Error loading configuration: {e}", fg="red", err=True)
+        click.secho(f"Error loading configuration: {_user_error_text(e)}", fg="red", err=True)
         sys.exit(1)
     if ctx.invoked_subcommand != 'doctor':
         # doctor configures its own logging: --production writes no log file.
@@ -194,7 +204,7 @@ def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
         raise click.UsageError("--json is supported with --production")
     config_error = ctx.obj.get('config_error')
     if config_error is not None and not production:
-        click.secho(f"Error loading configuration: {config_error}", fg="red", err=True)
+        click.secho(f"Error loading configuration: {_user_error_text(config_error)}", fg="red", err=True)
         sys.exit(1)
     if production:
         if config_error is None:
@@ -825,7 +835,7 @@ def model_group() -> None:
 def _model_cfg(ctx: click.Context) -> AppConfig:
     config_error = ctx.obj.get('config_error')
     if config_error is not None:
-        click.secho(f"Error loading configuration: {config_error}", fg="red", err=True)
+        click.secho(f"Error loading configuration: {_user_error_text(config_error)}", fg="red", err=True)
         sys.exit(1)
     return ctx.obj['config']
 
@@ -3077,8 +3087,18 @@ def _authority_user_errors() -> tuple:
 
 
 def _authority_fail(error: BaseException) -> NoReturn:
-    click.secho(f"Error: {error}", fg="red", err=True)
+    click.secho(f"Error: {_user_error_text(error)}", fg="red", err=True)
     sys.exit(1)
+
+
+def _authority_local_path(workspace_root: str) -> str:
+    """This workspace's local approval store; a store configured inside the
+    workspace is refused as a typed operator error, never a traceback."""
+    from kriya.config.authority_approval import default_local_approval_path
+    try:
+        return default_local_approval_path(workspace_root)
+    except _authority_user_errors() as error:
+        _authority_fail(error)
 
 
 def _authority_state(ctx: click.Context):
@@ -3108,12 +3128,7 @@ def authority_inspect(ctx: click.Context) -> None:
     fields (field path, classification, provenance, and a secret-redacted
     value) and whether an existing local approval currently covers them.
     Read-only - never writes anything, never itself approves."""
-    from kriya.config.authority_approval import (
-        default_local_approval_path,
-        describe_pending,
-        is_approval_current_for,
-        load_approval_artifact,
-    )
+    from kriya.config.authority_approval import describe_pending, is_approval_current_for, load_approval_artifact
 
     state = _authority_state(ctx)
     pending = describe_pending(state.violations, state.config_dict)
@@ -3122,7 +3137,7 @@ def authority_inspect(ctx: click.Context) -> None:
     if not state.violations:
         return
 
-    path = default_local_approval_path(state.workspace_root)
+    path = _authority_local_path(state.workspace_root)
     try:
         artifact = load_approval_artifact(path)
     except Exception as e:
@@ -3169,7 +3184,6 @@ def authority_approve(ctx: click.Context, out: Optional[str], confirm: bool) -> 
     to the repository, the config file, or any future field."""
     from kriya.config.authority_approval import (
         build_approval_artifact,
-        default_local_approval_path,
         describe_pending,
         save_approval_artifact,
         validate_trust_path_outside_workspace,
@@ -3183,7 +3197,7 @@ def authority_approve(ctx: click.Context, out: Optional[str], confirm: bool) -> 
         click.echo("Nothing to approve.")
         return
 
-    out_path = out or default_local_approval_path(state.workspace_root)
+    out_path = out or _authority_local_path(state.workspace_root)
     if out:
         try:
             validate_trust_path_outside_workspace(out_path, state.workspace_root)
@@ -3222,14 +3236,14 @@ def authority_revoke(ctx: click.Context) -> None:
     `load_config()` calls fall back to P1 fail-closed denial for every
     security-authority field, with no need to touch the config itself.
     Idempotent: revoking when nothing is approved is not an error."""
-    from kriya.config.authority_approval import default_local_approval_path, revoke_local_approval
+    from kriya.config.authority_approval import revoke_local_approval
 
     state = _authority_state(ctx)
+    path = _authority_local_path(state.workspace_root)
     try:
         removed = revoke_local_approval(state.workspace_root)
     except _authority_user_errors() as error:
         _authority_fail(error)
-    path = default_local_approval_path(state.workspace_root)
     if removed:
         click.secho(f"Revoked local approval at {path}.", fg="yellow", bold=True)
     else:

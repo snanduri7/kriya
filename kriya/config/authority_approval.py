@@ -77,7 +77,24 @@ class TrustPathInsideWorkspaceError(ValueError):
     """A trust-artifact path (local store or explicit --trust-file/
     KRIYA_TRUST_FILE) resolved to somewhere inside the workspace root.
     Refusing this is the load-bearing guard against a repository shipping
-    its own self-authorizing approval - see module docstring."""
+    its own self-authorizing approval - see module docstring. An expected
+    operator error: the CLI prints ``reason_code`` and ``remediation``,
+    never a traceback."""
+
+    reason_code = "TRUST_PATH_INSIDE_WORKSPACE"
+
+    def __init__(self, trust_path: str, workspace_root: str) -> None:
+        super().__init__(
+            f"trust-artifact path {trust_path!r} resolves inside the workspace root {workspace_root!r} - "
+            "a trust artifact must live outside the workspace a repository/checkout can populate; "
+            "see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
+        )
+        self.trust_path = trust_path
+        self.workspace_root = workspace_root
+        self.remediation = (
+            f"Point {ENV_HOME_OVERRIDE} (or --trust-file/{ENV_TRUST_FILE}/--out) at a directory outside "
+            f"{workspace_root}, or unset {ENV_HOME_OVERRIDE} to use the default ~/.kriya/authority."
+        )
 
 
 class ApprovalArtifactError(ValueError):
@@ -351,11 +368,7 @@ def validate_trust_path_outside_workspace(trust_path: str, workspace_root: str) 
     real_trust_dir = os.path.realpath(os.path.dirname(trust_path) or ".")
     real_ws = os.path.realpath(workspace_root)
     if real_trust_dir == real_ws or real_trust_dir.startswith(real_ws + os.sep):
-        raise TrustPathInsideWorkspaceError(
-            f"trust-artifact path {trust_path!r} resolves inside the workspace root {workspace_root!r} - "
-            "a trust artifact must live outside the workspace a repository/checkout can populate; "
-            "see kriya/config/authority_approval.py's module docstring for why this is refused, not just discouraged."
-        )
+        raise TrustPathInsideWorkspaceError(trust_path, workspace_root)
 
 
 def default_local_approval_path(workspace_root: str) -> str:

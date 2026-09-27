@@ -1155,12 +1155,19 @@ def run_production_doctor(cfg: AppConfig, workspace_path: str) -> ProductionDoct
 
 def config_load_failure_report(error: BaseException) -> ProductionDoctorReport:
     """The report when configuration cannot be loaded at all: nothing else can
-    be judged, and the deployment is not ready."""
+    be judged, and the deployment is not ready. A typed operator error keeps
+    its own reason code and remediation (e.g. TRUST_PATH_INSIDE_WORKSPACE)."""
+    evidence: Dict[str, Any] = {"error": f"{type(error).__name__}: {error}"}
+    reason_code = getattr(error, "reason_code", None)
+    if isinstance(reason_code, str) and reason_code:
+        evidence["reason_code"] = reason_code
+    remediation = getattr(error, "remediation", None)
     return _report([_check(
         CONFIG_LOAD_CHECK_ID,
         CheckStatus.FAIL,
-        evidence={"error": f"{type(error).__name__}: {error}"},
-        remediation="Fix the configuration (see `kriya authority inspect` for authority denials) and rerun.",
+        evidence=evidence,
+        remediation=remediation if isinstance(remediation, str) and remediation else
+        "Fix the configuration (see `kriya authority inspect` for authority denials) and rerun.",
     )])
 
 def render_production_report(report: ProductionDoctorReport) -> str:
