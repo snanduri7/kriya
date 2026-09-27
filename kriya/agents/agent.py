@@ -19,6 +19,13 @@ from kriya.core.llm import LLMClient
 from kriya.core.model_runtime import binding_output_tokens
 from kriya.core.role_metrics import model_role
 from kriya.core.token_budget import ContextBudgetUnsatisfiableError, OutputBudgetUnsatisfiableError
+from kriya.workflow.plan_schema import (
+    ExecutionMethod,
+    ExecutionRole,
+    FileAction,
+    VerificationMethodType,
+    VerifierKind,
+)
 from kriya.workflow.untrusted_context import outside_untrusted_reference
 from kriya.workflow.verifier_evidence import (
     VERIFIER_CALL_FAILED,
@@ -538,6 +545,25 @@ class BaseAgent(ABC):
 # 2. Specialized Agent Implementations
 # =====================================================================
 
+def _vocabulary(enum: Any) -> str:
+    return " | ".join(member.value for member in enum)
+
+
+# PRD-032 (live chaos tier): the structured plan schema refuses any value
+# outside these enums (and any absolute path), so the prompt states them
+# exactly, from the enums themselves - a model shown only examples invented
+# verifier_kind "file_check" and was refused for it.
+PLANNER_CLOSED_VOCABULARIES = (
+    "CLOSED VOCABULARIES - any other value is refused, so never invent one: "
+    f"verification type: {_vocabulary(VerificationMethodType)}; "
+    f"verifier_kind: {_vocabulary(VerifierKind)}; "
+    f"planned_files action: {_vocabulary(FileAction)}; "
+    f"execution_method: {_vocabulary(ExecutionMethod)}; "
+    f"execution_role: {_vocabulary(ExecutionRole)}. "
+    "Every path is workspace-relative (never absolute, never outside the workspace)."
+)
+
+
 class PlannerAgent(BaseAgent):
     @property
     def system_prompt(self) -> str:
@@ -619,6 +645,7 @@ class PlannerAgent(BaseAgent):
             "verifier keyword like \"test\"/\"compile\"/\"pytest\" (those are not valid Subtask.tool_name "
             "values) and never a name you are not certain is actually registered this run.\n"
             "\n"
+            f"{PLANNER_CLOSED_VOCABULARIES}\n"
             "execution_role is WHAT the subtask is for, separate from execution_method (HOW it runs): "
             "\"implementation\" (the default - this subtask writes/modifies real source, and MUST declare "
             "planned_files covering exactly what it changes) or \"verification\" (this subtask makes NO "
