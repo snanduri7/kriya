@@ -218,6 +218,12 @@ from kriya.workflow.toolchain import (
 )
 from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
 from kriya.workflow.verification_contract import ContractVerdictState, classify_contract_verdict
+from kriya.workflow.verification_coordinator import (
+    VerificationCoordinator,
+    VerificationRequest,
+    _directly_executable_runtime_verifiers,
+    _directly_executable_verifiers,
+)
 from kriya.workflow.verifier_evidence import (
     RetainedRuntimeEvidence,
     apply_runtime_disposition,
@@ -3988,58 +3994,6 @@ def _required_runtime_verification_missing_message(judgment: Dict[str, Any]) -> 
     )
 
 
-def _directly_executable_verifiers(required_verification: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """type=tool verifiers naming a BUILTIN_QUALITY_GATE_VERIFIERS tool_name
-    (compile/test/tests/regression/quality_gates) - the ones
-    _run_verification_only_attempt can execute directly via
-    PolymorphicValidator, the same deterministic gate every ordinary
-    implementation-subtask attempt already uses. See
-    _directly_executable_runtime_verifiers below for the sibling case
-    (a runtime-execution verifier) - kept as a separate function rather
-    than folded in here since the two are executed through genuinely
-    different machinery (PolymorphicValidator vs RunVerifierAgent)."""
-    from kriya.workflow.plan_schema import BUILTIN_QUALITY_GATE_VERIFIERS
-    return [
-        requirement for requirement in required_verification
-        if requirement.get("type") == "tool"
-        and requirement.get("tool_name") in BUILTIN_QUALITY_GATE_VERIFIERS
-    ]
-
-
-def _directly_executable_runtime_verifiers(required_verification: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """PRV-06 (2026-08-28, real live-validation finding): a verification-
-    only subtask (write_scope_mode=DENY_ALL, planned_files=[]) declaring
-    ONLY an application_runtime verifier used to fall through to the
-    ordinary Developer/Quality-Gates loop anyway (this exact case is what
-    _directly_executable_verifiers' own docstring flagged as "a larger,
-    separate lift" not yet built) - the Developer, asked to generate files
-    for a subtask that legitimately has none, reliably invented a
-    duplicate entrypoint every attempt. DENY_ALL correctly rejected each
-    one before it ever reached disk (zero corruption, confirmed live), but
-    the subtask still burned its entire retry budget on candidates that
-    could never be written, because nothing short-circuited BEFORE the
-    Developer call for this specific verifier shape.
-
-    Deliberately narrow, matching _directly_executable_verifiers' own
-    discipline: only matches an entry whose `verifier_kind` is EXPLICITLY
-    "application_runtime" AND `requires_runtime_execution` is True - not
-    just "files == []" alone (a malformed/under-specified plan could
-    accidentally have zero planned_files for a genuinely mutating subtask;
-    that must still enter ordinary validation/repair, never be silently
-    reinterpreted as verification-only). `type` is intentionally NOT
-    checked here (a validated plan's application_runtime verifier is
-    normally type=judgment/tool_name=None, but the CALLER already only
-    reaches this function under write_scope_mode=DENY_ALL, which is itself
-    gated on execution_role=verification/planned_files=[] upstream - the
-    verifier_kind+requires_runtime_execution pair is what actually
-    identifies "this is the runtime-execution check," not the type tag)."""
-    return [
-        requirement for requirement in required_verification
-        if requirement.get("verifier_kind") == "application_runtime"
-        and requirement.get("requires_runtime_execution") is True
-    ]
-
-
 async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     """First-class execution path for a verification-only subtask
     (ctx.write_scope_mode == WriteScopeMode.DENY_ALL): executes its own
@@ -4081,53 +4035,14 @@ async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptCon
         autonomy_cfg=ctx.kernel.config.autonomy,
         toolchain_declaration_mutable=_ctx_toolchain_declaration_mutable(ctx),
     )
-    known_files = sorted(set(ctx.established_files))
-
-    for requirement in _directly_executable_verifiers(ctx.required_verification):
-        tool_name = requirement.get("tool_name")
-        if tool_name == "compile":
-            result = validator.run_compile_check(known_files)
-            outcome_type = "compile"
-        else:
-            # test/tests/regression/quality_gates all ultimately mean "run
-            # the test suite" for this direct-execution path - quality_gates
-            # additionally implies compile must pass first.
-            if tool_name == "quality_gates":
-                compile_result = validator.run_compile_check(known_files)
-                state.gate_outcomes.append({
-                    "attempt": state.attempt_number, "type": "compile",
-                    "success": compile_result["success"], "output": compile_result.get("output", ""),
-                    **execution_evidence(compile_result),
-                })
-                if not compile_result["success"]:
-                    failure = Failure(
-                        type="compile",
-                        message=f"COMPILATION FAILURE (verification-only subtask):\n{compile_result.get('output', '')}",
-                        raw_output=compile_result.get("output", ""), attempt=state.attempt_number,
-                    )
-                    state.gate_outcomes.append(failure.to_gate_outcome())
-                    raise QualityGateFailure(failure)
-            result = validator.run_tests()
-            outcome_type = "test"
-        state.gate_outcomes.append({
-            "attempt": state.attempt_number, "type": outcome_type,
-            "success": result["success"], "output": result.get("output", ""),
-            **execution_evidence(result),
-        })
-        if not result["success"]:
-            failure = Failure(
-                type=outcome_type,
-                message=(
-                    f"{outcome_type.upper()} FAILURE (verification-only subtask):\n"
-                    f"{result.get('output', '')}"
-                ),
-                raw_output=result.get("output", ""), attempt=state.attempt_number,
-            )
-            state.gate_outcomes.append(failure.to_gate_outcome())
-            raise QualityGateFailure(failure)
-
-    if _directly_executable_runtime_verifiers(ctx.required_verification):
-        await _execute_runtime_verification_directly(state, ctx, validator)
+    # PRD-031: the declared verifiers are sequenced by VerificationCoordinator.
+    await VerificationCoordinator(
+        validator, record_gate_outcome=lambda outcome: state.gate_outcomes.append(outcome),
+        run_runtime_verification=lambda: _execute_runtime_verification_directly(state, ctx, validator),
+    ).verify(VerificationRequest(
+        required_verification=ctx.required_verification,
+        known_files=sorted(set(ctx.established_files)), attempt_number=state.attempt_number,
+    ))
 
     state.candidate_gates_succeeded = True
     state.record_event(RunEvent(

@@ -17,6 +17,12 @@ here, exactly the class of bug that made Slice 2 non-trivial - moving it as
 one cohesive, thoroughly-tested unit was the safer call once the actual
 shape of the code was read in full, not assumed from an earlier line-range
 estimate.
+
+PRD-031 (2026-09-27) split it only where no value crosses the cut:
+kriya/workflow/recovery_coordinator.py classifies the exception (reads only
+the exception, the attempt mode and the scope-denial grounding) and makes
+the stop/continue decision (reads only the recorded state). Everything with
+the data dependencies above stays together here as _record_attempt_failure.
 """
 import hashlib
 import logging
@@ -25,7 +31,6 @@ from typing import Any, Optional
 
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import WriteScopeMode
-from kriya.tools.containment import ContainmentSetupError
 from kriya.workflow.attribution import (
     DETERMINISTIC_ATTRIBUTION_TIERS,
     AttributionResult,
@@ -57,8 +62,8 @@ from kriya.workflow.file_resolution import (
 )
 from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
+from kriya.workflow.recovery_coordinator import ClassifiedAttemptFailure, RecoveryCoordinator
 from kriya.workflow.repair_contract import RepairContractStatus
-from kriya.workflow.retry_policy import RetryAction, decide_for_state
 from kriya.workflow.retry_progress import (
     NO_PROGRESS_TERMINAL_REASON,
     REGRESSION,
@@ -68,7 +73,6 @@ from kriya.workflow.retry_progress import (
 )
 from kriya.workflow.run_events import EventAuthority, RunEvent
 from kriya.workflow.state import APIContractRecovery, GenerationState
-from kriya.workflow.worktree import remove_git_worktree
 
 logger = logging.getLogger(__name__)
 
@@ -83,30 +87,6 @@ _REPAIR_FEEDBACK_FAILURE_TYPES = {
     "structural_corruption",
     "unaddressed_error_location",
 }
-
-
-def _abandon_active_repair_contract_if_any(state: GenerationState, *, reason: str) -> None:
-    """MA9 (2026-08-29 v2 design review): marks an ACTIVE RepairContract
-    ABANDONED at the two unambiguous "this subtask's retry loop is stopping
-    now, and it isn't because the obligation got SATISFIED" points in
-    handle_attempt_failure() below. Deliberately conservative/narrow - there
-    may be other paths where a subtask's retry loop ends with an obligation
-    still VIOLATED that this doesn't cover (e.g. an exception propagating
-    from somewhere this function never sees); an orphaned ACTIVE contract at
-    run end in one of those uncovered paths is a disclosed limitation, not a
-    correctness bug (the run itself still fails closed correctly regardless
-    of this status label - see RepairContractStatus.ABANDONED's own
-    docstring). A no-op whenever no contract is active, matching every other
-    MA9 hook in this codebase."""
-    if state.repair_contract is None or state.repair_contract.status != RepairContractStatus.ACTIVE:
-        return
-    state.repair_contract.status = RepairContractStatus.ABANDONED
-    state.record_event(RunEvent(
-        kind="repair_contract_abandoned", attempt=state.attempt_number, source="retry_strategy.handle_attempt_failure",
-        authority=EventAuthority.ADVISORY,
-        message=f"RepairContract '{state.repair_contract.id}' abandoned - retry loop stopping ({reason}).",
-        details={"repair_contract_id": state.repair_contract.id, "reason": reason},
-    ))
 
 
 def _failure_from_validated_scope_denial(
@@ -340,138 +320,33 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     last_missing_files, last_error_source_context, jdtls_client/
     jdtls_unavailable/lsp_warning, budgets, gate_outcomes, environment_failure,
     final_attempt_contents) and returns whether the retry loop should
-    explicitly `break` now (True only for an environment/toolchain failure -
-    genuine budget exhaustion is left to the `while` loop's own condition
-    going False on its next check, matching the original inline code's exact
-    control flow rather than introducing a new signal for it)."""
-    raw_error_context = str(e)
-    # "full_set" -> "full-set" to match this log line's original
-    # wording exactly; the other three modes were already hyphen-free.
-    attempt_mode = "full-set" if state.last_attempt_mode in (None, "full_set") else state.last_attempt_mode
-    # Every failure source now raises with a real Failure object attached
-    # (QualityGateFailure.failure directly, or IncompleteGenerationError.failure
-    # for backward compat - see kriya/workflow/failure.py) instead of a bare
-    # message string later re-sniffed for its type by prefix-matching.
-    #
-    # PRV-06 completion (2026-08-29, "MA8.1 <-> MA9 composition and
-    # AttemptContext correctness"): a bare Exception reaching this final
-    # fallback was ALWAYS documented as "shouldn't normally happen -
-    # defensive only". A NARROW, explicitly-named subset of exception types
-    # - ones that can ONLY ever indicate a bug in Kriya's OWN control-plane
-    # code, never a deliberate "the model/input was bad" signal - is
-    # reclassified as "internal_framework_error" instead of "general_error":
-    # never fed back to the Developer as diagnosis/repair evidence, and
-    # wired into the SAME environment_failure/STOP_ENVIRONMENT mechanism
-    # time_budget_exhausted/verification_infrastructure_failure already use
-    # below, so the run fails closed on the very first occurrence instead of
-    # burning further Developer retries or letting MA8.1 open a new cross-
-    # owner recovery requirement from it. Live-reproduced proof: an
-    # UnboundLocalError inside run_attempt's own coordinated-repair branch.
-    #
-    # ValueError is deliberately EXCLUDED from that set, even though it's
-    # just as "bare" here - this codebase already uses it pervasively and
-    # intentionally for "the model/input was bad" signaling (e.g.
-    # DeveloperAgent's own malformed-JSON-response ValueError in agent.py),
-    # and reclassifying that as internal would wrongly hard-stop a perfectly
-    # ordinary, retryable model failure. Confirmed live while implementing
-    # this fix: an early, broader version of this change (reclassifying
-    # EVERY bare exception) did exactly that regression, caught by this
-    # module's own existing test_workflow.py regression sweep.
-    #
-    # Future hardening note (2026-08-29 design review, not a blocker for
-    # this pass): this whitelist is a pragmatic fix for TODAY's evidenced
-    # failure classes, not permanent architectural truth - classification
-    # is properly about an exception's ORIGIN (did Kriya's own control-
-    # plane code break) and SEMANTICS, not merely its Python type. A
-    # TypeError could someday be a deliberate signal from a validator or
-    # plugin boundary, the same way ValueError already is here for
-    # DeveloperAgent's own malformed-response signaling. If a future
-    # addition needs one of these four types as an intentional, non-buggy
-    # signal, prefer a typed internal exception (a dedicated base class
-    # control-plane code raises deliberately) or an explicit control-plane
-    # boundary over continuing to grow this whitelist - see docs/design.md
-    # §11.3's own "Future hardening note" for the fuller rationale.
-    attached_failure = getattr(e, "failure", None)
-    scope_denial_failure = attached_failure is None and _failure_from_validated_scope_denial(e, ctx)
-    # PRV-17 (2026-09-03): a PolicyDeniedError whose target
-    # _failure_from_validated_scope_denial() could NOT ground into a
-    # plan_scope_conflict (no real existing production owner to hand
-    # recovery off to - see that function's own "hallucinated new path"
-    # comment) used to fall straight through to ordinary general_error
-    # retry handling: the Developer was simply asked to try again, and
-    # live evidence shows it proposes a DIFFERENT illegal target each time
-    # rather than converging. See GenerationState.unrecoverable_scope_
-    # denial_count's own docstring for the full incident this closes.
-    is_unrecoverable_scope_denial = (
-        attached_failure is None
-        and not scope_denial_failure
-        and isinstance(e, PolicyDeniedError)
-        and e.result.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
-    )
+    explicitly `break` now (True only for an environment/toolchain failure,
+    a plan-scope conflict or no progress - genuine budget exhaustion is left
+    to the `while` loop's own condition going False on its next check).
+
+    PRD-031: sequenced by RecoveryCoordinator (kriya/workflow/recovery_coordinator.py):
+    classify the exception, record it (_record_attempt_failure below), then
+    decide from the recorded state via the retry policy."""
+    decision = await RecoveryCoordinator(
+        ground_scope_denial=_failure_from_validated_scope_denial, record_failure=_record_attempt_failure,
+    ).handle(state, ctx, e)
+    return decision.stop_loop
+
+
+async def _record_attempt_failure(
+    state: GenerationState, ctx, e: Exception, classified: ClassifiedAttemptFailure,
+) -> None:
+    """Record one classified failure into the run's state: the failure
+    ledger and events, environment-failure classification, error-triggered
+    live lookup, the repeated-failure and no-progress checks, attribution
+    and LSP grounding, and the retry-budget charge. The stop/continue
+    decision is the coordinator's, from the state recorded here."""
+    raw_error_context = classified.raw_error_context
+    attempt_mode = classified.attempt_mode
+    failure = classified.failure
+    is_unrecoverable_scope_denial = classified.unrecoverable_scope_denial
     if is_unrecoverable_scope_denial:
         state.unrecoverable_scope_denial_count += 1
-    is_internal_framework_bug = (
-        attached_failure is None
-        and not scope_denial_failure
-        and isinstance(e, (UnboundLocalError, TypeError, KeyError, AssertionError))
-    )
-    # SEC-001 (2026-09-11): a ContainmentSetupError means ProcessController
-    # refused to run a command uncontained rather than silently degrading -
-    # this is exactly as unfixable-by-retrying as time_budget_exhausted/
-    # verification_infrastructure_failure/internal_framework_error above
-    # (no amount of Developer regeneration changes whether a containment
-    # backend is available), and must never be fed back to the Developer as
-    # diagnosis/repair evidence or misreported as an ordinary command/
-    # compile/test/environment failure - see kriya/tools/containment.py's
-    # own docstring.
-    is_containment_setup_failure = (
-        attached_failure is None
-        and not scope_denial_failure
-        and isinstance(e, ContainmentSetupError)
-    )
-    # PRD-016: a request refused before inference because the prompt plus the
-    # minimum output cannot fit the served window. Typed, with its reason
-    # code; the retry may still succeed on a fallback model with its own
-    # window (the context allocator re-runs against it).
-    from kriya.core.token_budget import OUTPUT_BUDGET_UNSATISFIABLE, ContextBudgetUnsatisfiableError
-
-    budget_failure = (
-        Failure(
-            type=(
-                "output_budget_unsatisfiable"
-                if getattr(e, "reason_code", None) == OUTPUT_BUDGET_UNSATISFIABLE
-                else "context_budget_unsatisfiable"
-            ),
-            message=str(e), raw_output=str(e), source="orchestrator",
-            diagnostics={"reason_code": e.reason_code, "budget": e.decision.to_dict()},
-        )
-        if attached_failure is None and not scope_denial_failure and isinstance(e, ContextBudgetUnsatisfiableError)
-        else None
-    )
-    failure: Failure = (
-        attached_failure
-        or scope_denial_failure
-        or budget_failure
-        or Failure(
-            type=(
-                "containment_setup_failed" if is_containment_setup_failure
-                else "internal_framework_error" if is_internal_framework_bug
-                else "general_error"
-            ),
-            message=(
-                f"CONTAINMENT_SETUP_FAILED: {raw_error_context}" if is_containment_setup_failure
-                else f"INTERNAL KRIYA ERROR (not a generated-application defect): {raw_error_context}"
-                if is_internal_framework_bug else raw_error_context
-            ),
-            raw_output=raw_error_context, source="orchestrator",
-            # PRD-011: a typed containment refusal (e.g.
-            # TOOLCHAIN_REQUIREMENT_CONFLICT) keeps its reason code.
-            diagnostics=(
-                {"reason_code": e.reason_code}
-                if is_containment_setup_failure and getattr(e, "reason_code", None) else None
-            ),
-        )
-    )
     failure_detail = (
         f"{attempt_mode}, full-set {state.budgets.retry_count}/{ctx.max_retries} + "
         f"targeted {state.budgets.targeted_retry_count}/{ctx.targeted_max_retries}: {e}"
@@ -583,7 +458,8 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
             # traceback.
             "internal_framework_error",
             # SEC-001 (2026-09-11): same reasoning - see the
-            # is_containment_setup_failure comment above.
+            # containment_setup_failure classification in
+            # kriya/workflow/recovery_coordinator.py.
             "containment_setup_failed",
             # VAL-001 G1-DEVINV2 (2026-09-20): a full-regression block with
             # zero candidate-attributable evidence (kriya/workflow/
@@ -1474,56 +1350,3 @@ async def handle_attempt_failure(state: GenerationState, ctx, e: Exception) -> b
     # defensive path.
     if not any(o.get("attempt") == state.attempt_number and o.get("type") == fail_type for o in state.gate_outcomes):
         state.gate_outcomes.append(failure.to_gate_outcome())
-
-    if state.plan_scope_conflict is not None or state.no_progress_terminated:
-        _abandon_active_repair_contract_if_any(state, reason="plan_scope_conflict_or_no_progress")
-        if state.plan_scope_conflict is not None:
-            logger.error(
-                "Quality Gates stopped early - grounded repair requires file(s) outside the "
-                "validated write scope; authoritative plan revision is required (%s).",
-                state.plan_scope_conflict["required_files"],
-            )
-        if ctx.worktree_path != ctx.workspace_path:
-            for filepath in state.all_files_written:
-                worktree_file = os.path.join(ctx.worktree_path, filepath)
-                try:
-                    with open(worktree_file, "r", encoding="utf-8", errors="replace") as fh:
-                        state.final_attempt_contents[filepath] = fh.read()
-                except Exception as exc:
-                    logger.debug(
-                        "Failed to capture final content of %r before scope-conflict cleanup: %s",
-                        worktree_file, exc,
-                    )
-            remove_git_worktree(ctx.workspace_path, ctx.worktree_path)
-        return True
-
-    retry_decision = decide_for_state(
-        state, max_retries=ctx.max_retries,
-        targeted_max_retries=ctx.targeted_max_retries,
-        has_fallback_model=bool(ctx.chain),
-    )
-    budgets_exhausted = not retry_decision.should_continue
-    if budgets_exhausted:
-        _abandon_active_repair_contract_if_any(state, reason=retry_decision.action.value)
-        if retry_decision.action is RetryAction.STOP_ENVIRONMENT:
-            logger.error(f"Quality Gates stopped early - {state.environment_failure}")
-        else:
-            logger.error("Quality Gates exceeded maximum debug retries (full-set and targeted). Continuing to review with errors.")
-        if ctx.worktree_path != ctx.workspace_path:
-            for filepath in state.all_files_written:
-                worktree_file = os.path.join(ctx.worktree_path, filepath)
-                try:
-                    with open(worktree_file, "r", encoding="utf-8", errors="replace") as fh:
-                        state.final_attempt_contents[filepath] = fh.read()
-                except Exception as e:
-                    logger.debug(f"Failed to capture final content of '{worktree_file}' before worktree cleanup: {e}")
-            remove_git_worktree(ctx.workspace_path, ctx.worktree_path)
-        # An environment/toolchain failure needs an explicit break -
-        # unlike genuine budget exhaustion (which naturally coincides
-        # with the `while` loop's own condition going False on its next
-        # check), this can fire on the very first attempt, well before
-        # retry_count reaches max_retries, and the loop would otherwise
-        # continue straight into another pointless Developer retry.
-        if retry_decision.action is RetryAction.STOP_ENVIRONMENT:
-            return True
-    return False

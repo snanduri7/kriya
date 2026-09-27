@@ -561,6 +561,20 @@ The enforce run's terminal decision is split into two services. `WorkflowControl
 Events, result keys and reason codes are unchanged. `tests/test_prd030_terminal_services.py` pins both contracts and the import direction controller -> services.
 
 
+### 2.9c Recovery and Verification Coordination (PRD-031, `kriya/workflow/recovery_coordinator.py`, `verification_coordinator.py`)
+
+One behaviour-preserving slice of the attempt/retry orchestration, each with typed requests and results, unit-tested without a WorkflowEngine (`tests/test_prd031_coordinators.py`).
+
+- **`RecoveryCoordinator.handle(state, ctx, exc) -> RecoveryDecision`** sequences one failed attempt's recovery in three steps:
+  1. `classify_attempt_exception` turns the exception into one typed `Failure`, as a `ClassifiedAttemptFailure`: attached failure, grounded scope denial, PRD-016 budget refusal, containment refusal, internal framework error (`INTERNAL_FRAMEWORK_ERROR_TYPES`; ValueError deliberately excluded), else a general error.
+  2. The injected recorder (`retry_strategy._record_attempt_failure`, the unchanged ledger, evidence, live lookup, LSP and budget logic) records it.
+  3. `conclude_attempt_failure` decides from the recorded state alone. A plan-scope conflict or no progress stops the run before the policy; otherwise `retry_policy.decide_for_state`. An exhausted run keeps its final contents and has its sandbox removed.
+
+  `retry_strategy.handle_attempt_failure` stays the entry point the retry loop and Best-of-N call, returning `decision.stop_loop`. The cut is exactly where no value crosses it: classification reads only the exception, the attempt mode and the grounding, and the decision reads only state.
+- **`VerificationCoordinator.verify(VerificationRequest) -> VerificationResult`** runs a verification-only subtask's declared verifiers: compile/test through the same PolymorphicValidator, then the injected runtime verifier (`attempt._execute_runtime_verification_directly`). It raises the same `QualityGateFailure` on the first failing gate and records each gate outcome as it happens. It performs no Developer call, no write and no retry. `attempt._run_verification_only_attempt` keeps the attempt counter, the validator and the `candidate_gates.passed` event.
+
+Neither coordinator imports attempt.py, retry_strategy.py, workflow.py or workflow_controller.py; the callers import them. Not migrated in this slice: run_attempt's inline compile/test/runtime/spec gate sequence for implementation subtasks (it interleaves self-correction, which mutates) and the rest of `_record_attempt_failure`.
+
 ### 2.10 `kriya/workflow/` Module Layout
 
 `kriya/workflow/workflow.py` had grown to ~4700 lines - every helper this section describes (context budgeting, edit safety, failure grounding, toolchain detection, retry-prompt building, skill extraction, live lookup, LSP integration, worktree lifecycle) lived in one file, making both navigation and full-file context loading during development increasingly costly. Mechanically extracted (2026-08-11) into focused modules, each re-exported back into `workflow.py`'s own namespace so every existing `from kriya.workflow.workflow import X` and `unittest.mock.patch("kriya.workflow.workflow.X", ...)` call site across the codebase and test suite kept working unchanged - a pure move, not a rewrite; `run_generation_workflow()`'s own internal orchestration logic is untouched and stays in `workflow.py` (~2600 lines) for now, deliberately deferred as separate, higher-risk follow-up work:
@@ -577,6 +591,7 @@ Events, result keys and reason codes are unchanged. `tests/test_prd030_terminal_
 *   `retry_prompts.py` - the standing invariant checklists (`ECOSYSTEM_INVARIANT_HEADER`, `RESOURCE_LIFECYCLE_HEADER`, `VERIFICATION_CONTRACT_HEADER`; §2.3.4k, §2.7) and the three retry-prompt builders (targeted, full-set, missing-files).
 *   `self_correction.py` - bounded, tool-using compile-failure recovery loop (below), opt-in via `autonomy.self_correction_loop_enabled`.
 *   `terminal_gate_service.py` / `commit_service.py` - the enforce run's terminal gates and terminal commit (PRD-030, §2.9b).
+*   `recovery_coordinator.py` / `verification_coordinator.py` - failed-attempt recovery sequencing and verification-only subtask verification (PRD-031, §2.9c).
 *   `attribution.py` - the single decision point for "which file(s) is this failure/edit about" (§7), replacing four previously-independent failure-attribution call sites AND (as of §7.8, 2026-08-14) colocating the edit-level and missing-manifest "which file" checks that used to live in `edit_safety.py`/`toolchain.py`.
 
 Verified behavior-preserving without any downstream code changes: `tests/test_workflow.py`, `tests/test_agents.py`, `kriya/cli.py`, and `spikes/fix_alignment/run_alignment_test.py` all compile and import cleanly against the new layout with zero edits, confirmed via direct Python import checks. A handful of rationale comments describing module-level constants (e.g. why `_MIN_GRAPH_CONTEXT_BUDGET` is 1000 tokens) needed manual re-attachment to their new file, since Python's `ast` module - used to script the bulk of the extraction by exact function/statement line ranges - captures a node's own span but not preceding standalone comment lines describing it.
