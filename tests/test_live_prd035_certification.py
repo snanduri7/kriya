@@ -328,9 +328,13 @@ def test_c6_configured_fallback_transition(case):
 def test_c7_contained_compile_and_test(case):
     case.config.autonomy.contained_execution_required = True
     case.config.autonomy.containment_backend = "oci"
+    # A contained environment has only what the project declares (PRD-011):
+    # the test runner is a pinned, declared dependency, acquired through the
+    # registry-scoped network (SEC-006), never assumed from the host.
     ws = git_workspace(case.tmp_path, {
         "calc.py": "def add(a, b):\n    return a + b\n",
         "test_calc.py": "from calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+        "requirements.txt": "pytest==9.1.1\n",
     })
     result = case.run(ws, "Add a function mul(a, b) returning a * b to calc.py.")
     passed = case.hidden_tests(ws, "from calc import mul\ndef test_mul():\n    assert mul(3, 4) == 12\n")
