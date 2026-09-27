@@ -4,7 +4,7 @@ import os
 import re
 import sqlite3
 import struct
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 import click
 import httpx
@@ -254,6 +254,15 @@ class SQLiteMetadataDict:
         if hasattr(self, "conn") and self.conn:
             self.conn.close()
 
+class LearnedKnowledgeMatches(NamedTuple):
+    """query_learned_knowledge's answer: the scored matches, plus the rows
+    it could not use (undecodable, or embedded by another model)."""
+
+    matches: List[Dict[str, Any]]
+    malformed_rows: int
+    other_embedding_rows: int
+
+
 class LocalVectorStore:
     """SQLite-backed local vector store."""
 
@@ -479,31 +488,46 @@ class LocalVectorStore:
         """, (text, blob, model_name, dimensions, provenance_url, fetch_date))
         self.conn.commit()
 
-    def query_learned_knowledge(self, query_embedding: List[float], top_k: int = 5, model_name: str = "default", dimensions: int = 768) -> List[Dict[str, Any]]:
+    def query_learned_knowledge(self, query_embedding: List[float], top_k: int = 5, model_name: str = "default", dimensions: int = 768) -> "LearnedKnowledgeMatches":
+        """The ``top_k`` learned chunks most similar to ``query_embedding``,
+        among rows embedded by ``model_name`` at ``dimensions`` only: a
+        vector from another embedding model is not comparable, whatever its
+        length (KNOWLEDGE-READPATH-001). Rows whose stored vector cannot be
+        decoded, or disagrees with its own declared dimensions, are left
+        out and counted, never scored."""
         if not query_embedding:
-            return []
+            return LearnedKnowledgeMatches([], 0, 0)
 
         cursor = self.conn.cursor()
-        cursor.execute("SELECT text, embedding, provenance_url, fetch_date FROM learned_knowledge")
+        cursor.execute(
+            "SELECT text, embedding, provenance_url, fetch_date FROM learned_knowledge "
+            "WHERE model_name IS ? AND dimensions IS ?",
+            (model_name, dimensions),
+        )
         rows = cursor.fetchall()
-
-        if not rows:
-            return []
+        cursor.execute(
+            "SELECT COUNT(*) FROM learned_knowledge WHERE NOT (model_name IS ? AND dimensions IS ?)",
+            (model_name, dimensions),
+        )
+        other_embedding_rows = cursor.fetchone()[0]
 
         docs = []
         embeddings = []
+        malformed_rows = 0
         for text, blob, url, date in rows:
-            doc_emb = deserialize_embedding(blob)
-            if len(doc_emb) == len(query_embedding):
-                docs.append({
-                    "text": text,
-                    "provenance_url": url,
-                    "fetch_date": date
-                })
-                embeddings.append(doc_emb)
+            try:
+                doc_emb = deserialize_embedding(blob)
+            except (TypeError, struct.error):
+                malformed_rows += 1
+                continue
+            if len(doc_emb) != dimensions or not isinstance(text, str):
+                malformed_rows += 1
+                continue
+            docs.append({"text": text, "provenance_url": url, "fetch_date": date})
+            embeddings.append(doc_emb)
 
         if not embeddings:
-            return []
+            return LearnedKnowledgeMatches([], malformed_rows, other_embedding_rows)
 
         # Vectorized cosine similarity using NumPy
         q_vec = np.array(query_embedding, dtype=np.float32)
@@ -518,13 +542,10 @@ class LocalVectorStore:
         valid = norms > 0
         scores[valid] = dot_products[valid] / norms[valid]
 
-        results = []
         for doc, score in zip(docs, scores, strict=True):
             doc["score"] = float(score)
-            results.append(doc)
-
-        results.sort(key=lambda x: x["score"], reverse=True)
-        return results[:top_k]
+        docs.sort(key=lambda x: x["score"], reverse=True)
+        return LearnedKnowledgeMatches(docs[:top_k], malformed_rows, other_embedding_rows)
 
     def remove_learned_knowledge(self, provenance_url: str) -> None:
         cursor = self.conn.cursor()

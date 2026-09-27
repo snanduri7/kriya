@@ -21,11 +21,10 @@ from _strict_doubles import strict_kernel
 from click.testing import CliRunner
 
 import kriya.workflow.workflow as workflow_module
-from kriya.cli import _web_reference_context, main
+from kriya.cli import main
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
-from kriya.memory.vector import LocalVectorStore
 from kriya.workflow.attempt import exit_authority_text
 from kriya.workflow.contract_authority import derive_direct_contract_authorizations
 from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
@@ -230,7 +229,7 @@ def test_generate_hands_the_workflow_the_users_exact_goal_on_every_dispatch(tmp_
     with patch("kriya.cli.load_config", return_value=cfg), \
          patch("kriya.cli.Kernel", return_value=strict_kernel(cfg)), \
          patch("kriya.cli.LLMClient"), patch("kriya.cli.WorkflowEngine"), \
-         patch("kriya.cli._web_reference_context", new=AsyncMock(return_value=HOSTILE)), \
+         patch("kriya.cli._learned_reference_context", new=AsyncMock(return_value=HOSTILE)), \
          patch("kriya.cli._dispatch_generation", new=dispatch):
         result = CliRunner().invoke(main, ["generate", USER_GOAL, "--json", "-y"])
 
@@ -374,22 +373,6 @@ async def test_every_planner_given_reference_context_fences_it_after_the_users_g
     begin, end = prompt.index(UNTRUSTED_REFERENCE_BEGIN), prompt.index(UNTRUSTED_REFERENCE_END)
     assert prompt.index(USER_GOAL) < begin
     assert MALICIOUS in prompt[begin:end] and USER_GOAL not in prompt[begin:end]
-
-
-@pytest.mark.asyncio
-async def test_web_reference_context_returns_the_scored_matches_only(tmp_path):
-    """The normal output of the retrieval step (its broad catch must not
-    hide a coding error as 'nothing retrieved')."""
-    cfg = AppConfig()
-    cfg.paths.memory = str(tmp_path)
-    store = LocalVectorStore(os.path.join(cfg.paths.memory, "web_knowledge.db"))
-    near, far = [1.0] + [0.0] * 767, [0.0, 1.0] + [0.0] * 766
-    store.add_document("https://docs.example/near", "Relevant reference.", near)
-    store.add_document("https://docs.example/far", "Unrelated reference.", far)
-    store.close()
-    with patch("kriya.memory.vector.OllamaEmbeddingClient.get_embedding", new=AsyncMock(return_value=near)):
-        text = await _web_reference_context(cfg, USER_GOAL)
-    assert text == "\n[Source: https://docs.example/near]\nRelevant reference.\n"
 
 
 # --- structural: nothing may widen an authority goal by concatenation ------

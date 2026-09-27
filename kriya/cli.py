@@ -1926,33 +1926,18 @@ async def _dispatch_generation(we: "WorkflowEngine", cfg: AppConfig, **kwargs: A
     return await we.run_generation_workflow(**kwargs)
 
 
-async def _web_reference_context(cfg: AppConfig, goal: str) -> str:
-    """Reference documentation retrieved for ``goal`` from the web-knowledge
-    store, for the model's context only - never joined to the goal
-    (AUTH-GOAL-CONTAMINATION-001). Empty when the store is absent, nothing
-    scores above the threshold, or retrieval fails (best-effort, logged)."""
-    index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
-    if not os.path.exists(index_path):
-        return ""
-    try:
-        from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
-        embed_client = OllamaEmbeddingClient(
-            base_url=cfg.embedding.base_url,
-            model=cfg.embedding.model,
-            egress_policy=cfg.autonomy.egress_policy,
-        )
-        query_emb = await embed_client.get_embedding(goal, is_query=True)
-        vector_store = LocalVectorStore(index_path)
-        try:
-            matches = vector_store.query(query_emb, top_k=5)
-        finally:
-            vector_store.close()
-    except Exception as e:
-        logger.warning(f"Failed to query RAG database in workflow: {e}")
-        return ""
-    return "".join(
-        f"\n[Source: {m['filepath']}]\n{m['text']}\n" for m in matches if m["score"] > 0.4
-    )
+async def _learned_reference_context(cfg: AppConfig, query: str) -> str:
+    """Learned knowledge (``kriya learn``) relevant to ``query`` - the user's
+    own words - with provenance, for the model's context only: the caller
+    passes it as ``reference_context``, which is fenced as untrusted and never
+    joined to the goal (AUTH-GOAL-CONTAMINATION-001, KNOWLEDGE-READPATH-001).
+    Anything that kept it from being used is shown on stderr."""
+    from kriya.memory.learned_knowledge import retrieve_learned_references
+
+    retrieval = await retrieve_learned_references(cfg, query)
+    for note in retrieval.warnings():
+        click.secho(note, fg="yellow", err=True)
+    return retrieval.render()
 
 
 async def _dispatch_milestones(we: "WorkflowEngine", cfg: AppConfig, run_state: Any, workspace_path: str, **kwargs: Any) -> Dict[str, Any]:
@@ -2203,6 +2188,9 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
             # sidecar if a prior invocation of this plan got partway through -
             # see load_or_resume_milestone_run_state's own docstring.
             run_state = load_or_resume_milestone_run_state(workspace_path, plan_data)
+            # Learned knowledge for the plan's own user goal (never a
+            # milestone's MilestonePlanner text), fenced in every unit.
+            reference_context = await _learned_reference_context(cfg, run_state.original_goal)
             await kernel.start()
             # MA7-C4: routes through WorkflowController when
             # workflow_controller.enabled (same gate/shape as plain
@@ -2227,6 +2215,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                 knowledge_risk_confirmed=yes or knowledge_policy == 'permissive',
                 resume=resume,
                 resume_id=resume_id,
+                reference_context=reference_context,
             )
             await kernel.stop()
             return result
@@ -2273,7 +2262,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
     async def run_workflow():
         # AUTH-GOAL-CONTAMINATION-001: `goal` stays the user's exact words;
         # retrieved text travels separately and is fenced as untrusted.
-        reference_context = await _web_reference_context(cfg, goal)
+        reference_context = await _learned_reference_context(cfg, goal)
 
         await kernel.start()
         res = await _dispatch_generation(
@@ -3695,31 +3684,18 @@ def ask(ctx: click.Context, question: str) -> None:
         sys.stdout.flush()
         
     async def run_query():
-        rag_context = ""
-        index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
-        if os.path.exists(index_path):
-            try:
-                from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
-                embed_client = OllamaEmbeddingClient(
-                    base_url=cfg.embedding.base_url,
-                    model=cfg.embedding.model,
-                    egress_policy=cfg.autonomy.egress_policy,
-                )
-                vector_store = LocalVectorStore(index_path)
-                query_emb = await embed_client.get_embedding(question, is_query=True)
-                matches = vector_store.query(query_emb, top_k=5)
-                good_matches = [m for m in matches if m["score"] > 0.4]
-                if good_matches:
-                    rag_context = "\n".join([f"[Source: {m['filepath']}]\n{m['text']}" for m in good_matches])
-                vector_store.close()
-            except Exception as e:
-                logger.debug(f"Failed to query RAG database for ask command: {e}")
+        from kriya.memory.learned_knowledge import retrieve_learned_references
+        from kriya.workflow.untrusted_context import fence_untrusted_reference
 
+        retrieval = await retrieve_learned_references(cfg, question)
+        for note in retrieval.warnings():
+            click.secho(note, fg="yellow", err=True)
         user_prompt = (
             f"=== Repository Context ===\n{repo_context}\n\n"
             f"=== Key Files Context ===\n{key_files_context}\n\n"
-            f"=== Web Resources Context ===\n{rag_context}\n\n"
             f"User Question: {question}"
+            # Learned knowledge: reference data, fenced after the question.
+            + fence_untrusted_reference(retrieval.render())
         )
         return await llm.complete(system_prompt, user_prompt, stream_callback=on_stream)
         
@@ -3743,6 +3719,7 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
         
     cfg: AppConfig = ctx.obj['config']
     
+    from kriya.memory.learned_knowledge import learned_knowledge_db_path
     from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
     from kriya.tools.web import fetch_url_text
     
@@ -3753,8 +3730,7 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
     )
     
     os.makedirs(cfg.paths.memory, exist_ok=True)
-    index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
-    vector_store = LocalVectorStore(index_path)
+    vector_store = LocalVectorStore(learned_knowledge_db_path(cfg))
     
     async def index_text_content(source_name: str, content: str):
         chunks = []

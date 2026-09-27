@@ -317,7 +317,7 @@ from kriya.workflow.toolchain import (
     _strip_jdk_incompatible_jvm_flags as _strip_jdk_incompatible_jvm_flags,
 )
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, EngineeringTriageService
-from kriya.workflow.untrusted_context import fence_untrusted_reference
+from kriya.workflow.untrusted_context import fence_untrusted_reference, outside_untrusted_reference
 from kriya.workflow.validation_baseline import (
     DeltaClassification,
     build_validation_outcome,
@@ -1320,9 +1320,12 @@ class WorkflowEngine:
         Empty string (the default) preserves today's exact behavior for every
         other caller.
 
-        reference_context: retrieved reference documentation (the `generate`
-        CLI's knowledge pre-step). Shown to Planner, Architect and Developer
-        inside the untrusted-reference fence, and never joined to `goal`:
+        reference_context: learned reference knowledge (``kriya learn``),
+        retrieved once by the caller from the user's own words
+        (kriya/memory/learned_knowledge.py; the ``generate`` CLI, direct and
+        milestone plans alike, and forwarded to enforce subtasks). Shown to
+        Planner, Architect and Developer inside the untrusted-reference
+        fence, and never joined to `goal`:
         the goal is the user's words, the only source of requirement,
         mutation-scope, contract and expected-exit authority
         (AUTH-GOAL-CONTAMINATION-001). Not part of any resume fingerprint.
@@ -2376,43 +2379,16 @@ class WorkflowEngine:
         else:
             convention_prompt = skills_prompt
             
-        # 1.6. Learned Knowledge RAG Context Retrieval (Untrusted)
-        learned_rag_context = ""
-        try:
-            vector_index_path = os.path.join(self.kernel.config.paths.memory, "vector_index.db")
-            if os.path.exists(vector_index_path):
-                from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
-                embed_client = OllamaEmbeddingClient(
-                    base_url=self.kernel.config.embedding.base_url,
-                    model=self.kernel.config.embedding.model,
-                    egress_policy=self.kernel.config.autonomy.egress_policy,
-                )
-                vector_store = LocalVectorStore(vector_index_path)
-                query_emb = await embed_client.get_embedding(goal, is_query=True)
-                
-                matches = vector_store.query_learned_knowledge(
-                    query_emb, 
-                    top_k=3,
-                    model_name=self.kernel.config.embedding.model,
-                    dimensions=len(query_emb)
-                )
-                good_matches = [m for m in matches if m["score"] > 0.40]
-                if good_matches:
-                    learned_rag_context = fence_untrusted_reference("".join(
-                        f"\n[Source: {m.get('provenance_url', 'Unknown')} "
-                        f"(Fetched: {m.get('fetch_date', 'Unknown')})]\n{m['text']}\n"
-                        for m in good_matches
-                    ))
-                    logger.info("Loaded untrusted learned knowledge chunks into generation context.")
-        except Exception as ex:
-            logger.warning(f"Failed to query Learned Knowledge RAG: {ex}")
-            
-        # AUTH-GOAL-CONTAMINATION-001: the caller's retrieved reference text
-        # is model context only, fenced like learned knowledge; `goal` (the
-        # authority for requirements, scope, contracts and exits) never sees it.
-        # It travels in the learned-reference slot, so the Developer reads it
-        # too (budgeted by allocate_context_budget), not only Planner/Architect.
-        learned_rag_context += fence_untrusted_reference(reference_context)
+        # 1.6. Learned knowledge (KNOWLEDGE-READPATH-001): retrieved once per
+        # user intent by the caller, from the user's own words
+        # (kriya/memory/learned_knowledge.py), and handed in as
+        # reference_context - never retrieved here from `goal`, which inside a
+        # unit is Planner/MilestonePlanner text. AUTH-GOAL-CONTAMINATION-001:
+        # it is model context only, fenced as untrusted; `goal` (the authority
+        # for requirements, scope, contracts and exits) never sees it. It
+        # travels in the learned-reference slot, so the Developer reads it too
+        # (budgeted by allocate_context_budget), not only Planner/Architect.
+        learned_rag_context = fence_untrusted_reference(reference_context)
         convention_prompt += learned_rag_context
 
         # Fingerprints for any checkpoint saved during this run - computed once,
@@ -2531,7 +2507,7 @@ class WorkflowEngine:
         # is an already-documented durable lesson in this codebase; this is
         # the same fix, same conditional-on-actually-present-content shape,
         # applied to the one stage that was missing it.
-        if "Engineering Skill Conventions" in convention_prompt:
+        if "Engineering Skill Conventions" in outside_untrusted_reference(convention_prompt):
             plan_prompt += (
                 "\nReminder: apply the Engineering Skill Conventions above when drafting this "
                 "plan - they document specific mistakes already confirmed to happen for this "
@@ -2847,7 +2823,7 @@ class WorkflowEngine:
         # Architect receives the identical convention_prompt content Planner
         # does, but nothing told it to actually use that content either.
         # Same fix, same conditional-on-actually-present-content shape.
-        if "Engineering Skill Conventions" in convention_prompt:
+        if "Engineering Skill Conventions" in outside_untrusted_reference(convention_prompt):
             design_prompt += (
                 "\nReminder: apply the Engineering Skill Conventions above when defining this "
                 "design - they document specific mistakes already confirmed to happen for this "

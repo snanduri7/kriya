@@ -19,6 +19,7 @@ from kriya.core.llm import LLMClient
 from kriya.core.model_runtime import binding_output_tokens
 from kriya.core.role_metrics import model_role
 from kriya.core.token_budget import ContextBudgetUnsatisfiableError, OutputBudgetUnsatisfiableError
+from kriya.workflow.untrusted_context import outside_untrusted_reference
 from kriya.workflow.verifier_evidence import (
     VERIFIER_CALL_FAILED,
     VERIFIER_RESULT_MALFORMED,
@@ -2074,7 +2075,11 @@ class DeveloperAgent(BaseAgent):
             # existing_code_context actually containing a skill section (cheap substring check, no new
             # plumbing/parameters needed - this function already receives the exact string that would
             # contain it) so a generation with no active skills doesn't pay for a no-op reminder.
-            has_skill_conventions = "Engineering Skill Conventions" in existing_code_context
+            # Only Kriya's own skill section counts: the same words inside
+            # fenced learned reference text must not earn a reminder to obey it.
+            has_skill_conventions = (
+                "Engineering Skill Conventions" in outside_untrusted_reference(existing_code_context)
+            )
             skill_reminder = (
                 "\nReminder: re-check the Engineering Skill Conventions in the Existing Code Base "
                 "Context above before finalizing this file - they document specific mistakes already "

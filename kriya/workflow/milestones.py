@@ -1456,6 +1456,7 @@ async def run_milestones(
     resume: bool = False,
     resume_id: Optional[str] = None,
     authoritative: bool = False,
+    reference_context: str = "",
 ) -> Dict[str, Any]:
     """Executes a (possibly hand-edited) milestone plan: calls the EXISTING,
     unmodified we.run_generation_workflow() once per milestone against the
@@ -1708,6 +1709,7 @@ async def run_milestones(
             web_lookup_callback=web_lookup_callback,
             web_lookup_query_callback=web_lookup_query_callback,
             knowledge_risk_confirmed=knowledge_risk_confirmed,
+            reference_context=reference_context,
         ),
     )
     # completed_milestone_ids here is what PRD-008 S4b/S4c revalidation (and

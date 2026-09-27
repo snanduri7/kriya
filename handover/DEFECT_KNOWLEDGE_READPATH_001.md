@@ -49,3 +49,61 @@ That was dormant, because the table it reads is always empty. Redirecting that r
 - The workflow's `learned_rag_context` is non-empty after `learn`, and fenced.
 - The authority tests from item 3 above.
 - A regression test that nothing reads `vector_chunks` from `web_knowledge.db`.
+
+## Fix (Backlog 6.5, 2026-09-27) - FIXED, awaiting the user's pytest run
+### Canonical contract
+- **Writer and store (unchanged).** The one writer is `kriya learn`. It writes `<paths.memory>/web_knowledge.db`, table `learned_knowledge`.
+- **Legacy stores.** Every historical `learn` wrote this same table:
+  - 959fcb0 wrote it to `web_knowledge.json`, which `LocalVectorStore` maps to `web_knowledge.db`;
+  - 490a94e onward wrote `web_knowledge.db`.
+
+  No other table or database ever held learned rows, so no migration or adapter is needed.
+- **The one reader** is `kriya/memory/learned_knowledge.py::retrieve_learned_references(cfg, query)`. It returns a `LearnedRetrieval` holding references with provenance, counts of malformed and other-model rows, and `unavailable_reason`.
+  - Top-k is 5 and the score threshold is 0.4, set as one constant each.
+  - `LocalVectorStore.query_learned_knowledge` now filters in SQL on `model_name` and `dimensions`. Before, it ignored both arguments and loaded every blob. It returns `LearnedKnowledgeMatches`.
+
+### Readers after the fix
+| Consumer | Query | Channel |
+|---|---|---|
+| `ask` | the question | fenced after `User Question:`, with provenance |
+| `generate` (direct and enforce) | the goal | `reference_context`, retrieved once per invocation and reused by the knowledge-gap retries |
+| `generate --from-milestones` | the plan's `original_goal` | `reference_context` in every unit (via `run_milestones(reference_context=)` and `generation_kwargs`) |
+| `run_generation_workflow` step 1.6 | none (it no longer retrieves) | fences the `reference_context` it is given into `learned_rag_context`, which reaches the Developer and `convention_prompt` |
+
+Not wired, by decision:
+- **`kriya fix`.** There is no user goal: the goal is Kriya's placeholder and the user input is an error log.
+- **Proposal promotion.** It is deterministic.
+
+### Failure behaviour ("fail closed where required")
+Reference material is never an input to a correctness decision, so a failure never aborts a run. It contributes nothing and says why on stderr. It never reads a store partially or silently:
+- **Store cannot be read** (`sqlite3.Error`): `unavailable_reason`.
+- **Query embedding is all zero** (the client's outage degradation): `unavailable_reason`.
+- **Egress-refused embedding endpoint** (`EgressViolationError`): `unavailable_reason`; no request is sent.
+- **A row that cannot be decoded, or disagrees with its declared dimensions**: excluded and counted.
+- **A row embedded by another model**: excluded and counted, and the user is told to re-run `learn`.
+
+The broad `except Exception` blocks were removed; the reader catches only the named types.
+
+### Injection hardening, live now that the read works
+- **Fence markers.** `fence_untrusted_reference` neutralizes marker lines inside the body, so the text cannot close its own fence.
+- **Skill-conventions reminders.** The Planner, Architect and Developer reminders ("apply the Engineering Skill Conventions ... must not contradict any Rule") are now keyed on `outside_untrusted_reference(...)`. Before, fenced learned text containing that phrase earned the reminder.
+
+### Related own bug (separate commit a314d45)
+f3707c4 never gave the Developer the `reference_context`.
+
+### Tests
+**tests/test_knowledge_readpath_001.py, 23 tests:**
+- write→read end to end through the real `learn` CLI and each reader (ask, direct generate, milestone generate, every milestone and integration unit), with the exact query text asserted;
+- the workflow embeds nothing itself;
+- the store contract: normal output, other model, malformed rows, corrupt file, missing store (never created), unusable query vector, the egress boundary, CLI warnings;
+- hostile learned text through a real run: fenced once, no reminder, and no requirement, exit, mutation-scope, contract or resume authority, with a control;
+- the fence neutralizes markers, and an unterminated fence hides everything after it;
+- structural: one module owns the store, and `reference_context`/`learned_rag_context` appear only in the prompt-path modules.
+
+**Other test changes:**
+- `tests/test_rag_queries.py` was vacuous. It passed through `ask`'s key-files scan of the seeded JSON file, while the RAG read returned nothing. It is rewritten and fails on the pre-fix code.
+- `tests/test_auth_goal_contamination_001.py` patches `_learned_reference_context`. Its `vector_chunks`-seeded test encoded the defect and was removed.
+
+**Mutations: 11 of 12 killed.** The survivor, renaming the store constant, is killed by `test_learn_command` and the structural owner test outside the `-k` filter.
+
+**Certification identity.** `index_implementation_digest` does not cover `query_learned_knowledge` (learned text never enters code retrieval), so the stored CERTIFIED record stays valid.
