@@ -25,7 +25,7 @@ from unittest.mock import patch
 
 import pytest
 from _chaos_harness import changed_paths, git_workspace, role_of, snapshot_tree
-from _live_identity import qualified_live_config
+from _live_identity import qualified_live_config, release_fallback_binding
 
 from kriya.config.config import FallbackModelConfig
 from kriya.control.persistence import scan_run_records
@@ -41,7 +41,10 @@ from kriya.workflow.workflow import WorkflowEngine
 
 pytestmark = [pytest.mark.live_model, pytest.mark.live_target, pytest.mark.live_certification]
 
-FALLBACK_MODEL = os.environ.get("KRIYA_LIVE_FALLBACK_MODEL", "qwen3.6:35b-a3b-q4_K_M")
+# PRD-036: the release configuration's own fallback binding when one is given.
+RELEASE_FALLBACK = release_fallback_binding()
+FALLBACK_MODEL = RELEASE_FALLBACK.model if RELEASE_FALLBACK else os.environ.get(
+    "KRIYA_LIVE_FALLBACK_MODEL", "qwen3.6:35b-a3b-q4_K_M")
 PINNED_SEMGREP = "1.178.0"
 SEMGREP_RULES = Path(__file__).parent / "fixtures" / "static_analysis" / "semgrep" / PINNED_SEMGREP / "rules"
 
@@ -298,7 +301,7 @@ class _DeveloperModelSpy(OllamaRuntimeAdapter):
 
 @certification_case("C6", "fallback_transition")
 def test_c6_configured_fallback_transition(case):
-    case.config.llm_chain = [FallbackModelConfig(
+    case.config.llm_chain = [RELEASE_FALLBACK or FallbackModelConfig(
         model=FALLBACK_MODEL, base_url=case.config.llm.base_url, api_key=case.config.llm.api_key,
         context_window=32768, temperature=0.7,
         extra_body={"reasoning_effort": "none", "options": {"num_ctx": 32768, "top_p": 0.8, "top_k": 20}},

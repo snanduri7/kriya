@@ -690,7 +690,21 @@ It certifies Kriya plus an exact identity. The identity is the Developer runtime
   Each asserts deterministic evidence only: a hidden acceptance test run after the run, the RunRecord and commit, and gate and event evidence. A typed failure is FAILED. Per-case metrics come from the PRD-033 deriver over the case's own trace rows.
 - **Report.** `scripts/certify_model.sh` writes the raw junit and pytest output plus `model-certification.{json,md}`, content-digested. The tier is `target_production` only for one QUALIFIED identity on an exact environment; otherwise it is `wiring`, which never certifies.
 - **Records.** A target-tier run stores a digest-sealed record in `~/.kriya/certifications/`, keyed by model, runtime digest, settings digest, environment digest and case-set version. `kriya model certification` reports CURRENT, FAILED, STALE (naming the changed field), INVALID or MISSING.
-- **Current rule.** One full passing matrix. Repeated trials are LIVE-CERTIFICATION-REPEATED-TRIALS-001, targeted at PRD-036.
+- **Record rule.** The record means "the latest full matrix passed" on that identity.
+- **Release streak (PRD-036).** A release needs 3 consecutive complete matrices, each 11/11, on one unchanged **release-candidate identity** (`kriya/core/release_candidate.py`). That identity composes:
+  - the release identity: revision, clean tree, platform providers and capabilities, containment, environment;
+  - the operator production config: content digest, workspace, and the SEC-009 security-field set digest under a fixed salt;
+  - every role's exact runtime, settings and qualification;
+  - the execution environment;
+  - the case set.
+
+  Any change is a new digest, so the streak restarts.
+- **Trial log.** `certify_model.sh` runs in release mode with `KRIYA_RELEASE_CANDIDATE`, `KRIYA_RELEASE_CONFIG`, `KRIYA_RELEASE_TRUST_FILE` and `KRIYA_RELEASE_WORKSPACE`.
+  - It refuses to run unless the frozen candidate is still CURRENT.
+  - The harness takes its primary and fallback bindings from the release config.
+  - Each trial is appended to a sealed log, `~/.kriya/certifications/streaks/<candidate>.json` (`model_certification.record_trial`).
+  - A failed or incomplete matrix, a matrix on another identity, or an identity change mid-trial resets the streak to 0. No trial is dropped, and a tampered log is never overwritten.
+- **What the matrix covers.** It runs the direct workflow path. The production profile's enforce path is certified by the PRD-036 canary (`scripts/prd036_canary.sh`) and `kriya doctor --production`. `scripts/prd036_gate.py` binds all of them into one decision.
 
 ### 2.10 `kriya/workflow/` Module Layout
 

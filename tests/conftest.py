@@ -49,7 +49,7 @@ _TEST_HOST = {"os": "linux", "architecture": "x86_64", "memory_bytes": 64 * (1 <
 
 @pytest.fixture(autouse=True)
 def _no_model_runtime_probe(request, monkeypatch, tmp_path_factory):
-    from kriya.core import execution_environment, model_qualification, model_runtime
+    from kriya.core import execution_environment, model_certification, model_qualification, model_runtime
 
     if request.node.get_closest_marker("live_model") is None:
         monkeypatch.setenv(model_runtime.PROBE_ENV_VAR, "0")
@@ -60,6 +60,9 @@ def _no_model_runtime_probe(request, monkeypatch, tmp_path_factory):
         # PRD-014: never read or write the developer's real qualification store.
         monkeypatch.setenv(model_qualification.QUALIFICATION_HOME_ENV,
                            str(tmp_path_factory.mktemp("kriya-qualifications")))
+        # PRD-035/036: never read or write the real certification records or release streaks.
+        monkeypatch.setenv(model_certification.CERTIFICATION_HOME_ENV,
+                           str(tmp_path_factory.mktemp("kriya-certifications")))
     model_runtime.clear_model_runtime_cache()
     yield
     model_runtime.clear_model_runtime_cache()
