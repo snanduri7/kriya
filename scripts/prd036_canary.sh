@@ -3,6 +3,10 @@
 # candidate (the demo-03 brownfield fix: a Spring Boot service, 53 existing
 # tests), with the exact operator production config, through the enforce
 # controller, plus leak checks before and after. Never reuses an old result.
+# It runs twice on the same candidate and config: run 1 from a fresh workspace,
+# run 2 from run 1's state with only the tracked files restored. Run 2 proves
+# the reusable worktrees are reused, not multiplied (OUT_DIR/run-1, run-2; the
+# combined verdict is OUT_DIR/canary.json).
 #
 #   scripts/prd036_canary.sh OUT_DIR
 #
@@ -38,20 +42,30 @@ git -C "$WS" reset -q --hard "$BASE_SHA" && git -C "$WS" clean -qfdx || exit 2
 cp "$KRIYA_RELEASE_CANDIDATE" "$OUT/release-candidate.json"
 kriya_cli() { ( cd "$WS" && "$KRIYA" --config "$KRIYA_RELEASE_CONFIG" --trust-file "$KRIYA_RELEASE_TRUST_FILE" "$@" ); }
 
-kriya_cli doctor --production --json > "$OUT/doctor-before.json" 2> "$OUT/doctor-before.stderr.txt"
-"$PY" scripts/prd036_canary.py snapshot "$WS" "$OUT/before.json" || exit 2
-echo "[canary] $(date -u +%Y-%m-%dT%H:%M:%SZ) run start (baseline $BASE_SHA)" | tee "$OUT/timeline.txt"
-kriya_cli generate -f "$KRIYA_CANARY_GOAL" -y --json > "$OUT/stdout.json" 2> "$OUT/stderr.log"
-echo $? > "$OUT/exit_code"
-echo "[canary] $(date -u +%Y-%m-%dT%H:%M:%SZ) run end (exit $(cat "$OUT/exit_code"))" | tee -a "$OUT/timeline.txt"
-"$PY" scripts/prd036_canary.py snapshot "$WS" "$OUT/after.json" || exit 2
-kriya_cli doctor --production --json > "$OUT/doctor-after.json" 2> "$OUT/doctor-after.stderr.txt"
+run_pass() {  # run_pass N: one full canary run into $OUT/run-N
+  local RUN="$OUT/run-$1"
+  mkdir -p "$RUN"
+  cp "$OUT/release-candidate-check.json" "$OUT/release-candidate.json" "$RUN/"
+  kriya_cli doctor --production --json > "$RUN/doctor-before.json" 2> "$RUN/doctor-before.stderr.txt"
+  "$PY" scripts/prd036_canary.py snapshot "$WS" "$RUN/before.json" || return 2
+  echo "[canary] $(date -u +%Y-%m-%dT%H:%M:%SZ) run $1 start (baseline $BASE_SHA)" | tee "$RUN/timeline.txt"
+  kriya_cli generate -f "$KRIYA_CANARY_GOAL" -y --json > "$RUN/stdout.json" 2> "$RUN/stderr.log"
+  echo $? > "$RUN/exit_code"
+  echo "[canary] $(date -u +%Y-%m-%dT%H:%M:%SZ) run $1 end (exit $(cat "$RUN/exit_code"))" | tee -a "$RUN/timeline.txt"
+  "$PY" scripts/prd036_canary.py snapshot "$WS" "$RUN/after.json" || return 2
+  kriya_cli doctor --production --json > "$RUN/doctor-after.json" 2> "$RUN/doctor-after.stderr.txt"
+  # Independent re-verification, outside Kriya's own gates.
+  ( cd "$WS" && ./mvnw -o -q clean compile > "$RUN/post-run-compile.log" 2>&1; echo $? > "$RUN/post-run-compile.exit" )
+  ( cd "$WS" && ./mvnw -o clean test > "$RUN/post-run-test.log" 2>&1; echo $? > "$RUN/post-run-test.exit" )
+  git -C "$WS" diff HEAD > "$RUN/workspace-diff.txt"
+  mkdir -p "$RUN/run-records" && cp "$WS"/.kriya/control/runs/*.json "$RUN/run-records/" 2>/dev/null
+  "$PY" -c 'import json, sys; from kriya.core.release_identity import release_identity; json.dump(release_identity("oci"), open(sys.argv[1], "w"), indent=2, sort_keys=True)' "$RUN/release-identity.json"
+  "$PY" scripts/prd036_canary.py verdict "$RUN" "$WS" --expect-changed "$KRIYA_CANARY_EXPECT"
+}
 
-# Independent re-verification, outside Kriya's own gates.
-( cd "$WS" && ./mvnw -o -q clean compile > "$OUT/post-run-compile.log" 2>&1; echo $? > "$OUT/post-run-compile.exit" )
-( cd "$WS" && ./mvnw -o clean test > "$OUT/post-run-test.log" 2>&1; echo $? > "$OUT/post-run-test.exit" )
-git -C "$WS" diff HEAD > "$OUT/workspace-diff.txt"
-mkdir -p "$OUT/run-records" && cp "$WS"/.kriya/control/runs/*.json "$OUT/run-records/" 2>/dev/null
-"$PY" -c 'import json, sys; from kriya.core.release_identity import release_identity; json.dump(release_identity("oci"), open(sys.argv[1], "w"), indent=2, sort_keys=True)' "$OUT/release-identity.json"
-
-"$PY" scripts/prd036_canary.py verdict "$OUT" "$WS" --expect-changed "$KRIYA_CANARY_EXPECT"
+run_pass 1
+# Run 2 starts from run 1's state (worktrees, caches, run records kept); only
+# the tracked files go back to the baseline so the same goal applies again.
+git -C "$WS" reset -q --hard "$BASE_SHA" || exit 2
+run_pass 2
+"$PY" scripts/prd036_canary.py combine "$OUT" "$OUT/run-1" "$OUT/run-2"

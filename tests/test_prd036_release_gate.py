@@ -301,6 +301,130 @@ def test_the_harness_bindings_equal_the_release_configs_effective_bindings(tmp_p
 
 # --- canary verdict ---------------------------------------------------------------
 
+def _retained(workspace, *, extra=None, **overrides):
+    """The worktree set a real production run leaves (see the canary evidence):
+    the workspace, the reset plan worktree hosting the subtask engine's own
+    reusable worktree, and that nested worktree; caches only."""
+    main = os.path.realpath(workspace)
+    outer = os.path.join(main, ".kriya", "worktree")
+    nested = os.path.join(outer, ".kriya", "worktree")
+    clean = {"exists": True, "tracked_changes": [], "untracked": [], "ignored_top": ["target/"], "kriya_entries": []}
+    entries = [
+        {"path": main, "head": "h", "flags": ["branch"]},
+        {"path": outer, "head": "h", "flags": ["detached"],
+         "inspection": {**clean, "untracked": [".kriya/worktree/"], "kriya_entries": ["worktree"]}},
+        {"path": nested, "head": "h", "flags": ["detached"], "inspection": dict(clean)},
+    ]
+    if extra:
+        entries.append({"path": extra, "head": "h", "flags": ["detached"], "inspection": dict(clean)})
+    for index, change in overrides.items():
+        position = {"outer": 1, "nested": 2}[index]
+        entries[position] = {**entries[position], **change(entries[position])}
+    return entries
+
+
+def _inspection(**changes):
+    return lambda entry: {"inspection": {**entry["inspection"], **changes}}
+
+
+@pytest.mark.parametrize("overrides,problem", [
+    ({"outer": lambda e: {"flags": ["detached", "locked"]}}, "locked:"),
+    ({"nested": lambda e: {"flags": ["detached", "prunable"]}}, "prunable:"),
+    ({"nested": lambda e: {"inspection": {"exists": False}}}, "broken:"),
+    ({"outer": lambda e: {"head": "stale"}}, "head:"),
+    ({"nested": _inspection(tracked_changes=[" M src/A.java"])}, "tracked_changes:"),
+    ({"nested": _inspection(untracked=["src/Leftover.java"])}, "untracked:"),
+    ({"outer": _inspection(untracked=[".kriya/worktree/", "out.txt"])}, "untracked:"),
+    ({"nested": _inspection(ignored_top=["target/", "secrets/"])}, "ignored:"),
+    ({"outer": _inspection(kriya_entries=["worktree", "control"])}, "kriya_state:"),
+    ({"nested": _inspection(kriya_entries=["worktree"])}, "kriya_state:"),
+])
+def test_a_retained_worktree_must_be_managed_reset_and_clean(tmp_path, overrides, problem):
+    module = _script("prd036_canary")
+    workspace = str(tmp_path / "ws")
+    assert module.worktree_violations({"head": ["h"], "worktrees": _retained(workspace)}, workspace) == []
+    violations = module.worktree_violations({"head": ["h"], "worktrees": _retained(workspace, **overrides)}, workspace)
+    assert any(v.startswith(problem) for v in violations), violations
+
+
+def test_only_the_documented_worktree_locations_are_kriya_owned(tmp_path):
+    module = _script("prd036_canary")
+    workspace = str(tmp_path / "ws")
+    deeper = os.path.join(os.path.realpath(workspace), *(module.WORKTREE_RELPATH * 3))
+    for extra in (deeper, os.path.join(os.path.realpath(workspace), ".kriya", "other")):
+        violations = module.worktree_violations({"head": ["h"], "worktrees": _retained(workspace, extra=extra)},
+                                                workspace)
+        assert violations == [f"unowned:{extra}"]
+    # Without the nested worktree registered, the plan worktree may not keep a nested directory.
+    lone = [w for w in _retained(workspace) if not w["path"].endswith(os.path.join(".kriya", "worktree", ".kriya", "worktree"))]
+    assert module.worktree_violations({"head": ["h"], "worktrees": lone}, workspace) == [
+        f"untracked:{lone[1]['path']}", f"kriya_state:{lone[1]['path']}"]
+
+
+def test_the_owned_location_is_where_kriya_creates_its_worktree(tmp_path):
+    """Binds the canary's location rule to create_git_worktree itself."""
+    from kriya.workflow.worktree import create_git_worktree
+
+    module = _script("prd036_canary")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / "a.txt").write_text("a\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], cwd=repo, check=True)
+    assert os.path.realpath(create_git_worktree(str(repo))) == module.kriya_worktree_paths(str(repo))[0]
+
+
+def test_a_real_retained_worktree_set_is_inspected_from_git(tmp_path):
+    from kriya.workflow.worktree import create_git_worktree, remove_git_worktree
+
+    module = _script("prd036_canary")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / ".gitignore").write_text("target/\n")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], cwd=repo, check=True)
+    worktree = create_git_worktree(str(repo))
+    (Path(worktree) / "target").mkdir()
+    (Path(worktree) / "target" / "A.class").write_text("x")
+    remove_git_worktree(str(repo), worktree)
+    assert module.worktree_violations(module.snapshot(str(repo)), str(repo)) == []
+    (Path(worktree) / "leftover.java").write_text("candidate output\n")
+    assert module.worktree_violations(module.snapshot(str(repo)), str(repo)) == [f"untracked:{os.path.realpath(worktree)}"]
+
+
+def _combined(tmp_path, first, second, verdicts=("PASS", "PASS")):
+    module = _script("prd036_canary")
+    runs = []
+    for n, (paths, verdict) in enumerate(zip((first, second), verdicts, strict=True), 1):
+        run = tmp_path / f"run-{n}"
+        run.mkdir()
+        (run / "canary.json").write_text(json.dumps({"verdict": verdict, "run_id": f"r{n}",
+                                                     "checks": {"run_success": {"passed": verdict == "PASS"}}}))
+        (run / "after.json").write_text(json.dumps({"worktrees": [{"path": p} for p in paths]}))
+        runs.append(str(run))
+    return module.combine(str(tmp_path), runs)
+
+
+def test_two_runs_that_reuse_the_same_worktrees_prove_bounded_reuse(tmp_path):
+    paths = ["/ws", "/ws/.kriya/worktree", "/ws/.kriya/worktree/.kriya/worktree"]
+    report = _combined(tmp_path, paths, list(paths))
+    assert report["verdict"] == "PASS" and report["checks"]["bounded_worktree_reuse"]["nesting_depth"] == [2, 2]
+    assert json.loads((tmp_path / "canary.json").read_text()) == report
+
+
+@pytest.mark.parametrize("second,verdicts", [
+    (["/ws", "/ws/.kriya/worktree", "/ws/.kriya/worktree/.kriya/worktree", "/ws/.kriya/worktree/.kriya/worktree/.kriya/worktree"],
+     ("PASS", "PASS")),
+    (["/ws", "/ws/.kriya/worktree"], ("PASS", "PASS")),
+    (["/ws", "/ws/.kriya/worktree", "/ws/.kriya/worktree/.kriya/worktree"], ("PASS", "FAIL")),
+])
+def test_a_growing_changing_or_failed_second_run_fails_the_canary(tmp_path, second, verdicts):
+    first = ["/ws", "/ws/.kriya/worktree", "/ws/.kriya/worktree/.kriya/worktree"]
+    report = _combined(tmp_path, first, second, verdicts)
+    assert report["verdict"] == "FAIL"
+
 @pytest.fixture
 def canary(tmp_path, monkeypatch):
     module = _script("prd036_canary")
@@ -314,7 +438,7 @@ def canary(tmp_path, monkeypatch):
     record.parent.mkdir(parents=True)
     record.write_text(json.dumps({"lifecycle_state": "SUCCESS", "commits": [{"result": "committed"}],
                                   "verification_evidence_ids": ["gate:x", "static_analysis:abc"]}))
-    snap = {"containers": ["c0"], "networks": ["n0"], "worktrees": ["worktree /ws"], "lock_free": True,
+    snap = {"containers": ["c0"], "networks": ["n0"], "worktrees": _retained(str(workspace)), "lock_free": True,
             "processes": [], "tracked_changes": [], "head": ["h"]}
     files = {
         "exit_code": "0", "post-run-compile.exit": "0", "post-run-test.exit": "0",
@@ -355,7 +479,8 @@ def _edit(evidence, name, **changes):
     (lambda e: _edit(e, "stdout.json", commit_evidence={"state": "in_progress"}), "commit_committed"),
     (lambda e: _edit(e, "after.json", containers=["c0", "c1"]), "no_leaked_containers"),
     (lambda e: _edit(e, "after.json", networks=["n0", "n1"]), "no_leaked_networks"),
-    (lambda e: _edit(e, "after.json", worktrees=["worktree /ws", "worktree /ws/.kriya/w"]), "no_leaked_worktrees"),
+    (lambda e: _edit(e, "after.json", worktrees=_retained(str(e.parent / "ws"), extra="/elsewhere/wt")),
+     "worktrees_managed_and_clean"),
     (lambda e: _edit(e, "after.json", processes=["42 docker run"]), "no_leaked_processes"),
     (lambda e: _edit(e, "after.json", lock_free=False), "workspace_lock_released"),
     (lambda e: _edit(e, "after.json", tracked_changes=[" M src/A.java", " M pom.xml"]), "only_authorized_workspace_writes"),
@@ -400,8 +525,8 @@ def _gate_inputs(gate):
                           "stages": {"release": {"status": "PASS"}},
                           "tiers": {"pytest": {"junit": {"failures": 0, "errors": 0, "passed": 7000}, "unexpected_skips": 0},
                                     "scanner": {"junit": {"failures": 0, "errors": 0, "passed": 27}}}},
-        "canary": {"verdict": "PASS", "checks": {"production_ready_before": {"passed": True},
-                                                  "production_ready_after": {"passed": True}}},
+        "canary": {"verdict": "PASS", "checks": {f"run{n}.production_ready_{when}": {"passed": True}
+                                                  for n in (1, 2) for when in ("before", "after")}},
         "canary_candidate_digest": candidate["digest"],
         "streak": {"status": mc.CERTIFIED, "streak": 3, "trials": trials},
         "trial_evidence_present": {1: True, 2: True, 3: True},
@@ -430,7 +555,8 @@ def _set(inputs, key, value):
     (lambda i: i["certification"]["release_identity"].update(digest="other"), "certified_candidate_identity"),
     (lambda i: i["canary"].update(verdict="FAIL"), "canary"),
     (lambda i: _set(i, "canary_candidate_digest", "other"), "canary"),
-    (lambda i: i["canary"]["checks"]["production_ready_after"].update(passed=False), "production_doctor_ready"),
+    (lambda i: i["canary"]["checks"]["run2.production_ready_after"].update(passed=False), "production_doctor_ready"),
+    (lambda i: i["canary"].update(checks={}), "production_doctor_ready"),
     (lambda i: i["streak"].update(status="IN_PROGRESS"), "live_streak"),
     (lambda i: i["streak"]["trials"][1].update(outcome=mc.FAILED), "live_streak"),
     (lambda i: i["streak"]["trials"][0].update(candidate_digest="other"), "live_streak"),

@@ -96,8 +96,9 @@ def evaluate(inputs: Mapping[str, Any]) -> Dict[str, Any]:
               verdict=canary.get("verdict"), failed=[k for k, c in (canary.get("checks") or {}).items()
                                                     if not c.get("passed")])
     checks = canary.get("checks") or {}
-    criterion("production_doctor_ready",
-              all((checks.get(name) or {}).get("passed") for name in ("production_ready_before", "production_ready_after")))
+    readiness = {name: c.get("passed") for name, c in checks.items()
+                 if name.endswith(("production_ready_before", "production_ready_after"))}
+    criterion("production_doctor_ready", len(readiness) >= 2 and all(readiness.values()), checks=readiness)
 
     streak = inputs["streak"]
     trials = streak.get("trials") or []
