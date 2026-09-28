@@ -21,14 +21,19 @@ def _python_sources():
 
 
 def test_cli_imports_and_parses_pyproject_without_stdlib_tomllib(tmp_path):
-    """Simulates a 3.10 interpreter: stdlib tomllib is unavailable and only the
-    API-identical ``tomli`` backport is importable (stood in for by the real
-    module under that name). ``import kriya.cli`` must succeed and a Python
-    project's requires-python must still be honoured, not ignored."""
+    """A 3.10 interpreter: stdlib tomllib is unavailable and only the
+    API-identical ``tomli`` backport is importable. On 3.11+ that is
+    simulated (the real stdlib module stands in under the backport's name);
+    on a real 3.10 the real ``tomli`` dependency is used. ``import kriya.cli``
+    must succeed and a Python project's requires-python must still be
+    honoured, not ignored."""
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "p"\nrequires-python = ">=3.11,<3.12"\n')
     script = textwrap.dedent(f"""
         import sys
-        import tomllib as _stdlib
+        try:
+            import tomllib as _stdlib  # 3.11+: simulate the 3.10 environment
+        except ModuleNotFoundError:
+            import tomli as _stdlib  # a real 3.10: the declared backport
         sys.modules["tomli"] = _stdlib
         sys.modules["tomllib"] = None
         import kriya.cli
