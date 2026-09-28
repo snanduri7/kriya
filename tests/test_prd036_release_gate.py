@@ -58,7 +58,11 @@ def operator(tmp_path, monkeypatch):
     monkeypatch.chdir(workspace)
     path = tmp_path / "operator" / "production.yaml"
     path.parent.mkdir()
-    path.write_text("runtime_profile: production\nllm:\n  base_url: http://localhost:11434/v1\n")
+    rules = tmp_path / "operator" / "rules.yml"
+    rules.write_text("rules: []\n")
+    path.write_text("runtime_profile: production\nllm:\n  base_url: http://localhost:11434/v1\n"
+                    "static_analysis:\n  providers:\n    semgrep:\n      rule_packs:\n"
+                    f"        - {rules}\n")
     return path
 
 
@@ -105,6 +109,7 @@ def test_an_unchanged_qualified_candidate_is_current_and_binds_every_component(s
     assert recorded["models"]["developer_primary"]["model"] == "primary:1"
     assert recorded["models"]["developer_fallback"]["model"] == "fallback:1"
     assert recorded["production_config"]["security_fields"] and recorded["case_set"]["case_ids"][0] == "C1"
+    assert list(recorded["production_config"]["referenced_files"]) == [os.path.realpath(operator.parent / "rules.yml")]
     assert {b["role"] for b in recorded["models"]["bindings"]} >= {"developer", "planner", "reviewer"}
     assert rc.compare_release_candidate(recorded, _candidate(source, operator)) == {"status": rc.CURRENT, "changes": []}
 
@@ -118,6 +123,7 @@ def _commit(source):
     (lambda s, o, q: _commit(s), "release.kriya.revision"),
     (lambda s, o, q: o.write_text(o.read_text() + "# edited\n"), "production_config.content_sha256"),
     (lambda s, o, q: o.write_text(o.read_text().replace("11434", "11435")), "production_config.security_field_set_digest"),
+    (lambda s, o, q: (o.parent / "rules.yml").write_text("rules: [changed]\n"), "production_config.referenced_files"),
     (lambda s, o, q: {"primary:1": "rt-other"}, "models.developer_primary.runtime_digest"),
     (lambda s, o, q: {"cfg": _cfg(temperature=0.2)}, "models.developer_primary.inference_settings_digest"),
     (lambda s, o, q: {"cfg": _cfg(fallback_temperature=0.2)}, "models.developer_fallback.inference_settings_digest"),

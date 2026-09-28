@@ -12,7 +12,9 @@ It composes identities that already exist, never redefining any of them:
   a digest of its SEC-009 security-relevant field set, taken with the
   effective values after profile expansion. The value digests use a fixed,
   published salt, so the same configuration always gives the same
-  identity; values are never stored.
+  identity; values are never stored. The content of every file the config
+  points the gates at (static-analysis rule packs) is bound too, so editing
+  one changes the identity even though the path stays the same.
 - ``models``: every role's every callable model. For each identity the
   role sends (PRD-014), it records the exact runtime digest (PRD-013), the
   inference-settings digest and the current qualification status. It also
@@ -54,13 +56,27 @@ def production_config_identity(config_path: str) -> Dict[str, Any]:
         content_sha256 = hashlib.sha256(handle.read()).hexdigest()
     state = resolve_config_state(config_path)
     records = build_security_field_records(state.violations, state.config_dict, SECURITY_IDENTITY_SALT)
+    providers = ((state.config_dict.get("static_analysis") or {}).get("providers") or {})
+    rule_packs = sorted({os.path.realpath(pack) for provider in providers.values() if isinstance(provider, dict)
+                         for pack in provider.get("rule_packs") or []})
     return {
         "path": os.path.realpath(config_path),
         "content_sha256": content_sha256,
         "workspace_id": workspace_identity(os.getcwd()),
         "security_field_set_digest": compute_set_digest(records),
         "security_fields": sorted(record.field_path for record in records),
+        "referenced_files": {path: _file_sha256(path) for path in rule_packs},
     }
+
+
+def _file_sha256(path: str) -> str:
+    """A referenced file's content digest; a missing or unreadable file is
+    recorded as such (the gate itself refuses it at run time)."""
+    try:
+        with open(path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+    except OSError as error:
+        return f"unreadable:{type(error).__name__}"
 
 
 def model_identity(cfg: Any, *, resolve_runtime: Optional[Callable[..., Any]] = None) -> Dict[str, Any]:
