@@ -30,6 +30,33 @@ jobs:
       - name: Run test suite
         run: pytest -q
 
+  platform-windows:
+    # ARCH-PLATFORM-001 / PLAT-003: Kriya core imports on a real Windows host
+    # and the platform architecture guard holds there. Windows RUNTIME is not
+    # supported (PORTABILITY_ARCHITECTURE_DEFINED / RUNTIME_NOT_SUPPORTED);
+    # this job proves only that no core module needs a POSIX-only import and
+    # that missing Windows providers report typed UNAVAILABLE. Non-blocking
+    # until its first green run, then blocking (PLAT-003 closes only then).
+    name: Platform import and architecture guard (Windows)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Kriya (declared dependency ranges; the lock file is POSIX-resolved, PLAT-036)
+        run: pip install -e ".[dev]"
+
+      - name: Import Kriya core natively
+        run: python -c "import kriya.cli, kriya.workflow.workflow, kriya.control.recovery, kriya.tools.validate, kriya.mcp.mcp, kriya.production_doctor, plugins.core_tools; from kriya.platform.services import platform_services; print(platform_services().identity())"
+
+      - name: Platform architecture guard and lock contract
+        run: python -m pytest -q -p no:cacheprovider tests/test_platform_architecture_guard.py tests/test_platform_workspace_lock_contract.py
+
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest

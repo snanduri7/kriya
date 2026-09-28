@@ -195,6 +195,13 @@ macOS hides several Linux behaviours, so verify containment/resource changes on 
 - **Stat caches.** A stat-validated read cache uses `file_stamp.unchanged_since` (settled-when-cached), never a bare mtime compare; tests exercising reuse settle their files with `os.utime`.
 - **Pinned images.** Certification images are listed in `tests/certification/pinned_images.txt`; CI pulls them by digest (`scripts/pinned_images.py --pull`) and `certify.sh` verifies them (`images` stage).
 
+### Platform services (`kriya/platform/`) — ARCH-PLATFORM-001
+- **Mechanism behind ports.** OS-specific mechanism lives only in `kriya/platform/`, composed once by `platform_services()` (`override()` for tests). Core code asks capabilities (`ENFORCED`/`ADVISORY`/`UNAVAILABLE`); an unavailable required capability is `PLATFORM_CAPABILITY_UNAVAILABLE`, never a fallback. Adapters never grant authority.
+- **Guard.** `tests/test_platform_architecture_guard.py` forbids `fcntl`/`resource`/`pwd`/... imports and `sys.platform`/`os.name`/`os.getuid`/`os.killpg`/... outside `kriya/platform/`; its `TEMPORARY_ALLOWLIST` only shrinks and never lists workflow/policy/control/config/metrics. Core must import with those modules blocked (checked in a subprocess and on `windows-latest`).
+- **Path identity.** Security decisions about paths use `filesystem_semantics.path_relation`/`path_identity` (stat identity, fail closed on unknown, no probe files), never string prefixes.
+- **Control paths.** Candidate writes (`AuthorizedFileWriter`) never reach `.git/**`/`.kriya/**` (`TRUSTED_CONTROL_PATH_DENIED`, plus a terminal-commit backstop); Kriya's own `.kriya/` state is written only through `kriya/control/control_store.write_control_file`.
+- **Windows.** `PORTABILITY_ARCHITECTURE_DEFINED / RUNTIME_NOT_SUPPORTED`: core imports; there are no Windows providers yet. See `handover/PLATFORM_*.md`.
+
 ### Chaos harness (`tests/_chaos_harness.py`) — PRD-032
 - **Tests only; no production subsystem.** `SCENARIOS` is the closed table, and every entry is bound to exactly one `@chaos("<id>")` test (`tests/test_prd032_chaos_harness.py` enforces it). Use the `chaos_case` fixture (tests/conftest.py). It snapshots the whole per-test tree, and `observe()` needs a typed, content-free outcome.
 - **Where hostility enters.** It enters at the runtime port (`ChaosRuntime`, never a mocked `llm.complete`), or at the one seam that owns the failure.
