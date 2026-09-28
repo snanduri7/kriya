@@ -37,7 +37,12 @@ def test_outside_certification_skips_are_recorded_not_failed(tmp_path):
 def test_certification_fails_every_unexpected_skip_and_xfail(tmp_path):
     completed, skips = _run(tmp_path, "--certification")
     assert completed.returncode == 1
-    assert completed.stdout.count("UNEXPECTED SKIP in certification mode") == 2
+    # The structured record, not a stdout count: the summary lines are
+    # truncated to the terminal width, so how often the message is printed
+    # depends on the environment (2 locally, 4 on the hosted runner).
+    assert skips["certification_mode"] is True and skips["unexpected"] == 2
+    assert {s["kind"] for s in skips["skips"]} == {"skip", "xfail"}
+    assert "UNEXPECTED SKIP in certification mode" in completed.stdout
     # A setup-phase skip becomes a setup error; either way the run fails.
     assert "1 failed, 1 passed, 1 error" in completed.stdout
 
