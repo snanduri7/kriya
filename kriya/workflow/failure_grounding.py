@@ -58,9 +58,9 @@ _BUILD_TIMING_NOISE_PATTERNS = (
     re.compile(r"^\[INFO\] Finished at:.*$", re.MULTILINE),
 )
 
-# FAILURE-SIGNATURE-RUN-NOISE-001: values that differ on every run of the same
-# failure, replaced by a fixed token, not removed, so the surrounding text
-# keeps its shape. PRD-036 rc7 matrix trial 1 (C8): an identical pytest
+# FAILURE-SIGNATURE-RUN-NOISE-001: values that differ between runs of the same
+# failure (or shift with an edit), replaced by a fixed token, not removed, so
+# the surrounding text keeps its shape. PRD-036 rc7 matrix trial 1 (C8): an identical pytest
 # failure (same test, same line, same ValueError) got a new signature on
 # every attempt only because pytest printed `<inventory.Inventory object at
 # 0x10b1b7b10>`, so every repeat looked like a new failure family, reset the
@@ -71,7 +71,19 @@ _RUN_NOISE_PATTERNS = (
     (re.compile(r"(\b[A-Za-z_$][\w$]*)@[0-9a-f]{4,8}\b"), r"\1@?"),  # Java identity hash codes
     (re.compile(r"\bin \d+(?:\.\d+)?s\b"), "in ?s"),  # pytest/unittest elapsed time
     (re.compile(r"\(\d+:\d{2}:\d{2}\)"), "(?:?:?)"),  # pytest's (h:mm:ss) elapsed time
+    (re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.IGNORECASE), "<uuid>"),
+    (re.compile(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"), "<timestamp>"),
+    (re.compile(r"\btmp[a-z0-9_]{8}\b"), "tmp?"),  # Python tempfile names
+    (re.compile(r"\b(pid|PID)([ =:]+)\d+\b"), r"\1\2?"),
+    # Line numbers an edit shifts (PRD-036 rc8 matrix trial 2, C10): the same
+    # defect moved from line 10 to 12, 14, 16 as the model added lines.
+    # Structured Java evidence already keeps basenames only (see below).
+    (re.compile(r"(\.[A-Za-z]\w*):\d+(?::\d+)?\b"), r"\1:?"),  # x.py:23, x.rb:12:5
+    (re.compile(r"\bline \d+\b"), "line ?"),  # File "x.py", line 7 / x.py line 10
 )
+
+# A static rule violation is "[<check>] <path> ..." (static_checks.run_static_checks).
+_STATIC_RULE_IDENTITY_PATTERN = re.compile(r"\[([\w-]+)\]\s+(\S+)")
 
 
 def _normalize_run_noise(text: str) -> str:
@@ -312,6 +324,12 @@ def build_failure_signature(failure_type: str, error_text: str) -> Tuple[str, An
     stable validator evidence with dynamic line numbers removed; hash the
     normalized local text only when no structured diagnostic is available.
     """
+    if failure_type == "static_rule_violation":
+        # The check and the file it names are the identity; the offending
+        # line's number and text change with every regeneration.
+        static_rule = _STATIC_RULE_IDENTITY_PATTERN.search(error_text)
+        if static_rule:
+            return failure_type, ("static_rule", static_rule.group(1), static_rule.group(2))
     locations = tuple(sorted({name for name, _ in extract_error_source_locations(error_text)}))
     javac_diagnostics = tuple(sorted({
         " ".join(message.split())
