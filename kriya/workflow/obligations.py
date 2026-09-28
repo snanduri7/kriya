@@ -492,6 +492,11 @@ class ObligationLedger:
     def history(self, obligation_id: str) -> List[ObligationRecord]:
         return list(self._history.get(obligation_id, []))
 
+    def record_counts(self) -> Dict[str, int]:
+        """How many records each obligation holds; comparing two of these
+        shows which ids a pass recorded in between."""
+        return {oid: len(history) for oid, history in self._history.items()}
+
     def ids_by_kind(self, kind: ObligationKind) -> List[str]:
         return [oid for oid, hist in self._history.items() if hist and hist[-1].kind == kind]
 

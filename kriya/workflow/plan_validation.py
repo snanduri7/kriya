@@ -46,7 +46,7 @@ continue under a stale, lighter profile.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Dict, Iterable, List, Optional
 
 from kriya.workflow.obligations import (
@@ -361,6 +361,37 @@ def canonicalize_planned_file_actions(
     return corrected_plan, corrections
 
 
+PLAN_VALIDATION_SOURCE = "plan_validation.validate_plan"
+
+
+def _retire_superseded_plan_obligations(
+    ledger: ObligationLedger, recorded_before: Dict[str, int], revision: object, *, live_ids,
+) -> None:
+    """PLAN-OBLIGATION-SUPERSEDED-001: a terminal plan obligation belongs to
+    the plan draft that recorded it. One this round neither recorded nor
+    still holds (``live_ids``: seeded-once ids whose element is still
+    planned) names an element a repaired draft dropped, so it stops being
+    terminal-required. Its history stays, and a later draft that plans the
+    element again records it terminal-required again. Only unresolved
+    records are retired; SATISFIED ones never block the terminal gate, and
+    the SATISFIED->dropped regression passes above own those."""
+    recorded_now = ledger.record_counts()
+    for oid, count in recorded_now.items():
+        if count != recorded_before.get(oid, 0) or oid in live_ids:
+            continue
+        rec = ledger.current(oid)
+        if (
+            rec is None or rec.source != PLAN_VALIDATION_SOURCE
+            or not rec.terminal_required or rec.status == ObligationStatus.SATISFIED
+        ):
+            continue
+        ledger.record(replace(
+            rec, revision=revision, terminal_required=False,
+            description=f"{rec.description} (superseded: no longer part of the plan)",
+            evidence={**rec.evidence, "superseded_between_revisions": True},
+        ))
+
+
 async def validate_plan(
     plan: EngineeringPlan,
     *,
@@ -417,6 +448,7 @@ async def validate_plan(
     was SATISFIED on a prior call and comes back VIOLATED on this one -
     and tell the next repair prompt to preserve it, not just fix whatever
     is currently broken."""
+    recorded_before = obligation_ledger.record_counts() if obligation_ledger is not None else {}
     errors: List[str] = []
     reason_codes: List[str] = []
     evidence: List[Dict[str, Any]] = []
@@ -1112,6 +1144,12 @@ async def validate_plan(
         all_planned_files = sorted({pf.path for st in plan.subtasks for pf in st.planned_files})
         escalated_route = await triage_service.recompute_from_files(
             route=route, workspace_path=workspace_path, planned_files=all_planned_files
+        )
+
+    if obligation_ledger is not None:
+        _retire_superseded_plan_obligations(
+            obligation_ledger, recorded_before, revision,
+            live_ids={f"plan.integration.{rel.id}" for rel in plan.integration_relationships},
         )
 
     if errors and not reason_codes:

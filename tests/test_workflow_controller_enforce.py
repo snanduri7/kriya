@@ -10533,3 +10533,35 @@ async def test_enforce_refuses_to_start_when_prior_source_commit_is_uncertain(tm
     assert result.legacy_result["reason_codes"] == ["UNCERTAIN_COMMIT_STATE"]
     assert result.legacy_result["uncertain_commit_ids"] == ["crashed"]
     we.planner.run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_requirement_the_repaired_plan_dropped_does_not_fail_the_enforce_terminal_gate(tmp_path):
+    """PLAN-OBLIGATION-SUPERSEDED-001, the PRD-036 rc6 canary run-2 path:
+    the first draft's s1 requires a capability no subtask provides (a real
+    validate_plan rejection), the repaired draft drops it and validates, s1
+    succeeds - and the terminal obligations gate must not fail the run on
+    the rejected draft's record."""
+    probe = _repair_probe_plan()
+    accepted = probe.model_copy(update={
+        "global_invariants": [GlobalInvariant(id="gi1", statement="a.py stays importable")],
+        "subtasks": [probe.subtasks[0].model_copy(update={"relevant_global_invariant_ids": ["gi1"]})],
+    })
+    rejected = accepted.model_copy(update={"subtasks": [
+        accepted.subtasks[0].model_copy(update={"requires": ["driver_repository_access"]}),
+    ]})
+    we = _workflow_engine()
+    we.engineering_triage.recompute_from_files = AsyncMock(return_value=_route())
+    we.run_generation_workflow = AsyncMock(side_effect=_successful_generation)
+    with patch(
+        "kriya.workflow.workflow_controller.parse_planner_structured_output",
+        return_value=(MagicMock(), None),
+    ), patch(
+        "kriya.workflow.workflow_controller.build_engineering_plan_from_planner_output",
+        side_effect=[rejected, accepted],
+    ):
+        result = await WorkflowController(we).execute("goal", str(tmp_path), migration_mode="enforce")
+
+    assert result.legacy_result["plan_repair_attempts"] == 1
+    assert "global_terminal_obligation_gap" not in result.legacy_result
+    assert result.legacy_result["status"] == "success"
