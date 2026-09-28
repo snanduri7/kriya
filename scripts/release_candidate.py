@@ -72,10 +72,16 @@ def main(argv=None) -> int:
         trial.add_argument(name, required=True)
     sub.add_parser("status").add_argument("--candidate", required=True)
     args = parser.parse_args(argv)
+    # current_identity() changes into the release workspace (load_config
+    # resolves against the working directory), so every path the caller
+    # gave is made absolute against the caller's directory first.
+    for name in ("out", "recorded", "candidate", "after", "report", "evidence"):
+        if getattr(args, name, None):
+            setattr(args, name, os.path.abspath(getattr(args, name)))
 
     if args.command == "identity":
         identity = current_identity()
-        _write(os.path.abspath(args.out), identity)
+        _write(args.out, identity)
         print(f"[release-candidate] identity {identity['digest']} -> {args.out}")
         return 0
     if args.command == "check":

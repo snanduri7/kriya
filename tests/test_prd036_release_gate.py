@@ -468,6 +468,28 @@ def test_open_p0_p1_are_any_not_closed_blocking_priority(gate):
     assert gate.open_blocking_items(rows) == ["A", "B"]
 
 
+def test_relative_paths_are_resolved_before_the_identity_changes_directory(tmp_path, monkeypatch):
+    """current_identity() changes into the release workspace; a relative
+    --out/--recorded must still mean the caller's directory."""
+    module = _script("release_candidate")
+    caller, workspace = tmp_path / "caller", tmp_path / "workspace"
+    caller.mkdir()
+    workspace.mkdir()
+    identity = _sealed()
+
+    def elsewhere():
+        os.chdir(workspace)
+        return identity
+
+    monkeypatch.chdir(caller)
+    monkeypatch.setattr(module, "current_identity", elsewhere)
+    assert module.main(["identity", "--out", "candidate.json"]) == 0
+    assert json.loads((caller / "candidate.json").read_text()) == identity and not (workspace / "candidate.json").exists()
+    monkeypatch.chdir(caller)
+    monkeypatch.setattr(module, "compare_release_candidate", lambda *_a: {"status": rc.CURRENT, "changes": []})
+    assert module.main(["check", "--recorded", "candidate.json"]) == 0
+
+
 def test_the_scripts_are_executable():
     for name in ("release_candidate.py", "prd036_canary.py", "prd036_canary.sh", "prd036_gate.py"):
         assert os.access(SCRIPTS / name, os.X_OK), name
