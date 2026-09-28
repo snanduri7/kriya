@@ -14,8 +14,9 @@ Reuses SEC-001's existing primitives rather than a second implementation
 same pass specifically so this module could reuse them) for the actual
 spawn/kill mechanics - the same ProcessControlPort process-tree ownership
 (kriya/platform/process_control.py; a POSIX session and `killpg(SIGKILL)`
-on macOS/Linux), the same `ContainmentSetupError` fail-closed conversion on
-a broken preexec_fn, and the same process-tree kill every other Kriya-owned
+on macOS/Linux; the port's `attach` runs right after creation, and a failed
+attach kills and reaps the server before it is returned), the same
+`ContainmentSetupError` fail-closed conversion on a broken preexec_fn, and the same process-tree kill every other Kriya-owned
 subprocess lifecycle already uses.
 
 Deliberately NOT built on `ProcessController.run()`/`run_async()`/

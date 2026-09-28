@@ -139,6 +139,42 @@ def _tree_spawn_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     return {**kwargs, **options}
 
 
+# Bound on reaping a process whose ProcessControlPort.attach failed; it has
+# already been sent SIGKILL (or the provider's equivalent).
+ATTACH_FAILURE_REAP_SECONDS = 5.0
+
+
+def _attach_or_kill(process: Any) -> Optional[Tuple[Exception, str]]:
+    """Bind a just-created process to its tree (ProcessControlPort.attach).
+    Returns None on success. On failure the process is killed through the
+    provider's tree termination and ``(attach error, detail)`` is returned;
+    the caller reaps the process and raises, so it never reaches a caller.
+
+    Any Exception is caught, not only PlatformCapabilityUnavailable: a real
+    provider failure (an OSError from a Job Object call) must not leak a
+    live, unowned process. It is never swallowed: the caller re-raises it
+    as the cause of a ContainmentSetupError."""
+    try:
+        platform_services().process_control.attach(process)
+        return None
+    except Exception as error:
+        try:
+            terminate_process_tree(process)
+            return error, ""
+        except Exception as kill_error:
+            # The provider cannot kill what it failed to own; the direct
+            # child it just created is all there is to kill.
+            process.kill()
+            return error, f"; tree termination also failed ({kill_error!r}), the direct child was killed"
+
+
+def _attach_refused(error: Exception, detail: str) -> ContainmentSetupError:
+    refusal = ContainmentSetupError(f"Process-tree attach failed after spawn ({error!r}); "
+                                    f"the process was killed{detail}")
+    refusal.__cause__ = error
+    return refusal
+
+
 class ManagedProcess:
     """A started-but-not-yet-awaited child process (Managed Runtime
     Verification, 2026-09-03). Unlike `ProcessController.run()`'s single
@@ -310,27 +346,50 @@ def _spawn_popen(*args: Any, **kwargs: Any) -> subprocess.Popen:
     the original exception's type or message across the errpipe, only
     this generic shape. Converted here into a real, typed
     `ContainmentSetupError` so callers can distinguish "the command itself
-    failed" from "we refused to even start it uncontained"."""
+    failed" from "we refused to even start it uncontained".
+
+    The ProcessControlPort's spawn options are merged and its `attach` runs
+    right after creation; a failed attach kills and reaps the process and
+    raises `ContainmentSetupError`, so no unowned process reaches a caller."""
     kwargs = _tree_spawn_kwargs(kwargs)
     try:
-        return subprocess.Popen(*args, **kwargs)
+        process = subprocess.Popen(*args, **kwargs)
     except subprocess.SubprocessError as e:
         raise ContainmentSetupError(
             f"Resource-limit/containment setup failed before the command could start: {e}"
         ) from e
+    refused = _attach_or_kill(process)
+    if refused is not None:
+        error, detail = refused
+        try:
+            process.communicate(timeout=ATTACH_FAILURE_REAP_SECONDS)
+        except subprocess.TimeoutExpired:
+            detail += f"; not reaped within {ATTACH_FAILURE_REAP_SECONDS}s"
+        raise _attach_refused(error, detail)
+    return process
 
 
 async def spawn_subprocess_exec_fail_closed(*args: Any, **kwargs: Any) -> "asyncio.subprocess.Process":
     """Async sibling of `_spawn_popen` - identical fail-closed conversion,
     confirmed empirically to raise the same `subprocess.SubprocessError`
-    shape for a failing `preexec_fn` under `asyncio.create_subprocess_exec`."""
+    shape for a failing `preexec_fn` under `asyncio.create_subprocess_exec`,
+    and the same attach-or-kill-and-reap step after creation."""
     kwargs = _tree_spawn_kwargs(kwargs)
     try:
-        return await asyncio.create_subprocess_exec(*args, **kwargs)
+        process = await asyncio.create_subprocess_exec(*args, **kwargs)
     except subprocess.SubprocessError as e:
         raise ContainmentSetupError(
             f"Resource-limit/containment setup failed before the command could start: {e}"
         ) from e
+    refused = _attach_or_kill(process)
+    if refused is not None:
+        error, detail = refused
+        try:
+            await asyncio.wait_for(process.communicate(), timeout=ATTACH_FAILURE_REAP_SECONDS)
+        except asyncio.TimeoutError:
+            detail += f"; not reaped within {ATTACH_FAILURE_REAP_SECONDS}s"
+        raise _attach_refused(error, detail)
+    return process
 
 
 class ProcessController:

@@ -27,6 +27,11 @@ class PosixProcessGroup:
     def spawn_options(self) -> Dict[str, Any]:
         return {"start_new_session": True}
 
+    def attach(self, process: Any) -> None:
+        # The session and group were created by spawn_options at exec time:
+        # there is nothing to bind afterwards.
+        pass
+
     def terminate_tree(self, process: Any) -> None:
         try:
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)

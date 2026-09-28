@@ -3,7 +3,9 @@
 Every Kriya-owned lifecycle (ProcessController.run/run_async/start_managed
 and the MCP lifecycle) spawns through the port and kills the whole tree
 through it: a real grandchild dies on timeout and on teardown, not only the
-direct child. A host without PROCESS_TREE_TERMINATION starts nothing (typed
+direct child. Every spawn is attached to its tree right after creation; a
+failed attach kills and reaps the new process and is a typed, non-retried
+ContainmentSetupError. A host without PROCESS_TREE_TERMINATION starts nothing (typed
 ContainmentSetupError) and never falls back to killing only the direct child.
 """
 import asyncio
@@ -83,6 +85,7 @@ class _Recording:
     def __init__(self, delegate):
         self._delegate = delegate
         self.spawns = 0
+        self.attached = []
         self.terminated = []
 
     def capability(self):
@@ -91,6 +94,10 @@ class _Recording:
     def spawn_options(self):
         self.spawns += 1
         return self._delegate.spawn_options()
+
+    def attach(self, process):
+        self.attached.append(process.pid)
+        self._delegate.attach(process)
 
     def terminate_tree(self, process):
         self.terminated.append(process.pid)
@@ -101,6 +108,36 @@ class _Recording:
 def recording():
     real = services.compose(services.POSIX)
     provider = _Recording(real.process_control)
+    with services.override(dataclasses.replace(real, process_control=provider)):
+        yield provider
+
+
+class _AttachFails(_Recording):
+    """The real POSIX provider, except that attach raises the shape a real
+    provider failure has (an OSError, not a platform exception)."""
+
+    def __init__(self, delegate):
+        super().__init__(delegate)
+        self.processes = []
+
+    def attach(self, process):
+        self.attached.append(process.pid)
+        self.processes.append(process)
+        raise OSError("test: attach refused")
+
+
+class _AttachAndTreeKillFail(_AttachFails):
+    """A provider that owns nothing: it can neither attach nor kill a tree."""
+
+    def terminate_tree(self, process):
+        self.terminated.append(process.pid)
+        raise OSError("test: no tree to terminate")
+
+
+@pytest.fixture
+def attach_fails():
+    real = services.compose(services.POSIX)
+    provider = _AttachFails(real.process_control)
     with services.override(dataclasses.replace(real, process_control=provider)):
         yield provider
 
@@ -124,23 +161,30 @@ def test_the_posix_provider_reports_enforced_tree_termination_and_windows_report
     assert windows.capability is PlatformCapability.PROCESS_TREE_TERMINATION
 
 
+def test_posix_attach_is_a_no_op_that_touches_nothing():
+    child = MagicMock(spec=subprocess.Popen)
+    assert services.compose(services.POSIX).process_control.attach(child) is None
+    assert child.mock_calls == []
+
+
 def test_a_spawned_child_leads_its_own_session_and_process_group(tmp_path, recording):
     probe = "import os; print(os.getsid(0) == os.getpid(), os.getpgid(0) == os.getpid())"
     result = ProcessController().run([sys.executable, "-c", probe], cwd=str(tmp_path), timeout=30)
     assert (result.returncode, result.stdout.split()) == (0, ["True", "True"])
-    assert recording.spawns == 1
+    assert recording.spawns == 1 and len(recording.attached) == 1
 
 
 def test_normal_completion_is_unchanged_and_kills_nothing(tmp_path, recording):
     result = ProcessController().run([sys.executable, "-c", "print('ok')"], cwd=str(tmp_path), timeout=30)
     assert (result.returncode, result.stdout, result.timeout) == (0, "ok\n", False)
-    assert recording.terminated == []
+    assert len(recording.attached) == 1 and recording.terminated == []
 
 
 def test_run_timeout_kills_the_grandchild(tmp_path, recording):
     pid_file = tmp_path / "grandchild.pid"
     result = ProcessController(reap_timeout=5).run(_tree_command(pid_file), cwd=str(tmp_path), timeout=2)
     assert result.timeout is True and len(recording.terminated) == 1
+    assert recording.attached == recording.terminated
     assert _wait_gone(_grandchild(pid_file))
 
 
@@ -149,6 +193,7 @@ def test_run_async_timeout_kills_the_grandchild(tmp_path, recording):
     result = asyncio.run(ProcessController(reap_timeout=5).run_async(
         _tree_command(pid_file), cwd=str(tmp_path), timeout=2))
     assert result.timeout is True and len(recording.terminated) == 1
+    assert recording.attached == recording.terminated
     assert _wait_gone(_grandchild(pid_file))
 
 
@@ -157,7 +202,7 @@ def test_managed_process_teardown_kills_the_grandchild(tmp_path, recording):
     managed = ProcessController().start_managed(_tree_command(pid_file), cwd=str(tmp_path))
     grandchild = _grandchild(pid_file)
     assert managed.terminate(reap_timeout=5) is True
-    assert recording.terminated == [managed.pid]
+    assert recording.attached == recording.terminated == [managed.pid]
     assert _wait_gone(grandchild)
 
 
@@ -173,8 +218,74 @@ def test_mcp_spawn_and_forced_teardown_use_the_port_and_kill_the_grandchild(tmp_
         return process.pid, grandchild
 
     pid, grandchild = asyncio.run(scenario())
-    assert recording.spawns == 1 and recording.terminated == [pid]
+    assert recording.spawns == 1 and recording.attached == recording.terminated == [pid]
     assert _wait_gone(grandchild)
+
+
+def _reaped(pid: int) -> bool:
+    """Fully gone: not running and not a zombie awaiting a reap."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    return False
+
+
+_SLEEP = [sys.executable, "-c", "import time; time.sleep(60)"]
+
+
+def _refusals(tmp_path):
+    """Every lifecycle spawn path, each expected to raise the attach refusal."""
+    yield lambda: ProcessController().run(_SLEEP, cwd=str(tmp_path), timeout=30)
+    yield lambda: asyncio.run(ProcessController().run_async(_SLEEP, cwd=str(tmp_path), timeout=30))
+    yield lambda: ProcessController().start_managed(_SLEEP, cwd=str(tmp_path))
+    yield lambda: asyncio.run(spawn_mcp_process(_SLEEP[0], _SLEEP[1:], None, cpu_seconds=None, memory_mb=None,
+                                                max_stdout_line_bytes=65536))
+
+
+def test_a_failed_attach_kills_and_reaps_the_new_process_on_every_spawn_path(tmp_path, attach_fails):
+    for spawn in _refusals(tmp_path):
+        with pytest.raises(ContainmentSetupError, match="attach failed after spawn") as raised:
+            spawn()
+        assert isinstance(raised.value.__cause__, OSError)
+        pid = attach_fails.attached[-1]
+        assert attach_fails.terminated[-1] == pid
+        assert _reaped(pid)
+    assert len(attach_fails.attached) == len(set(attach_fails.attached)) == 4
+
+
+def test_a_failed_async_attach_is_reaped_before_the_refusal_reaches_the_caller(attach_fails):
+    """asyncio's child watcher would reap the killed child eventually; the
+    refusal must not reach the caller before it is reaped."""
+
+    async def scenario():
+        with pytest.raises(ContainmentSetupError):
+            await process_module.spawn_subprocess_exec_fail_closed(*_SLEEP)
+        return attach_fails.processes[-1].returncode
+
+    assert asyncio.run(scenario()) is not None
+
+
+def test_when_the_provider_cannot_kill_what_it_failed_to_attach_the_direct_child_is_killed(tmp_path):
+    real = services.compose(services.POSIX)
+    provider = _AttachAndTreeKillFail(real.process_control)
+    with services.override(dataclasses.replace(real, process_control=provider)):
+        with pytest.raises(ContainmentSetupError, match="the direct child was killed") as raised:
+            ProcessController().run(_SLEEP, cwd=str(tmp_path), timeout=30)
+    assert isinstance(raised.value.__cause__, OSError)
+    assert provider.terminated == provider.attached and _reaped(provider.attached[0])
+
+
+def test_a_failed_attach_is_a_typed_containment_stop_that_is_not_retried(tmp_path, attach_fails):
+    from kriya.workflow.recovery_coordinator import classify_attempt_exception
+
+    with pytest.raises(ContainmentSetupError) as raised:
+        ProcessController().run(_SLEEP, cwd=str(tmp_path), timeout=30)
+    assert len(attach_fails.attached) == 1
+    classified = classify_attempt_exception(raised.value, None, last_attempt_mode=None,
+                                            ground_scope_denial=lambda _exc, _ctx: False)
+    assert classified.containment_setup_failure is True
+    assert classified.failure.type == "containment_setup_failed"
 
 
 def test_without_tree_termination_run_starts_nothing(tmp_path, unavailable):
