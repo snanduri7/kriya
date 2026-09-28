@@ -195,7 +195,9 @@ Plugins are a separate axis from platform adapters. Extension points (StaticAnal
 |---|---|---|
 | Linux | SUPPORTED / PRODUCTION_CERTIFIED | Hosted production certification is green (run 36384847918). It is re-certified after each platform slice. |
 | macOS | SUPPORTED / DEVELOPMENT_AND_TARGET_CERTIFIED | The M1 Max target certification is maintained. PLAT-001/002 must be fixed to keep this claim honest. |
-| Windows | ARCHITECTURALLY_SUPPORTED / NOT_YET_CERTIFIED, reached at the end of Phase P1/P2 | Core imports; there is no unconditional POSIX import; `PlatformServices` resolves Windows providers or reports each missing capability as UNAVAILABLE; adapters can be added without changing core. **Kriya makes no runtime-support claim for Windows until P6 Windows certification exists.** |
+| Windows, before P5 | PORTABILITY_ARCHITECTURE_DEFINED / RUNTIME_NOT_SUPPORTED | Core imports (proven by a real `windows-latest` job, blocking once green); there is no unconditional POSIX import; `PlatformServices` reports each missing Windows capability as UNAVAILABLE; adapters can be added without changing core. |
+| Windows, after P5 | ARCHITECTURALLY_SUPPORTED / NOT_YET_CERTIFIED | The Windows providers exist and pass their contract suites. |
+| Windows, after P6 | runtime support may be claimed | Only once Windows certification exists. |
 
 ## 14. Backward compatibility
 

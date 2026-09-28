@@ -26,7 +26,7 @@ What remains is that their mechanism (`setrlimit`, `os.getuid`) is called direct
 | **P5** | Windows providers. Lock (`LockFileEx`). Job Object process/resource control. Account identity. `CommandShellPort` (PLAT-010/011/033), which is a **security prerequisite** so policy recognizers see `cmd`/PowerShell. Windows path policy: separator-normalized policy paths (PLAT-019/020) and the portable relpath validator rejecting reserved names and alternate data streams (PLAT-021). Mode, replace and fsync capabilities (PLAT-022/023/024). The git invocation profile (PLAT-025/026). Symlink capability (PLAT-027). A Python certification driver (PLAT-038). | Windows only. | Windows contract suites are green. |
 | **P6** | `windows-latest` CI for install/import, config, path normalization, locking, process execution, workspace commit/recovery and the non-container deterministic core. | — | Windows certified at a declared level. Only then is a Windows runtime claim made. |
 
-P5 and P6 are **after** PRD-036. PRD-036 certifies macOS and Linux, and records Windows as ARCHITECTURALLY_SUPPORTED / NOT_YET_CERTIFIED.
+P5 and P6 are **after** PRD-036. PRD-036 certifies macOS and Linux, and records Windows as PORTABILITY_ARCHITECTURE_DEFINED / RUNTIME_NOT_SUPPORTED.
 
 ## 3. First implementation slice: exact files
 
@@ -87,17 +87,36 @@ The tracker (`TASK_STATUS_TRACKER.csv`) gets one task, `ARCH-PLATFORM-001`, poin
 
 ## 5. The ARCH-PLATFORM-001 gate (definition of done before PRD-036)
 
+**Approved sequence (user, 2026-09-28; supersedes the phase order above where they differ):**
+1. Slice 1A (PLAT-001/002).
+2. Reproduce and classify PLAT-039.
+3. Slice 1B (composition root, WorkspaceLockPort, architecture/import guard, real Windows import CI).
+4. PLAT-015 moves out of `kriya/workflow`.
+5. The JVM resource mechanism moves behind ResourceLimitPort.
+6. Host/container identity moves behind HostIdentityPort.
+7. macOS regression and target certification.
+8. Linux hosted production certification.
+9. ARCH-PLATFORM-001 closes.
+10. PRD-036 starts.
+
+Amendments:
+- `kriya/workflow`, `kriya/policy`, `kriya/control`, `kriya/config` and the requirements/evidence/metrics/static-analysis policy layers never receive a permanent guard allowlist entry. Temporary entries are allowed only in mechanism layers while their named slice is active.
+- PLAT-003 closes only after the real `windows-latest` import/guard job has passed. That job then becomes blocking.
+- **Release identity (PLAT-RELEASE-IDENTITY-001).** PRD-036 certification records and validates the Kriya git revision, the PlatformServices provider identities, the capabilities used with their ENFORCED/ADVISORY status, the containment backend identity and the relevant environment identity. A material change to any of these makes release certification stale (re-run required). The model qualification fingerprint is not changed for this.
+- Active P0/P1 work is tracked in `TASK_STATUS_TRACKER.csv`. Its registry row is added, CLOSED, in the commit that closes it. ARCH-PLATFORM-001 enters the registry, CLOSED, when this gate completes.
+
 1. The whole-repository audit is complete (this package) and approved.
 2. The platform architecture is approved.
-3. PLAT-001/002 (P0/P1) are fixed. SEC-CONTROL-PATH-WRITE-001 is reproduced and either fixed or reclassified with evidence.
-4. PLAT-003 is fixed. Core imports with POSIX modules blocked, and the Windows CI job imports core.
-5. The architecture guard is live. Its allowlist holds only `kriya/platform/**` (P2 complete), **or** the user accepts named residual allowlist entries as P2 debt with a target scope.
+3. PLAT-001/002 (P0/P1) are fixed. PLAT-039 is reproduced and either fixed or reclassified with evidence. No provisional P1 remains.
+4. PLAT-003 is fixed. Core imports with POSIX modules blocked, and the real Windows CI job imports core, passes, and is blocking.
+5. The architecture guard is live. No policy or orchestration layer has an allowlist entry (PLAT-015 has moved). Any remaining entries are mechanism modules of registered P2 items.
 6. The Linux fixes sit behind `ResourceLimitPort` / `HostIdentityPort` with no behaviour change.
 7. The macOS deterministic suite is green (the user's pytest run) and macOS target certification still holds.
 8. Linux hosted production certification is green at the gate head.
-9. The docs state the support levels (Linux PRODUCTION_CERTIFIED, macOS DEVELOPMENT_AND_TARGET_CERTIFIED, Windows ARCHITECTURALLY_SUPPORTED / NOT_YET_CERTIFIED).
+9. The docs state the support levels (Linux PRODUCTION_CERTIFIED, macOS DEVELOPMENT_AND_TARGET_CERTIFIED, Windows PORTABILITY_ARCHITECTURE_DEFINED / RUNTIME_NOT_SUPPORTED).
+10. Platform mechanism identity is bound to PRD-036 release evidence (PLAT-RELEASE-IDENTITY-001).
 
-A decision for you inside item 5: whether all of P2 must finish before PRD-036, or only 1A, 1B and the two Linux-fix ports (PLAT-RESOURCE-LIMITS-001 and PLAT-HOST-IDENTITY-001), with the rest carried as registered P2. My recommendation is the latter. Every remaining P2 item has no effect on macOS or Linux correctness today, and each one is independent.
+The other proven P2/P3 items stay registered debt with explicit target scopes (decided 2026-09-28).
 
 ## 6. Out of scope, stated so it is not implied
 
