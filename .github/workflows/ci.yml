@@ -35,11 +35,10 @@ jobs:
     # and the platform architecture guard holds there. Windows RUNTIME is not
     # supported (PORTABILITY_ARCHITECTURE_DEFINED / RUNTIME_NOT_SUPPORTED);
     # this job proves only that no core module needs a POSIX-only import and
-    # that missing Windows providers report typed UNAVAILABLE. Non-blocking
-    # until its first green run, then blocking (PLAT-003 closes only then).
+    # that missing Windows providers report typed UNAVAILABLE. Blocking since
+    # its first green run (run 36406170586 at 960b5f9), which closed PLAT-003.
     name: Platform import and architecture guard (Windows)
     runs-on: windows-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
