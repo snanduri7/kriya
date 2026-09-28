@@ -136,7 +136,10 @@ The overall result is VERIFIED only if every item passes.
       - Its only ignored files are listed build caches.
       - It holds no `.kriya` state other than that nested worktree.
     - **Bounded reuse.** The canary runs twice on the same candidate and config. Run 2 starts from run 1's state with only the tracked files restored. The retained worktree set must be identical after both runs: same set, same size, no new nesting level.
-    - **Follow-up.** The nested design is registered as WORKTREE-NESTED-REUSE-001 (P2). Production cleanup is unchanged.
+    - **Superseded (user decision, same day).** The nested topology itself was not accepted as production architecture, and under the Fix-Now rule it was fixed, not backlogged (WORKTREE-CANONICAL-ROOT-001).
+      - Candidate worktrees are now siblings under `<ws>/.kriya/worktrees/`, rooted at the run's canonical workspace.
+      - The canary rejects any nested worktree. The permitted-nesting allowance above is gone.
+      - The fix is a production change, so it is a new release candidate.
 - **D5: execution.** The agent runs the long jobs with no aggressive polling. The order:
   1. context certification (done, CERTIFIED; the doctor already reports `PRODUCTION_READY=true` on D1);
   2. freeze;
