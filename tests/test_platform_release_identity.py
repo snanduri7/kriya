@@ -37,7 +37,8 @@ def test_an_unchanged_host_is_current_and_the_record_carries_every_material_fiel
     recorded = _record(source)
     assert set(recorded) == {"version", "kriya", "platform", "containment", "environment", "digest"}
     assert recorded["kriya"]["dirty"] is False and len(recorded["kriya"]["revision"]) == 40
-    assert set(recorded["platform"]["providers"]) == {"workspace_lock", "resource_limits", "host_identity"}
+    assert set(recorded["platform"]["providers"]) == {"workspace_lock", "resource_limits", "host_identity",
+                                                    "process_control"}
     assert ri.compare_release_identity(recorded, ri.release_identity("none", source_root=str(source))) == {
         "status": ri.CURRENT, "changes": []}
 

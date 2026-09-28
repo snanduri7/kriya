@@ -12,10 +12,11 @@ Reuses SEC-001's existing primitives rather than a second implementation
 `spawn_subprocess_exec_fail_closed`/`terminate_process_tree`
 (kriya/tools/process.py, promoted from ProcessController-only helpers this
 same pass specifically so this module could reuse them) for the actual
-spawn/kill mechanics - the same `start_new_session=True` process-group
-isolation, the same `ContainmentSetupError` fail-closed conversion on a
-broken preexec_fn, and the same POSIX `killpg(SIGKILL)` process-tree kill
-every other Kriya-owned subprocess lifecycle already uses.
+spawn/kill mechanics - the same ProcessControlPort process-tree ownership
+(kriya/platform/process_control.py; a POSIX session and `killpg(SIGKILL)`
+on macOS/Linux), the same `ContainmentSetupError` fail-closed conversion on
+a broken preexec_fn, and the same process-tree kill every other Kriya-owned
+subprocess lifecycle already uses.
 
 Deliberately NOT built on `ProcessController.run()`/`run_async()`/
 `start_managed()` directly - none of their lifecycles fit an MCP server:
@@ -31,7 +32,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Dict, List, Optional
 
 from kriya.tools.process import spawn_subprocess_exec_fail_closed, terminate_process_tree
@@ -76,10 +76,11 @@ async def spawn_mcp_process(
     cpu_seconds: Optional[int], memory_mb: Optional[int], max_stdout_line_bytes: int,
     command_prefix: Optional[List[str]] = None,
 ) -> "asyncio.subprocess.Process":
-    """Fail-closed MCP subprocess spawn: process-group isolation
-    (`start_new_session=True`, POSIX - the property every descendant the
-    server spawns inherits the same group, which `terminate_mcp_process()`
-    below relies on to guarantee no survivors) + a hard per-line stdout
+    """Fail-closed MCP subprocess spawn: process-tree ownership through
+    the ProcessControlPort (`spawn_subprocess_exec_fail_closed`; on POSIX a
+    new session, whose process group every descendant the server spawns
+    inherits, which `terminate_mcp_process()` below relies on to guarantee
+    no survivors) + a hard per-line stdout
     size ceiling (`limit=`, asyncio's own StreamReader bound - raises
     `ValueError` deterministically rather than allocating unboundedly,
     confirmed empirically to recover cleanly for the NEXT read rather than
@@ -129,7 +130,6 @@ async def spawn_mcp_process(
         stderr=asyncio.subprocess.PIPE,
         env=env,
         preexec_fn=preexec_fn,
-        start_new_session=(os.name == "posix"),
         limit=max_stdout_line_bytes,
     )
 
@@ -147,11 +147,11 @@ async def terminate_mcp_process(process: "asyncio.subprocess.Process", *, grace_
     unchanged from pre-SEC-004 behavior) - a cooperative server is expected
     to propagate shutdown to its own children if it has any; this is not
     where descendant cleanup is guaranteed. The FORCED phase
-    (`terminate_process_tree`, SEC-001's shared POSIX `killpg(SIGKILL)`
-    primitive) is what guarantees no survivors regardless of the server's
-    own cooperation - it targets the whole process GROUP, which every
-    descendant the server spawns inherited at spawn time
-    (`start_new_session=True` in `spawn_mcp_process()` above).
+    (`terminate_process_tree`, SEC-001's shared process-tree kill through
+    the ProcessControlPort) is what guarantees no survivors regardless of
+    the server's own cooperation - it targets the whole tree, which every
+    descendant the server spawns joined at spawn time
+    (`spawn_mcp_process()` above).
 
     A reap that still times out AFTER the forced kill (confirmed possible
     empirically: an asyncio subprocess `wait()` can block on undrained

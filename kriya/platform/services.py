@@ -19,6 +19,7 @@ from typing import Dict, Iterator, List, Optional
 from kriya.platform.capabilities import CapabilityReport
 from kriya.platform.host_identity import HostIdentityPort, UnavailableHostIdentity
 from kriya.platform.locking import UnavailableWorkspaceLock, WorkspaceLockPort
+from kriya.platform.process_control import ProcessControlPort, UnavailableProcessControl
 from kriya.platform.resource_limits import ResourceLimitPort, UnavailableResourceLimits
 
 POSIX = "posix"
@@ -37,17 +38,19 @@ class PlatformServices:
     workspace_lock: WorkspaceLockPort
     resource_limits: ResourceLimitPort
     host_identity: HostIdentityPort
+    process_control: ProcessControlPort
 
     def capabilities(self) -> List[CapabilityReport]:
         return [self.workspace_lock.capability(), *self.resource_limits.capabilities(),
-                self.host_identity.capability()]
+                self.host_identity.capability(), self.process_control.capability()]
 
     def identity(self) -> Dict[str, object]:
         """Provider identity: mechanism evidence for certification records."""
         return {"family": self.family,
                 "providers": {"workspace_lock": self.workspace_lock.name,
                               "resource_limits": self.resource_limits.name,
-                              "host_identity": self.host_identity.name},
+                              "host_identity": self.host_identity.name,
+                              "process_control": self.process_control.name},
                 "capabilities": [report.to_dict() for report in self.capabilities()]}
 
 
@@ -55,14 +58,16 @@ def compose(family: str) -> PlatformServices:
     if family == POSIX:
         from kriya.platform.posix_host_identity import PosixUidGid
         from kriya.platform.posix_locking import PosixFlockLock
+        from kriya.platform.posix_process_control import PosixProcessGroup
         from kriya.platform.posix_resource_limits import PosixRlimit
 
         return PlatformServices(family=family, workspace_lock=PosixFlockLock(), resource_limits=PosixRlimit(),
-                                host_identity=PosixUidGid())
+                                host_identity=PosixUidGid(), process_control=PosixProcessGroup())
     reason = f"no {family} provider yet (Windows runtime is not supported; PLAT-WINDOWS-PROVIDERS-001)"
     return PlatformServices(family=family, workspace_lock=UnavailableWorkspaceLock(reason),
                             resource_limits=UnavailableResourceLimits(reason),
-                            host_identity=UnavailableHostIdentity(reason))
+                            host_identity=UnavailableHostIdentity(reason),
+                            process_control=UnavailableProcessControl(reason))
 
 
 _lock = threading.Lock()

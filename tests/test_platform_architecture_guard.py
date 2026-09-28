@@ -6,7 +6,9 @@ kriya/ and plugins/:
   pty, msvcrt, winreg, _winapi);
 - no OS branch or POSIX-only primitive (sys.platform, os.name,
   platform.system/mac_ver/win32_ver/machine, os.killpg/getpgid/setsid/
-  setpgid/fork, os.getuid/getgid/geteuid/getegid).
+  setpgid/fork, os.getuid/getgid/geteuid/getegid, POSIX-only signals);
+- no ``start_new_session=`` argument: process-tree ownership comes from
+  ProcessControlPort.spawn_options().
 
 TEMPORARY entries are allowed only for mechanism modules whose migration is
 a named, open registry item; the list may only shrink (a stale entry
@@ -29,16 +31,16 @@ FORBIDDEN_ATTRIBUTES = {
     "sys": {"platform"},
     "os": {"name", "killpg", "getpgid", "setsid", "setpgid", "fork", "getuid", "getgid", "geteuid", "getegid"},
     "platform": {"system", "mac_ver", "win32_ver", "machine"},
+    "signal": {"SIGKILL", "SIGHUP", "SIGSTOP", "SIGCONT", "SIGCHLD", "SIGALRM", "SIGUSR1", "SIGUSR2"},
 }
+FORBIDDEN_KEYWORDS = {"start_new_session"}
 # Layers that own policy or orchestration: never allowlisted, not even temporarily.
 NEVER_ALLOWLISTED = ("kriya/workflow/", "kriya/policy/", "kriya/control/", "kriya/config/", "kriya/metrics/",
                      "kriya/static_analysis/service.py", "kriya/static_analysis/policy", "kriya/agents/")
 
 # path -> (open registry item migrating it, why it is still here)
-TEMPORARY_ALLOWLIST: Dict[str, Tuple[str, str]] = {
-    "kriya/tools/process.py": ("PLAT-PROCESS-CONTROL-001", "process-group spawn/kill; ProcessControlPort"),
-    "kriya/mcp/lifecycle.py": ("PLAT-PROCESS-CONTROL-001", "MCP process-group spawn; ProcessControlPort"),
-}
+# Empty since PLAT-PROCESS-CONTROL-001: mechanism lives in kriya/platform/ only.
+TEMPORARY_ALLOWLIST: Dict[str, Tuple[str, str]] = {}
 
 BLOCKED_FOR_IMPORT = ("fcntl", "resource", "pwd", "grp", "termios")
 CORE_MODULES = ("kriya.cli", "kriya.workflow.workflow", "kriya.workflow.workflow_controller", "kriya.control.recovery",
@@ -71,6 +73,8 @@ def _offences(relpath: str) -> Set[str]:
         elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
             if node.attr in FORBIDDEN_ATTRIBUTES.get(node.value.id, ()):
                 found.add(f"{node.value.id}.{node.attr}")
+        elif isinstance(node, ast.Call):
+            found |= {f"{k.arg}=" for k in node.keywords if k.arg in FORBIDDEN_KEYWORDS}
     return found
 
 
@@ -96,16 +100,22 @@ def test_the_allowlist_only_shrinks_and_names_open_mechanism_migrations():
         assert _offences(path), f"{path} no longer needs its allowlist entry; remove it"
 
 
+def test_no_temporary_exception_remains():
+    # ARCH-PLATFORM-001 closes with platform mechanism in kriya/platform/ only.
+    assert TEMPORARY_ALLOWLIST == {}
+
+
 def test_the_guard_detects_every_forbidden_form(tmp_path, monkeypatch):
     sample = tmp_path / "kriya" / "sample.py"
     sample.parent.mkdir()
     sample.write_text(
         "import fcntl\nimport resource as r\nfrom pwd import getpwuid\nfrom os import getuid\nimport os, sys, platform\n"
-        "a = sys.platform\nb = os.name\nc = platform.system()\nd = os.killpg\ne = os.getgid()\n")
+        "a = sys.platform\nb = os.name\nc = platform.system()\nd = os.killpg\ne = os.getgid()\n"
+        "import signal, subprocess\nf = signal.SIGKILL\ng = subprocess.Popen(['x'], start_new_session=True)\n")
     monkeypatch.setattr(sys.modules[__name__], "REPO", tmp_path)
     assert _offences("kriya/sample.py") == {
         "import fcntl", "import resource", "from pwd import", "from os import getuid", "sys.platform", "os.name",
-        "platform.system", "os.killpg", "os.getgid"}
+        "platform.system", "os.killpg", "os.getgid", "signal.SIGKILL", "start_new_session="}
 
 
 def test_kriya_core_imports_without_posix_only_modules():

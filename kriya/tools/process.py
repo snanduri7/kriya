@@ -19,13 +19,13 @@ sandbox logic"), this is deliberately ONE set of security semantics shared
 by sync and async callers, not two parallel implementations that happen to
 look similar."""
 import asyncio
-import os
-import signal
 import subprocess
 import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from kriya.platform.capabilities import PlatformCapabilityUnavailable
+from kriya.platform.services import platform_services
 from kriya.tools.containment import (
     ContainmentBackend,
     ContainmentProfile,
@@ -114,26 +114,29 @@ def _bounded_tail(value: str, limit: int) -> tuple[str, bool]:
 
 
 def terminate_process_tree(process: Any) -> None:
-    """SIGKILLs the process's ENTIRE process group (POSIX) - not just the
-    direct PID - relying on every lifecycle in this module (and, since
-    SEC-004, kriya/mcp/lifecycle.py) spawning with `start_new_session=True`
-    so the child becomes its own session/process-group leader and every
-    descendant it spawns inherits that same group. This is the one
+    """Kills the process's ENTIRE tree - not just the direct PID - through
+    the platform's ProcessControlPort (kriya/platform/process_control.py;
+    on POSIX, SIGKILL to the process group every lifecycle here and in
+    kriya/mcp/lifecycle.py starts the child in). This is the one
     process-tree-ownership primitive shared by every caller (Invariant 14:
     prefer one execution-control abstraction over scattered sandbox
-    logic) - promoted from a `ProcessController`-only staticmethod
-    (2026-09-13) specifically so SEC-004's MCP lifecycle controller can
-    reuse it instead of re-implementing process-group termination.
-    Idempotent - `ProcessLookupError` (already exited) is swallowed, not
-    raised, since "the process is already gone" is the desired end state,
-    not a failure."""
+    logic). Idempotent: an already-exited process is not an error."""
+    platform_services().process_control.terminate_tree(process)
+
+
+def _tree_spawn_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """``kwargs`` plus the ProcessControlPort's spawn options, so every
+    child starts as the root of a tree ``terminate_process_tree`` can kill.
+    A host without PROCESS_TREE_TERMINATION refuses here, before anything
+    is spawned (never a spawn whose descendants could outlive a timeout)."""
     try:
-        if os.name == "posix":
-            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        else:
-            process.kill()
-    except ProcessLookupError:
-        pass
+        options = platform_services().process_control.spawn_options()
+    except PlatformCapabilityUnavailable as error:
+        raise ContainmentSetupError(f"Process-tree ownership is unavailable, command not started: {error}") from error
+    overlap = set(options) & set(kwargs)
+    if overlap:
+        raise ValueError(f"process-tree spawn options are owned by the platform provider: {sorted(overlap)}")
+    return {**kwargs, **options}
 
 
 class ManagedProcess:
@@ -308,6 +311,7 @@ def _spawn_popen(*args: Any, **kwargs: Any) -> subprocess.Popen:
     this generic shape. Converted here into a real, typed
     `ContainmentSetupError` so callers can distinguish "the command itself
     failed" from "we refused to even start it uncontained"."""
+    kwargs = _tree_spawn_kwargs(kwargs)
     try:
         return subprocess.Popen(*args, **kwargs)
     except subprocess.SubprocessError as e:
@@ -320,6 +324,7 @@ async def spawn_subprocess_exec_fail_closed(*args: Any, **kwargs: Any) -> "async
     """Async sibling of `_spawn_popen` - identical fail-closed conversion,
     confirmed empirically to raise the same `subprocess.SubprocessError`
     shape for a failing `preexec_fn` under `asyncio.create_subprocess_exec`."""
+    kwargs = _tree_spawn_kwargs(kwargs)
     try:
         return await asyncio.create_subprocess_exec(*args, **kwargs)
     except subprocess.SubprocessError as e:
@@ -365,7 +370,6 @@ class ProcessController:
             process = _spawn_popen(
                 resolved.command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                 stdin=subprocess.PIPE, text=True, env=resolved.env, preexec_fn=resolved.preexec_fn,
-                start_new_session=(os.name == "posix"),
             )
             timed_out = False
             try:
@@ -437,7 +441,6 @@ class ProcessController:
             process = await spawn_subprocess_exec_fail_closed(
                 *resolved.command, cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 stdin=asyncio.subprocess.PIPE, env=resolved.env, preexec_fn=resolved.preexec_fn,
-                start_new_session=(os.name == "posix"),
             )
             timed_out = False
             stdin_bytes = (stdin_payload or "").encode("utf-8")
@@ -496,7 +499,7 @@ class ProcessController:
         to keep listening) never exits on its own, so there is nothing for
         `run()`'s `communicate(timeout=...)` to wait ON. This method starts
         it under the exact same process-group isolation `run()` already
-        uses (`start_new_session`) and returns immediately - the CALLER
+        uses (ProcessControlPort) and returns immediately - the CALLER
         (not this method) still owns tearing it down, via the returned
         ManagedProcess.terminate(), exactly as strictly as `run()` already
         tears its own command down internally. stdin is DEVNULL rather than
@@ -514,7 +517,6 @@ class ProcessController:
         process = _spawn_popen(
             resolved.command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL, text=True, env=resolved.env, preexec_fn=resolved.preexec_fn,
-            start_new_session=(os.name == "posix"),
         )
         return ManagedProcess(
             process, max_output_chars=self.max_output_chars, cleanup=resolved.cleanup,
