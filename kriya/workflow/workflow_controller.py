@@ -6394,6 +6394,9 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     requirement_set=requirement_set, autonomy=getattr(engine_config, "autonomy", None),
                     spec_compliance=getattr(self.workflow_engine, "spec_compliance", None),
                     milestone_id=control_state.current_milestone_id or run_id,
+                    commit_batch=lambda: plan_terminal_writes(
+                        plan, plan_workspace_path, workspace_path, original_plan_revisions,
+                    ),
                     static_analysis_candidate=StaticAnalysisCandidate(
                         materialize=lambda: plan_terminal_writes(
                             plan, plan_workspace_path, workspace_path, original_plan_revisions,

@@ -50,6 +50,7 @@ from kriya.static_analysis.waivers import (
 )
 from kriya.workflow.edit_safety import StagedFileWrite, content_revision
 from kriya.workflow.terminal_commit import commit_terminal_candidate
+from kriya.workflow.verification_binding import bind_candidate
 
 REPO = Path(__file__).resolve().parent.parent
 KRIYA = REPO / "kriya"
@@ -550,7 +551,7 @@ def test_an_evidence_write_failure_is_recorded_and_never_changes_the_verdict(tmp
 
 
 def _commit(workspace, writes, guard):
-    return commit_terminal_candidate(writes, workspace_path=workspace, transaction_id="tx", static_analysis=guard)
+    return commit_terminal_candidate(writes, workspace_path=workspace, verified_candidate=bind_candidate(writes, workspace), transaction_id="tx", static_analysis=guard)
 
 
 def test_fresh_evidence_commits_and_names_itself_in_the_commit_evidence(tmp_path):
@@ -876,6 +877,7 @@ def test_enforce_gate_reports_the_real_outcome_and_blocks_the_commit(tmp_path, t
             migration_resolution=MigrationResolution(MigrationResolutionStatus.NOT_APPLICABLE),
             obligation_ledger=ObligationLedger(), requirement_set=derive_requirements("Update A.java."),
             autonomy=None, spec_compliance=None, milestone_id="m1",
+            commit_batch=lambda: plan_terminal_writes(plan, str(candidate), workspace, revisions),
             static_analysis_candidate=StaticAnalysisCandidate(
                 materialize=lambda: plan_terminal_writes(plan, str(candidate), workspace, revisions),
                 workspace_path=workspace, run_id="run", unit_id="m1"),

@@ -66,6 +66,7 @@ from kriya.workflow.terminal_commit import (
     materialize_candidate,
 )
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
+from kriya.workflow.verification_binding import bind_candidate
 from kriya.workflow.workflow import WorkflowEngine
 from kriya.workflow.workflow_controller import WorkflowController
 
@@ -336,7 +337,7 @@ def test_evidence_candidate_hash_is_the_run_record_cycle_candidate_hash(tmp_path
         writes = materialize_candidate(str(candidate), str(workspace), [
             CandidateFile("app.py", read_file_revision(str(workspace / "app.py"))),
         ])
-        outcome = commit_terminal_candidate(writes, workspace_path=str(workspace), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="link")
+        outcome = commit_terminal_candidate(writes, workspace_path=str(workspace), verified_candidate=bind_candidate(writes, str(workspace)), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="link")
         run_id = context.run_id
     assert outcome.committed
     record = load_run_record(str(workspace), run_id)
@@ -380,7 +381,7 @@ def test_run_record_intent_and_in_progress_evidence_precede_the_first_workspace_
             CandidateFile("app.py", read_file_revision(str(workspace / "app.py"))),
         ])
         with patch.object(edit_safety_module, "_stage_content", checking_stage):
-            outcome = commit_terminal_candidate(writes, workspace_path=str(workspace), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="ordered")
+            outcome = commit_terminal_candidate(writes, workspace_path=str(workspace), verified_candidate=bind_candidate(writes, str(workspace)), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="ordered")
     assert outcome.committed
     assert observed == [(CommitState.IN_PROGRESS, True, RunLifecycle.COMMIT_ELIGIBLE, None, "v0\n")]
 

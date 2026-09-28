@@ -43,6 +43,7 @@ from kriya.workflow.terminal_gate_service import (
     enforce_preserved_reference_terminal_integrity,
 )
 from kriya.workflow.triage import ChangeKind
+from kriya.workflow.verification_binding import bind_candidate
 
 REPO = Path(__file__).resolve().parent.parent
 # PRD-031A inserted static_analysis at position 4 (deterministic, before
@@ -87,7 +88,7 @@ def _request(tmp_path, *, autonomy=None, migration=None, ledger=None, goal="Upda
         candidate_root=str(candidate), workspace_path=str(workspace),
         migration_resolution=migration or MigrationResolution(MigrationResolutionStatus.NOT_APPLICABLE),
         obligation_ledger=ledger or ObligationLedger(), requirement_set=derive_requirements(goal),
-        autonomy=autonomy, spec_compliance=None, milestone_id="m1",
+        autonomy=autonomy, spec_compliance=None, milestone_id="m1", commit_batch=list,
         static_analysis_candidate=StaticAnalysisCandidate(
             materialize=list, workspace_path=str(workspace), run_id="run", unit_id="m1",
         ),
@@ -287,9 +288,16 @@ def _commit_request(tmp_path, *, candidate=None, action=FileAction.MODIFY, run_i
 ELIGIBLE = TerminalGateReport(ran=True)
 
 
+def _verified(request):
+    """An eligible report bound to the batch the request commits, as
+    TerminalGateService.run binds it before the first gate."""
+    return TerminalGateReport(ran=True, verified_candidate=bind_candidate(
+        commit_service.terminal_writes(request), request.workspace_path))
+
+
 def test_a_verified_candidate_is_committed_with_its_evidence(tmp_path):
     request, transitions = _commit_request(tmp_path)
-    result = commit_service.commit_verified_candidate(ELIGIBLE, request)
+    result = commit_service.commit_verified_candidate(_verified(request), request)
     assert result.completed and result.failure is None
     assert (tmp_path / "workspace" / "app.py").read_text() == "verified\n"
     assert result.evidence["transaction_id"].startswith("run1-")
@@ -351,8 +359,10 @@ def test_a_missing_candidate_file_is_a_structured_unchanged_failure(tmp_path):
 
 def test_a_concurrent_workspace_edit_is_a_structured_unchanged_failure(tmp_path):
     request, _transitions = _commit_request(tmp_path)
+    report = _verified(request)
     (tmp_path / "workspace" / "app.py").write_text("edited by someone else\n")
-    result = commit_service.commit_verified_candidate(ELIGIBLE, request)
+    result = commit_service.commit_verified_candidate(report, request)
+    assert result.failure["reason_code"] == "WORKSPACE_REVISION_CONFLICT"
     assert not result.completed and result.failure["workspace_state"] == "UNCHANGED"
     assert result.failure["commit_transaction_id"].startswith("run1-")
     assert (tmp_path / "workspace" / "app.py").read_text() == "edited by someone else\n"

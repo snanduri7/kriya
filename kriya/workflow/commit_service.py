@@ -141,6 +141,7 @@ def commit_verified_candidate(report: TerminalGateReport, request: TerminalCommi
         },
         contract_transition=request.contract_transition_for(writes, transaction_id),
         static_analysis=request.static_analysis,
+        verified_candidate=report.verified_candidate,
     )
     if not outcome.committed:
         return TerminalCommitResult(completed=False, failure=outcome.failure_payload())

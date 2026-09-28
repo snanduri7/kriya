@@ -44,7 +44,12 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.persistence import load_artifact_registry
 from kriya.static_analysis.service import StaticAnalysisCandidate, StaticAnalysisGateResult, banner
-from kriya.workflow.edit_safety import content_revision, read_file_revision
+from kriya.workflow.edit_safety import (
+    CandidateMaterializationError,
+    StagedFileWrite,
+    content_revision,
+    read_file_revision,
+)
 from kriya.workflow.migration import MigrationResolution, MigrationResolutionStatus, MigrationValidationScope
 from kriya.workflow.obligations import (
     ObligationAuthority,
@@ -61,6 +66,7 @@ from kriya.workflow.requirements import (
     verifier_result_verdicts,
 )
 from kriya.workflow.static_checks import derive_stack_contract, log_stack_contract_boundary
+from kriya.workflow.verification_binding import CandidateVerificationBinding, bind_candidate
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +187,10 @@ class TerminalGateRequest:
     autonomy: Any
     spec_compliance: Any
     milestone_id: str
+    # CANDIDATE-VERIFIED-DIGEST-BINDING-001: materializes the exact batch the
+    # commit will write; bound before the first gate, whatever static
+    # analysis is configured to do.
+    commit_batch: Callable[[], List[StagedFileWrite]]
     # PRD-031A: the batch the commit will write, materialized only when
     # static analysis is enabled.
     static_analysis_candidate: Optional[StaticAnalysisCandidate] = None
@@ -205,6 +215,9 @@ class TerminalGateReport:
     # blocking message (None when the result permits the commit).
     static_analysis: Optional[StaticAnalysisGateResult] = None
     static_analysis_gap: Optional[str] = None
+    # The binding of the batch these gates verified (None when it could not
+    # be materialized: the commit then refuses, VERIFIED_CANDIDATE_EVIDENCE_MISSING).
+    verified_candidate: Optional[CandidateVerificationBinding] = None
 
     @property
     def commit_eligible(self) -> bool:
@@ -235,6 +248,7 @@ class TerminalGateService:
         self._validators = validators
 
     async def run(self, request: TerminalGateRequest, emit_gate_outcome: GateOutcomeEmitter) -> TerminalGateReport:
+        verified_candidate = self._bind_candidate(request)
         migration_gap = self._migration_gap(request)
         await emit_gate_outcome("migration", "failed" if migration_gap else "passed", migration_gap)
 
@@ -280,7 +294,17 @@ class TerminalGateService:
             static_analysis=static_analysis, static_analysis_gap=static_analysis_gap,
             requirement_gap=requirement_gap, artifact_error=artifact_error,
             requirement_closure_attempts=tuple(closure_attempts), candidate_derived_artifacts=derived,
+            verified_candidate=verified_candidate,
         )
+
+    @staticmethod
+    def _bind_candidate(request: TerminalGateRequest) -> Optional[CandidateVerificationBinding]:
+        """The binding of the batch the gates below verify. A batch that
+        cannot be materialized has none; the commit refuses it."""
+        try:
+            return bind_candidate(request.commit_batch(), request.workspace_path)
+        except CandidateMaterializationError:
+            return None
 
     def _static_analysis(
         self, request: TerminalGateRequest,

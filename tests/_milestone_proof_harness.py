@@ -27,6 +27,7 @@ from kriya.workflow.milestone_validation import topological_order
 from kriya.workflow.milestones import load_or_resume_milestone_run_state, run_milestones
 from kriya.workflow.terminal_commit import CandidateFile, commit_terminal_candidate, materialize_candidate
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
+from kriya.workflow.verification_binding import bind_candidate
 from kriya.workflow.workflow import WorkflowEngine
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -66,9 +67,10 @@ def _apply(workspace_path, changes):
         path.write_bytes(data)
         os.chmod(path, mode)
         files.append(CandidateFile(relpath, read_file_revision(target)))
+    writes = materialize_candidate(str(candidate), str(workspace_path), files)
     outcome = commit_terminal_candidate(
-        materialize_candidate(str(candidate), str(workspace_path), files),
-        workspace_path=str(workspace_path), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id=uuid.uuid4().hex,
+        writes, workspace_path=str(workspace_path), static_analysis=DISABLED_STATIC_ANALYSIS,
+        transaction_id=uuid.uuid4().hex, verified_candidate=bind_candidate(writes, str(workspace_path)),
     )
     assert outcome.committed, outcome.failure_payload()
 

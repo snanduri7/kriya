@@ -64,6 +64,7 @@ from kriya.workflow.terminal_commit import (
     materialize_candidate,
 )
 from kriya.workflow.triage import ChangeKind, EngineeringRoute, ExecutionWeight, ImpactVector, RiskClass
+from kriya.workflow.verification_binding import bind_candidate
 from kriya.workflow.workflow_controller import WorkflowController
 
 MP = multiprocessing.get_context("fork")
@@ -268,7 +269,7 @@ def test_materialized_candidate_is_byte_and_mode_exact(tmp_path):
         CandidateFile(name, read_file_revision(str(workspace / name)), expected_base_exists=False)
         for name in ("crlf.txt", "latin1.txt", "mvnw")
     ])
-    outcome = commit_terminal_candidate(writes, workspace_path=str(workspace), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="exact")
+    outcome = commit_terminal_candidate(writes, workspace_path=str(workspace), verified_candidate=bind_candidate(writes, str(workspace)), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="exact")
     assert outcome.committed
     assert (workspace / "crlf.txt").read_bytes() == b"a\r\nb\r\n"
     assert (workspace / "latin1.txt").read_bytes() == b"caf\xe9\n"
@@ -282,7 +283,7 @@ def _candidate_commit(candidate_root, workspace, relpath, content, transaction_i
     writes = materialize_candidate(str(candidate_root), str(workspace), [
         CandidateFile(relpath, read_file_revision(os.path.join(workspace, relpath))),
     ])
-    return commit_terminal_candidate(writes, workspace_path=str(workspace), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id=transaction_id)
+    return commit_terminal_candidate(writes, workspace_path=str(workspace), verified_candidate=bind_candidate(writes, str(workspace)), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id=transaction_id)
 
 
 def test_nested_real_workspace_commits_are_each_recorded_candidate_commits_are_not(tmp_path):
@@ -335,7 +336,7 @@ def test_later_commit_that_does_not_land_makes_the_run_partially_committed(tmp_p
             CandidateFile("app.py", read_file_revision(os.path.join(workspace_path, "app.py"))),
         ])
         (workspace / "app.py").write_text("edited meanwhile\n")  # real concurrent edit
-        outcome = commit_terminal_candidate(writes, workspace_path=workspace_path, static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="m2")
+        outcome = commit_terminal_candidate(writes, workspace_path=workspace_path, verified_candidate=bind_candidate(writes, workspace_path), static_analysis=DISABLED_STATIC_ANALYSIS, transaction_id="m2")
         assert outcome.reason_code == "WORKSPACE_REVISION_CONFLICT"
         return {"status": "failed", "quality_gates_passed": False}
 

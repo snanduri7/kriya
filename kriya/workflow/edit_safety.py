@@ -66,6 +66,13 @@ def _audit_write_file(full_path: str, workspace_path: Optional[str] = None) -> N
         logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
 
+class CandidateMaterializationError(RuntimeError):
+    """An approved candidate file is missing or unreadable; nothing was
+    committed. Raised by terminal_commit.materialize_candidate, which
+    re-exports it; defined here so the terminal gate service can bind a
+    candidate without importing the commit module."""
+
+
 class FileRevisionConflict(ValueError):
     """The file changed after Kriya read it and before the staged write."""
 

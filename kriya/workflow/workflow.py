@@ -306,6 +306,7 @@ from kriya.workflow.skill_extraction import (
 from kriya.workflow.state import GenerationState, RecoveryPhaseAdvanced
 from kriya.workflow.terminal_commit import (
     CandidateFile,
+    CandidateMaterializationError,
     commit_terminal_candidate,
     materialize_candidate,
 )
@@ -336,6 +337,7 @@ from kriya.workflow.validation_baseline import (
     classify_baseline_delta,
     render_blocking_regression_evidence,
 )
+from kriya.workflow.verification_binding import bind_candidate
 from kriya.workflow.verification_contract import extract_contract_verdict as extract_contract_verdict
 from kriya.workflow.verification_contract import pass_verdict_is_grounded as pass_verdict_is_grounded
 from kriya.workflow.worktree import (
@@ -986,6 +988,15 @@ def _direct_terminal_writes(worktree_path: str, workspace_path: str, state: Gene
         )
         for filepath in sorted(state.all_files_written)
     ])
+
+
+def _bind_direct_candidate(worktree_path: str, workspace_path: str, state: GenerationState) -> Optional[Any]:
+    """The binding of the direct terminal batch; None when it cannot be
+    materialized (the commit then refuses it)."""
+    try:
+        return bind_candidate(_direct_terminal_writes(worktree_path, workspace_path, state), workspace_path)
+    except CandidateMaterializationError:
+        return None
 
 
 def _run_static_analysis_gate(
@@ -3816,6 +3827,7 @@ class WorkflowEngine:
             # concretely reproduced bug, not a theoretical one. Resetting here, before
             # run_attempt() is even called, guarantees no exception path can skip it.
             state.pre_approval_review = None
+            state.verified_candidate_binding = None
             try:
                 # Best-of-N only ever applies to the very first attempt of a run
                 # (state.attempt_number == 0 going in - resumed checkpoints also
@@ -3830,6 +3842,12 @@ class WorkflowEngine:
                     await run_attempt_with_best_of_n(state, attempt_ctx, n=best_of_n)
                 else:
                     await run_attempt(state, attempt_ctx)
+                # CANDIDATE-VERIFIED-DIGEST-BINDING-001: the candidate gates
+                # passed on exactly these bytes. Everything after this
+                # (requirements, static analysis, approval, terminal
+                # regression) judges the same candidate, and the terminal
+                # commit refuses any batch that differs from this binding.
+                state.verified_candidate_binding = _bind_direct_candidate(worktree_path, workspace_path, state)
 
                 # Authoritative subtask verification is part of the pre-apply
                 # success boundary.  A skipped/unavailable check or unresolved
@@ -5077,6 +5095,7 @@ class WorkflowEngine:
                 commit_outcome = commit_terminal_candidate(
                     final_writes, workspace_path=workspace_path,
                     static_analysis=commit_guard(self.kernel.config, state.static_analysis_result),
+                    verified_candidate=state.verified_candidate_binding,
                     transaction_id=terminal_transaction_id,
                     evidence={
                         "verification_evidence_ids": [

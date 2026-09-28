@@ -2235,8 +2235,9 @@ def _print_workspace_commit_failure(res: Dict[str, Any]) -> None:
     advice = (
         "The workspace state is UNCERTAIN: run `kriya runs recover` before any other run."
         if failure.get("workspace_state") == "UNCERTAIN"
-        else "The workspace is unchanged. Resolve the reason above (a concurrent edit, a disk or "
-             "permission problem, refused static-analysis evidence) and run again."
+        else "The workspace is unchanged. Resolve the reason above (a concurrent edit, a candidate "
+             "changed after verification, a disk or permission problem, refused static-analysis "
+             "evidence) and run again."
     )
     click.secho(f"\n[WORKSPACE COMMIT NOT COMPLETED] {res.get('environment_failure')}\n{advice}",
                 fg="yellow", bold=True)

@@ -53,14 +53,18 @@ from kriya.workflow.edit_safety import (
     commit_revision_grounded_batch,
     commit_state_for_transaction,
 )
+from kriya.workflow.edit_safety import (
+    CandidateMaterializationError as CandidateMaterializationError,
+)
+from kriya.workflow.verification_binding import (
+    CandidateVerificationBinding,
+    VerifiedCandidateStale,
+    binding_refusal,
+)
 
 
 class StaticAnalysisCommitRefused(RuntimeError):
     """PRD-031A: the commit guard refused the static-analysis evidence."""
-
-
-class CandidateMaterializationError(RuntimeError):
-    """An approved candidate file is missing or unreadable; nothing was committed."""
 
 
 @dataclass(frozen=True)
@@ -163,10 +167,16 @@ def _settled_state(workspace_path: str, transaction_id: str) -> str:
 def commit_terminal_candidate(
     writes: List[StagedFileWrite], *, workspace_path: str, transaction_id: str,
     static_analysis: StaticAnalysisCommitGuard,
+    verified_candidate: Optional[CandidateVerificationBinding],
     evidence: Optional[Dict[str, Any]] = None,
     contract_transition: Optional[Callable[[str], Optional[Any]]] = None,
 ) -> TerminalCommitOutcome:
     """Commit a materialized, verified candidate into the real workspace.
+
+    ``verified_candidate`` is the binding taken when terminal verification
+    started (kriya/workflow/verification_binding.py). It is recomputed from
+    ``writes`` first, before anything else: a missing or different binding
+    refuses the commit with nothing written, whatever static analysis says.
 
     ``contract_transition`` (PRD-029) builds the ContractRegistry transition
     from the candidate hash (contract_lifecycle.derive_contract_transition);
@@ -186,6 +196,13 @@ def commit_terminal_candidate(
         ContractTransitionRefused,
     )
 
+    binding_refused = binding_refusal(verified_candidate, writes, workspace_path)
+    if binding_refused is not None:
+        reason_code, detail = binding_refused
+        return TerminalCommitOutcome(
+            committed=False, workspace_state="UNCHANGED", commit_result=COMMIT_NOT_COMMITTED,
+            transaction_id=transaction_id, reason_code=reason_code, error=VerifiedCandidateStale(detail),
+        )
     if not writes:
         return TerminalCommitOutcome(
             committed=True, workspace_state="UNCHANGED", commit_result="NO_CHANGES",

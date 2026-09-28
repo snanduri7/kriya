@@ -38,6 +38,7 @@ from kriya.static_analysis import model as sa_model
 from kriya.static_analysis.model import ScanScope
 from kriya.static_analysis.registry import _REGISTRY
 from kriya.static_analysis.waivers import new_waiver, waiver_store_path, write_waiver
+from kriya.workflow.verification_binding import VERIFIED_CANDIDATE_EVIDENCE_STALE
 
 GOAL = "add sub to calc.py"
 RISKY = CALC_WITH_SUB + "\nRISK = 'BAD_HIGH'\n"
@@ -102,9 +103,12 @@ def test_candidate_bytes_changed_after_the_scan_are_refused(chaos_case, tmp_path
         _worktree(workspace).joinpath("calc.py").write_text(RISKY)
 
     workspace, result, runtime = _run(chaos_case, tmp_path, CALC_WITH_SUB, inject=swap_candidate, monkeypatch=monkeypatch)
-    audit = _commit_refused(chaos_case, workspace, result, runtime, sa_model.STATIC_ANALYSIS_EVIDENCE_STALE)
+    # The verification binding is checked before the static-analysis guard
+    # (CANDIDATE-VERIFIED-DIGEST-BINDING-001); either refusal leaves the
+    # workspace unchanged.
+    audit = _commit_refused(chaos_case, workspace, result, runtime, VERIFIED_CANDIDATE_EVIDENCE_STALE)
     assert Path(workspace, "calc.py").read_text() == CALC
-    chaos_case.observe(sa_model.STATIC_ANALYSIS_EVIDENCE_STALE, stale="candidate batch", **audit.evidence())
+    chaos_case.observe(VERIFIED_CANDIDATE_EVIDENCE_STALE, stale="candidate batch", **audit.evidence())
 
 
 @chaos("E03")

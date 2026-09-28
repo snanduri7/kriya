@@ -642,6 +642,11 @@ class GenerationState:
     # (kriya/static_analysis/service.py). The terminal commit's guard reads
     # it; None when the gate has not run.
     static_analysis_result: Optional[Any] = None
+    # CANDIDATE-VERIFIED-DIGEST-BINDING-001: the binding of the terminal batch
+    # taken when the current attempt's candidate gates passed
+    # (kriya/workflow/verification_binding.py). The terminal commit refuses
+    # a batch that no longer matches it; None until the gates pass.
+    verified_candidate_binding: Optional[Any] = None
     # Set when grounded failure attribution identifies a required repair
     # file outside an authoritative caller-provided write allowlist. This
     # is a plan/scope conflict, not another code-generation retry target.
