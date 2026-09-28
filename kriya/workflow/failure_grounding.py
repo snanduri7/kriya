@@ -58,6 +58,27 @@ _BUILD_TIMING_NOISE_PATTERNS = (
     re.compile(r"^\[INFO\] Finished at:.*$", re.MULTILINE),
 )
 
+# FAILURE-SIGNATURE-RUN-NOISE-001: values that differ on every run of the same
+# failure, replaced by a fixed token, not removed, so the surrounding text
+# keeps its shape. PRD-036 rc7 matrix trial 1 (C8): an identical pytest
+# failure (same test, same line, same ValueError) got a new signature on
+# every attempt only because pytest printed `<inventory.Inventory object at
+# 0x10b1b7b10>`, so every repeat looked like a new failure family, reset the
+# targeted and fallback budgets, and kept the retry loop on the primary until
+# the global ceiling.
+_RUN_NOISE_PATTERNS = (
+    (re.compile(r"\b0x[0-9a-fA-F]{4,}\b"), "0x?"),  # Python object addresses
+    (re.compile(r"(\b[A-Za-z_$][\w$]*)@[0-9a-f]{4,8}\b"), r"\1@?"),  # Java identity hash codes
+    (re.compile(r"\bin \d+(?:\.\d+)?s\b"), "in ?s"),  # pytest/unittest elapsed time
+    (re.compile(r"\(\d+:\d{2}:\d{2}\)"), "(?:?:?)"),  # pytest's (h:mm:ss) elapsed time
+)
+
+
+def _normalize_run_noise(text: str) -> str:
+    for pattern, token in _RUN_NOISE_PATTERNS:
+        text = pattern.sub(token, text)
+    return text
+
 
 _BUILD_WRAPPER_COORDINATES = {
     "org.apache.maven.plugins:maven-compiler-plugin",
@@ -273,12 +294,13 @@ def classify_environment_failure(
 
 def _normalize_error_for_repeat_detection(error_text: str) -> str:
     """Strips known non-deterministic per-run noise (Maven's own build-timing
-    lines) before unstructured error text is hashed as a repeated-failure
+    lines, then object addresses, identity hash codes and elapsed times)
+    before unstructured error text is hashed as a repeated-failure
     signature."""
     normalized = error_text
     for pattern in _BUILD_TIMING_NOISE_PATTERNS:
         normalized = pattern.sub("", normalized)
-    return normalized
+    return _normalize_run_noise(normalized)
 
 
 def build_failure_signature(failure_type: str, error_text: str) -> Tuple[str, Any]:
@@ -303,7 +325,7 @@ def build_failure_signature(failure_type: str, error_text: str) -> Tuple[str, An
         return failure_type, (locations, "javac", javac_diagnostics, javac_details)
 
     exception_causes = [
-        (exception_type, " ".join((message or "").split()))
+        (exception_type, _normalize_run_noise(" ".join((message or "").split())))
         for exception_type, message in _EXCEPTION_CAUSE_PATTERN.findall(error_text)
     ]
     if exception_causes:
