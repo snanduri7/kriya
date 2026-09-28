@@ -771,6 +771,14 @@ class OCIContainmentBackend:
                 f"docker daemon is not reachable (docker info exited "
                 f"{result.returncode}): {result.stderr.strip()[:500]}"
             )
+        # `docker info --format` exits 0 even when the daemon is unreachable
+        # (it prints the connection error to stderr and an empty template),
+        # so a reachable daemon is one that reported its server version.
+        if not result.stdout.strip():
+            raise BackendUnavailableError(
+                "docker daemon is not reachable (docker info reported no server "
+                f"version): {result.stderr.strip()[:500]}"
+            )
 
     def prepare(self, profile: ContainmentProfile, command: List[str]) -> PreparedContainment:
         docker_path = self._require_docker()
