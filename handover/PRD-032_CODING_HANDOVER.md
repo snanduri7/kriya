@@ -110,8 +110,9 @@ The generation pipeline embedded the repository model as JSON, including `root_p
   - Target: plan/file-list hardening with ENFORCE convergence.
 - **`CANDIDATE-VERIFIED-DIGEST-BINDING-001`.**
   - What happens: with static analysis disabled, neither terminal commit binds the committed batch to the digest the gates verified (both re-materialize the candidate).
-  - Impact: production seals OCI containment, and every contained command's container is removed before the commit. Uncontained code could already write the real workspace. D09 proves the binding holds when PRD-031A evidence is present.
-  - Target: convergence PRD.
+  - Impact (as first assessed): production seals OCI containment, and every contained command's container is removed before the commit. Uncontained code could already write the real workspace. D09 proves the binding holds when PRD-031A evidence is present.
+  - Target (as first assessed): convergence PRD.
+  - **Superseded (2026-09-28, Wave 7 final closure).** The architecture review reclassified it P3 → P1: a verification/commit TOCTOU correctness invariant that must not depend on static analysis or on the containment seal. It was fixed before the Wave 7 push by a provider-independent `CandidateVerificationBinding` on both commit paths, and is CLOSED. Chaos D10 now covers the static-analysis-disabled attack, and D09/E02 are refused by the binding first. See `handover/WAVE7_FINAL_CLOSURE.md`.
 
 ## Files changed
 

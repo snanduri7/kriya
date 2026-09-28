@@ -82,3 +82,15 @@ See `handover/evidence/PRD-034/`.
 | doctor (`--production --json`, recorded as reported) | PRODUCTION_READY=false. Required FAILs: `model.qualification` (the packaged-default fallback `qwen3.6` at packaged settings has no qualification record; every role on the primary is QUALIFIED) and `context.recall_certification` (no certification for this minimal config's exact embedding and retrieval identity). Both are environment facts, reported and never turned into a pass. PRODUCTION_READY=true with the operator's full production config was shown at PRD-031A (demo-03). |
 
 **Environment:** macOS arm64 (M1 Max), Python 3.14, JDK 17.0.10, Maven 3.9.16, Docker 27.5.1, Semgrep 1.178.0, uid 501 (non-root). No Gradle, and nothing skipped for it.
+
+## Final closure (2026-09-28)
+
+**Re-run at `580625a`: CERTIFIED** (`handover/evidence/WAVE7/final-closure/certification/`):
+- pytest in certification mode: 6857 passed, 0 failed, 0 skipped, 0 unexpected skips;
+- scanner: 27 passed;
+- release: PASS;
+- doctor: recorded as reported.
+
+**What CERTIFIED means (recorded for PRD-036).** "PRD-034 CERTIFIED" is canonical CI/test certification only, and never equivalent to `PRODUCTION_READY=true`. PRD-036 must separately require `kriya doctor --production` to return `PRODUCTION_READY=true` on the actual operator-approved production config.
+
+**Still open.** STATIC-ANALYSIS-CI-LIVE-JOB-001 stays OPEN, and PRD-034 is not fully verified, until the hosted `production-certification` job passes after the push.

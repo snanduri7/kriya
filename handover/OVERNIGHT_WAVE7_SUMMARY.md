@@ -4,7 +4,19 @@
 
 **Start:** `4496327`, the PRD-031A closure. It was pushed first, per the closure directive; afterwards local HEAD == origin, the tracked tree was clean, and there was no open P0/P1.
 
-**Recommendation: REVIEW_REQUIRED.** Every PRD is LOCALLY_VERIFIED, nothing is blocked, and no hard stop was hit. The hosted CI run and the user's Stage B/C verification remain. See **Recommendation** at the end.
+**Recommendation (overnight): REVIEW_REQUIRED.** Every PRD was LOCALLY_VERIFIED, nothing was blocked, and no hard stop was hit.
+
+**Final closure (2026-09-28, `handover/WAVE7_FINAL_CLOSURE.md`):**
+- The architecture review approved the four fixes.
+- It reclassified CANDIDATE-VERIFIED-DIGEST-BINDING-001 P3 → P1, blocking the push. That item is fixed and CLOSED in `580625a`.
+- Every gate was re-run green at `580625a`:
+  - adjacent suites 1227/0;
+  - deterministic chaos ×2 with the same digest;
+  - every-tier chaos 52/52;
+  - canonical certification CERTIFIED (pytest 6857/0, 0 skips);
+  - live matrix CERTIFIED 11/11.
+- The push to `milestone-decomposition` is approved on that basis.
+- After the push, the hosted `production-certification` job must pass before STATIC-ANALYSIS-CI-LIVE-JOB-001 closes or PRD-034 counts as fully verified. PRD-036 does not start before then.
 
 ## Status per PRD (tracker vocabulary: `READY_FOR_PYTEST_VERIFICATION`; none marked VERIFIED)
 
@@ -58,11 +70,11 @@ Also corrected before commit, so not shipped defects:
 | Id | Priority | Target |
 |---|---|---|
 | ARCHITECT-FILE-LIST-ESCAPE-FALLBACK-001 | P3 | plan/file-list hardening with the ENFORCE convergence |
-| CANDIDATE-VERIFIED-DIGEST-BINDING-001 | P3 | the convergence PRD (not exploitable under the production containment seal) |
+| CANDIDATE-VERIFIED-DIGEST-BINDING-001 | ~~P3~~ **P1, CLOSED** | reclassified by the final-closure review; fixed in `580625a` (provider-independent verification binding on both commit paths) |
 | TRACE-ENFORCE-SUBTASK-LINKAGE-001 | P3 | the ENFORCE convergence |
 | FINAL-REVIEW-BACKEND-ERROR-001 | P3 | the operator-UX batch |
 | CERT-NETWORK-DEPENDENCY-001 | P3 | PRD-036 |
-| **LIVE-CERTIFICATION-REPEATED-TRIALS-001** | **P2** | **PRD-036** (a single passing matrix cannot measure flakiness; C8 passed 1 of 2) |
+| **LIVE-CERTIFICATION-REPEATED-TRIALS-001** | **P2** | **PRD-036**, blocking the PRD-036 final release. The rule is 3 consecutive complete 11/11 matrices on an exact unchanged identity, where any failure resets the streak and every trial is kept as evidence. Across the three matrices so far, C8 passed 2 of 3. |
 
 **Untouched, by registry target:**
 - MCP-APPROVAL-PATH-TRACEBACK-001;
@@ -71,7 +83,9 @@ Also corrected before commit, so not shipped defects:
 - INF-001-VLLM-ADAPTER and INF-001-ENV-EVIDENCE (INF-002);
 - ENFORCE-EXECUTE-PLAN-CONVERGENCE-001, RUN-ATTEMPT-GATE-EXTRACTION-001, STATIC-ANALYSIS-REMEDIATION-LOOP-001, STATIC-ANALYSIS-INPLACE-BASELINE-001, STATIC-ANALYSIS-MULTI-PROVIDER-001, STATIC-ANALYSIS-SEVERITY-MAP-V2-001.
 
-**No open P0/P1.**
+**No open P0/P1.** The one P1 raised by the final review, CANDIDATE-VERIFIED-DIGEST-BINDING-001, is CLOSED.
+
+**Recorded for PRD-036.** "PRD-034 CERTIFIED" means canonical CI/test certification only. It is never equivalent to PRODUCTION_READY=true. PRD-036 must separately require `kriya doctor --production` to report PRODUCTION_READY=true on the actual operator-approved production config.
 
 ## Deviations from the task specs (explicit)
 
@@ -94,7 +108,9 @@ Also corrected before commit, so not shipped defects:
 → `016caba` → `ddfa3b8` → `3903dea` → `573b13b` (PRD-034)
 → `325eb4f` (prompt-fit closure)
 → `e987789` → C7 case fix → `220af75` (PRD-035)
-→ this summary commit.
+→ `0b1e2a3` (this summary)
+→ `580625a` (final closure: CANDIDATE-VERIFIED-DIGEST-BINDING-001 fix)
+→ the final-closure evidence/docs commit.
 
 ## Commands (user)
 

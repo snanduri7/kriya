@@ -91,6 +91,7 @@ Identity:
 |---|---|---|---|
 | 1 | `e987789` | **FAILED, 9/11** | `evidence/PRD-035/matrix-run1/` |
 | 2 | C7 case fix | **CERTIFIED, 11/11** (9:07) | `evidence/PRD-035/matrix-run2/` (content digest `26c3c0aa…`) |
+| 3 | `580625a` (final closure) | **CERTIFIED, 11/11** (9:27) | `evidence/WAVE7/final-closure/matrix/` (content digest `71b3d53b…`) |
 
 **Run 1 failures:**
 - **C7: case-design error, fixed.** The contained Python image has no `pytest`, and the case declared no dependencies. Kriya correctly stopped (`environment_failure`: "pytest not available … no dependency manifest"; no host fallback). The case now declares `pytest==9.1.1` and passes contained, with registry-scoped acquisition.
@@ -99,8 +100,14 @@ Identity:
 **Run 2:** all 11 passed. Certification record `evidence/PRD-035/certification-record.json`; `kriya model certification` → **CURRENT**.
 
 **Honest reading.**
-- Over the two runs, 10 of 11 cases passed both times, and C8 passed 1 of 2.
-- The certification rule is currently one full passing matrix per identity. A single run cannot measure flakiness like C8's, so certification should require repeated trials (k-of-n per case). Registry **LIVE-CERTIFICATION-REPEATED-TRIALS-001** (P2) targets PRD-036, which owns the release gate.
+- Over the three runs, 10 of 11 cases passed every time, and C8 passed 2 of 3.
+- The certification rule is currently one full passing matrix per identity. A single run cannot measure flakiness like C8's.
+- Registry **LIVE-CERTIFICATION-REPEATED-TRIALS-001** (P2) targets PRD-036 and blocks the PRD-036 final release. Its rule:
+  - 3 consecutive complete matrices, each 11/11;
+  - on an exact unchanged runtime, inference settings, environment and case-set identity;
+  - any required-case failure resets the streak;
+  - every trial is kept as evidence.
+- Today's CURRENT record is not redefined.
 - The CURRENT record means "the latest full matrix passed", not "reliable".
 
 **Per-case evidence** (tokens, retries, first pass, fallbacks, wall time, commit and gate evidence) is in each run's Markdown and JSON.

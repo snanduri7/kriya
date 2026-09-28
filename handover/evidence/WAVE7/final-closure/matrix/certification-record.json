@@ -1,0 +1,60 @@
+{
+  "cases": [
+    {
+      "case_id": "C1",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C2",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C3",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C4",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C5",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C6",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C7",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C8",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C9",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C10",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C11",
+      "verdict": "PASSED"
+    }
+  ],
+  "key": {
+    "case_set_version": 1,
+    "environment_digest": "sha256:7b3ce83bce654d1b29a5ccacb9d262ed668196baae3a301d71430b2a3ec93559",
+    "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+    "model": "qwen3-coder:30b",
+    "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276"
+  },
+  "record_digest": "d38d79f321f9b9543830a241e89052b801963d7e8e8059afac26087bb8bc2886",
+  "recorded_at": "2026-09-28T01:56:18+00:00",
+  "report_digest": "71b3d53b8800268cc126b751c9405d565f07abe2c8c385b7a2a63dfe82fd16e7",
+  "schema_version": 1,
+  "status": "CERTIFIED"
+}
