@@ -46,6 +46,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from kriya.control.workspace_identity import workspace_identity
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 from kriya.policy.model import MCPCapabilityProfileIdentity, MCPToolIdentity
 
 SCHEMA_VERSION = 1
@@ -220,9 +221,8 @@ def _approval_home_dir() -> str:
 
 
 def validate_store_path_outside_workspace(store_path: str, workspace_root: str) -> None:
-    real_dir = os.path.realpath(os.path.dirname(store_path) or ".")
-    real_ws = os.path.realpath(workspace_root)
-    if real_dir == real_ws or real_dir.startswith(real_ws + os.sep):
+    # PLAT-002: filesystem identity, fail closed (see authority_approval).
+    if path_relation(workspace_root, os.path.dirname(store_path) or ".") is not PathRelation.OUTSIDE:
         raise MCPTrustPathInsideWorkspaceError(
             f"MCP invocation-approval store path {store_path!r} resolves inside the workspace "
             f"root {workspace_root!r} - this store must live outside the workspace a repository/"

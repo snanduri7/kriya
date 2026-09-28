@@ -64,6 +64,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.config.authority import ConfigAuthorityViolation, get_field_value
 from kriya.control.workspace_identity import workspace_identity
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 AUTHORITY_SCHEMA_VERSION = 1
 
@@ -365,9 +366,11 @@ def validate_trust_path_outside_workspace(trust_path: str, workspace_root: str) 
     KRIYA_TRUST_FILE - whose real target resolves inside the workspace
     root. Checked with realpath so a symlink can't be used to smuggle an
     in-workspace path past an apparent outside-workspace location either."""
-    real_trust_dir = os.path.realpath(os.path.dirname(trust_path) or ".")
-    real_ws = os.path.realpath(workspace_root)
-    if real_trust_dir == real_ws or real_trust_dir.startswith(real_ws + os.sep):
+    # PLAT-002: by filesystem identity, so a case or normalization variant
+    # of the workspace path is recognized as the workspace; identity that
+    # cannot be established is refused.
+    trust_dir = os.path.dirname(trust_path) or "."
+    if path_relation(workspace_root, trust_dir) is not PathRelation.OUTSIDE:
         raise TrustPathInsideWorkspaceError(trust_path, workspace_root)
 
 

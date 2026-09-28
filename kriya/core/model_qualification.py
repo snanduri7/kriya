@@ -71,6 +71,7 @@ from kriya.core.file_stamp import FileStamp, file_stamp, unchanged_since
 from kriya.core.inference_runtime import ChatRequest, runtime_adapter, runtime_for_binding
 from kriya.core.inference_settings import InferenceSettings, qualification_identity
 from kriya.core.model_runtime import MODEL_PROTOCOL_ADAPTER_VERSION, ModelRuntimeFingerprint
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 # /3 (MODEL-QUAL-IDENTITY-001): records are keyed by runtime + inference
 # settings; every /2 record is STALE and must be re-qualified.
@@ -349,9 +350,8 @@ def qualification_home() -> str:
 def _refuse_inside_workspace(path: str, workspace_root: Optional[str]) -> None:
     if not workspace_root:
         return
-    real = os.path.realpath(path)
-    root = os.path.realpath(workspace_root)
-    if real == root or real.startswith(root + os.sep):
+    # PLAT-002: filesystem identity, fail closed (see authority_approval).
+    if path_relation(workspace_root, path) is not PathRelation.OUTSIDE:
         raise QualificationPathInsideWorkspaceError(
             f"qualification store {path!r} resolves inside the workspace {workspace_root!r}; a qualification "
             "must live outside anything a repository can populate."
