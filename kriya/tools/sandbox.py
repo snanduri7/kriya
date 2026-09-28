@@ -1,8 +1,9 @@
 import logging
 import os
-import sys
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
+
+from kriya.platform.services import platform_services
 
 logger = logging.getLogger(__name__)
 
@@ -27,79 +28,22 @@ def build_restricted_env(allowlist: List[str]) -> Dict[str, str]:
 def posix_resource_limits_preexec_fn(
     cpu_seconds: Optional[int], memory_mb: Optional[int]
 ) -> Optional[Callable[[], None]]:
-    """Returns a preexec_fn that caps CPU time and/or address space for a
-    subprocess, or None on non-POSIX platforms (preexec_fn isn't supported
-    on Windows).
+    """A preexec_fn that caps CPU time and/or address space for a
+    subprocess, from the host's ResourceLimitPort (kriya/platform/; POSIX
+    setrlimit on macOS and Linux, with RLIMIT_AS advisory on macOS - see
+    kriya/platform/posix_resource_limits.py). None for one dimension leaves
+    it untouched; pass None, never 0. A failure while applying a limit
+    fails the spawn (SEC-001 fail-closed). A host that cannot apply a
+    requested limit refuses with ResourceLimitSetupError, never an
+    unbounded run (PLAT-005)."""
+    from kriya.platform.capabilities import PlatformCapabilityUnavailable
 
-    `cpu_seconds`/`memory_mb` are independently optional - passing None for
-    one leaves that specific limit untouched rather than coercing it to 0
-    (a literal `setrlimit(..., (0, 0))` call, which would make the process
-    unable to run at all rather than "unlimited"). A caller that only wants
-    to bound one dimension must pass None, not 0, for the other.
+    try:
+        return platform_services().resource_limits.preexec_fn(cpu_seconds, memory_mb)
+    except PlatformCapabilityUnavailable as error:
+        from kriya.tools.containment import ResourceLimitSetupError
 
-    SEC-001 fail-closed correction (2026-09-11): a `setrlimit` failure here
-    now RAISES instead of being logged and swallowed - the prior behavior
-    let a subprocess start completely unbounded whenever limit application
-    failed for any reason, silently defeating the one resource control this
-    function exists to provide. `subprocess.Popen`/`asyncio.create_subprocess_exec`
-    both catch any exception raised inside `preexec_fn` and re-raise it in
-    the PARENT as `subprocess.SubprocessError("Exception occurred in
-    preexec_fn.")` (confirmed empirically, both sync and async - the
-    original exception type/message do not survive the errpipe, only a
-    generic SubprocessError does) - `ProcessController` is the layer that
-    catches that specific exception and converts it into a real, typed
-    `ContainmentSetupError` (kriya/tools/containment.py), which callers can
-    distinguish from an ordinary command/compile/test failure. This
-    function does not change on the happy path - only the failure path
-    changes, from "continue unprotected" to "abort before the command runs".
-
-    Still best-effort in what it can PROTECT, not in what it now REPORTS -
-    and the two are handled differently on purpose:
-    - RLIMIT_CPU is reliably settable and enforced on both Linux and macOS
-      (confirmed empirically on this host) - a failure here fails closed.
-    - RLIMIT_AS (address space) is reliably settable on Linux, but on macOS
-      `setrlimit(RLIMIT_AS, ...)` itself can outright FAIL - not merely be
-      weakly enforced once set - confirmed empirically on real macOS
-      26.6.2/arm64: the call raises `ValueError("current limit exceeds
-      maximum limit")` even for an ordinary, well-formed value, because the
-      platform's reported RLIMIT_AS hard limit is RLIM_INFINITY in a way
-      that rejects lowering it via this call. Failing closed on this
-      specific, platform-known limitation would break every real macOS
-      caller (ShellTool, PolymorphicValidator's compile/test gates) out of
-      the box - the opposite of this fix's own intent. So ONLY on macOS,
-      an RLIMIT_AS failure is caught and logged (matching the design's own
-      explicit "memory containment stays advisory-only on macOS regardless
-      of backend" conclusion) - everywhere else (Linux, where RLIMIT_AS is
-      reliably settable), the same failure fails closed like RLIMIT_CPU
-      does, since there it's a genuine, actionable signal.
-    - Deliberately does not set RLIMIT_NPROC: on Linux it's a per-EUID limit (shared
-      across every process the user owns, not just this subprocess tree), so a low
-      value risks interfering with unrelated processes running under the same account.
-    """
-    if sys.platform == "win32":
-        return None
-
-    def _set_limits() -> None:
-        import resource
-
-        if cpu_seconds is not None:
-            resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds))
-
-        if memory_mb is not None:
-            memory_bytes = memory_mb * 1024 * 1024
-            try:
-                resource.setrlimit(resource.RLIMIT_AS, (memory_bytes, memory_bytes))
-            except (ValueError, OSError) as e:
-                if sys.platform == "darwin":
-                    logger.debug(
-                        f"RLIMIT_AS could not be set on macOS (known platform "
-                        f"limitation, memory containment stays advisory-only "
-                        f"here): {e}"
-                    )
-                else:
-                    raise
-
-    return _set_limits
+        raise ResourceLimitSetupError(str(error)) from error
 
 
 # --- Resource strategy (LINUX-JVM-RLIMIT-AS-001) ---------------------------------
@@ -179,6 +123,10 @@ class ResourcePlan:
             "cpu_seconds": self.cpu_seconds,
             "memory_budget_mb": self.memory_budget_mb,
             "address_space_limit_mb": self.memory_budget_mb if self.strategy == ADDRESS_SPACE else None,
+            # PLAT-006: how the host enforces that limit (macOS: advisory).
+            "address_space_enforcement": (
+                platform_services().resource_limits.address_space_enforcement().value
+                if self.strategy == ADDRESS_SPACE else None),
             "jvm_options": list(self.jvm_options),
         }
 

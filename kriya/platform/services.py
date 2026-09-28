@@ -18,6 +18,7 @@ from typing import Dict, Iterator, List, Optional
 
 from kriya.platform.capabilities import CapabilityReport
 from kriya.platform.locking import UnavailableWorkspaceLock, WorkspaceLockPort
+from kriya.platform.resource_limits import ResourceLimitPort, UnavailableResourceLimits
 
 POSIX = "posix"
 WINDOWS = "windows"
@@ -33,24 +34,28 @@ def host_family(platform_name: Optional[str] = None) -> str:
 class PlatformServices:
     family: str
     workspace_lock: WorkspaceLockPort
+    resource_limits: ResourceLimitPort
 
     def capabilities(self) -> List[CapabilityReport]:
-        return [self.workspace_lock.capability()]
+        return [self.workspace_lock.capability(), *self.resource_limits.capabilities()]
 
     def identity(self) -> Dict[str, object]:
         """Provider identity: mechanism evidence for certification records."""
         return {"family": self.family,
-                "providers": {"workspace_lock": self.workspace_lock.name},
+                "providers": {"workspace_lock": self.workspace_lock.name,
+                              "resource_limits": self.resource_limits.name},
                 "capabilities": [report.to_dict() for report in self.capabilities()]}
 
 
 def compose(family: str) -> PlatformServices:
     if family == POSIX:
         from kriya.platform.posix_locking import PosixFlockLock
+        from kriya.platform.posix_resource_limits import PosixRlimit
 
-        return PlatformServices(family=family, workspace_lock=PosixFlockLock())
+        return PlatformServices(family=family, workspace_lock=PosixFlockLock(), resource_limits=PosixRlimit())
     reason = f"no {family} provider yet (Windows runtime is not supported; PLAT-WINDOWS-PROVIDERS-001)"
-    return PlatformServices(family=family, workspace_lock=UnavailableWorkspaceLock(reason))
+    return PlatformServices(family=family, workspace_lock=UnavailableWorkspaceLock(reason),
+                            resource_limits=UnavailableResourceLimits(reason))
 
 
 _lock = threading.Lock()

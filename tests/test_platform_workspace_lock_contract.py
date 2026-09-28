@@ -92,8 +92,9 @@ def test_the_posix_composition_reports_an_enforced_crash_safe_lock():
     assert require(report) is report
     identity = composed.identity()
     assert identity["family"] == services.POSIX
-    assert identity["providers"] == {"workspace_lock": "posix-flock"}
-    assert identity["capabilities"][0]["status"] == "enforced"
+    assert identity["providers"]["workspace_lock"] == "posix-flock"
+    lock_rows = [row for row in identity["capabilities"] if row["capability"] == "file_lock_crash_safe"]
+    assert [row["status"] for row in lock_rows] == ["enforced"]
 
 
 @pytest.mark.parametrize("name,family", [("linux", "posix"), ("darwin", "posix"), ("win32", "windows"),

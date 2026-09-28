@@ -25,10 +25,21 @@ def test_build_restricted_env_omits_missing_allowlist_entries(monkeypatch):
     assert "JAVA_HOME" not in env
 
 
-def test_posix_resource_limits_preexec_fn_none_on_windows():
-    with patch.object(sys, "platform", "win32"):
-        fn = posix_resource_limits_preexec_fn(cpu_seconds=60, memory_mb=512)
-    assert fn is None
+def test_a_host_without_a_resource_limit_provider_refuses_a_requested_limit():
+    # PLAT-005: this used to return None on win32, i.e. a silently unbounded
+    # subprocess. A host with no ResourceLimitPort provider now refuses a
+    # requested limit with the typed ResourceLimitSetupError; with no limit
+    # requested there is nothing to apply.
+    from kriya.platform import services
+    from kriya.platform.capabilities import PlatformCapabilityUnavailable
+    from kriya.tools.containment import ResourceLimitSetupError
+
+    with services.override(services.compose(services.WINDOWS)):
+        for cpu, memory in ((60, 512), (60, None), (None, 512)):
+            with pytest.raises(ResourceLimitSetupError) as raised:
+                posix_resource_limits_preexec_fn(cpu_seconds=cpu, memory_mb=memory)
+            assert isinstance(raised.value.__cause__, PlatformCapabilityUnavailable)
+        assert posix_resource_limits_preexec_fn(cpu_seconds=None, memory_mb=None) is None
 
 
 def test_posix_resource_limits_preexec_fn_sets_expected_limits():
