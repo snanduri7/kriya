@@ -187,7 +187,7 @@ from kriya.workflow.requirements import (
 )
 from kriya.workflow.resume_fingerprints import ResumePlan
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
-from kriya.workflow.retry_policy import API_CONTRACT_RECOVERY_MAX_ATTEMPTS, RetryAction, decide_retry_action
+from kriya.workflow.retry_policy import API_CONTRACT_RECOVERY_MAX_ATTEMPTS, RetryAction, decide_attempt_mode
 from kriya.workflow.retry_progress import SAMPLING_NOT_PERMITTED, SAMPLING_RESAMPLE, sampling_resample_permitted
 from kriya.workflow.retry_prompts import (
     _build_coordinated_retry_prompt,
@@ -5698,33 +5698,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         denied_path = os.path.join(ctx.worktree_path, control_targets[0])
         raise PolicyDeniedError(request=ActionRequest(action_type=ActionType.WRITE_FILE, target=denied_path),
                                 result=trusted_control_path_denial(denied_path))
-    # Mode selection delegates to retry_policy.decide_retry_action() - the
-    # same pure decision function the outer while loop (workflow.py) and the
-    # post-failure budget bookkeeping (retry_strategy.py) already call to
-    # decide whether to continue at all, so "targeted beats missing_files
-    # beats fallback_targeted beats full_set" is encoded in exactly one
-    # place instead of being independently hand-rolled here too (found by
-    # code review as unintentional duplication - the two copies happened to
-    # agree, but nothing enforced that). environment_failure/attempt_number
-    # are deliberately left at their None defaults: this call is scoped to
-    # MODE selection only - the STOP_ENVIRONMENT/STOP_EXHAUSTED stop
-    # conditions those two params drive are already handled one level up, by
-    # the while loop's own decide_for_state() check before run_attempt() is
-    # ever invoked for this iteration, so they must not fire a second time
-    # here with a since-incremented attempt_number.
-    retry_decision = decide_retry_action(
-        retry_count=state.budgets.retry_count,
-        max_retries=ctx.max_retries,
-        targeted_retry_count=state.budgets.targeted_retry_count,
-        targeted_max_retries=ctx.targeted_max_retries,
-        has_implicated_files=bool(state.last_implicated_files),
-        has_missing_files=bool(state.last_missing_files),
+    # Mode selection is retry_policy.decide_attempt_mode(): the same pure
+    # decision and the same state inputs as the outer loop's
+    # decide_for_state() (workflow.py), so "targeted beats missing_files
+    # beats fallback_targeted beats full_set" and the API-recovery handback
+    # are encoded in exactly one place. It leaves out the stop conditions:
+    # the loop already decided them before this attempt began, and they must
+    # not fire a second time here with a since-incremented attempt_number.
+    retry_decision = decide_attempt_mode(
+        state, max_retries=ctx.max_retries, targeted_max_retries=ctx.targeted_max_retries,
         has_fallback_model=bool(ctx.chain),
-        fallback_targeted_attempted=state.budgets.fallback_targeted_attempted,
-        environment_failure=None,
-        fallback_targeted_requested=state.budgets.fallback_targeted_requested,
-        has_api_contract_recovery=bool(state.api_contract_recovery),
-        api_contract_recovery_count=state.budgets.api_contract_recovery_count,
     )
     # Recorded now, not derived by the caller afterward - see the field's own
     # docstring in kriya/workflow/state.py for why that would be unsafe.

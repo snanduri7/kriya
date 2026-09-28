@@ -64,6 +64,7 @@ from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.recovery_coordinator import ClassifiedAttemptFailure, RecoveryCoordinator
 from kriya.workflow.repair_contract import RepairContractStatus
+from kriya.workflow.retry_policy import api_contract_recovery_handed_back
 from kriya.workflow.retry_progress import (
     NO_PROGRESS_TERMINAL_REASON,
     REGRESSION,
@@ -1267,9 +1268,19 @@ async def _record_attempt_failure(
         if narrowed:
             state.repair_contract.immediate_correction_targets = narrowed
 
-    if state.api_contract_recovery:
+    # Charged before the scope override below, so the override sees whether
+    # this attempt spent the last of recovery's own budget.
+    charges_api_contract_recovery = (
+        state.plan_scope_conflict is None and state.last_attempt_mode == "api_contract_recovery"
+    )
+    if charges_api_contract_recovery:
+        state.budgets.api_contract_recovery_count += 1
+    if state.api_contract_recovery and not api_contract_recovery_handed_back(state):
         # Later compiler/test failures remain diagnostic history; they cannot
         # replace the authoritative owner/signature/call-site recovery scope.
+        # Once recovery has handed back (WORKFLOW-RECOVERY-HANDBACK-001), the
+        # failure's own attribution routes the retry, exactly as in a run
+        # that never needed recovery.
         state.last_implicated_files = sorted({
             item["owner"] for item in state.api_contract_recovery["violations"]
         })
@@ -1337,8 +1348,8 @@ async def _record_attempt_failure(
         # plan transition, not an ordinary Developer retry, and must not burn
         # any full-set/targeted recovery budget.
         pass
-    elif state.last_attempt_mode == "api_contract_recovery":
-        state.budgets.api_contract_recovery_count += 1
+    elif charges_api_contract_recovery:
+        pass  # charged to recovery's own budget above
     elif state.last_attempt_mode in ("targeted", "missing_files"):
         if not failure_family_changed:
             state.budgets.targeted_retry_count += 1

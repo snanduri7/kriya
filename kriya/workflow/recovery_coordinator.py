@@ -224,7 +224,7 @@ def conclude_attempt_failure(state: GenerationState, ctx: Any) -> RecoveryDecisi
         if retry_decision.action is RetryAction.STOP_ENVIRONMENT:
             logger.error(f"Quality Gates stopped early - {state.environment_failure}")
         else:
-            logger.error("Quality Gates exceeded maximum debug retries (full-set and targeted). Continuing to review with errors.")
+            logger.error("Quality Gates stopped - %s. Continuing to review with errors.", retry_decision.reason)
         _capture_final_contents_and_remove_sandbox(state, ctx, cleanup="worktree cleanup")
     # An environment/toolchain failure needs an explicit break: unlike genuine
     # budget exhaustion (which coincides with the retry loop's own condition

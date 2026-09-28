@@ -86,6 +86,17 @@ class APIContractRecovery:
     def owner_files(self) -> List[str]:
         return sorted({item["owner"] for item in self.violations})
 
+    @property
+    def contract_restored(self) -> bool:
+        """Whether the owner contract was verified restored: the phase leaves
+        RESTORE_PUBLIC_CONTRACT only through owner_contract_restored(), after
+        find_unrestored_public_api_contracts() passes."""
+        return self.phase in (
+            APIContractRecoveryPhase.REPAIR_BEHAVIOR,
+            APIContractRecoveryPhase.AWAIT_TERMINAL_SUCCESS,
+            APIContractRecoveryPhase.COMPLETE,
+        )
+
     def _transition(
         self, expected: APIContractRecoveryPhase, target: APIContractRecoveryPhase,
     ) -> None:

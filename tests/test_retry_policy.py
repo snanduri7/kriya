@@ -226,3 +226,126 @@ def test_api_contract_recovery_own_bound_still_governs_past_the_global_ceiling()
     )
     assert decision.action is RetryAction.STOP_EXHAUSTED
     assert "API contract recovery" in decision.reason
+
+
+# --- WORKFLOW-RECOVERY-HANDBACK-001: recovery owns restoration only -------------------------
+# PRD-036 rc5 matrix trial 3, C6: the primary's first candidate removed a
+# public signature, recovery restored it and spent its 3 attempts on the
+# primary, and the run stopped with full-set retries and the configured
+# fallback untried.
+
+def _exhausted_recovery(**overrides):
+    values = dict(
+        retry_count=1, max_retries=4, targeted_retry_count=0, targeted_max_retries=3,
+        has_implicated_files=True, has_missing_files=False, has_fallback_model=True,
+        fallback_targeted_attempted=False, environment_failure=None,
+        attempt_number=4, max_total_attempts=11,
+        has_api_contract_recovery=True, api_contract_recovery_count=3,
+        api_contract_recovery_max_attempts=3, api_contract_restored=True,
+    )
+    values.update(overrides)
+    return decide_retry_action(**values)
+
+
+def test_a_restored_contract_hands_an_exhausted_recovery_back_to_the_ordinary_families():
+    assert _exhausted_recovery().action is RetryAction.TARGETED
+    assert _exhausted_recovery(targeted_retry_count=3).action is RetryAction.FALLBACK_TARGETED
+    assert _exhausted_recovery(
+        targeted_retry_count=3, fallback_targeted_attempted=True,
+    ).action is RetryAction.FULL_SET
+    assert _exhausted_recovery(has_implicated_files=False).action is RetryAction.FULL_SET
+
+
+def test_an_unrestored_contract_stops_fail_closed_whatever_budget_and_fallback_remain():
+    decision = _exhausted_recovery(api_contract_restored=False)
+    assert decision.action is RetryAction.STOP_EXHAUSTED
+    assert "before the contract was restored" in decision.reason
+
+
+def test_handback_grants_no_budget_the_ordinary_families_do_not_have():
+    spent = _exhausted_recovery(
+        retry_count=4, targeted_retry_count=3, fallback_targeted_attempted=True,
+    )
+    assert spent.action is RetryAction.STOP_EXHAUSTED
+    assert spent.reason == "all applicable retry budgets are exhausted"
+    ceiling = _exhausted_recovery(attempt_number=11)
+    assert ceiling.action is RetryAction.STOP_EXHAUSTED
+    assert ceiling.reason == "global attempt bound reached across all failure families"
+
+
+def test_a_restored_contract_still_spends_the_recovery_budget_first():
+    assert _exhausted_recovery(api_contract_recovery_count=2).action is RetryAction.API_CONTRACT_RECOVERY
+
+
+def test_contract_restored_follows_the_verified_phase():
+    from kriya.workflow.state import APIContractRecovery, APIContractRecoveryPhase
+
+    recovery = APIContractRecovery.detected([{"owner": "calc.py"}], [], {})
+    assert not recovery.contract_restored
+    recovery.begin_restoration()
+    assert recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT
+    assert not recovery.contract_restored
+    recovery.owner_contract_restored()
+    assert recovery.contract_restored
+    recovery.candidate_gates_passed()
+    assert recovery.contract_restored
+    recovery.terminal_succeeded()
+    assert recovery.contract_restored
+
+
+def test_decide_for_state_reads_the_restored_phase_from_the_run_state():
+    from kriya.workflow.retry_policy import decide_for_state
+    from kriya.workflow.state import APIContractRecovery, GenerationState
+
+    state = GenerationState()
+    state.attempt_number = 4
+    state.last_implicated_files = ["calc.py"]
+    state.budgets.retry_count = 1
+    state.budgets.api_contract_recovery_count = 3
+    state.api_contract_recovery = APIContractRecovery.detected([{"owner": "calc.py"}], [], {})
+    state.api_contract_recovery.begin_restoration()
+    args = dict(max_retries=4, targeted_max_retries=3, has_fallback_model=True)
+
+    assert decide_for_state(state, **args).action is RetryAction.STOP_EXHAUSTED
+    state.api_contract_recovery.owner_contract_restored()
+    assert decide_for_state(state, **args).action is RetryAction.TARGETED
+
+
+def _recovery_state(*, restored, spent):
+    from kriya.workflow.state import APIContractRecovery, GenerationState
+
+    state = GenerationState()
+    state.budgets.api_contract_recovery_count = spent
+    state.api_contract_recovery = APIContractRecovery.detected([{"owner": "calc.py"}], [], {})
+    state.api_contract_recovery.begin_restoration()
+    if restored:
+        state.api_contract_recovery.owner_contract_restored()
+    return state
+
+
+def test_recovery_hands_back_only_when_restored_and_its_budget_is_spent():
+    from kriya.workflow.retry_policy import api_contract_recovery_handed_back
+    from kriya.workflow.state import GenerationState
+
+    assert not api_contract_recovery_handed_back(GenerationState())
+    assert not api_contract_recovery_handed_back(_recovery_state(restored=False, spent=3))
+    assert not api_contract_recovery_handed_back(_recovery_state(restored=True, spent=2))
+    assert api_contract_recovery_handed_back(_recovery_state(restored=True, spent=3))
+
+
+def test_the_attempt_mode_and_the_loop_decision_read_the_same_handback():
+    """run_attempt's mode selection and the loop's continue decision share
+    one input builder: after a handback both route to the ordinary family,
+    and the mode never re-applies the loop's global ceiling."""
+    from kriya.workflow.retry_policy import decide_attempt_mode, decide_for_state
+
+    state = _recovery_state(restored=True, spent=3)
+    state.last_implicated_files = ["calc.py"]
+    state.budgets.retry_count = 1
+    args = dict(max_retries=4, targeted_max_retries=3, has_fallback_model=True)
+    state.attempt_number = 4
+    assert decide_for_state(state, **args).action is RetryAction.TARGETED
+    state.attempt_number = 11  # incremented past the ceiling for the admitted attempt
+    assert decide_attempt_mode(state, **args).action is RetryAction.TARGETED
+    unrestored = _recovery_state(restored=False, spent=3)
+    assert decide_attempt_mode(unrestored, **args).action is RetryAction.STOP_EXHAUSTED

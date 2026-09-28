@@ -45,6 +45,7 @@ def decide_retry_action(
     has_api_contract_recovery: bool = False,
     api_contract_recovery_count: int = 0,
     api_contract_recovery_max_attempts: int = API_CONTRACT_RECOVERY_MAX_ATTEMPTS,
+    api_contract_restored: bool = False,
 ) -> RetryDecision:
     if environment_failure:
         return RetryDecision(RetryAction.STOP_ENVIRONMENT, environment_failure)
@@ -66,16 +67,22 @@ def decide_retry_action(
     # cannot loop indefinitely, it only guarantees the family's own
     # separately-bounded budget is honored regardless of how much of the
     # shared counter other families spent getting here.
+    # Recovery owns restoration only (WORKFLOW-RECOVERY-HANDBACK-001). Once
+    # the contract was verified restored, an exhausted recovery budget hands
+    # control back to the ordinary families below, under the global ceiling
+    # (which already counts recovery's attempts: no budget is added). An
+    # unrestored contract fails closed: no ordinary retry, no fallback.
     if has_api_contract_recovery:
-        if api_contract_recovery_count >= api_contract_recovery_max_attempts:
+        if api_contract_recovery_count < api_contract_recovery_max_attempts:
+            return RetryDecision(
+                RetryAction.API_CONTRACT_RECOVERY,
+                "authoritative baseline API contract must be restored",
+            )
+        if not api_contract_restored:
             return RetryDecision(
                 RetryAction.STOP_EXHAUSTED,
-                "API contract recovery attempt budget exhausted",
+                "API contract recovery attempt budget exhausted before the contract was restored",
             )
-        return RetryDecision(
-            RetryAction.API_CONTRACT_RECOVERY,
-            "authoritative baseline API contract must be restored",
-        )
     if (
         attempt_number is not None and max_total_attempts is not None
         and attempt_number >= max_total_attempts
@@ -113,8 +120,10 @@ def decide_retry_action(
     return RetryDecision(RetryAction.STOP_EXHAUSTED, "all applicable retry budgets are exhausted")
 
 
-def decide_for_state(state, *, max_retries: int, targeted_max_retries: int, has_fallback_model: bool) -> RetryDecision:
-    return decide_retry_action(
+def _state_inputs(state, *, max_retries: int, targeted_max_retries: int, has_fallback_model: bool) -> dict:
+    """The run state's retry inputs, shared by both decision sites below so
+    they can never read the state differently."""
+    return dict(
         retry_count=state.budgets.retry_count,
         max_retries=max_retries,
         targeted_retry_count=state.budgets.targeted_retry_count,
@@ -123,14 +132,54 @@ def decide_for_state(state, *, max_retries: int, targeted_max_retries: int, has_
         has_missing_files=bool(state.last_missing_files),
         has_fallback_model=has_fallback_model,
         fallback_targeted_attempted=state.budgets.fallback_targeted_attempted,
-        environment_failure=state.environment_failure,
         fallback_targeted_requested=state.budgets.fallback_targeted_requested,
+        has_api_contract_recovery=bool(state.api_contract_recovery),
+        api_contract_recovery_count=state.budgets.api_contract_recovery_count,
+        api_contract_restored=api_contract_restored(state),
+    )
+
+
+def decide_for_state(state, *, max_retries: int, targeted_max_retries: int, has_fallback_model: bool) -> RetryDecision:
+    """The retry loop's continue/stop decision."""
+    return decide_retry_action(
+        **_state_inputs(
+            state, max_retries=max_retries, targeted_max_retries=targeted_max_retries,
+            has_fallback_model=has_fallback_model,
+        ),
+        environment_failure=state.environment_failure,
         attempt_number=state.attempt_number,
         max_total_attempts=(
             max_retries + targeted_max_retries + (1 if has_fallback_model else 0)
             + API_CONTRACT_RECOVERY_MAX_ATTEMPTS
             + state.budgets.best_of_n_candidates_tried
         ),
-        has_api_contract_recovery=bool(state.api_contract_recovery),
-        api_contract_recovery_count=state.budgets.api_contract_recovery_count,
+    )
+
+
+def decide_attempt_mode(state, *, max_retries: int, targeted_max_retries: int, has_fallback_model: bool) -> RetryDecision:
+    """The mode of the attempt the loop already admitted. The stop conditions
+    (environment failure, global ceiling) were decided by decide_for_state
+    before this attempt began and must not fire again against its
+    since-incremented attempt_number."""
+    return decide_retry_action(
+        **_state_inputs(
+            state, max_retries=max_retries, targeted_max_retries=targeted_max_retries,
+            has_fallback_model=has_fallback_model,
+        ),
+        environment_failure=None,
+    )
+
+
+def api_contract_restored(state) -> bool:
+    recovery = state.api_contract_recovery
+    return recovery is not None and recovery.contract_restored
+
+
+def api_contract_recovery_handed_back(state) -> bool:
+    """Recovery owns restoration only (WORKFLOW-RECOVERY-HANDBACK-001): once
+    the contract was verified restored and recovery's own budget is spent,
+    the ordinary families own the retry, routed by the failure's own
+    attribution."""
+    return api_contract_restored(state) and (
+        state.budgets.api_contract_recovery_count >= API_CONTRACT_RECOVERY_MAX_ATTEMPTS
     )
