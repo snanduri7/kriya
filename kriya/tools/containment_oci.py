@@ -143,6 +143,18 @@ MAVEN_CACHE_MOUNT = "/kriya/cache/m2"
 PIP_CACHE_MOUNT = "/kriya/cache/pip"
 
 
+# A non-root container user has no passwd entry in the image: its HOME is
+# the scratch tmpfs it owns, and the JVM's user.home (otherwise "?", which
+# Maven resolves relative to the workspace) and the Maven image entrypoint's
+# MAVEN_CONFIG (otherwise /root/.m2) point there too.
+_NON_ROOT_HOME = _CONTAINER_TEMP
+
+
+def _non_root_home_env(env: Dict[str, str]) -> Dict[str, str]:
+    java_options = " ".join(filter(None, (env.get("JAVA_TOOL_OPTIONS", "").strip(), f"-Duser.home={_NON_ROOT_HOME}")))
+    return {"HOME": _NON_ROOT_HOME, "MAVEN_CONFIG": f"{_NON_ROOT_HOME}/.m2", "JAVA_TOOL_OPTIONS": java_options}
+
+
 def _select_image_and_cache_mount(command: List[str]) -> Tuple[str, Optional[str]]:
     """Picks a base image (and, for the FIRST declared dependency-cache
     path only, the in-container location the tool actually expects its
@@ -658,6 +670,12 @@ def _render_setup_script(proxy_ip: str, acquisition_uid: int, acquisition_gid: i
 
 
 def _resolve_acquisition_identity(workspace_host: str, cache_hosts: List[str]) -> Tuple[int, int]:
+    return resolve_host_writer_identity(
+        [workspace_host, *cache_hosts], purpose="NetworkAuthority.DEPENDENCY_REGISTRY_ONLY acquisition",
+    )
+
+
+def resolve_host_writer_identity(paths: List[str], *, purpose: str) -> Tuple[int, int]:
     """SEC-008: the acquisition process's UID/GID must match the REAL
     host-owning identity of every bind-mounted path it needs to write to
     - never a fixed/arbitrary value, and never accompanied by a host
@@ -681,21 +699,20 @@ def _resolve_acquisition_identity(workspace_host: str, cache_hosts: List[str]) -
     uid, gid = os.getuid(), os.getgid()
     if uid == 0:
         raise BackendUnavailableError(
-            "NetworkAuthority.DEPENDENCY_REGISTRY_ONLY cannot resolve a safe non-root "
-            "acquisition identity - the invoking Kriya process itself is running as root (uid 0), "
-            "so matching its real ownership would mean running the untrusted acquisition command "
-            "as root too, which the non-root invariant forbids. Run Kriya as a non-root user to "
-            "use registry-scoped acquisition."
+            f"{purpose} cannot resolve a safe non-root identity - the invoking Kriya process "
+            "itself is running as root (uid 0), so matching its real ownership would mean running "
+            "the untrusted command as root too, which the non-root invariant forbids. Run Kriya "
+            "as a non-root user."
         )
-    for path in [workspace_host, *cache_hosts]:
+    for path in paths:
         st = os.stat(path)
         if st.st_uid != uid:
             raise BackendUnavailableError(
-                f"NetworkAuthority.DEPENDENCY_REGISTRY_ONLY: {path!r} is owned by uid {st.st_uid}, "
-                f"which does not match the invoking Kriya process's own uid {uid} - refusing to "
-                "guess an acquisition identity that would either fail to write there or (if it "
-                "happened to match) unintentionally impersonate a different real user. Ensure "
-                "workspace/cache paths are owned by the user running Kriya."
+                f"{purpose}: {path!r} is owned by uid {st.st_uid}, which does not match the "
+                f"invoking Kriya process's own uid {uid} - refusing to guess an identity that "
+                "would either fail to write there or (if it happened to match) unintentionally "
+                "impersonate a different real user. Ensure workspace/cache paths are owned by "
+                "the user running Kriya."
             )
     return uid, gid
 
@@ -780,6 +797,25 @@ class OCIContainmentBackend:
                 f"version): {result.stderr.strip()[:500]}"
             )
 
+    @staticmethod
+    def _writer_identity(profile: ContainmentProfile) -> Optional[Tuple[int, int]]:
+        """The host identity a container must run as to write its host
+        mounts; None when it writes none (or its identity is explicit)."""
+        if profile.run_as_uid is not None:
+            return None
+        writable = []
+        if profile.mount_workspace and profile.workspace_write:
+            writable.append(os.path.abspath(profile.workspace_path))
+        if profile.dependency_cache_writable:
+            writable += [os.path.abspath(path) for path in profile.dependency_cache_paths]
+        if profile.temp_path:
+            writable.append(os.path.abspath(profile.temp_path))
+        writable += [os.path.abspath(m.host_path) for m in profile.additional_mounts if m.writable]
+        existing = [path for path in writable if os.path.exists(path)]
+        if not existing:
+            return None
+        return resolve_host_writer_identity(existing, purpose="Contained execution writing a host mount")
+
     def prepare(self, profile: ContainmentProfile, command: List[str]) -> PreparedContainment:
         docker_path = self._require_docker()
 
@@ -823,6 +859,22 @@ class OCIContainmentBackend:
         else:
             image, cache_mount_point = _select_image_and_cache_mount(command)
 
+        # LINUX-OCI-WORKSPACE-IDENTITY-001: with --cap-drop ALL, root inside
+        # the container has no CAP_DAC_OVERRIDE, so on Linux it can neither
+        # enter nor write a host-owned bind mount ("can't cd to
+        # /kriya/workspace"; Docker Desktop's file sharing hides this on
+        # macOS). A container that writes a host mount runs as the real
+        # host identity owning it (SEC-008's rule, fail-closed on root or
+        # an ownership mismatch) - never root, never widened capabilities,
+        # never a host chmod/chown. An explicit run_as identity (TOOL-003
+        # MCP profiles) is used as given.
+        writer_identity = self._writer_identity(profile)
+        run_as = (
+            (profile.run_as_uid, profile.run_as_gid) if profile.run_as_uid is not None else writer_identity
+        )
+        # A non-root process owns its scratch tmpfs (also its working
+        # directory when no workspace is mounted, OCI-NONROOT-TMPFS-WORKDIR-001).
+        tmpfs_owner = f",uid={run_as[0]},gid={run_as[1]},mode=0700" if run_as is not None else ""
         args: List[str] = [
             docker_path, "run", "--rm", "--name", container_name,
             # PRD-031A: a pinned tool image must already be present; the
@@ -833,7 +885,7 @@ class OCIContainmentBackend:
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
             "--pids-limit", _PIDS_LIMIT,
-            "--tmpfs", f"{_CONTAINER_TEMP}:rw,noexec,nosuid,size={_TMPFS_SIZE}",
+            "--tmpfs", f"{_CONTAINER_TEMP}:rw,noexec,nosuid,size={_TMPFS_SIZE}{tmpfs_owner}",
         ]
 
         # TOOL-003 P2: `-i` (interactive, stdin kept open) for a persistent
@@ -851,8 +903,8 @@ class OCIContainmentBackend:
         # is out of this pass's scope). Never `--privileged`, never a
         # Docker socket mount, never broader than `--cap-drop ALL` +
         # `no-new-privileges` above.
-        if profile.run_as_uid is not None:
-            args += ["--user", f"{profile.run_as_uid}:{profile.run_as_gid}"]
+        if run_as is not None:
+            args += ["--user", f"{run_as[0]}:{run_as[1]}"]
 
         # TOOL-003 P2: an opaque audit label (Task 12) - None (default) for
         # every existing caller, unchanged.
@@ -965,9 +1017,13 @@ class OCIContainmentBackend:
             for key, value in profile.resolved_env.items():
                 args += ["-e", f"{key}={value}"]
         else:
-            for key, value in build_restricted_env(profile.env_allowlist).items():
-                if key in _HOST_ONLY_ENV_VARS:
-                    continue
+            container_env = {
+                key: value for key, value in build_restricted_env(profile.env_allowlist).items()
+                if key not in _HOST_ONLY_ENV_VARS
+            }
+            if writer_identity is not None:
+                container_env.update(_non_root_home_env(container_env))
+            for key, value in container_env.items():
                 args += ["-e", f"{key}={value}"]
 
         # RESOURCES: --memory is a real, cgroup-enforced hard limit (accurate
