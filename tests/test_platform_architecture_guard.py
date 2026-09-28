@@ -38,8 +38,6 @@ NEVER_ALLOWLISTED = ("kriya/workflow/", "kriya/policy/", "kriya/control/", "kriy
 TEMPORARY_ALLOWLIST: Dict[str, Tuple[str, str]] = {
     "kriya/tools/process.py": ("PLAT-PROCESS-CONTROL-001", "process-group spawn/kill; ProcessControlPort"),
     "kriya/mcp/lifecycle.py": ("PLAT-PROCESS-CONTROL-001", "MCP process-group spawn; ProcessControlPort"),
-    "kriya/tools/containment_oci.py": ("PLAT-HOST-IDENTITY-001", "host uid/gid; HostIdentityPort"),
-    "kriya/mcp/containment_adapter.py": ("PLAT-HOST-IDENTITY-001", "host uid/gid; HostIdentityPort"),
 }
 
 BLOCKED_FOR_IMPORT = ("fcntl", "resource", "pwd", "grp", "termios")

@@ -72,6 +72,44 @@ class BackendUnavailableError(ContainmentSetupError):
     requires."""
 
 
+class HostWriterIdentityRefused(Exception):
+    """Why SEC-008's writer-identity rule refused; each caller raises its
+    own typed error (and message) from it."""
+
+    PRIVILEGED = "privileged"
+    OWNER_MISMATCH = "owner_mismatch"
+    UNAVAILABLE = "unavailable"
+
+    def __init__(self, kind: str, *, uid: Optional[int] = None, path: Optional[str] = None,
+                 owner_uid: Optional[int] = None, detail: str = "") -> None:
+        super().__init__(kind)
+        self.kind, self.uid, self.path, self.owner_uid, self.detail = kind, uid, path, owner_uid, detail
+
+
+def host_writer_identity(paths: List[str]) -> Tuple[int, int]:
+    """SEC-008's rule, in one place (OCI registry acquisition, OCI host-
+    mount writers, TOOL-003 MCP write mounts): a container that writes host
+    paths runs as the Kriya process's own trusted identity (HostIdentityPort),
+    never as root, and only when every path is owned by that identity -
+    never a guessed or arbitrary identity, never a host chmod/chown."""
+    from kriya.platform.capabilities import PlatformCapabilityUnavailable
+    from kriya.platform.services import platform_services
+
+    host = platform_services().host_identity
+    try:
+        identity = host.current()
+    except PlatformCapabilityUnavailable as error:
+        raise HostWriterIdentityRefused(HostWriterIdentityRefused.UNAVAILABLE, detail=str(error)) from error
+    if identity.is_privileged:
+        raise HostWriterIdentityRefused(HostWriterIdentityRefused.PRIVILEGED, uid=identity.uid)
+    for path in paths:
+        owner = host.owner_uid(path)
+        if owner != identity.uid:
+            raise HostWriterIdentityRefused(HostWriterIdentityRefused.OWNER_MISMATCH, uid=identity.uid,
+                                            path=path, owner_uid=owner)
+    return identity.uid, identity.gid
+
+
 @dataclass(frozen=True)
 class MountSpec:
     """One explicit host<->container bind mount - TOOL-003 P2's own

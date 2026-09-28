@@ -72,9 +72,11 @@ from typing import Dict, List, Optional, Tuple
 from kriya.tools.containment import (
     BackendUnavailableError,
     ContainmentProfile,
+    HostWriterIdentityRefused,
     NetworkAuthority,
     PreparedContainment,
     build_restricted_env,
+    host_writer_identity,
 )
 from kriya.tools.process import ProcessResult
 from kriya.tools.toolchain_identity import ToolchainIdentity, ToolchainMismatchError
@@ -679,7 +681,7 @@ def resolve_host_writer_identity(paths: List[str], *, purpose: str) -> Tuple[int
     """SEC-008: the acquisition process's UID/GID must match the REAL
     host-owning identity of every bind-mounted path it needs to write to
     - never a fixed/arbitrary value, and never accompanied by a host
-    permission/ownership change. Uses `os.getuid()`/`os.getgid()` (the
+    permission/ownership change. Uses HostIdentityPort (POSIX: `os.getuid()`/`os.getgid()`, the
     Kriya PROCESS's own real identity - the same identity that created
     the workspace/cache directories via plain `os.makedirs` calls
     elsewhere in this codebase) as the candidate identity, then verifies
@@ -696,25 +698,25 @@ def resolve_host_writer_identity(paths: List[str], *, purpose: str) -> Tuple[int
     adapt to in that case (a real, narrow deployment constraint: Kriya
     itself running as root makes registry-scoped acquisition unusable,
     not a bug to work around here)."""
-    uid, gid = os.getuid(), os.getgid()
-    if uid == 0:
-        raise BackendUnavailableError(
-            f"{purpose} cannot resolve a safe non-root identity - the invoking Kriya process "
-            "itself is running as root (uid 0), so matching its real ownership would mean running "
-            "the untrusted command as root too, which the non-root invariant forbids. Run Kriya "
-            "as a non-root user."
-        )
-    for path in paths:
-        st = os.stat(path)
-        if st.st_uid != uid:
+    try:
+        return host_writer_identity(paths)
+    except HostWriterIdentityRefused as refusal:
+        if refusal.kind == HostWriterIdentityRefused.PRIVILEGED:
             raise BackendUnavailableError(
-                f"{purpose}: {path!r} is owned by uid {st.st_uid}, which does not match the "
-                f"invoking Kriya process's own uid {uid} - refusing to guess an identity that "
+                f"{purpose} cannot resolve a safe non-root identity - the invoking Kriya process "
+                "itself is running as root (uid 0), so matching its real ownership would mean running "
+                "the untrusted command as root too, which the non-root invariant forbids. Run Kriya "
+                "as a non-root user."
+            ) from None
+        if refusal.kind == HostWriterIdentityRefused.OWNER_MISMATCH:
+            raise BackendUnavailableError(
+                f"{purpose}: {refusal.path!r} is owned by uid {refusal.owner_uid}, which does not match the "
+                f"invoking Kriya process's own uid {refusal.uid} - refusing to guess an identity that "
                 "would either fail to write there or (if it happened to match) unintentionally "
                 "impersonate a different real user. Ensure workspace/cache paths are owned by "
                 "the user running Kriya."
-            )
-    return uid, gid
+            ) from None
+        raise BackendUnavailableError(f"{purpose}: no trusted host identity is available ({refusal.detail})") from None
 
 
 def finalize_registry_acquisition_result(result: ProcessResult) -> None:

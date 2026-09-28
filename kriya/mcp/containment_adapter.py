@@ -15,16 +15,17 @@ already there.
 """
 from __future__ import annotations
 
-import os
 from typing import Dict, List, Optional, Tuple
 
 from kriya.mcp.capability import MCPCapabilityProfile, MCPNetworkAuthority
 from kriya.tools.containment import (
     ContainmentProfile,
     ContainmentSetupError,
+    HostWriterIdentityRefused,
     MountSpec,
     NetworkAuthority,
     TrustClass,
+    host_writer_identity,
 )
 
 _CONTAINER_EXTRA_RO_PREFIX = "/kriya/mcp/extra/ro"
@@ -99,24 +100,24 @@ def resolve_mcp_container_identity(write_targets: List[str]) -> Tuple[int, int]:
       choice."""
     if not write_targets:
         return _NO_WRITE_UID, _NO_WRITE_GID
-    uid, gid = os.getuid(), os.getgid()
-    if uid == 0:
-        raise PermissionError(
-            "MCP containment cannot resolve a safe non-root container identity - the "
-            "invoking Kriya process itself is running as root (uid 0), and running the "
-            "contained MCP server as root too is forbidden (Task 7's non-root invariant). "
-            "Run Kriya as a non-root user to grant MCP write authority."
-        )
-    for path in write_targets:
-        st = os.stat(path)
-        if st.st_uid != uid:
+    try:
+        return host_writer_identity(write_targets)
+    except HostWriterIdentityRefused as refusal:
+        if refusal.kind == HostWriterIdentityRefused.PRIVILEGED:
             raise PermissionError(
-                f"MCP containment: write target {path!r} is owned by uid {st.st_uid}, which "
-                f"does not match the invoking Kriya process's own uid {uid} - refusing to "
+                "MCP containment cannot resolve a safe non-root container identity - the "
+                "invoking Kriya process itself is running as root (uid 0), and running the "
+                "contained MCP server as root too is forbidden (Task 7's non-root invariant). "
+                "Run Kriya as a non-root user to grant MCP write authority."
+            ) from None
+        if refusal.kind == HostWriterIdentityRefused.OWNER_MISMATCH:
+            raise PermissionError(
+                f"MCP containment: write target {refusal.path!r} is owned by uid {refusal.owner_uid}, which "
+                f"does not match the invoking Kriya process's own uid {refusal.uid} - refusing to "
                 "start a container whose write mounts could not match a real host owner "
                 "without a host chmod/chown widening (forbidden by Task 7)."
-            )
-    return uid, gid
+            ) from None
+        raise PermissionError(f"MCP containment: no trusted host identity is available ({refusal.detail})") from None
 
 
 def map_capability_profile_to_containment(
