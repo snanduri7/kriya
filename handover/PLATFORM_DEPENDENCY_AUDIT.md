@@ -206,3 +206,8 @@ This addendum records what changed after the audit. The dated rows above are lef
 **Linux repro** (`scripts/linux-repro/run.sh`) at `59b910b`: targeted platform, identity, JVM and OCI set, 229 passed, 0 failed, 0 skipped. At `e52a755`: the process-control contract plus the process, MCP-lifecycle, sandbox, validation and platform suites, 191 passed, 0 failed, 0 skipped.
 
 **Registry IDs at closure:** the tracker IDs (`PLAT-001`, `PLAT-002`, `PLAT-003`, `PLAT-039`, `PLAT-RELEASE-IDENTITY-001`, `ARCH-PLATFORM-001`) become CLOSED registry rows. Each matching tracker row is removed in the same commit. The names proposed in `PLATFORM_MIGRATION_PLAN.md` §4 (`PLAT-PATH-IDENTITY-001`, `PLAT-IMPORT-SAFETY-001`, `SEC-CONTROL-PATH-WRITE-001`) are superseded.
+
+**Closure (2026-09-28): ARCH-PLATFORM-001 CLOSED at `960b5f9`**
+- macOS: full suite 7058 passed, 0 failed, 0 skipped. Target certification (`scripts/certify.sh`) is CERTIFIED from a clean tree, and its release identity is CURRENT, with `process_control` = `posix-process-group`.
+- Hosted run `36406170586`: Linux production certification is CERTIFIED (pytest 7058/0, scanner 27/0, images and release PASS, doctor recorded). The first real `windows-latest` import and guard job is green (core imports natively, every provider reports `unavailable`, 13 passed and 5 POSIX-only tests skipped). The job has been blocking since `70ffd1b`, which closes PLAT-003.
+- Closed in the registry: PLAT-001, PLAT-002, PLAT-003, PLAT-039, PLAT-RELEASE-IDENTITY-001, ARCH-PLATFORM-001, and the four mechanism rows (resource limits, host identity, toolchain locator, process control). The remaining P2/P3 platform rows stay OPEN or DEFERRED with their target scopes. Windows runtime stays `RUNTIME_NOT_SUPPORTED`.
