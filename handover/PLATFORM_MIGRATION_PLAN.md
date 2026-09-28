@@ -64,6 +64,8 @@ Mutation checks for 1B: remove the lazy import (the guard fails); make `MissingP
 
 ## 4. Proposed backlog changes (CSV-ready; **not yet applied**)
 
+> **Superseded 2026-09-28** (see `PLATFORM_DEPENDENCY_AUDIT.md` §8). The P2/P3 rows were applied in `6067270`. The P0/P1 work is tracked as `PLAT-001`/`002`/`003`/`039`, `PLAT-RELEASE-IDENTITY-001` and `ARCH-PLATFORM-001` in the tracker, and enters the registry CLOSED under those IDs.
+
 These rows are not written to the registry yet. The directive ends at audit and design. There is also a hard constraint: `tests/test_backlog_registry.py::test_an_open_p0_or_p1_is_never_parked_in_the_backlog` fails whenever **any** row is non-CLOSED with priority P0/P1. So `ARCH-PLATFORM-001`, `PLAT-PATH-IDENTITY-001`, `PLAT-IMPORT-SAFETY-001` and `SEC-CONTROL-PATH-WRITE-001` can only enter the registry in the same batch that closes them. The P2/P3 rows can be applied at any time. Each P0/P1 row is therefore added in the commit that fixes it, and the gate item is tracked in `TASK_STATUS_TRACKER.csv` until it closes.
 
 ```csv

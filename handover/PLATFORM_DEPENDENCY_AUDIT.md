@@ -179,3 +179,28 @@ Python packages come from `requirements.txt` (runtime dependencies plus their co
 | MCP server executables | per server | per server | per server | per server | tools | Contained mode requires the command to resolve inside the Linux image (TOOL-003) |
 
 Conclusion: nothing in the dependency set is POSIX-only. Two Windows-only transitive dependencies (`pywin32`, `colorama`) are missing from the committed lock, which is POSIX-resolved. Semgrep's native Windows support is the one external question that could change the P5 plan.
+
+## 8. Implementation status (addendum, 2026-09-28; baseline tag `pre-arch-platform-001` @ `2f865c3`)
+
+This addendum records what changed after the audit. The dated rows above are left as found.
+
+| Finding | Outcome | Commits |
+|---|---|---|
+| PLAT-001 (P0) | Fixed. The protected-file check compares filesystem identity (`kriya/platform/filesystem_semantics.py`). | `f67816a` |
+| PLAT-002 (P1) | Fixed. All three outside-workspace guards use `path_relation`, and unknown identity is refused. | `c39360c` |
+| PLAT-039 | **P1, confirmed and reproduced end to end.** A real direct `generate` committed a model-planned `.kriya/control/runs/<id>.json` (and `.kriya/policy/approved-sources.json`) into the real workspace, and the run reported SUCCESS. See below for what is now refused, and at which points. | `0212c43`, `aa260e0`, `59b910b` (own-bug fix found on Linux), `ae8d733` |
+| PLAT-003 (P1) | Fixed. `PlatformServices` plus `WorkspaceLockPort`, the architecture/import guard, and a `windows-latest` job (non-blocking until its first green run). | `fdafdc2`, `072b28c` |
+| PLAT-015 | Done. The JDK locator moved to `kriya/platform/toolchain_locator.py`, and the host probe to `kriya/platform/host_properties.py`. | `52ab81d` |
+| PLAT-005/006/007 | Done. `ResourceLimitPort` (no behaviour change on macOS or Linux). A host with no provider now gets a typed refusal, and the evidence reports whether address-space limits are enforced or advisory. | `e94ac2c` |
+| PLAT-012 | Done. `HostIdentityPort` plus one SEC-008 rule (`containment.host_writer_identity`). | `0de190f` |
+| Release identity | Done. `kriya/core/release_identity.py`; `certify.sh` records it, and the summary requires it to be pinned. | `e1371ac` |
+
+**PLAT-039: what is refused, and where**
+- Kriya's own `.kriya/` state is written only through `kriya/control/control_store.py`.
+- The writer refuses `.git/**` and `.kriya/**` under any spelling, at any depth, on every host.
+- A planned control-path target stops the run before any Developer request (`unauthorized_generation_target`).
+- The terminal commit refuses one as a backstop.
+
+**Linux repro** (`scripts/linux-repro/run.sh`) at `59b910b`: targeted platform, identity, JVM and OCI set, 229 passed, 0 failed, 0 skipped.
+
+**Registry IDs at closure:** the tracker IDs (`PLAT-001`, `PLAT-002`, `PLAT-003`, `PLAT-039`, `PLAT-RELEASE-IDENTITY-001`, `ARCH-PLATFORM-001`) become CLOSED registry rows. Each matching tracker row is removed in the same commit. The names proposed in `PLATFORM_MIGRATION_PLAN.md` §4 (`PLAT-PATH-IDENTITY-001`, `PLAT-IMPORT-SAFETY-001`, `SEC-CONTROL-PATH-WRITE-001`) are superseded.
