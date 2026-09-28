@@ -284,6 +284,10 @@ def test_run_app_sequence_multi_step_success(tmp_path):
         [[sys.executable, "app.py", "add", "Task 1"], [sys.executable, "app.py", "list"]],
         timeout=10,
     )
+    # Each step carries its execution evidence: in host sandbox mode, the
+    # resource strategy it ran under (LINUX-JVM-RLIMIT-AS-001).
+    resources = validator.host_resource_plan([sys.executable]).evidence()
+    assert resources["strategy"] == "address_space"
     assert res["steps"] == [
         {
             "command": [sys.executable, "app.py", "add", "Task 1"],
@@ -291,6 +295,7 @@ def test_run_app_sequence_multi_step_success(tmp_path):
             "stdout": "Added Task 1\n",
             "stderr": "",
             "timed_out": False,
+            "resources": resources,
         },
         {
             "command": [sys.executable, "app.py", "list"],
@@ -298,6 +303,7 @@ def test_run_app_sequence_multi_step_success(tmp_path):
             "stdout": "Task 1\n",
             "stderr": "",
             "timed_out": False,
+            "resources": resources,
         },
     ]
 
