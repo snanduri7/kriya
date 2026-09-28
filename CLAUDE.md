@@ -188,6 +188,13 @@ Provider-neutral and off by default. `StaticAnalysisService` is the ONE gate, ca
 - **Config, production, doctor.** `static_analysis.*` is SECURITY_AUTHORITY as a whole; rule-pack and waiver-store paths are anchored to `config_dir`. Production does not force it on; when enabled, requirement=required and analysis_errors/prerequisites_missing=block. Doctor has seven `static_analysis.*` rows (NOT_APPLICABLE = PASS + `evidence.status`).
 - See `docs/design.md` §2.9d and `handover/PRD-031A_TASK.md`.
 
+### Linux execution semantics (`kriya/tools/sandbox.py`, `kriya/tools/containment_oci.py`, `kriya/core/file_stamp.py`)
+macOS hides several Linux behaviours, so verify containment/resource changes on Linux too: `scripts/linux-repro/run.sh <rev> [pytest args]` (ubuntu 24.04, uid 1001, its own docker daemon; a clean clone, never the working tree's ignored state).
+- **JVM resources.** A JVM-backed host process gets JVM heap/metaspace/direct bounds in `JAVA_TOOL_OPTIONS`, never RLIMIT_AS (`sandbox.resource_plan`; typed toolchain or argv[0] launcher, never shell text); everything else keeps RLIMIT_AS.
+- **OCI identity.** A container writing a host mount runs as the host uid:gid (`resolve_host_writer_identity`, SEC-008's rule), never root; `--cap-drop ALL` stays.
+- **Stat caches.** A stat-validated read cache uses `file_stamp.unchanged_since` (settled-when-cached), never a bare mtime compare; tests exercising reuse settle their files with `os.utime`.
+- **Pinned images.** Certification images are listed in `tests/certification/pinned_images.txt`; CI pulls them by digest (`scripts/pinned_images.py --pull`) and `certify.sh` verifies them (`images` stage).
+
 ### Chaos harness (`tests/_chaos_harness.py`) — PRD-032
 - **Tests only; no production subsystem.** `SCENARIOS` is the closed table, and every entry is bound to exactly one `@chaos("<id>")` test (`tests/test_prd032_chaos_harness.py` enforces it). Use the `chaos_case` fixture (tests/conftest.py). It snapshots the whole per-test tree, and `observe()` needs a typed, content-free outcome.
 - **Where hostility enters.** It enters at the runtime port (`ChaosRuntime`, never a mocked `llm.complete`), or at the one seam that owns the failure.
