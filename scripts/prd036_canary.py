@@ -13,13 +13,15 @@ workspace diff.
 Kriya keeps its reusable candidate worktrees on purpose. ``remove_git_worktree``
 resets them so compile caches survive. So a retained worktree is not a leak
 when it passes every check in ``worktree_violations``:
-- it is at a documented Kriya worktree location;
+- it is at a documented Kriya worktree location: the workspace's own
+  ``.kriya/worktree``, or a sibling under ``.kriya/worktrees/``, never inside
+  another Kriya-managed worktree;
 - it is registered, not locked or prunable, and not broken;
 - its HEAD is the workspace HEAD;
 - it has no tracked changes;
-- it has no untracked state beyond the permitted nested worktree;
+- it has no untracked state;
 - its only ignored files are build caches;
-- it holds no Kriya run or control state.
+- it holds no ``.kriya`` state of its own.
 
 Anything else is a leak. ``combine`` also proves bounded reuse: a second
 run on the same candidate must leave exactly the same worktree set.
@@ -45,23 +47,24 @@ sys.path.insert(0, ROOT)
 from kriya.control.commit_state import assess_workspace_commit_state  # noqa: E402 - after sys.path
 from kriya.control.persistence import run_record_path  # noqa: E402 - after sys.path
 from kriya.control.run_ownership import WorkspaceLockHeldError, acquire_run_lock  # noqa: E402 - after sys.path
+from kriya.workflow.worktree import (  # noqa: E402 - after sys.path
+    CANDIDATE_WORKTREES,
+    WORKSPACE_WORKTREE,
+    managed_worktree_ancestor,
+)
 
 STATIC_ANALYSIS_EVIDENCE_PREFIX = "static_analysis:"
-# kriya/workflow/worktree.py::create_git_worktree creates <repo>/.kriya/worktree.
-# The enforce controller creates one plan worktree for the workspace, and its
-# subtask engine then creates its own reusable worktree inside that one.
-# Those two are the only Kriya-owned worktree locations.
-WORKTREE_RELPATH = (".kriya", "worktree")
-REUSABLE_WORKTREE_LEVELS = 2
 PERMITTED_IGNORED_CACHES = ("target/", "build/", ".gradle/", "node_modules/", "__pycache__/", ".pytest_cache/")
 
 
-def kriya_worktree_paths(workspace: str) -> List[str]:
-    paths, current = [], os.path.realpath(workspace)
-    for _ in range(REUSABLE_WORKTREE_LEVELS):
-        current = os.path.join(current, *WORKTREE_RELPATH)
-        paths.append(current)
-    return paths
+def is_kriya_worktree_location(workspace: str, path: str) -> bool:
+    """A documented Kriya worktree location (WORKTREE-CANONICAL-ROOT-001,
+    kriya/workflow/worktree.py): the workspace's own <ws>/.kriya/worktree, or
+    a candidate worktree directly under <ws>/.kriya/worktrees/."""
+    root = os.path.realpath(workspace)
+    path = os.path.realpath(path)
+    return (path == os.path.join(root, *WORKSPACE_WORKTREE)
+            or os.path.dirname(path) == os.path.join(root, *CANDIDATE_WORKTREES))
 
 
 def _worktrees(workspace: str) -> List[Dict[str, Any]]:
@@ -102,21 +105,20 @@ def _inspect_worktree(path: str) -> Dict[str, Any]:
 
 def worktree_violations(snapshot: Mapping[str, Any], workspace: str) -> List[str]:
     """Why the retained worktrees are not all managed, reset and clean
-    (empty = acceptable)."""
+    (empty = acceptable). No worktree may sit inside another Kriya-managed one."""
     workspace = os.path.realpath(workspace)
-    allowed = kriya_worktree_paths(workspace)
-    registered = {w["path"] for w in snapshot["worktrees"]}
     head = (snapshot.get("head") or [None])[0]
     problems: List[str] = []
     for entry in snapshot["worktrees"]:
         path = entry["path"]
         if path == workspace:
             continue
-        if path not in allowed:
+        if managed_worktree_ancestor(path) is not None:
+            problems.append(f"nested:{path}")
+            continue
+        if not is_kriya_worktree_location(workspace, path):
             problems.append(f"unowned:{path}")
             continue
-        nested = allowed[allowed.index(path) + 1] if allowed.index(path) + 1 < len(allowed) else None
-        nested_here = nested is not None and nested in registered
         problems += [f"{flag}:{path}" for flag in entry["flags"] if flag in ("locked", "prunable")]
         inspection = entry.get("inspection") or {}
         if not inspection.get("exists"):
@@ -126,12 +128,11 @@ def worktree_violations(snapshot: Mapping[str, Any], workspace: str) -> List[str
             problems.append(f"head:{path}")
         if inspection["tracked_changes"]:
             problems.append(f"tracked_changes:{path}")
-        permitted_untracked = [os.path.join(*WORKTREE_RELPATH) + "/"] if nested_here else []
-        if any(item not in permitted_untracked for item in inspection["untracked"]):
+        if inspection["untracked"]:
             problems.append(f"untracked:{path}")
         if any(top not in PERMITTED_IGNORED_CACHES for top in inspection["ignored_top"]):
             problems.append(f"ignored:{path}")
-        if any(item not in (["worktree"] if nested_here else []) for item in inspection["kriya_entries"]):
+        if inspection["kriya_entries"]:
             problems.append(f"kriya_state:{path}")
     return problems
 
@@ -256,13 +257,12 @@ def combine(out: str, runs: List[str]) -> Dict[str, Any]:
     set is identical after every run (bounded reuse, no new nesting level)."""
     reports = [_read(os.path.join(run, "canary.json")) for run in runs]
     sets = [sorted(w["path"] for w in _read(os.path.join(run, "after.json"))["worktrees"]) for run in runs]
-    depth = [max((path.count(os.path.join(*WORKTREE_RELPATH)) for path in paths), default=0) for paths in sets]
+    nested = [sorted(path for path in paths if managed_worktree_ancestor(path) is not None) for paths in sets]
     checks: Dict[str, Dict[str, Any]] = {
         f"run{n}.{name}": check for n, report in enumerate(reports, 1) for name, check in report["checks"].items()}
     checks["bounded_worktree_reuse"] = {
-        # An identical set also means no new nesting level; the depth is reported as evidence.
-        "passed": len(runs) >= 2 and all(paths == sets[0] for paths in sets),
-        "worktree_sets": sets, "nesting_depth": depth}
+        "passed": len(runs) >= 2 and all(paths == sets[0] for paths in sets) and not any(nested),
+        "worktree_sets": sets, "nested": nested}
     report = {"verdict": "PASS" if all(c["passed"] for c in checks.values()) else "FAIL",
               "runs": [r["run_id"] for r in reports], "checks": checks}
     with open(os.path.join(out, "canary.json"), "w", encoding="utf-8") as handle:

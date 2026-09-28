@@ -301,24 +301,26 @@ def test_the_harness_bindings_equal_the_release_configs_effective_bindings(tmp_p
 
 # --- canary verdict ---------------------------------------------------------------
 
+SUBTASK = "candidate-kriya-worktree-1234abcd"
+
+
 def _retained(workspace, *, extra=None, **overrides):
-    """The worktree set a real production run leaves (see the canary evidence):
-    the workspace, the reset plan worktree hosting the subtask engine's own
-    reusable worktree, and that nested worktree; caches only."""
+    """The worktree set a production run leaves: the workspace, its reset plan
+    worktree, and the subtask engine's worktree as a sibling under
+    .kriya/worktrees/ (WORKTREE-CANONICAL-ROOT-001); caches only."""
     main = os.path.realpath(workspace)
-    outer = os.path.join(main, ".kriya", "worktree")
-    nested = os.path.join(outer, ".kriya", "worktree")
+    plan = os.path.join(main, ".kriya", "worktree")
+    subtask = os.path.join(main, ".kriya", "worktrees", SUBTASK)
     clean = {"exists": True, "tracked_changes": [], "untracked": [], "ignored_top": ["target/"], "kriya_entries": []}
     entries = [
         {"path": main, "head": "h", "flags": ["branch"]},
-        {"path": outer, "head": "h", "flags": ["detached"],
-         "inspection": {**clean, "untracked": [".kriya/worktree/"], "kriya_entries": ["worktree"]}},
-        {"path": nested, "head": "h", "flags": ["detached"], "inspection": dict(clean)},
+        {"path": plan, "head": "h", "flags": ["detached"], "inspection": dict(clean)},
+        {"path": subtask, "head": "h", "flags": ["detached"], "inspection": dict(clean)},
     ]
     if extra:
         entries.append({"path": extra, "head": "h", "flags": ["detached"], "inspection": dict(clean)})
     for index, change in overrides.items():
-        position = {"outer": 1, "nested": 2}[index]
+        position = {"plan": 1, "subtask": 2}[index]
         entries[position] = {**entries[position], **change(entries[position])}
     return entries
 
@@ -328,16 +330,16 @@ def _inspection(**changes):
 
 
 @pytest.mark.parametrize("overrides,problem", [
-    ({"outer": lambda e: {"flags": ["detached", "locked"]}}, "locked:"),
-    ({"nested": lambda e: {"flags": ["detached", "prunable"]}}, "prunable:"),
-    ({"nested": lambda e: {"inspection": {"exists": False}}}, "broken:"),
-    ({"outer": lambda e: {"head": "stale"}}, "head:"),
-    ({"nested": _inspection(tracked_changes=[" M src/A.java"])}, "tracked_changes:"),
-    ({"nested": _inspection(untracked=["src/Leftover.java"])}, "untracked:"),
-    ({"outer": _inspection(untracked=[".kriya/worktree/", "out.txt"])}, "untracked:"),
-    ({"nested": _inspection(ignored_top=["target/", "secrets/"])}, "ignored:"),
-    ({"outer": _inspection(kriya_entries=["worktree", "control"])}, "kriya_state:"),
-    ({"nested": _inspection(kriya_entries=["worktree"])}, "kriya_state:"),
+    ({"plan": lambda e: {"flags": ["detached", "locked"]}}, "locked:"),
+    ({"subtask": lambda e: {"flags": ["detached", "prunable"]}}, "prunable:"),
+    ({"subtask": lambda e: {"inspection": {"exists": False}}}, "broken:"),
+    ({"plan": lambda e: {"head": "stale"}}, "head:"),
+    ({"subtask": _inspection(tracked_changes=[" M src/A.java"])}, "tracked_changes:"),
+    ({"subtask": _inspection(untracked=["src/Leftover.java"])}, "untracked:"),
+    ({"plan": _inspection(untracked=[".kriya/worktree/"])}, "untracked:"),
+    ({"subtask": _inspection(ignored_top=["target/", "secrets/"])}, "ignored:"),
+    ({"plan": _inspection(kriya_entries=["worktree"])}, "kriya_state:"),
+    ({"subtask": _inspection(kriya_entries=["control"])}, "kriya_state:"),
 ])
 def test_a_retained_worktree_must_be_managed_reset_and_clean(tmp_path, overrides, problem):
     module = _script("prd036_canary")
@@ -347,22 +349,26 @@ def test_a_retained_worktree_must_be_managed_reset_and_clean(tmp_path, overrides
     assert any(v.startswith(problem) for v in violations), violations
 
 
-def test_only_the_documented_worktree_locations_are_kriya_owned(tmp_path):
+def test_a_nested_or_unowned_worktree_is_never_acceptable(tmp_path):
     module = _script("prd036_canary")
     workspace = str(tmp_path / "ws")
-    deeper = os.path.join(os.path.realpath(workspace), *(module.WORKTREE_RELPATH * 3))
-    for extra in (deeper, os.path.join(os.path.realpath(workspace), ".kriya", "other")):
+    root = os.path.realpath(workspace)
+    nested = [os.path.join(root, ".kriya", "worktree", ".kriya", "worktree"),
+              os.path.join(root, ".kriya", "worktrees", SUBTASK, ".kriya", "worktree")]
+    for extra in nested:
+        assert module.worktree_violations({"head": ["h"], "worktrees": _retained(workspace, extra=extra)},
+                                          workspace) == [f"nested:{extra}"]
+    for extra in (os.path.join(root, ".kriya", "other"), os.path.join(root, ".kriya", "worktrees", "a", "b"),
+                  str(tmp_path / "elsewhere")):
         violations = module.worktree_violations({"head": ["h"], "worktrees": _retained(workspace, extra=extra)},
                                                 workspace)
-        assert violations == [f"unowned:{extra}"]
-    # Without the nested worktree registered, the plan worktree may not keep a nested directory.
-    lone = [w for w in _retained(workspace) if not w["path"].endswith(os.path.join(".kriya", "worktree", ".kriya", "worktree"))]
-    assert module.worktree_violations({"head": ["h"], "worktrees": lone}, workspace) == [
-        f"untracked:{lone[1]['path']}", f"kriya_state:{lone[1]['path']}"]
+        assert violations in ([f"unowned:{extra}"], [f"nested:{extra}"]), violations
 
 
-def test_the_owned_location_is_where_kriya_creates_its_worktree(tmp_path):
-    """Binds the canary's location rule to create_git_worktree itself."""
+def test_the_owned_locations_are_where_kriya_creates_its_worktrees(tmp_path):
+    """Binds the canary's location rule to create_git_worktree itself, for the
+    workspace's worktree and for a candidate's."""
+    from kriya.control.run_coordinator import authorize_candidate_workspace, begin_mutating_run
     from kriya.workflow.worktree import create_git_worktree
 
     module = _script("prd036_canary")
@@ -372,7 +378,12 @@ def test_the_owned_location_is_where_kriya_creates_its_worktree(tmp_path):
     (repo / "a.txt").write_text("a\n")
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
     subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"], cwd=repo, check=True)
-    assert os.path.realpath(create_git_worktree(str(repo))) == module.kriya_worktree_paths(str(repo))[0]
+    with begin_mutating_run(str(repo)):
+        plan = create_git_worktree(str(repo))
+        authorize_candidate_workspace(plan)
+        subtask = create_git_worktree(plan)
+    assert module.is_kriya_worktree_location(str(repo), plan) and module.is_kriya_worktree_location(str(repo), subtask)
+    assert module.worktree_violations(module.snapshot(str(repo)), str(repo)) == []
 
 
 def test_a_real_retained_worktree_set_is_inspected_from_git(tmp_path):
@@ -407,23 +418,25 @@ def _combined(tmp_path, first, second, verdicts=("PASS", "PASS")):
     return module.combine(str(tmp_path), runs)
 
 
+SIBLINGS = ["/ws", "/ws/.kriya/worktree", f"/ws/.kriya/worktrees/{SUBTASK}"]
+
+
 def test_two_runs_that_reuse_the_same_worktrees_prove_bounded_reuse(tmp_path):
-    paths = ["/ws", "/ws/.kriya/worktree", "/ws/.kriya/worktree/.kriya/worktree"]
-    report = _combined(tmp_path, paths, list(paths))
-    assert report["verdict"] == "PASS" and report["checks"]["bounded_worktree_reuse"]["nesting_depth"] == [2, 2]
+    report = _combined(tmp_path, SIBLINGS, list(SIBLINGS))
+    assert report["verdict"] == "PASS" and report["checks"]["bounded_worktree_reuse"]["nested"] == [[], []]
     assert json.loads((tmp_path / "canary.json").read_text()) == report
 
 
-@pytest.mark.parametrize("second,verdicts", [
-    (["/ws", "/ws/.kriya/worktree", "/ws/.kriya/worktree/.kriya/worktree", "/ws/.kriya/worktree/.kriya/worktree/.kriya/worktree"],
+@pytest.mark.parametrize("first,second,verdicts", [
+    (SIBLINGS, SIBLINGS + ["/ws/.kriya/worktrees/candidate-other-9999"], ("PASS", "PASS")),
+    (SIBLINGS, SIBLINGS[:2], ("PASS", "PASS")),
+    (SIBLINGS, SIBLINGS, ("PASS", "FAIL")),
+    (SIBLINGS + ["/ws/.kriya/worktree/.kriya/worktree"], SIBLINGS + ["/ws/.kriya/worktree/.kriya/worktree"],
      ("PASS", "PASS")),
-    (["/ws", "/ws/.kriya/worktree"], ("PASS", "PASS")),
-    (["/ws", "/ws/.kriya/worktree", "/ws/.kriya/worktree/.kriya/worktree"], ("PASS", "FAIL")),
 ])
-def test_a_growing_changing_or_failed_second_run_fails_the_canary(tmp_path, second, verdicts):
-    first = ["/ws", "/ws/.kriya/worktree", "/ws/.kriya/worktree/.kriya/worktree"]
-    report = _combined(tmp_path, first, second, verdicts)
-    assert report["verdict"] == "FAIL"
+def test_a_growing_changing_nested_or_failed_run_fails_the_canary(tmp_path, first, second, verdicts):
+    assert _combined(tmp_path, first, second, verdicts)["verdict"] == "FAIL"
+
 
 @pytest.fixture
 def canary(tmp_path, monkeypatch):
