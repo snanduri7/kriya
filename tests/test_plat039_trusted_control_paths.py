@@ -82,6 +82,9 @@ def workspace(tmp_path):
 @pytest.mark.parametrize("relpath", [
     ".git", ".git/config", ".git/hooks/pre-commit", ".GIT/HOOKS/x", ".kriya", ".kriya/control/runs/x.json",
     ".KRIYA/control/x", ".kriya/new/deep/x", "sub/../.kriya/x",
+    # Name match on every host (a case-sensitive .GIT becomes the real .git
+    # on an insensitive checkout), at any depth (a submodule's .git is live).
+    "vendor/lib/.git/hooks/post-checkout", "vendor/lib/.GIT/config", "sub/.kriya/x", "caf\u00e9/.Git/x",
 ])
 def test_the_writer_refuses_every_trusted_control_path(workspace, relpath):
     result = AuthorizedFileWriter(str(workspace)).authorize(os.path.join(str(workspace), relpath))
@@ -180,3 +183,10 @@ def test_the_control_store_refuses_an_unknown_location(workspace, monkeypatch):
     with pytest.raises(ControlStorePathError):
         write_control_file(str(workspace), str(target), "{}", expected_revision=read_file_revision(str(target)))
     assert not target.exists()
+
+
+def test_a_control_directory_outside_the_root_is_not_this_roots_control_path(workspace):
+    other = workspace.parent / "other"
+    (other / ".git").mkdir(parents=True)
+    assert not is_trusted_control_path(str(workspace), str(other / ".git" / "config"))
+    assert not is_trusted_control_path(str(workspace), str(workspace.parent / ".kriya" / "x"))

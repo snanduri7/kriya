@@ -57,7 +57,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Iterable, Optional, Sequence, Tuple
 
-from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, path_identity, path_relation
+from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, fold_name, path_identity, path_relation
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
@@ -116,15 +116,28 @@ _ENFORCEMENT_SENSITIVE_PATH_PATTERNS: Tuple[str, ...] = (
 TRUSTED_CONTROL_DIRECTORIES: Tuple[str, ...] = (".git", ".kriya")
 
 
+_FOLDED_CONTROL_DIRECTORIES = frozenset(fold_name(name) for name in TRUSTED_CONTROL_DIRECTORIES)
+
+
 def is_trusted_control_path(root: str, target: str) -> bool:
     """Whether ``target`` is, or lies beneath, a trusted control directory
-    of ``root`` - by filesystem identity, so case and normalization variants
-    and symlink aliases count. A location that cannot be established counts
-    as trusted (fail closed)."""
-    return any(
-        path_relation(os.path.join(root, name), target) is not PathRelation.OUTSIDE
-        for name in TRUSTED_CONTROL_DIRECTORIES
-    )
+    of ``root``. By filesystem identity, so symlink aliases and (on an
+    insensitive filesystem) case/normalization variants count; and by name,
+    case- and normalization-insensitively on every host, because a `.GIT/`
+    written on a case-sensitive filesystem becomes the real `.git/` once the
+    repository is checked out on an insensitive one; at any depth. A
+    location that cannot be established counts as trusted (fail closed)."""
+    if any(path_relation(os.path.join(root, name), target) is not PathRelation.OUTSIDE
+           for name in TRUSTED_CONTROL_DIRECTORIES):
+        return True
+    try:
+        relative = os.path.relpath(os.path.realpath(target), os.path.realpath(root))
+    except ValueError:  # another drive: not beneath root
+        return False
+    parts = relative.split(os.sep)
+    # Any component, as git's own verify_path does: a nested .git (a
+    # submodule's) is as live as the top-level one.
+    return parts[0] != os.pardir and any(fold_name(part) in _FOLDED_CONTROL_DIRECTORIES for part in parts)
 
 
 def _canonical(path: str) -> str:
