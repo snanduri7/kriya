@@ -430,13 +430,22 @@ class PolymorphicValidator:
         create_interpreter = "python3" if contained else sys.executable
         create_target = venv_relative if contained else venv_dir_host
         venv_python = venv_python_relative if contained else venv_python_host
+        # LINUX-OCI-VENV-INTERPRETER-001: a venv created INSIDE a container
+        # links bin/python to the container's interpreter (e.g.
+        # /usr/local/bin/python3), which need not exist on the host - only
+        # the link itself is the host-visible evidence. os.path.exists
+        # follows it: it held on macOS only because Homebrew happens to
+        # install /usr/local/bin/python3, and on a Linux host every contained
+        # venv was judged "failed" and silently replaced by an interpreter
+        # without the project's dependencies.
+        venv_present = os.path.lexists if contained else os.path.exists
 
-        if not os.path.exists(venv_python_host):
+        if not venv_present(venv_python_host):
             try:
                 create_res = self._run_cmd_with_timeout(
                     [create_interpreter, "-m", "venv", create_target], cwd=self.workspace_path, timeout=60,
                 )
-                if create_res["returncode"] != 0 or not os.path.exists(venv_python_host):
+                if create_res["returncode"] != 0 or not venv_present(venv_python_host):
                     logger.warning(
                         f"Failed to create project-local venv at {venv_dir_host} - falling back to "
                         f"the default interpreter for this test run: {create_res['stderr']}"
