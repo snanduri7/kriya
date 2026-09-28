@@ -63,10 +63,16 @@ class ClassifiedAttemptFailure:
     # The retry mode as logged: "full-set", "targeted", "missing_files", ...
     attempt_mode: str
     # A PolicyDeniedError (FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE) that could
-    # not be grounded into a plan-scope conflict.
+    # not be grounded into a plan-scope conflict, or a trusted control path
+    # (TRUSTED_CONTROL_PATH_DENIED, PLAT-039); its reason code.
     unrecoverable_scope_denial: bool
     internal_framework_bug: bool
     containment_setup_failure: bool
+    unrecoverable_denial_reason: Optional[str] = None
+
+
+# Writer denials no retry can resolve: the stop is on the first one.
+UNRECOVERABLE_WRITE_DENIALS = frozenset({"FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE", "TRUSTED_CONTROL_PATH_DENIED"})
 
 
 @dataclass(frozen=True)
@@ -98,7 +104,7 @@ def classify_attempt_exception(
     # (no real existing owner to hand recovery to) is unrecoverable.
     unrecoverable_scope_denial = (
         unclassified and isinstance(exc, PolicyDeniedError)
-        and exc.result.reason_code == "FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE"
+        and exc.result.reason_code in UNRECOVERABLE_WRITE_DENIALS
     )
     internal_framework_bug = unclassified and isinstance(exc, INTERNAL_FRAMEWORK_ERROR_TYPES)
     # SEC-001: containment refused to run a command uncontained; retrying
@@ -151,6 +157,7 @@ def classify_attempt_exception(
         unrecoverable_scope_denial=bool(unrecoverable_scope_denial),
         internal_framework_bug=bool(internal_framework_bug),
         containment_setup_failure=bool(containment_setup_failure),
+        unrecoverable_denial_reason=exc.result.reason_code if unrecoverable_scope_denial else None,
     )
 
 

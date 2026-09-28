@@ -33,9 +33,11 @@ from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.filesystem import (
     AuthorizedFileWriter,
     WriteScopeMode,
+    is_trusted_control_path,
     is_within_scope,
     make_workspace_scope,
     normalize_workspace_relpath,
+    trusted_control_path_denial,
 )
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
 from kriya.tools.process import ProcessController
@@ -5686,6 +5688,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     state.candidate_gates_succeeded = False
     state.terminal_regression_succeeded = False
     state.overall_attempt_succeeded = False
+    # PLAT-039: a planned target that is repository metadata or Kriya control
+    # state is refused before any Developer request - the same DENY the
+    # writer gives, which the retry loop stops on at once.
+    control_targets = [path for path in ctx.architect_files
+                       if is_trusted_control_path(ctx.worktree_path, os.path.join(ctx.worktree_path, path))]
+    if control_targets:
+        state.rejected_generation_targets.extend(control_targets)
+        denied_path = os.path.join(ctx.worktree_path, control_targets[0])
+        raise PolicyDeniedError(request=ActionRequest(action_type=ActionType.WRITE_FILE, target=denied_path),
+                                result=trusted_control_path_denial(denied_path))
     # Mode selection delegates to retry_policy.decide_retry_action() - the
     # same pure decision function the outer while loop (workflow.py) and the
     # post-failure budget bookkeeping (retry_strategy.py) already call to

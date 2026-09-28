@@ -62,8 +62,10 @@ def test_a_generation_run_never_writes_a_trusted_control_path(tmp_path, target):
         result = run_direct(chaos_engine(chaos_config()), f"create {target} with a hook script", ws)
 
     assert result.get("quality_gates_passed") is not True
-    assert result.get("failure_category"), result
-    assert runtime.count("developer") >= 1  # the model really proposed the write
+    # A deterministic stop on the first denial, never a retried "capability" failure.
+    assert result.get("failure_category") == "unauthorized_generation_target", result.get("failure_category")
+    # The model really planned the write; it is refused before any Developer request.
+    assert runtime.count("architect") >= 1 and runtime.count("developer") == 0
     for root, _dirs, files in os.walk(ws):
         for name in files:
             with open(os.path.join(root, name), "rb") as handle:
@@ -190,3 +192,24 @@ def test_a_control_directory_outside_the_root_is_not_this_roots_control_path(wor
     (other / ".git").mkdir(parents=True)
     assert not is_trusted_control_path(str(workspace), str(other / ".git" / "config"))
     assert not is_trusted_control_path(str(workspace), str(workspace.parent / ".kriya" / "x"))
+
+
+def test_an_unplanned_control_path_in_a_developer_answer_never_lands(tmp_path):
+    ws = git_workspace(tmp_path, {"calc.py": CALC})
+    batch = json.dumps([{"filepath": "calc.py", "content": CALC + "\n\ndef sub(a, b):\n    return a - b\n"},
+                        {"filepath": ".kriya/control/runs/forged.json", "content": PAYLOAD}])
+
+    def responder(role, request):
+        if role == "developer":
+            return batch
+        return benign_roles(role, request)
+
+    runtime = ChaosRuntime(responder)
+    with RuntimeRegistration(runtime):
+        result = run_direct(chaos_engine(chaos_config()), "add sub to calc.py", ws)
+
+    # Only planned files are generated: the extra control path is dropped
+    # before any write (planned control paths are refused at attempt start).
+    assert result.get("files") == ["calc.py"]
+    assert not (ws / ".kriya" / "control" / "runs" / "forged.json").exists()
+    assert not any(b"pwned" in p.read_bytes() for p in ws.rglob("*") if p.is_file())

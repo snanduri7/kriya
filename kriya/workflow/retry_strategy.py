@@ -532,6 +532,10 @@ async def _record_attempt_failure(
         # pull an unowned/hallucinated path into MA8 owner-recovery
         # machinery designed for a real, discoverable owner. Not reused.
         state.environment_failure = (
+            "UNAUTHORIZED_GENERATION_TARGET: the Developer proposed a write to repository "
+            "metadata or Kriya control state (.git/.kriya, PLAT-039); candidate writes never "
+            "reach them, so retrying cannot help."
+            if classified.unrecoverable_denial_reason == "TRUSTED_CONTROL_PATH_DENIED" else
             "UNAUTHORIZED_GENERATION_TARGET: the Developer proposed a write outside "
             "this subtask's validated scope, and the target names no existing file "
             "with a real owner to hand recovery off to - retrying cannot discover a "

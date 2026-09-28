@@ -140,6 +140,21 @@ def is_trusted_control_path(root: str, target: str) -> bool:
     return parts[0] != os.pardir and any(fold_name(part) in _FOLDED_CONTROL_DIRECTORIES for part in parts)
 
 
+def trusted_control_path_denial(target_path: str) -> PolicyResult:
+    """The one DENY a candidate write to a trusted control path gets, from
+    the writer and from any earlier gate that refuses it before touching
+    the filesystem."""
+    return PolicyResult(
+        decision=PolicyDecision.DENY,
+        reason_code="TRUSTED_CONTROL_PATH_DENIED",
+        explanation=(
+            f"'{target_path}' is repository metadata or Kriya control state "
+            f"({', '.join(TRUSTED_CONTROL_DIRECTORIES)}); candidate writes never reach it."
+        ),
+        matched_rule="filesystem.authorized_writer.trusted_control_path",
+    )
+
+
 def _canonical(path: str) -> str:
     return os.path.realpath(os.path.expanduser(path))
 
@@ -266,15 +281,7 @@ class AuthorizedFileWriter:
                 matched_rule="filesystem.authorized_writer.outside_scope",
             )
         if is_trusted_control_path(self._workspace_root, target_path):
-            return PolicyResult(
-                decision=PolicyDecision.DENY,
-                reason_code="TRUSTED_CONTROL_PATH_DENIED",
-                explanation=(
-                    f"'{target_path}' is repository metadata or Kriya control state "
-                    f"({', '.join(TRUSTED_CONTROL_DIRECTORIES)}); candidate writes never reach it."
-                ),
-                matched_rule="filesystem.authorized_writer.trusted_control_path",
-            )
+            return trusted_control_path_denial(target_path)
         if self._write_scope_mode == WriteScopeMode.DENY_ALL:
             # Unconditional - no persistent write is permitted in this mode,
             # regardless of allowed_relpaths/protected_relpaths content. The
