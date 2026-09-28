@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _live_process import run_reporting_timeout
 
 from kriya.core.llm import is_local_url
 
@@ -72,7 +73,7 @@ def test_real_generate_emits_one_json_result(tmp_path):
     (evidence / 'effective-config.json').write_text(json.dumps(effective_config, indent=2))
     (evidence / 'effective-config.sha256').write_text(hashlib.sha256(
         json.dumps(effective_config, sort_keys=True).encode()).hexdigest())
-    result = subprocess.run([
+    result = run_reporting_timeout([
         sys.executable, '-m', 'kriya.cli', 'generate',
         'Write add.py containing a Python function add(a, b) returning a + b.',
         '-y', '--json', '--knowledge-policy', 'permissive',

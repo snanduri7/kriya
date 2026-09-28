@@ -21,6 +21,7 @@ import sys
 
 import pytest
 import yaml
+from _live_process import run_reporting_timeout
 
 pytestmark = pytest.mark.live_model
 
@@ -74,7 +75,7 @@ def _authority_home(workspace):
 
 
 def _run_kriya(args, cwd, timeout):
-    return subprocess.run(
+    return run_reporting_timeout(
         [_kriya_executable(), "--config", "kriya.yaml", *args],
         cwd=cwd, capture_output=True, text=True, timeout=timeout,
         env=dict(os.environ, KRIYA_AUTHORITY_HOME=_authority_home(cwd)),
