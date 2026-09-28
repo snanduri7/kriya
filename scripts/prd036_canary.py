@@ -1,9 +1,18 @@
 #!/usr/bin/env python3
-"""PRD-036 canary evidence: resource snapshots and the verdict.
+"""PRD-036 canary evidence: the fresh workspace, resource snapshots and the verdict.
 
+  prd036_canary.py reset WORKSPACE BASE_SHA
   prd036_canary.py snapshot WORKSPACE OUT.json
-  prd036_canary.py verdict EVIDENCE_DIR WORKSPACE --expect-changed PATH [--expect-changed PATH ...]
+  prd036_canary.py verdict EVIDENCE_DIR WORKSPACE (--fresh | --continues-from RUN_DIR)
+        --expect-changed PATH [--expect-changed PATH ...]
   prd036_canary.py combine OUT_DIR RUN_DIR [RUN_DIR ...]
+
+``reset`` makes the workspace fresh: every worktree but the main one is
+removed (a ``git clean`` never removes a directory holding a ``.git`` file, so
+a worktree an earlier candidate left would otherwise survive into this one's
+evidence), then the tracked files go back to BASE_SHA and everything
+untracked or ignored is deleted. It fails unless only the main worktree is
+left.
 
 ``snapshot`` records what a run could leak: the Docker containers and
 networks, the workspace's git worktrees, whether the workspace run lock is
@@ -30,7 +39,11 @@ run on the same candidate must leave exactly the same worktree set.
 (EVIDENCE_DIR/stdout.json and exit_code), the RunRecord, both snapshots and
 the independent re-verification results, and writes canary.json. Each check
 either passes or fails, and the canary is PASS only if every check passes.
-It never runs Kriya itself (scripts/prd036_canary.sh does).
+``starts_from_expected_worktrees`` checks what the run started from, so a
+stale environment is never read as something the candidate did: a fresh run
+starts with the main worktree only, and a continuing run with exactly the
+worktrees the previous run left. It never runs Kriya itself
+(scripts/prd036_canary.sh does).
 """
 from __future__ import annotations
 
@@ -39,7 +52,7 @@ import json
 import os
 import subprocess
 import sys
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Sequence
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -137,6 +150,27 @@ def worktree_violations(snapshot: Mapping[str, Any], workspace: str) -> List[str
     return problems
 
 
+def reset_workspace(workspace: str, base_sha: str) -> List[str]:
+    """Make ``workspace`` fresh at ``base_sha`` (see the module docstring).
+    Returns the worktrees it removed; raises unless only the main one is left."""
+    workspace = os.path.realpath(workspace)
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], cwd=workspace, capture_output=True, text=True, timeout=120, check=True)
+
+    removed = sorted((entry["path"] for entry in _worktrees(workspace) if entry["path"] != workspace),
+                     key=len, reverse=True)  # innermost first
+    for path in removed:
+        git("worktree", "remove", "--force", "--force", path)
+    git("worktree", "prune")
+    git("reset", "-q", "--hard", base_sha)
+    git("clean", "-qffdx")
+    left = [entry["path"] for entry in _worktrees(workspace)]
+    if left != [workspace]:
+        raise RuntimeError(f"the workspace is not fresh: worktrees {left}")
+    return removed
+
+
 def _lines(argv: List[str], cwd: str = None) -> List[str]:
     completed = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=60, check=False)
     if completed.returncode != 0:
@@ -182,7 +216,8 @@ def _result(evidence: str) -> Dict[str, Any]:
     return result.get("result", result) if isinstance(result, dict) else {}
 
 
-def verdict(evidence: str, workspace: str, expect_changed: List[str]) -> Dict[str, Any]:
+def verdict(evidence: str, workspace: str, expect_changed: List[str], expected_start: Sequence[str]) -> Dict[str, Any]:
+    """``expected_start`` is the worktree set the run must have started from."""
     checks: Dict[str, Dict[str, Any]] = {}
 
     def check(name: str, passed: bool, **detail: Any) -> None:
@@ -215,6 +250,9 @@ def verdict(evidence: str, workspace: str, expect_changed: List[str]) -> Dict[st
     check("no_uncertain_commit_state", assessment.safe, reason_codes=assessment.reason_codes)
 
     before, after = _read(os.path.join(evidence, "before.json")), _read(os.path.join(evidence, "after.json"))
+    started = sorted(w["path"] for w in before["worktrees"])
+    check("starts_from_expected_worktrees", started == sorted(expected_start),
+          started=started, expected=sorted(expected_start))
     for key in ("containers", "networks", "processes"):
         leaked = sorted(set(after[key]) - set(before[key]))
         check(f"no_leaked_{key}", not leaked, leaked=leaked)
@@ -274,6 +312,9 @@ def combine(out: str, runs: List[str]) -> Dict[str, Any]:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
+    fresh = sub.add_parser("reset")
+    fresh.add_argument("workspace")
+    fresh.add_argument("base_sha")
     snap = sub.add_parser("snapshot")
     snap.add_argument("workspace")
     snap.add_argument("out")
@@ -281,10 +322,17 @@ def main(argv=None) -> int:
     judge.add_argument("evidence")
     judge.add_argument("workspace")
     judge.add_argument("--expect-changed", action="append", required=True)
+    start = judge.add_mutually_exclusive_group(required=True)
+    start.add_argument("--fresh", action="store_true")
+    start.add_argument("--continues-from")
     joined = sub.add_parser("combine")
     joined.add_argument("out")
     joined.add_argument("runs", nargs="+")
     args = parser.parse_args(argv)
+    if args.command == "reset":
+        removed = reset_workspace(args.workspace, args.base_sha)
+        print(f"[canary] fresh workspace at {args.base_sha}" + (f"; removed worktrees {removed}" if removed else ""))
+        return 0
     if args.command == "snapshot":
         with open(args.out, "w", encoding="utf-8") as handle:
             json.dump(snapshot(args.workspace), handle, indent=2, sort_keys=True)
@@ -292,7 +340,10 @@ def main(argv=None) -> int:
     if args.command == "combine":
         report = combine(args.out, args.runs)
     else:
-        report = verdict(args.evidence, os.path.realpath(args.workspace), args.expect_changed)
+        workspace = os.path.realpath(args.workspace)
+        expected = ([workspace] if args.fresh else
+                    [w["path"] for w in _read(os.path.join(args.continues_from, "after.json"))["worktrees"]])
+        report = verdict(args.evidence, workspace, args.expect_changed, expected)
     failed = [name for name, c in report["checks"].items() if not c["passed"]]
     print(f"[canary] {report['verdict']}" + (f": failed {', '.join(failed)}" if failed else ""))
     return 0 if report["verdict"] == "PASS" else 1

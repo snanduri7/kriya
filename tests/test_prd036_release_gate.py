@@ -469,9 +469,12 @@ def canary(tmp_path, monkeypatch):
     return module, evidence, workspace
 
 
-def _verdict(canary):
+def _verdict(canary, expected_start=None):
+    """The fixture's run continues from a run that left the retained set."""
     module, evidence, workspace = canary
-    return module.verdict(str(evidence), str(workspace), ["src/A.java"])
+    if expected_start is None:
+        expected_start = [w["path"] for w in _retained(str(workspace))]
+    return module.verdict(str(evidence), str(workspace), ["src/A.java"], expected_start)
 
 
 def test_a_clean_production_canary_passes(canary):
@@ -517,6 +520,91 @@ def test_a_canary_without_bound_static_analysis_evidence_or_a_settled_record_fai
     checks = _verdict(canary)["checks"]
     assert not checks["static_analysis_evidence_bound"]["passed"] and not checks["run_record_success"]["passed"]
     assert not checks["no_uncertain_commit_state"]["passed"]
+
+
+def test_a_run_that_did_not_start_where_it_should_fails_its_own_check(canary):
+    """What a run started from is checked by name, so a stale environment is
+    never read as something the candidate did (the rc4 canary)."""
+    _module, _evidence, workspace = canary
+    checks = _verdict(canary, expected_start=[os.path.realpath(workspace)])["checks"]
+    assert not checks["starts_from_expected_worktrees"]["passed"]
+    assert checks["worktrees_managed_and_clean"]["passed"]  # the run itself left a clean set
+
+
+def _git_repo(path):
+    path.mkdir(parents=True)
+    for args in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        subprocess.run(["git", *args], cwd=path, check=True)
+    (path / ".gitignore").write_text("target/\n")
+    (path / "App.java").write_text("class App {}\n")
+    subprocess.run(["git", "add", "-A"], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=path, check=True)
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=path, check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
+def test_the_reset_makes_a_workspace_fresh_even_over_worktrees_an_earlier_run_left(tmp_path):
+    module = _script("prd036_canary")
+    workspace = tmp_path / "ws"
+    base = _git_repo(workspace)
+    root = os.path.realpath(workspace)
+    plan = os.path.join(root, ".kriya", "worktree")
+    leftovers = [plan, os.path.join(plan, ".kriya", "worktree"), os.path.join(root, ".kriya", "worktrees", SUBTASK)]
+    for path in leftovers:
+        subprocess.run(["git", "worktree", "add", "-q", "--detach", path], cwd=workspace, check=True)
+    subprocess.run(["git", "worktree", "lock", leftovers[1]], cwd=workspace, check=True)
+    (workspace / "App.java").write_text("class App { int changed; }\n")
+    (workspace / ".kriya" / "control").mkdir()
+    (workspace / "target").mkdir()
+    _git_repo(workspace / "stray-repo")  # an untracked nested repository (git clean needs -ff for it)
+    # What the canary used to do: the nested worktree survives it.
+    subprocess.run(["git", "clean", "-qfdx"], cwd=workspace, check=True)
+    assert os.path.isdir(leftovers[1])
+    assert module.reset_workspace(str(workspace), base) == sorted(leftovers, key=len, reverse=True)
+    assert [w["path"] for w in module.snapshot(str(workspace))["worktrees"]] == [root]
+    assert not (workspace / ".kriya").exists() and not (workspace / "target").exists()
+    assert not (workspace / "stray-repo").exists()
+    assert (workspace / "App.java").read_text() == "class App {}\n"
+
+
+def test_the_reset_refuses_a_workspace_it_could_not_make_fresh(tmp_path, monkeypatch):
+    module = _script("prd036_canary")
+    workspace = tmp_path / "ws"
+    base = _git_repo(workspace)
+    stray = os.path.realpath(tmp_path / "stray")
+    real = module._worktrees
+    monkeypatch.setattr(module, "_worktrees", lambda ws: [*real(ws), {"path": stray, "flags": []}])
+    monkeypatch.setattr(module.subprocess, "run", _pass_through_except_removal(module.subprocess.run))
+    with pytest.raises(RuntimeError, match="not fresh"):
+        module.reset_workspace(str(workspace), base)
+
+
+def _pass_through_except_removal(run):
+    def fake(argv, **kwargs):
+        if argv[1:3] == ["worktree", "remove"]:
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        return run(argv, **kwargs)
+    return fake
+
+
+def test_the_canary_script_resets_through_the_harness_and_checks_where_each_run_starts():
+    script = (SCRIPTS / "prd036_canary.sh").read_text()
+    assert 'prd036_canary.py reset "$WS" "$BASE_SHA"' in script and "clean -qfdx" not in script
+    assert "run_pass 1 --fresh" in script and 'run_pass 2 --continues-from "$OUT/run-1"' in script
+    assert '"${START[@]}"' in script
+
+
+def test_the_verdict_command_requires_where_the_run_started(canary, capsys):
+    module, evidence, workspace = canary
+    with pytest.raises(SystemExit):
+        module.main(["verdict", str(evidence), str(workspace), "--expect-changed", "src/A.java"])
+    previous = evidence.parent / "run-1"
+    previous.mkdir()
+    (previous / "after.json").write_text(json.dumps({"worktrees": _retained(str(workspace))}))
+    assert module.main(["verdict", str(evidence), str(workspace), "--continues-from", str(previous),
+                        "--expect-changed", "src/A.java"]) == 0
+    assert module.main(["verdict", str(evidence), str(workspace), "--fresh", "--expect-changed", "src/A.java"]) == 1
+    assert "starts_from_expected_worktrees" in capsys.readouterr().out
 
 
 # --- final gate ---------------------------------------------------------------------

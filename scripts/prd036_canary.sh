@@ -30,28 +30,33 @@ WS="$KRIYA_RELEASE_WORKSPACE"
 BASE_SHA="$(git -C "$KRIYA_CANARY_BASELINE" rev-parse HEAD)" || exit 2
 
 # A fresh workspace at the baseline: clone once, then reset (never rm -rf).
+# The reset removes every worktree an earlier run left (git clean cannot) and
+# refuses to go on unless only the main worktree is left.
 if [ ! -d "$WS/.git" ]; then
   git clone -q "$KRIYA_CANARY_BASELINE" "$WS" || exit 2
 fi
 [ "$(git -C "$WS" config --get remote.origin.url)" = "$KRIYA_CANARY_BASELINE" ] \
   || { echo "[canary] $WS is not a clone of $KRIYA_CANARY_BASELINE" >&2; exit 2; }
-git -C "$WS" reset -q --hard "$BASE_SHA" && git -C "$WS" clean -qfdx || exit 2
+"$PY" scripts/prd036_canary.py reset "$WS" "$BASE_SHA" | tee "$OUT/reset.txt"
+[ "${PIPESTATUS[0]}" -eq 0 ] || { echo "[canary] could not make the workspace fresh" >&2; exit 2; }
 
 "$PY" scripts/release_candidate.py check --recorded "$KRIYA_RELEASE_CANDIDATE" > "$OUT/release-candidate-check.json" \
   || { cat "$OUT/release-candidate-check.json"; echo "[canary] the frozen release candidate is not CURRENT" >&2; exit 2; }
 cp "$KRIYA_RELEASE_CANDIDATE" "$OUT/release-candidate.json"
 kriya_cli() { ( cd "$WS" && "$KRIYA" --config "$KRIYA_RELEASE_CONFIG" --trust-file "$KRIYA_RELEASE_TRUST_FILE" "$@" ); }
 
-run_pass() {  # run_pass N: one full canary run into $OUT/run-N
-  local RUN="$OUT/run-$1"
+run_pass() {  # run_pass N START...: one full canary run into $OUT/run-N (START: --fresh | --continues-from DIR)
+  local N="$1" RUN="$OUT/run-$1"
+  shift
+  local START=("$@")
   mkdir -p "$RUN"
   cp "$OUT/release-candidate-check.json" "$OUT/release-candidate.json" "$RUN/"
   kriya_cli doctor --production --json > "$RUN/doctor-before.json" 2> "$RUN/doctor-before.stderr.txt"
   "$PY" scripts/prd036_canary.py snapshot "$WS" "$RUN/before.json" || return 2
-  echo "[canary] $(date -u +%Y-%m-%dT%H:%M:%SZ) run $1 start (baseline $BASE_SHA)" | tee "$RUN/timeline.txt"
+  echo "[canary] $(date -u +%Y-%m-%dT%H:%M:%SZ) run $N start (baseline $BASE_SHA)" | tee "$RUN/timeline.txt"
   kriya_cli generate -f "$KRIYA_CANARY_GOAL" -y --json > "$RUN/stdout.json" 2> "$RUN/stderr.log"
   echo $? > "$RUN/exit_code"
-  echo "[canary] $(date -u +%Y-%m-%dT%H:%M:%SZ) run $1 end (exit $(cat "$RUN/exit_code"))" | tee -a "$RUN/timeline.txt"
+  echo "[canary] $(date -u +%Y-%m-%dT%H:%M:%SZ) run $N end (exit $(cat "$RUN/exit_code"))" | tee -a "$RUN/timeline.txt"
   "$PY" scripts/prd036_canary.py snapshot "$WS" "$RUN/after.json" || return 2
   kriya_cli doctor --production --json > "$RUN/doctor-after.json" 2> "$RUN/doctor-after.stderr.txt"
   # Independent re-verification, outside Kriya's own gates.
@@ -60,12 +65,12 @@ run_pass() {  # run_pass N: one full canary run into $OUT/run-N
   git -C "$WS" diff HEAD > "$RUN/workspace-diff.txt"
   mkdir -p "$RUN/run-records" && cp "$WS"/.kriya/control/runs/*.json "$RUN/run-records/" 2>/dev/null
   "$PY" -c 'import json, sys; from kriya.core.release_identity import release_identity; json.dump(release_identity("oci"), open(sys.argv[1], "w"), indent=2, sort_keys=True)' "$RUN/release-identity.json"
-  "$PY" scripts/prd036_canary.py verdict "$RUN" "$WS" --expect-changed "$KRIYA_CANARY_EXPECT"
+  "$PY" scripts/prd036_canary.py verdict "$RUN" "$WS" "${START[@]}" --expect-changed "$KRIYA_CANARY_EXPECT"
 }
 
-run_pass 1
+run_pass 1 --fresh
 # Run 2 starts from run 1's state (worktrees, caches, run records kept); only
 # the tracked files go back to the baseline so the same goal applies again.
 git -C "$WS" reset -q --hard "$BASE_SHA" || exit 2
-run_pass 2
+run_pass 2 --continues-from "$OUT/run-1"
 "$PY" scripts/prd036_canary.py combine "$OUT" "$OUT/run-1" "$OUT/run-2"
