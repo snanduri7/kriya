@@ -9,6 +9,7 @@
 #   static      ruff + pylint (zero findings)
 #   pytest      the deterministic suite in certification mode (every
 #               Docker/JDK/Maven test must execute; an unexpected skip fails)
+#   images      every digest-pinned image present with exactly its digest (never pulled here)
 #   scanner     the pinned static-analysis tier (Semgrep 1.178.0 + the pinned image)
 #   release     sdist/wheel build, integrity and clean-install smoke (PRD-002)
 #   doctor      `kriya doctor --production --json` - recorded, never turned into PASS
@@ -86,6 +87,13 @@ else
   else
     stage pytest FAIL "$(tail -1 "$OUT/pytest.txt")"
   fi
+fi
+
+# --- pinned images (present with the exact digest; certification never pulls) ----
+if "$VENV_BIN/python" scripts/pinned_images.py --verify > "$OUT/images.txt" 2>&1; then
+  stage images PASS "$(tail -1 "$OUT/images.txt")"
+else
+  stage images FAIL "$(grep -m1 -E 'MISSING|UNAVAILABLE' "$OUT/images.txt" || tail -1 "$OUT/images.txt")"
 fi
 
 # --- pinned static-analysis scanner tier ----------------------------------------

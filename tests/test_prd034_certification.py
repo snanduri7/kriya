@@ -110,8 +110,8 @@ def _certification_out(tmp_path, stages, *, unexpected=0, doctor=None):
     return str(out)
 
 
-PASSING = {"environment": "RECORDED", "static": "PASS", "pytest": "PASS", "scanner": "PASS", "release": "PASS",
-           "doctor": "RECORDED"}
+PASSING = {"environment": "RECORDED", "static": "PASS", "pytest": "PASS", "images": "PASS", "scanner": "PASS",
+           "release": "PASS", "doctor": "RECORDED"}
 DOCTOR = {"production_ready": False, "checks": [
     {"id": "model.qualification", "required": True, "status": "FAIL"},
     {"id": "profile.production", "required": True, "status": "PASS"}]}
@@ -124,7 +124,7 @@ def test_certified_only_when_every_mandatory_stage_passes_and_the_doctor_is_repo
     assert summary["doctor"]["production_ready"] is False
     assert summary["doctor"]["failed_required"] == ["model.qualification"]
     assert summary["tiers"]["pytest"]["junit"]["passed"] == 9
-    for stage, status in (("scanner", "UNAVAILABLE"), ("pytest", "FAIL"), ("release", "FAIL")):
+    for stage, status in (("scanner", "UNAVAILABLE"), ("pytest", "FAIL"), ("images", "FAIL"), ("release", "FAIL")):
         failing = module.summarize(_certification_out(tmp_path / stage, {**PASSING, stage: status}, doctor=DOCTOR))
         assert failing["status"] == "NOT_CERTIFIED" and f"{stage}: {status}" in failing["problems"]
 

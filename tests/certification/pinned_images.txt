@@ -1,0 +1,6 @@
+# Every image the certification tiers require, pinned by digest. CI pulls
+# them by digest before certifying (scripts/pinned_images.py --pull), and
+# scripts/certify.sh verifies each is present with exactly that digest
+# (--verify) - the product itself never pulls a pinned image (--pull never).
+# Keep in sync with the tests that use them (tests/test_pinned_images.py).
+semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b

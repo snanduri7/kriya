@@ -162,10 +162,12 @@ jobs:
           python -m venv .venv
           .venv/bin/pip install -r requirements.txt
           .venv/bin/pip install -e . --no-deps
-      - name: Install the pinned scanner and image
-        run: |
-          pipx install semgrep==1.178.0
-          docker pull semgrep/semgrep@sha256:32e459968daabe7ab86968184a29109b9564aa00392401156f9788452b42786b
+      - name: Install the pinned scanner
+        run: pipx install semgrep==1.178.0
+      - name: Pull and verify every pinned image by digest
+        # tests/certification/pinned_images.txt; certify.sh re-verifies and
+        # fails (never skips) on a missing or re-pointed image.
+        run: .venv/bin/python scripts/pinned_images.py --pull
       - name: Certify
         run: scripts/certify.sh certification-out/ci
       - uses: actions/upload-artifact@v4

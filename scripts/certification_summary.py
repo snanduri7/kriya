@@ -3,8 +3,8 @@
 Reads OUT_DIR/stages.jsonl, the junit files, the skip audits
 (skips.json), environment.json and doctor.json. Writes
 certification-summary.json and certification-summary.md. The overall status
-is CERTIFIED only when every mandatory stage (static, pytest, scanner,
-release) is PASS, the doctor produced parseable JSON, and no unexpected skip
+is CERTIFIED only when every mandatory stage (static, pytest, images,
+scanner, release) is PASS, the doctor produced parseable JSON, and no unexpected skip
 remains. The doctor's own PRODUCTION_READY verdict is reported exactly as it
 is. The exit status is 0 when CERTIFIED and 1 otherwise.
 """
@@ -14,7 +14,7 @@ import sys
 import xml.etree.ElementTree as ElementTree
 from typing import Any, Dict, List, Optional
 
-MANDATORY = ("static", "pytest", "scanner", "release")
+MANDATORY = ("static", "pytest", "images", "scanner", "release")
 
 
 def _junit(path: str) -> Optional[Dict[str, int]]:
