@@ -15,13 +15,22 @@ response can trigger, not to grade model output quality. Every other test in
 this suite already covers Kriya's own logic against controlled mock
 responses; this file's only job is proving the real wiring still works.
 """
+import json
 import os
 import subprocess
 import sys
 
 import pytest
 import yaml
-from _live_process import TAIL_CHARS, run_reporting_timeout
+from _live_process import run_reporting_timeout
+from _live_smoke_contract import (
+    SMOKE_AUTONOMY_BOUNDS,
+    SMOKE_LLM_BOUNDS,
+    SMOKE_PROCESS_LIMIT_SECONDS,
+    SUCCESS,
+    assert_smoke_contract,
+    workspace_snapshot,
+)
 
 pytestmark = pytest.mark.live_model
 
@@ -44,10 +53,15 @@ def _write_config(path):
         "llm": {
             "provider": "openai", "model": LIVE_LLM_MODEL, "base_url": LIVE_BASE_URL,
             "temperature": 0.2, "api_key": "local-key",
+            # Kriya's own output bounds, set explicitly for the smoke: a
+            # wiring smoke needs short answers, and a degenerating small model
+            # on a CPU runner otherwise spends many minutes in one runaway call.
+            **SMOKE_LLM_BOUNDS,
         },
         "embedding": {"model": LIVE_EMBED_MODEL, "base_url": LIVE_BASE_URL},
         "autonomy": {
             "mode": "guardrails", "run_verification_enabled": False, "web_lookup_enabled": False,
+            **SMOKE_AUTONOMY_BOUNDS,
         },
         "paths": {"skills": "./skills", "memory": "./memory"},
     }
@@ -74,11 +88,15 @@ def _authority_home(workspace):
     return str(workspace.parent / f"{workspace.name}-authority")
 
 
+def _state_dir(workspace):
+    return str(workspace.parent / f"{workspace.name}-state")
+
+
 def _run_kriya(args, cwd, timeout):
     return run_reporting_timeout(
         [_kriya_executable(), "--config", "kriya.yaml", *args],
         cwd=cwd, capture_output=True, text=True, timeout=timeout,
-        env=dict(os.environ, KRIYA_AUTHORITY_HOME=_authority_home(cwd)),
+        env=dict(os.environ, KRIYA_AUTHORITY_HOME=_authority_home(cwd), KRIYA_STATE_DIR=_state_dir(cwd)),
     )
 
 
@@ -95,33 +113,27 @@ def test_doctor_connects_to_a_real_local_llm_and_embedding_server(tmp_path):
     assert "[SUCCESS] Connected and successfully generated embedding" in result.stdout, result.stdout
 
 
-def test_generate_runs_the_real_pipeline_without_crashing(tmp_path):
-    """A trivial goal through the real pipeline end to end - Planner,
-    Architect, Developer, Quality Gates, and Reviewer all making real LLM
-    calls, real RAG retrieval against a real embedding call. Deliberately
-    does NOT assert quality_gates_passed - see module docstring. What matters
-    is that the pipeline completes and reports a defined outcome, rather than
-    crashing on an unexpected real response shape.
-
-    Generous timeout: SkillEngine always loads Kriya's global skill library
-    (kriya/skills/skill.py's `load_global=True`, no config override exists,
-    by design) in addition to any project-local skills - confirmed live that
-    this repo's own accumulated skill content adds meaningfully to prompt
-    size regardless of relevance to the goal. A small CI-pulled model is
-    proportionally slower against that larger context than the project's
-    real configured model would be - a throughput expectation, not a bug."""
+def test_generate_meets_the_smoke_contract(tmp_path):
+    """A trivial goal through the real pipeline with real LLM and embedding
+    calls, held to the smoke contract (tests/_live_smoke_contract.py): a real
+    model request with its runtime recorded, Kriya's own bounds kept, a
+    typed terminal outcome (SUCCESS or an allowlisted model-capability
+    failure), the workspace untouched unless verified SUCCESS, and no safety
+    invariant broken. A small CI model need not finish the task - generation
+    quality is PRD-035's (`live_target`)."""
     _init_git_repo(tmp_path)
     _write_config(tmp_path)
     goal = "write a python function called add(a, b) in add.py that returns a + b"
+    before = workspace_snapshot(tmp_path)
 
-    result = _run_kriya(["generate", goal, "-y"], cwd=tmp_path, timeout=600)
+    result = _run_kriya(["generate", goal, "-y", "--json"], cwd=tmp_path, timeout=SMOKE_PROCESS_LIMIT_SECONDS)
 
-    assert "Traceback (most recent call last)" not in result.stderr, result.stderr
-    assert "=== Generation Workflow Completed ===" in result.stdout, result.stdout
-    # Kriya logs its decisions (why a run stopped) to stderr; keep its tail
-    # with the verdict so a hosted failure is diagnosable.
-    assert "Quality Gates: PASSED" in result.stdout or "Quality Gates: FAILED" in result.stdout, (
-        f"{result.stdout}\n--- stderr (tail) ---\n{result.stderr[-TAIL_CHARS:]}")
+    payload = json.loads(result.stdout)  # one typed JSON result, never narrative
+    evidence = assert_smoke_contract(tmp_path, payload, before=before, stderr=result.stderr,
+                                     state_dir=_state_dir(tmp_path), model=LIVE_LLM_MODEL)
+    assert "=== Generation Workflow Completed ===" in result.stderr, result.stderr[-6000:]
+    assert result.returncode == (0 if evidence["outcome"] == SUCCESS else 1)
+    print(f"smoke contract evidence: {json.dumps(evidence)}")
 
 
 def test_ask_answers_a_question_about_the_repo_without_crashing(tmp_path):
