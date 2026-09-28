@@ -12,8 +12,8 @@ import os
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
+from kriya.control.control_store import write_control_file
 from kriya.control.workspace_identity import workspace_identity
-from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.workflow.edit_safety import read_file_revision
 from kriya.workflow.plan_schema import EngineeringPlan
 
@@ -174,7 +174,5 @@ def persist_planning_attempt_diagnostic(
             existing = handle.read()
     content = existing + json.dumps(payload, sort_keys=True) + "\n"
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    AuthorizedFileWriter(workspace_path).commit_file(
-        path, content, expected_revision=read_file_revision(path),
-    )
+    write_control_file(workspace_path, path, content, expected_revision=read_file_revision(path))
     return path

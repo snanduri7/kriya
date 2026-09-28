@@ -10,7 +10,6 @@ import pytest
 
 from kriya.control.decisions import DecisionLedger, load_decision_ledger
 from kriya.control.persistence import decision_ledger_path
-from kriya.policy.errors import PolicyDeniedError
 
 
 @pytest.fixture
@@ -96,10 +95,13 @@ def test_load_skips_a_malformed_trailing_line_without_losing_earlier_ones(worksp
     assert ledger.all()[1].type == "policy"
 
 
-def test_append_goes_through_authorized_file_writer(workspace, monkeypatch):
-    import kriya.policy.filesystem as fs_mod
+def test_append_goes_through_the_control_store_writer(workspace, monkeypatch):
+    # PLAT-039: Kriya's own control state is written only through
+    # kriya/control/control_store.py, which refuses anything it cannot
+    # establish as beneath .kriya/ - never candidate write authority.
+    import kriya.control.control_store as store
 
-    monkeypatch.setattr(fs_mod, "is_within_scope", lambda scope, target: False)
-    with pytest.raises(PolicyDeniedError):
+    monkeypatch.setattr(store, "path_relation", lambda root, target: store.PathRelation.OUTSIDE)
+    with pytest.raises(store.ControlStorePathError):
         DecisionLedger().record_and_persist(workspace, "triage", kind="task")
     monkeypatch.undo()

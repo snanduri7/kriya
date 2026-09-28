@@ -3,21 +3,21 @@ plan, extended in MA5.2+ as each store (contracts, artifacts, decisions)
 lands. Every store lives at its own path under `.kriya/control/` inside
 the target workspace; `_save_json_document`/`_load_json_document` below
 are the one shared, reused implementation of "atomic write through
-AuthorizedFileWriter, fail-closed read" every store's own save()/load()
+the control-store writer, fail-closed read" every store's own save()/load()
 delegates to - kept here rather than duplicated per store, per the package
 structure this task was scoped from (persistence.py as one shared file,
 not one per store).
 
-Every write goes through kriya/policy/filesystem.py's AuthorizedFileWriter
-(MA4.16) - the same real containment-and-sensitive-path enforcement every
-other authorized workspace write already goes through. No new direct
-write bypass is introduced here, per MA5's own explicit constraint.
+Every write goes through kriya/control/control_store.py's
+write_control_file (PLAT-039): Kriya's own control state is written only
+beneath `.kriya/`, and candidate write authority (AuthorizedFileWriter)
+refuses every trusted control path, so the two never overlap.
 
 No separate backup/recovery mechanism exists here because none exists
 anywhere else in Kriya's persistence today (kriya/workflow/checkpoint.py's
 save_checkpoint, kriya/workflow/milestones.py's MilestoneRunState save -
 both plain atomic-write-only, no .bak file) - nothing to mirror. Atomicity
-itself (via AuthorizedFileWriter -> edit_safety.py's commit_revision_
+itself (via write_control_file -> edit_safety.py's commit_revision_
 grounded_file -> atomic_write_file) is what protects against a partial
 write; that is the existing pattern this follows.
 """
@@ -30,10 +30,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.control.artifacts import ArtifactRegistry
 from kriya.control.contracts import ContractRegistry, ContractRegistryCorruptError, ContractRegistryTransitionError
+from kriya.control.control_store import write_control_file
 from kriya.control.run_record import RunRecord
 from kriya.control.state import ControlState
 from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
-from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.workflow.edit_safety import content_revision, read_file_revision
 
 logger = logging.getLogger(__name__)
@@ -232,7 +232,7 @@ def _save_json_document(
     expected_revision = (
         expected_file_revision if expected_file_revision is not None else read_file_revision(path)
     )
-    AuthorizedFileWriter(workspace_path).commit_file(path, content, expected_revision=expected_revision)
+    write_control_file(workspace_path, path, content, expected_revision=expected_revision)
 
 
 def _load_json_document(path: str, workspace_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -368,7 +368,7 @@ def promote_pending_contract_registry(
     """Make the staged after-state authoritative - exactly, or not at all.
     The staged payload must be the one the commit intent recorded, and the
     live registry must still be the before-state; the write is a
-    revision-checked (compare-and-swap) AuthorizedFileWriter commit of the
+    revision-checked (compare-and-swap) control-store commit of the
     staged bytes, never a rebuilt object."""
     staged = read_pending_contract_registry(workspace_path, transaction_id)
     if staged is None:
@@ -379,7 +379,7 @@ def promote_pending_contract_registry(
     if load_contract_registry(workspace_path).digest() != before_digest:
         raise ContractRegistryTransitionError("the live registry changed since the commit intent was recorded")
     path = contract_registry_path(workspace_path)
-    AuthorizedFileWriter(workspace_path).commit_file(path, text, expected_revision=read_file_revision(path))
+    write_control_file(workspace_path, path, text, expected_revision=read_file_revision(path))
     discard_pending_contract_registry(workspace_path, transaction_id)
 
 

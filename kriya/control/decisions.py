@@ -25,9 +25,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Tuple
 
+from kriya.control.control_store import write_control_file
 from kriya.control.persistence import decision_ledger_path
 from kriya.control.workspace_identity import WorkspaceOwnershipError, workspace_identity
-from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.workflow.edit_safety import read_file_revision
 
 logger = logging.getLogger(__name__)
@@ -80,9 +80,9 @@ class DecisionLedger:
     decision_ledger_path). Unlike ControlState/ContractRegistry/
     ArtifactRegistry (each a single overwritten JSON document), this store
     is append-only by nature - append_to_file() re-reads the current file,
-    adds the new line, and writes the whole thing back through
-    AuthorizedFileWriter (the same real containment/sensitive-path
-    enforcement every other control-plane write goes through) rather than
+    adds the new line, and writes the whole thing back through the
+    control-store writer (kriya/control/control_store.py, the one atomic
+    writer for `.kriya/` state) rather than
     a true O(1) file append, trading a little efficiency for reusing one
     authorized, atomic write path instead of a second bespoke one - decision
     volume within a single Kriya run is small enough that this is not a
@@ -137,7 +137,7 @@ class DecisionLedger:
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
         expected_revision = read_file_revision(path)
-        AuthorizedFileWriter(workspace_path).commit_file(path, content, expected_revision=expected_revision)
+        write_control_file(workspace_path, path, content, expected_revision=expected_revision)
 
     def record_and_persist(self, workspace_path: str, decision_type: str, **fields: Any) -> Decision:
         decision = self.record(decision_type, **fields)
@@ -178,9 +178,7 @@ def stamp_legacy_decision_ledger_ownership(workspace_path: str) -> int:
             serialized_lines.append(json.dumps(payload, sort_keys=True))
     if migrated:
         content = "\n".join(serialized_lines) + "\n"
-        AuthorizedFileWriter(workspace_path).commit_file(
-            path, content, expected_revision=read_file_revision(path),
-        )
+        write_control_file(workspace_path, path, content, expected_revision=read_file_revision(path))
     return migrated
 
 

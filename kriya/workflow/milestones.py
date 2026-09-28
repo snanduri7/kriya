@@ -35,6 +35,7 @@ from kriya.control.contracts import (
     register_provided_capabilities,
     wire_contract_consumers,
 )
+from kriya.control.control_store import write_control_file
 from kriya.control.persistence import (
     load_artifact_registry,
     load_contract_registry,
@@ -46,7 +47,6 @@ from kriya.control.persistence import (
 from kriya.control.run_coordinator import annotate_run, coordinated_mutation, owning_run_commits
 from kriya.control.run_record import COMMIT_COMMITTED
 from kriya.control.workspace_identity import ownership_metadata, validate_ownership
-from kriya.policy.filesystem import AuthorizedFileWriter
 from kriya.workflow.attempt import _build_python_runtime_grounding
 from kriya.workflow.checkpoint import compute_registry_hash, delete_checkpoint, list_checkpoints
 from kriya.workflow.context_projection import (
@@ -400,8 +400,8 @@ def save_milestone_run_state(workspace_path: str, run_state: MilestoneRunState) 
     # and a fresh plan file (no schema key) must not read as legacy later.
     payload["milestone_completion_schema"] = MILESTONE_COMPLETION_SCHEMA_VERSION
     payload["_workspace"] = ownership_metadata(workspace_path)
-    AuthorizedFileWriter(workspace_path).commit_file(
-        path, json.dumps(payload, indent=2, sort_keys=True), expected_revision=read_file_revision(path),
+    write_control_file(
+        workspace_path, path, json.dumps(payload, indent=2, sort_keys=True), expected_revision=read_file_revision(path),
     )
 
 

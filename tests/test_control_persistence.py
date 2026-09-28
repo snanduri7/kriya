@@ -1,6 +1,6 @@
 """MA5.1: ControlState persistence (kriya/control/persistence.py) - the
 save/load round trip, fail-closed behavior on a missing/corrupt file, and
-that saving really does go through AuthorizedFileWriter (MA4.16), not a
+that saving really does go through the control-store writer (PLAT-039), not a
 raw write bypass."""
 
 import json
@@ -18,7 +18,6 @@ from kriya.control.persistence import (
     save_control_state,
 )
 from kriya.control.state import ControlState
-from kriya.policy.errors import PolicyDeniedError
 
 
 @pytest.fixture
@@ -66,15 +65,15 @@ def test_load_control_state_fails_closed_on_corrupt_json(workspace):
     assert load_control_state(workspace) is None
 
 
-def test_save_goes_through_authorized_file_writer_and_denies_outside_workspace(workspace, monkeypatch):
-    """Confirms this module doesn't bypass AuthorizedFileWriter - forcing
-    is_within_scope to False (as if control_state_path somehow resolved
-    outside the workspace) must raise PolicyDeniedError, not silently
-    write anyway."""
-    import kriya.policy.filesystem as fs_mod
+def test_save_goes_through_the_control_store_writer_and_denies_outside_kriya(workspace, monkeypatch):
+    """Confirms this module doesn't bypass the control-store writer
+    (PLAT-039) - forcing its location check to OUTSIDE (as if
+    control_state_path somehow resolved outside .kriya/) must raise
+    ControlStorePathError, not silently write anyway."""
+    import kriya.control.control_store as store
 
-    monkeypatch.setattr(fs_mod, "is_within_scope", lambda scope, target: False)
-    with pytest.raises(PolicyDeniedError):
+    monkeypatch.setattr(store, "path_relation", lambda root, target: store.PathRelation.OUTSIDE)
+    with pytest.raises(store.ControlStorePathError):
         save_control_state(workspace, ControlState.new(run_id="run-1"))
     monkeypatch.undo()
 
