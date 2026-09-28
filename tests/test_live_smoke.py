@@ -21,7 +21,7 @@ import sys
 
 import pytest
 import yaml
-from _live_process import run_reporting_timeout
+from _live_process import TAIL_CHARS, run_reporting_timeout
 
 pytestmark = pytest.mark.live_model
 
@@ -118,7 +118,10 @@ def test_generate_runs_the_real_pipeline_without_crashing(tmp_path):
 
     assert "Traceback (most recent call last)" not in result.stderr, result.stderr
     assert "=== Generation Workflow Completed ===" in result.stdout, result.stdout
-    assert "Quality Gates: PASSED" in result.stdout or "Quality Gates: FAILED" in result.stdout, result.stdout
+    # Kriya logs its decisions (why a run stopped) to stderr; keep its tail
+    # with the verdict so a hosted failure is diagnosable.
+    assert "Quality Gates: PASSED" in result.stdout or "Quality Gates: FAILED" in result.stdout, (
+        f"{result.stdout}\n--- stderr (tail) ---\n{result.stderr[-TAIL_CHARS:]}")
 
 
 def test_ask_answers_a_question_about_the_repo_without_crashing(tmp_path):
