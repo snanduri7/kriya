@@ -294,9 +294,12 @@ def _store_probe(path: str, *, lock: bool = False) -> Dict[str, Any]:
             os.write(fd, b"kriya")
             os.fsync(fd)
             if lock:
-                import fcntl
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                from kriya.platform.services import platform_services
+
+                workspace_lock = platform_services().workspace_lock
+                if not workspace_lock.try_exclusive(fd):
+                    raise OSError(f"{real}: the workspace lock cannot be taken on a fresh file")
+                workspace_lock.release(fd)
         finally:
             os.close(fd)
             os.unlink(probe)
@@ -445,7 +448,14 @@ def _check_identity_lock(ctx: _Context) -> DoctorCheck:
     from kriya.control.workspace_identity import workspace_identity
 
     remediation = "Use a writable POSIX workspace and wait for the current mutating Kriya run to finish."
+    from kriya.platform.capabilities import CapabilityStatus
+    from kriya.platform.services import platform_services
+
     evidence: Dict[str, Any] = {"identity": workspace_identity(ctx.workspace)}
+    capability = platform_services().workspace_lock.capability()
+    evidence["lock_capability"] = capability.to_dict()
+    if capability.status is CapabilityStatus.UNAVAILABLE:
+        return _check("workspace.identity_lock", CheckStatus.FAIL, evidence=evidence, remediation=remediation)
     holder = probe_run_lock(ctx.workspace)
     if holder is not None:
         evidence["held_by"] = holder

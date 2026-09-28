@@ -44,12 +44,14 @@ an API protected by `run_coordinator.coordinated_mutation`.  This module is the
 low-level POSIX primitive; it deliberately remains independent of workflow
 code.
 
-Deployment envelope: macOS + Linux CI (POSIX `fcntl.flock`, no Windows
-support), single host only - this is not a distributed lock.
+The lock call itself is platform mechanism (ARCH-PLATFORM-001): it goes
+through PlatformServices' WorkspaceLockPort (POSIX flock on macOS and
+Linux; on a host without a crash-safe provider every acquisition is a typed
+PLATFORM_CAPABILITY_UNAVAILABLE refusal, never an unlocked run). Single
+host only - this is not a distributed lock.
 """
 from __future__ import annotations
 
-import fcntl
 import json
 import os
 import socket
@@ -59,6 +61,7 @@ from contextlib import contextmanager
 from typing import Iterator, Optional
 
 from kriya.control.workspace_identity import ownership_metadata
+from kriya.platform.services import platform_services
 
 _LOCK_RELPATH = os.path.join(".kriya", "run.lock")
 
@@ -123,11 +126,10 @@ def acquire_run_lock(workspace_path: str, run_id: Optional[str] = None) -> Itera
     lock_dir = os.path.join(workspace_path, ".kriya")
     os.makedirs(lock_dir, exist_ok=True)
 
+    lock = platform_services().workspace_lock
     fd = os.open(_lock_path(workspace_path), os.O_CREAT | os.O_RDWR)
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
+        if not lock.try_exclusive(fd):
             owner = _describe_current_owner(fd)
             raise WorkspaceLockHeldError(
                 f"workspace '{workspace_path}' is already owned by another Kriya "
@@ -135,20 +137,18 @@ def acquire_run_lock(workspace_path: str, run_id: Optional[str] = None) -> Itera
                 f"Kriya process is actually running before retrying - the lock "
                 f"releases automatically the instant that process exits."
             ) from None
-
         try:
-            os.lseek(fd, 0, os.SEEK_SET)
-            os.ftruncate(fd, 0)
-            os.write(fd, _diagnostic_payload(workspace_path, run_id))
-        except OSError:
-            pass  # diagnostics only - never fail acquisition over this
+            try:
+                os.lseek(fd, 0, os.SEEK_SET)
+                os.ftruncate(fd, 0)
+                os.write(fd, _diagnostic_payload(workspace_path, run_id))
+            except OSError:
+                pass  # diagnostics only - never fail acquisition over this
 
-        yield run_id
+            yield run_id
+        finally:
+            lock.release(fd)
     finally:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        except OSError:
-            pass
         os.close(fd)
 
 
@@ -163,12 +163,11 @@ def probe_run_lock(workspace_path: str) -> Optional[str]:
         fd = os.open(_lock_path(workspace_path), os.O_RDONLY)
     except FileNotFoundError:
         return None
+    lock = platform_services().workspace_lock
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-        except OSError:
+        if not lock.try_shared(fd):
             return _describe_current_owner(fd)
-        fcntl.flock(fd, fcntl.LOCK_UN)
+        lock.release(fd)
         return None
     finally:
         os.close(fd)
