@@ -126,6 +126,17 @@ The overall result is VERIFIED only if every item passes.
   - **Independent re-verification:** `mvnw -o` compile and test.
   - **Archived:** the RunRecords, the release identity, and the doctor output before and after.
   - **Verdict:** `scripts/prd036_canary.py` requires every check.
+  - **Retained worktrees (user decision, 2026-09-28, after the rc2 canary).** At rc2 the canary failed only `no_leaked_worktrees`. The run left two worktrees: the plan worktree, and the subtask engine's worktree nested inside it. Both were reset to the workspace HEAD, had no tracked changes, and held nothing but `target/` caches. That is the documented reuse (`remove_git_worktree` resets rather than deletes). The check was a harness defect: it counted any new worktree as a leak.
+    - **Rule since rc3:** a retained worktree is acceptable only if all of these hold. Anything else is a leak.
+      - It is at a documented Kriya location: `<ws>/.kriya/worktree`, or that worktree's own `.kriya/worktree`. The first path is bound to `create_git_worktree` by a test.
+      - It is registered, and is not locked, prunable or broken.
+      - Its HEAD is the workspace HEAD.
+      - It has no tracked changes.
+      - Its only untracked entry is the permitted nested worktree.
+      - Its only ignored files are listed build caches.
+      - It holds no `.kriya` state other than that nested worktree.
+    - **Bounded reuse.** The canary runs twice on the same candidate and config. Run 2 starts from run 1's state with only the tracked files restored. The retained worktree set must be identical after both runs: same set, same size, no new nesting level.
+    - **Follow-up.** The nested design is registered as WORKTREE-NESTED-REUSE-001 (P2). Production cleanup is unchanged.
 - **D5: execution.** The agent runs the long jobs with no aggressive polling. The order:
   1. context certification (done, CERTIFIED; the doctor already reports `PRODUCTION_READY=true` on D1);
   2. freeze;
