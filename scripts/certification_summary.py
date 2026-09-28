@@ -1,12 +1,15 @@
 """PRD-034: the certification summary of one scripts/certify.sh run.
 
 Reads OUT_DIR/stages.jsonl, the junit files, the skip audits
-(skips.json), environment.json and doctor.json. Writes
+(skips.json), environment.json, release-identity.json and doctor.json. Writes
 certification-summary.json and certification-summary.md. The overall status
 is CERTIFIED only when every mandatory stage (static, pytest, images,
 scanner, release) is PASS, the doctor produced parseable JSON, and no unexpected skip
-remains. The doctor's own PRODUCTION_READY verdict is reported exactly as it
-is. The exit status is 0 when CERTIFIED and 1 otherwise.
+remains, and the release identity (kriya/core/release_identity.py:
+Kriya revision, platform providers and capabilities, containment backend,
+environment) was recorded from a clean, pinned revision. The doctor's own
+PRODUCTION_READY verdict is reported exactly as it is. The exit status is
+0 when CERTIFIED and 1 otherwise.
 """
 import json
 import os
@@ -70,10 +73,17 @@ def summarize(out: str) -> Dict[str, Any]:
     for tier, data in tiers.items():
         if data["unexpected_skips"]:
             problems.append(f"{tier}: {data['unexpected_skips']} unexpected skip(s)")
+    identity = _json(os.path.join(out, "release-identity.json"))
+    kriya = (identity or {}).get("kriya") if isinstance(identity, dict) else None
+    if not isinstance(identity, dict) or not identity.get("digest"):
+        problems.append("release_identity: not recorded")
+    elif not isinstance(kriya, dict) or kriya.get("revision") in (None, "unavailable") or kriya.get("dirty") is not False:
+        problems.append("release_identity: Kriya revision not pinned (dirty or unavailable)")
     return {
         "status": "CERTIFIED" if not problems else "NOT_CERTIFIED", "problems": problems,
         "stages": stages, "tiers": tiers, "doctor": doctor_summary,
         "environment": _json(os.path.join(out, "environment.json")),
+        "release_identity": identity,
     }
 
 
@@ -91,7 +101,9 @@ def render(summary: Dict[str, Any]) -> str:
     doctor = summary["doctor"]
     lines += ["", "## Production doctor (recorded as reported)", "",
               "```json", json.dumps(doctor, indent=2, sort_keys=True), "```",
-              "", "## Environment", "", "```json", json.dumps(summary["environment"], indent=2, sort_keys=True), "```"]
+              "", "## Environment", "", "```json", json.dumps(summary["environment"], indent=2, sort_keys=True), "```",
+              "", "## Release identity (a material change makes this certification stale)", "",
+              "```json", json.dumps(summary["release_identity"], indent=2, sort_keys=True), "```"]
     return "\n".join(lines) + "\n"
 
 

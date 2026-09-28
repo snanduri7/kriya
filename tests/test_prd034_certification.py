@@ -96,7 +96,10 @@ def _summary_module():
     return module
 
 
-def _certification_out(tmp_path, stages, *, unexpected=0, doctor=None):
+PINNED_IDENTITY = {"version": 1, "kriya": {"revision": "a" * 40, "dirty": False}, "digest": "d" * 64}
+
+
+def _certification_out(tmp_path, stages, *, unexpected=0, doctor=None, identity=PINNED_IDENTITY):
     out = tmp_path / "out"
     (out / "pytest").mkdir(parents=True)
     (out / "stages.jsonl").write_text("".join(json.dumps({"stage": n, "status": s, "detail": ""}) + "\n"
@@ -105,6 +108,8 @@ def _certification_out(tmp_path, stages, *, unexpected=0, doctor=None):
     (out / "pytest" / "junit.xml").write_text(
         '<testsuites><testsuite tests="10" failures="0" errors="0" skipped="1"/></testsuites>')
     (out / "environment.json").write_text(json.dumps({"python": "3.14"}))
+    if identity is not None:
+        (out / "release-identity.json").write_text(json.dumps(identity))
     if doctor is not None:
         (out / "doctor.json").write_text(json.dumps(doctor))
     return str(out)
@@ -136,3 +141,17 @@ def test_an_unexpected_skip_or_a_missing_doctor_is_never_certified(tmp_path):
     no_doctor = module.summarize(_certification_out(tmp_path / "d", {**PASSING, "doctor": "FAIL"}))
     assert no_doctor["status"] == "NOT_CERTIFIED" and no_doctor["doctor"] is None
     assert module.main(_certification_out(tmp_path / "m", PASSING, doctor=DOCTOR)) == 0
+
+
+@pytest.mark.parametrize("identity,problem", [
+    (None, "release_identity: not recorded"),
+    ({"kriya": {"revision": "a" * 40, "dirty": False}}, "release_identity: not recorded"),
+    ({**PINNED_IDENTITY, "kriya": {"revision": "a" * 40, "dirty": True}}, "release_identity: Kriya revision not pinned"),
+    ({**PINNED_IDENTITY, "kriya": {"revision": "unavailable", "dirty": None}}, "release_identity: Kriya revision not pinned"),
+])
+def test_certification_requires_a_pinned_release_identity(tmp_path, identity, problem):
+    module = _summary_module()
+    summary = module.summarize(_certification_out(tmp_path, PASSING, doctor=DOCTOR, identity=identity))
+    assert summary["status"] == "NOT_CERTIFIED"
+    assert any(p.startswith(problem) for p in summary["problems"]), summary["problems"]
+    assert "Release identity" in module.render(summary)

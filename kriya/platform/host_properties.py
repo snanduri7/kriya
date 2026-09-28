@@ -74,3 +74,9 @@ def host_properties(run: Callable[[Sequence[str]], Optional[str]] = _run) -> Dic
         props["memory_bytes"] = None
         props["gpus"] = []
     return props
+
+
+def os_and_architecture() -> Dict[str, str]:
+    """The OS family and machine architecture, lower-case (UNAVAILABLE when
+    the host does not say)."""
+    return {"os": platform.system().lower() or UNAVAILABLE, "architecture": platform.machine().lower() or UNAVAILABLE}

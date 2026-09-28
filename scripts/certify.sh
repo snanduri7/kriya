@@ -66,6 +66,17 @@ json.dump(env, open(sys.argv[1], "w"), indent=2, sort_keys=True)
 PY
 stage environment RECORDED "$(cat "$OUT/environment.json" | tr -d '\n' | cut -c1-200)"
 
+# --- release identity (PLAT-RELEASE-IDENTITY-001) ------------------------------
+# Kriya revision, platform providers + capability statuses, containment backend
+# (certification exercises OCI), environment. A material change later makes this
+# certification stale (kriya.core.release_identity.compare_release_identity).
+if "$VENV_BIN/python" -c 'import json, sys; from kriya.core.release_identity import release_identity; json.dump(release_identity(sys.argv[2]), open(sys.argv[1], "w"), indent=2, sort_keys=True)' \
+    "$OUT/release-identity.json" oci 2> "$OUT/release-identity.stderr.txt"; then
+  stage release_identity RECORDED "$("$VENV_BIN/python" -c 'import json, sys; print(json.load(open(sys.argv[1]))["digest"])' "$OUT/release-identity.json")"
+else
+  stage release_identity FAIL "see release-identity.stderr.txt"
+fi
+
 # --- static checks -------------------------------------------------------------
 if ruff check . > "$OUT/ruff.txt" 2>&1 && pylint kriya plugins/core_tools tests > "$OUT/pylint.txt" 2>&1; then
   stage static PASS
