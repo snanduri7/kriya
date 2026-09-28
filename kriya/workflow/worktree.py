@@ -1,7 +1,9 @@
 """Git worktree sandbox lifecycle for the Developer + Quality Gates retry loop - create/reset/sync/remove. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
+import hashlib
 import logging
 import os
+import re
 import shutil
 import subprocess
 from typing import List, Optional
@@ -29,6 +31,74 @@ logger = logging.getLogger(__name__)
 # plumbing (status/rev-parse/worktree list/worktree prune) is untouched -
 # it cannot trigger a hook and this stays a minimal, targeted diff.
 _HOOKS_DISABLED = ["-c", "core.hooksPath=/dev/null"]
+
+# WORKTREE-CANONICAL-ROOT-001: where Kriya-managed worktrees live. A workspace's
+# own reusable worktree is <workspace>/.kriya/worktree (or the scoped snapshot
+# <workspace>/.kriya/scoped-worktree). A worktree for an isolated candidate
+# workspace the active run authorized (the enforce plan worktree, in which the
+# subtask engine runs) is a sibling rooted at the run's canonical workspace:
+# <workspace>/.kriya/worktrees/<name>, never inside the candidate. No
+# Kriya-managed worktree is ever a descendant of another one.
+WORKSPACE_WORKTREE = (".kriya", "worktree")
+WORKSPACE_SCOPED_WORKTREE = (".kriya", "scoped-worktree")
+CANDIDATE_WORKTREES = (".kriya", "worktrees")
+
+
+class NestedWorktreeError(RuntimeError):
+    """A Kriya-managed worktree would be created inside another one."""
+
+
+def managed_worktree_ancestor(path: str) -> Optional[str]:
+    """The Kriya-managed worktree location ``path`` lies strictly inside, or
+    None. A managed location itself is not inside one."""
+    parts = os.path.realpath(path).split(os.sep)
+    for index, part in enumerate(parts[:-1]):
+        if part != ".kriya":
+            continue
+        following = parts[index + 1]
+        if following in (WORKSPACE_WORKTREE[1], WORKSPACE_SCOPED_WORKTREE[1]):
+            end = index + 2
+        elif following == CANDIDATE_WORKTREES[1] and index + 2 < len(parts):
+            end = index + 3
+        else:
+            continue
+        if end < len(parts):
+            return os.sep.join(parts[:end])
+    return None
+
+
+def managed_worktree_path(repo_path: str, *, scoped: bool = False) -> str:
+    """Where the worktree for ``repo_path`` lives. It is rooted at the
+    canonical workspace: ``repo_path`` itself, or, for a candidate workspace
+    the active run authorized, that run's workspace (supplied by the
+    RunCoordinator, never inferred from the working directory). The candidate's
+    name is derived from its path relative to that root, so a resumed run
+    resolves the same worktree. Raises NestedWorktreeError rather than place
+    one managed worktree inside another."""
+    from kriya.control.run_coordinator import candidate_workspace_root
+
+    canonical = os.path.realpath(repo_path)
+    root = candidate_workspace_root(canonical)
+    if root is None:
+        path = os.path.join(canonical, *(WORKSPACE_SCOPED_WORKTREE if scoped else WORKSPACE_WORKTREE))
+    else:
+        relative = os.path.relpath(canonical, root)
+        hint = re.sub(r"[^A-Za-z0-9]+", "-", relative).strip("-")[:40] or "workspace"
+        digest = hashlib.sha256(relative.encode("utf-8")).hexdigest()[:8]
+        path = os.path.join(root, *CANDIDATE_WORKTREES, f"{'scoped-' if scoped else ''}candidate-{hint}-{digest}")
+    ancestor = managed_worktree_ancestor(path)
+    if ancestor is not None:
+        raise NestedWorktreeError(
+            f"refusing a Kriya-managed worktree at {path!r}: it would be inside the Kriya-managed worktree "
+            f"{ancestor!r}. A worktree for a candidate workspace is rooted at the run's canonical workspace; "
+            "this path is not a candidate the active run authorized."
+        )
+    return path
+
+
+def _registered_worktrees(repo_path: str) -> List[str]:
+    res = subprocess.run(["git", "worktree", "list", "--porcelain"], cwd=repo_path, capture_output=True, text=True)
+    return [os.path.realpath(line[len("worktree "):]) for line in res.stdout.splitlines() if line.startswith("worktree ")]
 
 
 # MA4.8 (control-plane implementation plan) - audit-only, module-level since
@@ -232,7 +302,7 @@ def _resolved_git_toplevel(workspace_path: str) -> Optional[str]:
     return None
 
 
-def _create_scoped_snapshot_sandbox(workspace_path: str) -> str:
+def _create_scoped_snapshot_sandbox(workspace_path: str, sandbox_path: str) -> str:
     """Isolate a requested directory that is merely nested inside another repo.
 
     A Git worktree always checks out the owning repository's complete root. If
@@ -242,7 +312,6 @@ def _create_scoped_snapshot_sandbox(workspace_path: str) -> str:
     caller's explicit workspace boundary while retaining the same apply-back
     contract used by the normal sandbox.
     """
-    sandbox_path = os.path.join(workspace_path, ".kriya", "scoped-worktree")
     if os.path.exists(sandbox_path):
         shutil.rmtree(sandbox_path)
     os.makedirs(sandbox_path, exist_ok=True)
@@ -325,7 +394,7 @@ def create_git_worktree(repo_path: str) -> str:
             "using a workspace-scoped snapshot sandbox.",
             workspace_realpath, git_toplevel,
         )
-        return _create_scoped_snapshot_sandbox(workspace_realpath)
+        return _create_scoped_snapshot_sandbox(workspace_realpath, managed_worktree_path(repo_path, scoped=True))
 
     # 1b. `git worktree add --detach` needs a commit-ish to detach at - a repo
     # with zero commits has no HEAD and this fails with exit 128, silently
@@ -356,7 +425,7 @@ def create_git_worktree(repo_path: str) -> str:
                 f"failed ({e}) - worktree creation will likely fail and fall back to the unisolated workspace."
             )
 
-    worktree_path = os.path.join(repo_path, ".kriya", "worktree")
+    worktree_path = managed_worktree_path(repo_path)
     os.makedirs(os.path.dirname(worktree_path), exist_ok=True)
 
     # 2. Prune any stale/orphaned worktree records in git administrative data
@@ -367,9 +436,9 @@ def create_git_worktree(repo_path: str) -> str:
 
     worktree_registered = False
     try:
-        res = subprocess.run(["git", "worktree", "list"], cwd=repo_path, capture_output=True, text=True)
-        if worktree_path in res.stdout:
-            worktree_registered = True
+        # An exact path match: <ws>/.kriya/worktree is a string prefix of
+        # every <ws>/.kriya/worktrees/<name>, so a substring test is wrong.
+        worktree_registered = os.path.realpath(worktree_path) in _registered_worktrees(repo_path)
     except Exception as e:
         logger.debug(f"git worktree list failed, assuming worktree is not registered: {e}")
 
@@ -526,6 +595,18 @@ def clean_untracked_files_since(worktree_path: str, baseline: Optional[set]) -> 
             logger.debug(f"Failed to clean up runtime artifact '{rel}' after verification run (non-fatal): {e}")
 
 
+def _is_scoped_snapshot(worktree_path: str) -> bool:
+    """A Kriya scoped snapshot sandbox at a managed location (never an
+    arbitrary directory that happens to carry the sentinel)."""
+    path = os.path.realpath(worktree_path)
+    parent, name = os.path.split(path)
+    at_managed_location = (
+        (name == WORKSPACE_SCOPED_WORKTREE[1] and os.path.basename(parent) == ".kriya")
+        or (name.startswith("scoped-candidate-") and parent.endswith(os.path.join(*CANDIDATE_WORKTREES)))
+    )
+    return at_managed_location and os.path.exists(os.path.join(path, _SCOPED_SNAPSHOT_SENTINEL))
+
+
 def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
     """Despite the name, this resets the worktree back to repo_path's current
     commit rather than truly deleting it - the worktree is deliberately reused
@@ -536,11 +617,7 @@ def remove_git_worktree(repo_path: str, worktree_path: str) -> None:
     frozen at whatever commit existed the first time it was ever created,
     silently hiding every commit made since from any future run that doesn't
     itself rewrite the affected files."""
-    expected_scoped_path = os.path.realpath(os.path.join(repo_path, ".kriya", "scoped-worktree"))
-    if (
-        os.path.realpath(worktree_path) == expected_scoped_path
-        and os.path.exists(os.path.join(worktree_path, _SCOPED_SNAPSHOT_SENTINEL))
-    ):
+    if _is_scoped_snapshot(worktree_path):
         try:
             shutil.rmtree(worktree_path)
         except OSError as e:

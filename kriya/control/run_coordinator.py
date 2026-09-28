@@ -329,6 +329,23 @@ def authorize_candidate_workspace(
     return active
 
 
+def candidate_workspace_root(path: str) -> Optional[str]:
+    """The active run's canonical workspace when ``path`` is an isolated
+    candidate workspace that run authorized (the enforce plan worktree);
+    None when no run is active, or ``path`` is the run's own workspace or
+    anything the run did not authorize. WORKTREE-CANONICAL-ROOT-001: a
+    worktree for a candidate is rooted here, never inside the candidate."""
+    context = current_run_context()
+    if context is None:
+        return None
+    canonical = _canonical_workspace(path)
+    if canonical == context.workspace_path:
+        return None
+    if workspace_identity(canonical) in context._lease.candidate_workspace_ids:
+        return context.workspace_path
+    return None
+
+
 @contextmanager
 def begin_mutating_run(
     workspace_path: str, *, run_id: Optional[str] = None
