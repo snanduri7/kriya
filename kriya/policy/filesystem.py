@@ -57,7 +57,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Iterable, Optional, Sequence, Tuple
 
-from kriya.platform.filesystem_semantics import PathIdentity, path_identity
+from kriya.platform.filesystem_semantics import PathIdentity, PathRelation, path_identity, path_relation
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
@@ -108,6 +108,23 @@ _ENFORCEMENT_SENSITIVE_PATH_PATTERNS: Tuple[str, ...] = (
     r"(^|/)secrets?(\.[A-Za-z0-9]+)?($|/)",
     r"(^|/)passwords?(\.[A-Za-z0-9]+)?($|/)",
 )
+
+
+# PLAT-039: repository metadata and Kriya's own control state. Candidate
+# (model-directed) write authority never reaches them, under any spelling;
+# Kriya's own stores write `.kriya/` through kriya/control/control_store.py.
+TRUSTED_CONTROL_DIRECTORIES: Tuple[str, ...] = (".git", ".kriya")
+
+
+def is_trusted_control_path(root: str, target: str) -> bool:
+    """Whether ``target`` is, or lies beneath, a trusted control directory
+    of ``root`` - by filesystem identity, so case and normalization variants
+    and symlink aliases count. A location that cannot be established counts
+    as trusted (fail closed)."""
+    return any(
+        path_relation(os.path.join(root, name), target) is not PathRelation.OUTSIDE
+        for name in TRUSTED_CONTROL_DIRECTORIES
+    )
 
 
 def _canonical(path: str) -> str:
@@ -234,6 +251,16 @@ class AuthorizedFileWriter:
                     f"authorized writable root: {self._scope.writable_roots}."
                 ),
                 matched_rule="filesystem.authorized_writer.outside_scope",
+            )
+        if is_trusted_control_path(self._workspace_root, target_path):
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="TRUSTED_CONTROL_PATH_DENIED",
+                explanation=(
+                    f"'{target_path}' is repository metadata or Kriya control state "
+                    f"({', '.join(TRUSTED_CONTROL_DIRECTORIES)}); candidate writes never reach it."
+                ),
+                matched_rule="filesystem.authorized_writer.trusted_control_path",
             )
         if self._write_scope_mode == WriteScopeMode.DENY_ALL:
             # Unconditional - no persistent write is permitted in this mode,

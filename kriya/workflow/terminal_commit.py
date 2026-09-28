@@ -41,6 +41,7 @@ from kriya.control.run_record import (
     COMMIT_ROLLED_BACK,
     COMMIT_UNCERTAIN,
 )
+from kriya.policy.filesystem import is_trusted_control_path
 from kriya.static_analysis.service import StaticAnalysisCommitGuard
 from kriya.workflow.edit_safety import (
     BatchCommitError,
@@ -90,6 +91,12 @@ def materialize_candidate(
     for item in files:
         candidate_path = os.path.join(candidate_root, item.relpath)
         target_path = os.path.join(workspace_root, item.relpath)
+        if is_trusted_control_path(workspace_root, target_path):
+            # PLAT-039: the commit boundary's own backstop to the candidate
+            # writer's refusal - a candidate never commits into .git/.kriya.
+            raise CandidateMaterializationError(
+                f"Verified candidate names a trusted control path {item.relpath!r}; refusing to commit it"
+            )
         if item.delete:
             if os.path.lexists(candidate_path):
                 raise CandidateMaterializationError(
