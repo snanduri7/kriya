@@ -1,0 +1,5 @@
+FAILED tests/test_context_source.py::test_resolver_revision_changes_with_content
+FAILED tests/test_distribution_integrity.py::test_wheel_package_data_patterns_cover_every_tracked_skill_file
+FAILED tests/test_polymorphic_validation.py::test_run_app_sequence_multi_step_success
+FAILED tests/test_prd014_model_qualification.py::test_assessment_states - Ass...
+FAILED tests/test_tools_command.py::test_tools_execute_works_despite_unrelated_broken_plugin

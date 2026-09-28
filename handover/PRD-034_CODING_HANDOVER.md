@@ -94,3 +94,15 @@ See `handover/evidence/PRD-034/`.
 **What CERTIFIED means (recorded for PRD-036).** "PRD-034 CERTIFIED" is canonical CI/test certification only, and never equivalent to `PRODUCTION_READY=true`. PRD-036 must separately require `kriya doctor --production` to return `PRODUCTION_READY=true` on the actual operator-approved production config.
 
 **Still open.** STATIC-ANALYSIS-CI-LIVE-JOB-001 stays OPEN, and PRD-034 is not fully verified, until the hosted `production-certification` job passes after the push.
+
+## First hosted run (2026-09-28) and Linux closure
+
+The first hosted `production-certification` run (36368006232) FAILED:
+- static, scanner (27/0) and release passed;
+- 15 pytest tests failed, all of them Linux-only defects hidden by macOS semantics.
+
+Every failure was classified and fixed, and reproduced on Linux before and after its fix. See `handover/LINUX_CERTIFICATION_CLOSURE.md`.
+- Local certification at `99fd3ee`: CERTIFIED, including the new mandatory `images` stage.
+- Linux full suite at `1ef6a5e`: 6897/0.
+
+PRD-034 stays not VERIFIED until a hosted run is green.

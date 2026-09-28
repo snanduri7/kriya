@@ -130,3 +130,20 @@ Also corrected before commit, so not shipped defects:
 3. After the approved push, the hosted `production-certification` job must run green; that is what closes STATIC-ANALYSIS-CI-LIVE-JOB-001.
 
 PRD-036 is not started.
+
+## After the push: first hosted run and Linux closure (2026-09-28)
+
+The first hosted run (36368006232) failed on Linux-only defects. Five P1 product defects and one P2 were fixed, each in its own commit and each reproduced on Linux before and after its fix:
+- JVM under RLIMIT_AS;
+- OCI containers running as root without DAC_OVERRIDE;
+- the contained-venv symlink check;
+- the Docker daemon probe;
+- racy stat caches;
+- the pinned-image preflight (the P2).
+
+Two of my own test defects were also fixed. Gates:
+- Linux full suite: 6897/0;
+- `certify.sh`: CERTIFIED at `99fd3ee`;
+- chaos: 52/52.
+
+The live timeouts (P2) await evidence from the next hosted run. Details: `handover/LINUX_CERTIFICATION_CLOSURE.md`.
