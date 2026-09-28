@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Tuple
 
 from kriya.analyzer.java_members import extract_java_members
+from kriya.core.file_stamp import file_stamp, unchanged_since
 from kriya.workflow.edit_safety import content_revision
 
 _SUPPORTED_MEMBER_EXTENSIONS = {".py", ".java"}
@@ -177,7 +178,10 @@ def _cached_read(
         return None
     cache_key = f"{root}\x00{relpath}"
     cached = content_cache.get(cache_key)
-    if cached is not None and cached[0] == stat_result.st_mtime:
+    # FILE-STAMP-RACY-CACHE-001: the stat proves nothing about a file that
+    # was still inside the racy window when it was cached (same-tick,
+    # same-size rewrites keep the mtime on Linux) - it is read again.
+    if cached is not None and unchanged_since(cached[0], stat_result):
         return cached[2], cached[1]
     try:
         with open(full, "r", encoding="utf-8", errors="replace") as fh:
@@ -185,7 +189,7 @@ def _cached_read(
     except OSError:
         return None
     revision = content_revision(content)
-    content_cache[cache_key] = (stat_result.st_mtime, revision, content)
+    content_cache[cache_key] = (file_stamp(stat_result), revision, content)
     return content, revision
 
 
@@ -260,8 +264,8 @@ class SourceDerivationCache:
         read path. Returns (content, revision) or None if unreadable."""
         self.content_reads += 1
         try:
-            was_cached = os.stat(os.path.join(root, relpath)).st_mtime == (
-                self.content_cache.get(f"{root}\x00{relpath}", (None,))[0]
+            was_cached = unchanged_since(
+                self.content_cache.get(f"{root}\x00{relpath}", (None,))[0], os.stat(os.path.join(root, relpath)),
             )
         except OSError:
             was_cached = False

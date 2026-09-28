@@ -67,6 +67,7 @@ from kriya.core.execution_environment import (
     ExecutionEnvironment,
     environment_for_fingerprint,
 )
+from kriya.core.file_stamp import FileStamp, file_stamp, unchanged_since
 from kriya.core.inference_runtime import ChatRequest, runtime_adapter, runtime_for_binding
 from kriya.core.inference_settings import InferenceSettings, qualification_identity
 from kriya.core.model_runtime import MODEL_PROTOCOL_ADAPTER_VERSION, ModelRuntimeFingerprint
@@ -191,10 +192,11 @@ def context_tier_requirements(config: Any, model: str) -> Tuple[str, ...]:
 
 
 # INF-001: qualification is looked up on every model call (measured limits,
-# context tiers). A record file is re-read and re-parsed only when its
-# (mtime, size) changed - never stale, never parsed twice while unchanged.
+# context tiers). A record file is re-read and re-parsed unless its stat
+# proves it unchanged (kriya/core/file_stamp.py: settled when cached, same
+# mtime/size/inode) - never stale, never parsed twice while unchanged.
 # Cached records are shared: callers treat them as read-only.
-_RECORD_CACHE: Dict[str, Tuple[Tuple[int, int], Optional[Dict[str, Any]]]] = {}
+_RECORD_CACHE: Dict[str, Tuple[FileStamp, Optional[Dict[str, Any]]]] = {}
 _RECORD_CACHE_LOCK = threading.Lock()
 
 
@@ -203,11 +205,13 @@ def _cached_record_file(path: str) -> Optional[Dict[str, Any]]:
         stat = os.stat(path)
     except OSError:
         return None
-    stamp = (stat.st_mtime_ns, stat.st_size)
     with _RECORD_CACHE_LOCK:
         hit = _RECORD_CACHE.get(path)
-    if hit is not None and hit[0] == stamp:
+    # FILE-STAMP-RACY-CACHE-001: trusted only if the record had settled
+    # when it was cached (a same-tick, same-size rewrite keeps the mtime).
+    if hit is not None and unchanged_since(hit[0], stat):
         return hit[1]
+    stamp = file_stamp(stat)
     try:
         with open(path, encoding="utf-8") as stream:
             record = json.load(stream)

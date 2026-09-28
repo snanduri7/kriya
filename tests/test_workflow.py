@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,6 +18,7 @@ from kriya.agents.contracts import (
     PLANNED_IMPLEMENTATION_SECTION_HEADER,
 )
 from kriya.config import AppConfig, LLMConfig
+from kriya.core.file_stamp import RACY_WINDOW_NS
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.core.state_paths import trace_db_path
@@ -26064,6 +26066,8 @@ async def test_source_cache_reused_across_two_real_run_attempt_calls(tmp_path):
     (tmp_path / "Shared.java").write_text(
         "public class Shared {\n    public void method() {}\n}\n" + "// pad\n" * 200
     )
+    settled = time.time_ns() - 10 * RACY_WINDOW_NS  # read reuse is only for a settled file
+    os.utime(tmp_path / "Shared.java", ns=(settled, settled))
 
     state = GenerationState()
     state.attempt_number = 0

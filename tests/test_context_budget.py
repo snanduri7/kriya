@@ -2,7 +2,9 @@
 (build_known_target_context, replacing _brownfield_owner_contract_block's
 own source-content responsibility)."""
 import os
+import time
 
+from kriya.core.file_stamp import RACY_WINDOW_NS
 from kriya.workflow.context_budget import (
     KNOWN_TARGET_FLOOR,
     REASON_BODY_ELIDED,
@@ -570,6 +572,8 @@ def test_source_derivation_cache_performance_counters_report_reuse(tmp_path):
     from kriya.workflow.context_source import SourceDerivationCache
 
     _write(str(tmp_path), "a.py", "x = 1\n" * 500)
+    settled = time.time_ns() - 10 * RACY_WINDOW_NS  # read reuse is only for a settled file
+    os.utime(tmp_path / "a.py", ns=(settled, settled))
     cache = SourceDerivationCache()
 
     build_code_context_package(["a.py"], [], str(tmp_path), budget_limit=5, cache=cache)

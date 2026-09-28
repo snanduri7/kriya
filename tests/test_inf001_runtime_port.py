@@ -6,6 +6,7 @@ port; workflow and agent code never touch an adapter."""
 import asyncio
 import os
 import re
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,6 +23,7 @@ from kriya.config import AppConfig, FallbackModelConfig, ModelCapabilities
 from kriya.config.authority import FieldClassification, agent_role_field_classification, classify_field
 from kriya.core import model_runtime
 from kriya.core.completion import CompletionStatus
+from kriya.core.file_stamp import RACY_WINDOW_NS
 from kriya.core.inference_runtime import (
     InferenceRuntimePort,
     UnknownRuntimeAdapterError,
@@ -249,6 +251,11 @@ def test_a_qualification_record_is_parsed_once_while_unchanged(tmp_path, monkeyp
     monkeypatch.setenv(mq.QUALIFICATION_HOME_ENV, str(tmp_path))
     path = tmp_path / "record.json"
     path.write_text('{"fingerprint_digest": "d"}')
+    # Parse-once holds for a settled record (FILE-STAMP-RACY-CACHE-001: one
+    # still inside the racy window is re-read) - as a record written by an
+    # earlier `kriya model qualify` is.
+    settled = time.time_ns() - 10 * RACY_WINDOW_NS
+    os.utime(path, ns=(settled, settled))
     real_load = mq.json.load
     loads = []
 
@@ -262,7 +269,7 @@ def test_a_qualification_record_is_parsed_once_while_unchanged(tmp_path, monkeyp
             assert mq.runtime_has_records("d")
         assert len(loads) == 1
         path.write_text('{"fingerprint_digest": "e"}')  # a changed record is re-read, never stale
-        os.utime(path, ns=(path.stat().st_atime_ns, path.stat().st_mtime_ns + 1000))
+        os.utime(path, ns=(settled + 1000, settled + 1000))
         assert mq._read_record("record", None) == {"fingerprint_digest": "e"}
 
 
