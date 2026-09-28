@@ -137,3 +137,25 @@ Then:
 - PRD-034 is not VERIFIED, and STATIC-ANALYSIS-CI-LIVE-JOB-001 is not closed, until the hosted `production-certification` job is green.
 - PRD-036 does not start before that.
 - Any hosted failure is classified as WAVE7_REGRESSION | PRE_EXISTING_PRODUCT_DEFECT | CI_ENVIRONMENT | EXTERNAL_TRANSIENT | EXPECTED_NON_PRODUCTION_CONDITION, and every product defect is fixed first.
+
+## Hosted validation (run 36380966601 at `6cbb614`)
+
+| Job | Result | Classification |
+|---|---|---|
+| **Production certification** | **CERTIFIED**: static PASS; pytest 6897/0 (0 unexpected skips); images PASS; pinned scanner tier 27/0; release PASS; doctor recorded | — |
+| Test 3.11 / 3.12 / 3.13 / 3.14 | success | — |
+| Static, lint, lock file, sdist / clean wheel | success | — |
+| Test (Python 3.10) | 1 failed / 6896 passed | Test defect, pre-existing since PRD-011 (PY310-COMPAT-TEST-001) |
+| Primary live model regression | 2 failed / 6 passed | EXPECTED_NON_PRODUCTION_CONDITION (LIVE-SMOKE-CPU-TIMEOUT-001) |
+
+**Test (Python 3.10).** The test simulated 3.10 by importing stdlib `tomllib`, so it could not run on a real 3.10. Fixed in `5cd5d12` and verified on a real Python 3.10.21.
+
+**Live model regression.**
+- The evidence captured by `de0ca0f` shows bounded progress, not a hang: the CPU-only 1.5B model degenerates into runaway repetitive designs at 60–95 s per call.
+- No timeout was changed. `18b7bc5` also keeps the stderr tail on the smoke verdict.
+- Deciding the job's model or runner, or its contract, is the user's call.
+
+**Consequences:**
+- **STATIC-ANALYSIS-CI-LIVE-JOB-001: CLOSED.**
+- **PRD-034: VERIFIED** (tracker).
+- PRD-036 is unblocked by the certification gate, but not started.

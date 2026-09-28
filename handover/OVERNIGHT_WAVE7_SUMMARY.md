@@ -147,3 +147,9 @@ Two of my own test defects were also fixed. Gates:
 - chaos: 52/52.
 
 The live timeouts (P2) await evidence from the next hosted run. Details: `handover/LINUX_CERTIFICATION_CLOSURE.md`.
+
+**Hosted certification green** (run 36380966601 at `6cbb614`):
+- **PRD-034 VERIFIED**;
+- **STATIC-ANALYSIS-CI-LIVE-JOB-001 CLOSED**;
+- the Test (3.10) test defect is fixed (`5cd5d12`);
+- the live-model job's CPU 1.5B model condition needs a user decision (LIVE-SMOKE-CPU-TIMEOUT-001, P2).

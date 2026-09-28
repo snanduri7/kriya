@@ -2,7 +2,7 @@
 
 ## Status
 
-**LOCALLY_VERIFIED / READY_FOR_USER_REVIEW** (Wave 7, local and unpushed). Tracker: `READY_FOR_PYTEST_VERIFICATION`.
+**VERIFIED** (hosted production-certification run 36380966601, 2026-09-28). Tracker: `VERIFIED`.
 
 The hosted GitHub run of the new job is **NOT_EXECUTED (pending the user's push)**. This batch forbids pushing, so this is not a CI service limitation. The executed evidence is the canonical local run of the same `scripts/certify.sh` on the target machine.
 
@@ -106,3 +106,11 @@ Every failure was classified and fixed, and reproduced on Linux before and after
 - Linux full suite at `1ef6a5e`: 6897/0.
 
 PRD-034 stays not VERIFIED until a hosted run is green.
+
+**Hosted run 36380966601 at `6cbb614`: CERTIFIED.**
+- pytest 6897/0 with 0 unexpected skips;
+- images PASS;
+- scanner 27/0;
+- release PASS.
+
+**PRD-034 VERIFIED; STATIC-ANALYSIS-CI-LIVE-JOB-001 CLOSED.**
