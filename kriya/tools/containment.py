@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Dict, List, Optional, Protocol, Tuple
 
-from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
+from kriya.tools.sandbox import build_restricted_env, resource_plan
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +258,10 @@ class PreparedContainment:
     cleanup: Optional[Callable[[], None]] = None
     exec_target: Optional[List[str]] = None
     toolchain_identity: Optional["_toolchain_identity_module.ToolchainIdentity"] = None
+    # LINUX-JVM-RLIMIT-AS-001: how a host process's CPU/memory budget is
+    # enforced (kriya/tools/sandbox.py::ResourcePlan.evidence). None when no
+    # limit applies or a container enforces them.
+    resources: Optional[Dict[str, object]] = None
 
 
 class ContainmentBackend(Protocol):
@@ -336,12 +340,18 @@ class NullContainmentBackend:
                 f"command uncontained."
             )
         env = build_restricted_env(profile.env_allowlist) if profile.env_allowlist else None
-        preexec_fn = None
-        if profile.cpu_seconds is not None or profile.memory_mb is not None:
-            preexec_fn = posix_resource_limits_preexec_fn(
-                profile.cpu_seconds, profile.memory_mb
-            )
-        return PreparedContainment(env=env, preexec_fn=preexec_fn, backend_name=self.name)
+        if profile.cpu_seconds is None and profile.memory_mb is None:
+            return PreparedContainment(env=env, preexec_fn=None, backend_name=self.name)
+        # LINUX-JVM-RLIMIT-AS-001: RLIMIT_AS for ordinary commands, explicit
+        # JVM memory bounds for a JVM-backed one (typed toolchain first).
+        plan = resource_plan(
+            command, profile.cpu_seconds, profile.memory_mb,
+            language=profile.toolchain_identity.language if profile.toolchain_identity is not None else None,
+        )
+        return PreparedContainment(
+            env=plan.apply_env(env), preexec_fn=plan.preexec_fn(), backend_name=self.name,
+            resources=plan.evidence(),
+        )
 
 
 class DummyContainmentBackend:

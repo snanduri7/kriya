@@ -51,6 +51,9 @@ class ProcessResult:
     # PRD-012: the outbound-network authority this contained process ran
     # under (see egress_evidence_for). None for an uncontained host process.
     egress: Optional[Dict[str, object]] = None
+    # LINUX-JVM-RLIMIT-AS-001: the resource strategy a host process ran
+    # under (kriya/tools/sandbox.py::ResourcePlan.evidence).
+    resources: Optional[Dict[str, object]] = None
 
     def to_dict(self) -> Dict[str, object]:
         result = {
@@ -68,6 +71,8 @@ class ProcessResult:
             result["toolchain_identity"] = self.toolchain_identity
         if self.egress is not None:
             result["egress"] = self.egress
+        if self.resources is not None:
+            result["resources"] = self.resources
         return result
 
 
@@ -247,6 +252,7 @@ class _ResolvedExecution:
     exec_target: Optional[List[str]] = None
     toolchain_identity: Optional[Dict[str, object]] = None
     egress: Optional[Dict[str, object]] = None
+    resources: Optional[Dict[str, object]] = None
 
 
 def _prepare_env_and_preexec(
@@ -288,6 +294,7 @@ def _prepare_env_and_preexec(
         exec_target=prepared.exec_target,
         toolchain_identity=(prepared.toolchain_identity.to_dict() if prepared.toolchain_identity else None),
         egress=egress_evidence_for(containment_profile, containment_backend),
+        resources=prepared.resources,
     )
 
 
@@ -397,7 +404,7 @@ class ProcessController:
             stdout_lost_chars=stdout_lost,
             stderr_lost_chars=stderr_lost,
             toolchain_identity=resolved.toolchain_identity,
-            egress=resolved.egress,
+            egress=resolved.egress, resources=resolved.resources,
         )
 
     async def run_async(
@@ -468,7 +475,7 @@ class ProcessController:
             stdout_lost_chars=stdout_lost,
             stderr_lost_chars=stderr_lost,
             toolchain_identity=resolved.toolchain_identity,
-            egress=resolved.egress,
+            egress=resolved.egress, resources=resolved.resources,
         )
 
     def start_managed(

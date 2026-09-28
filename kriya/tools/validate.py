@@ -31,7 +31,7 @@ from kriya.tools.dependency_execution import (
     maven_missing_artifact_signature,
 )
 from kriya.tools.process import ProcessController
-from kriya.tools.sandbox import build_restricted_env, posix_resource_limits_preexec_fn
+from kriya.tools.sandbox import ResourcePlan, build_restricted_env, resource_plan
 from kriya.tools.toolchain_identity import resolve_toolchain_selection
 
 logger = logging.getLogger(__name__)
@@ -187,6 +187,9 @@ _EXECUTION_EVIDENCE_KEYS = (
     # PRD-012: the outbound-network authority the process ran under
     # (capability class, destinations, authority source, backend).
     "egress",
+    # LINUX-JVM-RLIMIT-AS-001: how the CPU/memory budget was enforced
+    # (strategy, budget, address-space limit, JVM options).
+    "resources",
 )
 
 
@@ -690,7 +693,22 @@ class PolymorphicValidator:
         except Exception as e:
             logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
 
-    def build_subprocess_env_and_preexec(self) -> Tuple[Optional[Dict[str, str]], Optional[Callable[[], None]]]:
+    def host_resource_plan(self, command: Optional[List[str]] = None) -> Optional[ResourcePlan]:
+        """LINUX-JVM-RLIMIT-AS-001: how the sandbox's CPU/memory budget is
+        enforced for a host process of this validator (None when
+        sandbox_execution is off). A Java stack's commands are JVM-backed:
+        explicit JVM memory bounds instead of RLIMIT_AS, which a JVM's
+        address-space reservation exceeds on Linux."""
+        if not self.autonomy_cfg.sandbox_execution:
+            return None
+        language = self.toolchain_identity.language if self.toolchain_identity is not None else self.stack
+        return resource_plan(
+            command, self.autonomy_cfg.sandbox_cpu_seconds, self.autonomy_cfg.sandbox_memory_mb, language=language,
+        )
+
+    def build_subprocess_env_and_preexec(
+        self, command: Optional[List[str]] = None,
+    ) -> Tuple[Optional[Dict[str, str]], Optional[Callable[[], None]]]:
         """Shared sandbox-env + JAVA_HOME-override construction for every
         subprocess this validator launches - factored out of
         _run_cmd_with_timeout (2026-09-11) so a second caller (finite_command
@@ -705,11 +723,10 @@ class PolymorphicValidator:
         cross-module policy accessor, not a validator-internal detail."""
         env = None
         preexec_fn = None
-        if self.autonomy_cfg.sandbox_execution:
-            env = build_restricted_env(self.autonomy_cfg.sandbox_env_allowlist)
-            preexec_fn = posix_resource_limits_preexec_fn(
-                self.autonomy_cfg.sandbox_cpu_seconds, self.autonomy_cfg.sandbox_memory_mb
-            )
+        plan = self.host_resource_plan(command)
+        if plan is not None:
+            env = plan.apply_env(build_restricted_env(self.autonomy_cfg.sandbox_env_allowlist))
+            preexec_fn = plan.preexec_fn()
         if self.java_home_override:
             # env is None here means "inherit the parent process's environment
             # unchanged" (subprocess.Popen's own default) - that's no longer
@@ -876,10 +893,14 @@ class PolymorphicValidator:
                 # failure be misread as an ordinary mvn/pip result.
                 finalize_registry_acquisition_result(result)
             return result.to_dict()
-        env, preexec_fn = self.build_subprocess_env_and_preexec()
-        return ProcessController().run(
+        env, preexec_fn = self.build_subprocess_env_and_preexec(cmd)
+        result = ProcessController().run(
             cmd, cwd=cwd, timeout=timeout, env=env, preexec_fn=preexec_fn, stdin_payload=stdin_payload,
         ).to_dict()
+        plan = self.host_resource_plan(cmd)
+        if plan is not None:
+            result["resources"] = plan.evidence()
+        return result
 
     def _maven_cache_dir(self) -> str:
         """A persistent, per-workspace Maven local-repository cache
