@@ -159,3 +159,18 @@ Then:
 - **STATIC-ANALYSIS-CI-LIVE-JOB-001: CLOSED.**
 - **PRD-034: VERIFIED** (tracker).
 - PRD-036 is unblocked by the certification gate, but not started.
+
+## Live smoke contract (LIVE-SMOKE-CPU-TIMEOUT-001) — CLOSED
+
+**Decision (user).** The hosted `live_model and not live_target` tier is a runtime/wiring/safety smoke contract. Generation quality stays with PRD-035, whose target certification and PRD-036's 3-consecutive-11/11 rule are unchanged.
+
+**Implementation (`fe628df`).** `tests/_live_smoke_contract.py`, with:
+- Kriya's own bounds tightened only (output 1024, Planner 2048, generation budget 420 s);
+- no timeout raised.
+
+**Hosted evidence.** Run **36384847918** is **green across every job**:
+- production certification (the third consecutive hosted pass);
+- Test 3.10–3.14 (the 3.10 fix confirmed; also green in run 36383077080);
+- live tier: **8/8 in 8:33** on the CPU runner.
+
+**No open P0/P1. All hosted jobs green.**
