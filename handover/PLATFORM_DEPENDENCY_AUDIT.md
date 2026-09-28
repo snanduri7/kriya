@@ -193,6 +193,8 @@ This addendum records what changed after the audit. The dated rows above are lef
 | PLAT-015 | Done. The JDK locator moved to `kriya/platform/toolchain_locator.py`, and the host probe to `kriya/platform/host_properties.py`. | `52ab81d` |
 | PLAT-005/006/007 | Done. `ResourceLimitPort` (no behaviour change on macOS or Linux). A host with no provider now gets a typed refusal, and the evidence reports whether address-space limits are enforced or advisory. | `e94ac2c` |
 | PLAT-012 | Done. `HostIdentityPort` plus one SEC-008 rule (`containment.host_writer_identity`). | `0de190f` |
+| PLAT-008 | Done (pulled forward by user decision, 2026-09-28). `ProcessControlPort`: the four spawn sites take their options from the port at the one spawn point, and trees are killed through it (POSIX session + `killpg`, unchanged). No provider = typed refusal before spawn, never a direct-child kill. The guard allowlist is now empty. | `e52a755` |
+| PLAT-009 | Split out as `PLAT-LSP-TREE-KILL-001` (P3, deferred): moving jdtls into a process tree would change its session/signal behaviour. | `e52a755` |
 | Release identity | Done. `kriya/core/release_identity.py`; `certify.sh` records it, and the summary requires it to be pinned. | `e1371ac` |
 
 **PLAT-039: what is refused, and where**
@@ -201,6 +203,6 @@ This addendum records what changed after the audit. The dated rows above are lef
 - A planned control-path target stops the run before any Developer request (`unauthorized_generation_target`).
 - The terminal commit refuses one as a backstop.
 
-**Linux repro** (`scripts/linux-repro/run.sh`) at `59b910b`: targeted platform, identity, JVM and OCI set, 229 passed, 0 failed, 0 skipped.
+**Linux repro** (`scripts/linux-repro/run.sh`) at `59b910b`: targeted platform, identity, JVM and OCI set, 229 passed, 0 failed, 0 skipped. At `e52a755`: the process-control contract plus the process, MCP-lifecycle, sandbox, validation and platform suites, 191 passed, 0 failed, 0 skipped.
 
 **Registry IDs at closure:** the tracker IDs (`PLAT-001`, `PLAT-002`, `PLAT-003`, `PLAT-039`, `PLAT-RELEASE-IDENTITY-001`, `ARCH-PLATFORM-001`) become CLOSED registry rows. Each matching tracker row is removed in the same commit. The names proposed in `PLATFORM_MIGRATION_PLAN.md` §4 (`PLAT-PATH-IDENTITY-001`, `PLAT-IMPORT-SAFETY-001`, `SEC-CONTROL-PATH-WRITE-001`) are superseded.
