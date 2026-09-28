@@ -245,6 +245,75 @@ def test_the_root_worktree_is_not_mistaken_for_registered_by_a_sibling_prefix(tm
     assert (Path(plan) / "app.py").read_text() == "the user's uncommitted work\n"  # synced into the sandbox
 
 
+# --- the layout an earlier version left behind (WORKTREE-LEGACY-NESTED-001) ---------------
+
+def _seed_legacy_nested(repo):
+    """What a pre-WORKTREE-CANONICAL-ROOT-001 enforce run left: the plan
+    worktree, a subtask worktree inside it and, from a nested run, another
+    inside that, each with leftover content."""
+    root = os.path.realpath(repo)
+    plan = os.path.join(root, ".kriya", "worktree")
+    legacy = os.path.join(plan, ".kriya", "worktree")
+    deeper = os.path.join(legacy, ".kriya", "worktree")
+    for path in (plan, legacy, deeper):
+        _git(repo, "worktree", "add", "-q", "--detach", path)
+    for path in (legacy, deeper):
+        (Path(path) / "app.py").write_text("old run's candidate\n")
+        (Path(path) / "target").mkdir()
+    _git(repo, "worktree", "lock", deeper)  # a locked one goes too
+    return plan, legacy, deeper
+
+
+def test_a_legacy_nested_worktree_is_removed_when_the_worktrees_are_next_used(tmp_path):
+    repo = _repo(tmp_path)
+    plan, legacy, deeper = _seed_legacy_nested(repo)
+    # Resetting the plan worktree alone never removes them (git clean skips a .git file).
+    _git(plan, "clean", "-fd")
+    assert os.path.isdir(legacy)
+    with begin_mutating_run(str(repo)):
+        assert _plan_and_subtask(repo)[0] == plan
+    assert not os.path.exists(legacy) and not os.path.exists(deeper)
+    assert len(_registered(repo)) == 3
+    _assert_no_managed_worktree_is_nested(repo)
+    assert _git(plan, "status", "--porcelain") == ""  # the plan worktree carries no leftover state
+    assert (repo / "app.py").read_text() == "original\n"
+
+
+def test_legacy_cleanup_never_touches_a_worktree_it_does_not_own(tmp_path):
+    """Only a worktree inside one of this repository's own registered managed
+    worktrees is removed: not the main worktree, not the user's own worktrees,
+    not a repository that merely lives under some other managed location."""
+    host = tmp_path / "host" / ".kriya" / "worktree"
+    host.mkdir(parents=True)
+    repo = _repo(host)  # its main worktree lies inside a managed location it does not own
+    users = tmp_path / "users-worktree"
+    _git(repo, "worktree", "add", "-q", "--detach", str(users))
+    own_managed = os.path.join(os.path.realpath(repo), ".kriya", "worktrees", "candidate-x")
+    _git(repo, "worktree", "add", "-q", "--detach", own_managed)
+    registered = wt._registered_worktrees(str(repo))
+    wt._remove_legacy_nested_worktrees(str(repo), registered)
+    assert _registered(repo) == sorted(registered) and users.is_dir() and os.path.isdir(own_managed)
+
+
+def test_a_legacy_worktree_that_cannot_be_removed_fails_closed(tmp_path):
+    repo = _repo(tmp_path)
+    plan, _legacy, deeper = _seed_legacy_nested(repo)
+    locked = Path(deeper).parent  # its parent directory is read-only, so removal fails
+    locked.chmod(0o500)
+    try:
+        with begin_mutating_run(str(repo)), pytest.raises(subprocess.CalledProcessError) as failure:
+            wt.create_git_worktree(str(repo))
+        assert failure.value.cmd[1:3] == ["worktree", "remove"]  # the removal itself, not a later step
+    finally:
+        locked.chmod(0o700)
+    assert (repo / "app.py").read_text() == "original\n"
+    # Once the cause is gone, the next run removes what is left, registered or not.
+    with begin_mutating_run(str(repo)):
+        assert wt.create_git_worktree(str(repo)) == plan
+    assert _registered(repo) == sorted([os.path.realpath(repo), plan])
+    assert not (Path(plan) / ".kriya").exists() and _git(plan, "status", "--porcelain") == ""
+
+
 # --- through the real enforce controller ---------------------------------------------------
 
 def _engine():
@@ -311,6 +380,19 @@ async def test_two_enforce_runs_commit_verified_candidates_through_sibling_workt
     records = list_run_records(str(repo))
     assert len(records) == 2 and all(r.lifecycle_state == RunLifecycle.SUCCESS and r.commit_result == "COMMITTED"
                                      for r in records)
+
+
+@pytest.mark.asyncio
+async def test_an_enforce_run_over_a_legacy_nested_layout_commits_and_leaves_no_nesting(tmp_path):
+    """The PRD-036 rc4 canary: a workspace an earlier version ran in still had
+    the nested subtask worktree registered, and every later run kept it."""
+    repo = _repo(tmp_path)
+    _plan, legacy, _deeper = _seed_legacy_nested(repo)
+    result = await _enforce(repo, _engine())
+    assert result.legacy_result["status"] == "success", result.legacy_result
+    assert (repo / "app.py").read_text() == "verified candidate\n"
+    assert not os.path.exists(legacy) and len(_registered(repo)) == 3
+    _assert_no_managed_worktree_is_nested(repo)
 
 
 # --- structural -------------------------------------------------------------------------------

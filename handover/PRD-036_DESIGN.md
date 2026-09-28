@@ -140,6 +140,9 @@ The overall result is VERIFIED only if every item passes.
       - Candidate worktrees are now siblings under `<ws>/.kriya/worktrees/`, rooted at the run's canonical workspace.
       - The canary rejects any nested worktree. The permitted-nesting allowance above is gone.
       - The fix is a production change, so it is a new release candidate.
+    - **rc4 canary (2026-09-28): FAIL, classified as a stale environment plus two defects.** Both runs failed only the worktree checks, all over `.kriya/worktree/.kriya/worktree`. `run-1/before.json` shows that worktree already registered before run 1 started; it was created at 12:15Z by the rc3 run, about two hours before run 1. rc4 created only the sibling candidate worktree. Evidence: `evidence/PRD-036/rc4-canary-failed-stale-worktree/`. The user decided to fix both defects in one rc5 batch:
+      - **CANARY-FRESH-WORKSPACE-001 (own bug, harness).** The canary's "fresh workspace" was `reset --hard && clean -qfdx`, and `git clean` never removes a directory holding a `.git` file. `prd036_canary.py reset` now removes every non-main worktree, prunes, resets, runs `clean -qffdx`, and refuses unless only the main worktree is left. The verdict's `starts_from_expected_worktrees` check requires run 1 to start from the main worktree alone and run 2 from exactly run 1's final set, so a stale environment is never read as something the candidate did.
+      - **WORKTREE-LEGACY-NESTED-001 (production).** Kriya kept the old layout's nested worktree forever; see docs/design.md (Persistent Worktree Sandbox).
 - **D5: execution.** The agent runs the long jobs with no aggressive polling. The order:
   1. context certification (done, CERTIFIED; the doctor already reports `PRODUCTION_READY=true` on D1);
   2. freeze;

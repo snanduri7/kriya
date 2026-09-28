@@ -101,6 +101,28 @@ def _registered_worktrees(repo_path: str) -> List[str]:
     return [os.path.realpath(line[len("worktree "):]) for line in res.stdout.splitlines() if line.startswith("worktree ")]
 
 
+def _remove_legacy_nested_worktrees(repo_path: str, registered: List[str]) -> None:
+    """Remove what the pre-WORKTREE-CANONICAL-ROOT-001 layout left behind.
+
+    Kriya now refuses to create a managed worktree inside another one, so a
+    registered worktree of this repository that lies inside one of this
+    repository's own registered managed worktrees (the old subtask worktree
+    ``<ws>/.kriya/worktree/.kriya/worktree``) was left by an earlier version.
+    Resetting the outer worktree never removes it: ``git clean`` skips a
+    directory holding a ``.git`` file. The main worktree, and anything whose
+    managed ancestor is not a worktree of this repository, is never touched.
+    A locked one is removed too (``--force`` twice). Innermost first: removing
+    an outer one first can delete an inner one's ``.git`` file while it stays
+    registered, which git then refuses to remove. A removal that fails
+    raises, and both callers fail closed."""
+    registered_set = set(registered)
+    nested = [path for path in registered if managed_worktree_ancestor(path) in registered_set]
+    for path in sorted(nested, key=len, reverse=True):
+        logger.warning("Removing a nested Kriya worktree left by an earlier layout: %s", path)
+        subprocess.run(["git", "worktree", "remove", "--force", "--force", path],
+                       cwd=repo_path, check=True, capture_output=True)
+
+
 # MA4.8 (control-plane implementation plan) - audit-only, module-level since
 # this file has no class/instance to hold it (same pattern as
 # kriya/workflow/edit_safety.py's MA4.5 integration and kriya/tools/web.py's
@@ -434,13 +456,16 @@ def create_git_worktree(repo_path: str) -> str:
     except Exception as e:
         logger.debug(f"git worktree prune failed (non-fatal): {e}")
 
-    worktree_registered = False
     try:
-        # An exact path match: <ws>/.kriya/worktree is a string prefix of
-        # every <ws>/.kriya/worktrees/<name>, so a substring test is wrong.
-        worktree_registered = os.path.realpath(worktree_path) in _registered_worktrees(repo_path)
+        registered = _registered_worktrees(repo_path)
     except Exception as e:
         logger.debug(f"git worktree list failed, assuming worktree is not registered: {e}")
+        registered = []
+    _remove_legacy_nested_worktrees(repo_path, registered)
+    # The managed path is never nested (managed_worktree_path refuses), so the
+    # removal above cannot change whether it is registered. An exact path match: <ws>/.kriya/worktree is a string prefix of
+    # every <ws>/.kriya/worktrees/<name>, so a substring test is wrong.
+    worktree_registered = os.path.realpath(worktree_path) in registered
 
     if not worktree_registered:
         if os.path.exists(worktree_path):
