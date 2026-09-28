@@ -57,6 +57,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Iterable, Optional, Sequence, Tuple
 
+from kriya.platform.filesystem_semantics import PathIdentity, path_identity
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
@@ -269,7 +270,7 @@ class AuthorizedFileWriter:
                 matched_rule="filesystem.authorized_writer.validated_subtask_scope",
             )
         if self._protected_relpaths:
-            if target_relpath in self._protected_relpaths:
+            if target_relpath in self._protected_relpaths or self._aliases_protected_path(target_path):
                 return PolicyResult(
                     decision=PolicyDecision.DENY,
                     reason_code="GOAL_SOURCE_FILE_PROTECTED",
@@ -284,6 +285,17 @@ class AuthorizedFileWriter:
         return self._execution_policy.evaluate(ActionRequest(
             action_type=ActionType.WRITE_FILE, target=target_path, workspace_path=self._scope.writable_roots[0],
         ))
+
+    def _aliases_protected_path(self, target_path: str) -> bool:
+        """PLAT-001: the target names a protected file under another
+        spelling - a case or Unicode-normalization variant on an
+        insensitive filesystem, a symlink or a hard link - by filesystem
+        identity, never by string. Identity that cannot be established
+        counts as an alias (fail closed)."""
+        return any(
+            path_identity(os.path.join(self._workspace_root, relpath), target_path) is not PathIdentity.DIFFERENT
+            for relpath in self._protected_relpaths
+        )
 
     def _raise_if_denied(self, target_path: str) -> None:
         result = self.authorize(target_path)
