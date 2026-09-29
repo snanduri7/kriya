@@ -5,9 +5,11 @@ import json
 import logging
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from pydantic import BaseModel, Field
+
+from kriya.platform.filesystem_semantics import identity_key
 
 logger = logging.getLogger(__name__)
 
@@ -373,9 +375,9 @@ def nested_gitignore_patterns_for(
     return current_patterns
 
 
-# CTX-001 P1 WP8: a small, IN-PROCESS-ONLY cache - (root_path,
-# compute_workspace_content_hash()) -> the RepositoryModel last computed
-# for that exact real content identity. Deliberately module-level (not a
+# CTX-001 P1 WP8: a small, IN-PROCESS-ONLY cache - the workspace root's
+# filesystem identity -> (compute_workspace_content_hash(), the
+# RepositoryModel computed for that content). Deliberately module-level (not a
 # general caching framework, not a new persistent store): RepositoryAnalyzer
 # itself is constructed fresh on every real call site (kriya/workflow/
 # workflow.py), so a per-instance cache would be useless; a module-level
@@ -388,9 +390,36 @@ def nested_gitignore_patterns_for(
 # written to disk). _ANALYZE_CACHE_HITS/_MISSES are one-element lists (not
 # bare module ints) purely so they can be reset from a test without a
 # `global` statement leaking into this module's own runtime code path.
-_ANALYZE_CACHE: Dict[Tuple[str, str], "RepositoryModel"] = {}
+# LEAK-ANALYZE-CACHE-001: at most ONE entry per workspace root (keyed by
+# filesystem_semantics.identity_key, so every alias of a root shares it).
+# A new content revision replaces the root's entry, it never accumulates
+# beside it: keying on (root, hash) kept one full RepositoryModel per
+# historical revision for the whole life of a repl/milestone process. The
+# replacement is built first and stored with ONE dict assignment of an
+# immutable entry, so a failed build leaves the prior entry (still bound to
+# its own hash, so never served for other content) and a concurrent reader
+# sees either the old or the new (hash, model) pair, never a mix.
+class _AnalyzeCacheEntry(NamedTuple):
+    content_hash: str
+    model: "RepositoryModel"
+
+
+_ANALYZE_CACHE: Dict[Tuple[int, int], _AnalyzeCacheEntry] = {}
 _ANALYZE_CACHE_HITS = [0]
 _ANALYZE_CACHE_MISSES = [0]
+
+
+def _prune_departed_roots() -> None:
+    """Drop entries whose root no longer exists or is now a different
+    directory (removed and recreated): such an entry can never be hit again.
+    Run before every store, so the cache holds only roots that are still on
+    disk - without it every removed candidate worktree (.kriya/worktrees/*,
+    one per enforce run) kept its model for the rest of a repl/milestone
+    process. One stat per cached root, on a miss only. A concurrent store
+    for the same key may be dropped by this; that only costs a recompute."""
+    for key, entry in list(_ANALYZE_CACHE.items()):
+        if identity_key(entry.model.root_path) != key:
+            _ANALYZE_CACHE.pop(key, None)
 
 
 class RepositoryAnalyzer:
@@ -417,25 +446,32 @@ class RepositoryAnalyzer:
 
         cache_key = self._analyze_cache_key()
         if cache_key is not None:
-            cached = _ANALYZE_CACHE.get(cache_key)
-            if cached is not None:
+            root_key, content_hash = cache_key
+            cached = _ANALYZE_CACHE.get(root_key)
+            # The model embeds the root_path string it was built for, so an
+            # alias spelling of the same root recomputes (and takes over the
+            # root's single entry) rather than being served another spelling.
+            if (cached is not None and cached.content_hash == content_hash
+                    and cached.model.root_path == self.root_path):
                 _ANALYZE_CACHE_HITS[0] += 1
                 # Never return the SAME shared instance a second caller
                 # could mutate (RepositoryModel/pydantic BaseModel is
                 # mutable by default) - deep-copy on every cache hit, cheap
                 # relative to a full re-walk+re-parse.
-                return cached.model_copy(deep=True)
+                return cached.model.model_copy(deep=True)
 
         _ANALYZE_CACHE_MISSES[0] += 1
         model = self._analyze_uncached()
         if cache_key is not None:
-            _ANALYZE_CACHE[cache_key] = model
+            _prune_departed_roots()
+            _ANALYZE_CACHE[root_key] = _AnalyzeCacheEntry(content_hash, model)
             return model.model_copy(deep=True)
         return model
 
-    def _analyze_cache_key(self) -> Optional[Tuple[str, str]]:
-        """(root_path, workspace_content_hash) - None for a non-git
-        workspace or any other reason the hash can't be computed
+    def _analyze_cache_key(self) -> Optional[Tuple[Tuple[int, int], str]]:
+        """(root filesystem identity, workspace_content_hash) - None for a
+        non-git workspace, a root whose identity can't be established, or
+        any other reason the hash can't be computed
         (compute_workspace_content_hash() already fails closed to None for
         exactly these cases - see its own docstring) - analyze() always
         recomputes fresh when this is None, identical to every pre-WP8
@@ -445,10 +481,13 @@ class RepositoryAnalyzer:
         to first actual use, mirroring this module's own existing deferred-
         import convention (e.g. _parse_java's edit_safety import)."""
         from kriya.workflow.checkpoint import compute_workspace_content_hash
+        root_key = identity_key(self.root_path)
+        if root_key is None:
+            return None
         workspace_hash = compute_workspace_content_hash(self.root_path)
         if workspace_hash is None:
             return None
-        return (self.root_path, workspace_hash)
+        return (root_key, workspace_hash)
 
     def _analyze_uncached(self) -> RepositoryModel:
         model = RepositoryModel(root_path=self.root_path)

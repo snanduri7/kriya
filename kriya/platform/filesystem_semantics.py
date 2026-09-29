@@ -110,6 +110,20 @@ def path_relation(root: str, target: str) -> PathRelation:
         current = parent
 
 
+def identity_key(path: str) -> Optional[Tuple[int, int]]:
+    """Hashable filesystem identity of an existing path: the (device, inode)
+    pair ``samestat`` compares, so every alias of one directory maps to one
+    key. None when the path does not exist or cannot be stat'd."""
+    try:
+        real = os.path.realpath(path)
+    except (OSError, ValueError):
+        return None
+    result, _known = _stat(real)
+    if result is None:
+        return None
+    return (result.st_dev, result.st_ino)
+
+
 def path_identity(first: str, second: str) -> PathIdentity:
     """Whether two paths name the same file. Existing paths are compared by
     ``samestat`` (hard links and every alias included). A path that exists
