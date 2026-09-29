@@ -102,7 +102,7 @@ POLICY_DIGEST_FIELD = "qualification_policy_digest"
 # that externalized them), so such a record stands for exactly this digest,
 # pinned here and checked against an explicit table of those literals in
 # tests/test_qual_config_001.py. It never follows later default changes.
-LEGACY_V3_POLICY_DIGEST = "sha256:2aa1c55268bbffa9ed75f5b763b74b7725765ef0ae67b8b05e965af3e99f71d5"
+LEGACY_V3_POLICY_DIGEST = "sha256:d9ba816202804271520609d7af0eecc30d9a987b99d8f76467830c7ae8ad5e09"
 
 
 def qualification_policy_of(config: Any) -> ModelQualificationConfig:
@@ -112,7 +112,11 @@ def qualification_policy_of(config: Any) -> ModelQualificationConfig:
 
 
 def qualification_policy_digest(policy: ModelQualificationConfig) -> str:
-    canonical = json.dumps({"schema": QUALIFICATION_POLICY_SCHEMA, "policy": policy.model_dump(mode="json")},
+    """Digest of the values in effect. An unset optional knob (None) is left
+    out, so adding a new, off-by-default knob to the schema does not change
+    the identity of any existing policy (or stale its records)."""
+    canonical = json.dumps({"schema": QUALIFICATION_POLICY_SCHEMA,
+                            "policy": policy.model_dump(mode="json", exclude_none=True)},
                            sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 

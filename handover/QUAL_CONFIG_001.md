@@ -127,3 +127,15 @@ Close QUAL-CONFIG-001, and add its registry row as CLOSED (an OPEN P1 row fails 
 
 - **The ladder has already run once** (report §7b). At 512 the one complete response failed the unchanged argument assertion, so "the first sufficient budget" for `tool_argument_integrity` is not established: that sample was complete at 512 and still wrong. Re-running the same ladder unchanged would be sampling for variance, which the rules forbid. A new attempt needs the user's explicit approval of a declared-N variance or attribution study.
 - **`context_capacity`'s 64-token answer budget and 384-token headroom are a CONFIRMED harness mismatch for reasoning models.** Now that they are configuration, the fix is a policy choice for the user. One option: `reasoning_max_tokens` on `context_capacity` together with a headroom large enough for it, derived from measured reasoning use.
+
+## 7. Follow-up own bug: QUAL-CONFIG-DIGEST-STABILITY-001 (CLOSED)
+
+**The defect.** `dbe7705` digested the full policy dump, including unset (`None`) optional fields. Any new off-by-default knob would therefore have changed every policy's digest and staled every record, production included, with no effective policy change.
+
+**The fix.** The digest now covers only the values set (`exclude_none=True`). `LEGACY_V3_POLICY_DIGEST` was re-pinned (`sha256:d9ba8162…`) and is still checked against the explicit /3 literal table.
+
+**Nothing stranded (MEASURED).** 0 of the 15 stored records carried a digest before the change.
+
+**Regression.** `test_a_new_off_by_default_knob_does_not_change_any_existing_policy_digest` fails without the fix.
+
+**Measurement note (CONFIRMED toolchain artifact, not a product defect).** One focused run showed 2 transient failures. I had imported the module, which wrote its `.pyc`, and then `sed`-replaced the pinned 64-hex constant with another 64-hex value in the same second. CPython validates a `.pyc` by source mtime (whole seconds) and size, so it kept serving the old constant. Reproduced in isolation. Caches were cleared afterwards, and 5 repeat runs were green.

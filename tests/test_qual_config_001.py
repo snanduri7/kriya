@@ -511,3 +511,19 @@ def test_a_reasoning_budget_added_to_the_historical_values_makes_a_legacy_record
         {"cases": {"tool_argument_integrity": {"reasoning_max_tokens": 4096}}})
     assert mq.assess(_fp(), ("plain_completion",), settings=_settings(), record=record,
                      policy_digest=mq.qualification_policy_digest(policy)).status == mq.STALE
+
+
+def test_a_new_off_by_default_knob_does_not_change_any_existing_policy_digest():
+    """Adding an optional knob whose default is unset must not re-identify
+    every existing policy (which would stale every record, the production
+    ones included, without any effective change)."""
+    from typing import Optional
+
+    from pydantic import Field
+
+    class _WithFutureKnob(ModelQualificationConfig):
+        future_knob: Optional[int] = Field(default=None, gt=0)
+
+    assert mq.qualification_policy_digest(_WithFutureKnob()) == mq.qualification_policy_digest(
+        ModelQualificationConfig()) == mq.LEGACY_V3_POLICY_DIGEST
+    assert mq.qualification_policy_digest(_WithFutureKnob(future_knob=3)) != mq.LEGACY_V3_POLICY_DIGEST
