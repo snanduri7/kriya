@@ -533,6 +533,12 @@ class GenerationState:
     # owner for retrying to discover, so continuing cannot produce a
     # different, legal outcome.
     unrecoverable_scope_denial_count: int = 0
+    # Developer attempts actually started this run, by mode (attempt.py, at
+    # attempt.started). Never reset: the reported retry counts come from
+    # here, not from the scoped budget counters, which reset per failure
+    # family and are forced to their bound by the no-progress transition
+    # (STATE-ATTEMPT-METRICS-001).
+    attempts_by_mode: Dict[str, int] = field(default_factory=dict)
     # The file(s) the completeness check (extract_expected_files vs. what got
     # written) found missing after the MOST RECENT attempt. Mutually exclusive
     # with last_implicated_files - an IncompleteGenerationError sets this and
@@ -863,8 +869,11 @@ class GenerationState:
                 },
             },
             "retry": {
-                "full_set_attempts": self.budgets.retry_count,
-                "targeted_attempts": self.budgets.targeted_retry_count,
+                "full_set_attempts": self.attempts_by_mode.get("full_set", 0),
+                "targeted_attempts": (
+                    self.attempts_by_mode.get("targeted", 0) + self.attempts_by_mode.get("missing_files", 0)
+                ),
+                "attempts_by_mode": dict(self.attempts_by_mode),
                 "unrecoverable_scope_denials": self.unrecoverable_scope_denial_count,
                 "candidate_independent_diagnostic_invocations": (
                     self.candidate_independent_diagnostic_invocations

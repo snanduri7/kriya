@@ -2987,9 +2987,9 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                 click.echo(f"Validator wall:         {_fmt_duration(validators.get('wall_seconds'))}")
                 click.echo(f"Developer attempts:     {llm.get('developer_calls', 0)}")
                 # Was mislabeled "Planner repair rounds" prior to this
-                # correction - full_set_attempts is GenerationState.budgets.
-                # retry_count, the Developer's own full-file-set retry
-                # counter, unrelated to structured-plan Planner repair.
+                # correction - full_set_attempts counts the Developer's own
+                # full-file-set attempts (GenerationState.attempts_by_mode),
+                # unrelated to structured-plan Planner repair.
                 click.echo(f"Developer full-set retries: {retry.get('full_set_attempts', 0)}")
                 click.echo(f"Baseline replays:       {retry.get('baseline_replay_count', 0)}")
             if plan_repair_attempts is not None:

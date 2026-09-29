@@ -131,6 +131,7 @@ def test_generation_state_metrics_aggregate_events_without_source_content():
         "retry": {
             "full_set_attempts": 0,
             "targeted_attempts": 0,
+            "attempts_by_mode": {},
             "unrecoverable_scope_denials": 0,
             "candidate_independent_diagnostic_invocations": 0,
             "baseline_replay_count": 0,

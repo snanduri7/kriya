@@ -5749,6 +5749,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         operation=attempt_operation.value,
         details={"mode": state.last_attempt_mode},
     ))
+    state.attempts_by_mode[state.last_attempt_mode] = state.attempts_by_mode.get(state.last_attempt_mode, 0) + 1
     if retry_decision.reserved_fallback:
         # STATE-RESERVED-FALLBACK-001: only the fallback's own allowance in
         # the global ceiling remains, so this attempt is the fallback's.
