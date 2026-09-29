@@ -28,6 +28,7 @@ from typing import Callable, Iterable, List, Optional
 from kriya.workflow.attribution import resolve_fallback_model
 from kriya.workflow.retry_policy import (
     API_CONTRACT_RECOVERY_MAX_ATTEMPTS,
+    FALLBACK_ALLOWANCE,
     RetryAction,
     api_contract_recovery_handed_back,
     charge_failed_attempt,
@@ -91,6 +92,7 @@ class Step:
     consecutive_no_progress: int
     classification: Optional[str]
     budgets: tuple  # (retry, targeted, recovery, fallback_targeted_attempted, fallback_targeted_requested)
+    reserved_fallback: bool
     in_recovery: bool
     restored: bool
 
@@ -117,7 +119,7 @@ def chain_of(length: int) -> list:
 
 def global_ceiling(max_retries: int, has_fallback: bool, best_of_n_tried: int = 0) -> int:
     """decide_for_state's max_total_attempts, restated for assertions."""
-    return (max_retries + TARGETED_MAX_RETRIES + (1 if has_fallback else 0)
+    return (max_retries + TARGETED_MAX_RETRIES + (FALLBACK_ALLOWANCE if has_fallback else 0)
             + API_CONTRACT_RECOVERY_MAX_ATTEMPTS + best_of_n_tried)
 
 
@@ -167,7 +169,9 @@ def run_trajectory(
         if len(steps) >= max_attempts_guard:
             raise AssertionError("retry loop did not terminate within the guard")
         state.attempt_number += 1
-        mode = _mode_value(decide_attempt_mode(state, **policy_kwargs()).action)
+        admitted = decide_attempt_mode(state, **policy_kwargs())
+        assert admitted.action is decision.action, "attempt mode diverged from the loop decision"
+        mode = _mode_value(admitted.action)
         state.last_attempt_mode = mode
         if mode == RetryAction.FALLBACK_TARGETED.value:
             state.budgets.fallback_targeted_attempted = True
@@ -184,6 +188,8 @@ def run_trajectory(
             terminal = FALLBACK_INCOMPATIBLE
             break
         model = selected.model if selected is not None else PRIMARY
+        if model != PRIMARY:
+            state.budgets.fallback_attempts_used += 1
         state.last_model_override = None if model == PRIMARY else model
         recovery: Optional[Recovery] = state.api_contract_recovery
         outcome = outcomes(mode, model, recovery)
@@ -191,9 +197,10 @@ def run_trajectory(
             terminal = SCRIPT_ENDED
             break
 
-        def step(kind, mode=mode, model=model):
+        def step(kind, mode=mode, model=model, admitted=admitted):
             steps.append(Step(
                 attempt=state.attempt_number, mode=mode, model=model, outcome=kind,
+                reserved_fallback=admitted.reserved_fallback,
                 consecutive_no_progress=state.consecutive_no_progress_attempts,
                 classification=state.last_progress_classification, budgets=_budgets(state),
                 in_recovery=state.api_contract_recovery is not None,

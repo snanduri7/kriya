@@ -2081,6 +2081,13 @@ Recovery remains scope-preserving. A first anchor mismatch refreshes the exact c
 
 Retry progress is recorded on every failed attempt using effective workspace content, failure signature, verification stage, and implicated files. Outcomes are classified as `PROGRESS`, `NO_PROGRESS`, `REGRESSION`, or `REPEATED_ACTION`. Two consecutive no-progress outcomes force the existing bounded broader strategy; the third stops local retry. This policy changes neither allowed write scope nor the global retry ceiling, plan recovery, local-only egress, or authoritative full-regression enforcement.
 
+**Retry budgets across families (post-PRD-036 state-machine hardening).** The budget bookkeeping of a failed attempt lives in `kriya/workflow/retry_policy.py` next to the decision (`observe_failure_family`, `reset_scoped_budgets_for_new_family`, `force_strategy_transition`, `charge_failed_attempt`), in the order `retry_strategy._record_attempt_failure` calls it.
+*   A failure family is new only the first time the candidate produces it (`RetryBudgets.seen_failure_signatures`). A return to an earlier family (A -> B -> A) earns no fresh targeted/fallback-targeted budget and is charged (STATE-FAILURE-FAMILY-CYCLE-001).
+*   The global ceiling's fallback allowance (`FALLBACK_ALLOWANCE`) belongs to the fallback. Once the remaining capacity is no more than the allowance the fallback has not used (`RetryBudgets.fallback_attempts_used`), the attempt is the fallback's: fallback-targeted when grounded, else the escalated full-set. It is evaluated after the recovery rules, adds no attempt, and is recorded as `retry.reserved_fallback` (`RESERVED_FALLBACK_ALLOWANCE`) (STATE-RESERVED-FALLBACK-001).
+*   `decide_attempt_mode` decides from the attempt number the loop decided at, so the loop decision and the attempt mode are one decision.
+*   Best-of-N hands an already recorded candidate failure to the loop (`BestOfNFailureRecorded`), never recording it twice, and samples no independent candidate while authoritative repair state is active (STATE-BEST-OF-N-HANDOFF-001).
+*   The fast `pytest -m state_machine` tier enumerates the decision domain against its transition rules and drives seeded trajectories over these functions (`handover/STATE_MACHINE_HARDENING_REPORT.md`).
+
 **PRD-026: a universal progress invariant (`kriya/workflow/retry_progress.py`).**
 *   Every failed attempt also produces a canonical `ProgressVector`, and the run keeps every digest it has seen (`GenerationState.progress_vector_digests`, never erased). The vector covers:
     *   the failure signature;

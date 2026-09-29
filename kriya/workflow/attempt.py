@@ -187,7 +187,12 @@ from kriya.workflow.requirements import (
 )
 from kriya.workflow.resume_fingerprints import ResumePlan
 from kriya.workflow.retry_package import RetryPackage, build_retry_package
-from kriya.workflow.retry_policy import API_CONTRACT_RECOVERY_MAX_ATTEMPTS, RetryAction, decide_attempt_mode
+from kriya.workflow.retry_policy import (
+    API_CONTRACT_RECOVERY_MAX_ATTEMPTS,
+    RESERVED_FALLBACK_ALLOWANCE,
+    RetryAction,
+    decide_attempt_mode,
+)
 from kriya.workflow.retry_progress import SAMPLING_NOT_PERMITTED, SAMPLING_RESAMPLE, sampling_resample_permitted
 from kriya.workflow.retry_prompts import (
     _build_coordinated_retry_prompt,
@@ -5744,6 +5749,17 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         operation=attempt_operation.value,
         details={"mode": state.last_attempt_mode},
     ))
+    if retry_decision.reserved_fallback:
+        # STATE-RESERVED-FALLBACK-001: only the fallback's own allowance in
+        # the global ceiling remains, so this attempt is the fallback's.
+        state.record_event(RunEvent(
+            kind="retry.reserved_fallback",
+            attempt=state.attempt_number,
+            source="attempt.run_attempt",
+            authority=EventAuthority.AUTHORITATIVE,
+            message=retry_decision.reason,
+            details={"reason_code": RESERVED_FALLBACK_ALLOWANCE, "mode": state.last_attempt_mode},
+        ))
     # Needed unconditionally below (both the normal compile/test gate
     # path and the always-run full regression check use it) - imported
     # here rather than only inside the skippable gate block so a
@@ -6030,6 +6046,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         state.budgets.fallback_targeted_attempted = True
         state.budgets.fallback_targeted_requested = False
         fallback = _select_developer_fallback(state, ctx, 1)
+        state.budgets.fallback_attempts_used += 1
         reference_window = allocation_window(ctx.kernel.config, fallback)
         learned_reference = developer_reference(
             reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
@@ -6218,6 +6235,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         active_prompt_window = allocation_window(ctx.kernel.config)
         fallback = _select_developer_fallback(state, ctx, state.budgets.retry_count)
         if fallback is not None:
+            state.budgets.fallback_attempts_used += 1
             model_override = fallback.model
             base_url_override = fallback.base_url
             api_key_override = fallback.api_key

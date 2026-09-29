@@ -1,5 +1,5 @@
 """The retry decision, exhaustively: every decision-relevant input combination
-of retry_policy.decide_retry_action (10,368 of them, pure, well under a second) checked
+of retry_policy.decide_retry_action (41,472 of them, pure, under a second) checked
 against the declared transition rules, plus the budget bookkeeping functions.
 
 Transition rules (the reference model; each is one assertion below):
@@ -23,6 +23,13 @@ R8  targeted outranks missing-files, which outranks fallback-targeted,
     transition) jumps only the primary's targeted repair.
 R9  the attempt-mode decision equals the loop decision whenever the loop
     continues (one decision, two call sites).
+R10 the fallback's allowance in the ceiling belongs to the fallback
+    (STATE-RESERVED-FALLBACK-001): once the remaining capacity is no more
+    than its unused allowance, the attempt is the fallback's -
+    fallback-targeted when grounded, else the escalated full-set (from
+    retry_count 1, which every recorded failure reaches) - and only
+    after the recovery rules; with the allowance used, or no fallback, or
+    capacity above it, the ordinary rules decide.
 """
 import itertools
 from types import SimpleNamespace
@@ -31,6 +38,7 @@ import pytest
 
 from kriya.workflow.retry_policy import (
     API_CONTRACT_RECOVERY_MAX_ATTEMPTS,
+    FALLBACK_ALLOWANCE,
     STRATEGY_TRANSITION_AFTER_NO_PROGRESS,
     RetryAction,
     charge_failed_attempt,
@@ -46,6 +54,7 @@ from kriya.workflow.state import RetryBudgets
 pytestmark = pytest.mark.state_machine
 
 M, T = 4, 3  # max_retries with a one-model chain (max(4, 2)), TARGETED_MAX_RETRIES
+CEILING = 11
 STOPS = (RetryAction.STOP_ENVIRONMENT, RetryAction.STOP_EXHAUSTED)
 
 
@@ -53,10 +62,12 @@ def _domain():
     """Every combination that can change a decision: each counter at 0, one
     below and at its bound, the ceiling below/at, both recovery outcomes."""
     for (retry, targeted, implicated, missing, has_fallback, fb_attempted, fb_requested, env,
-         recovery, recovery_count, restored, at_ceiling) in itertools.product(
+         recovery, recovery_count, restored, attempt_number, fallback_used) in itertools.product(
             (0, M - 1, M), (0, T - 1, T), (False, True), (False, True), (False, True),
             (False, True), (False, True), (False, True), (False, True),
-            range(API_CONTRACT_RECOVERY_MAX_ATTEMPTS + 1), (False, True), (False, True)):
+            range(API_CONTRACT_RECOVERY_MAX_ATTEMPTS + 1), (False, True),
+            (CEILING - 6, CEILING - FALLBACK_ALLOWANCE - 1, CEILING - FALLBACK_ALLOWANCE, CEILING),
+            (0, FALLBACK_ALLOWANCE)):
         if not recovery and (recovery_count or restored):
             continue
         yield dict(
@@ -64,9 +75,9 @@ def _domain():
             has_implicated_files=implicated, has_missing_files=missing, has_fallback_model=has_fallback,
             fallback_targeted_attempted=fb_attempted, fallback_targeted_requested=fb_requested,
             environment_failure="env" if env else None,
-            attempt_number=11 if at_ceiling else 5, max_total_attempts=11,
+            attempt_number=attempt_number, max_total_attempts=CEILING,
             has_api_contract_recovery=recovery, api_contract_recovery_count=recovery_count,
-            api_contract_restored=restored,
+            api_contract_restored=restored, fallback_attempts_used=fallback_used,
         )
 
 
@@ -105,6 +116,18 @@ def test_every_decision_follows_the_transition_rules():
         if s["attempt_number"] >= s["max_total_attempts"]:
             assert action is RetryAction.STOP_EXHAUSTED, s  # R5
             continue
+        decision = decide_retry_action(**s)
+        reserved = (
+            s["has_fallback_model"] and s["fallback_attempts_used"] < FALLBACK_ALLOWANCE
+            and s["max_total_attempts"] - s["attempt_number"] <= FALLBACK_ALLOWANCE - s["fallback_attempts_used"]
+        )
+        if reserved and s["has_implicated_files"] and not s["fallback_targeted_attempted"]:
+            assert action is RetryAction.FALLBACK_TARGETED and decision.reserved_fallback, s  # R10
+            continue
+        if reserved and 1 <= s["retry_count"] < M:
+            assert action is RetryAction.FULL_SET and decision.reserved_fallback, s  # R10
+            continue
+        assert not decision.reserved_fallback, s
         if action is RetryAction.STOP_EXHAUSTED:
             assert _no_family_remains(s), s  # R6
         if action is RetryAction.TARGETED:  # R7, R8
@@ -125,7 +148,7 @@ def test_every_decision_follows_the_transition_rules():
             assert not (s["has_missing_files"] and s["targeted_retry_count"] < T), s
             assert not (s["has_implicated_files"] and s["has_fallback_model"]
                         and not s["fallback_targeted_attempted"]), s
-    assert checked == 10_368  # the whole domain was enumerated
+    assert checked == 41_472  # the whole domain was enumerated
 
 
 def _state(s):
@@ -134,6 +157,7 @@ def _state(s):
         api_contract_recovery_count=s["api_contract_recovery_count"],
         fallback_targeted_attempted=s["fallback_targeted_attempted"],
         fallback_targeted_requested=s["fallback_targeted_requested"],
+        fallback_attempts_used=s["fallback_attempts_used"],
     )
     recovery = SimpleNamespace(contract_restored=s["api_contract_restored"]) if s["has_api_contract_recovery"] else None
     return SimpleNamespace(
@@ -150,10 +174,13 @@ def test_the_attempt_mode_is_the_loop_decision_whenever_the_loop_continues():
         if s["attempt_number"] >= s["max_total_attempts"] or s["environment_failure"]:
             continue
         state = _state(s)
+        state.attempt_number = s["attempt_number"]
         policy = dict(max_retries=M, targeted_max_retries=T, has_fallback_model=s["has_fallback_model"])
         loop = decide_for_state(state, **policy)
         if loop.should_continue:
-            assert decide_attempt_mode(state, **policy).action is loop.action, s
+            state.attempt_number += 1  # run_attempt increments before deciding its mode
+            mode = decide_attempt_mode(state, **policy)
+            assert (mode.action, mode.reserved_fallback) == (loop.action, loop.reserved_fallback), s
 
 
 # --- bookkeeping -----------------------------------------------------------------------

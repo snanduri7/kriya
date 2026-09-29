@@ -345,7 +345,16 @@ def test_the_attempt_mode_and_the_loop_decision_read_the_same_handback():
     args = dict(max_retries=4, targeted_max_retries=3, has_fallback_model=True)
     state.attempt_number = 4
     assert decide_for_state(state, **args).action is RetryAction.TARGETED
-    state.attempt_number = 11  # incremented past the ceiling for the admitted attempt
+    state.attempt_number = 5  # run_attempt incremented it for the admitted attempt
     assert decide_attempt_mode(state, **args).action is RetryAction.TARGETED
+    # The last slot below the ceiling (11) is the fallback's reserved allowance
+    # (STATE-RESERVED-FALLBACK-001): the loop admits it at 10 and the mode,
+    # at the incremented 11, is that same decision, never a ceiling stop.
+    state.attempt_number = 10
+    loop = decide_for_state(state, **args)
+    state.attempt_number = 11
+    mode = decide_attempt_mode(state, **args)
+    assert (loop.action, loop.reserved_fallback) == (mode.action, mode.reserved_fallback) == (
+        RetryAction.FALLBACK_TARGETED, True)
     unrestored = _recovery_state(restored=False, spent=3)
     assert decide_attempt_mode(unrestored, **args).action is RetryAction.STOP_EXHAUSTED

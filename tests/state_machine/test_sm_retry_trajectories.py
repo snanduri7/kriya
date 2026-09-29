@@ -207,3 +207,46 @@ def test_the_failure_recording_calls_the_modelled_bookkeeping_in_order():
     # The only budget fields still written inline are the evidence records
     # (not counters or flags a decision reads).
     assert set(mutated) <= {"last_failure_signature"}, mutated
+
+
+# --- STATE-RESERVED-FALLBACK-001: the fallback's allowance is the fallback's --------------
+
+def _new_families(count, **kwargs):
+    return [_fail(f"c{i}", f"s{i}", **kwargs) for i in range(count)]
+
+
+def test_the_last_slot_is_the_fallbacks_when_every_primary_attempt_is_new_progress():
+    t = run_trajectory(_new_families(10) + [Outcome("pass")])
+    assert [step.reserved_fallback for step in t.steps] == [False] * 10 + [True]
+    assert _modes(t)[-1] == ("fallback_targeted", FB)
+    assert len(t.steps) == global_ceiling(t.max_retries, True)
+
+
+def test_an_ungrounded_new_family_run_reaches_the_fallback_by_the_full_set_route():
+    """New families with no grounded target: targeted cannot run, so the
+    route is full-set, which escalates from the first charged full-set
+    attempt on - the fallback runs without needing the reservation."""
+    t = run_trajectory(_new_families(3, implicated=False) + [Outcome("pass")])
+    assert t.models[:2] == [PRIMARY, FB]  # the ordinary escalation, no reservation needed
+    assert not any(step.reserved_fallback for step in t.steps)
+
+
+def test_after_the_fallback_has_run_no_slot_stays_reserved():
+    """C8 shape first (the fallback-targeted repair runs and fails with a new
+    family), then new families on the primary: the allowance is used, so the
+    primary keeps the ordinary ceiling."""
+    t = run_trajectory([_fail(f"c{i}") for i in range(4)] + [_fail("fb", "s-fb")] + _new_families(20))
+    assert t.steps[4].model == FB and not t.steps[4].reserved_fallback
+    assert not any(step.reserved_fallback for step in t.steps)
+    assert t.terminal == STOP_EXHAUSTED
+
+
+def test_mandatory_recovery_outranks_the_reserved_fallback_slot():
+    """A violation at the reservation boundary: unsafe authoritative state
+    comes first - recovery runs (past the ceiling, PRV-11), never the fallback."""
+    outcomes = _new_families(9) + [Outcome("violation", content="dropped", signature="api")]
+    outcomes += [Outcome("restore_fail", content="r", signature="restore")] * 3
+    t = run_trajectory(outcomes)
+    assert [step.mode for step in t.steps[10:]] == ["api_contract_recovery"] * 3
+    assert not t.fallback_called()
+    assert t.terminal == STOP_EXHAUSTED  # unrestored: fail closed

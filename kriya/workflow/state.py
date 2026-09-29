@@ -186,6 +186,11 @@ class RetryBudgets:
     # counter). A new failure family clears it; the global attempt ceiling still
     # bounds the run.
     fallback_targeted_attempted: bool = False
+    # Attempts this run actually sent to a fallback model (fallback-targeted
+    # or an escalated full-set). Never reset: it is what tells the retry
+    # policy whether the fallback's allowance in the global ceiling is still
+    # unused (STATE-RESERVED-FALLBACK-001).
+    fallback_attempts_used: int = 0
     # Set when a primary-model targeted response returns advisory NO CHANGE
     # against a target backed by a deterministic file:line locator.  The
     # authoritative locator remains the scope, but retrying the same model's

@@ -7,6 +7,13 @@ API_CONTRACT_RECOVERY_MAX_ATTEMPTS = 3
 # Consecutive attempts without material progress (PRD-026) after which the
 # retry loop is forced onto the bounded full-set/fallback route.
 STRATEGY_TRANSITION_AFTER_NO_PROGRESS = 2
+# The global ceiling's allowance for the configured fallback. It belongs to
+# the fallback: continued primary attempts may never consume it
+# (STATE-RESERVED-FALLBACK-001).
+FALLBACK_ALLOWANCE = 1
+# Typed reason an attempt was routed to the fallback because the remaining
+# global capacity reached the fallback's unused allowance.
+RESERVED_FALLBACK_ALLOWANCE = "RESERVED_FALLBACK_ALLOWANCE"
 
 
 class RetryAction(str, Enum):
@@ -23,6 +30,9 @@ class RetryAction(str, Enum):
 class RetryDecision:
     action: RetryAction
     reason: str
+    # The attempt runs on the fallback because only the fallback's reserved
+    # allowance remains.
+    reserved_fallback: bool = False
 
     @property
     def should_continue(self) -> bool:
@@ -49,6 +59,7 @@ def decide_retry_action(
     api_contract_recovery_count: int = 0,
     api_contract_recovery_max_attempts: int = API_CONTRACT_RECOVERY_MAX_ATTEMPTS,
     api_contract_restored: bool = False,
+    fallback_attempts_used: int = 0,
 ) -> RetryDecision:
     if environment_failure:
         return RetryDecision(RetryAction.STOP_ENVIRONMENT, environment_failure)
@@ -94,6 +105,14 @@ def decide_retry_action(
             RetryAction.STOP_EXHAUSTED,
             "global attempt bound reached across all failure families",
         )
+    reserved = reserved_fallback_decision(
+        attempt_number=attempt_number, max_total_attempts=max_total_attempts,
+        has_fallback_model=has_fallback_model, fallback_attempts_used=fallback_attempts_used,
+        has_implicated_files=has_implicated_files, fallback_targeted_attempted=fallback_targeted_attempted,
+        retry_count=retry_count, max_retries=max_retries,
+    )
+    if reserved is not None:
+        return reserved
     # fallback_targeted_requested only ever disqualifies TARGETED below (an
     # authoritative locator outranks another attempt by the SAME, already-
     # rejecting model) - it does NOT jump the queue ahead of MISSING_FILES.
@@ -123,6 +142,43 @@ def decide_retry_action(
     return RetryDecision(RetryAction.STOP_EXHAUSTED, "all applicable retry budgets are exhausted")
 
 
+def reserved_fallback_decision(
+    *, attempt_number: Optional[int], max_total_attempts: Optional[int], has_fallback_model: bool,
+    fallback_attempts_used: int, has_implicated_files: bool, fallback_targeted_attempted: bool,
+    retry_count: int, max_retries: int,
+) -> Optional[RetryDecision]:
+    """The fallback's allowance in the global ceiling belongs to the fallback
+    (STATE-RESERVED-FALLBACK-001). When the remaining global capacity (at
+    least 1: the ceiling was checked first) is no more than the allowance
+    the fallback has not used, the next attempt goes
+    to the fallback: fallback-targeted when the failure is grounded, else the
+    escalated full-set attempt. Evaluated after the recovery rules (unsafe
+    authoritative state still comes first) and never adds an attempt."""
+    if not has_fallback_model or attempt_number is None or max_total_attempts is None:
+        return None
+    reserved_capacity = max(0, FALLBACK_ALLOWANCE - fallback_attempts_used)
+    if max_total_attempts - attempt_number > reserved_capacity:
+        return None
+    reason = f"{RESERVED_FALLBACK_ALLOWANCE}: only the fallback's reserved allowance remains"
+    if has_implicated_files and not fallback_targeted_attempted:
+        return RetryDecision(RetryAction.FALLBACK_TARGETED, reason, reserved_fallback=True)
+    # A full-set attempt escalates to the fallback from retry_count 1, which
+    # every recorded failure has reached (the initial attempt is a charged
+    # full-set attempt, and best-of-N hands over only charged failures).
+    if 1 <= retry_count < max_retries:
+        return RetryDecision(RetryAction.FULL_SET, reason, reserved_fallback=True)
+    return None
+
+
+def max_total_attempts_for(state, *, max_retries: int, targeted_max_retries: int, has_fallback_model: bool) -> int:
+    """The global attempt ceiling: every family's own allowance."""
+    return (
+        max_retries + targeted_max_retries + (FALLBACK_ALLOWANCE if has_fallback_model else 0)
+        + API_CONTRACT_RECOVERY_MAX_ATTEMPTS
+        + state.budgets.best_of_n_candidates_tried
+    )
+
+
 def _state_inputs(state, *, max_retries: int, targeted_max_retries: int, has_fallback_model: bool) -> dict:
     """The run state's retry inputs, shared by both decision sites below so
     they can never read the state differently."""
@@ -139,6 +195,11 @@ def _state_inputs(state, *, max_retries: int, targeted_max_retries: int, has_fal
         has_api_contract_recovery=bool(state.api_contract_recovery),
         api_contract_recovery_count=state.budgets.api_contract_recovery_count,
         api_contract_restored=api_contract_restored(state),
+        fallback_attempts_used=state.budgets.fallback_attempts_used,
+        max_total_attempts=max_total_attempts_for(
+            state, max_retries=max_retries, targeted_max_retries=targeted_max_retries,
+            has_fallback_model=has_fallback_model,
+        ),
     )
 
 
@@ -151,25 +212,22 @@ def decide_for_state(state, *, max_retries: int, targeted_max_retries: int, has_
         ),
         environment_failure=state.environment_failure,
         attempt_number=state.attempt_number,
-        max_total_attempts=(
-            max_retries + targeted_max_retries + (1 if has_fallback_model else 0)
-            + API_CONTRACT_RECOVERY_MAX_ATTEMPTS
-            + state.budgets.best_of_n_candidates_tried
-        ),
     )
 
 
 def decide_attempt_mode(state, *, max_retries: int, targeted_max_retries: int, has_fallback_model: bool) -> RetryDecision:
-    """The mode of the attempt the loop already admitted. The stop conditions
-    (environment failure, global ceiling) were decided by decide_for_state
-    before this attempt began and must not fire again against its
-    since-incremented attempt_number."""
+    """The mode of the attempt the loop already admitted: the loop's own
+    decision, from the attempt number the loop decided at (this attempt has
+    already incremented it). The stop conditions were decided then and
+    cannot fire here: the environment failure is left out and the ceiling
+    admitted that number."""
     return decide_retry_action(
         **_state_inputs(
             state, max_retries=max_retries, targeted_max_retries=targeted_max_retries,
             has_fallback_model=has_fallback_model,
         ),
         environment_failure=None,
+        attempt_number=state.attempt_number - 1,
     )
 
 
