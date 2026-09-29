@@ -203,6 +203,12 @@ class RetryBudgets:
     # normal first-time failure - only a repeat is eligible for error-triggered
     # live lookup.
     last_failure_signature: Optional[Tuple[str, Any]] = None
+    # Every failure signature this candidate has produced. A family is new
+    # (fresh scoped budgets, an uncharged exposing attempt) only the first
+    # time it appears; returning to one seen earlier (A -> B -> A, fixing one
+    # defect by re-breaking another) is charged like a repeat
+    # (STATE-FAILURE-FAMILY-CYCLE-001).
+    seen_failure_signatures: Set[Tuple[str, Any]] = field(default_factory=set)
     # How many independent candidates kriya/workflow/best_of_n.py discarded before
     # this run's winning (or final) attempt. Unlike retry_count, this is NEVER reset
     # between candidates - it's a running total across the whole run, since it exists

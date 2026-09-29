@@ -68,6 +68,7 @@ from kriya.workflow.retry_policy import (
     api_contract_recovery_handed_back,
     charge_failed_attempt,
     force_strategy_transition,
+    observe_failure_family,
     reset_scoped_budgets_for_new_family,
 )
 from kriya.workflow.retry_progress import (
@@ -579,9 +580,8 @@ async def _record_attempt_failure(
     ):
         current_failure_signature = previous_failure_signature
 
-    failure_family_changed = (
-        previous_failure_signature is not None
-        and current_failure_signature != previous_failure_signature
+    failure_family_changed = observe_failure_family(
+        state.budgets, previous_failure_signature, current_failure_signature,
     )
     if failure_family_changed:
         logger.info(

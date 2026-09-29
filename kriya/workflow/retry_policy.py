@@ -193,6 +193,21 @@ def api_contract_recovery_handed_back(state) -> bool:
 # runs there. Each mutates only the run's RetryBudgets, so the state-machine
 # tier (tests/state_machine/) drives these same functions.
 
+def observe_failure_family(budgets, previous_signature, current_signature) -> bool:
+    """Record the attempt's failure signature and return whether it opens a
+    genuinely new failure family: different from the previous attempt's AND
+    never seen before in this candidate. A return to an earlier family (A ->
+    B -> A) is not new evidence, so it earns no fresh budget and is charged
+    (STATE-FAILURE-FAMILY-CYCLE-001)."""
+    new_family = (
+        previous_signature is not None
+        and current_signature != previous_signature
+        and current_signature not in budgets.seen_failure_signatures
+    )
+    budgets.seen_failure_signatures.add(current_signature)
+    return new_family
+
+
 def reset_scoped_budgets_for_new_family(budgets) -> None:
     """A genuinely different failure family earns fresh scoped (targeted and
     fallback-targeted) budgets; the global attempt ceiling still bounds the

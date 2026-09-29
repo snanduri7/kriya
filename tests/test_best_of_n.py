@@ -37,6 +37,7 @@ def _make_state(**overrides):
     state.toolchain_checked = True
     state.run_verification_confirmed = True
     state.budgets.best_of_n_candidates_tried = 1
+    state.budgets.seen_failure_signatures = {("compile", "sig")}
     for k, v in overrides.items():
         setattr(state, k, v)
     return state
@@ -61,6 +62,8 @@ def test_reset_clears_candidate_specific_fields():
     assert state.files_written == []
     assert state.budgets.retry_count == 0
     assert state.budgets.last_failure_signature is None
+    # An independent candidate's failure families are its own.
+    assert state.budgets.seen_failure_signatures == set()
 
 
 def test_reset_leaves_trace_and_environment_fields_untouched():
