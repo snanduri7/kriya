@@ -215,7 +215,7 @@ Ten slowest tier tests: `test_prd032_chaos_static_analysis.py::test_a_nosemgrep_
 |---|---|---|---|
 | 1 | `e509fbb` / `33998645…` | PASS (both runs) | **9/11 FAILED**: C4 exact_requirement, C11 static_analysis_enabled (`matrix/trial-20260929T025849Z`), kept as failed evidence |
 | 2 | `4240d69` / `0ef71721…` | PASS | **11/11 CERTIFIED** (`matrix/trial-20260929T040507Z`) |
-| final | `f4bb39e` / `051daa7d…` | PASS (both runs, every check) | not run (see below) |
+| final | `f4bb39e` / `051daa7d…` | PASS (both runs, every check) | **11/11 CERTIFIED** (`matrix/trial-20260929T052623Z`, 9:42, run detached at exactly `f4bb39e`; first-pass cases now report retries 0/0) |
 
 The canary checks are all true in every run:
 - `PRODUCTION_READY` before and after;
@@ -260,7 +260,21 @@ Both are reporting-only. **`f4bb39e` differs from the 11/11 revision `4240d69` o
 | 13 | SUCCESS requires mandatory evidence and verified == committed | PASS | binding/terminal-gate suites in the tier; canary commit evidence bound |
 | 14 | Process/worktree lifecycle intact | PASS | lifecycle suites in the tier; canary leak and worktree checks |
 
-**Completion status.** Every criterion is green on `f4bb39e` except one: the single complete 11/11 live matrix ran on `4240d69`, not on `f4bb39e`. Your instruction was one fresh matrix, not several. So `STATE_MACHINE_HARDENING_VERIFIED` is **pending your decision**: accept the 11/11 on `4240d69` plus the reporting-only delta, or run one matrix on `f4bb39e`.
+**Completion status.** At the user's instruction (a verification model bound to identity), ONE complete matrix ran on the exact final revision `f4bb39e`, candidate `051daa7d…` (CURRENT at `f4bb39e`): **11/11**. The earlier evidence is preserved unchanged:
+- 9/11 on `e509fbb`;
+- 11/11 on `4240d69`.
+
+Every criterion is green on `f4bb39e`:
+- PRD-017 pinned;
+- tier 584/584;
+- full pytest 7288/0;
+- ruff and pylint at zero;
+- canary PASS;
+- live matrix 11/11;
+- no open P0/P1;
+- clean tracked tree.
+
+**`STATE_MACHINE_HARDENING_VERIFIED=true`** (final hardening revision `f4bb39e`, Ollama 0.34.4). On Ollama 0.34.4 the same Kriya behaviour has now produced one 9/11 and two 11/11 matrices, so runtime repeatability stays a KRIYA_PRODUCTION_CERTIFICATION concern.
 
 ## Next: memory/resource-leak audit (designed, not run)
 The harness and plan are at the session scratchpad `leak_audit/`. They were designed read-only and none of it has been executed. Retention hypotheses to measure:
