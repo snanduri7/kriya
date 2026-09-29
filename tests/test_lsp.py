@@ -5,16 +5,20 @@ Length framing and request/notification handling logic, not just the
 public API shape."""
 import asyncio
 import json
+import os
+import tempfile
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from kriya.tools import lsp
 from kriya.tools.lsp import (
     JdtlsClient,
     find_jdtls,
     format_diagnostics_for_prompt,
 )
+from kriya.workflow.lsp_integration import _get_or_start_jdtls_client
 
 
 def _frame(message: Dict[str, Any]) -> bytes:
@@ -294,3 +298,65 @@ def test_format_diagnostics_for_prompt_is_forceful_ground_truth_framing():
     assert "ground truth" in result.lower()
     assert "not a guess" in result.lower()
     assert "same error WILL happen again" in result
+
+
+# --- LEAK-JDTLS-START-FAILURE-001: a failed start() releases what it acquired ---
+
+def _silent_jdtls(tmp_path) -> str:
+    """A real executable standing in for jdtls: records its pid, never answers."""
+    script = tmp_path / "fake-jdtls"
+    script.write_text(f"#!/bin/sh\necho $$ > '{tmp_path / 'pid'}'\nexec sleep 120\n")
+    script.chmod(0o755)
+    return str(script)
+
+
+def _jdtls_data_dirs(temp_root) -> List[str]:
+    return sorted(p.name for p in temp_root.iterdir() if p.name.startswith("kriya-jdtls-data-"))
+
+
+@pytest.fixture
+def temp_root(tmp_path, monkeypatch):
+    root = tmp_path / "tmp"
+    root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(root))
+    return root
+
+
+@pytest.mark.asyncio
+async def test_initialize_timeout_releases_data_dir_process_and_reader(tmp_path, temp_root, monkeypatch):
+    monkeypatch.setattr(lsp, "JDTLS_INIT_TIMEOUT_SECONDS", 1.0)
+    monkeypatch.setattr(lsp, "find_jdtls", lambda: _silent_jdtls(tmp_path))
+
+    client = await _get_or_start_jdtls_client(None, str(tmp_path))
+
+    assert client is None  # degraded to no LSP grounding, as before
+    assert _jdtls_data_dirs(temp_root) == []
+    pid = int((tmp_path / "pid").read_text())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)  # terminated and reaped, not left running
+    assert not [t for t in asyncio.all_tasks() if "_read_loop" in repr(t.get_coro())]
+
+
+@pytest.mark.asyncio
+async def test_launch_failure_releases_the_data_dir(tmp_path, temp_root):
+    client = JdtlsClient(str(tmp_path), str(tmp_path / "missing-jdtls"))
+
+    with pytest.raises(FileNotFoundError):
+        await client.start()
+
+    assert _jdtls_data_dirs(temp_root) == []
+
+
+@pytest.mark.asyncio
+async def test_successful_start_keeps_the_data_dir_until_shutdown(temp_root):
+    client = _make_client([{"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}}])
+    with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=client.process)):
+        await client.start()
+    assert len(_jdtls_data_dirs(temp_root)) == 1
+
+    client._request = AsyncMock(side_effect=RuntimeError("simulated: no shutdown response"))
+    client.process.terminate = MagicMock()
+    client.process.wait = AsyncMock(return_value=None)
+    await client.shutdown()
+
+    assert _jdtls_data_dirs(temp_root) == []

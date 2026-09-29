@@ -77,6 +77,19 @@ class JdtlsClient:
         self._reader_task: Optional[asyncio.Task] = None
 
     async def start(self) -> None:
+        """Launch jdtls and complete the initialize handshake. On ANY failure
+        (launch error, initialize timeout, cancellation) everything already
+        acquired - the data dir, the process, the reader task - is released
+        before the exception propagates: the caller degrades to no LSP
+        grounding and never holds the client, so nothing else would ever
+        call shutdown() (LEAK-JDTLS-START-FAILURE-001)."""
+        try:
+            await self._start()
+        except BaseException:
+            await self._release()
+            raise
+
+    async def _start(self) -> None:
         self._data_dir = tempfile.mkdtemp(prefix="kriya-jdtls-data-")
         # Confirmed live, not theoretical: jdtls's own launcher REFUSES to start
         # ("Exception: jdtls requires at least Java 21") if a JAVA_HOME inherited
@@ -144,8 +157,14 @@ class JdtlsClient:
         except Exception as ex:
             logger.debug(f"jdtls shutdown handshake failed, terminating directly: {ex}")
         finally:
-            if self._reader_task:
-                self._reader_task.cancel()
+            await self._release()
+
+    async def _release(self) -> None:
+        """Cancel the reader, stop the process (SIGTERM, then SIGKILL) and
+        remove the data dir - shared by shutdown() and a failed start()."""
+        if self._reader_task:
+            self._reader_task.cancel()
+        try:
             if self.process:
                 # SIGTERM alone, with no wait/confirmation and no SIGKILL
                 # fallback, is the same leaked-orphan-subprocess bug class
@@ -166,8 +185,10 @@ class JdtlsClient:
                     pass
                 except Exception as ex:
                     logger.debug(f"jdtls process termination failed: {ex}")
+        finally:
             if self._data_dir:
                 shutil.rmtree(self._data_dir, ignore_errors=True)
+                self._data_dir = None
 
     async def _read_loop(self) -> None:
         while True:
