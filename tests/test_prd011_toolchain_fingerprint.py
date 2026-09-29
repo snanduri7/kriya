@@ -39,11 +39,14 @@ def local_images(monkeypatch):
     present = {}
     inspected = []
 
-    def fake_digest(image):
+    def fake_inspection(image):
         inspected.append(image)
-        return present.get(image)
+        digest = present.get(image)
+        status = (containment_oci.ImageInspectStatus.PRESENT if digest
+                  else containment_oci.ImageInspectStatus.IMAGE_NOT_FOUND)
+        return containment_oci.ImageInspection(image, status, digest=digest)
 
-    monkeypatch.setattr(containment_oci, "local_image_content_digest", fake_digest)
+    monkeypatch.setattr(containment_oci, "local_image_inspection", fake_inspection)
     present["inspected"] = inspected
     return present
 

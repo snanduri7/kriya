@@ -220,7 +220,9 @@ def test_migration_resume_fingerprint_follows_the_target_toolchain_image(tmp_pat
 
     (tmp_path / "pom.xml").write_text(_pom(17))
     digests = {"maven:3.9-eclipse-temurin-17": "sha256:" + "1" * 64, "maven:3.9-eclipse-temurin-21": "sha256:" + "2" * 64}
-    monkeypatch.setattr(containment_oci, "local_image_content_digest", lambda image: digests.get(image))
+    monkeypatch.setattr(containment_oci, "local_image_inspection", lambda image: containment_oci.ImageInspection(
+        image, containment_oci.ImageInspectStatus.PRESENT if digests.get(image)
+        else containment_oci.ImageInspectStatus.IMAGE_NOT_FOUND, digest=digests.get(image)))
     migrated = {"pom.xml": _pom(21), "src/App.java": "class App {}"}
 
     def fingerprint(files):

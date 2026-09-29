@@ -778,7 +778,9 @@ def test_prd011_contained_no_change_proof_binds_the_real_toolchain_identity(
     subprocess.run(["git", "add", "app.py"], cwd=git_workspace, check=True)
     subprocess.run(["git", "commit", "-qm", "app"], cwd=git_workspace, check=True)
     digests = {"python:3.12-slim": "sha256:" + "a" * 64}
-    monkeypatch.setattr(containment_oci, "local_image_content_digest", lambda image: digests.get(image))
+    monkeypatch.setattr(containment_oci, "local_image_inspection", lambda image: containment_oci.ImageInspection(
+        image, containment_oci.ImageInspectStatus.PRESENT if digests.get(image)
+        else containment_oci.ImageInspectStatus.IMAGE_NOT_FOUND, digest=digests.get(image)))
     config = AppConfig()
     config.autonomy.contained_execution_required = True
     config.autonomy.containment_backend = "oci"

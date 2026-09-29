@@ -196,6 +196,16 @@ def _kriya_containers(docker: str) -> List[str]:
     return sorted(name for name in listing.stdout.split() if name.startswith("kriya-oci-"))
 
 
+class ContainmentImageUnavailableError(Exception):
+    """The containment image could not be confirmed present; carries the
+    inspection so the doctor reports the real cause (a stopped engine is not
+    a missing image)."""
+
+    def __init__(self, inspection: Any) -> None:
+        super().__init__(inspection.describe())
+        self.inspection = inspection
+
+
 def probe_oci_containment(cfg: AppConfig, docker: str, toolchain: Optional[Any]) -> Dict[str, Any]:
     """Run one command through the configured production containment backend.
 
@@ -209,13 +219,14 @@ def probe_oci_containment(cfg: AppConfig, docker: str, toolchain: Optional[Any])
         TrustClass,
         resolve_containment_backend,
     )
-    from kriya.tools.containment_oci import _inspect_image_digest, _select_image_and_cache_mount
+    from kriya.tools.containment_oci import _select_image_and_cache_mount, inspect_local_image
     from kriya.tools.process import ProcessController
 
     command = ["/bin/sh", "-c", _SMOKE_SCRIPT]
     image = toolchain.containment_image if toolchain is not None else _select_image_and_cache_mount(command)[0]
-    if _inspect_image_digest(docker, image) is None:
-        raise FileNotFoundError(f"containment image {image!r} is not present locally; run: docker pull {image}")
+    inspection = inspect_local_image(docker, image)
+    if not inspection.present:
+        raise ContainmentImageUnavailableError(inspection)
 
     backend = resolve_containment_backend(cfg.autonomy.containment_backend)
     scratch = tempfile.mkdtemp(prefix="kriya-doctor-oci-")
@@ -613,7 +624,7 @@ def _check_toolchain(ctx: _Context) -> DoctorCheck:
     """The project's toolchain as production containment will run it: stack
     from PolymorphicValidator, versioned image from PRD-011's resolver, the
     runtime proven inside that image. Host tools are irrelevant here."""
-    from kriya.tools.containment_oci import _attest_toolchain_image, _inspect_image_digest
+    from kriya.tools.containment_oci import _attest_toolchain_image, inspect_local_image
     from kriya.tools.toolchain_identity import ToolchainMismatchError, ToolchainResolutionError
     from kriya.tools.validate import PolymorphicValidator
 
@@ -635,12 +646,13 @@ def _check_toolchain(ctx: _Context) -> DoctorCheck:
     if docker is None:
         evidence.update(docker_evidence)
         return _check("toolchain.required", CheckStatus.UNAVAILABLE, evidence=evidence, remediation="Install and start Docker.")
-    if _inspect_image_digest(docker, identity.containment_image) is None:
-        evidence["error"] = f"image {identity.containment_image!r} is not present locally"
-        return _check(
-            "toolchain.required", CheckStatus.UNAVAILABLE, evidence=evidence,
-            remediation=f"Run: docker pull {identity.containment_image}",
-        )
+    inspection = inspect_local_image(docker, identity.containment_image)
+    if not inspection.present:
+        # Only the running engine's own answer is reported as absence.
+        evidence["error"] = inspection.describe()
+        evidence["image_inspection"] = inspection.to_evidence()
+        return _check("toolchain.required", CheckStatus.UNAVAILABLE, evidence=evidence,
+                      remediation=inspection.remediation())
     try:
         attested = _attest_toolchain_image(docker, identity.containment_image, identity, allow_pull=False)
     except ToolchainMismatchError as error:
@@ -680,6 +692,10 @@ def _check_oci_smoke(ctx: _Context) -> DoctorCheck:
     remediation = "Configure containment_backend: oci and verify Docker can run the containment image."
     try:
         evidence = probe_oci_containment(ctx.cfg, docker, ctx.toolchain)
+    except ContainmentImageUnavailableError as error:
+        return _check("containment.oci_smoke", CheckStatus.UNAVAILABLE,
+                      evidence={"error": str(error), "image_inspection": error.inspection.to_evidence()},
+                      remediation=error.inspection.remediation())
     except FileNotFoundError as error:
         return _check("containment.oci_smoke", CheckStatus.UNAVAILABLE, evidence={"error": str(error)}, remediation=str(error))
     except ContainmentSmokeError as error:

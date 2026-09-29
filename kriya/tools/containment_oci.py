@@ -67,7 +67,9 @@ import shutil
 import subprocess
 import time
 import uuid
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Dict, List, Optional, Tuple
 
 from kriya.tools.containment import (
     BackendUnavailableError,
@@ -201,29 +203,154 @@ def _toolchain_cache_mount(identity: ToolchainIdentity) -> Optional[str]:
     return None
 
 
-def _inspect_image_digest(docker_path: str, image: str) -> Optional[str]:
-    result = subprocess.run(
-        [docker_path, "image", "inspect", image, "--format", "{{.Id}}"],
-        capture_output=True, timeout=30, text=True,
-    )
+class ImageInspectStatus(str, Enum):
+    """What ``docker image inspect`` established about a local image. Every
+    failure exits 1, so the class comes from Docker's own stderr text
+    (measured on Docker 27.5.1); anything unrecognized stays UNKNOWN, never
+    "not present"."""
+
+    PRESENT = "PRESENT"
+    IMAGE_NOT_FOUND = "IMAGE_NOT_FOUND"
+    DAEMON_UNAVAILABLE = "DAEMON_UNAVAILABLE"
+    PERMISSION_ERROR = "PERMISSION_ERROR"
+    CLIENT_ERROR = "CLIENT_ERROR"
+    TIMEOUT = "TIMEOUT"
+    UNKNOWN_INSPECT_ERROR = "UNKNOWN_INSPECT_ERROR"
+
+
+# (stderr fragment, status), checked in order. The running engine's own
+# "No such image" answer is the only evidence of absence. Docker Desktop's
+# resource saver stops the engine VM after its idle timeout and then
+# answers every image inspect from an API cache with a 404 whose message
+# the CLI prints JSON-wrapped (``{"message":"No such image: ..."}``) - for
+# present and missing images alike (MEASURED, Docker Desktop 27.5.1): that
+# answer says nothing about the image.
+_CACHED_ENGINE_NOT_FOUND = '{"message":"No such image'
+_INSPECT_STDERR_CLASSES: Tuple[Tuple[str, ImageInspectStatus], ...] = (
+    (_CACHED_ENGINE_NOT_FOUND, ImageInspectStatus.DAEMON_UNAVAILABLE),
+    ("No such image", ImageInspectStatus.IMAGE_NOT_FOUND),
+    ("Cannot connect to the Docker daemon", ImageInspectStatus.DAEMON_UNAVAILABLE),
+    ("permission denied while trying to connect", ImageInspectStatus.PERMISSION_ERROR),
+    ("invalid reference format", ImageInspectStatus.CLIENT_ERROR),
+    ("Failed to initialize", ImageInspectStatus.CLIENT_ERROR),
+)
+
+_INSPECT_REMEDIATION = {
+    ImageInspectStatus.DAEMON_UNAVAILABLE: "Start the Docker daemon (`docker info` must succeed), then re-run.",
+    ImageInspectStatus.PERMISSION_ERROR: "Give this user access to the Docker daemon socket, then re-run.",
+    ImageInspectStatus.CLIENT_ERROR: "Fix the Docker client configuration (context/DOCKER_HOST) or the image "
+                                     "reference, then re-run.",
+    ImageInspectStatus.TIMEOUT: "`docker image inspect` timed out; check the Docker daemon's health, then re-run.",
+    ImageInspectStatus.UNKNOWN_INSPECT_ERROR: "Inspect the recorded docker stderr, then re-run.",
+}
+
+
+@dataclass(frozen=True)
+class ImageInspection:
+    image: str
+    status: ImageInspectStatus
+    digest: Optional[str] = None
+    exit_code: Optional[int] = None
+    stderr: str = ""
+    # The first answer when it was re-checked against the running engine
+    # (a not-found is never accepted without that check).
+    first_answer: Optional[str] = None
+
+    @property
+    def present(self) -> bool:
+        return self.status is ImageInspectStatus.PRESENT
+
+    def describe(self) -> str:
+        if self.status is ImageInspectStatus.PRESENT:
+            return f"image {self.image!r} is present ({self.digest})"
+        if self.status is ImageInspectStatus.IMAGE_NOT_FOUND:
+            return f"image {self.image!r} is not present locally"
+        detail = f": {self.stderr}" if self.stderr else ""
+        return f"image {self.image!r} could not be inspected ({self.status.value}){detail}"
+
+    def remediation(self) -> str:
+        if self.status is ImageInspectStatus.IMAGE_NOT_FOUND:
+            return f"Run: docker pull {self.image}"
+        return _INSPECT_REMEDIATION.get(self.status, "")
+
+    def to_evidence(self) -> Dict[str, Any]:
+        evidence = {"image": self.image, "status": self.status.value, "digest": self.digest,
+                    "exit_code": self.exit_code, "stderr": self.stderr}
+        if self.first_answer is not None:
+            evidence["first_answer"] = self.first_answer
+        return evidence
+
+
+def classify_inspect_failure(stderr: str) -> ImageInspectStatus:
+    for fragment, status in _INSPECT_STDERR_CLASSES:
+        if fragment in stderr:
+            return status
+    return ImageInspectStatus.UNKNOWN_INSPECT_ERROR
+
+
+def inspect_local_image(docker_path: str, image: str, *, timeout: float = 30) -> ImageInspection:
+    """Inspect an ALREADY-PRESENT local image without pulling or running
+    anything, keeping the failure's real cause (never read as absence).
+
+    A not-found answer (the engine's, or Docker Desktop's cached one while
+    its engine VM is stopped) is re-checked once against the running engine
+    before it is accepted: ``docker image ls`` is served by the engine and
+    wakes a stopped VM (MEASURED), then the image is inspected again. Only
+    that second answer can establish IMAGE_NOT_FOUND."""
+    first = _inspect_once(docker_path, image, timeout)
+    cached_answer = _CACHED_ENGINE_NOT_FOUND in first.stderr
+    if first.status is not ImageInspectStatus.IMAGE_NOT_FOUND and not cached_answer:
+        return first
+    try:
+        subprocess.run([docker_path, "image", "ls", "--quiet", image],
+                       capture_output=True, timeout=timeout, text=True)
+    except (OSError, subprocess.SubprocessError):
+        pass  # the re-inspect below reports whatever state the daemon is in
+    second = _inspect_once(docker_path, image, timeout)
+    return ImageInspection(second.image, second.status, second.digest, second.exit_code, second.stderr,
+                           first_answer=f"{first.status.value}: {first.stderr}")
+
+
+def _inspect_once(docker_path: str, image: str, timeout: float) -> ImageInspection:
+    try:
+        result = subprocess.run(
+            [docker_path, "image", "inspect", image, "--format", "{{.Id}}"],
+            capture_output=True, timeout=timeout, text=True,
+        )
+    except subprocess.TimeoutExpired:
+        return ImageInspection(image, ImageInspectStatus.TIMEOUT, stderr=f"no answer within {timeout:g}s")
+    except OSError as error:
+        return ImageInspection(image, ImageInspectStatus.CLIENT_ERROR, stderr=f"{type(error).__name__}: {error}")
+    stderr = (result.stderr or "").strip()[:500]
     if result.returncode != 0:
-        return None
+        return ImageInspection(image, classify_inspect_failure(stderr), exit_code=result.returncode, stderr=stderr)
     digest = result.stdout.strip()
-    return digest if digest.startswith("sha256:") else None
+    if not digest.startswith("sha256:"):
+        return ImageInspection(image, ImageInspectStatus.UNKNOWN_INSPECT_ERROR, exit_code=0,
+                               stderr=stderr or f"unexpected inspect output {digest[:80]!r}")
+    return ImageInspection(image, ImageInspectStatus.PRESENT, digest=digest, exit_code=0)
+
+
+def _inspect_image_digest(docker_path: str, image: str) -> Optional[str]:
+    """The content digest, or None whatever the reason (callers that only
+    need the digest; diagnostics use ``inspect_local_image``)."""
+    return inspect_local_image(docker_path, image).digest
+
+
+def local_image_inspection(image: str) -> ImageInspection:
+    """``inspect_local_image`` with the docker on PATH. Never pulls and never
+    runs a container: resume-fingerprint and doctor callers must not change
+    what they observe."""
+    docker_path = shutil.which("docker")
+    if docker_path is None:
+        return ImageInspection(image, ImageInspectStatus.CLIENT_ERROR, stderr="docker is not on PATH")
+    return inspect_local_image(docker_path, image)
 
 
 def local_image_content_digest(image: str) -> Optional[str]:
     """The immutable content digest of an ALREADY-PRESENT local image, or
-    None when Docker or the image is unavailable. Never pulls and never runs
-    a container: resume-fingerprint and doctor callers must not change what
-    they observe."""
-    docker_path = shutil.which("docker")
-    if docker_path is None:
-        return None
-    try:
-        return _inspect_image_digest(docker_path, image)
-    except (OSError, subprocess.SubprocessError):
-        return None
+    None when Docker or the image is unavailable."""
+    return local_image_inspection(image).digest
 
 
 def _attest_toolchain_image(

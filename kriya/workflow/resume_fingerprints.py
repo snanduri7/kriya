@@ -725,7 +725,7 @@ def toolchain_fingerprint(
     import tempfile
 
     from kriya.tools.containment import ContainmentSetupError
-    from kriya.tools.containment_oci import local_image_content_digest
+    from kriya.tools.containment_oci import local_image_inspection
     from kriya.tools.toolchain_identity import ALL_TOOLCHAIN_DECLARATION_FILES
     from kriya.tools.validate import PolymorphicValidator
 
@@ -763,9 +763,10 @@ def toolchain_fingerprint(
             shutil.rmtree(overlay, ignore_errors=True)
     if identity is None:
         return Fingerprint.unavailable(f"no versioned toolchain profile for stack {stack!r}")
-    digest = local_image_content_digest(identity.containment_image)
+    inspection = local_image_inspection(identity.containment_image)
+    digest = inspection.digest
     if digest is None:
-        return Fingerprint.unavailable(f"toolchain image {identity.containment_image!r} is not present locally")
+        return Fingerprint.unavailable(f"toolchain {inspection.describe()}")
     declared = identity.to_dict()
     for evidence_only in ("image_digest", "observed_runtime_version", "observed_build_tool_version"):
         declared.pop(evidence_only, None)

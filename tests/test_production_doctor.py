@@ -357,10 +357,20 @@ def test_an_unsupported_declared_toolchain_blocks(tmp_path):
     assert "Java 7" in check.evidence["error"]
 
 
+def _inspection(image, digest):
+    from kriya.tools.containment_oci import ImageInspection, ImageInspectStatus
+
+    if digest:
+        return ImageInspection(image, ImageInspectStatus.PRESENT, digest=digest, exit_code=0)
+    return ImageInspection(image, ImageInspectStatus.IMAGE_NOT_FOUND, exit_code=1,
+                           stderr=f"Error response from daemon: No such image: {image}")
+
+
 def test_an_absent_toolchain_image_is_unavailable_and_never_pulled(tmp_path):
     workspace = _git_workspace(tmp_path / "workspace")
     _pom(workspace, 17)
-    with patch("kriya.tools.containment_oci._inspect_image_digest", return_value=None), \
+    with patch("kriya.tools.containment_oci.inspect_local_image",
+               side_effect=lambda docker, image: _inspection(image, None)), \
          patch("kriya.tools.containment_oci._attest_toolchain_image") as attest:
         check = _checks(_run(tmp_path, workspace=workspace))["toolchain.required"]
     attest.assert_not_called()
@@ -379,7 +389,8 @@ def test_a_present_toolchain_image_is_attested_without_pulling(tmp_path):
             image_digest="sha256:" + "1" * 64, observed_runtime_version="21", observed_build_tool_version="3.9",
         )
 
-    with patch("kriya.tools.containment_oci._inspect_image_digest", return_value="sha256:" + "1" * 64), \
+    with patch("kriya.tools.containment_oci.inspect_local_image",
+               side_effect=lambda docker, image: _inspection(image, "sha256:" + "1" * 64)), \
          patch("kriya.tools.containment_oci._attest_toolchain_image", side_effect=attest), \
          patch("kriya.production_doctor.shutil.which", return_value=None):  # host tools are irrelevant
         report = _run(tmp_path, workspace=workspace)
@@ -396,7 +407,8 @@ def test_an_unattested_gradle_build_tool_is_reported_not_claimed(tmp_path):
     def attest(_docker, image, identity, *, allow_pull):
         return identity.with_runtime_evidence(image_digest="sha256:" + "2" * 64, observed_runtime_version="17")
 
-    with patch("kriya.tools.containment_oci._inspect_image_digest", return_value="sha256:" + "2" * 64), \
+    with patch("kriya.tools.containment_oci.inspect_local_image",
+               side_effect=lambda docker, image: _inspection(image, "sha256:" + "2" * 64)), \
          patch("kriya.tools.containment_oci._attest_toolchain_image", side_effect=attest):
         check = _checks(_run(tmp_path, workspace=workspace))["toolchain.required"]
     assert check.status is CheckStatus.WARN

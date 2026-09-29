@@ -151,7 +151,10 @@ def test_under_contained_execution_only_a_real_toolchain_change_alters_the_envir
     (tmp_path / "pom.xml").write_text(POM.format(release=17, deps=""))
     cfg = AppConfig()
     cfg.autonomy.contained_execution_required = True
-    with patch("kriya.tools.containment_oci.local_image_content_digest", return_value="sha256:image"):
+    from kriya.tools.containment_oci import ImageInspection, ImageInspectStatus
+
+    present = ImageInspection("image", ImageInspectStatus.PRESENT, digest="sha256:image")
+    with patch("kriya.tools.containment_oci.local_image_inspection", return_value=present):
         pre = baseline_environment_identity(str(tmp_path), cfg.autonomy)
         same = baseline_environment_identity(str(tmp_path), cfg.autonomy,
                                              candidate_files={"pom.xml": POM.format(release=17, deps=DEP)})
