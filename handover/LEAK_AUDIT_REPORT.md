@@ -28,6 +28,7 @@ The raw evidence is local-only, under `handover/leak_audit/results-20260929-1116
 | Step 5: Ollama reaches bounded residency | Accepted by the user as OLLAMA_RUNTIME_RESIDENCY. One runner grew 26.3 → 27.4 → 28.9 GB and released everything at unload. The plateau within one loaded session is UNKNOWN. | MEASURED |
 | Full pytest at the batch boundary | 7307 passed, 0 failed, 0 skipped (32.5 min). `kriya-strict-config-*` 0 → 0. Kriya Docker objects 0 → 0. | MEASURED |
 | Lint | ruff and pylint both at zero. | MEASURED |
+| Linux: focused containment/resource verification (`scripts/linux-repro/run.sh 454af7b`) | Ubuntu, kernel 6.12.5-linuxkit aarch64, non-root uid 1001, native inner Docker 29.1.3, Python 3.12.3. The inner daemon started clean (0 containers, default networks only). 57 passed / 0 failed / 0 skipped in 2 min 3 s across `tests/test_process_controller.py`, `test_containment_oci.py`, `test_service_runtime_oci.py` and `test_platform_process_control_contract.py`, including the 4 new lifecycle tests. Covered paths: normal completion (timeout and registry-teardown tests), early exception (container and registry network) and cancellation (host `run_async`). Afterwards: 0 Kriya containers, default networks only, no `docker run` or test processes. | MEASURED |
 
 ## Defects found and fixed (all CLOSED in `handover/BACKLOG_REGISTRY.csv`)
 
@@ -68,7 +69,7 @@ Next-run characterization, run with that residue present and not cleaned (MEASUR
 ## Open uncertainties (not proven)
 
 - **Managed-service SIGKILL residue.** It was 5/5 when step 4's harness killed pytest, but 0/3 when a plain Python driver was killed. The difference is UNKNOWN. It does not affect the safety verdict, which was tested against the reproduced residue.
-- **Linux.** `CLAUDE.md` asks that containment and resource changes also be verified on Linux (`scripts/linux-repro/run.sh`). The process-lifecycle fix 47c1bb3 has been verified on macOS only. The Linux run is NOT done; the user decides.
+- **Linux.** Done: the focused run is green (see the table above). What it does not prove: that the hosted CI runner behaves identically (this is a reproduction), the rest of the suite on Linux, cancellation mid-container (only host-process cancellation has a test), live-model paths or SIGKILL recovery.
 - **jdtls live path.** In production runs jdtls was only checked for leftover processes: none were found. Its start-failure path is covered deterministically by tests.
 
 ## Corrections logged during the audit
@@ -84,3 +85,11 @@ Kept, not rewritten:
 - Two invalid SIGKILL-driver runs (renamed INVALID/INCONCLUSIVE).
 
 These led to `handover/ENGINEERING_RULES.md`, which `CLAUDE.md` imports.
+
+## Housekeeping after the Linux run (MEASURED)
+
+- The idle `kriya-linux-ctr` container, up since 2026-09-28, was removed. `run.sh` recreates it on demand.
+- `kriya-linux-repro:latest` (934eda67aaa7) and the volumes `kriya-linux-dind-lib` and `kriya-linux-runner-home` were kept, because `run.sh` reuses them by design.
+- The superseded builds c9b3ef72f048 and a0de5effa3be were removed. No container, pinned list, script or `kriya/` file referenced them.
+- Image store total: unchanged at 6.033 GB. The ~2.2 GB I expected was not freed, most likely because those builds shared layers with the current image (INFERRED).
+- `784bbe1e00ff` belongs to the unrelated `cineflow-ai` Compose project and was left untouched.
