@@ -64,7 +64,12 @@ from kriya.workflow.live_lookup import _augment_error_with_live_lookup
 from kriya.workflow.lsp_integration import _build_lsp_diagnostics_context, _get_or_start_jdtls_client
 from kriya.workflow.recovery_coordinator import ClassifiedAttemptFailure, RecoveryCoordinator
 from kriya.workflow.repair_contract import RepairContractStatus
-from kriya.workflow.retry_policy import api_contract_recovery_handed_back
+from kriya.workflow.retry_policy import (
+    api_contract_recovery_handed_back,
+    charge_failed_attempt,
+    force_strategy_transition,
+    reset_scoped_budgets_for_new_family,
+)
 from kriya.workflow.retry_progress import (
     NO_PROGRESS_TERMINAL_REASON,
     REGRESSION,
@@ -583,9 +588,7 @@ async def _record_attempt_failure(
             "Quality Gates surfaced a new failure family - resetting scoped "
             "targeted/fallback budgets while preserving the global attempt bound."
         )
-        state.budgets.targeted_retry_count = 0
-        state.budgets.fallback_targeted_attempted = False
-        state.budgets.fallback_targeted_requested = False
+        reset_scoped_budgets_for_new_family(state.budgets)
     state.error_context = raw_error_context
     if (
         current_failure_signature == previous_failure_signature
@@ -704,14 +707,10 @@ async def _record_attempt_failure(
             no_progress_limit,
             state.last_progress_classification,
         )
-    elif state.consecutive_no_progress_attempts >= 2:
-        # Force the existing bounded full-set/escalation route; this changes
-        # strategy, not authorization or file scope.
-        state.budgets.targeted_retry_count = max(
-            state.budgets.targeted_retry_count, ctx.targeted_max_retries,
-        )
-        if ctx.chain:
-            state.budgets.fallback_targeted_requested = True
+    elif force_strategy_transition(
+        state.budgets, consecutive_no_progress=state.consecutive_no_progress_attempts,
+        targeted_max_retries=ctx.targeted_max_retries, has_fallback_model=bool(ctx.chain),
+    ):
         state.record_event(RunEvent(
             kind="retry.strategy_transition",
             attempt=state.attempt_number,
@@ -1269,12 +1268,13 @@ async def _record_attempt_failure(
             state.repair_contract.immediate_correction_targets = narrowed
 
     # Charged before the scope override below, so the override sees whether
-    # this attempt spent the last of recovery's own budget.
-    charges_api_contract_recovery = (
-        state.plan_scope_conflict is None and state.last_attempt_mode == "api_contract_recovery"
+    # this attempt spent the last of recovery's own budget. Nothing after this
+    # point sets plan_scope_conflict or changes the attempt's mode or family.
+    charge_failed_attempt(
+        state.budgets, attempt_mode=state.last_attempt_mode,
+        plan_scope_conflict=state.plan_scope_conflict is not None,
+        failure_family_changed=failure_family_changed,
     )
-    if charges_api_contract_recovery:
-        state.budgets.api_contract_recovery_count += 1
     if state.api_contract_recovery and not api_contract_recovery_handed_back(state):
         # Later compiler/test failures remain diagnostic history; they cannot
         # replace the authoritative owner/signature/call-site recovery scope.
@@ -1342,30 +1342,6 @@ async def _record_attempt_failure(
                 state.last_error_source_context[lsp_filepath] = (
                     state.last_error_source_context.get(lsp_filepath, "") + lsp_text
                 )
-
-    if state.plan_scope_conflict is not None:
-        # This exits to the authoritative controller immediately. It is a
-        # plan transition, not an ordinary Developer retry, and must not burn
-        # any full-set/targeted recovery budget.
-        pass
-    elif charges_api_contract_recovery:
-        pass  # charged to recovery's own budget above
-    elif state.last_attempt_mode in ("targeted", "missing_files"):
-        if not failure_family_changed:
-            state.budgets.targeted_retry_count += 1
-        # When the narrow repair resolved its original defect and exposed a
-        # different validator family, the new family starts at targeted zero.
-        # The attempt_number ceiling already counts the model call; do not
-        # mischarge it to the unrelated full-set budget below.
-    elif state.last_attempt_mode == "fallback_targeted":
-        # Deliberately counts against NEITHER budget - it's a genuinely
-        # separate, one-shot step (fallback_targeted_attempted, already
-        # set True at the branch entry above, is what prevents this from
-        # ever firing twice), not a full-set attempt or an extension of
-        # the primary-model-only targeted budget.
-        pass
-    else:
-        state.budgets.retry_count += 1
 
     # De-dup fallback: a QualityGateFailure-sourced failure already appended
     # its own gate_outcome at the raise site (via failure.to_gate_outcome()),

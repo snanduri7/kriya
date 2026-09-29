@@ -4,6 +4,9 @@ from enum import Enum
 from typing import Optional
 
 API_CONTRACT_RECOVERY_MAX_ATTEMPTS = 3
+# Consecutive attempts without material progress (PRD-026) after which the
+# retry loop is forced onto the bounded full-set/fallback route.
+STRATEGY_TRANSITION_AFTER_NO_PROGRESS = 2
 
 
 class RetryAction(str, Enum):
@@ -183,3 +186,55 @@ def api_contract_recovery_handed_back(state) -> bool:
     return api_contract_restored(state) and (
         state.budgets.api_contract_recovery_count >= API_CONTRACT_RECOVERY_MAX_ATTEMPTS
     )
+
+
+# --- budget bookkeeping of one failed attempt ------------------------------
+# The budget side of retry_strategy._record_attempt_failure, in the order it
+# runs there. Each mutates only the run's RetryBudgets, so the state-machine
+# tier (tests/state_machine/) drives these same functions.
+
+def reset_scoped_budgets_for_new_family(budgets) -> None:
+    """A genuinely different failure family earns fresh scoped (targeted and
+    fallback-targeted) budgets; the global attempt ceiling still bounds the
+    run, and the full-set budget never resets."""
+    budgets.targeted_retry_count = 0
+    budgets.fallback_targeted_attempted = False
+    budgets.fallback_targeted_requested = False
+
+
+def force_strategy_transition(
+    budgets, *, consecutive_no_progress: int, targeted_max_retries: int, has_fallback_model: bool,
+) -> bool:
+    """After STRATEGY_TRANSITION_AFTER_NO_PROGRESS consecutive attempts
+    without material progress (and before the no-progress ceiling), close
+    the primary's targeted budget and request the one fallback-targeted
+    repair, so the next attempt changes strategy: the fallback when one is
+    configured, else the full-set route. Changes strategy only, never
+    authorization or file scope. Returns whether it fired."""
+    if consecutive_no_progress < STRATEGY_TRANSITION_AFTER_NO_PROGRESS:
+        return False
+    budgets.targeted_retry_count = max(budgets.targeted_retry_count, targeted_max_retries)
+    if has_fallback_model:
+        budgets.fallback_targeted_requested = True
+    return True
+
+
+def charge_failed_attempt(budgets, *, attempt_mode: Optional[str], plan_scope_conflict: bool,
+                          failure_family_changed: bool) -> None:
+    """Charge one failed attempt to the budget of the family it ran in, and
+    to no other. A plan-scope conflict exits to the authoritative controller
+    (a plan transition, not a retry) and charges nothing; a targeted or
+    missing-files repair that exposed a new failure family starts that
+    family at zero; the one-shot fallback-targeted attempt is bounded by its
+    own flag; everything else is a full-set attempt."""
+    if plan_scope_conflict:
+        return
+    if attempt_mode == RetryAction.API_CONTRACT_RECOVERY.value:
+        budgets.api_contract_recovery_count += 1
+    elif attempt_mode in (RetryAction.TARGETED.value, RetryAction.MISSING_FILES.value):
+        if not failure_family_changed:
+            budgets.targeted_retry_count += 1
+    elif attempt_mode == RetryAction.FALLBACK_TARGETED.value:
+        pass
+    else:
+        budgets.retry_count += 1
