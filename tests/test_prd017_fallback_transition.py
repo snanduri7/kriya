@@ -580,3 +580,78 @@ async def test_triage_rides_the_same_fallback_the_generation_escalated_to():
     await _tier_triage(failure, ["A.java", "B.java"], 1, cfg.llm_chain, llm, lambda path: "class X {}",
                        skip_fallbacks=(FALLBACK,))
     assert llm.complete.call_args[1]["model_override"] == SECOND
+
+
+@pytest.mark.asyncio
+async def test_a_required_fallback_that_none_can_serve_ends_typed_with_primary_capacity_unused(tmp_path, monkeypatch):
+    """PRD-017, documented policy (distinct from STATE-RESERVED-FALLBACK-001):
+    the same failure three times spends the primary's targeted budget, so
+    policy requires the one fallback-targeted repair; the only configured
+    fallback failed a Developer qualification case, so none can serve. The
+    run ends FALLBACK_MODEL_INCOMPATIBLE at once - no routing back to the
+    primary's unused full-set budget, no extra attempt, the fallback sent
+    nothing, and the rejected candidates never reach the workspace."""
+    import json
+    import sqlite3
+    import subprocess
+
+    from kriya.core.state_paths import trace_db_path
+    from kriya.workflow.retry_policy import RetryAction
+    from kriya.workflow.workflow import WorkflowEngine
+
+    _exact_ollama(monkeypatch)
+    cfg = AppConfig()
+    cfg.autonomy.run_verification_enabled = False
+    cfg.llm_chain = [FallbackModelConfig(model="fallback-1")]
+    cfg.paths.skills = str(tmp_path / "skills")
+    _qualify(cfg, "fallback-1", anchored_edit_protocol=mq.FAIL)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    baseline = "class Counter:\n    def value(self):\n        return 3\n"
+    (workspace / "calc.py").write_text(baseline)
+    (workspace / "test_calc.py").write_text("from calc import Counter\n\n\ndef test_value():\n    assert Counter().value() == 3\n")
+    for argv in (["init", "-q"], ["config", "user.email", "t@example.com"], ["config", "user.name", "t"],
+                 ["add", "-A"], ["commit", "-q", "-m", "initial"]):
+        subprocess.run(["git", *argv], cwd=str(workspace), check=True)
+    llm = LLMClient(cfg)
+    developer_models = []
+    calls = {"n": 0}
+
+    async def complete(system_prompt, user_prompt, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return "Step 1: add double() to Counter in calc.py"
+        if calls["n"] == 2:
+            return json.dumps({"files": ["calc.py"]})
+        if not system_prompt.startswith(("You are the Kriya Developer Agent", "You are the Kriya File List Planner")):
+            return json.dumps({"verdict": "PASS", "requirements": []})
+        developer_models.append(kwargs.get("model_override"))
+        # The same failure family every attempt (value() raises inside calc.py), new bytes each time.
+        content = (f"# attempt {len(developer_models)}\nclass Counter:\n    def value(self):\n"
+                   "        raise ValueError('value unavailable')\n\n    def double(self):\n        return 2 * self.value()\n")
+        if "FILE CONTENT:" in f"{system_prompt}\n{user_prompt}":
+            return f"FIX ANALYSIS: repair calc.py\nFILE CONTENT:\n{content}"
+        return json.dumps([{"filepath": "calc.py", "content": content}])
+
+    llm.complete = complete
+    res = await WorkflowEngine(Kernel(config=cfg), llm).run_generation_workflow(
+        goal="Add a method double(self) to Counter in calc.py returning twice value().",
+        workspace_path=str(workspace), approval_callback=MagicMock(return_value=True),
+    )
+
+    assert res["quality_gates_passed"] is False
+    assert res["failure_category"] == "fallback_model_incompatible"
+    assert "fallback-1" not in developer_models  # the incompatible fallback is sent nothing
+    assert developer_models == [None] * 4  # full-set + 3 targeted, all on the primary; nothing after
+    assert (workspace / "calc.py").read_text() == baseline
+    with sqlite3.connect(trace_db_path(cfg)) as db:
+        (events_json,) = db.execute("SELECT run_events FROM runs").fetchone()
+    events = json.loads(events_json)
+    started = [e["details"]["mode"] for e in events if e["kind"] == "attempt.started"]
+    # The fallback transition was required: the fifth attempt was admitted as fallback-targeted.
+    assert started == ["full_set", "targeted", "targeted", "targeted", RetryAction.FALLBACK_TARGETED.value]
+    failed = [e["details"]["failure_type"] for e in events if e["kind"] == "attempt.failed"]
+    assert failed[-1] == "fallback_incompatible"
+    selection = [e["details"] for e in events if e["kind"] == "model.fallback_selection"]
+    assert selection and selection[-1]["selected"] is None
+    assert selection[-1]["rejected"][0]["model"] == "fallback-1"
