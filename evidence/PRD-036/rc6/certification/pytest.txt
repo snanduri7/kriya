@@ -1,0 +1,333 @@
+........................................................................ [  0%]
+........................................................................ [  1%]
+........................................................................ [  2%]
+........................................................................ [  3%]
+........................................................................ [  4%]
+........................................................................ [  5%]
+........................................................................ [  6%]
+........................................................................ [  7%]
+........................................................................ [  8%]
+........................................................................ [  9%]
+........................................................................ [ 10%]
+........................................................................ [ 11%]
+........................................................................ [ 12%]
+........................................................................ [ 13%]
+........................................................................ [ 14%]
+........................................................................ [ 15%]
+........................................................................ [ 16%]
+........................................................................ [ 17%]
+........................................................................ [ 18%]
+........................................................................ [ 19%]
+........................................................................ [ 20%]
+........................................................................ [ 21%]
+........................................................................ [ 22%]
+........................................................................ [ 23%]
+........................................................................ [ 24%]
+........................................................................ [ 25%]
+........................................................................ [ 26%]
+........................................................................ [ 27%]
+........................................................................ [ 28%]
+........................................................................ [ 29%]
+........................................................................ [ 30%]
+........................................................................ [ 31%]
+........................................................................ [ 32%]
+........................................................................ [ 33%]
+........................................................................ [ 34%]
+........................................................................ [ 35%]
+........................................................................ [ 36%]
+........................................................................ [ 37%]
+........................................................................ [ 38%]
+........................................................................ [ 39%]
+........................................................................ [ 40%]
+........................................................................ [ 41%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 44%]
+........................................................................ [ 45%]
+........................................................................ [ 46%]
+........................................................................ [ 47%]
+........................................................................ [ 48%]
+........................................................................ [ 49%]
+........................................................................ [ 50%]
+........................................................................ [ 51%]
+........................................................................ [ 52%]
+........................................................................ [ 53%]
+........................................................................ [ 54%]
+........................................................................ [ 55%]
+........................................................................ [ 56%]
+........................................................................ [ 57%]
+........................................................................ [ 58%]
+........................................................................ [ 59%]
+........................................................................ [ 60%]
+........................................................................ [ 61%]
+........................................................................ [ 62%]
+........................................................................ [ 63%]
+........................................................................ [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 66%]
+........................................................................ [ 67%]
+........................................................................ [ 68%]
+........................................................................ [ 69%]
+........................................................................ [ 70%]
+........................................................................ [ 71%]
+........................................................................ [ 72%]
+........................................................................ [ 73%]
+........................................................................ [ 74%]
+........................................................................ [ 75%]
+........................................................................ [ 76%]
+........................................................................ [ 77%]
+........................................................................ [ 78%]
+........................................................................ [ 79%]
+........................................................................ [ 80%]
+........................................................................ [ 81%]
+........................................................................ [ 82%]
+........................................................................ [ 83%]
+........................................................................ [ 84%]
+........................................................................ [ 85%]
+........................................................................ [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 88%]
+........................................................................ [ 89%]
+........................................................................ [ 90%]
+........................................................................ [ 91%]
+........................................................................ [ 92%]
+........................................................................ [ 93%]
+........................................................................ [ 94%]
+........................................................................ [ 95%]
+........................................................................ [ 96%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+........................................................................ [ 99%]
+.                                                                        [100%]
+=============================== warnings summary ===============================
+kriya/workflow/validation_baseline.py:127
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/validation_baseline.py:127: PytestCollectionWarning: cannot collect test class 'TestOutcome' because it has a __init__ constructor (from: tests/test_validation_baseline.py)
+    @dataclass(frozen=True)
+
+kriya/workflow/validation_baseline.py:115
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/validation_baseline.py:115: PytestCollectionWarning: cannot collect test class 'TestStatus' because it has a __new__ constructor (from: tests/test_validation_baseline.py)
+    class TestStatus(str, Enum):
+
+tests/test_deterministic_failure_diagnostic.py: 1 warning
+tests/test_prd024_baseline_auto_policy.py: 1 warning
+tests/test_proposal_promotion.py: 3 warnings
+tests/test_prv17_stage_contract_architecture.py: 1 warning
+tests/test_workflow.py: 24 warnings
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:2259: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    def __init__(self, name, parent):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_full_file_final_newline.py::test_fenced_full_file_rewrite_keeps_the_existing_final_newline
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/tests/test_full_file_final_newline.py:73: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    written = _rewrite(tmp_path, ORIGINAL, "```java\n" + FIXED_BODY + "\n```")
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_full_file_final_newline.py::test_unfenced_full_file_rewrite_without_final_newline_gets_it_back
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/tests/test_full_file_final_newline.py:78: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    assert _rewrite(tmp_path, ORIGINAL, FIXED_BODY) == FIXED_BODY + "\n"
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_full_file_final_newline.py::test_crlf_file_keeps_its_crlf_final_line_ending
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/tests/test_full_file_final_newline.py:84: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    assert _rewrite(tmp_path, original, body).endswith("}\r\n")
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_full_file_final_newline.py::test_file_without_a_final_newline_is_not_given_one
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/tests/test_full_file_final_newline.py:88: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    assert _rewrite(tmp_path, ORIGINAL.rstrip("\n"), FIXED_BODY) == FIXED_BODY
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_full_file_final_newline.py::test_new_file_is_written_as_given
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/tests/test_full_file_final_newline.py:112: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    assert _rewrite(tmp_path, None, "```java\n" + FIXED_BODY + "\n```") == FIXED_BODY
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_prd007_run_lifecycle.py: 1 warning
+tests/test_run_ownership.py: 12 warnings
+tests/test_run_record.py: 1 warning
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/multiprocessing/popen_fork.py:76: DeprecationWarning: This process (pid=43796) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_prd012_egress.py::test_mcp_explicit_destinations_is_recorded_as_refused_when_contained
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/.venv/lib/python3.14/site-packages/pydantic/main.py:475: UserWarning: Pydantic serializer warnings:
+    PydanticSerializationUnexpectedValue(Expected `MCPServerConfig` - serialized value may not be as expected [field_name='mcp', input_value={'command': 'python3', 'c...': ['api.example.com']}}, input_type=dict])
+    return self.__pydantic_serializer__.to_python(
+
+tests/test_proposal_promotion.py::test_corr018_authorized_target_body_only_change_allowed
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/tests/test_proposal_promotion.py:587: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    outcome, failure_type, _ = _run_attempt_case(regions, AUTHORIZED_BODY)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_proposal_promotion.py::test_recovery_retry_receives_same_immutable_authorized_regions
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/tests/test_proposal_promotion.py:626: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    _, _, ctx = _run_attempt_case(regions, AUTHORIZED_BODY)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_proposal_promotion.py::test_full_persist_approve_promote_generate_harness_rejects_unauthorized_helper
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/tests/test_proposal_promotion.py:1014: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    passed_outcome, _, _ = _run_attempt_case(
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_prv17_stage_contract_architecture.py: 1 warning
+tests/test_workflow.py: 71 warnings
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/events.py:94: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    self._context.run(self._callback, *self._args)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_restored_owner_uses_restoration_content
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:2289: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    super().__init__(*args, **kwargs)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_ordinary_test_failure_records_no_process_boundary_obligation
+tests/test_workflow.py::test_infrastructure_outcomes_map_to_verification_infrastructure_failure[READINESS_TIMEOUT]
+tests/test_workflow.py::test_managed_service_readiness_timeout_with_project_local_module_traceback_becomes_runtime_plan_gap
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:806: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    def __setattr__(self, name, value):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_infrastructure_outcomes_map_to_verification_infrastructure_failure[PREPARATION_FAILED]
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/context_budget.py:1375: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    def build_code_context_package(
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_unsafe_process_terminating_test_is_rejected_before_test_runner_and_targets_test_only
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:461: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    instance = _safe_super(NonCallableMock, cls).__new__(new)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_rejects_incomplete_migration_before_spec_compliance
+  <string>:5: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_allows_a_repair_that_reuses_its_own_existing_class_name
+tests/test_workflow.py::test_run_attempt_includes_established_files_in_compile_check
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/.venv/lib/python3.14/site-packages/pydantic/main.py:263: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_bounded_spec_compliance_includes_verified_upstream_files
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:495: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    __dict__['_mock_call_args_list'] = _CallList()
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_behavioral_contract_rejects_build_only_verification_sequence
+  <string>:68: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_ungrounded
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/verifier_evidence.py:591: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    RuntimeVerdict.PASS.value if grade.get("passed") else RuntimeVerdict.FAIL.value
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_ungrounded
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/verifier_evidence.py:593: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    if grade.get("passed") and final != RuntimeVerdict.PASS.value:
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_ungrounded
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/verifier_evidence.py:616: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    if grade.get("disposition") is not None:
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_ungrounded
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:2608: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    return tuple.__new__(cls, (name, args, kwargs))
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_still_requests_approval_when_goal_explicit_claim_is_ungrounded
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/verifier_evidence.py:618: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    if grade.get("evidence_packages"):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/attempt.py:2793: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    if grade.get("passed"):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/attempt.py:2818: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    f"{grade.get('reasoning', '')}"
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/.venv/lib/python3.14/site-packages/_pytest/stash.py:108: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    del self._storage[key]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_diagnosis_mismatch_bypassed_when_static_check_genuinely_resolved
+tests/test_workflow.py::test_targeted_byte_identical_edit_cannot_erase_authoritative_locator
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:504: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    _safe_super(NonCallableMock, self).__init__(
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_targeted_no_change_without_fix_analysis_still_widens_before_gates
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:498: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    __dict__['method_calls'] = _CallList()
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_prd025_real_grader_receives_bounded_package_with_middle_marker
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/tests/test_workflow.py:14607: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    await run_attempt(GenerationState(), ctx)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_c2_p0_large_file_production_reachable_member_retained_no_manual_hints
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/ast.py:46: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    return compile(source, filename, mode, flags,
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+7201 passed, 72 deselected, 174 warnings in 1928.54s (0:32:08)

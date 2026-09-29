@@ -1,0 +1,151 @@
+{
+  "doctor": {
+    "failed_required": [
+      "context.recall_certification",
+      "model.qualification"
+    ],
+    "production_ready": false,
+    "statuses": {
+      "FAIL": 2,
+      "PASS": 24,
+      "WARN": 5
+    }
+  },
+  "environment": {
+    "docker_client": "27.5.1",
+    "docker_server": "27.5.1",
+    "git": "git version 2.54.0",
+    "git_revision": "b73edb227d61c33240077f7aeccae5fe68f2c788",
+    "gradle": null,
+    "java": "openjdk version \"17.0.10\" 2024-01-16",
+    "machine": "arm64",
+    "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)",
+    "os": "macOS-26.7-arm64-arm-64bit-Mach-O",
+    "pip_freeze_sha256": "4700cc83cb384e4a7cd4326ea717b99311c428004325daf14c5602c95df864a5",
+    "python": "3.14.6",
+    "python_executable": "/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/.venv/bin/python",
+    "semgrep": "1.178.0",
+    "uid_is_root": false
+  },
+  "problems": [],
+  "release_identity": {
+    "containment": {
+      "backend": "oci",
+      "runtime_version": "27.5.1"
+    },
+    "digest": "f49435c412a080bc7d666f93fa2b0a6acd6413cbef0aca50a11ed0b5acdc207d",
+    "environment": {
+      "architecture": "arm64",
+      "os": "darwin",
+      "python": "3.14.6"
+    },
+    "kriya": {
+      "dirty": false,
+      "revision": "b73edb227d61c33240077f7aeccae5fe68f2c788"
+    },
+    "platform": {
+      "capabilities": [
+        [
+          "file_lock_crash_safe",
+          "enforced",
+          "posix-flock"
+        ],
+        [
+          "posix_rlimit_as",
+          "advisory",
+          "posix-setrlimit"
+        ],
+        [
+          "posix_rlimit_cpu",
+          "enforced",
+          "posix-setrlimit"
+        ],
+        [
+          "process_tree_termination",
+          "enforced",
+          "posix-process-group"
+        ],
+        [
+          "uid_gid_identity",
+          "enforced",
+          "posix-uid-gid"
+        ]
+      ],
+      "family": "posix",
+      "providers": {
+        "host_identity": "posix-uid-gid",
+        "process_control": "posix-process-group",
+        "resource_limits": "posix-setrlimit",
+        "workspace_lock": "posix-flock"
+      }
+    },
+    "version": 1
+  },
+  "stages": {
+    "doctor": {
+      "detail": "production doctor JSON archived",
+      "stage": "doctor",
+      "status": "RECORDED"
+    },
+    "environment": {
+      "detail": "{  \"docker_client\": \"27.5.1\",  \"docker_server\": \"27.5.1\",  \"git\": \"git version 2.54.0\",  \"git_revision\": \"b73edb227d61c33240077f7aeccae5fe68f2c788\",  \"gradle\": null,  \"java\": \"openjdk version \\\"17.0.1",
+      "stage": "environment",
+      "status": "RECORDED"
+    },
+    "images": {
+      "detail": "[pinned-images] 1 present, 0 missing",
+      "stage": "images",
+      "status": "PASS"
+    },
+    "pytest": {
+      "detail": "7181 passed, 72 deselected, 173 warnings in 1914.41s (0:31:54)",
+      "stage": "pytest",
+      "status": "PASS"
+    },
+    "release": {
+      "detail": "",
+      "stage": "release",
+      "status": "PASS"
+    },
+    "release_identity": {
+      "detail": "f49435c412a080bc7d666f93fa2b0a6acd6413cbef0aca50a11ed0b5acdc207d",
+      "stage": "release_identity",
+      "status": "RECORDED"
+    },
+    "scanner": {
+      "detail": "27 passed, 7226 deselected, 2 warnings in 103.64s (0:01:43)",
+      "stage": "scanner",
+      "status": "PASS"
+    },
+    "static": {
+      "detail": "",
+      "stage": "static",
+      "status": "PASS"
+    }
+  },
+  "status": "CERTIFIED",
+  "tiers": {
+    "pytest": {
+      "junit": {
+        "errors": 0,
+        "failures": 0,
+        "passed": 7181,
+        "skipped": 0,
+        "tests": 7181
+      },
+      "skipped": 0,
+      "unexpected_skips": 0
+    },
+    "scanner": {
+      "junit": {
+        "errors": 0,
+        "failures": 0,
+        "passed": 27,
+        "skipped": 0,
+        "tests": 27
+      },
+      "skipped": 0,
+      "unexpected_skips": 0
+    }
+  }
+}

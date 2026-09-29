@@ -1,0 +1,1 @@
+[canary] fresh workspace at 0d7a09136cfec085156308d706d53b091ecd3cde; removed worktrees ['/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktrees/candidate-kriya-worktree-c2a3db38', '/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktree/.kriya/worktree', '/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktree']

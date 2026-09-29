@@ -1,0 +1,254 @@
+{
+  "checks": {
+    "bounded_worktree_reuse": {
+      "nested": [
+        [],
+        []
+      ],
+      "passed": true,
+      "worktree_sets": [
+        [
+          "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo",
+          "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktree",
+          "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktrees/candidate-kriya-worktree-c2a3db38"
+        ],
+        [
+          "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo",
+          "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktree",
+          "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktrees/candidate-kriya-worktree-c2a3db38"
+        ]
+      ]
+    },
+    "run1.cli_exit_zero": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "run1.commit_committed": {
+      "passed": true,
+      "state": "committed",
+      "transaction_id": "20260929T025439-7b70d64b-53b58136c356"
+    },
+    "run1.enforce_controller_exercised": {
+      "passed": true,
+      "subtasks": [
+        {
+          "status": "completed",
+          "subtask_id": "s1"
+        }
+      ]
+    },
+    "run1.head_unchanged": {
+      "after": [
+        "0d7a09136cfec085156308d706d53b091ecd3cde"
+      ],
+      "before": [
+        "0d7a09136cfec085156308d706d53b091ecd3cde"
+      ],
+      "passed": true
+    },
+    "run1.independent_post_run_compile": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "run1.independent_post_run_test": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "run1.no_leaked_containers": {
+      "leaked": [],
+      "passed": true
+    },
+    "run1.no_leaked_networks": {
+      "leaked": [],
+      "passed": true
+    },
+    "run1.no_leaked_processes": {
+      "leaked": [],
+      "passed": true
+    },
+    "run1.no_uncertain_commit_state": {
+      "passed": true,
+      "reason_codes": []
+    },
+    "run1.only_authorized_workspace_writes": {
+      "changed": [
+        "src/main/java/com/myapp/service/driver/DefaultDriverService.java"
+      ],
+      "expected": [
+        "src/main/java/com/myapp/service/driver/DefaultDriverService.java"
+      ],
+      "passed": true
+    },
+    "run1.production_ready_after": {
+      "blocking": [],
+      "passed": true
+    },
+    "run1.production_ready_before": {
+      "blocking": [],
+      "passed": true
+    },
+    "run1.release_candidate_current": {
+      "changes": [],
+      "passed": true
+    },
+    "run1.run_record_success": {
+      "commits": 1,
+      "lifecycle_state": "SUCCESS",
+      "passed": true,
+      "run_id": "20260929T025439-7b70d64b"
+    },
+    "run1.run_success": {
+      "failure_category": null,
+      "passed": true,
+      "quality_gates_passed": true,
+      "status": "success"
+    },
+    "run1.starts_from_expected_worktrees": {
+      "expected": [
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo"
+      ],
+      "passed": true,
+      "started": [
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo"
+      ]
+    },
+    "run1.static_analysis_evidence_bound": {
+      "passed": true,
+      "verification_evidence_ids": [
+        "commit:20260929T025439-7b70d64b-53b58136c356",
+        "static_analysis:PASS:7a58e19b896fd7d4b12d3b313d3723ffe03735646bb2ac51c67a278019b9fd7f"
+      ]
+    },
+    "run1.workspace_lock_released": {
+      "passed": true
+    },
+    "run1.worktrees_managed_and_clean": {
+      "passed": true,
+      "retained": [
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktree",
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktrees/candidate-kriya-worktree-c2a3db38"
+      ],
+      "violations": []
+    },
+    "run2.cli_exit_zero": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "run2.commit_committed": {
+      "passed": true,
+      "state": "committed",
+      "transaction_id": "20260929T025854-61b086e9-6631e68756b5"
+    },
+    "run2.enforce_controller_exercised": {
+      "passed": true,
+      "subtasks": [
+        {
+          "status": "completed",
+          "subtask_id": "s1"
+        }
+      ]
+    },
+    "run2.head_unchanged": {
+      "after": [
+        "0d7a09136cfec085156308d706d53b091ecd3cde"
+      ],
+      "before": [
+        "0d7a09136cfec085156308d706d53b091ecd3cde"
+      ],
+      "passed": true
+    },
+    "run2.independent_post_run_compile": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "run2.independent_post_run_test": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "run2.no_leaked_containers": {
+      "leaked": [],
+      "passed": true
+    },
+    "run2.no_leaked_networks": {
+      "leaked": [],
+      "passed": true
+    },
+    "run2.no_leaked_processes": {
+      "leaked": [],
+      "passed": true
+    },
+    "run2.no_uncertain_commit_state": {
+      "passed": true,
+      "reason_codes": []
+    },
+    "run2.only_authorized_workspace_writes": {
+      "changed": [
+        "src/main/java/com/myapp/service/driver/DefaultDriverService.java"
+      ],
+      "expected": [
+        "src/main/java/com/myapp/service/driver/DefaultDriverService.java"
+      ],
+      "passed": true
+    },
+    "run2.production_ready_after": {
+      "blocking": [],
+      "passed": true
+    },
+    "run2.production_ready_before": {
+      "blocking": [],
+      "passed": true
+    },
+    "run2.release_candidate_current": {
+      "changes": [],
+      "passed": true
+    },
+    "run2.run_record_success": {
+      "commits": 1,
+      "lifecycle_state": "SUCCESS",
+      "passed": true,
+      "run_id": "20260929T025854-61b086e9"
+    },
+    "run2.run_success": {
+      "failure_category": null,
+      "passed": true,
+      "quality_gates_passed": true,
+      "status": "success"
+    },
+    "run2.starts_from_expected_worktrees": {
+      "expected": [
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo",
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktree",
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktrees/candidate-kriya-worktree-c2a3db38"
+      ],
+      "passed": true,
+      "started": [
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo",
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktree",
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktrees/candidate-kriya-worktree-c2a3db38"
+      ]
+    },
+    "run2.static_analysis_evidence_bound": {
+      "passed": true,
+      "verification_evidence_ids": [
+        "commit:20260929T025854-61b086e9-6631e68756b5",
+        "static_analysis:PASS:30d22a66f598dd6303a69314eae36817467724c6e2a1880e4bacd8737b3a0abf"
+      ]
+    },
+    "run2.workspace_lock_released": {
+      "passed": true
+    },
+    "run2.worktrees_managed_and_clean": {
+      "passed": true,
+      "retained": [
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktree",
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktrees/candidate-kriya-worktree-c2a3db38"
+      ],
+      "violations": []
+    }
+  },
+  "runs": [
+    "20260929T025439-7b70d64b",
+    "20260929T025854-61b086e9"
+  ],
+  "verdict": "PASS"
+}

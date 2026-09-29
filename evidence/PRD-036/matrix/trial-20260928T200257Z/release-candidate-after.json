@@ -1,0 +1,208 @@
+{
+  "case_set": {
+    "case_ids": [
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6",
+      "C7",
+      "C8",
+      "C9",
+      "C10",
+      "C11"
+    ],
+    "table_digest": "02a34217a4883aa2910e6af34d9052cf9ea310617ce89b58c3295a8fc822bfd9",
+    "version": 1
+  },
+  "digest": "2953802a5c6e8a503e7a6f2650685701b00d88dd1da13aa349f4db66ac15ca1d",
+  "models": {
+    "bindings": [
+      {
+        "identity": "normal",
+        "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+        "model": "qwen3-coder:30b",
+        "qualification": "QUALIFIED",
+        "role": "architect",
+        "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276",
+        "runtime_exact": true
+      },
+      {
+        "identity": "normal",
+        "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+        "model": "qwen3-coder:30b",
+        "qualification": "QUALIFIED",
+        "role": "developer",
+        "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276",
+        "runtime_exact": true
+      },
+      {
+        "identity": "normal",
+        "inference_settings_digest": "sha256:0f1e6b5c1fecf04fb5404f86e02095371a5242250ad26c2b26eb7bf094a1b85c",
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "qualification": "QUALIFIED",
+        "role": "developer",
+        "runtime_digest": "64e12eef74d56021381cf1519be87cb28ae4e12723ed23e879b2b5124864a1e9",
+        "runtime_exact": true
+      },
+      {
+        "identity": "normal",
+        "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+        "model": "qwen3-coder:30b",
+        "qualification": "QUALIFIED",
+        "role": "planner",
+        "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276",
+        "runtime_exact": true
+      },
+      {
+        "identity": "normal",
+        "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+        "model": "qwen3-coder:30b",
+        "qualification": "QUALIFIED",
+        "role": "reviewer",
+        "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276",
+        "runtime_exact": true
+      },
+      {
+        "identity": "normal",
+        "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+        "model": "qwen3-coder:30b",
+        "qualification": "QUALIFIED",
+        "role": "run_verifier",
+        "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276",
+        "runtime_exact": true
+      },
+      {
+        "identity": "normal",
+        "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+        "model": "qwen3-coder:30b",
+        "qualification": "QUALIFIED",
+        "role": "skill_gap",
+        "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276",
+        "runtime_exact": true
+      },
+      {
+        "identity": "normal",
+        "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+        "model": "qwen3-coder:30b",
+        "qualification": "QUALIFIED",
+        "role": "spec_compliance",
+        "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276",
+        "runtime_exact": true
+      }
+    ],
+    "developer_fallback": {
+      "inference_settings_digest": "sha256:0f1e6b5c1fecf04fb5404f86e02095371a5242250ad26c2b26eb7bf094a1b85c",
+      "model": "qwen3.6:35b-a3b-q4_K_M",
+      "runtime_digest": "64e12eef74d56021381cf1519be87cb28ae4e12723ed23e879b2b5124864a1e9"
+    },
+    "developer_primary": {
+      "inference_settings_digest": "sha256:ed7bfc09816e127d6e9743c0b0ef2ca39e6161f6d3645a14e9137474a90cad7b",
+      "model": "qwen3-coder:30b",
+      "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276"
+    },
+    "execution_environment": {
+      "accelerator_backend": "metal",
+      "accelerator_count": 1,
+      "accelerator_memory_class_gib": 64,
+      "accelerator_model": "Apple M1 Max",
+      "architecture": "arm64",
+      "digest": "sha256:7b3ce83bce654d1b29a5ccacb9d262ed668196baae3a301d71430b2a3ec93559",
+      "exact": true,
+      "inference_runtime": "ollama/0.34.2",
+      "os": "darwin",
+      "runtime_parallelism": "unavailable",
+      "schema_version": 1,
+      "system_memory_class_gib": 64,
+      "unified_memory": true
+    }
+  },
+  "production_config": {
+    "content_sha256": "a5be2e833e123e89e71631e5754a263c7f9b861c6b103ee811d5ba1d5dc61b77",
+    "path": "/Users/sriramnanduri/.kriya/operator/prd036-production.yaml",
+    "referenced_files": {
+      "/Users/sriramnanduri/.kriya/operator/prd036/semgrep-rules/java-security.yml": "92c69468b626588f1b3f4b088c01a9dcf927e0961f73532b4be99b3d6aae4b0e"
+    },
+    "security_field_set_digest": "f50f0a05cf58b5e8006024f5ab2f6487254c534e3718c644f7989b6678bee00a",
+    "security_fields": [
+      "autonomy.contained_execution_required",
+      "autonomy.containment_backend",
+      "autonomy.egress_policy",
+      "autonomy.mcp_contained_execution_required",
+      "autonomy.mode",
+      "autonomy.requirement_unknown_policy",
+      "autonomy.requirement_unverified_policy",
+      "autonomy.shell_network",
+      "embedding.base_url",
+      "engineering_triage.shadow_mode",
+      "execution_policy.enabled",
+      "execution_policy.mode",
+      "llm.base_url",
+      "llm_chain",
+      "runtime_profile",
+      "search.base_url",
+      "static_analysis.enabled",
+      "static_analysis.provider",
+      "static_analysis.providers",
+      "static_analysis.requirement",
+      "workflow_controller.enabled",
+      "workflow_controller.mode"
+    ],
+    "workspace_id": "5abea7535995677944603214e874ac118860d10c57dbcd14b4b60ebb12f0fca5"
+  },
+  "release": {
+    "containment": {
+      "backend": "oci",
+      "runtime_version": "27.5.1"
+    },
+    "digest": "337e1eec5a5b530b7e5c681e066bdf8db332c24763c1c6ac992e07eea07d4e04",
+    "environment": {
+      "architecture": "arm64",
+      "os": "darwin",
+      "python": "3.14.6"
+    },
+    "kriya": {
+      "dirty": false,
+      "revision": "5727f9993c9e6f9cad9055674988ea9180895c3e"
+    },
+    "platform": {
+      "capabilities": [
+        [
+          "file_lock_crash_safe",
+          "enforced",
+          "posix-flock"
+        ],
+        [
+          "posix_rlimit_as",
+          "advisory",
+          "posix-setrlimit"
+        ],
+        [
+          "posix_rlimit_cpu",
+          "enforced",
+          "posix-setrlimit"
+        ],
+        [
+          "process_tree_termination",
+          "enforced",
+          "posix-process-group"
+        ],
+        [
+          "uid_gid_identity",
+          "enforced",
+          "posix-uid-gid"
+        ]
+      ],
+      "family": "posix",
+      "providers": {
+        "host_identity": "posix-uid-gid",
+        "process_control": "posix-process-group",
+        "resource_limits": "posix-setrlimit",
+        "workspace_lock": "posix-flock"
+      }
+    },
+    "version": 1
+  },
+  "version": 1
+}

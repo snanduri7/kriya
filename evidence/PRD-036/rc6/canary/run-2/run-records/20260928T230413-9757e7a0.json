@@ -1,0 +1,48 @@
+{
+  "_workspace": {
+    "version": "1",
+    "workspace_id": "5abea7535995677944603214e874ac118860d10c57dbcd14b4b60ebb12f0fca5"
+  },
+  "active_work_unit": null,
+  "approved_plan_hash": "35b0c655def4d16d7f09ff21e5b80a19bf268600cdee329e0321bcabb54145e9",
+  "base_source_revision": "0d7a09136cfec085156308d706d53b091ecd3cde",
+  "base_tree_hash": "16188cde879c40fc1630fb10970996887e68279d",
+  "candidate_hash": "84ff5402286ce49eb5c225e4815c2fb59dafc9caf79024e65926d8ceab46eaa6",
+  "commit_intent": "APPLY_VERIFIED_CANDIDATE",
+  "commit_result": "COMMITTED",
+  "commit_transaction_id": "20260928T230413-9757e7a0-0be06dd73fde",
+  "commits": [
+    {
+      "candidate_hash": "84ff5402286ce49eb5c225e4815c2fb59dafc9caf79024e65926d8ceab46eaa6",
+      "intent": "APPLY_VERIFIED_CANDIDATE",
+      "result": "COMMITTED",
+      "transaction_id": "20260928T230413-9757e7a0-0be06dd73fde"
+    }
+  ],
+  "created_at": "2026-09-28T17:34:13.660644+00:00",
+  "effective_config_fingerprint": "00525a4097868cc46465241ede2ce47c8ae20a8161b220b2fee5a7a7facb5653",
+  "execution_plan": null,
+  "goal_hash": "bd57aa20d0268748db33b80f7976736a09b908a045c7d5f133048e8944426e1d",
+  "lifecycle_state": "SUCCESS",
+  "milestone_reuse": null,
+  "model_runtime_fingerprint_ids": [
+    "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276"
+  ],
+  "obligation_ledger_hash": "2221c9301e8cadd7fd03b4ca0528cb180c7570815fffffaa8434db74a69e53f3",
+  "obligation_ledger_revision": 15,
+  "recovery": null,
+  "resume_decision": null,
+  "retry_counters": {},
+  "retry_state_reference": null,
+  "revision": 10,
+  "run_id": "20260928T230413-9757e7a0",
+  "schema_version": 3,
+  "terminal_status": "SUCCESS",
+  "updated_at": "2026-09-28T17:38:13.801391+00:00",
+  "verification_evidence_ids": [
+    "commit:20260928T230413-9757e7a0-0be06dd73fde",
+    "static_analysis:PASS:f167fba6ad9ae7861124fca43faf1d13210704067a8f3441be05abdf6f61fec5"
+  ],
+  "work_unit_states": null,
+  "workspace_identity": "5abea7535995677944603214e874ac118860d10c57dbcd14b4b60ebb12f0fca5"
+}

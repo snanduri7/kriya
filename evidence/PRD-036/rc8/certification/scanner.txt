@@ -1,0 +1,12 @@
+...........................                                              [100%]
+=============================== warnings summary ===============================
+kriya/workflow/validation_baseline.py:127
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/validation_baseline.py:127: PytestCollectionWarning: cannot collect test class 'TestOutcome' because it has a __init__ constructor (from: tests/test_validation_baseline.py)
+    @dataclass(frozen=True)
+
+kriya/workflow/validation_baseline.py:115
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/validation_baseline.py:115: PytestCollectionWarning: cannot collect test class 'TestStatus' because it has a __new__ constructor (from: tests/test_validation_baseline.py)
+    class TestStatus(str, Enum):
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+27 passed, 7260 deselected, 2 warnings in 102.88s (0:01:42)

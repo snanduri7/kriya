@@ -1,0 +1,2 @@
+[canary] 2026-09-28T19:54:30Z run 1 start (baseline 0d7a09136cfec085156308d706d53b091ecd3cde)
+[canary] 2026-09-28T19:58:32Z run 1 end (exit 0)

@@ -1,0 +1,472 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 11 items
+
+tests/test_live_prd035_certification.py .......F...                      [100%]
+
+=================================== FAILURES ===================================
+_______________________ test_c8_pre_post_full_regression _______________________
+
+case = <test_live_prd035_certification.Case object at 0x10b8ef8a0>
+
+    @certification_case("C8", "pre_post_regression")
+    def test_c8_pre_post_full_regression(case):
+        case.config.autonomy.brownfield_full_regression_baseline_policy = "required"
+        ws = git_workspace(case.tmp_path, {"inventory.py": INVENTORY, "test_inventory.py": INVENTORY_TEST,
+                                           "report.py": REPORT_PY})
+        events = []
+        from kriya.workflow.state import GenerationState
+    
+        real_record = GenerationState.record_event
+    
+        def spy(state, event):
+            events.append(event.kind)
+            return real_record(state, event)
+    
+        with patch.object(GenerationState, "record_event", spy):
+            result = case.run(ws, "Add a method total(self) to Inventory in inventory.py that returns the sum of all quantities.")
+        passed = case.hidden_tests(ws, """
+            from inventory import Inventory
+            def test_total():
+                inv = Inventory(); inv.add_item("a", 2); inv.add_item("b", 3)
+                assert inv.total() == 5 and inv.count("a") == 2
+        """)
+        baseline = sorted({kind for kind in events if kind.startswith("validation_baseline.")})
+>       case.finish(result, ws, hidden_acceptance_passed=passed, baseline_events=baseline)
+
+tests/test_live_prd035_certification.py:372: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_live_prd035_certification.Case object at 0x10b8ef8a0>
+result = {'plan': '```markdown\n### Step-by-Step Implementation Plan\n\n#### 1. **Verify the existence and structure of `invent...entory.py", "test_inventory.py"]}', 'files': ['test_inventory.py', 'inventory.py'], 'quality_gates_passed': False, ...}
+workspace = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2010/test_c8_pre_post_full_regressi0/ws')
+required = True
+evidence = {'hidden_acceptance_passed': False, 'baseline_events': ['validation_baseline.full_regression_source', 'validation_baseline.policy']}
+
+    def finish(self, result, workspace, *, required=True, **evidence):
+        """Record the case (always, pass or fail) and assert success."""
+        metrics = derive_metrics(load_trace_runs(trace_db_path(self.config)))
+        generation = metrics["outcomes"]["generation"]
+        roles = {}
+        for row in metrics["model_protocol"]:
+            entry = roles.setdefault(row["role"], {"runtime_digests": set(), "settings_digests": set(),
+                                                   "models": set(), "prompt_tokens": 0, "completion_tokens": 0,
+                                                   "calls": 0})
+            entry["runtime_digests"].add(row["runtime_digest"])
+            entry["settings_digests"].add(row["inference_settings_digest"])
+            entry["models"].update(row["models"])
+            for key in ("prompt_tokens", "completion_tokens", "calls"):
+                entry[key] += row[key]
+        records = scan_run_records(str(workspace)).records
+        self.record.update({
+            "final_success": result.get("quality_gates_passed") is True,
+            "failure_category": result.get("failure_category") or result.get("status"),
+            "first_pass_compile": generation["first_pass_compile"],
+            "retries": {k: v.get("value") for k, v in generation["retries"].items()},
+            "fallback_transitions": generation["fallback_transitions"].get("value"),
+            "roles": {role: {k: sorted(v) if isinstance(v, set) else v for k, v in entry.items()}
+                      for role, entry in sorted(roles.items())},
+            "tokens": {"input": sum(r["prompt_tokens"] for r in roles.values()),
+                       "output": sum(r["completion_tokens"] for r in roles.values())},
+            "context_window": self.config.llm.context_window, "max_tokens": self.config.llm.max_tokens,
+            "static_analysis": (result.get("static_analysis") or {}).get("outcome"),
+            "commit_results": [c.get("result") for r in records for c in r.commits],
+            "lifecycles": [r.lifecycle_state.value for r in records],
+            **evidence,
+        })
+        self.request.node.user_properties.append(("model_certification_case", self.record))
+        if required:
+>           assert self.record["final_success"], f"{self.case_id} did not succeed: {self.record['failure_category']}"
+E           AssertionError: C8 did not succeed: quality_gates_exhausted
+E           assert False
+
+tests/test_live_prd035_certification.py:120: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+[Usage: 2754 input tokens, 1149 output tokens | Time: 20.60s | Finish: stop]
+
+[Usage: 1895 input tokens, 13 output tokens | Time: 2.41s | Finish: stop]
+
+[Usage: 2306 input tokens, 97 output tokens | Time: 4.69s | Finish: stop]
+
+[Usage: 2404 input tokens, 217 output tokens | Time: 3.93s | Finish: stop]
+
+[Usage: 3012 input tokens, 102 output tokens | Time: 6.52s | Finish: stop]
+
+[Usage: 3348 input tokens, 219 output tokens | Time: 8.60s | Finish: stop]
+
+[Usage: 3348 input tokens, 244 output tokens | Time: 5.11s | Finish: stop]
+
+[Usage: 2941 input tokens, 277 output tokens | Time: 5.61s | Finish: stop]
+
+[Usage: 2941 input tokens, 262 output tokens | Time: 5.31s | Finish: stop]
+
+[Usage: 2803 input tokens, 174 output tokens | Time: 7.24s | Finish: stop]
+
+[Usage: 2547 input tokens, 223 output tokens | Time: 7.48s | Finish: stop]
+
+[Usage: 3348 input tokens, 183 output tokens | Time: 4.85s | Finish: stop]
+
+[Usage: 3348 input tokens, 201 output tokens | Time: 4.31s | Finish: stop]
+
+[Usage: 2941 input tokens, 282 output tokens | Time: 5.81s | Finish: stop]
+
+[Usage: 2941 input tokens, 263 output tokens | Time: 5.40s | Finish: stop]
+
+[Usage: 2941 input tokens, 259 output tokens | Time: 4.65s | Finish: stop]
+
+[Usage: 2941 input tokens, 249 output tokens | Time: 5.10s | Finish: stop]
+
+[Usage: 3359 input tokens, 213 output tokens | Time: 8.77s | Finish: stop]
+
+[Usage: 3359 input tokens, 275 output tokens | Time: 5.92s | Finish: stop]
+
+[Usage: 2953 input tokens, 133 output tokens | Time: 3.40s | Finish: stop]
+
+[Usage: 2953 input tokens, 112 output tokens | Time: 2.75s | Finish: stop]
+
+[Usage: 2634 input tokens, 323 output tokens | Time: 8.10s | Finish: stop]
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 1: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 0/4 + targeted 0/3: STATIC RULE VIOLATION: [bare_verification_marker] test_inventory.py line 30 contains the literal, unquoted text '[VERIFICATION] PASS' sitting on its own. The verification contract's verdict line must be the argument to an actual print/console-output call in this file's language (e.g. Python's print(...), Java's System.out.println(...), Ruby's puts) - not a bare line of source text. As written, this either fails to compile, or compiles but never actually prints anything, so the verdict will never reach the program's real output. Wrap it in the correct print/output call for this file's language.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 1: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 0/4 + targeted 0/3: STATIC RULE VIOLATION: [bare_verification_marker] test_inventory.py line 30 contains the literal, unquoted text '[VERIFICATION] PASS' sitting on its own. The verification contract's verdict line must be the argument to an actual print/console-output call in this file's language (e.g. Python's print(...), Java's System.out.println(...), Ruby's puts) - not a bare line of source text. As written, this either fails to compile, or compiles but never actually prints anything, so the verdict will never reach the program's real output. Wrap it in the correct print/output call for this file's language.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 2: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2010/test_c8_pre_post_full_regressi0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 3 items
+
+test_inventory.py ..F                                                    [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_total __________________________________
+
+    def test_total():
+        inv = Inventory()
+        assert inv.total() == 0
+        inv.add_item("apple", 3)
+        assert inv.total() == 3
+        inv.add_item("banana", 2)
+        assert inv.total() == 5
+        inv.add_item("apple", 1)
+        assert inv.total() == 6
+>       inv.add_item("cherry", 0)
+
+test_inventory.py:23: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <inventory.Inventory object at 0x10b1b7b10>, name = 'cherry', qty = 0
+
+    def add_item(self, name, qty):
+        if qty <= 0:
+>           raise ValueError("qty must be positive")
+E           ValueError: qty must be positive
+
+inventory.py:7: ValueError
+=========================== short test summary info ============================
+FAILED test_inventory.py::test_total - ValueError: qty must be positive
+========================= 1 failed, 2 passed in 0.02s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 2: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2010/test_c8_pre_post_full_regressi0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 3 items
+
+test_inventory.py ..F                                                    [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_total __________________________________
+
+    def test_total():
+        inv = Inventory()
+        assert inv.total() == 0
+        inv.add_item("apple", 3)
+        assert inv.total() == 3
+        inv.add_item("banana", 2)
+        assert inv.total() == 5
+        inv.add_item("apple", 1)
+        assert inv.total() == 6
+>       inv.add_item("cherry", 0)
+
+test_inventory.py:23: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <inventory.Inventory object at 0x10b1b7b10>, name = 'cherry', qty = 0
+
+    def add_item(self, name, qty):
+        if qty <= 0:
+>           raise ValueError("qty must be positive")
+E           ValueError: qty must be positive
+
+inventory.py:7: ValueError
+=========================== short test summary info ============================
+FAILED test_inventory.py::test_total - ValueError: qty must be positive
+========================= 1 failed, 2 passed in 0.02s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 3: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: MISDIRECTED EDIT: the search block for test_inventory.py matched 0 times against test_inventory.py's content, but was found instead inside inventory.py. The fix you diagnosed likely belongs in inventory.py, not test_inventory.py - target inventory.py in your next edit (and test_inventory.py too, only if it genuinely also needs its own companion change).
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 3: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: MISDIRECTED EDIT: the search block for test_inventory.py matched 0 times against test_inventory.py's content, but was found instead inside inventory.py. The fix you diagnosed likely belongs in inventory.py, not test_inventory.py - target inventory.py in your next edit (and test_inventory.py too, only if it genuinely also needs its own companion change).
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 4: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 1/3: MISDIRECTED EDIT: the search block for test_inventory.py matched 0 times against test_inventory.py's content, but was found instead inside inventory.py. The fix you diagnosed likely belongs in inventory.py, not test_inventory.py - target inventory.py in your next edit (and test_inventory.py too, only if it genuinely also needs its own companion change).
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 4: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 1/3: MISDIRECTED EDIT: the search block for test_inventory.py matched 0 times against test_inventory.py's content, but was found instead inside inventory.py. The fix you diagnosed likely belongs in inventory.py, not test_inventory.py - target inventory.py in your next edit (and test_inventory.py too, only if it genuinely also needs its own companion change).
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 5: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 1/4 + targeted 4/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2010/test_c8_pre_post_full_regressi0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 3 items
+
+test_inventory.py ..F                                                    [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_total __________________________________
+
+    def test_total():
+        inv = Inventory()
+        assert inv.total() == 0
+        inv.add_item("apple", 3)
+        assert inv.total() == 3
+        inv.add_item("banana", 2)
+        assert inv.total() == 5
+        inv.add_item("apple", 1)
+        assert inv.total() == 6
+>       inv.add_item("cherry", 0)
+
+test_inventory.py:23: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <inventory.Inventory object at 0x106893b10>, name = 'cherry', qty = 0
+
+    def add_item(self, name, qty):
+        if qty <= 0:
+>           raise ValueError("qty must be positive")
+E           ValueError: qty must be positive
+
+inventory.py:7: ValueError
+=========================== short test summary info ============================
+FAILED test_inventory.py::test_total - ValueError: qty must be positive
+========================= 1 failed, 2 passed in 0.02s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 5: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 1/4 + targeted 4/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2010/test_c8_pre_post_full_regressi0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 3 items
+
+test_inventory.py ..F                                                    [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_total __________________________________
+
+    def test_total():
+        inv = Inventory()
+        assert inv.total() == 0
+        inv.add_item("apple", 3)
+        assert inv.total() == 3
+        inv.add_item("banana", 2)
+        assert inv.total() == 5
+        inv.add_item("apple", 1)
+        assert inv.total() == 6
+>       inv.add_item("cherry", 0)
+
+test_inventory.py:23: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <inventory.Inventory object at 0x106893b10>, name = 'cherry', qty = 0
+
+    def add_item(self, name, qty):
+        if qty <= 0:
+>           raise ValueError("qty must be positive")
+E           ValueError: qty must be positive
+
+inventory.py:7: ValueError
+=========================== short test summary info ============================
+FAILED test_inventory.py::test_total - ValueError: qty must be positive
+========================= 1 failed, 2 passed in 0.02s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 6: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 0/3: MISDIRECTED EDIT: the search block for test_inventory.py matched 0 times against test_inventory.py's content, but was found instead inside inventory.py. The fix you diagnosed likely belongs in inventory.py, not test_inventory.py - target inventory.py in your next edit (and test_inventory.py too, only if it genuinely also needs its own companion change).
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 6: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 0/3: MISDIRECTED EDIT: the search block for test_inventory.py matched 0 times against test_inventory.py's content, but was found instead inside inventory.py. The fix you diagnosed likely belongs in inventory.py, not test_inventory.py - target inventory.py in your next edit (and test_inventory.py too, only if it genuinely also needs its own companion change).
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 7: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 1/3: MISDIRECTED EDIT: the search block for test_inventory.py matched 0 times against test_inventory.py's content, but was found instead inside inventory.py. The fix you diagnosed likely belongs in inventory.py, not test_inventory.py - target inventory.py in your next edit (and test_inventory.py too, only if it genuinely also needs its own companion change).
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 7: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 1/3: MISDIRECTED EDIT: the search block for test_inventory.py matched 0 times against test_inventory.py's content, but was found instead inside inventory.py. The fix you diagnosed likely belongs in inventory.py, not test_inventory.py - target inventory.py in your next edit (and test_inventory.py too, only if it genuinely also needs its own companion change).
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 8: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 2/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2010/test_c8_pre_post_full_regressi0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 3 items
+
+test_inventory.py ..F                                                    [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_total __________________________________
+
+    def test_total():
+        inv = Inventory()
+        assert inv.total() == 0
+        inv.add_item("apple", 3)
+        assert inv.total() == 3
+        inv.add_item("banana", 2)
+        assert inv.total() == 5
+        inv.add_item("apple", 1)
+        assert inv.total() == 6
+>       inv.add_item("cherry", 0)
+
+test_inventory.py:23: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <inventory.Inventory object at 0x108f4fb10>, name = 'cherry', qty = 0
+
+    def add_item(self, name, qty):
+        if qty <= 0:
+>           raise ValueError("qty must be positive")
+E           ValueError: qty must be positive
+
+inventory.py:7: ValueError
+=========================== short test summary info ============================
+FAILED test_inventory.py::test_total - ValueError: qty must be positive
+========================= 1 failed, 2 passed in 0.02s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 8: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 2/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2010/test_c8_pre_post_full_regressi0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 3 items
+
+test_inventory.py ..F                                                    [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_total __________________________________
+
+    def test_total():
+        inv = Inventory()
+        assert inv.total() == 0
+        inv.add_item("apple", 3)
+        assert inv.total() == 3
+        inv.add_item("banana", 2)
+        assert inv.total() == 5
+        inv.add_item("apple", 1)
+        assert inv.total() == 6
+>       inv.add_item("cherry", 0)
+
+test_inventory.py:23: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <inventory.Inventory object at 0x108f4fb10>, name = 'cherry', qty = 0
+
+    def add_item(self, name, qty):
+        if qty <= 0:
+>           raise ValueError("qty must be positive")
+E           ValueError: qty must be positive
+
+inventory.py:7: ValueError
+=========================== short test summary info ============================
+FAILED test_inventory.py::test_total - ValueError: qty must be positive
+========================= 1 failed, 2 passed in 0.02s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 9: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 0/3: MISDIRECTED EDIT: the search block for test_inventory.py matched 0 times against test_inventory.py's content, but was found instead inside inventory.py. The fix you diagnosed likely belongs in inventory.py, not test_inventory.py - target inventory.py in your next edit (and test_inventory.py too, only if it genuinely also needs its own companion change).
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 9: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 0/3: MISDIRECTED EDIT: the search block for test_inventory.py matched 0 times against test_inventory.py's content, but was found instead inside inventory.py. The fix you diagnosed likely belongs in inventory.py, not test_inventory.py - target inventory.py in your next edit (and test_inventory.py too, only if it genuinely also needs its own companion change).
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 10: FAILED                 
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 1/3: MISDIRECTED EDIT: the search block for test_inventory.py matched 0 times against test_inventory.py's content, but was found instead inside inventory.py. The fix you diagnosed likely belongs in inventory.py, not test_inventory.py - target inventory.py in your next edit (and test_inventory.py too, only if it genuinely also needs its own companion change).
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 10: FAILED                 
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 1/3: MISDIRECTED EDIT: the search block for test_inventory.py matched 0 times against test_inventory.py's content, but was found instead inside inventory.py. The fix you diagnosed likely belongs in inventory.py, not test_inventory.py - target inventory.py in your next edit (and test_inventory.py too, only if it genuinely also needs its own companion change).
+ERROR    kriya.workflow.recovery_coordinator:recovery_coordinator.py:227 Quality Gates stopped - global attempt bound reached across all failure families. Continuing to review with errors.
+- generated xml file: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/evidence/PRD-036/matrix/trial-20260928T184841Z/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_live_prd035_certification.py::test_c8_pre_post_full_regression
+=================== 1 failed, 10 passed in 670.70s (0:11:10) ===================
