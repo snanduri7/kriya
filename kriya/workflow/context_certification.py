@@ -311,10 +311,11 @@ def indexed_embedding_dimensions(config: Any) -> Optional[int]:
     the configured embedding model, read from the index (no probe); None
     when it holds none, or more than one."""
     import sqlite3
+    from contextlib import closing
 
     path = os.path.join(config.paths.memory, "vector_index.db")
     try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as connection:
+        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
             rows = connection.execute(
                 "SELECT DISTINCT dimensions FROM vector_chunks WHERE model_name = ?", (config.embedding.model,),
             ).fetchall()

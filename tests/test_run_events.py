@@ -1,3 +1,6 @@
+import sqlite3
+from contextlib import closing
+
 from kriya.core.trace import TraceLogger
 from kriya.workflow.failure import Failure
 from kriya.workflow.run_events import EventAuthority, FailureLedger, RunEvent
@@ -45,9 +48,8 @@ def test_trace_logger_persists_canonical_run_events(tmp_path):
         run_id="run-1", goal="fix", duration_sec=1, attempts=1,
         status="failure", files_modified=[], run_events=[event.to_dict()],
     )
-    row = logger.conn.execute(
-        "SELECT run_events FROM runs WHERE run_id = ?", ("run-1",)
-    ).fetchone()
+    with closing(sqlite3.connect(logger.db_path)) as conn:
+        row = conn.execute("SELECT run_events FROM runs WHERE run_id = ?", ("run-1",)).fetchone()
     logger.close()
 
     assert '"authority": "authoritative"' in row[0]
@@ -65,9 +67,8 @@ def test_trace_logger_persists_content_free_generation_metrics(tmp_path):
         run_id="run-metrics", goal="generate", duration_sec=13, attempts=2,
         status="success", files_modified=["App.java"], generation_metrics=metrics,
     )
-    row = logger.conn.execute(
-        "SELECT generation_metrics FROM runs WHERE run_id = ?", ("run-metrics",)
-    ).fetchone()
+    with closing(sqlite3.connect(logger.db_path)) as conn:
+        row = conn.execute("SELECT generation_metrics FROM runs WHERE run_id = ?", ("run-metrics",)).fetchone()
     logger.close()
 
     assert '"calls": 2' in row[0]

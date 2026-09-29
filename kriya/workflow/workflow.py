@@ -2501,21 +2501,25 @@ class WorkflowEngine:
 
                 # PRD-027: the retrieval itself lives in graph_retrieval.py so the
                 # context-recall certification suite measures this exact code path.
-                retrieval = await retrieve_graph_context(
-                    goal, workspace_path,
-                    embed_client=embed_client, vector_store=vector_store,
-                    dependency_graph_path=db_path, limits=retrieval_limits,
-                    embedding_model=self.kernel.config.embedding.model,
-                    # The graph pool, never more than the Planner's own request
-                    # has room for beside its system prompt and the text known
-                    # so far (PROMPT-BUDGET-FIT-001A; the rest is fitted when
-                    # the request is complete).
-                    budget_limit=lambda: min(
-                        _reserve_graph_context_budget(allocation_window(self.kernel.config), convention_prompt),
-                        planner_capacity().allocator_units(planner_capacity().room(
-                            self.planner.system_prompt, goal, repo_context, convention_prompt)),
-                    ),
-                )
+                try:
+                    retrieval = await retrieve_graph_context(
+                        goal, workspace_path,
+                        embed_client=embed_client, vector_store=vector_store,
+                        dependency_graph_path=db_path, limits=retrieval_limits,
+                        embedding_model=self.kernel.config.embedding.model,
+                        # The graph pool, never more than the Planner's own request
+                        # has room for beside its system prompt and the text known
+                        # so far (PROMPT-BUDGET-FIT-001A; the rest is fitted when
+                        # the request is complete).
+                        budget_limit=lambda: min(
+                            _reserve_graph_context_budget(allocation_window(self.kernel.config), convention_prompt),
+                            planner_capacity().allocator_units(planner_capacity().room(
+                                self.planner.system_prompt, goal, repo_context, convention_prompt)),
+                        ),
+                    )
+                finally:
+                    # RESOURCE-SQLITE-CLOSE-001: used for this one call only.
+                    vector_store.close()
                 graph_retrieval_result = retrieval
                 retrieved_chunks.extend(retrieval.retrieved_chunks)
                 retrieval_member_hints = retrieval.retrieval_member_hints

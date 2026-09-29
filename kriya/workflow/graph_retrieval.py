@@ -208,22 +208,24 @@ async def retrieve_graph_context(
     if seed_files and dependency_graph_path and os.path.exists(dependency_graph_path):
         from kriya.analyzer.graph import DependencyGraph
         graph = DependencyGraph(dependency_graph_path)
-
-        # Real symbols this file's own parse produced, not a filename-stem
-        # guess - falls back to the stem only when the file has no indexed
-        # symbols at all (e.g. a matched YAML/config file).
-        seed_symbols = []
-        for f in seed_files:
-            symbols = graph.get_symbols_for_file(f)
-            seed_symbols.extend(symbols or [os.path.splitext(os.path.basename(f))[0]])
-            # PRD-027: the file itself is a node too - calls/imports are
-            # recorded with the calling file as their source, so a matched
-            # file's own dependencies are reachable only from its path.
-            seed_symbols.append(f)
-        neighbors = graph.get_neighborhood(
-            seed_symbols, max_hops=limits.max_hops,
-            max_results=limits.max_neighborhood_results,
-        )
+        try:
+            # Real symbols this file's own parse produced, not a filename-stem
+            # guess - falls back to the stem only when the file has no indexed
+            # symbols at all (e.g. a matched YAML/config file).
+            seed_symbols = []
+            for f in seed_files:
+                symbols = graph.get_symbols_for_file(f)
+                seed_symbols.extend(symbols or [os.path.splitext(os.path.basename(f))[0]])
+                # PRD-027: the file itself is a node too - calls/imports are
+                # recorded with the calling file as their source, so a matched
+                # file's own dependencies are reachable only from its path.
+                seed_symbols.append(f)
+            neighbors = graph.get_neighborhood(
+                seed_symbols, max_hops=limits.max_hops,
+                max_results=limits.max_neighborhood_results,
+            )
+        finally:
+            graph.close()  # RESOURCE-SQLITE-CLOSE-001
         for n in neighbors:
             fp = n.get("filepath")
             if fp and fp not in matched_files_list:

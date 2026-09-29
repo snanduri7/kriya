@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import sqlite3
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -48,7 +49,7 @@ class KnowledgeCache:
 
     def _init_db(self) -> None:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn, conn:
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS release_cache (
                         ecosystem TEXT,
@@ -71,7 +72,7 @@ class KnowledgeCache:
 
     def get_release_date(self, ecosystem: str, package: str, version: str) -> Optional[datetime]:
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn, conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT release_date, retrieved_at, source FROM release_cache WHERE ecosystem = ? AND package = ? AND version = ?",
@@ -98,7 +99,7 @@ class KnowledgeCache:
         try:
             date_str = release_date.isoformat()
             retrieved_at = datetime.now(timezone.utc).isoformat()
-            with sqlite3.connect(self.db_path) as conn:
+            with closing(sqlite3.connect(self.db_path)) as conn, conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO release_cache (ecosystem, package, version, release_date, retrieved_at, source) VALUES (?, ?, ?, ?, ?, ?)",
                     (ecosystem.lower(), package.lower(), version.lower(), date_str,
@@ -112,7 +113,7 @@ class KnowledgeCache:
             logger.debug(f"Failed to write to KnowledgeCache: {e}")
 
     def invalidate(self, ecosystem: str, package: str, version: str) -> None:
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute(
                 "DELETE FROM release_cache WHERE ecosystem = ? AND package = ? AND version = ?",
                 (ecosystem.lower(), package.lower(), version.lower()),

@@ -1,20 +1,32 @@
 import datetime
 import json
 import os
+from contextlib import closing
 from typing import Optional
 
 from kriya.core.db import get_connection
 
 
 class TraceLogger:
+    """Writes run and milestone-plan rows to traces.db. Each operation opens
+    its own connection and closes it (RESOURCE-SQLITE-CLOSE-001): a logger is
+    usually a temporary (``TraceLogger(path).log_run(...)``), and a connection
+    held for the object's life was left for the garbage collector to close."""
+
     def __init__(self, db_path: str) -> None:
         self.db_path = os.path.abspath(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        self.conn = get_connection(self.db_path)
         self.init_db()
 
+    def _connect(self):
+        return closing(get_connection(self.db_path))
+
     def init_db(self) -> None:
-        cursor = self.conn.cursor()
+        with self._connect() as conn:
+            self._create_schema(conn)
+
+    def _create_schema(self, conn) -> None:
+        cursor = conn.cursor()
         # Create table with all details without dropping it first (preserves history!)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS runs (
@@ -88,7 +100,7 @@ class TraceLogger:
                 repository_topology TEXT
             )
         """)
-        self.conn.commit()
+        conn.commit()
 
     def log_run(
         self,
@@ -112,34 +124,35 @@ class TraceLogger:
         generation_metrics: dict = None,
         failure_report: list = None,
     ) -> None:
-        cursor = self.conn.cursor()
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        files_str = ",".join(files_modified)
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            files_str = ",".join(files_modified)
 
-        chunks_json = json.dumps(retrieved_chunks or [])
-        skills_str = ",".join(active_skills or [])
-        gates_json = json.dumps(gate_outcomes or [])
-        hops_json = json.dumps(model_hops or [])
-        events_json = json.dumps(run_events or [])
-        evidence_json = json.dumps(evidence_records or [])
-        generation_metrics_json = json.dumps(generation_metrics or {})
-        failure_report_json = json.dumps(failure_report or [])
+            chunks_json = json.dumps(retrieved_chunks or [])
+            skills_str = ",".join(active_skills or [])
+            gates_json = json.dumps(gate_outcomes or [])
+            hops_json = json.dumps(model_hops or [])
+            events_json = json.dumps(run_events or [])
+            evidence_json = json.dumps(evidence_records or [])
+            generation_metrics_json = json.dumps(generation_metrics or {})
+            failure_report_json = json.dumps(failure_report or [])
 
-        cursor.execute("""
-            INSERT OR REPLACE INTO runs (
-                run_id, timestamp, goal, duration_sec, attempts, status, files_modified,
-                retrieved_chunks, active_skills, prompt_rendered, gate_outcomes, model_hops,
+            cursor.execute("""
+                INSERT OR REPLACE INTO runs (
+                    run_id, timestamp, goal, duration_sec, attempts, status, files_modified,
+                    retrieved_chunks, active_skills, prompt_rendered, gate_outcomes, model_hops,
+                    failure_category, milestone_group_id, milestone_index, milestone_total,
+                    run_events, evidence_records, generation_metrics, failure_report
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                run_id, timestamp, goal, duration_sec, attempts, status, files_str,
+                chunks_json, skills_str, prompt_rendered, gates_json, hops_json,
                 failure_category, milestone_group_id, milestone_index, milestone_total,
-                run_events, evidence_records, generation_metrics, failure_report
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            run_id, timestamp, goal, duration_sec, attempts, status, files_str,
-            chunks_json, skills_str, prompt_rendered, gates_json, hops_json,
-            failure_category, milestone_group_id, milestone_index, milestone_total,
-            events_json, evidence_json, generation_metrics_json, failure_report_json
-        ))
-        self.conn.commit()
+                events_json, evidence_json, generation_metrics_json, failure_report_json
+            ))
+            conn.commit()
 
     def log_milestone_plan(
         self,
@@ -163,22 +176,22 @@ class TraceLogger:
         compact summary the design doc's own telemetry spec calls for
         (build_system/module_count/entrypoint_count), not the full
         RepositoryTopology dataclass."""
-        cursor = self.conn.cursor()
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute("""
-            INSERT OR REPLACE INTO milestone_plans (
+        with self._connect() as conn:
+            cursor = conn.cursor()
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cursor.execute("""
+                INSERT OR REPLACE INTO milestone_plans (
+                    group_id, timestamp, status, schema_version, milestone_count,
+                    dependency_edges, extension_count, composition_count,
+                    validation_attempts, validation_failures, repository_topology
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
                 group_id, timestamp, status, schema_version, milestone_count,
                 dependency_edges, extension_count, composition_count,
-                validation_attempts, validation_failures, repository_topology
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            group_id, timestamp, status, schema_version, milestone_count,
-            dependency_edges, extension_count, composition_count,
-            validation_attempts, json.dumps(validation_failures), json.dumps(repository_topology),
-        ))
-        self.conn.commit()
+                validation_attempts, json.dumps(validation_failures), json.dumps(repository_topology),
+            ))
+            conn.commit()
 
     def close(self) -> None:
-        if hasattr(self, "conn") and self.conn:
-            self.conn.close()
+        """Kept for callers: every operation already closes its own connection."""
