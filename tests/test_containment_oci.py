@@ -639,3 +639,67 @@ def test_registry_scoped_ownership_mismatch_fails_closed_before_any_container_st
             ["/bin/sh", "-c", "true"], cwd="/usr", timeout=10,
             containment_profile=profile, containment_backend=OCIContainmentBackend(),
         )
+
+
+# --- LEAK-OCI-EXCEPTION-RACE-001: an exception right after `docker run` starts ---
+#
+# Measured in the pre-Graphify leak audit: an exception escaping communicate()
+# before the daemon had created the container ran `docker rm -f` too early; the
+# still-running docker client then created the container (which outlived the
+# run) and, for a registry-scoped run, kept the per-run network from being
+# removed. Reproduced here exactly: the exception fires at once, and the
+# host is checked after the window in which the late container used to appear.
+
+def _raise_immediately_for_kriya_run(monkeypatch):
+    real_communicate = subprocess.Popen.communicate
+    fired = []
+
+    def interrupted(self, *args, **kwargs):
+        argv = self.args if isinstance(self.args, (list, tuple)) else []
+        # The controller's own foreground container run only (the one the audit
+        # measured) - never the backend's setup calls such as `docker run -d`
+        # for the registry proxy, which also go through communicate().
+        if not fired and "run" in argv and "-d" not in argv and any(str(a).startswith("kriya-oci-") for a in argv):
+            fired.append(" ".join(map(str, argv)))
+            raise RuntimeError("interrupted right after docker run started")
+        return real_communicate(self, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess.Popen, "communicate", interrupted)
+    return fired
+
+
+def _kriya_docker_residue():
+    ps = subprocess.run(
+        ["docker", "ps", "-a", "--filter", "name=kriya-oci-", "--filter", "name=kriya-acq-", "--format", "{{.Names}}"],
+        capture_output=True, text=True, timeout=10,
+    ).stdout.split()
+    nets = subprocess.run(
+        ["docker", "network", "ls", "--filter", "name=kriya-acq-net-", "--format", "{{.Name}}"],
+        capture_output=True, text=True, timeout=10,
+    ).stdout.split()
+    clients = subprocess.run(["pgrep", "-f", "docker run --rm --name kriya-"], capture_output=True, text=True).stdout.split()
+    return ps, nets, clients
+
+
+def test_exception_right_after_start_leaves_no_container_or_docker_client(workspace, monkeypatch):
+    fired = _raise_immediately_for_kriya_run(monkeypatch)
+    profile = ContainmentProfile(
+        trust_class=TrustClass.UNTRUSTED_EXECUTION, workspace_path=str(workspace), network=NetworkAuthority.DENIED,
+    )
+    with pytest.raises(RuntimeError, match="interrupted right after"):
+        ProcessController().run(["/bin/sh", "-c", "sleep 120"], cwd=".", timeout=60,
+                                containment_profile=profile, containment_backend=OCIContainmentBackend())
+    assert fired  # the fault really fired on the kriya container run
+    time.sleep(5)  # the late container used to appear within this window
+    assert _kriya_docker_residue() == ([], [], [])
+
+
+def test_exception_right_after_start_leaves_no_registry_network(workspace, monkeypatch):
+    fired = _raise_immediately_for_kriya_run(monkeypatch)
+    with pytest.raises(RuntimeError, match="interrupted right after"):
+        ProcessController().run(["/bin/sh", "-c", "sleep 120"], cwd=str(workspace), timeout=60,
+                                containment_profile=_registry_profile(workspace, ["repo.maven.apache.org"]),
+                                containment_backend=OCIContainmentBackend())
+    assert fired
+    time.sleep(5)
+    assert _kriya_docker_residue() == ([], [], [])

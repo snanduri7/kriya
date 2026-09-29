@@ -124,6 +124,20 @@ def terminate_process_tree(process: Any) -> None:
     platform_services().process_control.terminate_tree(process)
 
 
+def _terminate_and_reap(process: subprocess.Popen, reap_timeout: float) -> None:
+    """Kill and reap a spawned tree whose wait was interrupted by an
+    exception other than its own timeout (LEAK-OCI-EXCEPTION-RACE-001). It
+    must run BEFORE the containment cleanup: a still-running `docker run`
+    client creates its container after an early `docker rm -f` found
+    nothing, and the container then outlives the run (and, for a
+    registry-scoped run, keeps the per-run network from being removed)."""
+    terminate_process_tree(process)
+    try:
+        process.wait(timeout=reap_timeout)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def _tree_spawn_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """``kwargs`` plus the ProcessControlPort's spawn options, so every
     child starts as the root of a tree ``terminate_process_tree`` can kill.
@@ -443,6 +457,9 @@ class ProcessController:
                     stderr = (reap_ex.stderr or "") + (
                         "\n[REAP TIMEOUT] Process tree did not exit after termination."
                     )
+            except BaseException:
+                _terminate_and_reap(process, self.reap_timeout)
+                raise
         finally:
             # SEC-001-P6: a container backend's own authoritative teardown
             # (e.g. `docker rm -f`) - not optional even on the happy path,
@@ -516,6 +533,15 @@ class ProcessController:
                     )
                 except asyncio.TimeoutError:
                     stdout_b, stderr_b = b"", b"[REAP TIMEOUT] Process tree did not exit after termination.".encode()
+            except BaseException:
+                # Same rule as run(): cancellation (the realistic trigger here)
+                # or any other error kills and reaps the tree before cleanup.
+                terminate_process_tree(process)
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=self.reap_timeout)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass  # the original exception is re-raised below either way
+                raise
         finally:
             if resolved.cleanup is not None:
                 resolved.cleanup()
