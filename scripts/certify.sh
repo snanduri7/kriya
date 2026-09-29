@@ -131,6 +131,7 @@ fi
 # it is approved explicitly (SEC-009 P2, bound to its exact security fields)
 # into a trust file outside any workspace, exactly as an operator deploys it.
 DOCTOR_HOME="$(mktemp -d "${TMPDIR:-/tmp}/kriya-cert-doctor.XXXXXXXX")"
+trap 'rm -rf "$DOCTOR_HOME"' EXIT  # disposable: its outputs are captured under $OUT (LEAK-RELEASE-TMP-001)
 mkdir -p "$DOCTOR_HOME/operator" "$DOCTOR_HOME/workspace"
 git -C "$DOCTOR_HOME/workspace" init -q  # a real (empty) repository, as a deployment has
 printf 'runtime_profile: production\n' > "$DOCTOR_HOME/operator/production.yaml"
