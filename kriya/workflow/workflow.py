@@ -76,6 +76,7 @@ from kriya.workflow.attribution import (
     find_whole_response_no_op as find_whole_response_no_op,
 )
 from kriya.workflow.banners import log_gate_banner, log_quality_gate_banner
+from kriya.workflow.best_of_n import BestOfNFailureRecorded
 from kriya.workflow.checkpoint import (
     ResumeAction,
     ResumeStatus,
@@ -5228,6 +5229,11 @@ class WorkflowEngine:
                     state.attempt_number, transition,
                 )
                 continue
+            except BestOfNFailureRecorded as recorded:
+                # Already recorded by best-of-N (STATE-BEST-OF-N-HANDOFF-001):
+                # act on its decision, never record the failure again.
+                if recorded.stop_loop:
+                    break
             except Exception as e:
                 if await handle_attempt_failure(state, attempt_ctx, e):
                     break

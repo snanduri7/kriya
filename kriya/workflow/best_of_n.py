@@ -24,7 +24,34 @@ patching it - one candidate needs to succeed, not the first one.
 """
 import logging
 
+from kriya.workflow.repair_contract import RepairContractStatus
+from kriya.workflow.state import RecoveryPhaseAdvanced
+
 logger = logging.getLogger(__name__)
+
+
+class BestOfNFailureRecorded(Exception):
+    """A candidate failure best-of-N already recorded through
+    handle_attempt_failure, handed to the retry loop when no further
+    independent candidate follows (STATE-BEST-OF-N-HANDOFF-001). The loop
+    acts on ``stop_loop`` and must not record the failure a second time:
+    that would charge its budget, ledger it and classify its progress twice."""
+
+    def __init__(self, failure: Exception, *, stop_loop: bool) -> None:
+        super().__init__(str(failure))
+        self.failure = failure
+        self.stop_loop = stop_loop
+
+
+def _authoritative_repair_active(state) -> bool:
+    """Repair state the next attempt must honour (sticky API contract
+    recovery, an active MA9 repair contract). A reset candidate is an
+    ungrounded full-set attempt, so it cannot start while either is active:
+    that state belongs to the main loop."""
+    contract = state.repair_contract
+    return state.api_contract_recovery is not None or (
+        contract is not None and contract.status == RepairContractStatus.ACTIVE
+    )
 
 
 def reset_state_for_independent_candidate(state) -> None:
@@ -91,6 +118,11 @@ async def run_attempt_with_best_of_n(state, attempt_ctx, n: int) -> None:
     post-success steps (checkpoint, human approval, apply-to-workspace,
     regression suite, lesson extraction) runs completely unchanged.
 
+    A candidate failure that ends sampling early (the loop must stop, the
+    budgets are spent, authoritative repair state became active, or no fresh
+    sandbox is available) was already recorded here, so it reaches the loop
+    as BestOfNFailureRecorded and is never recorded twice.
+
     If every candidate fails, re-raises the LAST one's exception un-swallowed,
     so the existing `except Exception as e: if await handle_attempt_failure(...):
     break` right after the call site in workflow.py handles it exactly as it
@@ -103,6 +135,7 @@ async def run_attempt_with_best_of_n(state, attempt_ctx, n: int) -> None:
     so Best-of-N never actually re-attempts a resumed run.
     """
     from kriya.workflow.attempt import run_attempt
+    from kriya.workflow.retry_policy import decide_for_state
     from kriya.workflow.retry_strategy import handle_attempt_failure
     from kriya.workflow.worktree import create_git_worktree
 
@@ -110,30 +143,35 @@ async def run_attempt_with_best_of_n(state, attempt_ctx, n: int) -> None:
         try:
             await run_attempt(state, attempt_ctx)
             return
+        except RecoveryPhaseAdvanced:
+            # A verified recovery transition, never a candidate failure: the
+            # retry loop's own handler records it.
+            raise
         except Exception as e:
             if i == n - 1:
                 raise
             should_stop = await handle_attempt_failure(state, attempt_ctx, e)
-            if should_stop:
-                raise
+            # The failure is recorded from here on: every exit below hands
+            # the loop that record, never the raw exception.
+            if should_stop or _authoritative_repair_active(state) or not decide_for_state(
+                state, max_retries=attempt_ctx.max_retries,
+                targeted_max_retries=attempt_ctx.targeted_max_retries,
+                has_fallback_model=bool(attempt_ctx.chain),
+            ).should_continue:
+                raise BestOfNFailureRecorded(e, stop_loop=should_stop) from e
+            # The fresh sandbox comes first: the state is reset for an
+            # independent candidate only once that candidate can run.
+            try:
+                create_git_worktree(attempt_ctx.workspace_path)
+            except Exception as reset_error:
+                # No clean sandbox for another candidate: stop sampling. The
+                # loop continues from the recorded failure, in its own
+                # worktree, exactly as after an ordinary failed attempt.
+                logger.warning(f"Best-of-N: worktree reset failed, no further candidate: {reset_error!r}")
+                raise BestOfNFailureRecorded(e, stop_loop=False) from e
             state.budgets.best_of_n_candidates_tried += 1
             reset_state_for_independent_candidate(state)
             logger.info(
                 f"Best-of-N: candidate {i + 1}/{n} failed, trying an independent "
                 f"candidate {i + 2}/{n}."
             )
-            reset_error = None
-            try:
-                create_git_worktree(attempt_ctx.workspace_path)
-            except Exception as error:
-                reset_error = error
-            if reset_error is not None:
-                # Can't get a clean sandbox for the next candidate - stop here
-                # rather than continue in a possibly-dirty worktree. Re-raise the
-                # ORIGINAL candidate failure (e), not this worktree-reset error -
-                # from the caller's point of view this is still "the attempt
-                # failed," just without a further independent retry available.
-                # Raised outside the reset's except block so e keeps its own
-                # context; the reset error did not cause e, so it is logged.
-                logger.warning(f"Best-of-N: worktree reset failed, no further candidate: {reset_error!r}")
-                raise e

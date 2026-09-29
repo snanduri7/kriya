@@ -4,13 +4,18 @@ run_attempt_with_best_of_n() in isolation; one integration-level test in
 tests/test_workflow.py (see test_workflow_best_of_n_never_activates_without_a_real_sandbox)
 covers the workflow.py dispatch condition.
 """
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from kriya.workflow.best_of_n import reset_state_for_independent_candidate, run_attempt_with_best_of_n
+from kriya.workflow.best_of_n import (
+    BestOfNFailureRecorded,
+    reset_state_for_independent_candidate,
+    run_attempt_with_best_of_n,
+)
 from kriya.workflow.failure import Failure, QualityGateFailure
-from kriya.workflow.state import GenerationState
+from kriya.workflow.state import GenerationState, RecoveryPhaseAdvanced
 
 
 def _make_state(**overrides):
@@ -35,6 +40,12 @@ def _make_state(**overrides):
     for k, v in overrides.items():
         setattr(state, k, v)
     return state
+
+
+def _ctx():
+    """The attempt-context fields best-of-N reads: the retry policy's
+    budgets (4 full-set, 3 targeted, no fallback) and the workspace."""
+    return SimpleNamespace(workspace_path="/fake/workspace", max_retries=4, targeted_max_retries=3, chain=[])
 
 
 def test_reset_clears_candidate_specific_fields():
@@ -84,8 +95,7 @@ async def test_first_candidate_success_returns_immediately():
 @pytest.mark.asyncio
 async def test_second_candidate_succeeds_after_first_fails():
     state = GenerationState()
-    ctx = AsyncMock()
-    ctx.workspace_path = "/fake/workspace"
+    ctx = _ctx()
     failure = QualityGateFailure(Failure(type="compile", message="broke"))
 
     with patch("kriya.workflow.attempt.run_attempt", new=AsyncMock(side_effect=[failure, None])), \
@@ -100,8 +110,7 @@ async def test_second_candidate_succeeds_after_first_fails():
 @pytest.mark.asyncio
 async def test_all_candidates_failing_propagates_the_last_failure():
     state = GenerationState()
-    ctx = AsyncMock()
-    ctx.workspace_path = "/fake/workspace"
+    ctx = _ctx()
     first_failure = QualityGateFailure(Failure(type="compile", message="first"))
     last_failure = QualityGateFailure(Failure(type="compile", message="last"))
 
@@ -120,31 +129,97 @@ async def test_stops_immediately_when_handle_attempt_failure_says_stop():
     """An environment/toolchain failure (handle_attempt_failure returning True)
     must not be papered over by trying another independent candidate."""
     state = GenerationState()
-    ctx = AsyncMock()
-    ctx.workspace_path = "/fake/workspace"
+    ctx = _ctx()
     failure = QualityGateFailure(Failure(type="compile", message="env broke"))
 
     with patch("kriya.workflow.attempt.run_attempt", new=AsyncMock(side_effect=failure)), \
-         patch("kriya.workflow.retry_strategy.handle_attempt_failure", new=AsyncMock(return_value=True)), \
+         patch("kriya.workflow.retry_strategy.handle_attempt_failure", new=AsyncMock(return_value=True)) as handle, \
          patch("kriya.workflow.worktree.create_git_worktree") as mock_worktree:
-        with pytest.raises(QualityGateFailure):
+        with pytest.raises(BestOfNFailureRecorded) as exc_info:
             await run_attempt_with_best_of_n(state, ctx, n=3)
 
+    # Recorded once, here; the loop gets the record and its stop decision.
+    handle.assert_awaited_once()
+    assert exc_info.value.failure is failure and exc_info.value.stop_loop is True
     mock_worktree.assert_not_called()
     assert state.budgets.best_of_n_candidates_tried == 0
 
 
 @pytest.mark.asyncio
-async def test_worktree_reset_failure_reraises_the_original_candidate_failure():
+async def test_worktree_reset_failure_hands_the_recorded_failure_to_the_loop_unreset():
     state = GenerationState()
-    ctx = AsyncMock()
-    ctx.workspace_path = "/fake/workspace"
+    state.error_context = "recorded failure evidence"
+    state.budgets.retry_count = 1
+    ctx = _ctx()
     candidate_failure = QualityGateFailure(Failure(type="compile", message="candidate broke"))
 
     with patch("kriya.workflow.attempt.run_attempt", new=AsyncMock(side_effect=candidate_failure)), \
-         patch("kriya.workflow.retry_strategy.handle_attempt_failure", new=AsyncMock(return_value=False)), \
+         patch("kriya.workflow.retry_strategy.handle_attempt_failure", new=AsyncMock(return_value=False)) as handle, \
          patch("kriya.workflow.worktree.create_git_worktree", side_effect=RuntimeError("worktree gone")):
-        with pytest.raises(QualityGateFailure) as exc_info:
+        with pytest.raises(BestOfNFailureRecorded) as exc_info:
             await run_attempt_with_best_of_n(state, ctx, n=3)
 
-    assert exc_info.value is candidate_failure
+    handle.assert_awaited_once()
+    assert exc_info.value.failure is candidate_failure and exc_info.value.stop_loop is False
+    # No candidate followed, so none is counted and the recorded state stays.
+    assert state.budgets.best_of_n_candidates_tried == 0
+    assert state.error_context == "recorded failure evidence"
+    assert state.budgets.retry_count == 1
+
+
+@pytest.mark.asyncio
+async def test_active_contract_recovery_hands_the_failure_to_the_loop_without_a_new_candidate():
+    state = GenerationState()
+    ctx = _ctx()
+    failure = QualityGateFailure(Failure(type="compile", message="removed a public signature"))
+
+    async def enter_recovery(state_, ctx_, exc):
+        state_.api_contract_recovery = object()
+        return False
+
+    with patch("kriya.workflow.attempt.run_attempt", new=AsyncMock(side_effect=failure)) as mock_run, \
+         patch("kriya.workflow.retry_strategy.handle_attempt_failure", new=enter_recovery), \
+         patch("kriya.workflow.worktree.create_git_worktree") as mock_worktree:
+        with pytest.raises(BestOfNFailureRecorded) as exc_info:
+            await run_attempt_with_best_of_n(state, ctx, n=3)
+
+    assert exc_info.value.stop_loop is False
+    mock_run.assert_awaited_once()
+    mock_worktree.assert_not_called()
+    assert state.budgets.best_of_n_candidates_tried == 0
+
+
+@pytest.mark.asyncio
+async def test_spent_budgets_hand_the_failure_to_the_loop_without_a_new_candidate():
+    state = GenerationState()
+    ctx = _ctx()
+    failure = QualityGateFailure(Failure(type="compile", message="broke"))
+
+    async def spend(state_, ctx_, exc):
+        state_.budgets.retry_count = ctx_.max_retries
+        return False
+
+    with patch("kriya.workflow.attempt.run_attempt", new=AsyncMock(side_effect=failure)) as mock_run, \
+         patch("kriya.workflow.retry_strategy.handle_attempt_failure", new=spend), \
+         patch("kriya.workflow.worktree.create_git_worktree") as mock_worktree:
+        with pytest.raises(BestOfNFailureRecorded):
+            await run_attempt_with_best_of_n(state, ctx, n=3)
+
+    mock_run.assert_awaited_once()
+    mock_worktree.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_recovery_transition_is_never_handled_as_a_candidate_failure():
+    state = GenerationState()
+    transition = RecoveryPhaseAdvanced("RESTORE_PUBLIC_CONTRACT", "REPAIR_BEHAVIOR")
+
+    with patch("kriya.workflow.attempt.run_attempt", new=AsyncMock(side_effect=transition)), \
+         patch("kriya.workflow.retry_strategy.handle_attempt_failure", new=AsyncMock(return_value=False)) as handle, \
+         patch("kriya.workflow.worktree.create_git_worktree") as mock_worktree:
+        with pytest.raises(RecoveryPhaseAdvanced) as exc_info:
+            await run_attempt_with_best_of_n(state, _ctx(), n=3)
+
+    assert exc_info.value is transition
+    handle.assert_not_awaited()
+    mock_worktree.assert_not_called()
