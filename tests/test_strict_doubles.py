@@ -6,7 +6,10 @@ code under test reads truthy. In Batch 5 that silently switched PRD-020's
 terminal requirement verifier on in two suites. The static check cannot see
 this, so the repository guard below rejects the pattern at its source."""
 import ast
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -15,6 +18,7 @@ from _strict_doubles import strict_config, strict_engine, strict_kernel
 from kriya.config.config import AppConfig
 
 TESTS_DIR = Path(__file__).resolve().parent
+_NESTED_SESSION_ENV = "KRIYA_TEST_NESTED_STRICT_SESSION"
 _MOCK_FACTORIES = {"Mock", "MagicMock", "AsyncMock", "NonCallableMock", "NonCallableMagicMock"}
 # A name that holds a config, kernel or policy double.
 _GUARDED_NAME = re.compile(r"(^|_)(kernel|config|cfg|policy)$")
@@ -174,3 +178,25 @@ def test_strict_kernel_and_engine_carry_real_config_and_reject_unknown_attribute
     engine = strict_engine(cfg)
     assert engine.kernel.config is cfg
     assert isinstance(strict_engine().kernel.config, AppConfig)
+
+
+@pytest.mark.skipif(os.environ.get(_NESTED_SESSION_ENV) == "1", reason="the nested session this test starts")
+def test_a_pytest_session_leaves_no_default_config_root_behind(tmp_path):
+    """LEAK-STRICT-CONFIG-TMP-001: every strict_config() default root is
+    removed at session end. A real pytest session runs in a subprocess with
+    its own TMPDIR (producer: _strict_doubles, consumer: conftest's
+    pytest_sessionfinish); nothing kriya-strict-config-* may remain."""
+    temp_root = tmp_path / "tmp"
+    temp_root.mkdir()
+    env = dict(os.environ, TMPDIR=str(temp_root), **{_NESTED_SESSION_ENV: "1"})
+    env.pop("PYTEST_CURRENT_TEST", None)
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+         f"--basetemp={tmp_path / 'basetemp'}",
+         f"{__file__}::test_default_strict_configs_are_equal_within_a_test",
+         f"{__file__}::test_strict_config_paths_never_resolve_into_the_cwd"],
+        cwd=TESTS_DIR.parent, env=env, capture_output=True, text=True, timeout=120, check=False)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "2 passed" in result.stdout
+    assert sorted(p.name for p in temp_root.iterdir() if p.name.startswith("kriya-strict-config-")) == []

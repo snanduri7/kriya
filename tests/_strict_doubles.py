@@ -10,6 +10,7 @@ values production starts from) and a kernel that raises on any attribute
 Kernel does not have. ``tests/test_strict_doubles.py`` rejects new bare
 config/kernel/engine doubles."""
 import os
+import shutil
 import tempfile
 from typing import Any, Dict, Optional
 from unittest.mock import MagicMock
@@ -31,6 +32,17 @@ def _default_root() -> str:
     if test_id not in _DEFAULT_ROOTS:
         _DEFAULT_ROOTS[test_id] = tempfile.mkdtemp(prefix="kriya-strict-config-")
     return _DEFAULT_ROOTS[test_id]
+
+
+def release_default_roots() -> None:
+    """Remove every default root this process created (tests/conftest.py's
+    ``pytest_sessionfinish``). Released once per session, never per test: a
+    module- or class-scoped fixture's config keeps the root of the test that
+    set it up for the rest of the scope. Without this each test left one
+    directory in the system temp dir for good (LEAK-STRICT-CONFIG-TMP-001)."""
+    while _DEFAULT_ROOTS:
+        _test_id, root = _DEFAULT_ROOTS.popitem()
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def strict_config(**sections: Dict[str, Any]) -> AppConfig:

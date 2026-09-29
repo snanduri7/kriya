@@ -221,6 +221,9 @@ def chaos_case(request, tmp_path):
 
 
 def pytest_sessionfinish(session):
+    from _strict_doubles import release_default_roots
+
+    release_default_roots()
     model_dir = session.config.getoption("--model-certification")
     if model_dir:
         from _model_certification import build_report as build_model_report
