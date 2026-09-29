@@ -9,12 +9,14 @@ Scope: where a subsystem's locally correct state blocks, permits or changes a gl
 | STATE-BEST-OF-N-HANDOFF-001 (own bug) | P2 (opt-in best-of-N) | B, E, F | `2939a47` |
 | STATE-FAILURE-FAMILY-CYCLE-001 | P1 | A, D, E | `e37f444` |
 | STATE-RESERVED-FALLBACK-001 (fix chosen by the user) | P1 | D, E | `c8bd61e` |
+| STATE-ATTEMPT-METRICS-001 (found in final verification) | P2 | evidence accuracy | `4240d69` |
+| STATE-ATTEMPT-METRICS-002 (own bug, incomplete -001) | P2 | evidence accuracy | `f4bb39e` |
 
 Supporting commits:
 - `a2e8683` extracts the retry budget bookkeeping into `retry_policy`, with no behavior change, so the tier drives the same functions production does.
 - `f3c61ee` and the tier-extension commit add the fast tier.
 
-**Fast tier:** `.venv/bin/pytest -m state_machine` (578 tests). `tests/state_machine/` alone: about 25 s. The whole-tier runtime has not been measured; that is in the hand-off.
+**Fast tier:** `.venv/bin/pytest -m state_machine` (584 tests at `f4bb39e`, 108.7 s). `tests/state_machine/` alone: about 25 s. The whole-tier runtime has not been measured; that is in the hand-off.
 
 **Verification so far (all run by me):**
 - a targeted run per fix;
@@ -177,8 +179,94 @@ The suites above are in the tier through `tests/conftest.py::STATE_MACHINE_TIER_
 - **`RetryBudgets` is never serialized**, so the new set field cannot reach JSON.
 
 ## Policy question left as documented
-PRD-017 `FALLBACK_MODEL_INCOMPATIBLE`: when escalation needs a fallback and none configured can serve, the run ends even with primary full-set budget left. This is documented as intended and pinned in the corpus.
+PRD-017 `FALLBACK_MODEL_INCOMPATIBLE`: when escalation needs a fallback and none configured can serve, the run ends even with primary full-set budget left. This is documented as intended, and now pinned end to end: `tests/test_prd017_fallback_transition.py::test_a_required_fallback_that_none_can_serve_ends_typed_with_primary_capacity_unused` (`e509fbb`). That test proves:
+- the fallback-targeted transition was admitted;
+- the only fallback is sent nothing;
+- there is no routing back to unused primary full-set capacity;
+- no extra attempt is made (4 primary attempts, then the stop);
+- the typed `fallback_incompatible` failure appears, with `failure_category: fallback_model_incompatible` and a `model.fallback_selection` record;
+- the workspace is untouched.
 
-## Hand-off (your terminal)
-- Tier runtime: `.venv/bin/pytest -m state_machine --durations=10`.
-- Full gate at the batch boundary: `.venv/bin/pytest`.
+## Final verification (2026-09-29)
+
+**Final hardening revision: `f4bb39e`.** It is NOT the PRD-036 certified candidate, which stays prd-036-rc9 / 7bc686f on Ollama 0.34.2. Full post-hardening release certification (a 3×11/11 streak and hosted CI) is deferred on purpose to `KRIYA_PRODUCTION_CERTIFICATION`. PRD-036 evidence is untouched.
+
+**Runtime.** Ollama was upgraded on this host from 0.34.2 to **0.34.4** after PRD-036.
+- The model weights are unchanged: artifact digests `sha256:06c1097e…` (qwen3-coder:30b) and `sha256:07d35212…` (qwen3.6:35b-a3b-q4_K_M). Only `provider_version` differs.
+- So the runtime digests are new: `9439a612…` and `39cda4f4…`.
+- Every role model was requalified on 0.34.4 under the unchanged operator config (digest `a5be2e83…`): 18 PASS, 0 FAIL, 1 UNAVAILABLE (`endpoint_restart_semantics`) each.
+- After requalification, the doctor reports `PRODUCTION_READY=true`.
+- Evidence: `evidence/STATE-MACHINE-HARDENING/qualification/`.
+
+**Deterministic gates on `f4bb39e`.**
+
+| Gate | Result |
+|---|---|
+| Full pytest | 7288 passed, 0 failed, 0 errors, 0 skips (33:00) |
+| Fast tier `-m state_machine` | 584/584, 0 skips, 108.7 s |
+| ruff / pylint | 0 / 0 |
+| Open P0/P1 | none |
+
+Ten slowest tier tests: `test_prd032_chaos_static_analysis.py::test_a_nosemgrep_suppression_in_the_candidate_never_hides_a_finding` 5.0 s; the reserved-fallback e2e tests 2.9–3.2 s each (5); `test_sm_attempt_metrics.py::test_new_family_resets_do_not_hide_targeted_attempts` 3.3 s; `test_sm_failure_families.py::test_with_no_fallback_…` 2.4 s; two `test_prd031a_static_analysis.py` tests at 2.2 s. There is no accidental slowness: the slow ones are real scripted-pipeline runs.
+
+**Production canary and live matrix (production profile, enforce path, operator config, Ollama 0.34.4).**
+
+| Attempt | Revision / candidate | Canary | Live 11-case matrix |
+|---|---|---|---|
+| 1 | `e509fbb` / `33998645…` | PASS (both runs) | **9/11 FAILED**: C4 exact_requirement, C11 static_analysis_enabled (`matrix/trial-20260929T025849Z`), kept as failed evidence |
+| 2 | `4240d69` / `0ef71721…` | PASS | **11/11 CERTIFIED** (`matrix/trial-20260929T040507Z`) |
+| final | `f4bb39e` / `051daa7d…` | PASS (both runs, every check) | not run (see below) |
+
+The canary checks are all true in every run:
+- `PRODUCTION_READY` before and after;
+- the enforce controller exercised;
+- only the authorized file written, HEAD unchanged;
+- independent compile and test exit 0;
+- a committed transaction with its verification and static-analysis evidence bound (the commit is refused unless the verified digest matches);
+- a bounded, non-nested worktree set reused on run 2;
+- no leaked processes, containers or networks;
+- the workspace lock released;
+- a SUCCESS run record consistent with the trace.
+
+**Attempt 1 classification (provisional).** Model/runtime behavior, not a Kriya defect:
+- both cases fail on first-generation output, which the hardening doesn't touch;
+- neither case configures a fallback, so STATE-RESERVED-FALLBACK-001 is inactive;
+- no failure-family cycle occurred;
+- every candidate was rejected with a typed failure, nothing was committed, and there was no false success.
+
+Both cases passed all 9 PRD-036 trials on 0.34.2. Ollama 0.34.4 is a candidate cause, **not proven**: 0.34.4 has now produced both a 9/11 and an 11/11 run, so runtime repeatability stays a production-certification concern. The recommended next diagnostic is 0.34.2 vs 0.34.4 on C4/C11.
+
+**Defects found during final verification (Fix-Now):**
+- **STATE-ATTEMPT-METRICS-001** (P2, `4240d69`, found while classifying attempt 1). The reported retry counts came from the scoped budget counters, so C11 reported 4 targeted retries where 3 ran, and 0 where nine ran. This was evidence-only; decisions were unaffected.
+- **STATE-ATTEMPT-METRICS-002** (P2, own bug in that fix, `f4bb39e`, found in the attempt-2 report). Counting started attempts made a first-pass success read `Retries 1/0`. The counts are now failed attempts per mode, and a first-pass success is 0/0; the final canary's production runs report 0/0.
+
+Both are reporting-only. **`f4bb39e` differs from the 11/11 revision `4240d69` only by STATE-ATTEMPT-METRICS-002**: `state.py` and `retry_strategy.py` count failed attempts for the metrics dict, with no routing, gate or commit change. Full pytest, the tier and the canary are green on `f4bb39e` itself.
+
+### Invariant check (§8 of the verification task)
+| # | Invariant | Result | Evidence |
+|---|---|---|---|
+| 1 | Unrestored/uncertain authority cannot reach fallback/commit | PASS | R3; unrestorable-contract e2e + corpus; generated fail-closed check |
+| 2 | Safe handback does not suppress remaining legal retry/fallback | PASS | R4; C6 e2e + corpus |
+| 3 | A seen failure family cannot reset its budget | PASS | STATE-FAILURE-FAMILY-CYCLE-001 e2e; `test_only_a_never_seen_failure_family_is_new` |
+| 4 | Best-of-N records one failure exactly once | PASS | `test_sm_best_of_n.py` (4 e2e) |
+| 5 | Candidate reset clears candidate-local recovery state | PASS | best-of-N hands authoritative repair state to the loop, never sampling under it; reset clears seen families (`test_reset_clears_candidate_specific_fields`) |
+| 6 | Primary cannot consume the fallback's reserved allowance | PASS | `test_sm_reserved_fallback.py`; R10 |
+| 7 | Reserved fallback adds no attempt | PASS | `test_the_reserved_fallback_attempt_adds_no_attempt_to_the_ceiling` |
+| 8 | Mandatory recovery outranks the reserved fallback | PASS | R2 before R10; `test_mandatory_recovery_outranks_the_reserved_fallback_slot` |
+| 9 | No-progress cannot stop with an unused compatible fallback | PASS | 4,500 generated trajectories; stuck-primary corpus cases |
+| 10 | Fallback required but none compatible → PRD-017 as documented | PASS | new end-to-end PRD-017 test above |
+| 11 | Attempt mode and loop decision derive from the same state | PASS | R9 over 41,472 states (including the reserved flag); `decide_attempt_mode` decides at the loop's attempt number |
+| 12 | C6/C8/C10 deterministically reproducible in seconds | PASS | table above |
+| 13 | SUCCESS requires mandatory evidence and verified == committed | PASS | binding/terminal-gate suites in the tier; canary commit evidence bound |
+| 14 | Process/worktree lifecycle intact | PASS | lifecycle suites in the tier; canary leak and worktree checks |
+
+**Completion status.** Every criterion is green on `f4bb39e` except one: the single complete 11/11 live matrix ran on `4240d69`, not on `f4bb39e`. Your instruction was one fresh matrix, not several. So `STATE_MACHINE_HARDENING_VERIFIED` is **pending your decision**: accept the 11/11 on `4240d69` plus the reporting-only delta, or run one matrix on `f4bb39e`.
+
+## Next: memory/resource-leak audit (designed, not run)
+The harness and plan are at the session scratchpad `leak_audit/`. They were designed read-only and none of it has been executed. Retention hypotheses to measure:
+- the unbounded `_ANALYZE_CACHE` (`kriya/analyzer/analyzer.py`);
+- `TraceLogger` SQLite connections closed only by GC;
+- unclosed `AsyncOpenAI` clients;
+- jdtls released only on the normal return path;
+- the path-keyed qualification `_RECORD_CACHE`;
+- `ManagedProcess` cleanup only on `terminate()`.

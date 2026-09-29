@@ -1,0 +1,14 @@
+{
+  "status": "IN_PROGRESS",
+  "path": "/Users/sriramnanduri/.kriya/certifications/streaks/0ef717211dc41b5eda46778d310336bc1c2466519c921f07d976ddfeced3a0ed.json",
+  "streak": 1,
+  "required": 3,
+  "trials": [
+    {
+      "trial": 1,
+      "outcome": "CERTIFIED",
+      "streak_after": 1,
+      "reasons": []
+    }
+  ]
+}
