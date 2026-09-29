@@ -1097,7 +1097,13 @@ async def case_context_capacity(llm, model, ctx):
     # not necessarily the primary binding's.
     policy = _policy(ctx).cases.context_capacity
     answer_tokens = _case_budget(ctx, "context_capacity")
-    _note_policy(ctx, "context_capacity", headroom_tokens=policy.headroom_tokens,
+    # A reasoning identity's answer budget needs its own room below the
+    # window (same capability rule as the budget itself).
+    reasoning_headroom = bool(ctx.get("reasoning")) and policy.reasoning_headroom_tokens is not None
+    headroom = policy.reasoning_headroom_tokens if reasoning_headroom else policy.headroom_tokens
+    _note_policy(ctx, "context_capacity", headroom_tokens=headroom,
+                 headroom_source=("model_qualification.cases.context_capacity."
+                                  + ("reasoning_headroom_tokens" if reasoning_headroom else "headroom_tokens")),
                  min_fill_ratio=policy.min_fill_ratio, request_timeout_seconds=policy.request_timeout_seconds)
     factory = ctx.get("client_factory")
     client = factory(policy.request_timeout_seconds).client if factory is not None else llm.client
@@ -1124,7 +1130,7 @@ async def case_context_capacity(llm, model, ctx):
                                             "probe_prompt_tokens": [small, large]})
     per_unit = (large - small) / 40
     fixed = small - 40 * per_unit
-    target = int(window) - policy.headroom_tokens
+    target = int(window) - headroom
     units = max(1, int((target - fixed) / per_unit))
     head, tail = secrets.token_hex(4), secrets.token_hex(4)
     response = await send([

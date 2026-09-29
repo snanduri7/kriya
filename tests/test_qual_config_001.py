@@ -200,8 +200,8 @@ def test_an_unapproved_config_cannot_set_the_qualification_policy(tmp_path):
 
 
 def test_a_partial_case_entry_keeps_that_cases_other_defaults():
-    cases = AppConfig(model_qualification={"cases": {"context_capacity": {"max_tokens": 900}}}).model_qualification.cases
-    assert cases.context_capacity.max_tokens == 900
+    cases = AppConfig(model_qualification={"cases": {"context_capacity": {"max_tokens": 300}}}).model_qualification.cases
+    assert cases.context_capacity.max_tokens == 300
     assert (cases.context_capacity.headroom_tokens, cases.context_capacity.min_fill_ratio) == (384, 0.9)
     assert cases.cancellation_semantics.max_tokens == 1024
 
@@ -316,8 +316,9 @@ def test_the_capacity_probe_uses_the_configured_answer_budget_headroom_and_fill_
     assert runtime.requests[-1].max_tokens == 700 and made == [42]
     assert result.evidence["target_prompt_tokens"] == 8192 - 2000
     assert result.evidence["policy"] == {"max_tokens": 700, "source": "model_qualification.cases.context_capacity.max_tokens",
-                                         "headroom_tokens": 2000, "min_fill_ratio": 0.5,
-                                         "request_timeout_seconds": 42}
+                                         "headroom_tokens": 2000,
+                                         "headroom_source": "model_qualification.cases.context_capacity.headroom_tokens",
+                                         "min_fill_ratio": 0.5, "request_timeout_seconds": 42}
 
 
 def test_the_capacity_fill_ratio_decides_the_verdict():
@@ -527,3 +528,42 @@ def test_a_new_off_by_default_knob_does_not_change_any_existing_policy_digest():
     assert mq.qualification_policy_digest(_WithFutureKnob()) == mq.qualification_policy_digest(
         ModelQualificationConfig()) == mq.LEGACY_V3_POLICY_DIGEST
     assert mq.qualification_policy_digest(_WithFutureKnob(future_knob=3)) != mq.LEGACY_V3_POLICY_DIGEST
+
+
+def _capacity(policy, reasoning):
+    runtime = _CapacityRuntime(_codes)
+    ctx = {"policy": policy, "reasoning": reasoning, "context_window": 32768, "runtime": runtime,
+           "client_factory": lambda timeout: type("C", (), {"client": object()})()}
+    result = asyncio.run(mq.case_context_capacity(FakeLLM(), MODEL, ctx))
+    return result, runtime.requests[-1]
+
+
+def test_a_reasoning_identity_gets_its_capacity_answer_budget_and_the_headroom_to_hold_it():
+    policy = _policy(context_capacity={"reasoning_max_tokens": 1024, "reasoning_headroom_tokens": 1344})
+    reasoning, request = _capacity(policy, True)
+    assert reasoning.status == mq.PASS, reasoning.evidence
+    assert request.max_tokens == 1024 and reasoning.evidence["target_prompt_tokens"] == 32768 - 1344
+    assert reasoning.evidence["policy"]["headroom_source"].endswith("reasoning_headroom_tokens")
+    plain, plain_request = _capacity(policy, False)
+    assert plain_request.max_tokens == 64 and plain.evidence["target_prompt_tokens"] == 32768 - 384
+
+
+def test_the_capacity_pass_semantics_are_unchanged_for_a_reasoning_identity():
+    """Both markers are still required; a larger budget never passes a lost marker."""
+    policy = _policy(context_capacity={"reasoning_max_tokens": 1024, "reasoning_headroom_tokens": 1344})
+    runtime = _CapacityRuntime(lambda request: _codes(request).split()[1])
+    ctx = {"policy": policy, "reasoning": True, "context_window": 32768, "runtime": runtime,
+           "client_factory": lambda timeout: type("C", (), {"client": object()})()}
+    result = asyncio.run(mq.case_context_capacity(FakeLLM(), MODEL, ctx))
+    assert result.status == mq.FAIL and result.evidence["first_marker_recalled"] is False
+
+
+@pytest.mark.parametrize("bad", [
+    {"max_tokens": 400},  # the default 384 headroom cannot hold it
+    {"reasoning_max_tokens": 1024},  # a reasoning answer with no room for it
+    {"reasoning_max_tokens": 1024, "reasoning_headroom_tokens": 1024},
+    {"reasoning_headroom_tokens": 0},
+])
+def test_a_capacity_answer_budget_its_headroom_cannot_hold_is_rejected(bad):
+    with pytest.raises(ValidationError):
+        AppConfig(model_qualification={"cases": {"context_capacity": bad}})

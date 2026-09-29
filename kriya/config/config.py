@@ -1352,8 +1352,27 @@ class QualificationContextCapacityPolicy(QualificationCaseBudget):
 
     max_tokens: int = Field(default=64, gt=0)
     headroom_tokens: int = Field(default=384, gt=0)
+    # The headroom for a reasoning identity (None = headroom_tokens), which
+    # must hold that identity's answer budget (reasoning_max_tokens).
+    reasoning_headroom_tokens: Optional[int] = Field(default=None, gt=0)
     min_fill_ratio: float = Field(default=0.9, gt=0, le=1)
     request_timeout_seconds: float = Field(default=600.0, gt=0)
+
+    @model_validator(mode="after")
+    def _answer_fits_the_headroom(self) -> "QualificationContextCapacityPolicy":
+        """The headroom is the room below the served window for the answer
+        and the chat template: an answer budget it cannot hold would let the
+        request outgrow the window, and a server that then drops the front
+        of the prompt would lose the first marker (a false FAIL)."""
+        if self.headroom_tokens <= self.max_tokens:
+            raise ValueError(f"context_capacity.headroom_tokens ({self.headroom_tokens}) must exceed "
+                             f"max_tokens ({self.max_tokens})")
+        answer = self.reasoning_max_tokens or self.max_tokens
+        headroom = self.reasoning_headroom_tokens or self.headroom_tokens
+        if headroom <= answer:
+            raise ValueError(f"context_capacity reasoning headroom ({headroom}) must exceed the reasoning "
+                             f"answer budget ({answer}); set reasoning_headroom_tokens")
+        return self
 
 
 def _budget(tokens: int) -> Any:
