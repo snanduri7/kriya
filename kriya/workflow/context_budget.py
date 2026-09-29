@@ -850,7 +850,10 @@ class OptionalSection:
 # prompt, task and authoritative goal, design and plan, skill conventions,
 # required blocks, retry evidence, known-target source, directives - is
 # mandatory and never trimmed.
-DEVELOPER_SECTION_ORDER = ("siblings", "graph_context", "investigation", "learned_reference")
+# GRAPHIFY-OVERSIZE-REQUEST-001: the planned files' own current source is
+# the most relevant optional text a Developer request carries, so it is
+# given room first.
+DEVELOPER_SECTION_ORDER = ("planned_source", "siblings", "graph_context", "investigation", "learned_reference")
 
 
 def fit_developer_request(capacity: RequestCapacity, system_prompt: str, prompt: str,

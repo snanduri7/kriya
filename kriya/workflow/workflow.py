@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Sequence, Tuple
 
 # `name as name` marks an explicit re-export: the helper moved to its own module
 # during modularization, and callers (tests, review_context.py, spikes) still
@@ -1400,6 +1400,7 @@ class WorkflowEngine:
         milestone_index: Optional[int] = None,
         milestone_total: Optional[int] = None,
         supplementary_context: str = "",
+        planned_source_files: Optional[Sequence[str]] = None,
         reference_context: str = "",
         recovery_contract_block: str = "",
         established_files: Optional[List[str]] = None,
@@ -1440,6 +1441,13 @@ class WorkflowEngine:
         unit of an outer plan (the milestone driver, the enforce subtask
         loop) passes its WorkUnitInvocation and this method runs exactly that
         unit. Either way the pipeline below is the same generation primitive.
+
+        planned_source_files: GRAPHIFY-OVERSIZE-REQUEST-001 - a bounded enforce
+        subtask's planned files that exist on disk. Their current source is
+        rendered by the attempt as a budgeted, optional Developer section
+        (attempt.py::_planned_source_context), never folded verbatim into
+        supplementary_context (mandatory text that no request fit can
+        shrink).
 
         supplementary_context: raw text folded into convention_prompt BEFORE
         skills/RAG content is appended (see the `convention_prompt = ""` init
@@ -3743,6 +3751,7 @@ class WorkflowEngine:
             learned_rag_context=learned_rag_context,
             matched_files=matched_files,
             related_files=related_files,
+            planned_source_files=tuple(planned_source_files or ()),
             ecosystem_invariant_block=ecosystem_invariant_block,
             resource_lifecycle_block=resource_lifecycle_block,
             verification_contract_block=verification_contract_block,

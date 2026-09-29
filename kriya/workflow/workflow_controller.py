@@ -487,6 +487,22 @@ def build_subtask_goal_text(
     )
 
 
+# GRAPHIFY-OVERSIZE-REQUEST-001: the reason _build_context labels a planned
+# file's full current on-disk content with. The bounded subtask call never
+# renders such an item as prompt text; it passes the paths on, and the
+# attempt renders them budgeted (planned_source_files).
+PLANNED_FILE_SOURCE_REASON = "planned file, current on-disk content"
+
+
+def split_planned_source(package: Any) -> Tuple[List[str], Any]:
+    """(the planned-file paths whose full current source ``package`` carries,
+    the package without those items) - what the bounded subtask renders as
+    prompt text and what it hands the attempt to render budgeted."""
+    paths = [item.path for item in package.relevant_files if item.reason == PLANNED_FILE_SOURCE_REASON]
+    rest = tuple(item for item in package.relevant_files if item.reason != PLANNED_FILE_SOURCE_REASON)
+    return paths, package.with_changes(relevant_files=rest)
+
+
 def build_subtask_constraint_context(original_goal: str) -> str:
     """Retain global constraints without redefining the bounded stage's goal."""
     if not original_goal:
@@ -4951,7 +4967,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
             )
             target_files = [pf.path for pf in target.planned_files]
             target_context = project_for_subtask(execution_context, target)
-            target_context_text = subtask_executor._render_context_package(target_context)
+            # GRAPHIFY-OVERSIZE-REQUEST-001: a planned file's full current
+            # source is not rendered into supplementary_context (mandatory
+            # Developer text no request fit can shrink - a 331 KB planned
+            # file made every request unsendable). Its path goes to the
+            # attempt, which renders it through the budgeted optional
+            # planned_source section instead.
+            planned_source_files, rendered_context = split_planned_source(target_context)
+            target_context_text = subtask_executor._render_context_package(rendered_context)
             kernel = getattr(self.workflow_engine, "kernel", None)
             config = getattr(kernel, "config", None)
             process_profiles = getattr(config, "process_profiles", None)
@@ -4977,6 +5000,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     target_context_text,
                     findings_prompt_block([f for f in ownership_findings if f.subtask_id == target.id]),
                 ))),
+                planned_source_files=planned_source_files,
                 # Recovery Execution Contract (PRV-06, 2026-08-29): NO LONGER
                 # folded into supplementary_context above - a live incident
                 # traced this exact text (MUST_FIX/MUST_PRESERVE/EVIDENCE/
@@ -6672,7 +6696,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                     logger.debug(f"WorkflowController shadow context: could not read {pf.path!r}: {e}")
                     continue
                 items.append(make_context_item(
-                    path=pf.path, content=content, reason="planned file, current on-disk content",
+                    path=pf.path, content=content, reason=PLANNED_FILE_SOURCE_REASON,
                     source_type="named_in_request", trust_level="repository",
                 ))
 

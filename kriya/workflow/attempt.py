@@ -2010,14 +2010,44 @@ def _chain_binding(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
     return next((fallback for fallback in ctx.chain if fallback.model == model_override), None)
 
 
+PLANNED_SOURCE_HEADER = "=== Planned File Current Source (this subtask's approved files) ==="
+# The initial rendering keeps every planned file whole whenever it can; the
+# request fit (DEVELOPER-PROMPT-FIT-001) is what decides the real room.
+_PLANNED_SOURCE_UNBOUNDED_TOKENS = 1 << 40
+
+
+def _planned_source_context(
+    ctx: "AttemptContext", exclude: Any, budget: int = _PLANNED_SOURCE_UNBOUNDED_TOKENS,
+) -> str:
+    """GRAPHIFY-OVERSIZE-REQUEST-001: the current source of a bounded enforce
+    subtask's planned files (ctx.planned_source_files), through
+    build_code_context's own tiers (full -> skeleton -> signatures, anything
+    left over named as omitted) instead of verbatim mandatory text. A path
+    the attempt already represents through a more authoritative producer
+    (``exclude``: attempt-1 known targets, files written this run) is left
+    out, never shown twice. Registered first among the optional Developer
+    sections, so it stays whole whenever the request fits and degrades
+    rather than making the request unsendable."""
+    paths = _filtered_candidates(ctx.planned_source_files, exclude)
+    if not paths:
+        return ""
+    body = build_code_context(paths, [], ctx.worktree_path, budget, cache=ctx.source_cache)
+    return f"\n\n{PLANNED_SOURCE_HEADER}\n{body}" if body else ""
+
+
 def _developer_optional_sections(
     ctx: "AttemptContext", graph_context: str, graph_exclude: Any, learned_reference: str,
+    planned_source: str = "",
 ) -> Tuple[OptionalSection, ...]:
     """The optional sections an attempt branch placed in its Developer
-    context (DEVELOPER-PROMPT-FIT-001): the graph context, rebuilt smaller
-    from the same candidates when the request does not fit, and the fenced
-    learned reference, trimmed at whole entries."""
+    context (DEVELOPER-PROMPT-FIT-001): the planned files' current source
+    and the graph context, each rebuilt smaller from the same candidates when
+    the request does not fit, and the fenced learned reference, trimmed at
+    whole entries."""
     sections: List[OptionalSection] = []
+    if planned_source:
+        sections.append(OptionalSection(
+            "planned_source", planned_source, lambda budget: _planned_source_context(ctx, graph_exclude, budget)))
     if graph_context:
         sections.append(OptionalSection("graph_context", graph_context, lambda budget: build_code_context(
             _filtered_candidates(ctx.matched_files, graph_exclude),
@@ -2226,6 +2256,11 @@ class AttemptContext:
     # nothing about a cache hit vs. miss ever changes what content is
     # produced, only how much work it costs to produce it.
     source_cache: "SourceDerivationCache" = field(default_factory=SourceDerivationCache)
+    # GRAPHIFY-OVERSIZE-REQUEST-001: a bounded enforce subtask's planned
+    # files that exist on disk. Their current source reaches the Developer
+    # only through _planned_source_context (budgeted, optional), never as
+    # verbatim mandatory text. Empty for every other run.
+    planned_source_files: Tuple[str, ...] = ()
     # Files known to exist from OUTSIDE this attempt's own generation - for a
     # milestone run, every file an earlier, already-completed milestone wrote
     # (kriya/workflow/milestones.py's MilestoneRunState.established_file_context
@@ -5844,7 +5879,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             ctx.worktree_path, current_limit,
             cache=ctx.source_cache,
         )
-        base_code_context = ctx.skills_prompt
+        planned_source = _planned_source_context(ctx, _graph_exclude)
+        base_code_context = ctx.skills_prompt + planned_source
         if current_graph_context:
             base_code_context += current_graph_context
         if learned_reference:
@@ -5895,7 +5931,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             files, coordinated_candidate_view = await _run_coordinated_repair_generation(
                 state, ctx, active_repair_contract, base_code_context, dev_stream, attempt_operation,
                 optional_sections=_developer_optional_sections(
-                    ctx, current_graph_context, _graph_exclude, learned_reference),
+                    ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
             )
             # PRV-06 completion (2026-08-29): active_code_context was
             # previously left UNASSIGNED on this branch - live-reproduced
@@ -6013,7 +6049,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 files = await _run_developer_generation(
                     state, ctx,
                     optional_sections=_developer_optional_sections(
-                        ctx, current_graph_context, _graph_exclude, learned_reference),
+                        ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
                     task_description=task_desc,
                     design_context=(task_desc if use_api_contract_recovery else ctx.design),
                     existing_code_context=active_code_context,
@@ -6074,7 +6110,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             ctx.worktree_path, current_limit,
             cache=ctx.source_cache,
         )
-        base_code_context = ctx.skills_prompt
+        planned_source = _planned_source_context(ctx, _graph_exclude)
+        base_code_context = ctx.skills_prompt + planned_source
         if current_graph_context:
             base_code_context += current_graph_context
         if learned_reference:
@@ -6113,7 +6150,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         files = await _run_developer_generation(
             state, ctx,
             optional_sections=_developer_optional_sections(
-                ctx, current_graph_context, _graph_exclude, learned_reference),
+                ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -6163,7 +6200,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             ctx.worktree_path, current_limit,
             cache=ctx.source_cache,
         )
-        base_code_context = ctx.skills_prompt
+        planned_source = _planned_source_context(ctx, _graph_exclude)
+        base_code_context = ctx.skills_prompt + planned_source
         if current_graph_context:
             base_code_context += current_graph_context
         if learned_reference:
@@ -6203,7 +6241,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         files = await _run_developer_generation(
             state, ctx,
             optional_sections=_developer_optional_sections(
-                ctx, current_graph_context, _graph_exclude, learned_reference),
+                ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -6314,7 +6352,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             ctx.worktree_path, current_limit,
             cache=ctx.source_cache,
         )
-        active_code_context = ctx.skills_prompt
+        planned_source = _planned_source_context(ctx, _graph_exclude)
+        active_code_context = ctx.skills_prompt + planned_source
         if current_graph_context:
             active_code_context += current_graph_context
         if learned_reference:
@@ -6500,7 +6539,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             files = await _run_developer_generation(
                 state, ctx,
                 optional_sections=_developer_optional_sections(
-                    ctx, current_graph_context, _graph_exclude, learned_reference),
+                    ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
                 task_description=task_desc,
                 design_context=ctx.design,
                 existing_code_context=active_code_context,
