@@ -503,3 +503,25 @@ def test_mismatched_file_type_content_check_not_fooled_by_bare_less_than_operato
     violation = MismatchedFileTypeContentCheck().check(files)
     assert violation is not None
     assert "a.html" in violation
+
+
+# STATIC-LEAK-UNPARSABLE-PY-001: measured on Graphify's engine.py (437 lines
+# with backticks inside docstrings/comments): one unbalanced parenthesis at
+# line 5365 made the check scan raw text and report the docstring at line
+# 133 as a Markdown leak - the retry evidence then named a valid docstring
+# instead of Python's own "unmatched ')'" at line 5365.
+_DOCSTRING_BACKTICKS = '"""Return names declared as `interface` in this unit."""\n'
+
+
+def test_a_syntax_error_elsewhere_never_blames_a_valid_docstring_backtick():
+    check = MarkdownInlineCodeLeakCheck()
+    source = _DOCSTRING_BACKTICKS + "".join(f"value_{i} = {i}\n" for i in range(40)) + "broken = len(x))\n"
+    assert check.check({"engine.py": source}) is None  # the compile gate reports the real error
+    assert check.check({"engine.py": source.replace("len(x))", "len(x)")}) is None
+
+
+def test_a_backtick_on_the_line_python_rejects_is_still_a_leak_at_that_line():
+    check = MarkdownInlineCodeLeakCheck()
+    source = _DOCSTRING_BACKTICKS + "".join(f"value_{i} = {i}\n" for i in range(40)) + "callee = `name`\n"
+    result = check.check({"engine.py": source})
+    assert result is not None and "line 42" in result and "`name`" in result

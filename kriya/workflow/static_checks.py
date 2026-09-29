@@ -466,17 +466,40 @@ class MarkdownInlineCodeLeakCheck(StaticCheck):
         except (SyntaxError, tokenize.TokenError, IndentationError):
             return None
 
+    @staticmethod
+    def _python_rejected_line(content: str) -> Optional[int]:
+        """The line Python's own parser rejects (None when it parses)."""
+        try:
+            ast.parse(content)
+        except (SyntaxError, ValueError) as error:
+            return getattr(error, "lineno", None)
+        return None
+
     def check(self, files: Dict[str, str]) -> Optional[str]:
         for filepath, content in sorted(files.items()):
             extension = os.path.splitext(filepath)[1].lower()
             if extension not in _BACKTICK_ILLEGAL_EXTENSIONS:
                 continue
             scan_content = content or ""
+            only_line: Optional[int] = None
             if extension == ".py":
                 tokenized = self._python_executable_regions(scan_content)
                 if tokenized is not None:
                     scan_content = tokenized
+                else:
+                    # STATIC-LEAK-UNPARSABLE-PY-001: strings and comments can
+                    # only be told apart in source that parses. In source
+                    # that does not, a backtick is a leak only on the line
+                    # Python itself rejects; anywhere else it may sit in a
+                    # valid docstring (engine.py: 437 such lines), and
+                    # naming it would hide the real syntax error, which the
+                    # compile gate then reports instead.
+                    only_line = self._python_rejected_line(scan_content)
+                    if only_line is None:
+                        continue
             for line_number, line in enumerate(scan_content.splitlines(), start=1):
+                if only_line is not None and line_number != only_line:
+                    continue
                 stripped = line.lstrip()
                 if not stripped or stripped.startswith(("//", "#", "/*", "*", "--")):
                     continue
