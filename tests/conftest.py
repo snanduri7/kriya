@@ -84,6 +84,33 @@ def pytest_addoption(parser):
                      help="PRD-035: write model-certification.json/.md (the live matrix report) to DIR")
 
 
+# --- state-machine tier ------------------------------------------------------------
+# `pytest -m state_machine` (docs: handover/STATE_MACHINE_HARDENING_REPORT.md):
+# tests/state_machine/ marks itself; these existing deterministic suites own
+# the rest of the tier's transition families and are marked here, in one
+# place, rather than file by file. None may carry a live marker
+# (tests/state_machine/test_sm_tier_guard.py).
+STATE_MACHINE_TIER_FILES = frozenset({
+    # retry / recovery / fallback
+    "test_retry_policy.py", "test_prd026_retry_progress.py", "test_workflow_recovery_handback.py",
+    "test_failure_signature_run_noise.py", "test_prd031_coordinators.py", "test_best_of_n.py",
+    "test_prd017_fallback_transition.py",
+    # resume / invalidation
+    "test_prd008_resume_fingerprints.py", "test_prd008a_resume_convergence.py", "test_resume_integrity.py",
+    "test_prd008_recovery.py",
+    # verification -> terminal gates -> commit, static analysis -> commit
+    "test_candidate_verification_binding.py", "test_prd030_terminal_services.py",
+    "test_prd008_commit_state_gate.py", "test_prd032_terminal_commit_stop.py", "test_prd032_chaos_commit.py",
+    "test_prd032_chaos_static_analysis.py",
+})
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        if item.path.name in STATE_MACHINE_TIER_FILES:
+            item.add_marker(pytest.mark.state_machine)
+
+
 _SKIPS = pytest.StashKey[list]()
 _CERTIFICATION_CASES = pytest.StashKey[list]()
 _ALLOWLIST = pytest.StashKey[tuple]()
