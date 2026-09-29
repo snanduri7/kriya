@@ -101,7 +101,9 @@ STATE_MACHINE_TIER_FILES = frozenset({
     # verification -> terminal gates -> commit, static analysis -> commit
     "test_candidate_verification_binding.py", "test_prd030_terminal_services.py",
     "test_prd008_commit_state_gate.py", "test_prd032_terminal_commit_stop.py", "test_prd032_chaos_commit.py",
-    "test_prd032_chaos_static_analysis.py",
+    "test_prd032_chaos_static_analysis.py", "test_prd031a_static_analysis.py",
+    # process lifecycle feeding workflow decisions
+    "test_platform_process_control_contract.py", "test_prd032_chaos_runtime.py",
 })
 
 

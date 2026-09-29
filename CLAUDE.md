@@ -22,6 +22,7 @@ pip install -e .                    # installs `kriya` and `kriya-mcp` console s
 .venv/bin/pytest                     # full suite (asyncio_mode = strict, see pyproject.toml) - entirely mocked, no live model calls
 .venv/bin/pytest tests/test_workflow.py            # single file
 .venv/bin/pytest tests/test_workflow.py::test_workflow_fallback_chain   # single test
+.venv/bin/pytest -m state_machine    # fast deterministic state-machine tier (retry/recovery/fallback, resume, verification/commit, budgets, lifecycle); members: tests/state_machine/ + tests/conftest.py STATE_MACHINE_TIER_FILES
 .venv/bin/pytest -m live_model       # tests/test_live_smoke.py only - needs a real local Ollama running, excluded by default
 .venv/bin/pytest -m live_static_analysis   # PRD-031A real-scanner tier - needs Semgrep 1.178.0 exactly (and Docker + the pinned image for the OCI cases), excluded by default
 ```
