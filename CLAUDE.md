@@ -6,6 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Kriya is a local-first, multi-agent AI engineering platform (Python, `kriya/` package). It runs entirely against local LLM/embedding endpoints (Ollama or any OpenAI-compatible server) and coordinates Planner → Architect → Developer → Reviewer agents to plan, generate, fix, and review code inside a target repository, backed by a hybrid AST/vector/lexical index stored in SQLite.
 
+## Kriya Standing Engineering Rules
+
+Obey handover/ENGINEERING_RULES.md, imported below so it loads at every session start. These rules apply to every session and override convenience/speed optimizations unless the user explicitly says otherwise.
+
+@handover/ENGINEERING_RULES.md
+
 ## Commands
 
 ```bash
