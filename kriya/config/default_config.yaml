@@ -264,3 +264,15 @@ autonomy:
   # full rationale. False here (unlike spec_compliance_enabled above) - not
   # yet live-validated; flip to true once it has been.
   auto_index_missing_dependency_graph: false
+
+# QUAL-CONFIG-001: live model qualification policy (`kriya model qualify`).
+# Not set here on purpose: the defaults live in one place, ModelQualificationConfig
+# (kriya/config/config.py), and equal the kriya-qualification/3 values. An
+# operator config may override any case, e.g.:
+#   model_qualification:
+#     cases:
+#       tool_argument_integrity: {max_tokens: 512, reasoning_max_tokens: 4096}
+#       context_capacity: {max_tokens: 64, headroom_tokens: 384, min_fill_ratio: 0.9}
+#     measurement: {bytes_per_token_margin: 0.9, reasoning_tokens_headroom: 1.5}
+# The effective policy and its digest are recorded in every qualification
+# record, and a record made under another policy is STALE. SECURITY_AUTHORITY.

@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import hashlib
 import json
 import math
 import os
@@ -62,6 +63,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
 
+from kriya.config.config import ModelQualificationConfig
 from kriya.core.execution_environment import (
     ENVIRONMENT_DEPENDENT_CAPABILITIES,
     ExecutionEnvironment,
@@ -87,8 +89,45 @@ STALE = "STALE"
 MISSING = "MISSING"
 NOT_EXACT = "RUNTIME_NOT_EXACT"
 
-# Safety margin applied to the smallest measured bytes-per-token ratio.
-BYTES_PER_TOKEN_MARGIN = 0.9
+# QUAL-CONFIG-001: the qualification policy (per-case budgets, capacity
+# probe bounds, timing bounds, measurement margins) is configuration
+# (``model_qualification``, kriya/config/config.py); this module holds the
+# mechanics. A record carries the effective policy and its digest, and a
+# record made under another policy is STALE.
+QUALIFICATION_POLICY_SCHEMA = "kriya-qualification-policy/1"
+POLICY_DIGEST_FIELD = "qualification_policy_digest"
+# Records written before QUAL-CONFIG-001 carry no policy digest. Every
+# kriya-qualification/3 record was produced with the literals that are now
+# the defaults (unchanged in git from the /3 bump at 6c163f2 to the change
+# that externalized them), so such a record stands for exactly this digest,
+# pinned here and checked against an explicit table of those literals in
+# tests/test_qual_config_001.py. It never follows later default changes.
+LEGACY_V3_POLICY_DIGEST = "sha256:2aa1c55268bbffa9ed75f5b763b74b7725765ef0ae67b8b05e965af3e99f71d5"
+
+
+def qualification_policy_of(config: Any) -> ModelQualificationConfig:
+    """The effective qualification policy of ``config`` (defaults when it has none)."""
+    policy = getattr(config, "model_qualification", None) if config is not None else None
+    return policy if isinstance(policy, ModelQualificationConfig) else ModelQualificationConfig()
+
+
+def qualification_policy_digest(policy: ModelQualificationConfig) -> str:
+    canonical = json.dumps({"schema": QUALIFICATION_POLICY_SCHEMA, "policy": policy.model_dump(mode="json")},
+                           sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def policy_digest_for(config: Any) -> str:
+    """The digest a record must carry to count under ``config``."""
+    return qualification_policy_digest(qualification_policy_of(config))
+
+
+def record_policy_digest(record: Dict[str, Any]) -> str:
+    return record.get(POLICY_DIGEST_FIELD) or LEGACY_V3_POLICY_DIGEST
+
+
+def _current_policy_digest(policy_digest: Optional[str]) -> str:
+    return policy_digest or qualification_policy_digest(ModelQualificationConfig())
 
 CAPABILITIES: Tuple[str, ...] = (
     "plain_completion",
@@ -320,7 +359,8 @@ def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFing
             base_url=base_url, model=model, api_key=api_key, egress_policy=config.autonomy.egress_policy,
             configured_context=size, kriya_protocol=fingerprint.kriya_protocol, config=config, runtime=runtime,
         )
-        assessment = assess(tier_runtime, context_tier_requirements(config, model), settings=settings)
+        assessment = assess(tier_runtime, context_tier_requirements(config, model), settings=settings,
+                            policy_digest=policy_digest_for(config))
         source = None
         if assessment.status == QUALIFIED:
             source = TIER_SOURCE_QUALIFICATION_RECORD
@@ -367,7 +407,7 @@ def record_path(record_key: str, workspace_root: Optional[str] = None) -> str:
 
 
 def _same_qualified_identity(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
-    return all(a.get(key) == b.get(key) for key in (
+    return record_policy_digest(a) == record_policy_digest(b) and all(a.get(key) == b.get(key) for key in (
         "qualification_identity", "fingerprint_digest", "inference_settings_digest", "adapter_version",
         "policy_version", "schema_version"))
 
@@ -422,7 +462,9 @@ class QualificationAssessment:
 
 
 def record_is_current(record: Optional[Dict[str, Any]], fingerprint: ModelRuntimeFingerprint,
-                      settings: InferenceSettings) -> Tuple[bool, List[str]]:
+                      settings: InferenceSettings, *, policy_digest: Optional[str] = None) -> Tuple[bool, List[str]]:
+    """``policy_digest``: the effective qualification policy's
+    (``policy_digest_for(config)``); None is the default policy."""
     if record is None:
         return False, ["no qualification record for this exact runtime and inference settings"]
     reasons = []
@@ -444,6 +486,12 @@ def record_is_current(record: Optional[Dict[str, Any]], fingerprint: ModelRuntim
         )
     if record.get("schema_version") != QUALIFICATION_SCHEMA_VERSION:
         reasons.append("the qualification record schema changed")
+    wanted = _current_policy_digest(policy_digest)
+    if record_policy_digest(record) != wanted:
+        reasons.append(
+            f"the qualification policy settings changed (model_qualification {record_policy_digest(record)[:19]} "
+            f"-> {wanted[:19]})"
+        )
     return not reasons, reasons
 
 
@@ -459,8 +507,12 @@ def environment_case_statuses(record: Dict[str, Any], environment: ExecutionEnvi
 
 def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str], *, settings: InferenceSettings,
            record: Optional[Dict[str, Any]] = None, workspace_root: Optional[str] = None,
-           environment: Optional[ExecutionEnvironment] = None) -> QualificationAssessment:
-    """``settings``: what the role sends this runtime
+           environment: Optional[ExecutionEnvironment] = None,
+           policy_digest: Optional[str] = None) -> QualificationAssessment:
+    """``policy_digest``: the effective qualification policy's
+    (``policy_digest_for(config)``; every production caller passes it,
+    tests/test_qual_config_001.py); a record made under another policy is
+    STALE. ``settings``: what the role sends this runtime
     (``inference_settings.role_inference_settings``); a record qualified
     under other settings does not count. ``environment`` (default: the one
     serving the runtime's endpoint) selects the capacity evidence that
@@ -476,7 +528,7 @@ def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str], *, set
     if record is None:
         return QualificationAssessment(MISSING, fingerprint.digest, required, (),
                                        ("no qualification record for this exact runtime and inference settings",))
-    current, reasons = record_is_current(record, fingerprint, settings)
+    current, reasons = record_is_current(record, fingerprint, settings, policy_digest=policy_digest)
     if not current:
         return QualificationAssessment(STALE, fingerprint.digest, required, (), tuple(reasons))
     statuses = {case.get("capability"): case.get("status") for case in record.get("cases", [])
@@ -508,9 +560,10 @@ def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str], *, set
 RUNTIME_SCOPED_LIMITS = ("bytes_per_token_floor", "non_ascii_bytes_per_token_floor")
 
 
-def _runtime_current(record: Dict[str, Any], fingerprint: ModelRuntimeFingerprint) -> bool:
+def _runtime_current(record: Dict[str, Any], fingerprint: ModelRuntimeFingerprint, policy_digest: str) -> bool:
     """Current for this runtime under the current policy, whatever its settings."""
     return (record.get("fingerprint_digest") == fingerprint.digest
+            and record_policy_digest(record) == policy_digest
             and record.get("adapter_version") == MODEL_PROTOCOL_ADAPTER_VERSION
             and record.get("policy_version") == QUALIFICATION_POLICY_VERSION
             and record.get("schema_version") == QUALIFICATION_SCHEMA_VERSION
@@ -526,17 +579,19 @@ def measured_limits_for(fingerprint: ModelRuntimeFingerprint, config: Any = None
     record of the runtime, whatever its settings, so a prompt sized under
     one identity (allocation, the Developer's) is counted the same way when
     it is dispatched under another (a retry_temperature retry, a Reviewer
-    temperature). A policy-/2 record never contributes."""
+    temperature). A policy-/2 record never contributes, nor does one made
+    under another qualification policy (``config``'s, defaults if None)."""
     if not fingerprint.exact:
         return {}
+    policy_digest = policy_digest_for(config)
     record = load_record(fingerprint.digest, settings)
-    current, _ = record_is_current(record, fingerprint, settings)
+    current, _ = record_is_current(record, fingerprint, settings, policy_digest=policy_digest)
     limits = dict(record.get("measured_limits") or {}) if current and record else {}
     for key in RUNTIME_SCOPED_LIMITS:
         limits.pop(key, None)
         values = [
             stored["measured_limits"][key] for stored in _stored_records()
-            if _runtime_current(stored, fingerprint)
+            if _runtime_current(stored, fingerprint, policy_digest)
             and isinstance((stored.get("measured_limits") or {}).get(key), (int, float))
         ]
         if values:
@@ -619,6 +674,28 @@ TOKENIZER_CORPORA: Dict[str, str] = {
 }
 
 
+def _policy(ctx: Dict[str, Any]) -> ModelQualificationConfig:
+    policy = ctx.get("policy")
+    return policy if isinstance(policy, ModelQualificationConfig) else ModelQualificationConfig()
+
+
+def _note_policy(ctx: Dict[str, Any], capability: str, **values: Any) -> None:
+    ctx.setdefault("_policy_used", {}).setdefault(capability, {}).update(values)
+
+
+def _case_budget(ctx: Dict[str, Any], capability: str) -> int:
+    """The output budget ``capability`` is sent with: its configured
+    ``max_tokens``, or ``reasoning_max_tokens`` when set and the identity
+    qualified sends ``reasoning: true`` (ctx["reasoning"]). Recorded, with
+    its configuration path, in the case evidence."""
+    entry = getattr(_policy(ctx).cases, capability)
+    reasoning = bool(ctx.get("reasoning")) and entry.reasoning_max_tokens is not None
+    name = "reasoning_max_tokens" if reasoning else "max_tokens"
+    tokens = entry.reasoning_max_tokens if reasoning else entry.max_tokens
+    _note_policy(ctx, capability, max_tokens=tokens, source=f"model_qualification.cases.{capability}.{name}")
+    return tokens
+
+
 def _case(capability: str) -> Callable[[CaseFn], CaseFn]:
     def wrap(fn: CaseFn) -> CaseFn:
         async def run(llm: Any, model: str, ctx: Dict[str, Any]) -> CaseResult:
@@ -627,6 +704,10 @@ def _case(capability: str) -> Callable[[CaseFn], CaseFn]:
                 result = await fn(llm, model, ctx)
             except Exception as error:  # a crashing case is a FAIL with its evidence, never a PASS
                 result = CaseResult(capability, FAIL, {"error": f"{type(error).__name__}: {error}"[:500]})
+            used = ctx.get("_policy_used", {}).pop(capability, None)
+            if used:
+                # The policy that controlled the verdict, next to the result.
+                result.evidence = {"policy": used, **result.evidence}
             result.capability = capability
             result.elapsed_seconds = round(time.monotonic() - started, 3)
             return result
@@ -642,7 +723,7 @@ def _completion_evidence(result: Any) -> Dict[str, Any]:
 @_case("plain_completion")
 async def case_plain_completion(llm, model, ctx):
     r = await llm.complete_result("You are a terse assistant.", "Reply with exactly one word: READY",
-                                  model_override=model, max_tokens_override=64)
+                                  model_override=model, max_tokens_override=_case_budget(ctx, "plain_completion"))
     ok = r.status.value == "OK" and "".join(ch for ch in r.content if ch.isalpha()).upper() == "READY"
     return CaseResult("", PASS if ok else FAIL, {"content": r.content[:200], **_completion_evidence(r)})
 
@@ -650,7 +731,7 @@ async def case_plain_completion(llm, model, ctx):
 @_case("finish_reason_stop")
 async def case_finish_reason_stop(llm, model, ctx):
     r = await llm.complete_result("You are a terse assistant.", "Say hello in one short sentence.",
-                                  model_override=model, max_tokens_override=256)
+                                  model_override=model, max_tokens_override=_case_budget(ctx, "finish_reason_stop"))
     ok = r.status.value == "OK" and r.finish_reason == "stop"
     return CaseResult("", PASS if ok else FAIL, {"finish_reason": r.finish_reason, **_completion_evidence(r)})
 
@@ -660,7 +741,7 @@ async def case_structured_json(llm, model, ctx):
     r = await llm.complete_result(
         "You output JSON only.",
         'Return a JSON object with exactly these keys and values: "status" set to "ok", "count" set to 3.',
-        json_mode=True, model_override=model, max_tokens_override=256,
+        json_mode=True, model_override=model, max_tokens_override=_case_budget(ctx, "structured_json"),
     )
     try:
         parsed = json.loads(r.content)
@@ -679,7 +760,7 @@ async def case_multiline_json(llm, model, ctx):
         "You output JSON only.",
         "Return a JSON object with key \"filepath\" set to \"greet.py\" and key \"content\" set to this exact "
         "three-line Python file (keep the newlines, indentation and quotes exactly):\n\n" + _MULTILINE_EXPECTED,
-        json_mode=True, model_override=model, max_tokens_override=512,
+        json_mode=True, model_override=model, max_tokens_override=_case_budget(ctx, "multiline_json"),
     )
     try:
         parsed = json.loads(r.content)
@@ -702,7 +783,7 @@ async def case_native_tool_calls(llm, model, ctx):
         return skip
     r = await llm.complete_with_tools_result(
         [{"role": "user", "content": "What is the weather in Paris? Use the tool."}], [_WEATHER_TOOL],
-        model_override=model, max_tokens_override=256,
+        model_override=model, max_tokens_override=_case_budget(ctx, "native_tool_calls"),
     )
     calls = [c for c in r.tool_calls if c.get("name") == "get_weather"]
     ok = (r.status.value == "OK" and len(calls) == 1 and calls[0].get("source") == "native"
@@ -717,7 +798,7 @@ async def case_multiple_tool_calls(llm, model, ctx):
     r = await llm.complete_with_tools_result(
         [{"role": "user", "content": "Get the weather for Paris and for Tokyo. Call the tool once per city, "
                                      "both in this single reply."}],
-        [_WEATHER_TOOL], model_override=model, max_tokens_override=512,
+        [_WEATHER_TOOL], model_override=model, max_tokens_override=_case_budget(ctx, "multiple_tool_calls"),
     )
     cities = sorted(str(c.get("arguments", {}).get("city", "")).lower() for c in r.tool_calls
                     if c.get("name") == "get_weather")
@@ -732,7 +813,7 @@ async def case_tool_argument_integrity(llm, model, ctx):
     r = await llm.complete_with_tools_result(
         [{"role": "user", "content": "Save this note with the save_note tool, character for character:\n"
                                      + NOTE_TEXT}],
-        [_NOTE_TOOL], model_override=model, max_tokens_override=512,
+        [_NOTE_TOOL], model_override=model, max_tokens_override=_case_budget(ctx, "tool_argument_integrity"),
     )
     texts = [c.get("arguments", {}).get("text") for c in r.tool_calls if c.get("name") == "save_note"]
     ok = r.status.value == "OK" and len(texts) == 1 and texts[0] == NOTE_TEXT
@@ -746,7 +827,7 @@ async def case_streaming_assembly(llm, model, ctx):
     deltas: List[str] = []
     r = await llm.complete_result("You are a terse assistant.",
                                   "Write the numbers 1 to 20 separated by single spaces and nothing else.",
-                                  stream_callback=deltas.append, model_override=model, max_tokens_override=256)
+                                  stream_callback=deltas.append, model_override=model, max_tokens_override=_case_budget(ctx, "streaming_assembly"))
     from kriya.core.completion import split_reasoning
 
     assembled, _ = split_reasoning("".join(deltas), anywhere=True)
@@ -760,6 +841,8 @@ async def case_streaming_assembly(llm, model, ctx):
 
 @_case("output_truncation")
 async def case_output_truncation(llm, model, ctx):
+    # Not policy: the 16-token budget far below the requested output, without
+    # the reasoning floor, is what makes this a truncation test.
     r = await llm.complete_result("You are a helpful assistant.",
                                   "Count from 1 to 400, one number per line.",
                                   model_override=model, max_tokens_override=16, reasoning_override=False)
@@ -772,7 +855,7 @@ async def case_reasoning_behavior(llm, model, ctx):
     r = await llm.complete_result("You are a careful assistant.",
                                   "A train leaves at 09:40 and arrives at 11:05. How many minutes is the trip? "
                                   "Answer with the number only.",
-                                  model_override=model, max_tokens_override=2048)
+                                  model_override=model, max_tokens_override=_case_budget(ctx, "reasoning_behavior"))
     visible_clean = "<think>" not in r.content and "</think>" not in r.content
     ok = r.status.value == "OK" and visible_clean and "85" in r.content
     measured = {"reasoning_observed": r.reasoning_present}
@@ -793,7 +876,7 @@ async def case_full_file_raw_content(llm, model, ctx):
         "It must define slugify(text: str) -> str that lowercases text, replaces runs of non-alphanumeric "
         "characters with a single '-', and strips leading/trailing '-'.\n"
         "Return ONLY the content of 'slug.py' - nothing before it, nothing after it, no other file.",
-        model_override=model, max_tokens_override=1024,
+        model_override=model, max_tokens_override=_case_budget(ctx, "full_file_raw_content"),
     )
     content = DeveloperAgent.sanitize_generated_content(r.content, filepath="slug.py") or ""
     # Model output is never executed on the host: the check is structural.
@@ -826,7 +909,7 @@ async def case_anchored_edit_protocol(llm, model, ctx):
         "\"SEARCH:\" followed by the exact original code (copied verbatim from calc.py above) that needs to "
         "change, then the line \"REPLACE:\" followed by the corrected code - include only the lines that "
         "need to change plus the minimum context to identify them, not the whole file.",
-        model_override=model, max_tokens_override=1024,
+        model_override=model, max_tokens_override=_case_budget(ctx, "anchored_edit_protocol"),
     )
     analysis, edits, _ = DeveloperAgent._split_fix_analysis_edit(r.content)
     applied = None
@@ -865,7 +948,7 @@ async def case_malformed_output_recovery(llm, model, ctx):
         "You are a helpful assistant.",
         "First write one sentence of explanation, then a JSON array of the three strings \"a.py\", \"b.py\" "
         "and \"c.py\" inside a ```json fenced block.",
-        model_override=model, max_tokens_override=512,
+        model_override=model, max_tokens_override=_case_budget(ctx, "malformed_output_recovery"),
     )
     try:
         value = DeveloperAgent._extract_json_value(r.content)
@@ -877,6 +960,8 @@ async def case_malformed_output_recovery(llm, model, ctx):
 
 @_case("timeout_semantics")
 async def case_timeout_semantics(llm, model, ctx):
+    # Not policy: the 1 ms client timeout forces the timeout under test; the
+    # request never completes, so its output budget is irrelevant.
     probe = ctx["client_factory"](timeout=0.001)
     r = await probe.complete_result("You are a helpful assistant.", "Write a long story about a lighthouse.",
                                     model_override=model, max_tokens_override=512)
@@ -891,12 +976,17 @@ async def case_cancellation_semantics(llm, model, ctx):
     def on_delta(_text: str) -> None:
         first_delta.set()
 
+    policy = _policy(ctx).cases.cancellation_semantics
+    _note_policy(ctx, "cancellation_semantics", health_check_max_tokens=policy.health_check_max_tokens,
+                 first_delta_timeout_seconds=policy.first_delta_timeout_seconds,
+                 max_settle_seconds=policy.max_settle_seconds)
     task = asyncio.ensure_future(llm.complete_result(
         "You are a helpful assistant.", "Write a 600-word story about a lighthouse keeper.",
-        stream_callback=on_delta, model_override=model, max_tokens_override=1024,
+        stream_callback=on_delta, model_override=model,
+        max_tokens_override=_case_budget(ctx, "cancellation_semantics"),
     ))
     try:
-        await asyncio.wait_for(first_delta.wait(), timeout=ctx.get("first_delta_timeout", 120))
+        await asyncio.wait_for(first_delta.wait(), timeout=policy.first_delta_timeout_seconds)
     except asyncio.TimeoutError:
         task.cancel()
         return CaseResult("", FAIL, {"reason": "no streamed output before cancelling"})
@@ -910,8 +1000,9 @@ async def case_cancellation_semantics(llm, model, ctx):
     settle_seconds = round(time.monotonic() - started, 3)
     recorded = getattr(llm.last_completion, "status", None)
     healthy = await llm.complete_result("You are a terse assistant.", "Reply with exactly one word: READY",
-                                        model_override=model, max_tokens_override=64)
-    ok = (cancelled_raised and getattr(recorded, "value", None) == "CANCELLED" and settle_seconds < 10
+                                        model_override=model, max_tokens_override=policy.health_check_max_tokens)
+    ok = (cancelled_raised and getattr(recorded, "value", None) == "CANCELLED"
+          and settle_seconds < policy.max_settle_seconds
           and healthy.status.value == "OK")
     return CaseResult("", PASS if ok else FAIL,
                       {"cancelled_raised": cancelled_raised, "recorded_status": getattr(recorded, "value", None),
@@ -920,6 +1011,7 @@ async def case_cancellation_semantics(llm, model, ctx):
 
 @_case("endpoint_error_semantics")
 async def case_endpoint_error_semantics(llm, model, ctx):
+    # Not policy: the model does not exist, so nothing is generated.
     r = await llm.complete_result("You are a helpful assistant.", "Hello",
                                   model_override="kriya-qualification-no-such-model:0", max_tokens_override=16)
     ok = r.status.value == "BACKEND_ERROR" and r.error is not None and r.content == ""
@@ -939,7 +1031,12 @@ async def case_tokenizer_measurement(llm, model, ctx):
     """Real prompt-token usage per content class. ASCII bytes per token comes
     from the ASCII probes; non-ASCII bytes per token from the Unicode probe
     after its ASCII part is charged at the ASCII rate. Both are floors (the
-    template's own tokens are included, which only makes them smaller)."""
+    template's own tokens are included, which only makes them smaller),
+    lowered by ``model_qualification.measurement.bytes_per_token_margin``.
+    The 1-token budget is not policy: only prompt usage is measured."""
+    margin = _policy(ctx).measurement.bytes_per_token_margin
+    _note_policy(ctx, "tokenizer_measurement", bytes_per_token_margin=margin,
+                 source="model_qualification.measurement.bytes_per_token_margin")
     reported: Dict[str, Any] = {}
     ascii_ratios: Dict[str, float] = {}
     for name, text in TOKENIZER_CORPORA.items():
@@ -962,14 +1059,12 @@ async def case_tokenizer_measurement(llm, model, ctx):
         "non_ascii_bytes_per_token": round(non_ascii_ratio, 4),
         "reported_prompt_tokens": reported,
     }, {
-        "bytes_per_token_floor": round(ascii_floor * BYTES_PER_TOKEN_MARGIN, 4),
-        "non_ascii_bytes_per_token_floor": round(non_ascii_ratio * BYTES_PER_TOKEN_MARGIN, 4),
+        "bytes_per_token_floor": round(ascii_floor * margin, 4),
+        "non_ascii_bytes_per_token_floor": round(non_ascii_ratio * margin, 4),
     })
 
 
 _CAPACITY_UNIT = "alpha beta gamma delta epsilon zeta eta theta iota kappa. "
-# Room left for the reply and the chat template around the filler.
-_CAPACITY_HEADROOM_TOKENS = 384
 
 
 @_case("context_capacity")
@@ -996,8 +1091,12 @@ async def case_context_capacity(llm, model, ctx):
                                             "endpoint": base_url})
     # The model's own endpoint and key (the timeout case's client factory),
     # not necessarily the primary binding's.
+    policy = _policy(ctx).cases.context_capacity
+    answer_tokens = _case_budget(ctx, "context_capacity")
+    _note_policy(ctx, "context_capacity", headroom_tokens=policy.headroom_tokens,
+                 min_fill_ratio=policy.min_fill_ratio, request_timeout_seconds=policy.request_timeout_seconds)
     factory = ctx.get("client_factory")
-    client = factory(600.0).client if factory is not None else llm.client
+    client = factory(policy.request_timeout_seconds).client if factory is not None else llm.client
     extra_body = ctx.get("extra_body") or None
     runtime = ctx.get("runtime") or runtime_adapter()
 
@@ -1011,6 +1110,9 @@ async def case_context_capacity(llm, model, ctx):
     def prompt_tokens(response) -> Optional[int]:
         return response.prompt_tokens or None
 
+    # Not policy: the two token-rate probes (40 and 80 filler units, 1 output
+    # token) only measure prompt usage; temperature 0.0 because this measures
+    # the server, not sampling.
     small = prompt_tokens(await send([{"role": "user", "content": _CAPACITY_UNIT * 40}], 1))
     large = prompt_tokens(await send([{"role": "user", "content": _CAPACITY_UNIT * 80}], 1))
     if not small or not large or large <= small:
@@ -1018,7 +1120,7 @@ async def case_context_capacity(llm, model, ctx):
                                             "probe_prompt_tokens": [small, large]})
     per_unit = (large - small) / 40
     fixed = small - 40 * per_unit
-    target = int(window) - _CAPACITY_HEADROOM_TOKENS
+    target = int(window) - policy.headroom_tokens
     units = max(1, int((target - fixed) / per_unit))
     head, tail = secrets.token_hex(4), secrets.token_hex(4)
     response = await send([
@@ -1026,7 +1128,7 @@ async def case_context_capacity(llm, model, ctx):
         {"role": "user", "content": _CAPACITY_UNIT * units
          + f"\nThe second code is {tail}. Reply with the first code, then the second code, separated by one "
            "space, and nothing else."},
-    ], 64)
+    ], answer_tokens)
     reported = prompt_tokens(response)
     content = response.content
     evidence = {
@@ -1040,7 +1142,8 @@ async def case_context_capacity(llm, model, ctx):
     }
     if reported is None:
         return CaseResult("", UNAVAILABLE, {"reason": "the endpoint did not report prompt token usage", **evidence})
-    ok = (head in content and tail in content and reported >= int(0.9 * target) and reported <= int(window))
+    ok = (head in content and tail in content and reported >= int(policy.min_fill_ratio * target)
+          and reported <= int(window))
     return CaseResult("", PASS if ok else FAIL, evidence)
 
 
@@ -1055,7 +1158,8 @@ ALL_CASES: Tuple[CaseFn, ...] = (
 assert tuple(case.capability for case in ALL_CASES) == CAPABILITIES  # type: ignore[attr-defined]
 
 
-def measured_limits(cases: List[CaseResult]) -> Dict[str, Any]:
+def measured_limits(cases: List[CaseResult], policy: Optional[ModelQualificationConfig] = None) -> Dict[str, Any]:
+    headroom = (policy or ModelQualificationConfig()).measurement.reasoning_tokens_headroom
     limits: Dict[str, Any] = {}
     for case in cases:
         if case.status != PASS:
@@ -1063,7 +1167,7 @@ def measured_limits(cases: List[CaseResult]) -> Dict[str, Any]:
         for key, value in case.measured.items():
             limits[key] = value
     if "reasoning_tokens_observed" in limits:
-        limits["reasoning_tokens_max"] = int(math.ceil(limits.pop("reasoning_tokens_observed") * 1.5))
+        limits["reasoning_tokens_max"] = int(math.ceil(limits.pop("reasoning_tokens_observed") * headroom))
     return limits
 
 
@@ -1121,7 +1225,11 @@ async def run_qualification(
         return probe
 
     runtime = runtime_for_binding(_binding_for(config, model))
+    policy = qualification_policy_of(config)
     ctx: Dict[str, Any] = {
+        "policy": policy,
+        # Capability-aware budgets follow the identity qualified, never a name.
+        "reasoning": bool(settings.reasoning),
         "runtime": runtime,
         "native_tool_calls_enabled": capabilities_for_model(config, model).native_tool_calls,
         "client_factory": client_factory or default_factory,
@@ -1141,7 +1249,7 @@ async def run_qualification(
         if progress is not None:
             progress(result)
     return build_record(fingerprint, results, settings=settings,
-                        environment=environment_for_fingerprint(fingerprint))
+                        environment=environment_for_fingerprint(fingerprint), policy=policy)
 
 
 def qualification_config(config: Any, model: str, context_window: Optional[int] = None, *,
@@ -1184,8 +1292,10 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
 
 
 def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult], *,
-                 settings: InferenceSettings, environment: Optional[ExecutionEnvironment] = None) -> Dict[str, Any]:
-    """The record of one qualification run. Functional cases go to
+                 settings: InferenceSettings, environment: Optional[ExecutionEnvironment] = None,
+                 policy: Optional[ModelQualificationConfig] = None) -> Dict[str, Any]:
+    """The record of one qualification run, bound to the effective
+    qualification ``policy`` (defaults when None). Functional cases go to
     ``cases``; environment-dependent ones to ``environment_evidence`` under
     the digest of the environment that ran them (``environment``, default
     the one serving the fingerprint's endpoint)."""
@@ -1196,6 +1306,7 @@ def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult]
     functional = [r for r in results if r.capability not in ENVIRONMENT_DEPENDENT_CAPABILITIES]
     dependent = [r for r in results if r.capability in ENVIRONMENT_DEPENDENT_CAPABILITIES]
     qualified_at = datetime.now(timezone.utc).isoformat()
+    policy = policy if policy is not None else ModelQualificationConfig()
     evidence = ({environment.digest: {"environment": environment.to_dict(), "qualified_at": qualified_at,
                                       "cases": [asdict(r) for r in dependent]}} if dependent else {})
     return {
@@ -1209,20 +1320,25 @@ def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult]
         "inference_settings_digest": settings.digest,
         # output_ceiling inside is metadata (the configured max_tokens), never identity.
         "inference_settings": settings.to_dict(),
+        # QUAL-CONFIG-001: the policy the verdicts were reached under.
+        POLICY_DIGEST_FIELD: qualification_policy_digest(policy),
+        "qualification_policy": policy.model_dump(mode="json"),
         "qualified_at": qualified_at,
         # The environment this run was served from (capacity evidence below
         # is keyed by its digest; functional cases hold in any environment).
         "environment": environment.to_dict(),
         "cases": [asdict(r) for r in functional],
         "environment_evidence": evidence,
-        "measured_limits": measured_limits(results),
+        "measured_limits": measured_limits(results, policy),
         "summary": counts,
     }
 
 
 __all__ = [
     "ALL_CASES", "CAPABILITIES", "CaseResult", "FAIL", "MISSING", "NOT_EXACT", "NOT_QUALIFIED", "PASS",
-    "QUALIFICATION_HOME_ENV", "QUALIFICATION_POLICY_VERSION", "QUALIFIED", "QualificationAssessment",
+    "LEGACY_V3_POLICY_DIGEST", "POLICY_DIGEST_FIELD", "QUALIFICATION_HOME_ENV", "QUALIFICATION_POLICY_VERSION",
+    "QUALIFIED", "QualificationAssessment", "policy_digest_for", "qualification_policy_digest",
+    "qualification_policy_of", "record_policy_digest",
     "QualificationError", "QualificationPathInsideWorkspaceError", "ROLES", "STALE", "TOKENIZER_CORPORA",
     "CONTEXT_TIER_REQUIREMENTS", "ContextTierOffer", "UNAVAILABLE", "offered_context_tiers", "assess", "build_record", "context_tier_requirements",
     "load_record", "measured_limits", "measured_limits_for", "qualification_config", "qualification_home",

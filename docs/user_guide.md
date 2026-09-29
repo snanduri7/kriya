@@ -365,7 +365,32 @@ for a configuration that drops it. When the roles call a model with different se
 `reviewer_temperature`), `kriya model qualify` qualifies each distinct identity in turn. A record is **stale** when the
 runtime fingerprint, the inference settings, Kriya's protocol adapter or the qualification policy version changes;
 records written before inference settings were part of the identity (policy `kriya-qualification/2`) are stale and
-must be re-qualified. Each role requires the cases for the protocols Kriya uses with it: always
+must be re-qualified. A record is also stale when the **qualification policy settings** change.
+
+**Qualification policy (`model_qualification`, QUAL-CONFIG-001).** How the cases are run is configuration, not code:
+each case's output budget (`model_qualification.cases.<case>.max_tokens`), the `context_capacity` probe's answer
+budget, `headroom_tokens`, `min_fill_ratio` and `request_timeout_seconds`, the `cancellation_semantics` timing bounds,
+and the `measurement` margins used to derive measured limits. The defaults are exactly the values Kriya has always
+used. `reasoning_max_tokens` optionally gives a case a different budget when the identity being qualified sends
+`reasoning: true`; it applies based on that capability, never on a model name. Budgets that are the test itself (the
+truncation, timeout, endpoint-error and tokenizer probes) are not configurable, and neither is which cases a role
+requires. The whole section is SECURITY_AUTHORITY: a repository cannot change what qualifies a model.
+
+```yaml
+model_qualification:
+  cases:
+    tool_argument_integrity:
+      reasoning_max_tokens: 4096   # max_tokens keeps its default (512)
+```
+
+Every record stores the effective policy and its digest. A record made under another policy is STALE, and
+`kriya doctor --production` shows the policy it checked against in `model.qualification`. For a non-PASS case,
+`kriya model qualify` prints the controlling value, its configuration path, the budget actually sent and the finish
+reason. On the plain-completion path, LLMClient's reasoning floor can raise the sent budget above the configured one.
+Records written before QUAL-CONFIG-001 carry no policy digest. They count only while the effective policy equals the
+built-in `kriya-qualification/3` values they were produced with.
+
+Each role requires the cases for the protocols Kriya uses with it: always
 completion, stop, truncation detection, reasoning handling and endpoint errors; the Developer also full-file content,
 the anchored edit protocol and malformed-output recovery; the Planner malformed-output recovery; and every role the
 tool-call, JSON, multi-line JSON and streaming cases its resolved capability profile enables. `kriya doctor

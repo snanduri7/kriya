@@ -92,7 +92,7 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
     from kriya.core.inference_settings import binding_inference_settings, retry_inference_settings
     from kriya.core.llm import REASONING_MIN_MAX_TOKENS
     from kriya.core.model_capabilities import resolve_model_capability_profile
-    from kriya.core.model_qualification import assess, required_capabilities
+    from kriya.core.model_qualification import assess, policy_digest_for, required_capabilities
     from kriya.core.model_runtime import (
         binding_output_tokens,
         endpoint_identity,
@@ -117,12 +117,14 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
         runtime_exact = bool(fingerprint.exact)
         runtime_digest = fingerprint.digest if runtime_exact else "unavailable"
         served_window = fingerprint.effective_context_window
+        policy_digest = policy_digest_for(config)
         assessment = assess(fingerprint, required_capabilities(config, DEVELOPER_ROLE, model),
-                            settings=binding_inference_settings(config, DEVELOPER_ROLE, binding))
+                            settings=binding_inference_settings(config, DEVELOPER_ROLE, binding),
+                            policy_digest=policy_digest)
         qualification, failed = assessment.status, tuple(assessment.failed)
         if retry_settings is not None:
             retry_qualification = assess(fingerprint, required_capabilities(config, DEVELOPER_ROLE, model),
-                                         settings=retry_settings).status
+                                         settings=retry_settings, policy_digest=policy_digest).status
     except Exception as error:  # a profile is evidence; it never blocks the run itself
         logger.debug("Request profile of %s: runtime unavailable: %s", model, error)
     output = binding_output_tokens(config, binding)

@@ -489,12 +489,13 @@ async def _primary_model_runtime_details(cfg: Any) -> Dict[str, Any]:
     import asyncio
 
     from kriya.core.inference_settings import role_inference_settings
-    from kriya.core.model_qualification import assess, required_capabilities
+    from kriya.core.model_qualification import assess, policy_digest_for, required_capabilities
     from kriya.core.model_runtime import resolve_configured_model_runtime
 
     fingerprint = await asyncio.to_thread(resolve_configured_model_runtime, cfg)
     settings = role_inference_settings(cfg, "developer", cfg.llm.model)
-    qualification = assess(fingerprint, required_capabilities(cfg, "developer", cfg.llm.model), settings=settings)
+    qualification = assess(fingerprint, required_capabilities(cfg, "developer", cfg.llm.model), settings=settings,
+                           policy_digest=policy_digest_for(cfg))
     return {"fingerprint": fingerprint.to_dict(), "developer_qualification": qualification.to_dict()}
 
 

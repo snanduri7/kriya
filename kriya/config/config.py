@@ -1318,6 +1318,111 @@ class StaticAnalysisConfig(BaseModel):
         return self
 
 
+class QualificationCaseBudget(BaseModel):
+    """QUAL-CONFIG-001: the output budget one live qualification case sends.
+
+    ``reasoning_max_tokens`` (None = ``max_tokens``) applies only when the
+    inference identity being qualified sends ``reasoning: true``: the
+    binding's capability, never a model name. The sent budget can still be
+    raised by LLMClient's own reasoning floor on the plain-completion path;
+    the record reports both the configured and the sent value."""
+
+    model_config = ConfigDict(extra="forbid")
+    max_tokens: int = Field(gt=0)
+    reasoning_max_tokens: Optional[int] = Field(default=None, gt=0)
+
+
+class QualificationCancellationPolicy(QualificationCaseBudget):
+    """``cancellation_semantics``: the streamed request cancelled after its
+    first delta, the healthy-endpoint check after it, and the two timing
+    bounds of the PASS decision."""
+
+    max_tokens: int = Field(default=1024, gt=0)
+    health_check_max_tokens: int = Field(default=64, gt=0)
+    first_delta_timeout_seconds: float = Field(default=120.0, gt=0)
+    max_settle_seconds: float = Field(default=10.0, gt=0)
+
+
+class QualificationContextCapacityPolicy(QualificationCaseBudget):
+    """``context_capacity``: the near-window probe. ``max_tokens`` is the
+    answer budget (the two recalled markers); ``headroom_tokens`` is what the
+    filler leaves below the served window for the answer and the chat
+    template; the reported prompt must reach ``min_fill_ratio`` of the
+    target."""
+
+    max_tokens: int = Field(default=64, gt=0)
+    headroom_tokens: int = Field(default=384, gt=0)
+    min_fill_ratio: float = Field(default=0.9, gt=0, le=1)
+    request_timeout_seconds: float = Field(default=600.0, gt=0)
+
+
+def _budget(tokens: int) -> Any:
+    return Field(default_factory=lambda: QualificationCaseBudget(max_tokens=tokens))
+
+
+class QualificationCasesConfig(BaseModel):
+    """Per-case budgets. Cases whose budget is part of what they test
+    (output_truncation, timeout_semantics, endpoint_error_semantics,
+    tokenizer_measurement, the capacity token-rate probes) have none here:
+    those values stay in kriya/core/model_qualification.py."""
+
+    model_config = ConfigDict(extra="forbid")
+    plain_completion: QualificationCaseBudget = _budget(64)
+    finish_reason_stop: QualificationCaseBudget = _budget(256)
+    structured_json: QualificationCaseBudget = _budget(256)
+    multiline_json: QualificationCaseBudget = _budget(512)
+    native_tool_calls: QualificationCaseBudget = _budget(256)
+    multiple_tool_calls: QualificationCaseBudget = _budget(512)
+    tool_argument_integrity: QualificationCaseBudget = _budget(512)
+    streaming_assembly: QualificationCaseBudget = _budget(256)
+    reasoning_behavior: QualificationCaseBudget = _budget(2048)
+    full_file_raw_content: QualificationCaseBudget = _budget(1024)
+    anchored_edit_protocol: QualificationCaseBudget = _budget(1024)
+    malformed_output_recovery: QualificationCaseBudget = _budget(512)
+    cancellation_semantics: QualificationCancellationPolicy = Field(default_factory=QualificationCancellationPolicy)
+    context_capacity: QualificationContextCapacityPolicy = Field(
+        default_factory=QualificationContextCapacityPolicy)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _partial_case_keeps_its_defaults(cls, data: Any) -> Any:
+        """A case given only some fields (e.g. just reasoning_max_tokens)
+        keeps that case's own defaults for the rest. Unknown cases and
+        fields are still rejected (extra="forbid")."""
+        if not isinstance(data, dict):
+            return data
+        merged = dict(data)
+        for name, value in data.items():
+            field = cls.model_fields.get(name)
+            if field is not None and field.default_factory is not None and isinstance(value, dict):
+                merged[name] = {**field.default_factory().model_dump(), **value}
+        return merged
+
+
+class QualificationMeasurementPolicy(BaseModel):
+    """How measured limits are derived from passing cases: the margin on the
+    smallest measured bytes-per-token ratio, and the headroom multiplier on
+    the reasoning tokens observed."""
+
+    model_config = ConfigDict(extra="forbid")
+    bytes_per_token_margin: float = Field(default=0.9, gt=0, le=1)
+    reasoning_tokens_headroom: float = Field(default=1.5, ge=1)
+
+
+class ModelQualificationConfig(BaseModel):
+    """QUAL-CONFIG-001: live model qualification policy (PRD-014 mechanics
+    stay in kriya/core/model_qualification.py). Defaults reproduce the
+    kriya-qualification/3 values exactly. The effective policy's digest is
+    part of every record, and a record made under another policy is STALE.
+    SECURITY_AUTHORITY as a whole (kriya/config/authority.py): a repository
+    cannot change what qualifies a model. Which cases a role requires is not
+    configurable."""
+
+    model_config = ConfigDict(extra="forbid")
+    cases: QualificationCasesConfig = Field(default_factory=QualificationCasesConfig)
+    measurement: QualificationMeasurementPolicy = Field(default_factory=QualificationMeasurementPolicy)
+
+
 class AppConfig(BaseModel):
     """runtime_profile (2026-08-25, external review P2) - a named
     preset in place of remembering which combination of independent
@@ -1374,6 +1479,7 @@ class AppConfig(BaseModel):
     execution_policy: ExecutionPolicyConfig = Field(default_factory=ExecutionPolicyConfig)
     workflow_controller: WorkflowControllerConfig = Field(default_factory=WorkflowControllerConfig)
     static_analysis: StaticAnalysisConfig = Field(default_factory=StaticAnalysisConfig)
+    model_qualification: ModelQualificationConfig = Field(default_factory=ModelQualificationConfig)
     runtime_profile: Optional[str] = Field(default=None)
     # PRD-019: the routing plan a workflow command applied to this (routed)
     # configuration, recorded by the run as model.route events. Not a

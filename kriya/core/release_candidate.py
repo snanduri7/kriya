@@ -84,7 +84,7 @@ def model_identity(cfg: Any, *, resolve_runtime: Optional[Callable[..., Any]] = 
     Developer primary and first fallback, and the execution environment."""
     from kriya.core.execution_environment import environment_for_fingerprint
     from kriya.core.inference_settings import role_inference_identities
-    from kriya.core.model_qualification import assess, required_capabilities, role_models
+    from kriya.core.model_qualification import assess, policy_digest_for, required_capabilities, role_models
     from kriya.core.model_runtime import resolve_configured_model_runtime
 
     resolve = resolve_runtime or resolve_configured_model_runtime
@@ -97,7 +97,8 @@ def model_identity(cfg: Any, *, resolve_runtime: Optional[Callable[..., Any]] = 
                 runtimes[key] = resolve(cfg, model, fresh=True)
             runtime = runtimes[key]
             for label, settings in role_inference_identities(cfg, role, model):
-                assessment = assess(runtime, required_capabilities(cfg, role, model), settings=settings)
+                assessment = assess(runtime, required_capabilities(cfg, role, model), settings=settings,
+                                    policy_digest=policy_digest_for(cfg))
                 bindings.append({
                     "role": role, "model": model, "identity": label, "runtime_digest": runtime.digest,
                     "runtime_exact": bool(runtime.exact), "inference_settings_digest": settings.digest,

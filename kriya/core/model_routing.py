@@ -349,7 +349,7 @@ def candidate_evidence(config: Any, role: str, model: str, *, order: int, explic
     """Evidence for ``model`` bound as ``role`` in ``config`` (already placed)."""
     from kriya.core.inference_settings import role_inference_identities, role_inference_settings
     from kriya.core.model_capabilities import capabilities_for_model
-    from kriya.core.model_qualification import assess, required_capabilities
+    from kriya.core.model_qualification import assess, policy_digest_for, required_capabilities
     from kriya.core.model_runtime import resolve_configured_model_runtime
 
     binding = role_binding(config, role)
@@ -359,13 +359,16 @@ def candidate_evidence(config: Any, role: str, model: str, *, order: int, explic
             config, model, base_url=binding.base_url, api_key=binding.api_key, extra_body=binding.extra_body or {},
         )
         settings = role_inference_settings(config, role, model)
-        assessment = assess(fingerprint, required_capabilities(config, role, model), settings=settings)
+        policy_digest = policy_digest_for(config)
+        assessment = assess(fingerprint, required_capabilities(config, role, model), settings=settings,
+                            policy_digest=policy_digest)
         exact, digest = bool(fingerprint.exact), fingerprint.digest if fingerprint.exact else None
         status, reasons = assessment.status, tuple(assessment.reasons)
         # Every identity the role executes must be qualified (a Developer's
         # differing retry-temperature identity included).
         for label, other in role_inference_identities(config, role, model)[1:]:
-            extra = assess(fingerprint, required_capabilities(config, role, model), settings=other)
+            extra = assess(fingerprint, required_capabilities(config, role, model), settings=other,
+                           policy_digest=policy_digest)
             if status == "QUALIFIED" and extra.status != "QUALIFIED":
                 status = extra.status
                 reasons = tuple(f"{label} identity: {reason}" for reason in extra.reasons)

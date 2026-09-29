@@ -836,11 +836,14 @@ def _check_qualification(ctx: _Context) -> DoctorCheck:
         QUALIFIED,
         STALE,
         assess,
+        policy_digest_for,
+        qualification_policy_of,
         required_capabilities,
         role_models,
     )
     from kriya.core.model_runtime import resolve_configured_model_runtime
 
+    policy_digest = policy_digest_for(ctx.cfg)
     runtimes: Dict[str, Any] = {}
     primary = ctx.runtime_probe.get("runtime")
     if primary is not None:
@@ -868,7 +871,7 @@ def _check_qualification(ctx: _Context) -> DoctorCheck:
             # differing retry temperature is its own; MODEL-EVIDENCE-HARDENING-001).
             for label, settings in role_inference_identities(ctx.cfg, role, model):
                 assessment = assess(runtime, required_capabilities(ctx.cfg, role, model), settings=settings,
-                                    workspace_root=ctx.workspace)
+                                    workspace_root=ctx.workspace, policy_digest=policy_digest)
                 statuses.add(assessment.status)
                 entries.append({"model": model, "identity": label, "inference_settings_digest": settings.digest,
                                 "campaign_named": is_campaign_named_model(model), **assessment.to_dict()})
@@ -881,7 +884,12 @@ def _check_qualification(ctx: _Context) -> DoctorCheck:
                   else QUALIFICATION_STALE)
     else:
         status, reason = CheckStatus.UNAVAILABLE, RUNTIME_FINGERPRINT_NOT_COMPUTABLE
-    evidence: Dict[str, Any] = {"model": ctx.cfg.llm.model, "roles": roles, "name_based_profile_is_authority": False}
+    evidence: Dict[str, Any] = {
+        "model": ctx.cfg.llm.model, "roles": roles, "name_based_profile_is_authority": False,
+        # QUAL-CONFIG-001: the policy every record above was checked against.
+        "qualification_policy_digest": policy_digest,
+        "qualification_policy": qualification_policy_of(ctx.cfg).model_dump(mode="json"),
+    }
     if reason:
         evidence["reason_code"] = reason
     return _check(

@@ -1069,6 +1069,7 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
     from kriya.core.model_qualification import (
         CAPABILITIES,
         QualificationError,
+        record_policy_digest,
         role_models,
         run_qualification,
         save_record,
@@ -1103,6 +1104,15 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
         if not json_output:
             color = {"PASS": "green", "FAIL": "red"}.get(result.status, "yellow")
             click.secho(f"  {result.capability:<28} {result.status:<11} {result.elapsed_seconds:>7.2f}s", fg=color)
+            if result.status != "PASS" and result.evidence.get("policy"):
+                # QUAL-CONFIG-001: the policy that controlled a non-PASS
+                # verdict, next to what the endpoint reported.
+                used = result.evidence["policy"]
+                controls = ", ".join(f"{key}={value}" for key, value in used.items() if key != "source")
+                sent = result.evidence.get("max_tokens")
+                click.secho(f"      policy: {controls} ({used.get('source', 'model_qualification')})"
+                            f"{f'; sent max_tokens={sent}' if sent is not None else ''}"
+                            f"; finish_reason={result.evidence.get('finish_reason')}", fg=color)
 
     records = []
     for settings, roles in identities.values():
@@ -1127,6 +1137,7 @@ def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, j
             click.echo(f"\nSummary: {record['summary']}  measured limits: {record['measured_limits']}")
             click.echo(f"Runtime fingerprint: {record['fingerprint_digest']}")
             click.echo(f"Qualification identity: {record['qualification_identity']}")
+            click.echo(f"Qualification policy: {record_policy_digest(record)} (model_qualification)")
             env = record.get("environment") or {}
             click.echo(f"Execution environment: {env.get('digest')} ({env.get('os')}/{env.get('architecture')}, "
                        f"{env.get('accelerator_backend')} {env.get('accelerator_model')}, "
@@ -1148,7 +1159,7 @@ def model_status(ctx: click.Context, json_output: bool) -> None:
     """Show each production role's models, exact runtimes and qualification."""
     from kriya.core.execution_environment import environment_for_fingerprint
     from kriya.core.inference_settings import role_inference_identities
-    from kriya.core.model_qualification import QUALIFIED, assess, required_capabilities, role_models
+    from kriya.core.model_qualification import QUALIFIED, assess, policy_digest_for, required_capabilities, role_models
     from kriya.core.model_runtime import resolve_configured_model_runtime
 
     cfg = _model_cfg(ctx)
@@ -1160,7 +1171,8 @@ def model_status(ctx: click.Context, json_output: bool) -> None:
             runtime = resolve_configured_model_runtime(cfg, model, fresh=True)
             for label, settings in role_inference_identities(cfg, role, model):
                 assessment = assess(runtime, required_capabilities(cfg, role, model), settings=settings,
-                                    workspace_root=os.path.realpath(os.getcwd()))
+                                    workspace_root=os.path.realpath(os.getcwd()),
+                                    policy_digest=policy_digest_for(cfg))
                 all_qualified &= assessment.status == QUALIFIED
                 report[role].append({"model": model, "identity": label, "exact": runtime.exact,
                                      "inference_settings": settings.to_dict(),
