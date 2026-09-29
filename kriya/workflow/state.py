@@ -539,6 +539,11 @@ class GenerationState:
     # family and are forced to their bound by the no-progress transition
     # (STATE-ATTEMPT-METRICS-001).
     attempts_by_mode: Dict[str, int] = field(default_factory=dict)
+    # Failed Developer attempts this run, by the mode they ran in
+    # (retry_strategy._record_attempt_failure). Never reset: the reported
+    # full-set/targeted retry counts - the retries those failures caused, so
+    # a first-pass success is 0/0 (STATE-ATTEMPT-METRICS-002).
+    failed_attempts_by_mode: Dict[str, int] = field(default_factory=dict)
     # The file(s) the completeness check (extract_expected_files vs. what got
     # written) found missing after the MOST RECENT attempt. Mutually exclusive
     # with last_implicated_files - an IncompleteGenerationError sets this and
@@ -869,9 +874,10 @@ class GenerationState:
                 },
             },
             "retry": {
-                "full_set_attempts": self.attempts_by_mode.get("full_set", 0),
+                "full_set_attempts": self.failed_attempts_by_mode.get("full_set", 0),
                 "targeted_attempts": (
-                    self.attempts_by_mode.get("targeted", 0) + self.attempts_by_mode.get("missing_files", 0)
+                    self.failed_attempts_by_mode.get("targeted", 0)
+                    + self.failed_attempts_by_mode.get("missing_files", 0)
                 ),
                 "attempts_by_mode": dict(self.attempts_by_mode),
                 "unrecoverable_scope_denials": self.unrecoverable_scope_denial_count,

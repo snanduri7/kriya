@@ -380,6 +380,8 @@ async def _record_attempt_failure(
     failure.attempt = state.attempt_number
     failure.mode = attempt_mode
     state.record_failure(failure, operation=attempt_mode)
+    failed_mode = state.last_attempt_mode or "full_set"
+    state.failed_attempts_by_mode[failed_mode] = state.failed_attempts_by_mode.get(failed_mode, 0) + 1
     state.record_event(RunEvent(
         kind="attempt.failed",
         attempt=state.attempt_number,
