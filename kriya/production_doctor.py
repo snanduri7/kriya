@@ -845,6 +845,8 @@ def probe_served_context(cfg: AppConfig, model: str) -> Dict[str, Any]:
     request through Kriya's own client loads it exactly as a run would (and
     runs the client's own post-call contract check). Never raises."""
     import asyncio
+    import contextlib
+    import sys
 
     from kriya.core.inference_runtime import runtime_for_binding
     from kriya.core.llm import LLMClient
@@ -869,7 +871,10 @@ def probe_served_context(cfg: AppConfig, model: str) -> Dict[str, Any]:
                 await llm.aclose()
 
         evidence["probe_request_sent"] = True
-        result = asyncio.run(load())
+        # The doctor's own output is its report (``--json`` is one JSON
+        # document): the probe's per-call usage line goes to stderr.
+        with contextlib.redirect_stdout(sys.stderr):
+            result = asyncio.run(load())
         contract = result.protocol.get("provider_contract", {})
         evidence["served"] = contract.get("served_context_window_after_call")
         if "violation" in contract:

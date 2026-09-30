@@ -847,3 +847,13 @@ def test_a_qualification_probe_client_carries_the_kriya_transport_policy():
         assert probe._request_timeout().read == 42.0  # pylint: disable=protected-access
     finally:
         asyncio.run(probe.aclose())
+
+
+def test_the_doctor_controlled_probe_never_writes_to_stdout(fake, capsys):
+    """Live `doctor --production --json` (2026-09-30): the controlled probe's
+    usage line reached stdout ahead of the JSON document, breaking it."""
+    from kriya.production_doctor import probe_served_context
+
+    evidence = probe_served_context(_fake_config(), "primary:1")
+    assert evidence["probe_request_sent"] is True and fake.requests
+    assert capsys.readouterr().out == ""
