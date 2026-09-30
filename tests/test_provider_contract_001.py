@@ -556,8 +556,13 @@ def test_pin_fixes_only_the_server_only_settings_the_binding_declares():
 
 
 def test_the_pinned_name_is_bound_to_the_exact_parameters():
+    import re
+
     from kriya.core.model_runtime import pinned_model_name
 
+    # One name:tag separator (an Ollama tag cannot hold another ':'), 12 hex digest characters.
+    assert re.fullmatch(r"qwen3-coder:30b-kriya-[0-9a-f]{12}", pinned_model_name("qwen3-coder:30b", {"num_ctx": 32768}))
+    assert re.fullmatch(r"m:latest-kriya-[0-9a-f]{12}", pinned_model_name("m", {"num_ctx": 32768}))
     assert pinned_model_name("m:1", {"num_ctx": 32768}) == pinned_model_name("m:1", {"num_ctx": 32768})
     assert pinned_model_name("m:1", {"num_ctx": 32768}) != pinned_model_name("m:1", {"num_ctx": 65536})
 

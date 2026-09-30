@@ -879,7 +879,7 @@ def pinned_model_name(model: str, parameters: Dict[str, Any]) -> str:
     """A derived model name bound to the base model and the exact pinned
     parameters: another parameter set is another name, never an overwrite."""
     base, _, tag = model.partition(":")
-    digest = _sha256_json({"from": model, "parameters": parameters})[:12]
+    digest = _sha256_json({"from": model, "parameters": parameters}).partition(":")[2][:12]
     return f"{base}:{tag or 'latest'}-kriya-{digest}"
 
 
