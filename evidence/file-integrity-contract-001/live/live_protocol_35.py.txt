@@ -1,0 +1,85 @@
+"""FILE-INTEGRITY-CONTRACT-001 §35: is the protocol realistically usable by the pinned models?
+
+Tiny synthetic tasks, no repository, no Graphify. For each model x protocol x task, a few trials:
+records whether the response parses (valid protocol rate), the typed refusal code otherwise,
+and - for parsed responses - that Kriya did not alter the payload (the parsed payload is a
+verbatim substring of the raw response) and whether the edit applies through the engine.
+"""
+import asyncio
+import json
+import os
+import sys
+
+from kriya.agents.response_protocol import parse_legacy_repair, parse_structured, structured_contract
+from kriya.config import load_config
+from kriya.core.llm import LLMClient
+from kriya.workflow.file_integrity import FileIntegrityError, apply_line_block_edits, anchored_replaces
+
+MODELS = ["qwen3-coder:30b-kriya-e52213655394", "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"]
+SOURCE = "def total(prices):\n    result = 0\n    for p in prices:\n        result += p\n    return result\n"
+TASK = "Task: total() must ignore negative prices."
+TRIALS = 3
+
+LEGACY_EDIT_SYS = (
+    "You are the Kriya Developer Agent. MODE: REPAIR.\nRepair exactly one existing file. Write, in this exact order:\n"
+    "\"FIX ANALYSIS:\" - 1-3 sentences.\nThen exactly ONE of:\n  \"SEARCH:\" <exact original lines, copied verbatim>\n"
+    "  \"REPLACE:\" <the replacement lines>\nor \"NO CHANGE NEEDED:\" <one sentence>.\n"
+    "Each marker on its own line. Never combine outcomes."
+)
+LEGACY_FILE_SYS = (
+    "You are the Kriya Developer Agent. MODE: REPAIR.\nWrite \"FIX ANALYSIS:\" (1-3 sentences), then the line "
+    "\"FILE CONTENT:\" on its own line followed by the complete corrected file and nothing after it."
+)
+
+
+def _prompt():
+    return f"=== calc.py ===\n{SOURCE}\n{TASK}\n"
+
+
+async def trial(llm, model, protocol, task):
+    if protocol == "structured":
+        system = ("You are the Kriya Developer Agent. MODE: REPAIR. Repair exactly one existing file, 'calc.py'.\n"
+                  + structured_contract("calc.py", analysis_required=True, allow_edit=task == "edit",
+                                        allow_file=task == "file", allow_no_change=True))
+    else:
+        system = LEGACY_EDIT_SYS if task == "edit" else LEGACY_FILE_SYS
+    raw = await llm.complete(system, _prompt(), model_override=model)
+    if protocol == "structured":
+        parsed = parse_structured(raw, "calc.py", patch_allowed=task == "edit", file_allowed=task == "file")
+    else:
+        parsed = parse_legacy_repair(raw, "calc.py", patch_allowed=task == "edit")
+    row = {"model": model, "protocol": protocol, "task": task, "kind": parsed.kind,
+           "reason_code": parsed.reason_code, "raw_len": len(raw)}
+    if parsed.kind == "edits":
+        row["payload_verbatim"] = all(s in raw and r in raw for s, r in parsed.edits)
+        try:
+            row["applied"] = apply_line_block_edits(SOURCE, anchored_replaces(parsed.edit_dicts())).text != SOURCE
+        except FileIntegrityError as error:
+            row["applied"], row["apply_code"] = False, error.reason_code
+    elif parsed.kind == "file":
+        row["payload_verbatim"] = (parsed.content or "").rstrip("\n") in raw
+    if parsed.kind == "invalid":
+        row["raw_head"] = raw[:300]
+    return row
+
+
+async def main(out_path):
+    cfg = load_config(os.environ["KRIYA_CONFIG"])
+    llm = LLMClient(cfg)
+    rows = []
+    try:
+        for model in MODELS:
+            for protocol in ("legacy_strict", "structured"):
+                for task in ("edit", "file"):
+                    for _ in range(TRIALS):
+                        rows.append(await trial(llm, model, protocol, task))
+                        print(json.dumps(rows[-1]), flush=True)
+    finally:
+        await llm.aclose() if hasattr(llm, "aclose") else None
+    with open(out_path, "w") as handle:
+        for row in rows:
+            handle.write(json.dumps(row) + "\n")
+
+
+if __name__ == "__main__":
+    asyncio.run(main(sys.argv[1]))

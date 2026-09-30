@@ -1,0 +1,102 @@
+"""FILE-INTEGRITY-CONTRACT-001 mutation run: each mutation must make the new test module fail."""
+import os
+import shutil
+import subprocess
+import sys
+
+ROOT = os.getcwd()
+TESTS = ["tests/test_file_integrity_contract_001.py"]
+M = [
+    ("restore largest-block selection", "kriya/agents/response_protocol.py",
+     '''    if not markdown and any(_is_fence_line(line) and not line.startswith((" ", "\\t")) for line in lines):
+        return _invalid(''',
+     '''    if not markdown and any(_is_fence_line(line) and not line.startswith((" ", "\\t")) for line in lines):
+        blocks = re.findall(r"```[a-zA-Z0-9_+-]*\\n(.*?)\\n```", text, re.DOTALL)
+        if blocks:
+            return DeveloperResponse(kind=FILE, protocol=LEGACY_STRICT, content=max(blocks, key=len))
+        return _invalid('''),
+    ("restore broad gutter regex", "kriya/agents/response_protocol.py",
+     "    return DeveloperResponse(kind=FILE, protocol=LEGACY_STRICT, content=text)\n",
+     "    return DeveloperResponse(kind=FILE, protocol=LEGACY_STRICT, content=re.sub(r'^(>>\\s*(?:\\d+:)?\\s?|[ ]{2,}\\d+:\\s?)', '', text, flags=re.M))\n"),
+    ("restore XML payload rewrite", "kriya/agents/response_protocol.py",
+     "    return DeveloperResponse(kind=FILE, protocol=LEGACY_STRICT, content=text)\n",
+     "    return DeveloperResponse(kind=FILE, protocol=LEGACY_STRICT, content=re.sub(r'<!--(.*?)-->', lambda m: '<!--' + re.sub('-{2,}', '-', m.group(1)) + '-->', text, flags=re.S))\n"),
+    ("loosen FILE CONTENT", "kriya/agents/response_protocol.py",
+     "    if stripped in (_SEARCH, _REPLACE, _FILE_CONTENT):\n        return stripped\n",
+     "    if stripped in (_SEARCH, _REPLACE, _FILE_CONTENT):\n        return stripped\n    if 'file content' in stripped.lower() and stripped.endswith(':'):\n        return _FILE_CONTENT\n"),
+    ("loosen NO CHANGE NEEDED", "kriya/agents/response_protocol.py",
+     "    if stripped.startswith(_NO_CHANGE):",
+     "    if 'no change needed' in stripped.lower() or 'no changes needed' in stripped.lower():"),
+    ("loosen marker regex", "kriya/agents/response_protocol.py",
+     "    stripped = line.rstrip(\" \\t\\r\")\n    if stripped in (_SEARCH, _REPLACE, _FILE_CONTENT):",
+     "    stripped = line.strip().upper()\n    if stripped in (_SEARCH, _REPLACE, _FILE_CONTENT):"),
+    ("reintroduce errors=replace", "kriya/workflow/file_integrity.py",
+     "        if self.encoding is None:\n            raise FileIntegrityError(\n                UNSUPPORTED_TEXT_ENCODING,",
+     "        if False:\n            raise FileIntegrityError(\n                UNSUPPORTED_TEXT_ENCODING,"),
+    ("use splitlines()", "kriya/workflow/file_integrity.py",
+     "    lines = text.split(\"\\n\")\n    matchable =",
+     "    lines = text.splitlines()\n    matchable ="),
+    ("normalize CRLF", "kriya/workflow/file_integrity.py",
+     "            if self.newline == CRLF:\n                body = body.replace",
+     "            if False:\n                body = body.replace"),
+    ("discard final newline", "kriya/workflow/file_integrity.py",
+     "    return EditResult(text=\"\\n\".join(result),",
+     "    return EditResult(text=\"\\n\".join(result).rstrip(\"\\n\"),"),
+    ("use substring anchor", "kriya/workflow/file_integrity.py",
+     "        if all(key(lines[start + offset]) == wanted[offset] for offset in range(width))",
+     "        if all(wanted[offset] in key(lines[start + offset]) for offset in range(width))"),
+    ("permit empty SEARCH", "kriya/workflow/file_integrity.py",
+     "        if not edit.search or not any(line.strip() for line in search):",
+     "        if False:"),
+    ("permit duplicate match selection", "kriya/workflow/file_integrity.py",
+     "        if len(exact) > 1:\n            raise FileIntegrityError(\n                ANCHOR_AMBIGUOUS,",
+     "        if False:\n            raise FileIntegrityError(\n                ANCHOR_AMBIGUOUS,"),
+    ("permit overlapping edits", "kriya/workflow/file_integrity.py",
+     "        if current[0] < previous[1]:", "        if False:"),
+    ("drop indentation-style check", "kriya/workflow/file_integrity.py",
+     "        if file_indent_chars and not set(_leading(line)) <= file_indent_chars:",
+     "        if False:"),
+    ("bypass source digest check", "kriya/workflow/file_integrity.py",
+     "    if snapshot.raw_sha256 != authorized_digest:", "    if False:"),
+    ("text-based (lossy) revision identity", "kriya/workflow/edit_safety.py",
+     "    return file_raw_digest(full_path)\n",
+     "    try:\n        with open(full_path, 'r', encoding='utf-8', errors='replace') as fh:\n            return content_revision(fh.read())\n    except FileNotFoundError:\n        return content_revision('')\n"),
+    ("allow direct pom.xml write", "kriya/workflow/attempt.py",
+     "    if \"pom.xml\" not in state.all_files_written:\n        return\n", ""),
+    ("allow post-verification mutation", "kriya/workflow/terminal_commit.py",
+     "    mismatch = committed_digest_mismatch(writes)\n", "    mismatch = None\n"),
+    ("disable worktree/candidate equivalence", "kriya/workflow/attempt.py",
+     "        if actual != expected:\n            mismatches.append(relpath)", "        if False:\n            mismatches.append(relpath)"),
+    ("non-NUL git status parsing", "kriya/workflow/worktree.py",
+     "    command = [\"git\", \"status\", \"--porcelain=v1\", \"-z\", f\"--untracked-files={untracked}\"]",
+     "    command = [\"git\", \"status\", \"--porcelain=v1\", f\"--untracked-files={untracked}\"]"),
+    ("drop post-sync digest check", "kriya/workflow/worktree.py",
+     "    if mismatched:\n        raise WorktreeSyncError(", "    if False:\n        raise WorktreeSyncError("),
+    ("sync failure non-fatal", "kriya/workflow/worktree.py",
+     "        raise WorktreeSyncError(WORKTREE_SYNC_FAILED, f\"copying uncommitted work failed: {error}\") from error",
+     "        return"),
+    ("materialize a candidate symlink", "kriya/workflow/terminal_commit.py",
+     "        if os.path.islink(candidate_path):\n            raise CandidateMaterializationError(",
+     "        if False:\n            raise CandidateMaterializationError("),
+]
+
+results = []
+for name, rel, old, new in M:
+    path = os.path.join(ROOT, rel)
+    source = open(path).read()
+    if source.count(old) != 1:
+        results.append((name, "MUTATION NOT APPLICABLE", source.count(old)))
+        continue
+    backup = path + ".mutbak"
+    shutil.copy2(path, backup)
+    try:
+        open(path, "w").write(source.replace(old, new))
+        run = subprocess.run([sys.executable, "-m", "pytest", *TESTS, "-q", "-x", "-p", "no:cacheprovider"],
+                             capture_output=True, text=True, timeout=600)
+        tail = [line for line in run.stdout.splitlines() if line.startswith(("FAILED", "ERROR"))][:1]
+        results.append((name, "KILLED" if run.returncode != 0 else "SURVIVED", tail[0] if tail else run.stdout.splitlines()[-1]))
+    finally:
+        shutil.move(backup, path)
+for name, verdict, detail in results:
+    print(f"{verdict:24} {name}: {detail}")
+print("killed", sum(1 for r in results if r[1] == "KILLED"), "/", len(results))

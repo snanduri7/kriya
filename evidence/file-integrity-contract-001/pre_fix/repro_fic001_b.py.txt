@@ -1,0 +1,12 @@
+import os, sys
+sys.path.insert(0, os.getcwd())
+from kriya.agents.agent import DeveloperAgent as D
+# 1b: module-level docstring fence at column 0
+py = '"""Usage:\n\n```python\nimport m\nm.run()\n```\n"""\n\ndef run():\n    return 1\n'
+r = D.sanitize_generated_content(py, filepath="m.py")
+print("#1b col0 docstring fence:", "CORRUPTED" if r != py else "intact", repr(r))
+# 4b: real chain = _split_fix_analysis -> sanitize(filepath) (agent.py:2406) -> sanitize (attempt.py:7574)
+resp = "FIX ANALYSIS: fix\nFILE CONTENT:\ndef f():\n    '''\n    File content: bytes\n    '''\n    return 1\n"
+a, c = D._split_fix_analysis(resp)
+c1 = D.sanitize_generated_content(c, filepath="f.py"); c2 = D.sanitize_generated_content(c1)
+print("#4b chain:", "CORRUPTED" if "return 1" not in (c2 or "") else "intact", repr(c2))

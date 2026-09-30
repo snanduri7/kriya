@@ -1,0 +1,41 @@
+CORRUPTED  #1 largest-fence README: 'x = 1'
+intact     #1 largest-fence py docstring: 'def f():\n    """Example:\n\n    ```python\n    f()\n    ```\n    """\n    return 1\n'
+CORRUPTED  #2 gutter yaml status keys: 'responses:\n      description: ok\n      description: nf\n'
+CORRUPTED  #2 gutter python dict: "CODES = {\n'ok',\n'nf',\n}\n"
+CORRUPTED  #2 gutter doctest: 'def f():\n    """\n> f()\n1\n"""\n    return 1\n'
+CORRUPTED  #2 gutter bitshift: 'x = (a\n8)\n'
+CORRUPTED  #3 xml-repair A.java: 'String s = "<!-- a - b -->";\n'
+CORRUPTED  #3 xml-repair a.py: 's = "<!-- x-y -->"\n'
+CORRUPTED  #3 xml-repair a.properties: 'k=<!-- a - b -->\n'
+CORRUPTED  #4 FILE CONTENT in payload (sanitize): 'Reads a file.'
+intact     #4 FILE CONTENT in payload (split): "def f():\n    '''\n    File content: bytes\n    '''\n    return 1"
+CORRUPTED  #5 NO CHANGE NEEDED in payload (full file): content=None
+CORRUPTED  #5 NO CHANGE NEEDED in payload (edit): edits=None
+CORRUPTED  #6 marker in YAML replace: [{'search': 'config:\n  mode: a', 'replace': 'config:\n  mode: b'}, {'search': 'enabled', 'replace': 'never'}]
+CORRUPTED  #6 marker in docstring replace: [{'search': 'def f():\n    return 1', 'replace': 'def f():\n    """'}]
+CORRUPTED  #7 bytes crlf.py: expected=b'a = 1\r\nb = 20\r\nc = 3\r\n' got=b'a = 1\nb = 20\nc = 3\n'
+CORRUPTED  #7 bytes latin1.py: expected=b'# caf\xe9\nx = 10\ny = 2\n' got=b'# caf\xef\xbf\xbd\nx = 10\ny = 2\n'
+CORRUPTED  #7 bytes nofinal.py: expected=b'x = 10\n  y = 2' got=b'x = 10\ny = 2'
+CORRUPTED  #7 bytes ff.py: expected=b's = "a\x0cb"\nx = 10\n  y = 2\n' got=b's = "a\nb"\nx = 10\ny = 2'
+CORRUPTED  #7 bytes u2028.py: expected=b's = "a\xe2\x80\xa8b"\nx = 10\n  y = 2\n' got=b's = "a\nb"\nx = 10\ny = 2'
+CORRUPTED  #10 revision invalid bytes: distinct raw bytes -> same revision
+CORRUPTED  #10 revision CRLF vs LF: distinct raw bytes -> same revision
+CORRUPTED  #8 substring anchor: 'limit = 20\nprint(limit)\n'
+CORRUPTED  #9 empty SEARCH silently skipped: no error raised, edit dropped
+CORRUPTED  #9 blank lines ignored in match / collapsed: 'def f():\na = 1\nb = 3\n    return a + b'
+CORRUPTED  #9 tab-indented python reindent: TabError: inconsistent use of tabs and spaces in indentation (t.py, line 4)
+CORRUPTED  #12 worktree sync 'café.txt': worktree has 'v1\n'
+CORRUPTED  #12 worktree sync 'tab\there.txt': worktree has 'v1\n'
+intact     #12 worktree sync 'sp ace.txt': worktree has 'v2-uncommitted\n'
+#1b col0 docstring fence: CORRUPTED 'import m\nm.run()'
+#4b chain: CORRUPTED "def f():\n    '''"
+Architect file list didn't validate (no JSON file-list block found in the text) - caller will fall back to heuristic extraction.
+Architect file list: structured JSON extraction unavailable - falling back to heuristic regex extraction over the design's prose.
+status: None gates: True files: ['App.java']
+compile-gate saw pom sha 2da925b6cb70 committed pom sha 2da925b6cb70
+#11 pom verified != committed: same
+verified pom widened: False committed widened: False
+status: None gates: True files: ['app/App.java']
+compile-gate saw pom sha 7fa328bf1147 committed pom sha 2da925b6cb70
+#11 pom verified != committed: CORRUPTED(divergent)
+verified pom widened: True committed widened: False

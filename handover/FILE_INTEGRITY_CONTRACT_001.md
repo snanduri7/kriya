@@ -174,9 +174,21 @@ Triage. Every failure was classified before changing anything.
 
 Re-run of all 14 plus both new modules: passed. Mutations re-run: 24/24 killed (`post_fix/mutation_run2.txt`). One `RuntimeWarning` (AsyncMock never awaited) in the allowlist test is pre-existing (MEASURED at `4b28bef`).
 
-## Verification
+## Verification (product commit `eeda5c8`)
 
-See the final report in the session. Evidence: `evidence/file-integrity-contract-001/`.
+| Gate | Result | Evidence |
+|---|---|---|
+| L0 original reproducers, post-fix | 32/32 predicted typed/byte-identical results; #11 verified pom == committed pom | `post_fix/repro_postfix.txt` |
+| L1 new module | 263 passed (pytest, 4.2 s) | `tests/test_file_integrity_contract_001.py` |
+| L1 mutation | 24/24 killed, run twice (before and after the L2 fixes) | `post_fix/mutation_run1.txt`, `mutation_run2.txt` |
+| L2 adjacent suites (user) | 14 failed / 2969 passed; triaged above; all 14 re-run and passing | this document |
+| L3 full pytest (user, `ulimit -n 256`) | 7769 passed / 1 failed / 72 deselected, 162 warnings. The failure (`test_repair_executor::test_generic_repair_loop_retests_only_the_targeted_test`) is a mid-line substring anchor fixture (`return 0`), issue #8; the fixture was changed to a whole-line anchor and re-run (passed). **The full suite has not been re-run at `eeda5c8` itself.** | session |
+| Static | `ruff check` (tracked tree) 0, `pylint kriya plugins/core_tools tests` 0 | session |
+| L4 requalification (policy /5, Ollama 0.34.4) | qwen3-coder 18 PASS / 0 FAIL / 1 UNAVAILABLE; qwen3.6 15/0/4 (tool cases not applicable); every role QUALIFIED | `live/qualify_*.json`, `live/model_status.txt` |
+| L4 `doctor --production` (successor config, sha256 667831f0...) | `production_ready: true`; the same five WARN checks as the PROVIDER-CONTRACT-001 closure | `live/doctor_production.json` |
+| §35 live protocol usability (24 calls, 3 trials per cell) | `structured`: 12/12 valid, 6/6 edits applied, both models. `legacy_strict`: 11/12 valid (one qwen3.6 REPLACE-without-SEARCH, refused `INVALID_EDIT_PROTOCOL`), one qwen3-coder valid `NO CHANGE NEEDED` (model decision). Payload verbatim in 24/24. Small sample, not qualification. | `live/protocol_35.jsonl` |
+
+The qualification and doctor runs used the working tree that became `eeda5c8`, plus the one test-only fixture change (`live/HEAD_at_run.txt`). No Graphify run was started.
 
 ## Residual risk
 

@@ -1,0 +1,155 @@
+"""FILE-INTEGRITY-CONTRACT-001 post-fix replay: the SAME inputs as repro_fic001.py, through the new boundary."""
+import os
+import subprocess
+import sys
+import tempfile
+
+sys.path.insert(0, os.getcwd())
+from kriya.agents.agent import DeveloperAgent as D  # noqa: E402
+from kriya.agents.response_protocol import parse_legacy_repair  # noqa: E402
+from kriya.workflow.edit_safety import (  # noqa: E402
+    StagedFileWrite, apply_anchored_edits, commit_revision_grounded_batch, read_file_revision,
+)
+from kriya.workflow.file_integrity import FileIntegrityError, load_snapshot  # noqa: E402
+
+out = []
+
+
+def rec(issue, ok, detail):
+    out.append((issue, "OK" if ok else "FAIL", detail))
+
+
+def payload(text, fp):
+    p = D.parse_file_payload(text, fp)
+    return p.content if p.kind == "file" else p.reason_code
+
+
+readme = "# Title\n\nUse it like this:\n\n```python\nx = 1\n```\n\nMore prose.\n"
+r = payload(readme, "README.md")
+rec("#1 README verbatim", r == readme, repr(r))
+py = '"""Usage:\n\n```python\nimport m\nm.run()\n```\n"""\n\ndef run():\n    return 1\n'
+r = payload(py, "m.py")
+rec("#1b col0 docstring fence refused typed", r == "AMBIGUOUS_FILE_RESPONSE_PROTOCOL", repr(r))
+for name, text, fp in [
+    ("yaml", "responses:\n    200:\n      description: ok\n    404:\n      description: nf\n", "f.yaml"),
+    ("dict", "CODES = {\n    200: 'ok',\n    404: 'nf',\n}\n", "f.py"),
+    ("doctest", 'def f():\n    """\n>>> f()\n1\n"""\n    return 1\n', "f.py"),
+    ("bitshift", "x = (a\n>> 8)\n", "f.py"),
+    ("xml-java", 'String s = "<!-- a -- b -->";\n', "A.java"),
+    ("xml-py", 's = "<!-- x--y -->"\n', "a.py"),
+    ("xml-props", "k=<!-- a -- b -->\n", "a.properties"),
+    ("file-content-doc", "Reads a file.\n\nFile content: the raw bytes are returned.\nMore docs.\n", "doc.md"),
+]:
+    r = payload(text, fp)
+    rec(f"#2-4 payload {name} byte-identical", r == text, repr(r))
+p = parse_legacy_repair("FIX ANALYSIS: fix\nFILE CONTENT:\ndef f():\n    '''\n    File content: bytes\n    '''\n    return 1\n",
+                        "f.py", patch_allowed=False)
+rec("#4b chain intact", p.kind == "file" and p.content == "def f():\n    '''\n    File content: bytes\n    '''\n    return 1\n", repr(p.content))
+p = parse_legacy_repair("FIX ANALYSIS: add guard\nFILE CONTENT:\n# no change needed for legacy callers\ndef f(x):\n    return max(x, 0)\n",
+                        "f.py", patch_allowed=False)
+rec("#5 NO CHANGE in payload keeps file", p.kind == "file" and "max(x, 0)" in (p.content or ""), repr(p))
+p = parse_legacy_repair("FIX ANALYSIS: x\nSEARCH:\ndef f(x):\n    return x\nREPLACE:\ndef f(x):\n    # No changes needed upstream\n    return max(x, 0)\n",
+                        "f.py", patch_allowed=True)
+rec("#5 NO CHANGE in payload keeps edit", p.kind == "edits" and "max(x, 0)" in p.edits[0][1], repr(p.edits))
+p = parse_legacy_repair("FIX ANALYSIS: x\nSEARCH:\nconfig:\n  mode: a\nREPLACE:\nconfig:\n  mode: b\n  search: enabled\n  replace: never\n",
+                        "c.yaml", patch_allowed=True)
+rec("#6 YAML marker-like keys stay payload", p.kind == "edits" and len(p.edits) == 1 and "replace: never" in p.edits[0][1], repr(p.edits))
+p = parse_legacy_repair('FIX ANALYSIS: x\nSEARCH:\ndef f():\n    return 1\nREPLACE:\ndef f():\n    """\n    Search: the index\n    """\n    return 2\n',
+                        "f.py", patch_allowed=True)
+rec("#6 docstring marker-like stays payload", p.kind == "edits" and "return 2" in p.edits[0][1], repr(p.edits))
+
+
+def attempt_path(p, edits):
+    snap = load_snapshot(p)
+    text = snap.text
+    new = apply_anchored_edits(text, edits, "")
+    data = snap.encode(new)
+    commit_revision_grounded_batch([StagedFileWrite(target_path=p, content=new, base_path=p,
+                                                    expected_base_revision=snap.raw_sha256, content_bytes=data)])
+    with open(p, "rb") as fh:
+        return fh.read()
+
+
+with tempfile.TemporaryDirectory() as td:
+    cases = {
+        "crlf.py": (b"a = 1\r\nb = 2\r\nc = 3\r\n", [{"search": "b = 2", "replace": "b = 20"}], b"a = 1\r\nb = 20\r\nc = 3\r\n"),
+        "nofinal.py": (b"x = 1\n  y = 2", [{"search": "x = 1", "replace": "x = 10"}], b"x = 10\n  y = 2"),
+        "ff.py": (b's = "a\x0cb"\nx = 1\n  y = 2\n', [{"search": "x = 1", "replace": "x = 10"}], b's = "a\x0cb"\nx = 10\n  y = 2\n'),
+        "u2028.py": ('s = "a b"\nx = 1\n  y = 2\n'.encode(), [{"search": "x = 1", "replace": "x = 10"}],
+                     's = "a b"\nx = 10\n  y = 2\n'.encode()),
+        "bom.py": (b"\xef\xbb\xbfx = 1\r\n", [{"search": "x = 1", "replace": "x = 10"}], b"\xef\xbb\xbfx = 10\r\n"),
+    }
+    for name, (raw, edits, expected) in cases.items():
+        p = os.path.join(td, name)
+        with open(p, "wb") as fh:
+            fh.write(raw)
+        after = attempt_path(p, edits)
+        rec(f"#7 bytes {name}", after == expected, f"got={after!r}")
+    for name, raw, edits, code in [
+        ("latin1.py", b"# caf\xe9\nx = 1\ny = 2\n", [{"search": "x = 1", "replace": "x = 10"}], "UNSUPPORTED_TEXT_ENCODING"),
+        ("mixed.py", b"a = 1\r\nb = 2\n", [{"search": "b = 2", "replace": "b = 3"}], "MIXED_NEWLINE_UNSUPPORTED"),
+        ("nofinal_bad_indent.py", b"x = 1\n  y = 2", [{"search": "x = 1\ny = 2", "replace": "x = 10\ny = 2"}], "INDENTATION_STYLE_MISMATCH"),
+    ]:
+        p = os.path.join(td, name)
+        with open(p, "wb") as fh:
+            fh.write(raw)
+        try:
+            attempt_path(p, edits)
+            got = "APPLIED"
+        except FileIntegrityError as err:
+            got = err.reason_code
+        with open(p, "rb") as fh:
+            untouched = fh.read() == raw
+        rec(f"#7 refusal {name}", got == code and untouched, f"{got}, untouched={untouched}")
+    p1, p2 = os.path.join(td, "r1"), os.path.join(td, "r2")
+    for p, b in ((p1, b"x\xff\n"), (p2, b"x\xfe\n")):
+        with open(p, "wb") as fh:
+            fh.write(b)
+    rec("#10 revision invalid bytes distinct", read_file_revision(p1) != read_file_revision(p2), "")
+    with open(p1, "wb") as fh:
+        fh.write(b"a\r\nb\r\n")
+    with open(p2, "wb") as fh:
+        fh.write(b"a\nb\n")
+    rec("#10 revision CRLF vs LF distinct", read_file_revision(p1) != read_file_revision(p2), "")
+
+
+def refused(src, edits):
+    try:
+        return apply_anchored_edits(src, edits, "")
+    except FileIntegrityError as err:
+        return err.reason_code
+
+
+r = refused("limit = 10\nprint(limit)\n", [{"search": "it = 1", "replace": "it = 2"}])
+rec("#8 substring anchor refused", r == "ANCHOR_NOT_FOUND", r)
+r = refused("a = 1\n", [{"search": "", "replace": "b = 2"}])
+rec("#9 empty SEARCH refused", r == "EMPTY_SEARCH_BLOCK", r)
+r = refused("def f():\n    a = 1\n\n\n    b = 2\n    return a + b\n", [{"search": "a = 1\nb = 2", "replace": "a = 1\nb = 3"}])
+rec("#9 blank lines not collapsed", r == "ANCHOR_NOT_FOUND", r)
+r = refused("def f():\n\tif True:\n\t\ta = 1\n\t\treturn a\n", [{"search": "    if True:\n        a = 1", "replace": "    if True:\n        a = 2"}])
+rec("#9 tabs vs spaces refused", r == "INDENTATION_STYLE_MISMATCH", r)
+
+with tempfile.TemporaryDirectory() as td:
+    repo = os.path.join(td, "repo")
+    os.makedirs(repo)
+    g = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)  # noqa: E731
+    g("init", "-q")
+    names = ["café.txt", "tab\there.txt", "sp ace.txt"]
+    for n in names:
+        with open(os.path.join(repo, n), "w") as fh:
+            fh.write("v1\n")
+    g("add", "-A")
+    g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
+    for n in names:
+        with open(os.path.join(repo, n), "w") as fh:
+            fh.write("v2-uncommitted\n")
+    from kriya.workflow.worktree import create_git_worktree
+    wt = create_git_worktree(repo)
+    for n in names:
+        with open(os.path.join(wt, n)) as fh:
+            got = fh.read()
+        rec(f"#12 worktree sync {n!r}", got == "v2-uncommitted\n", f"worktree has {got!r}")
+
+for issue, status, detail in out:
+    print(f"{status:5} {issue}: {detail}")
+print("TOTAL", sum(1 for o in out if o[1] == "OK"), "/", len(out))
