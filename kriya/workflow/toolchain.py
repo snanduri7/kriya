@@ -142,7 +142,9 @@ _JDK_INCOMPATIBLE_JVM_FLAGS: List[Tuple[str, int, str]] = [
 ]
 
 
-def _strip_jdk_incompatible_jvm_flags(worktree_path: str, java_home_override: Optional[str] = None) -> Optional[str]:
+def _strip_jdk_incompatible_jvm_flags(
+    content: str, java_home_override: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str]]:
     """Deterministically strips a JVM flag from the worktree's pom.xml
     exec-maven-plugin <argument> list when it's known to be fatal on the
     actually-resolved target JDK, right before the run-verification gate
@@ -181,47 +183,43 @@ def _strip_jdk_incompatible_jvm_flags(worktree_path: str, java_home_override: Op
     would otherwise be fine. Returns a human-readable note describing what
     was stripped (for logging/toolchain_warning), or None if nothing
     needed correcting."""
-    pom_path = os.path.join(worktree_path, "pom.xml")
-    if not os.path.exists(pom_path):
-        return None
+    # FILE-INTEGRITY-CONTRACT-001: a pure transform of pom.xml text,
+    # (corrected content, note) or (None, None). It never writes; the attempt
+    # applies it as a candidate mutation, before any verification gate.
+    # The flags are checked first: resolving the toolchain spawns java/mvn.
+    if not any(flag in content for flag, _jdk, _reason in _JDK_INCOMPATIBLE_JVM_FLAGS):
+        return None, None
     try:
         from kriya.tools.validate import check_java_toolchain
         toolchain = check_java_toolchain()
-        if java_home_override:
-            version_str = toolchain["java_version"]
-        else:
-            version_str = toolchain["mvn_java_version"] or toolchain["java_version"]
+        version_str = (
+            toolchain["java_version"] if java_home_override
+            else toolchain["mvn_java_version"] or toolchain["java_version"]
+        )
         if not version_str:
-            return None
+            return None, None
         resolved_major = int(version_str)
-
-        with open(pom_path, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        notes = []
-        for flag, min_forbidden_jdk, reason in _JDK_INCOMPATIBLE_JVM_FLAGS:
-            if resolved_major < min_forbidden_jdk or flag not in content:
-                continue
-            pattern = re.compile(rf"[ \t]*<argument>\s*{re.escape(flag)}\s*</argument>[ \t]*\n?")
-            new_content, count = pattern.subn("", content)
-            if count:
-                content = new_content
-                notes.append(
-                    f"Stripped '{flag}' from pom.xml before running - {reason} "
-                    f"(resolved target: JDK {resolved_major})."
-                )
-
-        if not notes:
-            return None
-        with open(pom_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        return " ".join(notes)
     except Exception as e:
         logger.debug(f"_strip_jdk_incompatible_jvm_flags failed (non-fatal, skipping): {e}")
-        return None
+        return None, None
+    notes = []
+    for flag, min_forbidden_jdk, reason in _JDK_INCOMPATIBLE_JVM_FLAGS:
+        if resolved_major < min_forbidden_jdk or flag not in content:
+            continue
+        pattern = re.compile(rf"[ \t]*<argument>\s*{re.escape(flag)}\s*</argument>[ \t]*\n?")
+        new_content, count = pattern.subn("", content)
+        if count:
+            content = new_content
+            notes.append(
+                f"Stripped '{flag}' from pom.xml before running - {reason} "
+                f"(resolved target: JDK {resolved_major})."
+            )
+    return (content, " ".join(notes)) if notes else (None, None)
 
 
-def _pin_exec_plugin_executable_to_resolved_jdk(worktree_path: str, java_home_override: Optional[str]) -> Optional[str]:
+def _pin_exec_plugin_executable_to_resolved_jdk(
+    content: str, java_home_override: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
     """Pins exec-maven-plugin's <executable> (the exec:exec goal only -
     exec:java always runs inside Maven's own already-started JVM and ignores
     <executable>/<arguments> entirely, using <mainClass>/systemProperties
@@ -256,37 +254,19 @@ def _pin_exec_plugin_executable_to_resolved_jdk(worktree_path: str, java_home_ov
     and silent on any I/O problem, same discipline as
     _strip_jdk_incompatible_jvm_flags - a defensive correction, never allowed
     to break a run that would otherwise be fine."""
+    # FILE-INTEGRITY-CONTRACT-001: a pure transform, like the one above.
     if not java_home_override:
-        return None
-    pom_path = os.path.join(worktree_path, "pom.xml")
-    if not os.path.exists(pom_path):
-        return None
-    try:
-        with open(pom_path, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        resolved_java = os.path.join(java_home_override, "bin", "java")
-        pattern = re.compile(r"<executable>\s*java\s*</executable>")
-        new_content, count = pattern.subn(f"<executable>{resolved_java}</executable>", content, count=1)
-        if not count:
-            return None
-
-        with open(pom_path, "w", encoding="utf-8") as f:
-            f.write(new_content)
-        return (
-            f"Pinned exec-maven-plugin's <executable> to {resolved_java} - the JDK this "
-            "run's verification actually used - so the delivered project runs consistently "
-            "later regardless of the default JDK on whoever runs it."
-        )
-    except Exception as e:
-        logger.debug(f"_pin_exec_plugin_executable_to_resolved_jdk failed (non-fatal, skipping): {e}")
-        return None
-
-
-# _detect_missing_build_manifest() (formerly here) moved to
-# kriya/workflow/attribution.py on 2026-08-14, alongside the rest of the
-# "which file does this concern" checks - see that module's own docstring
-# taxonomy.
+        return None, None
+    resolved_java = os.path.join(java_home_override, "bin", "java")
+    pattern = re.compile(r"<executable>\s*java\s*</executable>")
+    new_content, count = pattern.subn(f"<executable>{resolved_java}</executable>", content, count=1)
+    if not count:
+        return None, None
+    return new_content, (
+        f"Pinned exec-maven-plugin's <executable> to {resolved_java} - the JDK this "
+        "run's verification actually used - so the delivered project runs consistently "
+        "later regardless of the default JDK on whoever runs it."
+    )
 
 
 def toolchain_declaration_mutable(

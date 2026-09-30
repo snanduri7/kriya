@@ -561,6 +561,23 @@ class AutonomyConfig(BaseModel):
     # "denied". SECURITY_AUTHORITY under SEC-009.
     shell_network: str = Field(default="unrestricted")
 
+    # FILE-INTEGRITY-CONTRACT-001 (kriya/agents/response_protocol.py): the
+    # protocol the Developer is asked to answer in. "legacy_strict" keeps the
+    # historical FIX ANALYSIS/SEARCH/REPLACE/FILE CONTENT/NO CHANGE NEEDED
+    # markers, recognized only as exact lines; "structured" asks for
+    # path-named <<<KRIYA:...>>> sentinel blocks. Both produce the same typed
+    # intent and neither rewrites payload. SECURITY_AUTHORITY under SEC-009.
+    developer_response_protocol: str = Field(default="legacy_strict")
+
+    @field_validator("developer_response_protocol")
+    @classmethod
+    def _developer_response_protocol_must_be_known(cls, v: str) -> str:
+        if v not in ("legacy_strict", "structured"):
+            raise ValueError(
+                f"autonomy.developer_response_protocol must be 'legacy_strict' or 'structured', got {v!r}"
+            )
+        return v
+
     @field_validator("shell_network")
     @classmethod
     def _shell_network_must_be_known(cls, v: str) -> str:

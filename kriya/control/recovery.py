@@ -317,7 +317,10 @@ def _classify_v2(current: Dict[str, Any], operation: Dict[str, Any]) -> str:
 def _classify_v1(target: str, operation: Dict[str, Any]) -> str:
     """Schema-1 evidence only has text revisions (errors="replace" decoding,
     a missing file reads like an empty one): weaker evidence, and AMBIGUOUS
-    whenever it cannot tell the two states apart."""
+    whenever it cannot tell the two states apart. read_file_revision() is a
+    raw-byte digest (FILE-INTEGRITY-CONTRACT-001), equal to such a text
+    revision only for valid UTF-8 with LF endings; any other file therefore
+    classifies FOREIGN - fail closed, never a guessed state."""
     exists = os.path.lexists(target)
     if exists and not os.path.isfile(target):
         return OP_FOREIGN

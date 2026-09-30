@@ -1038,7 +1038,7 @@ This protects brownfield baselines and allows deterministic recovery.
 
 ## KAD-036 — Verified Bytes Must Equal Committed Bytes
 
-**Status:** ACTIVE  
+**Status:** ACTIVE — EXTENDED (KAD-063)  
 **Change class:** PRESERVE
 
 ### Decision
@@ -1668,6 +1668,52 @@ KAD-028, KAD-029, KAD-030, KAD-031, KAD-059. Evidence: `evidence/provider-contra
 
 ---
 
+## KAD-063 — Protocol and Payload Are Separate Trust Boundaries
+
+**Status:** ACTIVE (2026-09-30, FILE-INTEGRITY-CONTRACT-001)  
+**Change class:** EXTEND (KAD-035, KAD-036)
+
+### Decision
+
+A model response is protocol plus payload, and they are separate trust boundaries. Kriya may parse protocol metadata. It may remove a wrapper that encloses the whole payload. It may not heuristically rewrite file payload: no trimming, repair, re-indentation guesses, marker truncation or normalization of file content. A response that does not match its protocol is refused and re-asked, never interpreted.
+
+Sanitization is not mutation authority. Every repository mutation is a candidate operation bound to the target's raw-byte revision. It is applied by one byte-preserving edit engine, and only bytes outside the authorized span are the source's own. It goes through the one authorized staged writer. Any deterministic transformation Kriya performs is an ordinary candidate mutation: authorized, visible in the candidate and its evidence, and verified. No write happens between verification and commit, and the committed bytes are re-read against the verified bytes.
+
+### Why
+
+MEASURED at `1200824`:
+- The shared sanitizer reduced a README to its code block and deleted YAML/dict keys.
+- It rewrote XML-comment-like strings in Java and Python.
+- It truncated files at marker-like prose, and dropped a whole fix on a "no change needed" comment.
+- Substring anchors changed `limit = 10` to `limit = 20`.
+- Lossy reads turned CRLF into LF and invalid bytes into U+FFFD, and made different bytes share one revision.
+- Worktree sync missed paths with tabs or non-ASCII characters.
+- A real engine run verified a `pom.xml` Kriya had rewritten in the sandbox but never committed.
+
+### Invariant
+
+> Kriya never silently alters file bytes outside the exact authorized mutation, and `verified candidate bytes == committed bytes` holds per file, checked after the commit as well as before it.
+
+Revision identity used for mutation safety is `sha256(raw bytes)`. A file Kriya cannot represent byte-exactly is refused, never re-encoded: an unsupported encoding, mixed line endings, or a symbolic link.
+
+### Does not imply
+
+- A particular wire format. The legacy markers (strict) and the sentinel protocol both satisfy this decision. Which one production uses is a qualification question.
+- Support for encodings beyond UTF-8.
+- That malformed model output is Kriya's to fix. It is the model's to repeat correctly.
+
+### Change trigger
+
+- A new response protocol or mutation operation.
+- A new deterministic transformation of candidate content.
+- Any new filesystem write site (the audit tripwire in `tests/test_file_integrity_contract_001.py`).
+
+### Related
+
+KAD-022..027, KAD-035, KAD-036, KAD-037. Evidence: `evidence/file-integrity-contract-001/`, `handover/FILE_INTEGRITY_CONTRACT_001.md`.
+
+---
+
 ## KAD-H01 — One-File-at-a-Time Generation Is a Stability Strategy, Not a Universal Product Law
 
 **Status:** ACTIVE STRATEGY WHERE APPLICABLE
@@ -1914,7 +1960,7 @@ Only generic architectural conclusions belong here.
 | Brownfield analysis | KAD-017..021 |
 | Context/mutation authority | KAD-022..027 |
 | Model governance | KAD-028..033, KAD-062 |
-| Candidate/commit | KAD-034..037 |
+| Candidate/commit | KAD-034..037, KAD-063 |
 | Verification/recovery | KAD-038..044 |
 | Knowledge/CKM/EIE | KAD-045..052 |
 | Benchmark/process/certification | KAD-053..059 |

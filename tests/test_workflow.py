@@ -102,7 +102,6 @@ from kriya.workflow.file_resolution import (
     include_response_construction_owners,
     is_runnable_test_file,
     prefer_existing_artifact_owners,
-    strip_package_declaration_matching_source_root,
 )
 from kriya.workflow.obligations import (
     ObligationAuthority,
@@ -3434,7 +3433,8 @@ async def test_run_coordinated_repair_generation_candidate_view_isolation_with_a
         if filepath == app_path:
             return [{
                 "filepath": app_path, "content": None,
-                "edits": [{"search": "System.exit(1);", "replace": "return;"}],
+                "edits": [{"search": "        if (args.length == 0) { System.exit(1); }",
+                           "replace": "        if (args.length == 0) { return; }"}],
             }]
         return [{"filepath": test_path, "content": "NEW_TEST_CANDIDATE_BODY", "edits": []}]
 
@@ -3728,7 +3728,8 @@ async def test_run_attempt_coordinated_anchored_edit_response_reaches_shared_pip
             # anchored edit, not full file content.
             return [{
                 "filepath": app_path, "content": None,
-                "edits": [{"search": "System.exit(1);", "replace": "return;"}],
+                "edits": [{"search": "        if (args.length == 0) { System.exit(1); }",
+                           "replace": "        if (args.length == 0) { return; }"}],
             }]
         return [{"filepath": test_path, "content": fixed_test, "edits": []}]
 
@@ -3781,11 +3782,13 @@ async def test_run_attempt_coordinated_active_code_context_reflects_candidate_vi
         if filepath == app_path:
             return [{
                 "filepath": app_path, "content": None,
-                "edits": [{"search": "System.exit(1);", "replace": "return;"}],
+                "edits": [{"search": "        if (args.length == 0) { System.exit(1); }",
+                           "replace": "        if (args.length == 0) { return; }"}],
             }]
         return [{
             "filepath": test_path, "content": None,
-            "edits": [{"search": "testMain", "replace": "testMainAgain"}],
+            "edits": [{"search": "    void testMain() { App.main(new String[0]); }",
+                       "replace": "    void testMainAgain() { App.main(new String[0]); }"}],
         }]
 
     captured_contexts = []
@@ -8620,18 +8623,11 @@ async def test_workflow_prompt_includes_resource_lifecycle_on_missing_files_retr
     assert "Resource Lifecycle" in second_call_kwargs["task_description"]
 
 @pytest.mark.asyncio
-async def test_workflow_sanitizes_batch_json_content_before_writing_to_disk(tmp_path):
-    """Regression test for a real, previously-uncovered gap: DeveloperAgent's
-    per-file generation paths (_fill_missing_content) route content through
-    DeveloperAgent.sanitize_generated_content, but a batch JSON response's
-    content field (DeveloperAgent._normalize_file_entries, used when the
-    model returns full file objects in one JSON array) never passed through
-    ANY sanitization before this fix - it went straight from parsed JSON to
-    disk. Mocking run_generation here stands in for that path (as the other
-    workflow-level tests in this file already do for the Developer Agent
-    generally) to confirm the workflow's own write loop - not just the
-    agent-side paths - now sanitizes any content it receives, regardless of
-    which internal path produced it."""
+async def test_workflow_writes_batch_json_content_byte_verbatim(tmp_path):
+    """FILE-INTEGRITY-CONTRACT-001 (replaces the pre-contract "sanitizes batch
+    JSON content" test): the attempt's write choke point never rewrites
+    payload. Content that merely LOOKS like Kriya's display gutter, a fence
+    or an XML comment reaches disk byte for byte."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
@@ -8644,29 +8640,18 @@ async def test_workflow_sanitizes_batch_json_content_before_writing_to_disk(tmp_
         "Review: Approved",
     ])
     we = WorkflowEngine(kernel, llm)
-    we.developer.run_generation = AsyncMock(return_value=[
-        {"filepath": "App.py", "content": "```python\n>> 1: def main():\n    pass\n```"}
-    ])
+    payload = 'def main():\n    marker = """\n>> 1: not a gutter\n   2: <!-- a -- b -->\n"""\n    return marker\n'
+    we.developer.run_generation = AsyncMock(return_value=[{"filepath": "App.py", "content": payload}])
     res = await we.run_generation_workflow(goal="Write a script", workspace_path=str(tmp_path))
     assert res["quality_gates_passed"] is True
-    written = (tmp_path / "App.py").read_text()
-    assert "```" not in written
-    assert ">>" not in written
-    assert written == "def main():\n    pass"
+    assert (tmp_path / "App.py").read_bytes() == payload.encode("utf-8")
 
 @pytest.mark.asyncio
-async def test_workflow_sanitizes_batch_json_edits_before_applying(tmp_path):
-    """Same gap as above, for the edits path: a batch JSON response's edits
-    field (search/replace text) also went straight to apply_anchored_edits
-    with zero sanitization before this fix - a model that echoed a gutter
-    into an edit supplied this way (not through _split_fix_analysis_edit,
-    which already sanitized its own edits) would have produced a guaranteed
-    anchor-match failure with no way to recover. Attempt 1 writes the file
-    normally and a mocked compile failure forces a targeted retry, so the
-    edit's target content is legitimately present in apply_anchored_edits'
-    own shown_context guard (mirrors the precedent in
-    test_workflow_anchored_edit_failure_captures_filepath, which exercises
-    the same edits path but for the mismatch-failure case, not success)."""
+async def test_workflow_gutter_prefixed_batch_json_edit_fails_typed_never_stripped(tmp_path):
+    """FILE-INTEGRITY-CONTRACT-001 (replaces the pre-contract "sanitizes batch
+    JSON edits" test): a SEARCH block carrying Kriya's display gutter is not
+    silently repaired; it fails as a typed ANCHOR_NOT_FOUND anchored-edit
+    failure, and the next, correct edit applies."""
     _init_git_repo(tmp_path)
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
@@ -8679,11 +8664,6 @@ async def test_workflow_sanitizes_batch_json_edits_before_applying(tmp_path):
         "Review: Approved",
     ])
     we = WorkflowEngine(kernel, llm)
-    # "   1: " (three leading spaces) is Kriya's own non-highlighted
-    # context-line gutter (see _build_error_source_context's format string:
-    # the two-space placeholder plus its own literal space before {i+1})
-    # prepended to the real, unmarked source line "    old()" - exactly the
-    # shape a model echoing the gutter back would produce.
     gutter_prefixed_search = "   1: " + "    old()"
     with patch("kriya.tools.validate.PolymorphicValidator.run_compile_check") as mock_compile:
         mock_compile.side_effect = [
@@ -8692,14 +8672,17 @@ async def test_workflow_sanitizes_batch_json_edits_before_applying(tmp_path):
         ]
         we.developer.run_generation = AsyncMock(side_effect=[
             [{"filepath": "App.py", "content": "def main():\n    old()\n"}],
-            [{"filepath": "App.py", "edits": [
-                {"search": gutter_prefixed_search, "replace": "    new()"}
-            ]}],
+            [{"filepath": "App.py", "edits": [{"search": gutter_prefixed_search, "replace": "    new()"}]}],
+            [{"filepath": "App.py", "edits": [{"search": "    old()", "replace": "    new()"}]}],
         ])
         res = await we.run_generation_workflow(goal="Write a script", workspace_path=str(tmp_path))
     assert res["quality_gates_passed"] is True
-    written = (tmp_path / "App.py").read_text()
-    assert written == "def main():\n    new()\n"
+    assert (tmp_path / "App.py").read_text() == "def main():\n    new()\n"
+    row = _latest_trace_row(cfg)
+    anchor_failures = [o for o in json.loads(row["gate_outcomes"]) if o.get("type") == "anchored_edit"]
+    assert len(anchor_failures) == 1
+    # Refused by the anchor-authority gate before the engine: typed, never stripped.
+    assert anchor_failures[0]["output"].startswith("ANCHOR_NOT_IN_FILE:")
 
 
 def _latest_trace_row(cfg):
@@ -12524,37 +12507,8 @@ async def test_run_attempt_disables_run_verification_end_to_end_for_python_test_
     mock_run_app_sequence.assert_not_called()
 
 
-def test_strip_package_declaration_matching_source_root_removes_the_bogus_package():
-    """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol
-    milestone 3/4): `package src.main.java;` is the Maven source-root path,
-    dotted, mistaken for a package name - unconditionally invalid for a file
-    with zero subdirectory nesting below src/main/java/."""
-    content = "package src.main.java;\n\nimport java.util.Arrays;\n\npublic class Protocol {\n}\n"
-    result = strip_package_declaration_matching_source_root("src/main/java/Protocol.java", content)
-    assert result is not None
-    assert "package" not in result
-    assert "import java.util.Arrays;" in result
-
-
-def test_strip_package_declaration_matching_source_root_leaves_real_nested_packages_alone():
-    """A file WITH real subdirectory nesting below src/main/java/ may
-    legitimately need a real package - this function has no way to derive
-    what it should be and must never touch it."""
-    content = "package com.example;\npublic class Foo {}\n"
-    assert strip_package_declaration_matching_source_root("src/main/java/com/example/Foo.java", content) is None
-
-
-def test_strip_package_declaration_matching_source_root_is_a_noop_outside_the_source_root():
-    content = "package src.main.java;\npublic class Protocol {}\n"
-    assert strip_package_declaration_matching_source_root("Protocol.java", content) is None
-
-
-def test_strip_package_declaration_matching_source_root_is_a_noop_without_a_package_declaration():
-    assert strip_package_declaration_matching_source_root("src/main/java/Bar.java", "public class Bar {}\n") is None
-
-
 @pytest.mark.asyncio
-async def test_run_attempt_deterministically_strips_directory_path_masquerading_as_package_end_to_end(tmp_path):
+async def test_run_attempt_never_rewrites_a_developer_package_declaration_end_to_end(tmp_path):
     """Regression test for a real live bug, 2026-08-22 (ignite_qpid_protocol,
     milestone 3/4): the Developer wrote Protocol.java directly under
     src/main/java/ (no subdirectory nesting) with `package src.main.java;` -
@@ -12593,8 +12547,11 @@ async def test_run_attempt_deterministically_strips_directory_path_masquerading_
 
     with open(os.path.join(str(tmp_path), "src/main/java/Protocol.java"), "r", encoding="utf-8") as f:
         final_content = f.read()
-    assert "package" not in final_content
-    assert "public class Protocol {" in final_content
+    # FILE-INTEGRITY-CONTRACT-001: the pre-contract behaviour stripped this
+    # declaration behind the gates (a hidden payload rewrite). Now the
+    # Developer's bytes are what the gates see and what is written; the
+    # compiler, not Kriya, judges the package.
+    assert final_content == "package src.main.java;\n\npublic class Protocol {\n    private int version;\n}\n"
 
 
 def test_correct_exec_main_class_property_fixes_a_copied_example_placeholder():
@@ -19692,6 +19649,20 @@ _POM_WITH_SECURITY_MANAGER_FLAG = """<project>
 </project>
 """
 
+def _apply_pom_transform(tmp_path, transform, *args, **kwargs):
+    """FILE-INTEGRITY-CONTRACT-001 made the pom corrections pure text
+    transforms (the attempt applies them as candidate mutations through the
+    authorized writer). Applies one to tmp_path/pom.xml and returns its note,
+    so these unit tests keep asserting the transform itself."""
+    pom = tmp_path / "pom.xml"
+    if not pom.exists():
+        return None
+    new_content, note = transform(pom.read_text(), *args, **kwargs)
+    if new_content is not None:
+        pom.write_text(new_content)
+    return note
+
+
 def test_strip_jdk_incompatible_jvm_flags_strips_on_forbidden_jdk(tmp_path):
     """Regression test for a real bug found live (2026-08-07 eval harness):
     skills/qpid/rules.txt already states the correct JDK-version-conditional
@@ -19705,7 +19676,7 @@ def test_strip_jdk_incompatible_jvm_flags_strips_on_forbidden_jdk(tmp_path):
         "mvn_found": True, "mvn_java_version": "26",
         "mismatch": False,
     }):
-        note = _strip_jdk_incompatible_jvm_flags(str(tmp_path))
+        note = _apply_pom_transform(tmp_path, _strip_jdk_incompatible_jvm_flags)
     assert note is not None
     assert "java.security.manager" in note
     assert "JDK 26" in note
@@ -19724,7 +19695,7 @@ def test_strip_jdk_incompatible_jvm_flags_leaves_flag_on_supported_jdk(tmp_path)
         "mvn_found": True, "mvn_java_version": "17",
         "mismatch": False,
     }):
-        note = _strip_jdk_incompatible_jvm_flags(str(tmp_path))
+        note = _apply_pom_transform(tmp_path, _strip_jdk_incompatible_jvm_flags)
     assert note is None
     assert "-Djava.security.manager=allow" in (tmp_path / "pom.xml").read_text()
 
@@ -19735,10 +19706,10 @@ def test_strip_jdk_incompatible_jvm_flags_none_when_flag_absent(tmp_path):
         "mvn_found": True, "mvn_java_version": "26",
         "mismatch": False,
     }):
-        assert _strip_jdk_incompatible_jvm_flags(str(tmp_path)) is None
+        assert _apply_pom_transform(tmp_path, _strip_jdk_incompatible_jvm_flags) is None
 
 def test_strip_jdk_incompatible_jvm_flags_none_when_no_pom(tmp_path):
-    assert _strip_jdk_incompatible_jvm_flags(str(tmp_path)) is None
+    assert _apply_pom_transform(tmp_path, _strip_jdk_incompatible_jvm_flags) is None
 
 def test_strip_jdk_incompatible_jvm_flags_uses_override_target_not_mvn_default(tmp_path):
     """Regression test for a real bug found live (2026-08-07 eval harness,
@@ -19758,8 +19729,8 @@ def test_strip_jdk_incompatible_jvm_flags_uses_override_target_not_mvn_default(t
         "mvn_found": True, "mvn_java_version": "26",
         "mismatch": True,
     }):
-        note = _strip_jdk_incompatible_jvm_flags(
-            str(tmp_path),
+        note = _apply_pom_transform(
+            tmp_path, _strip_jdk_incompatible_jvm_flags,
             java_home_override="/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
         )
     # Effective target is JDK 17 (the override), where this flag is
@@ -19776,7 +19747,7 @@ def test_strip_jdk_incompatible_jvm_flags_still_strips_when_override_target_is_f
         "mvn_found": True, "mvn_java_version": "17",
         "mismatch": True,
     }):
-        note = _strip_jdk_incompatible_jvm_flags(str(tmp_path), java_home_override="/some/jdk-26/Home")
+        note = _apply_pom_transform(tmp_path, _strip_jdk_incompatible_jvm_flags, java_home_override="/some/jdk-26/Home")
     assert note is not None
     assert "JDK 26" in note
     assert "-Djava.security.manager=allow" not in (tmp_path / "pom.xml").read_text()
@@ -19792,8 +19763,8 @@ def test_pin_exec_plugin_executable_pins_when_override_active(tmp_path):
     Kriya's own JAVA_HOME-overridden environment, on a machine where 'mvn'
     itself defaults to a JDK the app is genuinely incompatible with."""
     (tmp_path / "pom.xml").write_text(_POM_WITH_SECURITY_MANAGER_FLAG)
-    note = _pin_exec_plugin_executable_to_resolved_jdk(
-        str(tmp_path),
+    note = _apply_pom_transform(
+        tmp_path, _pin_exec_plugin_executable_to_resolved_jdk,
         java_home_override="/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home",
     )
     assert note is not None
@@ -19810,7 +19781,7 @@ def test_pin_exec_plugin_executable_none_without_override(tmp_path):
     # Nothing to reconcile without a detected java/mvn mismatch in the first
     # place - must leave the pom untouched.
     (tmp_path / "pom.xml").write_text(_POM_WITH_SECURITY_MANAGER_FLAG)
-    assert _pin_exec_plugin_executable_to_resolved_jdk(str(tmp_path), None) is None
+    assert _apply_pom_transform(tmp_path, _pin_exec_plugin_executable_to_resolved_jdk, None) is None
     assert "<executable>java</executable>" in (tmp_path / "pom.xml").read_text()
 
 def test_pin_exec_plugin_executable_none_when_already_pinned(tmp_path):
@@ -19821,12 +19792,12 @@ def test_pin_exec_plugin_executable_none_when_already_pinned(tmp_path):
         "<executable>/some/other/jdk/bin/java</executable>",
     )
     (tmp_path / "pom.xml").write_text(already_pinned)
-    note = _pin_exec_plugin_executable_to_resolved_jdk(str(tmp_path), "/Library/Java/temurin-17")
+    note = _apply_pom_transform(tmp_path, _pin_exec_plugin_executable_to_resolved_jdk, "/Library/Java/temurin-17")
     assert note is None
     assert "/some/other/jdk/bin/java" in (tmp_path / "pom.xml").read_text()
 
 def test_pin_exec_plugin_executable_none_when_no_pom(tmp_path):
-    assert _pin_exec_plugin_executable_to_resolved_jdk(str(tmp_path), "/Library/Java/temurin-17") is None
+    assert _apply_pom_transform(tmp_path, _pin_exec_plugin_executable_to_resolved_jdk, "/Library/Java/temurin-17") is None
 
 def test_pin_exec_plugin_executable_none_for_exec_java_shape(tmp_path):
     # exec:java always runs inside Maven's own already-started JVM and never
@@ -19846,7 +19817,7 @@ def test_pin_exec_plugin_executable_none_for_exec_java_shape(tmp_path):
       </build>
     </project>
     """)
-    assert _pin_exec_plugin_executable_to_resolved_jdk(str(tmp_path), "/Library/Java/temurin-17") is None
+    assert _apply_pom_transform(tmp_path, _pin_exec_plugin_executable_to_resolved_jdk, "/Library/Java/temurin-17") is None
 
 def test_resolve_jdk_home_for_version_uses_java_home_tool_on_macos():
     """Regression test for a real, live bug (2026-08-07): the ORIGINAL
@@ -23192,7 +23163,7 @@ def test_find_structural_corruption_detects_unclosed_and_extra_braces():
     assert "unclosed" in problem
 
 
-def test_apply_anchored_edits_handles_search_block_with_different_blank_line_count_than_content():
+def test_apply_anchored_edits_refuses_a_search_block_with_a_different_blank_line_count():
     """Regression test for a real bug found live, 2026-08-11
     (kriya-oneshot-protocol-ignite-qpid audit): the OLD uniqueness check
     counted matches against a whole-file, ALL-blank-lines-collapsed flatten
@@ -23205,26 +23176,31 @@ def test_apply_anchored_edits_handles_search_block_with_different_blank_line_cou
     inside target content" - a self-contradictory outcome, confirmed by
     reproducing it against the pre-fix function. The fix computes uniqueness
     and location with the SAME window algorithm, so this must now succeed."""
+    # FILE-INTEGRITY-CONTRACT-001: uniqueness and location still share one
+    # algorithm, but blank lines are now part of the anchor (they are never
+    # collapsed), so a different blank-line count is a typed zero match, and
+    # the same count with shifted indentation applies re-indented.
+    from kriya.workflow.file_integrity import ANCHOR_NOT_FOUND, FileIntegrityError
     from kriya.workflow.workflow import apply_anchored_edits
 
-    search_block = "int a = 1;\n\nint b = 2;"
     content = "class X {\n    int a = 1;\n\n\n    int b = 2;\n}"
-    edits = [{"search": search_block, "replace": "int a = 99;\n\nint b = 2;"}]
+    edits = [{"search": "int a = 1;\n\nint b = 2;", "replace": "int a = 99;\n\nint b = 2;"}]
+    with pytest.raises(FileIntegrityError) as raised:
+        apply_anchored_edits(content, edits, "")
+    assert raised.value.reason_code == ANCHOR_NOT_FOUND
 
-    result = apply_anchored_edits(content, edits, "")
-
-    assert "int a = 99;" in result
-    assert "int b = 2;" in result
+    edits = [{"search": "int a = 1;\n\n\nint b = 2;", "replace": "int a = 99;\n\n\nint b = 2;"}]
+    assert apply_anchored_edits(content, edits, "") == "class X {\n    int a = 99;\n\n\n    int b = 2;\n}"
 
 
 def test_apply_anchored_edits_still_rejects_genuinely_ambiguous_window_match():
     from kriya.workflow.workflow import apply_anchored_edits
 
     search_block = "return x;"
-    content = "int a() { return x; }\nint b() { return x; }"
+    content = "int a() {\n    return x;\n}\nint b() {\n    return x;\n}"
     edits = [{"search": search_block, "replace": "return y;"}]
 
-    with pytest.raises(ValueError, match="matched 2 times"):
+    with pytest.raises(ValueError, match="ANCHOR_AMBIGUOUS: .*matched 2 times"):
         apply_anchored_edits(content, edits, "")
 
 
@@ -23233,7 +23209,7 @@ def test_apply_anchored_edits_still_rejects_zero_matches():
 
     edits = [{"search": "does not exist anywhere", "replace": "x"}]
 
-    with pytest.raises(ValueError, match="matched 0 times"):
+    with pytest.raises(ValueError, match="ANCHOR_NOT_FOUND: .*matched 0 times"):
         apply_anchored_edits("class X {}", edits, "")
 
     extra = "public class Foo {\n    void bar() {}\n}\n}\n"
@@ -23242,7 +23218,7 @@ def test_apply_anchored_edits_still_rejects_zero_matches():
     assert "extra closing" in problem2
 
 
-def test_apply_anchored_edits_grounds_a_chained_edit_against_evolving_content():
+def test_apply_anchored_edits_refuses_a_chained_edit_anchored_in_another_edits_output():
     """Regression test for a real bug found live, 2026-08-17, digging into a
     corpus-wide survey of eval-harness runs: shown_context is a fixed
     snapshot passed in once, never updated across the per-edit loop, but
@@ -23266,8 +23242,16 @@ def test_apply_anchored_edits_grounds_a_chained_edit_against_evolving_content():
         {"search": "int x = 1;", "replace": "int x = 1;\n    helper();"},
         {"search": "helper();", "replace": "helper(); // step 2, chained off edit 1"},
     ]
-    result = apply_anchored_edits(original, edits, shown_context)
-    assert "helper(); // step 2, chained off edit 1" in result
+    # FILE-INTEGRITY-CONTRACT-001 supersedes the sequential grounding this
+    # test once asserted: every edit locates in the same immutable source
+    # snapshot, and an anchor that exists only in another edit's output is
+    # refused typed (nothing applied), never grounded on intermediate text.
+    from kriya.workflow.file_integrity import FileIntegrityError
+
+    with pytest.raises(FileIntegrityError) as raised:
+        apply_anchored_edits(original, edits, shown_context)
+    assert raised.value.reason_code == "ANCHOR_NOT_IN_FILE"
+    assert "edit #2" in str(raised.value)
 
 
 def test_apply_anchored_edits_chained_grounding_still_rejects_fabricated_search_text():

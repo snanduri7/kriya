@@ -862,43 +862,6 @@ async def test_run_generation_with_known_target_files_skips_file_list_call():
     assert files_by_path["pom.xml"] == "<project>fixed</project>"
 
 
-def test_split_fix_analysis_extracts_marker_and_strips_content():
-    text = (
-        "FIX ANALYSIS: The cache is used as a raw type so .get() returns Object; "
-        "adding explicit generics fixes it.\n"
-        "FILE CONTENT:\n"
-        "public class App {}"
-    )
-    analysis, content = DeveloperAgent._split_fix_analysis(text)
-    assert analysis == "The cache is used as a raw type so .get() returns Object; adding explicit generics fixes it."
-    assert content == "public class App {}"
-
-def test_split_fix_analysis_is_case_insensitive():
-    text = "fix analysis: short reason\nfile content:\nclass X {}"
-    analysis, content = DeveloperAgent._split_fix_analysis(text)
-    assert analysis == "short reason"
-    assert content == "class X {}"
-
-def test_split_fix_analysis_truncates_prose_phrased_marker():
-    # Same real 2026-08-08 phrasing as
-    # test_split_fix_analysis_edit_truncates_prose_phrased_trailing_file_content,
-    # exercised directly against _split_fix_analysis (the fallback path
-    # _split_fix_analysis_edit itself defers to when no SEARCH:/REPLACE:
-    # markers are present).
-    text = "FIX ANALYSIS: reason here.\nCorrected file content for 'App.java':\npublic class App {}"
-    analysis, content = DeveloperAgent._split_fix_analysis(text)
-    assert analysis == "reason here."
-    assert content == "public class App {}"
-
-def test_split_fix_analysis_falls_back_when_marker_missing():
-    # A non-compliant response (no marker at all) must degrade to the plain
-    # pre-existing behavior - the whole text treated as content, not corrupted
-    # or silently dropped.
-    text = "public class App {}"
-    analysis, content = DeveloperAgent._split_fix_analysis(text)
-    assert analysis is None
-    assert content == text
-
 @pytest.mark.asyncio
 async def test_fill_missing_content_adds_fix_analysis_instruction_only_with_prior_error():
     """Regression test for a real, generalizable bug found live during golden-
@@ -1419,47 +1382,6 @@ async def test_fill_missing_content_scopes_fix_analysis_to_implicated_files_only
     assert files_by_path["Broken.java"] == "class Broken {}"
     assert files_by_path["Unrelated.java"] == "class Unrelated {}"
 
-def test_split_fix_analysis_edit_extracts_search_replace():
-    text = (
-        "FIX ANALYSIS: Person needs to implement Serializable for ObjectMessage.\n"
-        "SEARCH:\n"
-        "public class Person {\n"
-        "REPLACE:\n"
-        "public class Person implements java.io.Serializable {"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert analysis == "Person needs to implement Serializable for ObjectMessage."
-    assert edits == [{
-        "search": "public class Person {",
-        "replace": "public class Person implements java.io.Serializable {",
-    }]
-    assert content is None
-
-def test_split_fix_analysis_edit_falls_back_to_file_content_when_no_markers():
-    text = "FIX ANALYSIS: broader change needed.\nFILE CONTENT:\npublic class App {}"
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert analysis == "broader change needed."
-    assert edits is None
-    assert content == "public class App {}"
-
-def test_split_fix_analysis_edit_falls_back_when_no_markers_at_all():
-    text = "public class App {}"
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert analysis is None
-    assert edits is None
-    assert content == text
-
-def test_split_fix_analysis_edit_does_not_treat_prose_substrings_as_markers():
-    text = (
-        "FIX ANALYSIS: I will search: for the invalid import and replace: it.\n"
-        "FILE CONTENT:\npublic class App {}"
-    )
-
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-
-    assert edits is None
-    assert content == "public class App {}"
-
 @pytest.mark.asyncio
 async def test_repair_generation_fails_closed_on_dangling_search_marker():
     """The exact malformed envelope that corrupted python_task_tracker source."""
@@ -1481,382 +1403,8 @@ async def test_repair_generation_fails_closed_on_dangling_search_marker():
 
     assert files[0]["content"] is None
     assert not files[0].get("edits")
-    assert "incomplete repair markers" in files[0]["protocol_error"]
-
-def test_split_fix_analysis_edit_truncates_redundant_trailing_file_content():
-    """Regression test for a real bug found live, 2026-08-04: a model asked
-    to prefer an anchored edit sometimes ALSO appends a redundant, unasked-
-    for FILE CONTENT: block after its SEARCH/REPLACE - without truncating
-    replace_block there, the entire redundant full-file content (plus the
-    literal "FILE CONTENT:" marker text) got swallowed into the applied
-    patch. Confirmed live: this exact shape (a correct 3-line import fix,
-    plus a redundant trailing FILE CONTENT: block) corrupted a real file
-    with a duplicated package/class declaration, producing "class,
-    interface, enum, or record expected" - not a model mistake, since the
-    SEARCH/REPLACE portion alone was entirely correct."""
-    text = (
-        "FIX ANALYSIS: IgniteCache is imported from the wrong package.\n"
-        "SEARCH:\n"
-        "import org.apache.ignite.cache.IgniteCache;\n"
-        "REPLACE:\n"
-        "import org.apache.ignite.IgniteCache;\n"
-        "\n"
-        "FILE CONTENT:\n"
-        "package com.example;\n"
-        "import org.apache.ignite.IgniteCache;\n"
-        "public class App { /* redundant full regeneration the model wasn't asked for */ }"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert edits == [{
-        "search": "import org.apache.ignite.cache.IgniteCache;",
-        "replace": "import org.apache.ignite.IgniteCache;",
-    }]
-    assert content is None
-
-def test_split_fix_analysis_edit_truncates_prose_phrased_trailing_file_content():
-    """Regression test for a real bug found live, 2026-08-08
-    (ignite_qpid_protocol, run 20260808-053604): the truncation above only
-    ever recognized the literal marker line "FILE CONTENT:" - this response
-    instead phrased its redundant trailing dump as "Corrected file content
-    for '...':", no colon immediately after "content", so the old exact-
-    marker regex didn't match it at all and the entire duplicate
-    package/class declaration got folded verbatim into the applied edit's
-    replace text. Confirmed live via direct replay of the real captured
-    model response: applying that edit produced a file with two package
-    statements and two class declarations, a real 23-error "illegal start
-    of expression"/"class expected" javac cascade."""
-    text = (
-        "FIX ANALYSIS: buffer overflow on write.\n"
-        "SEARCH:\n"
-        "        buffer.putInt(protocol.getDataLength());\n"
-        "REPLACE:\n"
-        "        buffer.put((byte)(protocol.getDataLength() >> 16));\n"
-        "\n"
-        "Corrected file content for 'src/main/java/com/example/ProtocolParser.java':\n"
-        "```java\n"
-        "package com.example;\n"
-        "\n"
-        "public class ProtocolParser {\n"
-        "    // duplicated, unasked-for full file dump\n"
-        "}\n"
-        "```\n"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert analysis == "buffer overflow on write."
-    assert edits == [{
-        "search": "        buffer.putInt(protocol.getDataLength());",
-        "replace": "        buffer.put((byte)(protocol.getDataLength() >> 16));",
-    }]
-    assert content is None
-
-def test_split_fix_analysis_edit_strips_copied_error_source_gutter():
-    """Regression test for a real bug found live, 2026-08-04: a model shown
-    _build_error_source_context()'s own display format (">> N: <line>" for
-    the reported error line) copied that gutter directly into its SEARCH
-    block instead of the bare source line - confirmed live, the real SEARCH
-    text was literally ">> import org.apache.ignite.cache.IgniteCache;"
-    (kept the ">>" marker, dropped the line number). That can never match
-    the real file's plain "import ...;" line, guaranteeing "Anchor matching
-    failed... matched 0 times" regardless of whether the model's intended
-    fix was otherwise correct - a real, self-inflicted retry-budget waste,
-    not a model reasoning failure."""
-    text = (
-        "FIX ANALYSIS: wrong package for IgniteCache.\n"
-        "SEARCH:\n"
-        "```java\n"
-        "import org.apache.ignite.Ignite;\n"
-        "import org.apache.ignite.Ignition;\n"
-        ">> import org.apache.ignite.cache.IgniteCache;\n"
-        "import org.slf4j.Logger;\n"
-        "```\n"
-        "REPLACE:\n"
-        "```java\n"
-        "import org.apache.ignite.Ignite;\n"
-        "import org.apache.ignite.Ignition;\n"
-        "import org.apache.ignite.IgniteCache;\n"
-        "import org.slf4j.Logger;\n"
-        "```"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert edits == [{
-        "search": (
-            "import org.apache.ignite.Ignite;\n"
-            "import org.apache.ignite.Ignition;\n"
-            "import org.apache.ignite.cache.IgniteCache;\n"
-            "import org.slf4j.Logger;"
-        ),
-        "replace": (
-            "import org.apache.ignite.Ignite;\n"
-            "import org.apache.ignite.Ignition;\n"
-            "import org.apache.ignite.IgniteCache;\n"
-            "import org.slf4j.Logger;"
-        ),
-    }]
-
-def test_split_fix_analysis_edit_strips_gutter_with_line_number_preserved():
-    # The other real gutter shape (surrounding, non-highlighted context
-    # lines): "   N: <line>" (three leading spaces), also emitted by
-    # _build_error_source_context.
-    text = (
-        "SEARCH:\n"
-        "   9: import org.apache.ignite.Ignite;\n"
-        ">> 10: import org.apache.ignite.cache.IgniteCache;\n"
-        "REPLACE:\n"
-        "import org.apache.ignite.Ignite;\n"
-        "import org.apache.ignite.IgniteCache;"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert edits[0]["search"] == (
-        "import org.apache.ignite.Ignite;\n"
-        "import org.apache.ignite.cache.IgniteCache;"
-    )
-
-def test_split_fix_analysis_edit_strips_the_real_three_space_gutter_format(tmp_path):
-    """Regression test for a real bug found live, 2026-08-07
-    (kriya-protocol-parser-app), diagnosed directly from
-    Failure.attempted_edits once that started being persisted:
-    _build_error_source_context()'s actual non-highlighted gutter format is
-    THREE leading spaces ("   N: "), not two - the format string is
-    f"{'>>' if ... else '  '} {i+1}: ...", so the two-space placeholder plus
-    the f-string's own literal separator space adds up to three. The gutter
-    regex only ever matched an exact two-space prefix, so a real SEARCH
-    block that copied this exact format verbatim went unstripped,
-    guaranteeing "matched 0 times" regardless of whether the model's
-    intended edit was otherwise correct. Generates the gutter via the REAL
-    _build_error_source_context() (not a hand-typed guess at its format,
-    which is exactly how the original 2-vs-3-space mismatch went unnoticed)
-    so this test breaks immediately if the two ever drift apart again."""
-    from kriya.workflow.workflow import _build_error_source_context
-
-    (tmp_path / "Calc.java").write_text(
-        "\n".join(f"line {i}" for i in range(1, 10))
-    )
-    error = "at com.example.Calc.divide(Calc.java:5)"
-    context = _build_error_source_context(str(tmp_path), error, known_files=["Calc.java"])
-    real_gutter_snippet = context["Calc.java"].strip()
-    assert real_gutter_snippet.startswith("=== Source context")
-    # Pull just the gutter-formatted lines (skip the header line above) to
-    # use as a real SEARCH block, exactly as a model copying them verbatim
-    # would produce.
-    gutter_lines = "\n".join(real_gutter_snippet.splitlines()[1:])
-    assert "   4: line 4" in gutter_lines  # confirms the real format IS 3 spaces, not 2
-
-    text = f"SEARCH:\n{gutter_lines}\nREPLACE:\nreplacement"
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert edits is not None
-    search_block = edits[0]["search"]
-    for line_no in range(2, 9):
-        assert f"line {line_no}" in search_block
-    assert "   " not in search_block  # no unstripped 3-space gutter survives
-    assert ">>" not in search_block   # the highlighted-line marker is also gone
-
-def test_split_fix_analysis_edit_does_not_corrupt_ordinary_indented_code():
-    # Must NOT strip legitimate 2-space (or deeper) indentation on real code
-    # that has no line-number gutter - only the exact ">>"/"  N:" shapes
-    # Kriya itself emits are stripped.
-    text = (
-        "SEARCH:\n"
-        "public class App {\n"
-        "  public static void main(String[] args) {\n"
-        "REPLACE:\n"
-        "public class App implements Serializable {\n"
-        "  public static void main(String[] args) {"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert edits[0]["search"] == (
-        "public class App {\n"
-        "  public static void main(String[] args) {"
-    )
-
-
-def test_split_fix_analysis_edit_fenced_indented_search_replace_survives_exact():
-    """Regression test (2026-09-19, VAL-001 G1 qwen3.6:35b-a3b comparison):
-    the real, live failure mode this closes end-to-end - a model wraps its
-    SEARCH/REPLACE bodies in markdown fences (```python ... ```) whose
-    first content line is itself deeply indented, exactly as a real edit
-    fragment quoting the inside of a function always is. Before the
-    _strip_markdown_fences fix, the SEARCH block's leading indentation was
-    silently destroyed here, producing a search string that could never
-    exact-match the real file and, when it DID splice in via the
-    whitespace-tolerant fallback, corrupted the REPLACE side into invalid
-    Python. Both SEARCH and REPLACE must survive with EXACT source bytes
-    (indentation included) intact through the full _split_fix_analysis_edit
-    -> sanitize_generated_content -> _strip_markdown_fences pipeline."""
-    text = (
-        "FIX ANALYSIS: strip generic type arguments before comparing callee names.\n"
-        "SEARCH:\n"
-        "```python\n"
-        "                    if mname is not None:\n"
-        "                        callee_name = _read_text(mname, source)\n"
-        "```\n"
-        "REPLACE:\n"
-        "```python\n"
-        "                    if mname is not None:\n"
-        "                        if mname.type == \"generic_name\":\n"
-        "                            callee_name = _strip_generic(mname, source)\n"
-        "                        else:\n"
-        "                            callee_name = _read_text(mname, source)\n"
-        "```"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert len(edits) == 1
-    assert edits[0]["search"] == (
-        "                    if mname is not None:\n"
-        "                        callee_name = _read_text(mname, source)"
-    )
-    assert edits[0]["replace"] == (
-        "                    if mname is not None:\n"
-        "                        if mname.type == \"generic_name\":\n"
-        "                            callee_name = _strip_generic(mname, source)\n"
-        "                        else:\n"
-        "                            callee_name = _read_text(mname, source)"
-    )
-
-
-def test_split_fix_analysis_edit_unclosed_fence_falls_back_safely():
-    """A malformed/unclosed fence (an opening ```python with no matching
-    closing ``` anywhere in the block) must never crash the parser or
-    silently fabricate a plausible-looking edit. _strip_markdown_fences'
-    own opening-fence removal fires unconditionally on a recognized
-    opening marker regardless of whether a matching close exists - it is
-    the closing-fence removal that is conditional (only strips a LAST
-    line that itself starts with ```) - so an unclosed fence degrades
-    safely to "fence marker removed, real content (indentation intact)
-    kept exactly", never a crash and never a leftover fence artifact
-    misread as real code."""
-    text = (
-        "SEARCH:\n"
-        "```python\n"
-        "    old_code()\n"
-        "REPLACE:\n"
-        "    new_code()"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert edits == [{"search": "    old_code()", "replace": "    new_code()"}]
-
-
-def test_split_fix_analysis_edit_strips_same_line_marker_separator():
-    """Regression test for a real bug found live, 2026-08-17
-    (ignite_qpid_person, run b-10l): a model wrote "REPLACE: <?xml
-    version=\"1.0\"?>..." on ONE line instead of putting the content on the
-    line after the marker. The existing `.strip("\n")` never touches a
-    leading SPACE (it only strips "\n" characters from the ends), so that
-    one separator space survived into the actual replacement text -
-    " <?xml version=\"1.0\"?>...", invalid per the XML spec (no whitespace
-    may precede an XML declaration). Confirmed as the exact cause of a live
-    "XML or text declaration not at start of entity: line 1, column 1"
-    failure that recurred identically across 2 consecutive retries."""
-    text = (
-        "SEARCH: <?xml version=\"1.0\"?>\n<beans></beans>\n\n"
-        "REPLACE: <?xml version=\"1.0\"?>\n<beans><bean/></beans>"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert edits[0]["search"] == "<?xml version=\"1.0\"?>\n<beans></beans>"
-    assert edits[0]["replace"] == "<?xml version=\"1.0\"?>\n<beans><bean/></beans>"
-
-def test_split_fix_analysis_edit_same_line_marker_separator_does_not_corrupt_indented_code():
-    # Companion negative case - meaningful leading indentation on a
-    # multi-line block (content starts on the line AFTER the marker) must
-    # be preserved exactly, not eaten by the new same-line-separator fix.
-    text = (
-        "SEARCH:\n    old();\n\n"
-        "REPLACE:\n    new();"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert edits[0]["search"] == "    old();"
-    assert edits[0]["replace"] == "    new();"
-
-def test_split_fix_analysis_edit_truncates_same_line_trailing_file_content():
-    """Regression test for a real bug found live, 2026-08-21
-    (milestone_task_cli): a targeted-retry response's REPLACE block was
-    followed by a redundant, unasked-for "FILE CONTENT: #!/usr/bin/env
-    python3\\n<rest of file>" over-delivery, with content starting on the
-    SAME line as the marker (mirroring the exact same-line-marker habit
-    test_split_fix_analysis_edit_strips_same_line_marker_separator already
-    covers for SEARCH:/REPLACE:). The old _TRAILING_FILE_CONTENT_RE required
-    nothing but trailing whitespace after the marker's colon, so it never
-    recognized this same-line variant as a marker at all - the entire
-    redundant dump, literal "FILE CONTENT:" text included, got folded
-    verbatim into the REPLACE block's own replacement text and written to
-    disk, corrupting the file with duplicate function definitions that then
-    consumed the rest of that run's retry budget failing to unwind it."""
-    text = (
-        "FIX ANALYSIS: fix add_task\n"
-        "SEARCH:\ndef add_task(title):\n    pass\n"
-        "REPLACE:\ndef add_task(title):\n    real_impl()\n"
-        "FILE CONTENT: #!/usr/bin/env python3\n"
-        "import json\ndef add_task(title):\n    pass\n"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert content is None
-    assert len(edits) == 1
-    assert edits[0]["replace"] == "def add_task(title):\n    real_impl()"
-    assert "FILE CONTENT" not in edits[0]["replace"]
-    assert "#!/usr/bin/env" not in edits[0]["replace"]
-
-def test_split_fix_analysis_edit_parses_multiple_search_replace_pairs():
-    """Regression test for a real bug found live, 2026-08-07
-    (ignite_qpid_person): despite the prompt saying "include only the lines
-    that actually need to change" (singular), a real response returned THREE
-    separate SEARCH/REPLACE pairs for one file, plus a trailing FILE CONTENT:
-    block it wasn't asked for either. The old implementation only recognized
-    the FIRST search:/replace: pair and took everything up to FILE CONTENT:
-    as one giant replace_block - swallowing pairs 2 and 3 (markers and all)
-    into pair 1's own replacement text. apply_anchored_edits() already
-    applies a LIST of edits in sequence, so the fix is to actually return all
-    three as separate edits instead of corrupting the first one with the
-    other two's raw text."""
-    text = (
-        "FIX ANALYSIS: Multiple related fixes needed across this file.\n"
-        "SEARCH:\n"
-        "Ignite ignite = (Ignite) context.getBean(\"igniteNode\");\n"
-        "REPLACE:\n"
-        "Ignite ignite = (Ignite) context.getBean(\"igniteNode\");\n"
-        "SEARCH:\n"
-        "ConnectionFactory factory = (ConnectionFactory) context.getBean(\"qpidConnectionFactory\");\n"
-        "REPLACE:\n"
-        "ConnectionFactory factory = (ConnectionFactory) context.getBean(\"qpidFactory\");\n"
-        "SEARCH:\n"
-        "IgniteCache<String, Person> cache = ignite.getOrCreateCache(\"person-cache\");\n"
-        "REPLACE:\n"
-        "IgniteCache<String, Person> cache = ignite.getOrCreateCache(\"people-cache\");\n"
-        "\n"
-        "FILE CONTENT:\n"
-        "package com.example;\npublic class App { /* redundant, unasked-for full file */ }"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert content is None
-    assert edits == [
-        {
-            "search": 'Ignite ignite = (Ignite) context.getBean("igniteNode");',
-            "replace": 'Ignite ignite = (Ignite) context.getBean("igniteNode");',
-        },
-        {
-            "search": 'ConnectionFactory factory = (ConnectionFactory) context.getBean("qpidConnectionFactory");',
-            "replace": 'ConnectionFactory factory = (ConnectionFactory) context.getBean("qpidFactory");',
-        },
-        {
-            "search": 'IgniteCache<String, Person> cache = ignite.getOrCreateCache("person-cache");',
-            "replace": 'IgniteCache<String, Person> cache = ignite.getOrCreateCache("people-cache");',
-        },
-    ]
-    # No stray marker text leaked into any replace block - the exact
-    # corruption the real live failure produced.
-    for edit in edits:
-        assert "SEARCH:" not in edit["replace"]
-        assert "REPLACE:" not in edit["replace"]
-
-def test_split_fix_analysis_edit_stops_at_trailing_search_with_no_replace():
-    # A malformed sequence (a dangling SEARCH with no REPLACE after it)
-    # degrades to whatever complete pairs were found, rather than raising or
-    # misparsing the dangling block as part of an earlier pair.
-    text = (
-        "SEARCH:\nfoo();\n"
-        "REPLACE:\nbar();\n"
-        "SEARCH:\nincomplete, no replace follows"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert edits == [{"search": "foo();", "replace": "bar();"}]
+    assert files[0]["protocol_error"].startswith("INVALID_EDIT_PROTOCOL: a SEARCH: block has no REPLACE:")
+    assert files[0]["protocol_reason_code"] == "INVALID_EDIT_PROTOCOL"
 
 def test_build_incompatible_types_scaffold_names_the_reported_types():
     """Regression test for a real bug found live, 2026-08-07
@@ -2108,233 +1656,6 @@ async def test_extra_fix_instruction_reaches_the_real_prompt_when_set():
     )
     prompt_with_override = llm.complete.call_args_list[0][0][1]
     assert "RE-READ your own FIX ANALYSIS" in prompt_with_override
-
-def test_sanitize_generated_content_none_passthrough():
-    assert DeveloperAgent.sanitize_generated_content(None) is None
-
-def test_sanitize_generated_content_strips_gutter_and_fence():
-    # "   4: " (three leading spaces) is the REAL non-highlighted gutter
-    # format _build_error_source_context() emits - confirmed by generating
-    # this exact snippet via the real function, not a hand-typed guess (a
-    # 2-space version of this fixture was a latent inaccuracy, silently
-    # inconsistent with the real format, until fixed 2026-08-11 alongside
-    # the audit that narrowed _GUTTER_CONTEXT_RE to require exactly this).
-    text = (
-        "```java\n"
-        ">> 3: import org.apache.ignite.cache.IgniteCache;\n"
-        "   4: public class App {\n"
-        "```"
-    )
-    assert DeveloperAgent.sanitize_generated_content(text) == (
-        "import org.apache.ignite.cache.IgniteCache;\npublic class App {"
-    )
-
-def test_sanitize_generated_content_truncates_redundant_trailing_marker():
-    text = "public class App {}\n\nFILE CONTENT:\npublic class App { /* duplicated */ }"
-    assert DeveloperAgent.sanitize_generated_content(text) == "public class App {}"
-
-def test_sanitize_generated_content_truncates_prose_phrased_marker():
-    # Same real 2026-08-08 phrasing as
-    # test_split_fix_analysis_edit_truncates_prose_phrased_trailing_file_content -
-    # the old regex only matched the literal "FILE CONTENT:" marker line,
-    # not a prose lead-in like "Corrected file content for '...':".
-    text = "public class App {}\n\nCorrected file content for 'App.java':\npublic class App { /* dup */ }"
-    assert DeveloperAgent.sanitize_generated_content(text) == "public class App {}"
-
-def test_sanitize_generated_content_plain_text_passthrough():
-    # No gutter, no fence, no marker - must not be altered at all.
-    text = "public class App {\n    public static void main(String[] args) {}\n}"
-    assert DeveloperAgent.sanitize_generated_content(text) == text
-
-def test_sanitize_generated_content_does_not_truncate_real_code_mentioning_the_phrase():
-    """Regression test for a real bug found live, 2026-08-11
-    (kriya-oneshot-protocol-ignite-qpid audit): the old _TRAILING_FILE_CONTENT_RE
-    matched ANY line containing "file content" followed by a colon within 60
-    chars, anywhere in the file - including a perfectly ordinary log statement,
-    not just Kriya's own marker line - and silently deleted everything after
-    it. A real marker (literal or prose-phrased) always has nothing but the
-    colon left on its own line; this log statement has real code after its
-    colon, so it must survive untouched."""
-    text = (
-        "public class FileReader {\n"
-        "    public String read(String path) throws IOException {\n"
-        "        String data = Files.readString(Path.of(path));\n"
-        "        logger.info(\"Loaded file content: {} bytes\", data.length());\n"
-        "        return data;\n"
-        "    }\n"
-        "\n"
-        "    public void validate(String data) {\n"
-        "        if (data.isEmpty()) throw new IllegalArgumentException(\"empty\");\n"
-        "    }\n"
-        "}\n"
-    )
-    assert DeveloperAgent.sanitize_generated_content(text) == text
-
-def test_sanitize_generated_content_does_not_strip_yaml_numeric_keys():
-    """Regression test for a real bug found live, 2026-08-11: the old gutter
-    regex's "  N:" branch matched ANY 2-OR-MORE-space-indented "digit:" line
-    unconditionally - identical in shape to a legitimate YAML/properties
-    entry, and with no way to tell the two apart, silently deleted the key
-    and colon, leaving only the value. Narrowed to require the REAL, exact
-    format _build_error_source_context() emits (three leading spaces, not
-    "two or more") - ordinary 2-space YAML indentation no longer collides."""
-    text = "retry:\n  1: first-attempt-config\n  2: second-attempt-config\n"
-    assert DeveloperAgent.sanitize_generated_content(text) == text
-
-def test_sanitize_generated_content_still_strips_context_gutter_at_the_real_space_count():
-    # Mirrors test_sanitize_generated_content_strips_gutter_and_fence above
-    # but without a fence, isolating that the narrowed three-space
-    # requirement still correctly strips a REAL gutter-shaped context line
-    # (not just rejecting the too-loose 2-space YAML shape).
-    text = ">> 3: import org.apache.ignite.cache.IgniteCache;\n   4: public class App {"
-    assert DeveloperAgent.sanitize_generated_content(text) == (
-        "import org.apache.ignite.cache.IgniteCache;\npublic class App {"
-    )
-
-def test_sanitize_generated_content_fixes_double_hyphen_in_xml_comment():
-    """Regression test for a real, live-confirmed bug, 2026-08-16
-    (ignite_qpid_person, run b-10): a generated pom.xml's own explanatory
-    comment - <!-- Ignite --add-opens flags --> - echoed the literal
-    "--add-opens" JVM flag text (correctly documented as plain prose in
-    skills/ignite-java17/rules.txt) into an XML comment body. XML forbids
-    "--" anywhere inside a comment - STRUCTURAL CORRUPTION correctly caught
-    this, but it burned 3 full retry attempts before the model happened to
-    diagnose and fix it on its own. Confirmed via xml.etree.ElementTree
-    directly: the original text fails to parse, the sanitized text parses
-    cleanly."""
-    import xml.etree.ElementTree as ET
-
-    xml_doc = (
-        "<root>\n"
-        "    <!-- Ignite --add-opens flags -->\n"
-        "    <arg>--add-opens=java.base/jdk.internal.access=ALL-UNNAMED</arg>\n"
-        "</root>\n"
-    )
-    with pytest.raises(ET.ParseError):
-        ET.fromstring(xml_doc)
-
-    fixed = DeveloperAgent.sanitize_generated_content(xml_doc)
-    ET.fromstring(fixed)  # must not raise
-    # The real --add-opens flag text OUTSIDE the comment must be untouched -
-    # only the comment BODY is sanitized, never actual code/markup content.
-    assert "--add-opens=java.base/jdk.internal.access=ALL-UNNAMED" in fixed
-
-def test_sanitize_generated_content_fixes_comment_ending_in_a_dash():
-    # XML also forbids a comment body ENDING in "-" (would form "--->"
-    # against the closing marker) - a narrower, easy-to-miss case of the
-    # same underlying rule.
-    import xml.etree.ElementTree as ET
-
-    xml_doc = "<root><!-- trailing dash --- --></root>"
-    with pytest.raises(ET.ParseError):
-        ET.fromstring(xml_doc)
-    fixed = DeveloperAgent.sanitize_generated_content(xml_doc)
-    ET.fromstring(fixed)  # must not raise
-
-def test_sanitize_generated_content_does_not_touch_content_with_no_xml_comment():
-    # Harmless no-op for every non-XML/HTML stack - <!-- --> simply never
-    # occurs in Java/Python/Ruby source, confirmed directly rather than
-    # assumed.
-    java = 'public class X { String s = "no comment markers here -- just text"; }'
-    assert DeveloperAgent.sanitize_generated_content(java) == java
-
-def test_sanitize_generated_content_unwraps_batch_json_envelope():
-    """Regression test for a real, live-confirmed bug, 2026-08-22
-    (ignite_qpid_protocol, integration phase, two separate runs): qwen3.8:27b
-    wrapped its single-file CREATE_FULL_FILE response for pom.xml in the
-    multi-file batch JSON envelope shape instead of returning raw content -
-    verbatim shape captured from that run's own traces.db gate_outcomes.
-    Before the fix, sanitize_generated_content had no defense against this and
-    the literal JSON text got written to disk as pom.xml, failing STRUCTURAL
-    CORRUPTION with "malformed XML ... line 1, column 0" on both runs."""
-    import xml.etree.ElementTree as ET
-
-    envelope = json.dumps({
-        "files": [
-            {
-                "path": "pom.xml",
-                "content": '<?xml version="1.0" encoding="UTF-8"?>\n<project></project>',
-            }
-        ]
-    })
-    fixed = DeveloperAgent.sanitize_generated_content(envelope, filepath="pom.xml")
-    assert fixed == '<?xml version="1.0" encoding="UTF-8"?>\n<project></project>'
-    ET.fromstring(fixed)  # must not raise
-
-def test_sanitize_generated_content_unwraps_bare_single_file_envelope():
-    # A model may drop the "files" list wrapper for a single-file response -
-    # same underlying mistake, narrower shape.
-    envelope = json.dumps({"path": "App.java", "content": "public class App {}"})
-    assert DeveloperAgent.sanitize_generated_content(envelope, filepath="App.java") == (
-        "public class App {}"
-    )
-
-def test_sanitize_generated_content_matches_envelope_entry_by_basename():
-    # The requested filepath may carry directory prefixes the envelope entry
-    # doesn't (or vice versa) - match on basename rather than refusing to
-    # unwrap an otherwise unambiguous single entry.
-    envelope = json.dumps({"files": [{"path": "src/main/pom.xml", "content": "<project/>"}]})
-    assert DeveloperAgent.sanitize_generated_content(
-        envelope, filepath="pom.xml",
-    ) == "<project/>"
-
-def test_sanitize_generated_content_envelope_unwrap_requires_filepath():
-    # The two SEARCH/REPLACE call sites never pass filepath - a patch fragment
-    # that happens to look like JSON must never be unwrapped/misinterpreted.
-    envelope = json.dumps({"files": [{"path": "App.java", "content": "public class App {}"}]})
-    assert DeveloperAgent.sanitize_generated_content(envelope) == envelope
-
-def test_sanitize_generated_content_does_not_unwrap_ambiguous_multi_file_envelope():
-    # Genuinely ambiguous (multiple files, none matching the requested path) -
-    # left untouched for the existing STRUCTURAL CORRUPTION gate to catch,
-    # rather than guessing which entry was meant.
-    envelope = json.dumps({
-        "files": [
-            {"path": "App.java", "content": "public class App {}"},
-            {"path": "Other.java", "content": "public class Other {}"},
-        ]
-    })
-    assert DeveloperAgent.sanitize_generated_content(envelope, filepath="pom.xml") == envelope
-
-def test_sanitize_generated_content_does_not_misfire_on_real_json_file_content():
-    # A genuinely-requested JSON file's real content must never be mistaken
-    # for the envelope shape - it has no "files"/"path"+"content" keys.
-    package_json = json.dumps({"name": "example", "version": "1.0.0"}, indent=2)
-    assert DeveloperAgent.sanitize_generated_content(
-        package_json, filepath="package.json",
-    ) == package_json
-
-@pytest.mark.asyncio
-async def test_fill_missing_content_full_content_retry_strips_copied_gutter():
-    """Regression test: unlike the anchored-edit SEARCH/REPLACE path (already
-    covered in test_split_fix_analysis_edit_strips_copied_error_source_gutter),
-    a full FILE CONTENT: retry response is shown the exact same gutter-
-    formatted error_source_context but, before sanitize_generated_content was
-    wired into _fill_missing_content's non-anchored branch, only ever had
-    markdown fences stripped - a model that echoed the gutter back into a
-    full-file response (not just a SEARCH block) would have written it
-    straight to disk uncorrected."""
-    cfg = AppConfig()
-    llm = LLMClient(cfg)
-    llm.complete = AsyncMock(return_value=(
-        "FIX ANALYSIS: wrong import package.\n"
-        "FILE CONTENT:\n"
-        ">> 1: import org.apache.ignite.cache.IgniteCache;\n"
-        "   2: public class App {}\n"
-    ))
-    dev = DeveloperAgent("developer", llm)
-    files = await dev.run_generation(
-        "Task", "Design", "Existing code",
-        known_target_files=["App.java"],
-        prior_error_context="cannot find symbol",
-        # No error_source_context entry for this file - keeps prefer_anchored_edit
-        # False so this exercises the non-anchored FILE CONTENT: branch, not the
-        # SEARCH/REPLACE one already covered by _split_fix_analysis_edit's tests.
-        error_source_context=None,
-    )
-    assert files[0]["content"] == (
-        "import org.apache.ignite.cache.IgniteCache;\npublic class App {}"
-    )
 
 @pytest.mark.asyncio
 async def test_fill_missing_content_prefers_anchored_edit_when_source_context_known():
@@ -2620,20 +1941,6 @@ async def test_fill_missing_content_no_change_needed_leaves_file_untouched_plain
         "analysis": "the bug is in a different file.",
     }]
 
-def test_split_fix_analysis_edit_no_change_needed_takes_priority_over_search_replace():
-    # If the model contradicts itself (declares no change needed but also
-    # emits a SEARCH/REPLACE pair), NO CHANGE NEEDED wins - trust the
-    # explicit declaration over a possibly-stray leftover edit.
-    text = (
-        "FIX ANALYSIS: reason.\n"
-        "NO CHANGE NEEDED: nothing to do here.\n"
-        "SEARCH:\nfoo\nREPLACE:\nbar\n"
-    )
-    analysis, edits, content = DeveloperAgent._split_fix_analysis_edit(text)
-    assert edits is None
-    assert content is None
-    assert analysis == "reason."
-
 @pytest.mark.asyncio
 async def test_fill_missing_content_applies_retry_temperature_only_to_implicated_file():
     """retry_temperature (LLMConfig.retry_temperature) must only override the
@@ -2823,15 +2130,15 @@ async def test_run_generation_fallback_no_error_block_on_clean_first_attempt():
     assert "Prior Attempt Failed" not in fallback_prompt
 
 
-def test_strip_markdown_fences_plain_leading_fence():
+def test_strip_json_protocol_fences_plain_leading_fence():
     text = "```python\ndef add(a, b):\n    return a + b\n```"
-    assert DeveloperAgent._strip_markdown_fences(text) == "def add(a, b):\n    return a + b"
+    assert DeveloperAgent._strip_json_protocol_fences(text) == "def add(a, b):\n    return a + b"
 
-def test_strip_markdown_fences_no_fence_passthrough():
+def test_strip_json_protocol_fences_no_fence_passthrough():
     text = "def add(a, b):\n    return a + b"
-    assert DeveloperAgent._strip_markdown_fences(text) == text
+    assert DeveloperAgent._strip_json_protocol_fences(text) == text
 
-def test_strip_markdown_fences_prose_wrapped_fence():
+def test_strip_json_protocol_fences_prose_wrapped_fence():
     # Reproduces the deepseek-r1 fallback-model failure: the model returns the
     # correct fenced code but surrounds it with conversational pre/postamble
     # instead of ONLY the fence, despite being told not to.
@@ -2844,20 +2151,20 @@ def test_strip_markdown_fences_prose_wrapped_fence():
         "```\n\n"
         "This simple file will ensure proper module importing when running pytest tests."
     )
-    assert DeveloperAgent._strip_markdown_fences(text) == (
+    assert DeveloperAgent._strip_json_protocol_fences(text) == (
         "# This is a blank file that makes the directory a Python package"
     )
 
-def test_strip_markdown_fences_picks_largest_of_multiple_fences():
+def test_strip_json_protocol_fences_picks_largest_of_multiple_fences():
     text = (
         "For example:\n```python\nx = 1\n```\n\n"
         "But the real content is:\n"
         "```python\ndef add(a, b):\n    return a + b\n```"
     )
-    assert DeveloperAgent._strip_markdown_fences(text) == "def add(a, b):\n    return a + b"
+    assert DeveloperAgent._strip_json_protocol_fences(text) == "def add(a, b):\n    return a + b"
 
 
-def test_strip_markdown_fences_preserves_indented_first_line():
+def test_strip_json_protocol_fences_preserves_indented_first_line():
     """Regression test (2026-09-19, VAL-001 G1 qwen3.6:35b-a3b comparison):
     a real anchored-edit response reproduced live had its SEARCH block's
     leading indentation entirely eaten by this function's own former bare
@@ -2868,12 +2175,12 @@ def test_strip_markdown_fences_preserves_indented_first_line():
     real edit fragment quoting the inside of a function almost always has
     an indented first line."""
     text = "```python\n                    if mname is not None:\n                        callee_name = _read_text(mname, source)\n```"
-    assert DeveloperAgent._strip_markdown_fences(text) == (
+    assert DeveloperAgent._strip_json_protocol_fences(text) == (
         "                    if mname is not None:\n                        callee_name = _read_text(mname, source)"
     )
 
 
-def test_strip_markdown_fences_preserves_all_indentation_in_nested_block():
+def test_strip_json_protocol_fences_preserves_all_indentation_in_nested_block():
     text = (
         "```python\n"
         "    if outer:\n"
@@ -2883,7 +2190,7 @@ def test_strip_markdown_fences_preserves_all_indentation_in_nested_block():
         "            do_other()\n"
         "```"
     )
-    assert DeveloperAgent._strip_markdown_fences(text) == (
+    assert DeveloperAgent._strip_json_protocol_fences(text) == (
         "    if outer:\n"
         "        if inner:\n"
         "            do_something()\n"
@@ -2892,7 +2199,7 @@ def test_strip_markdown_fences_preserves_all_indentation_in_nested_block():
     )
 
 
-def test_strip_markdown_fences_indented_first_line_in_prose_wrapped_fence():
+def test_strip_json_protocol_fences_indented_first_line_in_prose_wrapped_fence():
     """Same fix, exercised through the SECOND extraction path (prose
     preamble/postamble around the fence, not a leading fence) - both
     return paths had the identical bare-.strip() defect."""
@@ -2905,20 +2212,20 @@ def test_strip_markdown_fences_indented_first_line_in_prose_wrapped_fence():
         "```\n\n"
         "That should resolve it."
     )
-    assert DeveloperAgent._strip_markdown_fences(text) == (
+    assert DeveloperAgent._strip_json_protocol_fences(text) == (
         "    for child in mname.children:\n"
         "        if child.type == \"identifier\":\n"
         "            callee_name = _read_text(child, source)"
     )
 
 
-def test_strip_markdown_fences_still_removes_genuine_blank_fence_padding():
+def test_strip_json_protocol_fences_still_removes_genuine_blank_fence_padding():
     """A blank line immediately after the opening fence and immediately
     before the closing fence is still removed - only a REAL line's own
     leading space/tab is protected, not blank-line padding around the
     fence itself."""
     text = "```python\n\n    real_code()\n\n```"
-    assert DeveloperAgent._strip_markdown_fences(text) == "    real_code()"
+    assert DeveloperAgent._strip_json_protocol_fences(text) == "    real_code()"
 
 def test_extract_json_value_direct_parse():
     assert DeveloperAgent._extract_json_value('["a.txt", "b.txt"]') == ["a.txt", "b.txt"]
@@ -2927,7 +2234,7 @@ def test_extract_json_value_recovers_prose_prefixed_array():
     # Reproduces a real observed deepseek-r1 failure: response_format=json_object
     # doesn't stop a reasoning model from explaining itself in prose before finally
     # emitting the JSON - there's no markdown fence here at all, so
-    # _strip_markdown_fences alone can't recover it; only bracket-span recovery can.
+    # _strip_json_protocol_fences alone can't recover it; only bracket-span recovery can.
     text = (
         "To fix the compile error, we need to modify the CacheAndMessagingClient.java "
         "file to include the correct imports for JmsConnectionFactory.\n\n"

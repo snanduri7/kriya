@@ -196,6 +196,10 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     ("autonomy", "sandbox_execution"),
     # PRD-012: "unrestricted" grants arbitrary shell commands network access.
     ("autonomy", "shell_network"),
+    # FILE-INTEGRITY-CONTRACT-001: which Developer response protocol the model
+    # is asked for; it changes the qualified inference behaviour, so only the
+    # operator chooses it.
+    ("autonomy", "developer_response_protocol"),
     # PRD-020: "record" lets an unverified/unknown original requirement pass.
     ("autonomy", "requirement_unknown_policy"), ("autonomy", "requirement_unverified_policy"),
     # PRD-023: "human" opens a human authorization path for contract changes.

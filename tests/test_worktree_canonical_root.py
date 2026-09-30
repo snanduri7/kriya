@@ -409,5 +409,5 @@ def test_worktree_locations_are_decided_only_by_worktree_py():
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.Constant) and node.value in ("worktree", "worktrees", "scoped-worktree"):
                 offenders.append(f"{relative}:{node.lineno}:{node.value}")
-    assert offenders == ["kriya/production_doctor.py:596:worktree", "kriya/static_analysis/operator_scan.py:72:worktree",
-                         "kriya/static_analysis/operator_scan.py:79:worktree"], offenders
+    assert offenders == ["kriya/production_doctor.py:596:worktree", "kriya/static_analysis/operator_scan.py:70:worktree",
+                         "kriya/static_analysis/operator_scan.py:77:worktree"], offenders

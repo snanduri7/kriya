@@ -92,7 +92,12 @@ from kriya.platform.filesystem_semantics import PathRelation, path_relation
 # case goes through the adapter's request plan and checks the served window,
 # and the tokenizer case measures the prompt-consumption ceiling. Every /3
 # record is STALE (its identity was desired, not proven).
-QUALIFICATION_POLICY_VERSION = "kriya-qualification/4"
+# /5 (FILE-INTEGRITY-CONTRACT-001): the full_file_raw_content and
+# anchored_edit_protocol cases judge the response through the strict
+# protocol parser and the complete-line edit engine (no payload sanitizer,
+# no substring/whitespace-collapsing anchors). A /4 PASS was judged under the
+# old parsing, so every /4 record is STALE.
+QUALIFICATION_POLICY_VERSION = "kriya-qualification/5"
 QUALIFICATION_SCHEMA_VERSION = 2
 QUALIFICATION_HOME_ENV = "KRIYA_QUALIFICATION_HOME"
 
@@ -902,7 +907,8 @@ async def case_full_file_raw_content(llm, model, ctx):
         "Return ONLY the content of 'slug.py' - nothing before it, nothing after it, no other file.",
         model_override=model, max_tokens_override=_case_budget(ctx, "full_file_raw_content"),
     )
-    content = DeveloperAgent.sanitize_generated_content(r.content, filepath="slug.py") or ""
+    parsed = DeveloperAgent.parse_file_payload(r.content or "", "slug.py")
+    content = (parsed.content or "") if parsed.kind == "file" else ""
     # Model output is never executed on the host: the check is structural.
     defines = False
     try:
@@ -914,7 +920,8 @@ async def case_full_file_raw_content(llm, model, ctx):
     ok = r.status.value == "OK" and parses and defines
     return CaseResult("", PASS if ok else FAIL,
                       {"parses": parses, "defines_slugify": defines,
-                       "raw_had_fence": r.content.lstrip().startswith("```"), **_completion_evidence(r)})
+                       "raw_had_fence": r.content.lstrip().startswith("```"),
+                       "protocol_reason_code": parsed.reason_code, **_completion_evidence(r)})
 
 
 _EDIT_SOURCE = "def total(prices):\n    result = 0\n    for p in prices:\n        result += p\n    return result\n"
@@ -922,7 +929,7 @@ _EDIT_SOURCE = "def total(prices):\n    result = 0\n    for p in prices:\n      
 
 @_case("anchored_edit_protocol")
 async def case_anchored_edit_protocol(llm, model, ctx):
-    from kriya.agents.agent import DeveloperAgent
+    from kriya.agents.response_protocol import parse_legacy_repair
     from kriya.workflow.edit_safety import apply_anchored_edits
 
     r = await llm.complete_result(
@@ -935,7 +942,8 @@ async def case_anchored_edit_protocol(llm, model, ctx):
         "need to change plus the minimum context to identify them, not the whole file.",
         model_override=model, max_tokens_override=_case_budget(ctx, "anchored_edit_protocol"),
     )
-    analysis, edits, _ = DeveloperAgent._split_fix_analysis_edit(r.content)
+    parsed = parse_legacy_repair(r.content or "", "calc.py", patch_allowed=True)
+    analysis, edits = parsed.analysis, parsed.edit_dicts() if parsed.kind == "edits" else None
     applied = None
     if edits:
         try:
@@ -958,6 +966,7 @@ async def case_anchored_edit_protocol(llm, model, ctx):
     ok = r.status.value == "OK" and bool(analysis) and bool(edits) and changed
     return CaseResult("", PASS if ok else FAIL,
                       {"analysis": bool(analysis), "edit_count": len(edits or []), "applied": applied is not None,
+                       "protocol_reason_code": parsed.reason_code,
                        "applied_parses_and_changed": changed, **_completion_evidence(r)})
 
 

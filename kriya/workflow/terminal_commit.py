@@ -57,11 +57,33 @@ from kriya.workflow.edit_safety import (
 from kriya.workflow.edit_safety import (
     CandidateMaterializationError as CandidateMaterializationError,
 )
+from kriya.workflow.file_integrity import display_text, file_raw_digest, raw_digest
 from kriya.workflow.verification_binding import (
     CandidateVerificationBinding,
     VerifiedCandidateStale,
     binding_refusal,
 )
+
+VERIFIED_COMMIT_DIGEST_MISMATCH = "VERIFIED_COMMIT_DIGEST_MISMATCH"
+
+
+def committed_digest_mismatch(writes: Iterable[StagedFileWrite]) -> Optional[str]:
+    """FILE-INTEGRITY-CONTRACT-001: the destination bytes after the commit,
+    re-read from disk, against the verified candidate bytes; the first
+    difference, or None when every path holds exactly what was verified."""
+    for write in writes:
+        if write.delete:
+            if os.path.lexists(write.target_path):
+                return f"{write.target_path}: verified as deleted but still present after commit"
+            continue
+        expected = raw_digest(
+            write.content_bytes if write.content_bytes is not None else write.content.encode("utf-8")
+        )
+        actual = file_raw_digest(write.target_path)
+        if actual != expected:
+            return (f"{write.target_path}: committed bytes {actual[:12]} differ from the "
+                    f"verified candidate {expected[:12]}")
+    return None
 
 
 class StaticAnalysisCommitRefused(RuntimeError):
@@ -108,20 +130,21 @@ def materialize_candidate(
                 expected_base_exists=True,
             ))
             continue
+        if os.path.islink(candidate_path):
+            raise CandidateMaterializationError(
+                f"Verified candidate file {item.relpath!r} is a symbolic link; Kriya never "
+                "commits a link as a regular file"
+            )
         try:
             with open(candidate_path, "rb") as handle:
                 candidate_bytes = handle.read()
-            candidate_mode = os.stat(candidate_path).st_mode & 0o7777
-            # The decoded text is only the revision identity, matching
-            # read_file_revision(); the bytes are what reach disk.
-            with open(candidate_path, "r", encoding="utf-8", errors="replace") as handle:
-                candidate_text = handle.read()
+            candidate_mode = os.lstat(candidate_path).st_mode & 0o7777
         except OSError as error:
             raise CandidateMaterializationError(
                 f"Verified candidate is missing approved file {item.relpath!r}: {error}"
             ) from error
         writes.append(StagedFileWrite(
-            target_path=target_path, content=candidate_text, base_path=target_path,
+            target_path=target_path, content=display_text(candidate_bytes), base_path=target_path,
             expected_base_revision=item.expected_base_revision,
             expected_base_exists=item.expected_base_exists,
             content_bytes=candidate_bytes, mode=candidate_mode,
@@ -305,6 +328,14 @@ def commit_terminal_candidate(
         if transition is not None and settled in (COMMIT_ROLLED_BACK, COMMIT_NOT_COMMITTED):
             discard_pending_contract_registry(workspace_path, transaction_id)
         raise
+
+    mismatch = committed_digest_mismatch(writes)
+    if mismatch is not None:
+        return settle(COMMIT_UNCERTAIN, TerminalCommitOutcome(
+            committed=False, workspace_state="UNCERTAIN", commit_result=COMMIT_UNCERTAIN,
+            transaction_id=transaction_id, reason_code=VERIFIED_COMMIT_DIGEST_MISMATCH,
+            evidence=result.evidence, error=BatchCommitError(mismatch),
+        ))
 
     if transition is not None:
         try:

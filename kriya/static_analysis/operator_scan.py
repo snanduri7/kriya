@@ -14,7 +14,8 @@ import tempfile
 from typing import Any, List
 
 from kriya.static_analysis.service import StaticAnalysisGateResult, StaticAnalysisRequest, StaticAnalysisService
-from kriya.workflow.edit_safety import StagedFileWrite, content_revision
+from kriya.workflow.edit_safety import StagedFileWrite
+from kriya.workflow.file_integrity import display_text, file_raw_digest, raw_digest
 
 
 class OperatorScanError(RuntimeError):
@@ -42,24 +43,21 @@ def operator_writes(workspace: str, base_root: str, paths: List[str]) -> List[St
     writes: List[StagedFileWrite] = []
     for relpath in paths:
         base_file = os.path.join(base_root, relpath)
-        base_text = ""
         base_exists = os.path.isfile(base_file) and not os.path.islink(base_file)
-        if base_exists:
-            with open(base_file, "r", encoding="utf-8", errors="replace") as handle:
-                base_text = handle.read()
+        base_revision = file_raw_digest(base_file) if base_exists else raw_digest(b"")
         current = os.path.join(workspace, relpath)
         if os.path.isfile(current) and not os.path.islink(current):
             with open(current, "rb") as handle:
                 data = handle.read()
             writes.append(StagedFileWrite(
-                target_path=base_file, content=data.decode("utf-8", errors="replace"), base_path=base_file,
-                expected_base_revision=content_revision(base_text), expected_base_exists=base_exists,
+                target_path=base_file, content=display_text(data), base_path=base_file,
+                expected_base_revision=base_revision, expected_base_exists=base_exists,
                 content_bytes=data,
             ))
         elif base_exists:
             writes.append(StagedFileWrite(
                 target_path=base_file, content="", base_path=base_file,
-                expected_base_revision=content_revision(base_text), delete=True, expected_base_exists=True,
+                expected_base_revision=base_revision, delete=True, expected_base_exists=True,
             ))
     return writes
 

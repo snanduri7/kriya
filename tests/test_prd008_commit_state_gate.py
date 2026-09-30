@@ -309,7 +309,8 @@ def test_evidence_records_kind_and_exact_byte_state(tmp_path):
                         expected_base_exists=True, delete=True),
     ], workspace_path=str(tmp_path), transaction_id="exact")
     persisted = load_commit_evidence(str(tmp_path / ".kriya/control/commits/exact.json"))
-    assert persisted.schema_version == 2
+    # Schema 3 (FILE-INTEGRITY-CONTRACT-001): every revision is a raw-byte digest.
+    assert persisted.schema_version == 3
     ops = {op["target_path"]: op for op in persisted.operations}
     sha = lambda data: hashlib.sha256(data).hexdigest()  # noqa: E731
 
@@ -320,6 +321,8 @@ def test_evidence_records_kind_and_exact_byte_state(tmp_path):
     assert ops["modified.txt"]["before"] == {"exists": True, "sha256": sha(b"old\r\n"), "mode": 0o754}
     # Byte-exact: the CRLF bytes, not the decoded text's revision.
     assert ops["modified.txt"]["after"] == {"exists": True, "sha256": sha(crlf), "mode": 0o754}
+    assert ops["modified.txt"]["candidate_revision"] == sha(crlf)
+    assert result[str(modified)] == sha(crlf)
     assert ops["deleted.txt"]["kind"] == "DELETE"
     assert ops["deleted.txt"]["after"] == {"exists": False, "sha256": None, "mode": None}
     assert ops["deleted.txt"]["before"]["sha256"] == sha(b"gone\n")

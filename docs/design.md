@@ -748,6 +748,28 @@ one `EditCapability` (run event `context.edit_capability`), read by the operatio
 - **Retry**: an edit-protocol failure followed by the same capability digest, model and requested operation is
   `ANCHOR_CONTEXT_NOT_ESCALATED`, a stop before inference that always counts toward the no-progress limit.
 
+### 2.9i File Integrity: Protocol Is Not Payload (FILE-INTEGRITY-CONTRACT-001, KAD-063)
+
+Kriya never silently alters file bytes outside the exact authorized mutation. This **supersedes** the earlier dated
+entries in this document that describe the shared payload sanitizer (`sanitize_generated_content`: trailing
+`FILE CONTENT:` truncation, gutter stripping, largest-fence extraction, XML comment repair), the whitespace-collapsing
+anchor fallback and deterministic package stripping. Those entries stay as history. Each of those heuristics was
+measured corrupting legitimate files (`handover/FILE_INTEGRITY_CONTRACT_001.md`).
+
+- **Response protocol** (`kriya/agents/response_protocol.py`). The parser returns a typed `DeveloperResponse`. It
+  removes only a wrapper that encloses the whole payload, and refuses anything else typed, which the operation-contract
+  retry re-asks. The protocol is `autonomy.developer_response_protocol`: `legacy_strict` (exact column-0 marker lines)
+  or `structured` (path-named `<<<KRIYA:...>>>` sentinels).
+- **Edit engine** (`kriya/workflow/file_integrity.py`). A raw-byte snapshot with a strict UTF-8 text view in one
+  line-ending convention, proven to round-trip. Anchors are complete-line blocks, all located in the same source, and
+  must be unique and non-overlapping. The result is re-encoded in the file's own BOM and convention. Unsupported files
+  are refused, never re-encoded.
+- **Revisions** are raw-byte digests on every mutation and commit path (commit evidence schema 3).
+- **No hidden writes.** Deterministic corrections are candidate mutations applied before the gates. The sandbox must
+  hold the staged candidate digests before every gate. The committed destination is re-read against the verified bytes.
+  Worktree sync is NUL-delimited and byte-checked. A new filesystem write site fails the audit tripwire until it is
+  classified.
+
 ### 2.10 `kriya/workflow/` Module Layout
 
 `kriya/workflow/workflow.py` had grown to ~4700 lines - every helper this section describes (context budgeting, edit safety, failure grounding, toolchain detection, retry-prompt building, skill extraction, live lookup, LSP integration, worktree lifecycle) lived in one file, making both navigation and full-file context loading during development increasingly costly. Mechanically extracted (2026-08-11) into focused modules, each re-exported back into `workflow.py`'s own namespace so every existing `from kriya.workflow.workflow import X` and `unittest.mock.patch("kriya.workflow.workflow.X", ...)` call site across the codebase and test suite kept working unchanged - a pure move, not a rewrite; `run_generation_workflow()`'s own internal orchestration logic is untouched and stays in `workflow.py` (~2600 lines) for now, deliberately deferred as separate, higher-risk follow-up work:

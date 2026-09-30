@@ -3,17 +3,22 @@
 Seen live in demo-03 (2026-09-25): the model returned the fixed file in a
 ```java fence, fence extraction trimmed the newline before the closing fence,
 and the accepted diff dropped the file's final newline next to the one-line
-fix. These tests drive the real run_attempt() write loop (sanitization, write,
-commit to the sandbox), not the helper alone.
+fix. These tests drive the real run_attempt() write loop (write, commit to
+the sandbox), not the helper alone. FILE-INTEGRITY-CONTRACT-001: the fence is
+removed at the Developer's protocol boundary (DeveloperAgent.parse_file_payload,
+applied by _rewrite exactly as the agent does), never by the write loop, and
+the rewrite keeps the file's final-newline state and line-ending convention.
 """
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from kriya.agents.agent import DeveloperAgent
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
-from kriya.workflow.attempt import AttemptContext, _final_line_ending, _keep_final_newline, run_attempt
+from kriya.workflow.attempt import AttemptContext, run_attempt
+from kriya.workflow.file_integrity import keep_final_newline_state, load_snapshot
 from kriya.workflow.migration import resolve_migration_resolution
 from kriya.workflow.state import GenerationState
 
@@ -54,7 +59,9 @@ def _rewrite(tmp_path, original, model_content, target="Target.java"):
     if original is not None:
         path.write_bytes(original.encode("utf-8"))
     developer = AsyncMock()
-    developer.run_generation = AsyncMock(return_value=[{"filepath": target, "content": model_content}])
+    parsed = DeveloperAgent.parse_file_payload(model_content, target)
+    assert parsed.kind == "file", parsed
+    developer.run_generation = AsyncMock(return_value=[{"filepath": target, "content": parsed.content}])
     state = GenerationState()
     state.attempt_number = 0
     state.all_files_written = set()
@@ -88,24 +95,18 @@ def test_file_without_a_final_newline_is_not_given_one(tmp_path):
     assert _rewrite(tmp_path, ORIGINAL.rstrip("\n"), FIXED_BODY) == FIXED_BODY
 
 
-@pytest.mark.parametrize(("prior_ending", "content", "expected"), [
-    ("\n", "b", "b\n"),
-    ("\n", "b\n", "b\n"),
-    ("\r\n", "b", "b\r\n"),
-    ("", "b", "b"),
-    ("\n", "", ""),          # empty content is never padded
+@pytest.mark.parametrize(("original", "content", "expected"), [
+    (b"a\n", "b", "b\n"),
+    (b"a\n", "b\n", "b\n"),
+    (b"a", "b\n", "b"),       # no final newline stays absent
+    (b"a", "b", "b"),
+    (b"a\n", "", ""),         # empty content is never padded
+    (b"", "b\n", "b\n"),     # an empty original has no final-newline convention
 ])
-def test_keep_final_newline(prior_ending, content, expected):
-    assert _keep_final_newline(prior_ending, content) == expected
-
-
-@pytest.mark.parametrize(("data", "expected"), [
-    (b"x\r\n", "\r\n"), (b"x\n", "\n"), (b"x", ""), (b"", ""), (b"\n", "\n"),
-])
-def test_final_line_ending(tmp_path, data, expected):
+def test_keep_final_newline_state(tmp_path, original, content, expected):
     path = tmp_path / "f"
-    path.write_bytes(data)
-    assert _final_line_ending(str(path)) == expected
+    path.write_bytes(original)
+    assert keep_final_newline_state(load_snapshot(str(path)), content) == expected
 
 
 def test_new_file_is_written_as_given(tmp_path):

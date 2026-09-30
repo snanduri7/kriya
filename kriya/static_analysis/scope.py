@@ -35,7 +35,7 @@ from kriya.static_analysis.model import (
     Side,
     bytes_digest,
 )
-from kriya.workflow.edit_safety import content_revision
+from kriya.workflow.file_integrity import raw_digest
 
 # Build descriptors marking a module root (provider-neutral; the markers
 # kriya/tools/validate.py's stack detection uses, plus common others).
@@ -101,14 +101,14 @@ def build_change_set(writes: Iterable[object], workspace_root: str) -> Tuple[Tup
         expected = write.expected_base_revision
         base_exists = write.expected_base_exists
         if disk is None:
-            if write.delete or base_exists is True or expected != content_revision(""):
+            if write.delete or base_exists is True or expected != raw_digest(b""):
                 raise ScopeError(
                     BASELINE_IDENTITY_MISMATCH,
                     f"{relpath}: the base the commit is grounded on is not present in the workspace",
                 )
             kind = ChangeKind.ADDED
         else:
-            if base_exists is False or content_revision(disk.decode("utf-8", errors="replace")) != expected:
+            if base_exists is False or raw_digest(disk) != expected:
                 raise ScopeError(
                     BASELINE_IDENTITY_MISMATCH,
                     f"{relpath}: the workspace no longer holds the base revision the commit is grounded on",

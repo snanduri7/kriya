@@ -6,12 +6,13 @@ import os
 import re
 import shutil
 import subprocess
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from kriya.policy.enforcement import enforce_hard_invariants
 from kriya.policy.errors import PolicyDeniedError
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType
+from kriya.workflow.file_integrity import WORKTREE_CONTENT_MISMATCH, WORKTREE_SYNC_FAILED, file_raw_digest
 
 logger = logging.getLogger(__name__)
 
@@ -203,40 +204,104 @@ def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) 
     "package does not exist" compile failure that looked like a model mistake but was
     purely this sync gap."""
     try:
-        status = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=all", "--", ".", ":!.kriya"],
-            cwd=repo_path, capture_output=True, text=True,
-        )
-        if status.returncode != 0 or not status.stdout.strip():
-            return
-        for line in status.stdout.splitlines():
-            if len(line) < 4:
+        entries = git_status_entries(repo_path, untracked="all", pathspec=(".", ":!.kriya"))
+    except Exception as error:
+        raise WorktreeSyncError(WORKTREE_SYNC_FAILED, f"git status failed: {error}") from error
+    synced: List[str] = []
+    try:
+        for _code, rel, original in entries:
+            if rel == ".kriya" or rel.startswith(".kriya/"):
                 continue
-            code, rest = line[:2], line[3:]
-            # Renames: "R  old -> new" - treat as delete-old + copy-new.
-            if code.startswith("R") and " -> " in rest:
-                old_rel, rest = rest.split(" -> ", 1)
-                old_abs = os.path.join(worktree_path, old_rel.strip().strip('"'))
-                if os.path.exists(old_abs):
-                    os.remove(old_abs)
-            rel = rest.strip().strip('"')
-            if not rel or rel.startswith(".kriya"):
-                continue
+            if original and not os.path.lexists(os.path.join(repo_path, original)):
+                _remove_path(os.path.join(worktree_path, original))
+                synced.append(original)
             src = os.path.join(repo_path, rel)
             dst = os.path.join(worktree_path, rel)
-            if code.strip() == "D" or not os.path.exists(src):
-                if os.path.exists(dst):
-                    try:
-                        os.remove(dst)
-                    except IsADirectoryError:
-                        shutil.rmtree(dst, ignore_errors=True)
+            if not os.path.lexists(src):
+                _remove_path(dst)
+                synced.append(rel)
                 continue
-            if os.path.isdir(src):
-                continue
+            if os.path.isdir(src) and not os.path.islink(src):
+                continue  # an untracked nested repository/submodule directory
             os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
-    except Exception as e:
-        logger.warning(f"Failed to sync uncommitted changes into worktree sandbox (non-fatal, sandbox may be missing uncommitted work): {e}")
+            if os.path.lexists(dst) and (os.path.islink(dst) or os.path.isdir(dst) or os.path.islink(src)):
+                _remove_path(dst)
+            if os.path.islink(src):
+                os.symlink(os.readlink(src), dst)
+            else:
+                shutil.copy2(src, dst, follow_symlinks=False)
+            synced.append(rel)
+    except Exception as error:
+        raise WorktreeSyncError(WORKTREE_SYNC_FAILED, f"copying uncommitted work failed: {error}") from error
+    mismatched = [rel for rel in synced if _path_identity(os.path.join(repo_path, rel))
+                  != _path_identity(os.path.join(worktree_path, rel))]
+    if mismatched:
+        raise WorktreeSyncError(
+            WORKTREE_CONTENT_MISMATCH,
+            f"the sandbox does not hold the workspace's bytes after sync: {', '.join(mismatched[:10])}",
+        )
+
+
+class WorktreeSyncError(RuntimeError):
+    """FILE-INTEGRITY-CONTRACT-001: the sandbox could not be made to hold the
+    workspace's uncommitted work exactly; nothing is verified against it."""
+
+    def __init__(self, reason_code: str, detail: str) -> None:
+        super().__init__(f"{reason_code}: {detail}")
+        self.reason_code = reason_code
+
+
+def git_status_entries(
+    repo_path: str, *, untracked: str = "all", pathspec: Tuple[str, ...] = (),
+) -> List[Tuple[str, str, Optional[str]]]:
+    """``git status --porcelain=v1 -z`` as (XY code, path, original path of a
+    rename/copy). NUL-delimited, so spaces, tabs, newlines and non-UTF-8
+    bytes in names reach the caller exactly (never Git's quoted display
+    form). Raises on a failed ``git status``."""
+    command = ["git", "status", "--porcelain=v1", "-z", f"--untracked-files={untracked}"]
+    if pathspec:
+        command += ["--", *pathspec]
+    result = subprocess.run(command, cwd=repo_path, capture_output=True)
+    if result.returncode != 0:
+        raise RuntimeError(os.fsdecode(result.stderr).strip() or f"exit {result.returncode}")
+    records = result.stdout.split(b"\0")
+    entries: List[Tuple[str, str, Optional[str]]] = []
+    index = 0
+    while index < len(records):
+        record = records[index]
+        index += 1
+        if not record:
+            continue
+        if len(record) < 4 or record[2:3] != b" ":
+            raise RuntimeError(f"unparseable git status record {record!r}")
+        code, path = record[:2].decode("ascii"), os.fsdecode(record[3:])
+        original = None
+        if code[0] in "RC":
+            if index >= len(records) or not records[index]:
+                raise RuntimeError(f"rename/copy record without its original path: {record!r}")
+            original = os.fsdecode(records[index])
+            index += 1
+        entries.append((code, path, original))
+    return entries
+
+
+def _remove_path(path: str) -> None:
+    if os.path.islink(path) or os.path.isfile(path):
+        os.remove(path)
+    elif os.path.isdir(path):
+        shutil.rmtree(path)
+
+
+def _path_identity(path: str) -> Optional[Tuple[str, str]]:
+    """What a path is, byte-exactly: absent, a link (its target) or a file
+    (its raw digest). Directories are not synced and compare as themselves."""
+    if not os.path.lexists(path):
+        return None
+    if os.path.islink(path):
+        return ("link", os.readlink(path))
+    if os.path.isdir(path):
+        return ("dir", "")
+    return ("file", file_raw_digest(path))
 
 
 def _resolve_repo_head(repo_path: str) -> Optional[str]:
@@ -551,20 +616,11 @@ def snapshot_untracked_files(worktree_path: str) -> Optional[set]:
     generated-app runtime state, e.g. a JSON store, leaking across retry
     attempts inside the same reused worktree)."""
     try:
-        res = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=all"],
-            cwd=worktree_path, capture_output=True, text=True,
-        )
-        if res.returncode != 0:
-            return _snapshot_all_files_without_git(worktree_path)
+        entries = git_status_entries(worktree_path, untracked="all")
     except Exception as e:
         logger.debug(f"Failed to snapshot untracked files in '{worktree_path}' via git (non-fatal): {e}")
         return _snapshot_all_files_without_git(worktree_path)
-    files = set()
-    for line in res.stdout.splitlines():
-        if line.startswith("??"):
-            files.add(line[3:].strip().strip('"'))
-    return files
+    return {path for code, path, _original in entries if code == "??"}
 
 
 def clean_untracked_files_since(worktree_path: str, baseline: Optional[set]) -> None:

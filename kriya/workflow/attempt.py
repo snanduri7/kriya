@@ -120,6 +120,17 @@ from kriya.workflow.failure_grounding import (
     find_locator_files_outside_known_scope,
     resolve_repository_locator_files,
 )
+from kriya.workflow.file_integrity import (
+    DETERMINISTIC_FILE_INTEGRITY_STOPS,
+    WORKTREE_CONTENT_MISMATCH,
+    FileIntegrityError,
+    display_text,
+    file_raw_digest,
+    keep_final_newline_state,
+    load_snapshot,
+    raw_digest,
+    read_shown_text,
+)
 from kriya.workflow.file_resolution import (
     IncompleteGenerationError,
     _resolve_run_command,
@@ -147,7 +158,6 @@ from kriya.workflow.file_resolution import (
     python_command_targets_test_path,
     python_file_is_runnable_script,
     python_target_path_is_test_shaped,
-    strip_package_declaration_matching_source_root,
 )
 from kriya.workflow.migration import (
     MigrationResolution,
@@ -243,32 +253,140 @@ from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untrac
 logger = logging.getLogger(__name__)
 
 
-def _final_line_ending(path: str) -> str:
-    """The line ending the file at ``path`` ends with ("\r\n", "\n" or "").
-    Read as bytes: text mode turns a final CRLF into "\n"."""
+def _apply_candidate_pom_corrections(
+    state: GenerationState, ctx: "AttemptContext", compile_known_files: List[str],
+) -> None:
+    """Deterministic pom.xml corrections (Maven source-root coverage and
+    exec.mainClass), as ordinary candidate mutations (FILE-INTEGRITY-
+    CONTRACT-001): only when this candidate itself wrote pom.xml, through the
+    authorized staged writer against the pom's raw revision, recorded as a
+    run event with both digests - so the change is in the candidate's diff,
+    its commit batch and its verification. A pom the candidate did not write
+    (the repository's own) is never rewritten behind the gates; the compile
+    gate then reports the real layout problem instead."""
+    pom_path = os.path.join(ctx.worktree_path, "pom.xml")
+    if not os.path.exists(pom_path):
+        return
+    if "pom.xml" not in state.all_files_written:
+        return
+    snapshot = load_snapshot(pom_path)
     try:
-        with open(path, "rb") as fh:
-            fh.seek(0, os.SEEK_END)
-            fh.seek(max(0, fh.tell() - 2))
-            tail = fh.read()
+        pom_content = snapshot.text
+    except FileIntegrityError:
+        return
+    corrected = pom_content
+    skills_relpath = os.path.relpath(ctx.kernel.config.paths.skills, ctx.workspace_path)
+    corrections = []
+    widened = ensure_maven_covers_nonconventional_java_files(corrected, compile_known_files, skills_relpath)
+    if widened is not None:
+        corrected = widened
+        corrections.append("maven_source_root_coverage")
+    compile_java_files = [f for f in compile_known_files if f.endswith(".java")]
+    main_class = correct_exec_main_class_property(corrected, _build_java_main_class_map(compile_java_files, ctx))
+    if main_class is not None:
+        corrected = main_class
+        corrections.append("exec_main_class")
+    notes = []
+    for name, transform in (("jdk_incompatible_jvm_flags", _strip_jdk_incompatible_jvm_flags),
+                            ("exec_executable_pinned_to_resolved_jdk", _pin_exec_plugin_executable_to_resolved_jdk)):
+        transformed, note = transform(corrected, state.java_home_override)
+        if transformed is not None:
+            corrected = transformed
+            corrections.append(name)
+            notes.append(note)
+    if notes:
+        joined = " ".join(notes)
+        logger.warning(f"JVM preflight: {joined}")
+        state.toolchain_warning = f"{state.toolchain_warning} {joined}" if state.toolchain_warning else joined
+    if not corrections:
+        return
+    data = snapshot.encode(corrected)
+    AuthorizedFileWriter(
+        ctx.worktree_path,
+        protected_relpaths=(ctx.protected_relpath,) if ctx.protected_relpath else (),
+        allowed_relpaths=ctx.allowed_write_relpaths,
+        write_scope_mode=ctx.write_scope_mode,
+    ).commit_batch([StagedFileWrite(
+        target_path=pom_path, content=corrected, base_path=pom_path,
+        expected_base_revision=snapshot.raw_sha256, content_bytes=data, mode=snapshot.file_mode,
+    )])
+    state.candidate_digests["pom.xml"] = raw_digest(data)
+    state.record_event(RunEvent(
+        kind="candidate.deterministic_transformation", attempt=state.attempt_number,
+        source="attempt.pom_corrections", authority=EventAuthority.ADVISORY,
+        message=f"pom.xml corrected in the candidate ({', '.join(corrections)}) before verification",
+        details={"path": "pom.xml", "corrections": corrections,
+                 "before_sha256": snapshot.raw_sha256, "after_sha256": raw_digest(data)},
+    ))
+
+
+def _require_worktree_matches_candidate(state: GenerationState, ctx: "AttemptContext") -> None:
+    """FILE-INTEGRITY-CONTRACT-001, before any verification gate: every
+    candidate file in the sandbox holds exactly the bytes the authorized
+    writer staged for it (``state.candidate_digests``). A difference means
+    something wrote the candidate outside the staged writer; verification
+    never runs on bytes the commit batch would not carry."""
+    mismatches = []
+    for relpath, expected in sorted(state.candidate_digests.items()):
+        path = os.path.join(ctx.worktree_path, relpath)
+        actual = file_raw_digest(path) if os.path.lexists(path) else None
+        if actual != expected:
+            mismatches.append(relpath)
+    if not mismatches:
+        return
+    message = (f"{WORKTREE_CONTENT_MISMATCH}: candidate file(s) {', '.join(mismatches[:10])} no longer hold the "
+               "bytes the authorized writer staged; verification is not run on them")
+    failure = Failure(
+        type="internal_framework_error", message=message, raw_output=message, source="orchestrator",
+        authority="deterministic", attempt=state.attempt_number,
+        diagnostics={"reason_code": WORKTREE_CONTENT_MISMATCH, "paths": mismatches[:50]},
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def _capture_original(state: GenerationState, ctx: "AttemptContext", relpath: str) -> None:
+    """Record, once per run, the exact workspace bytes of ``relpath`` (None
+    when absent) and their display text. The bytes are the commit base
+    revision (FILE-INTEGRITY-CONTRACT-001) and what a restoration writes back."""
+    if relpath in state.all_original_raw:
+        return
+    try:
+        with open(os.path.join(ctx.workspace_path, relpath), "rb") as handle:
+            data: Optional[bytes] = handle.read()
+    except (FileNotFoundError, IsADirectoryError):
+        data = None
     except OSError:
-        return ""
-    if tail.endswith(b"\r\n"):
-        return "\r\n"
-    return "\n" if tail.endswith(b"\n") else ""
+        return
+    state.all_original_raw[relpath] = data
+    state.all_original_contents.setdefault(relpath, "" if data is None else display_text(data))
 
 
-def _keep_final_newline(prior_ending: str, content: str) -> str:
-    """A full-file rewrite of an existing file keeps that file's final line
-    ending (``prior_ending``, from _final_line_ending). Fence extraction
-    (DeveloperAgent._strip_markdown_fences) trims the newlines around a
-    fenced block, so a fenced full-file answer arrives without one, and the
-    rewrite used to drop it (seen live in demo-03: a one-line fix whose diff
-    also removed the file's final newline). A new file, or an existing file
-    without a final newline, is left as given."""
-    if not content or not prior_ending or content.endswith(("\n", "\r")):
-        return content
-    return content + prior_ending
+def _baseline_restoration_write(state: GenerationState, target_path: str, relpath: str) -> StagedFileWrite:
+    """Restore ``relpath`` to its exact original bytes, based on the target's
+    current raw revision (re-checked by the batch commit)."""
+    original = state.all_original_raw.get(relpath)
+    data = original if original is not None else state.all_original_contents[relpath].encode("utf-8")
+    return StagedFileWrite(
+        target_path=target_path, content=display_text(data), base_path=target_path,
+        expected_base_revision=file_raw_digest(target_path), content_bytes=data,
+    )
+
+
+def _file_integrity_stop(state: GenerationState, filepath: str, error: Any) -> "QualityGateFailure":
+    """FILE-INTEGRITY-CONTRACT-001: a file the edit engine cannot mutate
+    byte-exactly (not UTF-8, mixed line endings, a symbolic link). No
+    Developer retry can change the file itself, so this is a deterministic
+    stop (retry_strategy: ``file_integrity_unsupported``), never a retry."""
+    message = str(error)
+    failure = Failure(
+        type="file_integrity_unsupported", message=message, raw_output=message,
+        source="orchestrator", authority="deterministic", attempt=state.attempt_number,
+        file_locations=[FileLocation(filepath=filepath)], likely_files=[filepath],
+        diagnostics={"reason_code": getattr(error, "reason_code", None)},
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    return QualityGateFailure(failure)
 
 
 def _target_exists(ctx: "AttemptContext", filepath: str) -> bool:
@@ -1086,14 +1204,13 @@ def _record_all_files_written_as_exact_context(
     for filepath in filepaths:
         full_path = os.path.join(ctx.worktree_path, filepath)
         try:
-            with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
-                current_content = handle.read()
+            current_content, current_revision = read_shown_text(full_path)
         except OSError:
             continue
         state.known_target_context_items[filepath] = make_context_item(
             path=filepath, content=current_content, reason="all_files_written_current_source",
             source_type="named_in_request", trust_level="repository",
-            tier="full", is_exact=True, revision=content_revision(current_content),
+            tier="full", is_exact=True, revision=current_revision,
         )
 
 
@@ -1203,8 +1320,7 @@ def _has_authoritative_full_source(
     if not os.path.exists(full_path):
         full_path = os.path.join(ctx.workspace_path, filepath)
     try:
-        with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
-            current_revision = content_revision(handle.read())
+        current_revision = read_shown_text(full_path)[1]
     except OSError:
         current_revision = None
     # An item with no recorded revision at all predates CTX-001 P1 WP3
@@ -1220,8 +1336,7 @@ def _current_revision(filepath: str, ctx: "AttemptContext") -> Optional[str]:
     if not os.path.exists(full_path):
         full_path = os.path.join(ctx.workspace_path, filepath)
     try:
-        with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
-            return content_revision(handle.read())
+        return read_shown_text(full_path)[1]
     except OSError:
         return None
 
@@ -2166,8 +2281,7 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
     budget_chars = exact_window_reserve(allocation_window(ctx.kernel.config, binding)) * 4 // len(targets)
     capabilities: Dict[str, Any] = {}
     for path, full in targets:
-        with open(full, "r", encoding="utf-8", errors="replace") as handle:
-            content = handle.read()
+        content, content_shown_revision = read_shown_text(full)
         # Pieces already shown count only when Kriya's producer vouches for
         # their bytes (a member_exact slice; an implementation excerpt's head
         # and tail, exact by construction) and they are of the current revision.
@@ -2175,7 +2289,7 @@ def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwa
         shown = (
             shown_exact_texts(item.tier, item.content)
             if item is not None and (item.is_exact or item.tier == "implementation_excerpt")
-            and (not item.revision or item.revision == content_revision(content)) else []
+            and (not item.revision or item.revision == content_shown_revision) else []
         )
         # Whatever renderer put it there (a retry prompt's current content),
         # the whole current file present verbatim in this request's mandatory
@@ -2797,13 +2911,9 @@ def _materialize_candidate_content(
     current_file_path = os.path.join(ctx.worktree_path, filepath)
     if not os.path.exists(current_file_path):
         current_file_path = os.path.join(ctx.workspace_path, filepath)
-    orig_text = ""
-    if os.path.exists(current_file_path):
-        with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
-            orig_text = fh.read()
     try:
-        return apply_anchored_edits(orig_text, edits, "")
-    except ValueError:
+        return apply_anchored_edits(load_snapshot(current_file_path).text, edits, "")
+    except (ValueError, OSError):
         return None
 
 
@@ -5117,16 +5227,10 @@ async def _execute_runtime_verification_directly(
         )
         state.gate_outcomes.append(failure.to_gate_outcome())
         raise QualityGateFailure(failure)
-    jvm_flag_correction = _strip_jdk_incompatible_jvm_flags(ctx.worktree_path, state.java_home_override)
-    if jvm_flag_correction:
-        state.toolchain_warning = (
-            f"{state.toolchain_warning} {jvm_flag_correction}" if state.toolchain_warning else jvm_flag_correction
-        )
-    exec_pin_correction = _pin_exec_plugin_executable_to_resolved_jdk(ctx.worktree_path, state.java_home_override)
-    if exec_pin_correction:
-        state.toolchain_warning = (
-            f"{state.toolchain_warning} {exec_pin_correction}" if state.toolchain_warning else exec_pin_correction
-        )
+    # FILE-INTEGRITY-CONTRACT-001: pom corrections are candidate mutations,
+    # applied before the first gate of this attempt, never between gates.
+    _apply_candidate_pom_corrections(state, ctx, sorted(state.all_files_written | set(ctx.established_files)))
+    _require_worktree_matches_candidate(state, ctx)
     command_verification_kind = deterministic_sequence_kind(resolved_run_commands)
     logger.info(
         "Quality Gates: Running %s verification (verification-only subtask): "
@@ -5769,10 +5873,7 @@ def _stage_ownership_redirect_restoration(
         except OSError:
             current = ""
         if current != baseline:
-            staged_writes.append(StagedFileWrite(
-                target_path=target, content=baseline, base_path=target,
-                expected_base_revision=content_revision(current),
-            ))
+            staged_writes.append(_baseline_restoration_write(state, target, test_path))
             restored.append(test_path)
     removed: List[str] = []
     for candidate in recovery.get("abandoned_candidates", []):
@@ -5785,7 +5886,7 @@ def _stage_ownership_redirect_restoration(
             current = handle.read()
         staged_writes.append(StagedFileWrite(
             target_path=target, content="", base_path=target,
-            expected_base_revision=content_revision(current), delete=True,
+            expected_base_revision=file_raw_digest(target), delete=True,
         ))
         removed.append(candidate)
     if restored or removed:
@@ -7033,21 +7134,15 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             )
         if early_api_violations:
             state.all_original_contents.update(baseline_contents)
+            for baseline_path in baseline_contents:
+                _capture_original(state, ctx, baseline_path)
             for evidence_path in sorted({
                 path
                 for item in early_api_violations
                 for path in item.get("evidence_files", [])
             }):
-                if evidence_path in state.all_original_contents:
-                    continue
-                try:
-                    with open(
-                        os.path.join(ctx.workspace_path, evidence_path),
-                        "r", encoding="utf-8", errors="replace",
-                    ) as handle:
-                        state.all_original_contents[evidence_path] = handle.read()
-                except OSError:
-                    pass
+                if evidence_path not in state.all_original_contents:
+                    _capture_original(state, ctx, evidence_path)
             failure = Failure(
                 type="brownfield_public_api_changed",
                 message=(
@@ -7465,13 +7560,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         filepath = file_obj.get("filepath", "")
         if not filepath:
             continue
-        if filepath not in state.all_original_contents:
-            actual_file = os.path.join(ctx.workspace_path, filepath)
-            if os.path.exists(actual_file):
-                with open(actual_file, "r", encoding="utf-8", errors="replace") as fh:
-                    state.all_original_contents[filepath] = fh.read()
-            else:
-                state.all_original_contents[filepath] = ""
+        _capture_original(state, ctx, filepath)
 
     # Write files to worktree sandbox
     state.files_written = []
@@ -7553,26 +7642,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 ),
             )
 
-        # Single choke point every content path (batch JSON, iterative
-        # per-file, a full-set retry) converges through before a byte
-        # reaches disk - closes a real gap the per-path fixes upstream
-        # (DeveloperAgent.sanitize_generated_content) don't: a batch JSON
-        # response's content/edits fields are consumed directly from
-        # parsed JSON and never passed through any sanitization at all
-        # before this point. Idempotent/harmless to re-apply to content
-        # that already went through it upstream.
-        if edits:
-            edits = [
-                {
-                    **e,
-                    "search": DeveloperAgent.sanitize_generated_content(e.get("search", "")),
-                    "replace": DeveloperAgent.sanitize_generated_content(e.get("replace", "")),
-                }
-                for e in edits
-            ]
-        elif content is not None:
-            content = DeveloperAgent.sanitize_generated_content(content)
-
+        # FILE-INTEGRITY-CONTRACT-001: content and edits arrive here as
+        # parsed protocol payload (kriya/agents/response_protocol.py) and are
+        # never rewritten; the bytes written are the snapshot-bound result of
+        # the one edit engine (kriya/workflow/file_integrity.py).
         full_path = os.path.join(ctx.worktree_path, filepath)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
@@ -7581,15 +7654,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             if not os.path.exists(current_file_path):
                 current_file_path = os.path.join(ctx.workspace_path, filepath)
 
-            orig_text = ""
-            if os.path.exists(current_file_path):
-                with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
-                    orig_text = fh.read()
-
+            source_snapshot = load_snapshot(current_file_path)
+            orig_text = display_text(source_snapshot.raw_bytes)
             try:
+                orig_text = source_snapshot.text
                 _authorize_anchors(state, filepath, edits, orig_text)
                 new_content = apply_anchored_edits(orig_text, edits, active_code_context)
+                new_bytes = source_snapshot.encode(new_content)
             except ValueError as anchor_ex:
+                if getattr(anchor_ex, "reason_code", None) in DETERMINISTIC_FILE_INTEGRITY_STOPS:
+                    raise _file_integrity_stop(state, filepath, anchor_ex) from anchor_ex
                 # apply_anchored_edits() itself never receives a filepath, so its
                 # raised ValueError never named one either - this failure class
                 # always fell through to a blind full-set retry, unlike a compile
@@ -7848,7 +7922,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 target_path=full_path,
                 content=new_content,
                 base_path=current_file_path,
-                expected_base_revision=content_revision(orig_text),
+                expected_base_revision=source_snapshot.raw_sha256,
+                content_bytes=new_bytes,
+                mode=source_snapshot.file_mode,
             ))
         else:
             if content is None:
@@ -7859,13 +7935,30 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 workspace_file_path = os.path.join(ctx.workspace_path, filepath)
                 if os.path.exists(workspace_file_path):
                     current_file_path = workspace_file_path
-            file_is_new = not os.path.exists(current_file_path)
-            prior_content = ""
-            if os.path.exists(current_file_path):
-                with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
-                    prior_content = fh.read()
+            # FILE-INTEGRITY-CONTRACT-001: a whole-file replacement of an
+            # existing file keeps its BOM, line-ending convention and final
+            # newline state, and is refused for a file the edit engine cannot
+            # represent exactly (never re-encoded from a lossy view).
+            source_snapshot = load_snapshot(current_file_path)
+            file_is_new = not source_snapshot.exists
+            prior_content = display_text(source_snapshot.raw_bytes)
             if not file_is_new:
-                content = _keep_final_newline(_final_line_ending(current_file_path), content)
+                try:
+                    source_snapshot.require_mutable()
+                except FileIntegrityError as integrity_ex:
+                    raise _file_integrity_stop(state, filepath, integrity_ex) from integrity_ex
+                content = keep_final_newline_state(source_snapshot, content)
+            try:
+                content_bytes = source_snapshot.encode(content)
+            except FileIntegrityError as integrity_ex:
+                failure = Failure(
+                    type="file_integrity", message=f"FILE INTEGRITY FAILURE in {filepath}: {integrity_ex}",
+                    raw_output=str(integrity_ex), file_locations=[FileLocation(filepath=filepath)],
+                    likely_files=[filepath], diagnostics={"reason_code": integrity_ex.reason_code},
+                    attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure) from integrity_ex
 
             structural_problem = find_structural_corruption(filepath, content)
             if structural_problem:
@@ -7971,7 +8064,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 target_path=full_path,
                 content=content,
                 base_path=current_file_path,
-                expected_base_revision=content_revision(prior_content),
+                expected_base_revision=source_snapshot.raw_sha256,
+                content_bytes=content_bytes,
+                mode=source_snapshot.file_mode,
             ))
 
     # Protected callers/tests are contract evidence, not repair targets.  An
@@ -8008,12 +8103,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 continue
             current = current_evidence[evidence_path]
             if current != baseline:
-                staged_writes.append(StagedFileWrite(
-                    target_path=target_path,
-                    content=baseline,
-                    base_path=target_path,
-                    expected_base_revision=content_revision(current),
-                ))
+                staged_writes.append(_baseline_restoration_write(state, target_path, evidence_path))
                 logger.info(
                     "RESTORE_PUBLIC_CONTRACT: deterministically restoring protected "
                     "baseline evidence %s", evidence_path,
@@ -8036,6 +8126,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         allowed_relpaths=ctx.allowed_write_relpaths,
         write_scope_mode=ctx.write_scope_mode,
     ).commit_batch(staged_writes)
+    for staged in staged_writes:
+        state.candidate_digests[os.path.relpath(staged.target_path, ctx.worktree_path)] = (
+            None if staged.delete else raw_digest(
+                staged.content_bytes if staged.content_bytes is not None else staged.content.encode("utf-8"))
+        )
     changed_files = [
         os.path.relpath(staged.target_path, ctx.worktree_path)
         for staged in staged_writes
@@ -8334,78 +8429,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # worktree - cheap to detect "already customized" and no-op, and
         # correctly re-applies if a retry rewrites pom.xml back to a plain
         # Maven-convention shape.
-        pom_path = os.path.join(ctx.worktree_path, "pom.xml")
-        if os.path.exists(pom_path):
-            try:
-                with open(pom_path, "r", encoding="utf-8", errors="replace") as fh:
-                    pom_content = fh.read()
-            except OSError:
-                pom_content = None
-            if pom_content is not None:
-                skills_relpath = os.path.relpath(ctx.kernel.config.paths.skills, ctx.workspace_path)
-                corrected_pom = ensure_maven_covers_nonconventional_java_files(
-                    pom_content, compile_known_files, skills_relpath,
-                )
-                if corrected_pom is not None:
-                    logger.info(
-                        "pom.xml doesn't cover the actual location of known .java files under "
-                        "Maven's default sourceDirectory - deterministically widening it to the "
-                        "workspace root (excluding the skills and .kriya directories)."
-                    )
-                    pom_content = corrected_pom
-                    with open(pom_path, "w", encoding="utf-8") as fh:
-                        fh.write(corrected_pom)
-
-                # Deterministic exec.mainClass property correction - found live,
-                # 2026-08-22 (ignite_qpid_protocol): see
-                # correct_exec_main_class_property()'s own docstring
-                # (kriya/workflow/file_resolution.py) for the full incident -
-                # every active skill's own example pom.xml sets a plausible-
-                # looking but arbitrary default (com.example.App and siblings)
-                # for this property, which the Developer can copy verbatim
-                # even though the real class it generated lives in the
-                # default package. compile succeeds either way (this property
-                # has no bearing on what compiles) - `mvn exec:exec` only
-                # fails at RUNTIME with "Could not find or load main class
-                # App", the exact failure this closes.
-                compile_java_files = [f for f in compile_known_files if f.endswith(".java")]
-                corrected_exec_main_class = correct_exec_main_class_property(
-                    pom_content, _build_java_main_class_map(compile_java_files, ctx),
-                )
-                if corrected_exec_main_class is not None:
-                    logger.info(
-                        "pom.xml's <exec.mainClass> property doesn't match the real class Kriya "
-                        "actually generated (likely copied verbatim from a skill's example) - "
-                        "deterministically correcting it."
-                    )
-                    with open(pom_path, "w", encoding="utf-8") as fh:
-                        fh.write(corrected_exec_main_class)
-
-        # Deterministic package-declaration correction - found live,
-        # 2026-08-22 (ignite_qpid_protocol milestone 3/4): see
-        # strip_package_declaration_matching_source_root()'s own docstring
-        # (kriya/workflow/file_resolution.py) for the full incident. Runs
-        # every attempt, unconditionally, over every known .java file - cheap
-        # to no-op for the (overwhelmingly common) case where a file either
-        # isn't directly under src/main/java/ or already has no package.
-        for java_relpath in (f for f in compile_known_files if f.endswith(".java")):
-            java_abs_path = os.path.join(ctx.worktree_path, java_relpath)
-            if not os.path.exists(java_abs_path):
-                continue
-            try:
-                with open(java_abs_path, "r", encoding="utf-8", errors="replace") as fh:
-                    java_content = fh.read()
-            except OSError:
-                continue
-            corrected_java = strip_package_declaration_matching_source_root(java_relpath, java_content)
-            if corrected_java is not None:
-                logger.info(
-                    f"{java_relpath} sits directly under src/main/java/ with no subdirectory "
-                    "nesting, so its package declaration is unconditionally invalid per Java's "
-                    "own rules - deterministically stripping it to the default package."
-                )
-                with open(java_abs_path, "w", encoding="utf-8") as fh:
-                    fh.write(corrected_java)
+        _apply_candidate_pom_corrections(state, ctx, compile_known_files)
+        _require_worktree_matches_candidate(state, ctx)
 
         _compile_started = time.monotonic()
         compile_res = validator.run_compile_check(compile_known_files)
@@ -9156,20 +9181,6 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         )
                         state.gate_outcomes.append(rv_failure.to_gate_outcome())
                         raise QualityGateFailure(rv_failure)
-                    jvm_flag_correction = _strip_jdk_incompatible_jvm_flags(ctx.worktree_path, state.java_home_override)
-                    if jvm_flag_correction:
-                        logger.warning(f"JVM flag preflight: {jvm_flag_correction}")
-                        state.toolchain_warning = (
-                            f"{state.toolchain_warning} {jvm_flag_correction}"
-                            if state.toolchain_warning else jvm_flag_correction
-                        )
-                    exec_pin_correction = _pin_exec_plugin_executable_to_resolved_jdk(ctx.worktree_path, state.java_home_override)
-                    if exec_pin_correction:
-                        logger.warning(f"JVM executable preflight: {exec_pin_correction}")
-                        state.toolchain_warning = (
-                            f"{state.toolchain_warning} {exec_pin_correction}"
-                            if state.toolchain_warning else exec_pin_correction
-                        )
                     command_verification_kind = deterministic_sequence_kind(resolved_run_commands)
                     logger.info(
                         "Quality Gates: Running %s verification: "

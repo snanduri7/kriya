@@ -17,7 +17,8 @@ async def test_generic_repair_loop_retests_only_the_targeted_test(tmp_path):
         {"content": "", "tool_calls": [{
             "id": "2", "name": "apply_patch", "arguments": {
                 "filepath": "pricing.py", "edits": [{
-                    "search": "return 0", "replace": "return 1",
+                    # A complete-line anchor (FILE-INTEGRITY-CONTRACT-001, issue #8).
+                    "search": "def price(): return 0", "replace": "def price(): return 1",
                 }],
             },
         }, {

@@ -35,6 +35,7 @@ from kriya.control.run_record import RunRecord
 from kriya.control.state import ControlState
 from kriya.control.workspace_identity import WorkspaceOwnershipError, ownership_metadata, validate_ownership
 from kriya.workflow.edit_safety import content_revision, read_file_revision
+from kriya.workflow.file_integrity import raw_digest
 
 logger = logging.getLogger(__name__)
 
@@ -114,16 +115,16 @@ def _read_run_record(workspace_path: str, run_id: str) -> Tuple[Optional[RunReco
     """(record, content revision) from ONE read; (None, None) when absent."""
     path = run_record_path(workspace_path, run_id)
     try:
-        # Same decoding as read_file_revision(), so the content revision the
-        # revision-grounded write checks is identical to this read.
-        with open(path, "r", encoding="utf-8", errors="replace") as handle:
-            text = handle.read()
+        # FILE-INTEGRITY-CONTRACT-001: the revision is the raw bytes' digest,
+        # exactly what read_file_revision() and the grounded write check.
+        with open(path, "rb") as handle:
+            data = handle.read()
     except FileNotFoundError:
         return None, None
     except OSError as error:
         raise UnreadableRunRecordError(path, f"{type(error).__name__}: {error}") from error
     try:
-        payload = json.loads(text)
+        payload = json.loads(data.decode("utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("RunRecord document is not a JSON object")
         validate_ownership(workspace_path, payload, path)
@@ -132,7 +133,7 @@ def _read_run_record(workspace_path: str, run_id: str) -> Tuple[Optional[RunReco
         raise UnreadableRunRecordError(path, f"{type(error).__name__}: {error}") from error
     if record.run_id != run_id:
         raise UnreadableRunRecordError(path, f"file names run {run_id!r} but holds {record.run_id!r}")
-    return record, content_revision(text)
+    return record, raw_digest(data)
 
 
 def load_run_record(workspace_path: str, run_id: str) -> Optional[RunRecord]:

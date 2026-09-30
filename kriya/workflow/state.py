@@ -355,6 +355,14 @@ class GenerationState:
     files_written: List[Dict[str, str]] = field(default_factory=list)
     all_files_written: Set[str] = field(default_factory=set)
     all_original_contents: Dict[str, str] = field(default_factory=dict)
+    # FILE-INTEGRITY-CONTRACT-001: the exact workspace bytes behind each
+    # all_original_contents entry (None = the file did not exist). Their raw
+    # digest is the commit base revision, and restorations write them back.
+    all_original_raw: Dict[str, Optional[bytes]] = field(default_factory=dict)
+    # FILE-INTEGRITY-CONTRACT-001: the raw digest of the bytes the authorized
+    # writer last staged for each candidate path (None = deleted); checked
+    # against the sandbox before every verification gate.
+    candidate_digests: Dict[str, Optional[str]] = field(default_factory=dict)
     # Test-obligation preservation (2026-09-20): populated once, in
     # workflow.py's own Architect-stage prefer_existing_artifact_owners()
     # call, whenever a PLANNED-BUT-NONEXISTENT test file (is_runnable_

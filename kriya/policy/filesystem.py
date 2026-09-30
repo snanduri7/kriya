@@ -362,14 +362,17 @@ class AuthorizedFileWriter:
                 result=result,
             )
 
-    def commit_file(self, full_path: str, content: str, expected_revision: str) -> str:
-        """Authorizes, then delegates to edit_safety.py's unmodified
-        commit_revision_grounded_file - nothing is written if this raises."""
+    def commit_file(
+        self, full_path: str, content: str, expected_revision: str, *, content_bytes: Optional[bytes] = None,
+    ) -> str:
+        """Authorizes, then delegates to edit_safety.py's
+        commit_revision_grounded_file - nothing is written if this raises.
+        ``content_bytes`` are the exact bytes to write when given."""
 
         self._raise_if_denied(full_path)
         return commit_revision_grounded_file(
             full_path, content, expected_revision=expected_revision,
-            workspace_path=self._scope.writable_roots[0],
+            workspace_path=self._scope.writable_roots[0], content_bytes=content_bytes,
         )
 
     def commit_batch(self, writes: Iterable[StagedFileWrite]) -> Dict[str, str]:

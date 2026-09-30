@@ -520,6 +520,10 @@ async def _record_attempt_failure(
             # commit. Regeneration cannot change the workspace's revision,
             # the commit evidence or a refused commit guard.
             "workspace_commit",
+            # FILE-INTEGRITY-CONTRACT-001: the target file is not something the
+            # edit engine can mutate byte-exactly (not UTF-8, mixed line
+            # endings, a symbolic link); regenerating cannot change the file.
+            "file_integrity_unsupported",
         }
         else classify_environment_failure(
             raw_error_context,

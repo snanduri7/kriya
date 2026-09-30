@@ -129,7 +129,9 @@ from kriya.workflow.edit_safety import (
 )
 from kriya.workflow.edit_safety import (
     atomic_write_file,
+    commit_revision_grounded_file,
     content_revision,
+    read_file_revision,
 )
 from kriya.workflow.edit_safety import (
     find_structural_corruption as find_structural_corruption,
@@ -162,6 +164,7 @@ from kriya.workflow.failure_grounding import (
     extract_implicated_files as extract_implicated_files,
 )
 from kriya.workflow.failure_reporting import build_failure_report_entry
+from kriya.workflow.file_integrity import DETERMINISTIC_FILE_INTEGRITY_STOPS, display_text, raw_digest
 from kriya.workflow.file_resolution import (
     IncompleteGenerationError as IncompleteGenerationError,
 )
@@ -981,12 +984,27 @@ def _terminal_contract_authorizations(
     ]
 
 
+def _restore_original_bytes(path: str, data: bytes) -> None:
+    """Atomically put a file back to its exact original bytes (the abort path
+    without worktree isolation), keeping its mode."""
+    commit_revision_grounded_file(path, display_text(data), read_file_revision(path), content_bytes=data)
+
+
+def _original_revision(state: GenerationState, filepath: str) -> str:
+    """The raw-byte revision the run read ``filepath`` at (FILE-INTEGRITY-
+    CONTRACT-001); a path captured only as text (equal for valid UTF-8 LF
+    files) falls back to its text revision."""
+    if filepath in state.all_original_raw:
+        return raw_digest(state.all_original_raw[filepath] or b"")
+    return content_revision(state.all_original_contents.get(filepath, ""))
+
+
 def _direct_terminal_writes(worktree_path: str, workspace_path: str, state: GenerationState) -> List[Any]:
     """The direct terminal batch, exactly as the terminal apply materializes it."""
     return materialize_candidate(worktree_path, workspace_path, [
         CandidateFile(
             relpath=filepath,
-            expected_base_revision=content_revision(state.all_original_contents.get(filepath, "")),
+            expected_base_revision=_original_revision(state, filepath),
         )
         for filepath in sorted(state.all_files_written)
     ])
@@ -4242,7 +4260,15 @@ class WorkflowEngine:
                     else:
                         for filepath, orig_content in state.all_original_contents.items():
                             actual_file = os.path.join(workspace_path, filepath)
-                            if orig_content:
+                            # FILE-INTEGRITY-CONTRACT-001: restore the exact original
+                            # bytes, never a decoded copy of them.
+                            orig_raw = state.all_original_raw.get(filepath)
+                            if orig_raw is not None:
+                                _restore_original_bytes(actual_file, orig_raw)
+                            elif filepath in state.all_original_raw:
+                                if os.path.exists(actual_file):
+                                    os.remove(actual_file)
+                            elif orig_content:
                                 # Atomic, not plain open(...,"w") - this restores the
                                 # user's REAL project file directly (no worktree
                                 # isolation on this path), so a kill mid-write here would
@@ -5585,6 +5611,10 @@ class WorkflowEngine:
             is_workspace_commit_stop = bool(state.environment_failure) and (
                 state.environment_failure.startswith(f"{WORKSPACE_COMMIT_NOT_COMPLETED}:")
             )
+            # FILE-INTEGRITY-CONTRACT-001: same convention - a target the edit
+            # engine cannot mutate byte-exactly (file_integrity.py reason codes).
+            is_file_integrity_stop = bool(state.environment_failure) and any(
+                state.environment_failure.startswith(f"{code}:") for code in DETERMINISTIC_FILE_INTEGRITY_STOPS)
             # PRD-031A: a static-analysis gate stop (StaticAnalysisGateResult.gap).
             static_analysis_stop = next(
                 (
@@ -5609,6 +5639,7 @@ class WorkflowEngine:
                 else "contract_registry_blocked" if is_contract_registry_stop
                 else static_analysis_stop if static_analysis_stop is not None
                 else "workspace_commit_failed" if is_workspace_commit_stop
+                else "file_integrity_unsupported" if is_file_integrity_stop
                 else "environment_failure" if state.environment_failure
                 # PRD-026: the retry-progress invariant ended the run.
                 else "no_progress" if state.no_progress_terminated

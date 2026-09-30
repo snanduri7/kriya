@@ -43,7 +43,13 @@ from kriya.workflow.context_budget import conversation_tokens
 from kriya.workflow.edit_safety import (
     FileRevisionConflict,
     apply_anchored_edits,
-    content_revision,
+)
+from kriya.workflow.file_integrity import (
+    FileIntegrityError,
+    display_text,
+    file_raw_digest,
+    load_snapshot,
+    require_unchanged,
 )
 from kriya.workflow.semantic_region_authority import (
     AuthorizedSemanticRegion,
@@ -342,15 +348,13 @@ def _dispatch_tool_call(
             return f"ERROR: '{filepath}' is not a file in this attempt's sandbox. Known files: {sorted(known_files)}"
         read_files.add(filepath)
         if filepath in modified_files:
-            observed_revisions[filepath] = content_revision(modified_files[filepath])
             return modified_files[filepath]
         full_path = os.path.join(worktree_path, filepath)
         if not os.path.exists(full_path):
             return f"ERROR: '{filepath}' is listed as written but not found on disk."
-        with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-            content = fh.read()
-        observed_revisions[filepath] = content_revision(content)
-        return content
+        snapshot = load_snapshot(full_path)
+        observed_revisions[filepath] = snapshot.raw_sha256
+        return display_text(snapshot.raw_bytes)
 
     if name == "list_files":
         substring = args.get("filter") or ""
@@ -451,21 +455,19 @@ def _dispatch_tool_call(
         if not isinstance(edits, list) or not edits:
             return "ERROR: apply_patch requires a non-empty 'edits' list, each with 'search' and 'replace'."
 
-        if filepath in modified_files:
-            orig_text = modified_files[filepath]
-        else:
-            full_path = os.path.join(worktree_path, filepath)
-            if not os.path.exists(full_path):
-                return f"ERROR: '{filepath}' is listed as written but not found on disk."
-            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-                orig_text = fh.read()
-
-        expected_revision = observed_revisions.get(filepath, content_revision(orig_text))
-        if content_revision(orig_text) != expected_revision:
-            return (
-                f"ERROR: '{filepath}' changed since it was read. Re-read the file before "
-                "submitting another patch."
-            )
+        # FILE-INTEGRITY-CONTRACT-001: the patch applies to one raw snapshot,
+        # bound to the revision the conversation last observed, and the exact
+        # resulting bytes (original BOM/line endings kept) are written.
+        full_path = os.path.join(worktree_path, filepath)
+        if not os.path.exists(full_path):
+            return f"ERROR: '{filepath}' is listed as written but not found on disk."
+        snapshot = load_snapshot(full_path)
+        expected_revision = observed_revisions.get(filepath, snapshot.raw_sha256)
+        try:
+            require_unchanged(snapshot, expected_revision)
+            orig_text = snapshot.text
+        except FileIntegrityError as integrity_ex:
+            return f"ERROR: {integrity_ex}. Re-read the file before submitting another patch."
 
         # Found live, 2026-08-17 (ignite_qpid_person, run b-10m): apply_patch's
         # OWN edit-application already re-reads the real, current, full file
@@ -496,6 +498,7 @@ def _dispatch_tool_call(
         effective_shown_context = "" if (filepath in read_files or filepath in modified_files) else active_code_context
         try:
             new_content = apply_anchored_edits(orig_text, edits, effective_shown_context)
+            new_bytes = snapshot.encode(new_content)
         except ValueError as anchor_ex:
             # Fed back to the model as this tool call's result, NOT raised - the
             # whole point of this loop is letting the model retry within its
@@ -541,7 +544,7 @@ def _dispatch_tool_call(
             # tool-driven patch reaches disk, using the real worktree_path
             # this call site has always had in scope.
             new_revision = AuthorizedFileWriter(worktree_path).commit_file(
-                full_path, new_content, expected_revision=expected_revision,
+                full_path, new_content, expected_revision=expected_revision, content_bytes=new_bytes,
             )
         except FileRevisionConflict as revision_ex:
             return f"ERROR: {revision_ex}"
@@ -649,8 +652,7 @@ async def run_self_correction_loop(
     for filepath in files_in_scope:
         full_path = os.path.join(worktree_path, filepath)
         if os.path.exists(full_path):
-            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-                observed_revisions[filepath] = content_revision(fh.read())
+            observed_revisions[filepath] = file_raw_digest(full_path)
     transcript: List[Dict[str, Any]] = []
     last_compile_output = compile_error_output
 

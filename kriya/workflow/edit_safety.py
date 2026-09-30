@@ -16,6 +16,14 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from kriya.policy.execution import ExecutionPolicy
 from kriya.policy.model import ActionRequest, ActionType
+from kriya.workflow.file_integrity import (
+    ANCHOR_NOT_IN_FILE,
+    FileIntegrityError,
+    anchored_replaces,
+    apply_line_block_edits,
+    file_raw_digest,
+    raw_digest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -162,30 +170,42 @@ def content_revision(content: str) -> str:
 
 
 def read_file_revision(full_path: str) -> str:
-    try:
-        with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-            return content_revision(fh.read())
-    except FileNotFoundError:
-        return content_revision("")
+    """FILE-INTEGRITY-CONTRACT-001: a file's revision is the SHA-256 of its
+    raw bytes (the digest of no bytes when it is absent), never of a decoded
+    copy - two different byte sequences never share a revision. For valid
+    UTF-8 with LF line endings it equals content_revision() of its text."""
+    return file_raw_digest(full_path)
 
 
 def commit_revision_grounded_file(
     full_path: str, content: str, expected_revision: str,
-    workspace_path: Optional[str] = None,
+    workspace_path: Optional[str] = None, *, content_bytes: Optional[bytes] = None,
 ) -> str:
-    """Atomically commit a fully staged file only if its base is unchanged."""
+    """Atomically commit a fully staged file only if its base is unchanged.
+
+    ``content_bytes``, when given, are the exact bytes written (``content``
+    is then only their text view); the returned revision is theirs."""
     actual_revision = read_file_revision(full_path)
     if actual_revision != expected_revision:
         raise FileRevisionConflict(
             f"Refusing stale write to '{full_path}': expected revision "
             f"{expected_revision[:12]}, found {actual_revision[:12]}. Re-read the file and retry."
         )
-    atomic_write_file(full_path, content, workspace_path=workspace_path)
-    return content_revision(content)
+    if os.path.islink(full_path):
+        raise FileRevisionConflict(
+            f"Refusing write to '{full_path}': it is a symbolic link, never replaced by a regular file."
+        )
+    data = content_bytes if content_bytes is not None else content.encode("utf-8")
+    mode = os.stat(full_path).st_mode & 0o7777 if os.path.exists(full_path) else None
+    atomic_write_file(full_path, content, workspace_path=workspace_path, content_bytes=data)
+    if mode is not None:
+        os.chmod(full_path, mode)
+    return raw_digest(data)
 
 
 def atomic_write_file(
     full_path: str, content: str, workspace_path: Optional[str] = None,
+    *, content_bytes: Optional[bytes] = None,
 ) -> None:
     """Writes `content` to `full_path` atomically - via a temp file in the SAME
     directory, then os.replace() (atomic on both POSIX and Windows NTFS) - so a
@@ -219,8 +239,8 @@ def atomic_write_file(
     platforms, defeating the whole point."""
     _audit_write_file(full_path, workspace_path=workspace_path)
     tmp_path = f"{full_path}.kriya-tmp-{os.getpid()}"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(content)
+    with open(tmp_path, "wb") as f:
+        f.write(content_bytes if content_bytes is not None else content.encode("utf-8"))
     os.replace(tmp_path, full_path)
 
 
@@ -242,8 +262,11 @@ def _atomic_write_bytes(full_path: str, content: bytes) -> None:
 # exists, sha256, mode), the operation kind and the candidate hash. Schema 1
 # evidence still loads; recovery treats its text-only revisions as weaker
 # evidence and never guesses when they cannot tell states apart.
-_COMMIT_EVIDENCE_SCHEMA_VERSION = 2
-_SUPPORTED_COMMIT_EVIDENCE_SCHEMAS = frozenset({1, 2})
+# Schema 3 (FILE-INTEGRITY-CONTRACT-001): every revision is a raw-byte digest.
+# Schemas 1-2 digested a decoded copy; they equal raw digests for valid UTF-8
+# LF files, and recovery fails closed on any other mismatch.
+_COMMIT_EVIDENCE_SCHEMA_VERSION = 3
+_SUPPORTED_COMMIT_EVIDENCE_SCHEMAS = frozenset({1, 2, 3})
 _COMMIT_EVIDENCE_RELATIVE_DIR = os.path.join(".kriya", "control", "commits")
 
 
@@ -617,7 +640,7 @@ def commit_revision_grounded_batch(
         "operation": "delete" if item.delete else "write",
         "expected_base_revision": item.expected_base_revision,
         "expected_base_exists": item.expected_base_exists,
-        "candidate_revision": None if item.delete else content_revision(item.content),
+        "candidate_revision": None if item.delete else raw_digest(_candidate_bytes(item)),
         "stage_prefix": None if item.delete else stage_file_prefix(transaction_id),
         # PRD-008: exact byte state of the target before and after, so crash
         # recovery classifies each path by bytes and mode, not by decoded text.
@@ -758,7 +781,7 @@ def commit_revision_grounded_batch(
                     pass
 
     revisions = {
-        item.target_path: content_revision("" if item.delete else item.content)
+        item.target_path: raw_digest(b"" if item.delete else _candidate_bytes(item))
         for item in staged
     }
     committed_evidence = _evidence(
@@ -781,118 +804,26 @@ def normalize_whitespace(text: str) -> str:
 
 
 def apply_anchored_edits(original_content: str, edits: List[Dict[str, str]], shown_context: str) -> str:
-    current_content = original_content
-    for idx, edit in enumerate(edits, 1):
-        search_block = edit.get("search", "")
-        replace_block = edit.get("replace", "")
+    """Apply the Developer's SEARCH/REPLACE edits to ``original_content``
+    (LF-normalized text) through the one edit engine
+    (kriya/workflow/file_integrity.py): complete-line anchors, located in the
+    same source, exactly one match each, no overlap, empty SEARCH refused.
 
-        if not search_block:
-            continue
-
-        norm_search = normalize_whitespace(search_block)
-
-        # Found live, 2026-08-17, digging into a corpus-wide survey of
-        # eval-harness runs: 14 "elided in the skeletonized context"
-        # failures across the whole run history, several from a genuinely
-        # legitimate shape this check never accounted for. shown_context is
-        # a fixed snapshot, passed in once and never updated across loop
-        # iterations - but current_content DOES evolve as earlier edits in
-        # this SAME response get applied (the .replace() call below).
-        # Reproduced directly: a two-step chained edit (edit #1 adds a
-        # `helper();` call, edit #2 wants to comment on that exact new
-        # line) is completely valid and internally consistent, but edit
-        # #2's search text was never part of the ORIGINAL file the model
-        # was shown - only of what edit #1 itself just introduced - so the
-        # old check (comparing only against the static shown_context)
-        # wrongly rejected it as "not shown to the model," when the model
-        # in fact introduced that exact text itself, one edit earlier in
-        # the same response. Grounding a search block against EITHER the
-        # original shown context OR the file's current (possibly
-        # already-edited) state closes this gap while still rejecting a
-        # genuinely fabricated/hallucinated search block, which by
-        # definition matches neither.
-        if shown_context:
-            norm_shown = normalize_whitespace(shown_context)
-            norm_current = normalize_whitespace(current_content)
-            if norm_search not in norm_shown and norm_search not in norm_current:
-                # CONTEXT-EDIT-PROTOCOL-001: neither shown nor in the file - a
-                # fabricated or stale block, not an elided one.
-                raise ValueError(
-                    f"ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #{idx}: the search block occurs "
-                    f"neither in the source shown to the model nor in the current file (fabricated or stale)."
+    ``shown_context`` (the source shown to the model) additionally refuses a
+    SEARCH block that occurs neither there nor in the file
+    (ANCHOR_NOT_IN_FILE: fabricated or stale)."""
+    if shown_context:
+        norm_shown = normalize_whitespace(shown_context)
+        norm_current = normalize_whitespace(original_content)
+        for index, edit in enumerate(edits, 1):
+            norm_search = normalize_whitespace(edit.get("search") or "")
+            if norm_search and norm_search not in norm_shown and norm_search not in norm_current:
+                raise FileIntegrityError(
+                    ANCHOR_NOT_IN_FILE,
+                    f"Anchor matching failed for edit #{index}: the search block occurs neither in the "
+                    "source shown to the model nor in the current file (fabricated or stale).",
                 )
-
-        exact_count = current_content.count(search_block)
-        if exact_count >= 1:
-            # An exact (unnormalized) match exists - the strictest, most-
-            # preferred match shape, so its own count is the uniqueness
-            # signal here, not a whitespace-normalized count over the whole
-            # file (see the window branch below for why that can disagree
-            # with what's actually being matched).
-            if exact_count > 1:
-                raise ValueError(
-                    f"Anchor matching failed for edit #{idx}: The search block matched {exact_count} times (must match exactly once). "
-                    f"Provide more context surrounding the search block."
-                )
-            current_content = current_content.replace(search_block, replace_block, 1)
-            continue
-
-        # No exact match - fall back to a whitespace-tolerant search that
-        # also tolerates a DIFFERENT number of blank lines between content
-        # and search block, not just different indentation - consistent with
-        # normalize_whitespace's own blank-line-discarding philosophy used
-        # everywhere else in this function (the shown_context check above,
-        # for instance). A prior version used a FIXED-size raw-line window
-        # (exactly len(search_block.splitlines()) raw lines) for both the
-        # uniqueness check and the actual splice - found live, 2026-08-11
-        # (kriya-oneshot-protocol-ignite-qpid audit): a search block with one
-        # blank line between two statements, matched against content with
-        # TWO blank lines at the same location, made the OLD whole-file
-        # blank-line-collapsed uniqueness check report "exactly 1 match" (it
-        # discards all blank lines before counting) while the fixed-size
-        # window could never actually find it (the real match needs one more
-        # raw line than the search block has) - the check said "found,
-        # unique" while application then failed with "could not find match",
-        # a self-contradictory outcome that burned a retry on Kriya's own
-        # matching inconsistency, not a real problem with the edit.
-        #
-        # Matches the search block's own non-blank, stripped lines as a
-        # contiguous subsequence against the content's non-blank, stripped
-        # lines - the count of subsequence matches IS the uniqueness check
-        # (no separate, disagreeing mechanism), and the actual RAW splice
-        # range spans from the first to the last matched non-blank line's
-        # real index, so any blank lines interspersed between them in the
-        # original file are naturally included in (and replaced by) the
-        # spliced-in replace_block, regardless of how many there are.
-        search_norm_lines = [ln.strip() for ln in search_block.splitlines() if ln.strip()]
-        content_lines = current_content.splitlines()
-        content_nonblank = [(i, ln.strip()) for i, ln in enumerate(content_lines) if ln.strip()]
-        content_norm_lines = [ln for _, ln in content_nonblank]
-
-        n = len(search_norm_lines)
-        matched_starts = (
-            [i for i in range(len(content_norm_lines) - n + 1) if content_norm_lines[i:i + n] == search_norm_lines]
-            if n > 0 else []
-        )
-
-        if not matched_starts:
-            raise ValueError(
-                f"Anchor matching failed for edit #{idx}: The search block matched 0 times. "
-                f"Please ensure whitespace and contents match exactly."
-            )
-        elif len(matched_starts) > 1:
-            raise ValueError(
-                f"Anchor matching failed for edit #{idx}: The search block matched {len(matched_starts)} times (must match exactly once). "
-                f"Provide more context surrounding the search block."
-            )
-
-        match_pos = matched_starts[0]
-        raw_start = content_nonblank[match_pos][0]
-        raw_end = content_nonblank[match_pos + n - 1][0] + 1
-        content_lines[raw_start:raw_end] = replace_block.splitlines()
-        current_content = "\n".join(content_lines)
-
-    return current_content
+    return apply_line_block_edits(original_content, anchored_replaces(edits)).text
 
 
 def _strip_java_comments_and_strings(code: str) -> str:

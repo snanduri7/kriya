@@ -14,6 +14,18 @@ from kriya.agents.contracts import (
     parse_milestone_list,
     parse_milestone_list_v2,
 )
+from kriya.agents.response_protocol import EDITS as RESPONSE_EDITS
+from kriya.agents.response_protocol import FILE as RESPONSE_FILE
+from kriya.agents.response_protocol import INVALID as RESPONSE_INVALID
+from kriya.agents.response_protocol import LEGACY_STRICT as LEGACY_PROTOCOL
+from kriya.agents.response_protocol import STRUCTURED as STRUCTURED_PROTOCOL
+from kriya.agents.response_protocol import (
+    developer_response_protocol,
+    parse_legacy_repair,
+    parse_raw_payload,
+    parse_structured,
+    structured_contract,
+)
 from kriya.config.config import FallbackModelConfig, LLMConfig
 from kriya.core.llm import LLMClient
 from kriya.core.model_runtime import binding_output_tokens
@@ -62,63 +74,6 @@ def _truncated_completion_error(llm: Any, target: str) -> Optional[str]:
     return None
 
 
-# Matches _build_error_source_context()'s own display gutter (">> N: " for
-# the reported line, "   N: " for surrounding context lines - the format
-# string there is f"{'>>' if ... else '  '} {i+1}: ...", so a NON-highlighted
-# line actually gets THREE leading spaces: the two-space placeholder plus the
-# f-string's own literal space before {i+1}, not two) - see
-# DeveloperAgent._split_fix_analysis_edit for why this needs stripping from
-# a model's SEARCH/REPLACE blocks before anchor matching. Confirmed live,
-# 2026-08-07 (kriya-protocol-parser-app, diagnosed directly from
-# Failure.attempted_edits once that started being persisted): a real SEARCH
-# block had the gutter copied verbatim and unstripped ("   58: // Extract
-# body...") because this pattern only ever matched an EXACT 2-space prefix,
-# never the real 3-space one - guaranteeing "matched 0 times" regardless of
-# whether the model's intended edit was otherwise correct. [ ]{2,} (2 OR
-# MORE) instead of a hardcoded exact count, so a future formatting tweak to
-# the leading-space count doesn't silently reopen the identical gap again.
-#
-# Split into two patterns - found live, 2026-08-11 (kriya-oneshot-protocol-
-# ignite-qpid audit). The original single combined pattern had two
-# independent false-positive gaps, since sanitize_generated_content() applies
-# it to ALL generated content, not just text that was ever shown gutter-
-# formatted (gutter context is only ever built for Java compile/stack-trace
-# locations in the first place): (1) the ">>" branch's digit+colon group was
-# optional, so it matched ANY line starting with bare ">>" - a real risk in
-# exactly this project's own domain, which generates plenty of byte-shifting
-# protocol-parser code (">> 8) & 0xFF;" on its own line had its operator
-# silently stripped); (2) the "  N:" branch matched ANY 2-OR-MORE-space-
-# indented "digit:" line - identical in shape to a legitimate YAML/properties
-# entry ("  1: first-attempt-config" had its key and colon silently deleted,
-# only the value surviving).
-#
-# (1) turned out NOT to be safely fixable: making the digit+colon group
-# mandatory for the ">>" branch was tried first, but
-# test_split_fix_analysis_edit_strips_copied_error_source_gutter is a real,
-# already-confirmed incident (2026-08-04) where a model echoed back ONLY the
-# bare ">>" marker with the line number DROPPED ("'>> import
-# org.apache.ignite.cache.IgniteCache;' - kept the '>>' marker, dropped the
-# line number") - structurally indistinguishable from a genuine bit-shift
-# continuation line by pattern alone, since both are "line starts with '>>'
-# then a space then arbitrary text." Requiring digits closes the bit-shift
-# false positive but reopens this confirmed real one; left optional, since
-# the historically-observed failure mode is the one with actual evidence
-# behind it - the bit-shift risk remains open, undocumented false-positive
-# territory this pattern can't distinguish without more context than a pure
-# text-in/text-out function has available.
-#
-# (2) IS safely fixable: narrowed the "  N:" branch's space count to the
-# REAL, exact format _build_error_source_context() emits (THREE spaces, not
-# "two or more") - still forward-hedged against a future increase past
-# three, but no longer collides with the much more common 2-space
-# YAML/properties indentation convention. No historical test or incident
-# relies on exactly two spaces specifically (several existing test fixtures
-# turned out to hand-type "two spaces" as a guess at the format without ever
-# checking it against the real function's own output - a latent inaccuracy,
-# corrected alongside this narrowing, not evidence of real 2-space usage).
-_GUTTER_HIGHLIGHT_RE = re.compile(r"^>>\s*(?:\d+:)?\s?", re.MULTILINE)
-_GUTTER_CONTEXT_RE = re.compile(r"^[ ]{3,}\d+:\s?", re.MULTILINE)
-
 # javac's "incompatible types: X cannot be converted to Y" is a generic,
 # language-level error shape (raw/erased generics, missing casts) - not tied
 # to any one library - so it's handled as its own scaffold rather than a
@@ -156,97 +111,6 @@ _INCOMPATIBLE_TYPES_RE = re.compile(
 # bytes than that field should occupy, corrupting every subsequent field and
 # eventually over/underrunning the buffer.
 _BUFFER_CAPACITY_RE = re.compile(r"java\.nio\.Buffer(Overflow|Underflow)Exception")
-
-# Marks a redundant, unasked-for full-file dump appended after a SEARCH/REPLACE
-# edit (or, in _split_fix_analysis's case, the REQUIRED marker introducing a
-# full-file FIX ANALYSIS response). Originally just the literal "file content:"
-# (matching the "FILE CONTENT:" instruction text verbatim) - broadened
-# 2026-08-08 after a real, live corruption traced directly to this being too
-# narrow: a real response phrased its trailing full-file dump as "Corrected
-# file content for 'ProtocolParser.java':" instead - no colon immediately
-# after "content", so the old exact-match regex never fired, and the entire
-# duplicate class (its own package statement and class declaration included)
-# got folded verbatim into the SEARCH/REPLACE edit's replace text, producing
-# a file with two `package` statements and two `public class` declarations -
-# a 23-error "illegal start of expression"/"class expected" cascade,
-# confirmed by replaying the exact real captured response through this
-# module's own parsing functions, not assumed. Broadened to "file content"
-# followed by up to 60 non-newline characters then a colon, on the same
-# line - covers "file content:", "file content for 'X.java':", "file
-# content for the corrected version:", etc., while still requiring an
-# eventual colon so a stray, unrelated mention of the phrase elsewhere in a
-# response doesn't trigger a false truncation. Anchored to the START of
-# whatever line "file content" appears on (not just the phrase itself) so a
-# lead-in like "Corrected " isn't left dangling in the truncated text - every
-# real observed instance of this marker is the entire content of its own
-# announcement line, never embedded mid-sentence with real content before it
-# on the same line.
-#
-# The `^[A-Za-z ]{0,30}` PREFIX restriction (not a `[ \t]*$` SUFFIX one - see
-# below for why that changed) is the false-positive guard, found live,
-# 2026-08-11 (kriya-oneshot-protocol-ignite-qpid audit): without some guard,
-# this also matched perfectly ordinary generated code that happens to mention
-# the phrase inline, e.g. `logger.info("Loaded file content: {} bytes",
-# data.length());` - the colon in that log message satisfied "file content" +
-# up to 60 chars + ":" just as well as a real marker line does, and truncated
-# everything after it, silently deleting the rest of the file with no error
-# raised. A real marker's own text immediately before "file content" (if any)
-# is always plain lead-in words ("Corrected ", "The corrected ") - never code
-# punctuation like the `.`, `(`, `"` a real source/log statement has before
-# reaching that phrase - so restricting the prefix to letters/spaces excludes
-# exactly the code-statement case while still matching every real marker
-# variant, independent of whatever follows the colon.
-#
-# That prefix restriction REPLACED an earlier `[ \t]*$` suffix requirement
-# (nothing but trailing whitespace after the colon) that closed the same
-# 2026-08-11 false-positive a different way, but had its own real, live gap:
-# it silently assumed a marker always puts its content on the NEXT line, so a
-# model that wrote "FILE CONTENT: <content starts here>" on the SAME line -
-# mirroring the exact same-line-marker habit already handled for SEARCH:/
-# REPLACE: via _strip_marker_separator - was never recognized as a marker at
-# all here. Confirmed live, 2026-08-21 (milestone_task_cli): a targeted-retry
-# response's REPLACE block was followed by exactly that unrecognized
-# same-line "FILE CONTENT: #!/usr/bin/env python3" over-delivery: with no
-# marker detected, the whole redundant full-file dump - literal marker text
-# included - got folded verbatim into the REPLACE block's own replacement
-# text and written to disk, corrupting the file with duplicate function
-# definitions that then took the rest of that run's retry budget trying
-# (and failing) to unwind. The prefix-based guard above closes the original
-# false-positive without depending on where the model puts the content.
-_TRAILING_FILE_CONTENT_RE = re.compile(r"^[A-Za-z ]{0,30}file content[^\n:]{0,60}:", re.IGNORECASE | re.MULTILINE)
-_SEARCH_MARKER_RE = re.compile(r"^[ \t]*SEARCH:", re.IGNORECASE | re.MULTILINE)
-_REPLACE_MARKER_RE = re.compile(r"^[ \t]*REPLACE:", re.IGNORECASE | re.MULTILINE)
-
-# See _fix_xml_comment_double_hyphens's own docstring - matches every <!-- ... -->
-# block (DOTALL so a multi-line comment body is captured whole) so its own hyphen
-# runs can be collapsed without touching real code/markup outside the comment.
-_XML_COMMENT_RE = re.compile(r"<!--(.*?)-->", re.DOTALL)
-
-# Opt-out marker for a retry that legitimately implicates a file which doesn't
-# itself need any code change - found live, 2026-08-10 (ignite_qpid_protocol,
-# run 20260810-111517): a java.nio.BufferOverflowException's stack trace gave
-# BOTH ProtocolParser.java:21 (where the bug lives) and ProtocolApp.java:37
-# (its caller) a real locator, so extract_implicated_files() correctly scoped
-# a targeted retry to both files - each gets its own separate per-file
-# completion. But the fix-analysis instruction had no way for the model to say
-# "this file is fine as-is" for ProtocolApp.java, whose real problem was
-# entirely inside ProtocolParser.encode() - confirmed directly from the raw
-# captured completion: ProtocolApp.java's own response wrote a correct FIX
-# ANALYSIS describing ProtocolParser.encode()'s bug, then a SEARCH block that
-# was actually ProtocolParser.java's encode() method body verbatim, which can
-# never match ProtocolApp.java's real content ("Anchor matching failed... The
-# search block matched 0 times"), burning a whole wasted retry attempt.
-# Without this marker, a model volunteering "no change needed" prose with no
-# other markers would ALSO have been treated as the file's new literal
-# content by _split_fix_analysis's own fallback (the entire response becomes
-# "content" when no FILE CONTENT: marker is found either) - silently
-# overwriting real source with an explanation sentence. Both parsing
-# functions check this FIRST, before any SEARCH/REPLACE or FILE CONTENT
-# extraction, and return content=None (not "", not the raw text) - the
-# write loop's existing `if content is None: continue` (kriya/workflow/
-# workflow.py) already treats that as "leave this file exactly as it is",
-# no new write-path plumbing needed.
-_NO_CHANGE_NEEDED_RE = re.compile(r"^[^\n]*?no change(?:s)? needed[^\n]*", re.IGNORECASE | re.MULTILINE)
 
 # Data formats whose whole document may legitimately be a bare JSON array or
 # object (`[]` is a valid, meaningful data.json or config.yaml). A response of
@@ -411,7 +275,7 @@ def _is_unparseable_json(response: str) -> bool:
     response doesn't even parse into a JSON object, rather than trusting the first
     model's output no matter what."""
     try:
-        parsed = json.loads(DeveloperAgent._strip_markdown_fences(response))
+        parsed = json.loads(DeveloperAgent._strip_json_protocol_fences(response))
     except Exception:
         return True
     return not isinstance(parsed, dict)
@@ -981,7 +845,11 @@ class DeveloperAgent(BaseAgent):
         )
 
     @staticmethod
-    def _strip_markdown_fences(text: str) -> str:
+    def _strip_json_protocol_fences(text: str) -> str:
+        """JSON protocol envelopes only (file lists, plans, verdicts): finds the
+        JSON a model wrapped in markdown. Never applied to file payload - see
+        parse_file_payload (FILE-INTEGRITY-CONTRACT-001), which removes only a
+        fence enclosing the whole payload."""
         # Used only to DETECT a fence (a genuine ``` marker can never be
         # meaningful leading/trailing whitespace, so stripping first is safe
         # for detection purposes) - the ORIGINAL, unstripped text is what gets
@@ -1034,30 +902,6 @@ class DeveloperAgent(BaseAgent):
             return max(fences, key=len).strip("\n")
 
         return text
-
-    @staticmethod
-    def _fix_xml_comment_double_hyphens(text: str) -> str:
-        """XML forbids "--" ANYWHERE inside a comment body, and forbids the body
-        ending in "-" (which would form "--->" against the closing marker) - a
-        real, spec-level rule, not a style preference. Found live, 2026-08-16
-        (ignite_qpid_person, run b-10): a generated pom.xml's own explanatory
-        comment - <!-- Ignite --add-opens flags --> - echoed the literal
-        "--add-opens"/"--add-exports" JVM flag text straight from
-        skills/ignite-java17/rules.txt (which correctly documents those flags as
-        plain prose, not as something unsafe to quote) into an XML comment body,
-        producing invalid XML that STRUCTURAL CORRUPTION correctly caught but
-        burned 3 full retry attempts (each with its own live-model completion)
-        before the model happened to diagnose and fix it on its own. This class
-        of mistake is 100% deterministically detectable and 100% safely
-        auto-fixable - collapsing hyphens inside a comment can never change what
-        the comment MEANS (it's not executed), unlike touching real code content
-        - so it's corrected here instead of relying on the retry loop to recover
-        from it every time it recurs, for any goal that happens to document a
-        double-hyphen-prefixed flag/token in an XML comment, not just this one."""
-        def _fix_one(m: re.Match) -> str:
-            body = re.sub(r"-{2,}", "-", m.group(1))
-            return f"<!--{body.rstrip('-')}-->"
-        return _XML_COMMENT_RE.sub(_fix_one, text)
 
     @staticmethod
     def _unwrap_file_content_envelope(text: str, filepath: str) -> Optional[str]:
@@ -1171,61 +1015,18 @@ class DeveloperAgent(BaseAgent):
         )
 
     @staticmethod
-    def sanitize_generated_content(text: Optional[str], filepath: Optional[str] = None) -> Optional[str]:
-        """Single, uniform sanitization step for ANY text a model returns as file
-        content or an anchored edit's search/replace block. Five real model habits
-        - each found live, each originally patched only in the one path where it was
-        first noticed (_split_fix_analysis_edit's SEARCH/REPLACE parsing) - are
-        generalized here so every extraction point applies the same cleanup, not
-        just the first one that happened to hit the bug:
-        1. A redundant trailing "FILE CONTENT:" marker and everything after it - a
-           model asked for a small patch sometimes over-delivers a second, unasked
-           full-file block appended after the real answer.
-        2. This module's own line-numbered display gutter (">> N: " / "  N: ", see
-           _build_error_source_context in kriya/workflow/workflow.py) sometimes gets
-           echoed back verbatim instead of the bare source line underneath it.
-        3. A wrapping ```lang fence, or a fenced block buried in surrounding prose.
-        4. An invalid "--" sequence inside an XML comment body (see
-           _fix_xml_comment_double_hyphens's own docstring) - harmless to apply
-           unconditionally, regardless of file type, since <!-- --> simply never
-           occurs in non-XML/HTML source, so this is a no-op for every other stack.
-        5. The whole response wrapped in the multi-file batch JSON envelope shape
-           instead of raw content - see _unwrap_file_content_envelope's own
-           docstring for the live incident this closes. Only attempted when
-           `filepath` is given (the two SEARCH/REPLACE call sites below don't pass
-           one - a patch fragment is never plausibly a whole-response JSON envelope,
-           and has no filepath of its own to disambiguate against anyway).
-
-        Order matters, same as the original single-path fix: truncate before
-        gutter-stripping (so a gutter line straddling the truncation point doesn't
-        leave a stray fragment behind), gutter-strip before fence-stripping, and the
-        JSON-envelope unwrap last (it needs the already-fence-stripped text to parse
-        cleanly, and its own recursive sanitize pass - filepath=None, so it can never
-        loop back into another unwrap attempt - re-applies 1-4 to whatever real
-        content it recovers).
-
-        Deliberately does NOT blanket-strip whitespace beyond that: plain
-        pass-through content (no marker, no fence) is returned exactly as given,
-        including a real trailing newline - only the newline(s) left immediately
-        before a truncated "FILE CONTENT:" marker are trimmed, since those are a
-        structural artifact of where the model chose to place that marker, not
-        part of the real answer either side of it.
-
-        Returns None unchanged - callers routinely pass content that's legitimately
-        absent (e.g. a file entry still awaiting generation)."""
-        if text is None:
-            return None
-        trailing_file_content = _TRAILING_FILE_CONTENT_RE.search(text)
-        if trailing_file_content:
-            text = text[:trailing_file_content.start()].rstrip("\n")
-        text = _GUTTER_CONTEXT_RE.sub("", text)
-        text = _GUTTER_HIGHLIGHT_RE.sub("", text)
-        text = DeveloperAgent._fix_xml_comment_double_hyphens(DeveloperAgent._strip_markdown_fences(text))
-        if filepath:
-            unwrapped = DeveloperAgent._unwrap_file_content_envelope(text, filepath)
+    def parse_file_payload(text: str, filepath: str):
+        """FILE-INTEGRITY-CONTRACT-001: a raw per-file content response (or a
+        batch JSON entry's content) as a typed DeveloperResponse. The only
+        wrappers removed are ones that enclose the WHOLE payload: one outer
+        fence, or the multi-file JSON envelope (_unwrap_file_content_envelope).
+        Nothing inside the payload is ever rewritten."""
+        parsed = parse_raw_payload(text, filepath)
+        if parsed.kind == RESPONSE_FILE:
+            unwrapped = DeveloperAgent._unwrap_file_content_envelope(parsed.content or "", filepath)
             if unwrapped is not None:
-                text = DeveloperAgent.sanitize_generated_content(unwrapped)
-        return text
+                return parse_raw_payload(unwrapped, filepath)
+        return parsed
 
     @staticmethod
     def _extract_json_value(text: str) -> Any:
@@ -1238,7 +1039,7 @@ class DeveloperAgent(BaseAgent):
         '{'..last '}' span found in the text (array preferred when both are present
         and the array starts first). Raises the direct-parse JSONDecodeError if
         nothing works, so callers see the original diagnostic."""
-        cleaned = DeveloperAgent._strip_markdown_fences(text)
+        cleaned = DeveloperAgent._strip_json_protocol_fences(text)
         try:
             return json.loads(cleaned)
         except json.JSONDecodeError as e:
@@ -1259,229 +1060,6 @@ class DeveloperAgent(BaseAgent):
 
             logger.warning(f"Could not recover a JSON value from response text: {text[:200]}...")
             raise e
-
-    @staticmethod
-    def _split_fix_analysis(text: str) -> Tuple[Optional[str], Optional[str]]:
-        """Splits a per-file retry completion into (fix_analysis, file_content) when
-        the model complied with the MANDATORY FIX ANALYSIS instruction added to the
-        prompt whenever a real prior error exists (see _fill_missing_content) - a
-        case-insensitive search for a literal "FILE CONTENT:" marker line, everything
-        before it is the analysis, everything after is the actual file content.
-
-        Checks _NO_CHANGE_NEEDED_RE FIRST, before any FILE CONTENT: extraction -
-        see that constant's own docstring for the live incident this exists for.
-        Returns (analysis, None) in that case; None here is a real, meaningful
-        "write nothing" signal, distinct from every other return path, which
-        always yields a content string (even if empty).
-
-        Found live as a real, generalizable root cause during golden-use-case
-        validation, not guessed: single-shot, non-reasoning completion (this repo's
-        default local model config) regenerated byte-for-byte identical broken code
-        across all 7 retry attempts of a real failing run, despite the exact compile
-        error being present in every prompt - confirmed directly by diffing the
-        model's own output across attempts. The model was never actually engaging
-        with the stated error before writing code; it was just re-emitting its
-        strongest prior completion regardless of what the error said. Forcing an
-        explicit, structurally-required "identify the error, then fix it" step before
-        code generation is a standard chain-of-thought prompting technique that works
-        independent of whether the underlying model is a "reasoning" model - it does
-        NOT touch kriya.config.llm.reasoning, which is a different thing entirely
-        (that flag only accommodates a model that already emits <think> tags on its
-        own; qwen3-coder:30b, the model this was diagnosed against, isn't one, so
-        toggling that flag would have done nothing here).
-
-        Falls back to (None, text unchanged) if the model didn't include the marker,
-        so a non-compliant response degrades to the pre-existing plain-content
-        behavior rather than corrupting it - this is a prompt-level nudge, not a hard
-        parsing requirement."""
-        no_change_match = _NO_CHANGE_NEEDED_RE.search(text)
-        if no_change_match:
-            analysis = text[:no_change_match.start()].strip()
-            analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
-            return (analysis or None), None
-        match = _TRAILING_FILE_CONTENT_RE.search(text)
-        if not match:
-            return None, text
-        analysis = text[:match.start()].strip()
-        content = text[match.end():].strip()
-        analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
-        return (analysis or None), content
-
-    @staticmethod
-    def _strip_marker_separator(text: str) -> str:
-        """Strips exactly the single separator between a "SEARCH:"/"REPLACE:"
-        marker and its content when both sit on the SAME line ("REPLACE:
-        <content>") instead of the content starting on the line after the
-        marker - deliberately not a blanket lstrip(), which would also eat
-        meaningful leading indentation on a block whose entire content is a
-        single indented line (e.g. "    new()"). Found live, 2026-08-17
-        (ignite_qpid_person, run b-10l): a model wrote
-        "REPLACE: <?xml version=\"1.0\"?>..." on one line instead of putting
-        the content on the line after the marker - slicing right after the
-        marker's own regex match leaves that one separator space attached,
-        and _split_fix_analysis_edit's existing `.strip("\\n")` never touches
-        it (it only strips "\\n" characters from the ends, not a space).
-        Confirmed as the exact cause of a live "XML or text declaration not
-        at start of entity: line 1, column 1" failure, recurring identically
-        across 2 consecutive retries since nothing anywhere caught or fixed
-        it. Checks for exactly one occurrence of the marker's own separator
-        (a single space, or a newline) at the very start, not a general
-        strip - a genuine multi-space indent immediately after the marker
-        (rare, but the same shape a real code block's own leading whitespace
-        would have) is deliberately left alone beyond that first character."""
-        if text.startswith(" "):
-            return text[1:]
-        if text.startswith("\r\n"):
-            return text[2:]
-        if text.startswith("\n"):
-            return text[1:]
-        return text
-
-    @staticmethod
-    def _split_fix_analysis_edit(text: str) -> Tuple[Optional[str], Optional[List[Dict[str, str]]], Optional[str]]:
-        """Splits a per-file retry completion into (fix_analysis, edits, full_content)
-        when the model was asked to prefer a small, anchored SEARCH:/REPLACE: patch
-        over regenerating the whole file (see _fill_missing_content) - returns
-        (analysis, [{"search":..., "replace":...}], None) if both markers are found
-        in order, else falls back to _split_fix_analysis's plain FILE CONTENT: parsing
-        (analysis, None, content).
-
-        Motivated by a real, distinct failure mode found live: a full-file
-        regeneration correctly self-diagnosed a one-line fix in its own FIX ANALYSIS
-        text (a class needing `implements Serializable` added) and then still
-        emitted the class WITHOUT it - the intention was stated correctly and lost
-        somewhere across regenerating the entire surrounding file from scratch. A
-        small, localized edit has nowhere for that to happen: there's no unrelated
-        content for a one-line fix to get lost inside. A failed/ambiguous anchor
-        match (0 or >1 occurrences) raises inside apply_anchored_edits() and is
-        caught by the same retry-loop exception handling as any other Quality Gate
-        failure - not a new failure mode, just becomes the next attempt's error
-        text, same as a compile failure would.
-
-        Parses EVERY SEARCH:/REPLACE: pair in the response, not just the first -
-        found live, 2026-08-07 (ignite_qpid_person): despite the prompt saying
-        "include only the lines that actually need to change" (singular), a real
-        response returned THREE separate SEARCH/REPLACE pairs for one file, plus
-        a trailing FILE CONTENT: block. The old implementation only ever looked
-        for the first "search:"/"replace:" match and took everything after that
-        REPLACE (up to FILE CONTENT:, if any) as ONE replace_block - which meant
-        pairs 2 and 3 got folded verbatim, markers and all, into pair 1's own
-        replacement text: applying that edit spliced the literal strings
-        "SEARCH:"/"REPLACE:" and duplicate code into the middle of the file.
-        apply_anchored_edits() already accepts and applies a LIST of edits in
-        sequence (confirmed via reading it directly, not assumed) - the fix is to
-        actually use that, not to bound the first pair's replace text more
-        tightly and still discard the rest.
-
-        Checks _NO_CHANGE_NEEDED_RE FIRST, before any SEARCH:/REPLACE:/FILE
-        CONTENT: extraction - see that constant's own docstring for the live
-        incident this exists for (a file legitimately implicated by a shared
-        error, e.g. a caller of the actual buggy method, with no fix of its
-        own to make). Returns (analysis, None, None) in that case."""
-        no_change_match = _NO_CHANGE_NEEDED_RE.search(text)
-        if no_change_match:
-            analysis = text[:no_change_match.start()].strip()
-            analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
-            return (analysis or None), None, None
-
-        file_content_match = _TRAILING_FILE_CONTENT_RE.search(text)
-        bound = file_content_match.start() if file_content_match else len(text)
-
-        # Markers are structural only when they start a line.  An analysis sentence
-        # such as "replace: the invalid import" is prose, not a patch delimiter.
-        # Treating arbitrary substrings as delimiters lets explanations become code.
-        search_matches = list(_SEARCH_MARKER_RE.finditer(text[:bound]))
-        replace_matches = list(_REPLACE_MARKER_RE.finditer(text[:bound]))
-        if not search_matches or not replace_matches:
-            analysis, content = DeveloperAgent._split_fix_analysis(text)
-            return analysis, None, content
-
-        analysis = text[:search_matches[0].start()].strip()
-        analysis = re.sub(r"^\s*fix analysis:\s*", "", analysis, flags=re.IGNORECASE).strip()
-
-        # Walk SEARCH/REPLACE markers in the order they actually appear (not by
-        # assuming strict alternation) so a malformed sequence degrades to
-        # "however many complete pairs were found" instead of raising or
-        # silently misparsing.
-        markers = sorted(
-            [("search", m.start(), m.end()) for m in search_matches]
-            + [("replace", m.start(), m.end()) for m in replace_matches],
-            key=lambda t: t[1],
-        )
-        edits: List[Dict[str, str]] = []
-        i = 0
-        while i < len(markers):
-            kind, _start, end = markers[i]
-            if kind != "search":
-                i += 1
-                continue
-            j = i + 1
-            while j < len(markers) and markers[j][0] != "replace":
-                j += 1
-            if j >= len(markers):
-                break  # a trailing SEARCH with no REPLACE after it - stop here
-            _r_kind, r_start, r_end = markers[j]
-            # Trim ONLY the leading/trailing newline(s) that slicing right after a
-            # "SEARCH:"/"REPLACE:" marker structurally introduces (the marker is
-            # always followed by a newline before the real block starts) - NOT a
-            # blanket whitespace strip, which would also eat meaningful leading
-            # indentation on a block whose entire content is a single indented
-            # line (e.g. "    new()"). That distinction is why this trims "\n"
-            # specifically here, at the point the artifact is introduced, rather
-            # than inside sanitize_generated_content below, which must also handle
-            # plain full-file content where a genuine trailing newline is real,
-            # not an artifact. _strip_marker_separator() handles the sibling
-            # artifact - the marker's own SPACE separator when content sits on
-            # the SAME line as "SEARCH:"/"REPLACE:" instead of the line after it
-            # - which .strip("\n") alone never touches (see that function's own
-            # docstring for the live incident this closes).
-            search_block = DeveloperAgent._strip_marker_separator(text[end:r_start]).strip("\n")
-            replace_end_bound = markers[j + 1][1] if j + 1 < len(markers) else bound
-            replace_block = DeveloperAgent._strip_marker_separator(text[r_end:replace_end_bound]).strip("\n")
-            # Both real, observed model habits this used to hand-patch here alone
-            # (a redundant trailing FILE CONTENT: over-delivery, and this module's
-            # own display gutter getting echoed back verbatim) are now handled by
-            # one shared step applied uniformly wherever model text is extracted -
-            # see sanitize_generated_content for the full history/rationale.
-            search_block = DeveloperAgent.sanitize_generated_content(search_block)
-            replace_block = DeveloperAgent.sanitize_generated_content(replace_block)
-            if search_block:
-                edits.append({"search": search_block, "replace": replace_block})
-            i = j + 1
-
-        if edits:
-            return (analysis or None), edits, None
-        analysis, content = DeveloperAgent._split_fix_analysis(text)
-        return analysis, None, content
-
-    @staticmethod
-    def _repair_protocol_error(text: str, *, patch_preferred: bool) -> Optional[str]:
-        """Validate a retry completion's envelope before any text becomes source.
-
-        Repair prompts require an explicit SEARCH/REPLACE pair, FILE CONTENT block,
-        or NO CHANGE NEEDED assessment.  The legacy parser intentionally preserves
-        raw text when no marker exists because first-pass/plain-content callers rely
-        on that behavior; this repair-only check closes the unsafe transition where a
-        malformed retry explanation was accepted as a full-file fallback.
-        """
-        if _NO_CHANGE_NEEDED_RE.search(text):
-            return None
-        has_file_content = _TRAILING_FILE_CONTENT_RE.search(text) is not None
-        searches = list(_SEARCH_MARKER_RE.finditer(text))
-        replaces = list(_REPLACE_MARKER_RE.finditer(text))
-        if patch_preferred and searches and replaces:
-            return None
-        if has_file_content:
-            return None
-        if searches or replaces:
-            return (
-                "incomplete repair markers: SEARCH and REPLACE must form at least "
-                "one complete pair, or the response must use FILE CONTENT"
-            )
-        return (
-            "missing repair outcome marker: expected SEARCH/REPLACE, FILE CONTENT, "
-            "or NO CHANGE NEEDED"
-        )
 
     @staticmethod
     def _normalize_file_entries(parsed: Any) -> Optional[List[Dict[str, Any]]]:
@@ -1807,7 +1385,18 @@ class DeveloperAgent(BaseAgent):
                     "step (e.g. a Planner-reused block, or an already-resolved known_target_files "
                     "entry) - reusing it as-is, no fresh generation call for this file."
                 )
-                files_out.append({"filepath": filepath, "content": entry.get("content"), "edits": entry.get("edits") or []})
+                reused = {"filepath": filepath, "content": entry.get("content"), "edits": entry.get("edits") or []}
+                if isinstance(reused["content"], str) and not reused["edits"]:
+                    # FILE-INTEGRITY-CONTRACT-001: batch/reused content is payload
+                    # too - only a whole-payload wrapper is removed, and an
+                    # ambiguous one is refused typed, never guessed.
+                    parsed = self.parse_file_payload(reused["content"], filepath)
+                    if parsed.kind == RESPONSE_INVALID:
+                        reused.update(content=None, protocol_error=parsed.error,
+                                      protocol_reason_code=parsed.reason_code)
+                    else:
+                        reused["content"] = parsed.content
+                files_out.append(reused)
                 continue
 
             logger.info(f"Developer: generating content for '{filepath}'...")
@@ -2256,6 +1845,29 @@ class DeveloperAgent(BaseAgent):
                 "printing \"[VERIFICATION] PASS\" or \"[VERIFICATION] FAIL: <reason>\"."
                 if classify_file_role(filepath) is FileRole.ENTRYPOINT else ""
             )
+            if developer_response_protocol(self.llm.config) == STRUCTURED_PROTOCOL:
+                # FILE-INTEGRITY-CONTRACT-001: the sentinel protocol replaces
+                # every legacy marker instruction; the task/mode text stays.
+                repair_outcomes = prefer_anchored_edit or apply_fix_analysis
+                file_sys_prompt = (
+                    "You are the Kriya Developer Agent. "
+                    + ("MODE: REPAIR. Repair exactly one existing file" if repair_outcomes
+                       else "Produce exactly one file")
+                    + f", '{filepath}' - never content for any other file.\n"
+                    + structured_contract(
+                        filepath, analysis_required=repair_outcomes, allow_edit=prefer_anchored_edit,
+                        allow_file=(not prefer_anchored_edit) or full_file_offered,
+                        allow_no_change=repair_outcomes,
+                    )
+                )
+                generation_directive = (
+                    f"Follow the RESPONSE PROTOCOL in the system prompt for '{filepath}' ONLY.\n"
+                )
+                fix_analysis_instruction = (
+                    DeveloperAgent._build_incompatible_types_scaffold(prior_error_context)
+                    + DeveloperAgent._build_buffer_capacity_scaffold(prior_error_context)
+                    + extra_fix_instruction
+                ) if apply_fix_analysis else ""
             prompt_head = (
                 f"=== Existing Code Base Context ===\n{existing_code_context}\n\n"
                 f"=== Architecture Design ===\n{design_context}\n\n"
@@ -2356,26 +1968,37 @@ class DeveloperAgent(BaseAgent):
             # visible verbatim, not swallowed by print-formatting.
             logger.debug(f"Developer raw completion for '{filepath}' (pre-parse): {content!r}")
 
-            raw_completion = content
             edits = None
             analysis = None
             protocol_error = None
-            if prefer_anchored_edit:
-                analysis, edits, content = self._split_fix_analysis_edit(content)
-                protocol_error = self._repair_protocol_error(
-                    raw_completion, patch_preferred=True,
+            protocol_reason_code = None
+            # FILE-INTEGRITY-CONTRACT-001: parse the protocol, never rewrite
+            # the payload; a response that does not match it is refused typed.
+            protocol = developer_response_protocol(self.llm.config)
+            repair_protocol = prefer_anchored_edit or apply_fix_analysis
+            if protocol == STRUCTURED_PROTOCOL:
+                parsed = parse_structured(
+                    content, filepath, patch_allowed=prefer_anchored_edit,
+                    file_allowed=(not prefer_anchored_edit) or full_file_offered,
                 )
-                if analysis:
-                    logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
-                if edits:
-                    logger.info(f"Developer returned an anchored edit for '{filepath}' instead of full content.")
-            elif apply_fix_analysis:
-                analysis, content = self._split_fix_analysis(content)
-                protocol_error = self._repair_protocol_error(
-                    raw_completion, patch_preferred=False,
-                )
-                if analysis:
-                    logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
+            elif repair_protocol:
+                parsed = parse_legacy_repair(content, filepath, patch_allowed=prefer_anchored_edit)
+            else:
+                parsed = self.parse_file_payload(content, filepath)
+            analysis = parsed.analysis if repair_protocol or protocol == STRUCTURED_PROTOCOL else None
+            content = None
+            if parsed.kind == RESPONSE_INVALID:
+                protocol_error, protocol_reason_code = parsed.error, parsed.reason_code
+            elif parsed.kind == RESPONSE_EDITS:
+                edits = parsed.edit_dicts()
+                logger.info(f"Developer returned an anchored edit for '{filepath}' instead of full content.")
+            elif parsed.kind == RESPONSE_FILE:
+                content = parsed.content
+                if parsed.protocol == LEGACY_PROTOCOL and repair_protocol:
+                    unwrapped = self._unwrap_file_content_envelope(content or "", filepath)
+                    content = unwrapped if unwrapped is not None else content
+            if analysis:
+                logger.info(f"Developer fix analysis for '{filepath}': {analysis}")
 
             # PRD-015: truncated output is never a file. A completion the
             # provider stopped at the output budget may still parse as code
@@ -2399,11 +2022,12 @@ class DeveloperAgent(BaseAgent):
             # live (2026-08-13, ignite_qpid_protocol validation): the model's own
             # analysis correctly named the real cause in a sibling file, but
             # nothing downstream ever read this text again after logging it.
-            protocol_reason_code = OUTPUT_TRUNCATED if truncation_error else None
+            if truncation_error:
+                protocol_reason_code = OUTPUT_TRUNCATED
             if edits:
                 file_entry = {"filepath": filepath, "content": None, "edits": edits}
             else:
-                sanitized = self.sanitize_generated_content(content, filepath=filepath)
+                sanitized = content
                 list_answer_error = self._file_list_protocol_answer_error(sanitized, filepath)
                 if list_answer_error:
                     logger.warning(
@@ -2906,7 +2530,7 @@ class RunVerifierAgent(BaseAgent):
             logger.warning(f"Run Verifier judge() call failed entirely, skipping run verification: {e}")
             return {"should_run": False, "execution_mode": "finite_command", "run_commands": None, "managed_service": None, "command_source": "inferred", "success_criteria": "", "reasoning": f"judge() call failed entirely: {e}", "infrastructure_error": str(e)}
         try:
-            parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
+            parsed = json.loads(DeveloperAgent._strip_json_protocol_fences(response_str))
         except Exception as e:
             logger.warning(f"Run Verifier judge() returned unparseable JSON, skipping run verification: {e}")
             return {"should_run": False, "execution_mode": "finite_command", "run_commands": None, "managed_service": None, "command_source": "inferred", "success_criteria": "", "reasoning": f"judge() response was unparseable JSON: {e}", "infrastructure_error": f"unparseable response: {e}"}
@@ -3179,7 +2803,7 @@ class RunVerifierAgent(BaseAgent):
                 RuntimeVerdict.UNKNOWN, VERIFIER_CALL_FAILED, f"Grader call failed: {e}", [], answered=False,
             )
         try:
-            parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
+            parsed = json.loads(DeveloperAgent._strip_json_protocol_fences(response_str))
         except Exception as e:
             logger.warning(f"Run Verifier grade() returned unparseable JSON, treating as failure: {e}")
             return result(
@@ -3401,7 +3025,7 @@ class SpecComplianceAgent(BaseAgent):
                     "verifier": _verifier_identity(self.llm)}
         verifier = _verifier_identity(self.llm)
         try:
-            parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
+            parsed = json.loads(DeveloperAgent._strip_json_protocol_fences(response_str))
         except Exception as e:
             logger.warning(f"Spec Compliance check() returned unparseable JSON, skipping check: {e}")
             return {"compliant": True, "status": "unknown", "reasoning": f"Response could not be parsed: {e}", "missing_requirements": [], "likely_files": [],
@@ -3552,7 +3176,7 @@ class SkillGapAgent(BaseAgent):
             logger.warning(f"Skill Gap Agent call failed entirely: {e}")
             return {"rules": [], "examples": {}, "conflicts": []}
         try:
-            parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
+            parsed = json.loads(DeveloperAgent._strip_json_protocol_fences(response_str))
         except Exception as e:
             logger.warning(f"Skill Gap Agent returned unparseable JSON: {e}")
             return {"rules": [], "examples": {}, "conflicts": []}
@@ -3692,7 +3316,7 @@ class SkillGapAgent(BaseAgent):
             logger.warning(f"Skill Conflict Checker call failed entirely: {e}")
             return []
         try:
-            parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
+            parsed = json.loads(DeveloperAgent._strip_json_protocol_fences(response_str))
         except Exception as e:
             logger.warning(f"Skill Conflict Checker returned unparseable JSON: {e}")
             return []
@@ -3925,7 +3549,7 @@ class ReviewerAgent(BaseAgent):
         response must never silently fall back to unvalidated free-form
         Markdown for this path) rather than treat the dict as a review result.
         Matches the exact json_mode=True + is_failure=_is_unparseable_json +
-        DeveloperAgent._strip_markdown_fences idiom already used by
+        DeveloperAgent._strip_json_protocol_fences idiom already used by
         RunVerifierAgent.judge()/SpecComplianceAgent.check() - bypasses
         BaseAgent.run() directly (the same way those two do) since it needs
         json_mode and is_failure, which run() doesn't expose."""
@@ -3938,7 +3562,7 @@ class ReviewerAgent(BaseAgent):
             logger.warning(f"ReviewerAgent structured review call failed entirely: {e}")
             return {"_error": f"structured review call failed: {e}"}
         try:
-            parsed = json.loads(DeveloperAgent._strip_markdown_fences(response_str))
+            parsed = json.loads(DeveloperAgent._strip_json_protocol_fences(response_str))
         except Exception as e:
             logger.warning(f"ReviewerAgent structured review returned unparseable JSON: {e}")
             return {"_error": f"structured review response was unparseable JSON: {e}"}

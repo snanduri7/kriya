@@ -84,6 +84,8 @@ def reset_state_for_independent_candidate(state) -> None:
     state.last_error_source_context = {}
     state.all_files_written = set()
     state.all_original_contents = {}
+    state.all_original_raw = {}
+    state.candidate_digests = {}
     state.validated_file_revisions = {}
     state.files_written = []
     state.budgets.retry_count = 0

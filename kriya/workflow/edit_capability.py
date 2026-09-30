@@ -37,12 +37,12 @@ from typing import Iterable, List, Optional, Sequence, Tuple
 
 from kriya.workflow.context_source import member_boundaries_for
 from kriya.workflow.edit_safety import content_revision, normalize_whitespace
+from kriya.workflow.file_integrity import ANCHOR_NOT_IN_FILE as ANCHOR_NOT_IN_FILE
 
 ANCHORED_EDIT = "anchored_edit"
 FULL_FILE_REPLACEMENT = "full_file_replacement"
 
 CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE = "CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE"
-ANCHOR_NOT_IN_FILE = "ANCHOR_NOT_IN_FILE"
 ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT = "ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT"
 ANCHOR_CONTEXT_NOT_ESCALATED = "ANCHOR_CONTEXT_NOT_ESCALATED"
 
