@@ -1,0 +1,3 @@
+=========================== short test summary info ============================
+FAILED tests/test_lsp.py::test_initialize_timeout_releases_data_dir_process_and_reader
+1 failed, 7554 passed, 72 deselected, 165 warnings in 1751.35s (0:29:11)

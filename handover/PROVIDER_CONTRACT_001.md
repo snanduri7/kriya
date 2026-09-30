@@ -1,6 +1,6 @@
 # PROVIDER-CONTRACT-001: Kriya ↔ provider inference contract
 
-**Status:** IMPLEMENTED on branch `milestone-decomposition`, not pushed. The commits are listed at the end. Architecture ledger: KAD-062 (EXTEND of KAD-029/030/031). No Graphify run was started during this work, and Graphify evidence was left untouched.
+**Status:** CLOSED 2026-09-30 at product HEAD `1200824` (pushed; fast-forward from `853aa43`). Closure record: `evidence/provider-contract-001/closure/CLOSURE.md`. Architecture ledger: KAD-062 (EXTEND of KAD-029/030/031). No Graphify run was started during this work, and Graphify evidence was left untouched.
 
 ## Invariant
 
@@ -87,7 +87,9 @@ Any model or runtime setting that Kriya records, budgets against, qualifies or t
 
 ## Operator notes
 
-- **Production config.** The operator production config (`~/.kriya/operator/prd036-production.yaml`) is **unchanged**, because it is immutable under PRD-036. Its unpinned models are refused under production (served 65536 ≠ 32768). A copy binding the pinned tags is at `~/kriya-live-validation/provider-contract-001/config/pinned.yaml`. Adopting it, and deciding per-role `max_output_tokens`, is an operator decision.
+- **Production config.** The operator production config (`~/.kriya/operator/prd036-production.yaml`) is **unchanged**, because it is immutable under PRD-036. Its unpinned models are refused under production (served 65536 ≠ 32768).
+  - The successor is `~/.kriya/operator/provider-contract-v3-production.yaml` (SHA-256 `667831f0…75e0d8`). It binds the pinned tags and preserves the current resolved role budgets (no tuning), and it has its own SEC-009 approval.
+  - A future Graphify run #3 needs a new canonical config derived from this identity.
 - **Pinned models created on the local Ollama.**
   - `qwen3-coder:30b-kriya-e52213655394`
   - `qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a`
