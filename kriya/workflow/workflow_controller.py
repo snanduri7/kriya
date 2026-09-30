@@ -494,6 +494,16 @@ def build_subtask_goal_text(
 PLANNED_FILE_SOURCE_REASON = "planned file, current on-disk content"
 
 
+# GOAL-DESIGN-DEDUP-001: GOAL != PREDETERMINED DESIGN. A validated Subtask
+# carries no design artifact of its own, so a bounded subtask supplies an
+# empty design: supplied (run_generation_workflow does not call the
+# Architect) but never the subtask goal restated as one. The goal already
+# reaches the Developer as its task (target_goal embeds the authoritative
+# goal) and as the overall request constraints; rendering it as the design
+# too put the full original goal into the request a third time.
+BOUNDED_SUBTASK_DESIGN = ""
+
+
 def split_planned_source(package: Any) -> Tuple[List[str], Any]:
     """(the planned-file paths whose full current source ``package`` carries,
     the package without those items) - what the bounded subtask renders as
@@ -5018,7 +5028,7 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
                 recovery_contract_block=recovery_context,
                 established_files=sorted(established_file_context.keys()),
                 predetermined_plan=build_subtask_plan_text(target),
-                predetermined_design=target_goal,
+                predetermined_design=BOUNDED_SUBTASK_DESIGN,
                 predetermined_architect_files=target_files,
                 allowed_write_relpaths=target_files,
                 # PRV-05 run 7 (2026-08-28): the validated EngineeringPlan and

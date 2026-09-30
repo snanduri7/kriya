@@ -6949,7 +6949,11 @@ async def test_enforce_passes_predetermined_plan_design_and_files_from_the_subta
     assert len(calls) == 2
     assert calls[0]["predetermined_plan"] == "Implement: write a.py"
     assert calls[0]["predetermined_architect_files"] == ["a.py"]
-    assert calls[0]["predetermined_design"]  # non-empty, real content
+    # Supplied (the Architect is not re-run) but never the goal restated as a
+    # design (GOAL-DESIGN-DEDUP-001); the goal reaches the subtask as its task.
+    assert calls[0]["predetermined_design"] is not None
+    assert "goal" not in calls[0]["predetermined_design"]
+    assert "goal" in calls[0]["goal"]
     assert calls[0]["allowed_write_relpaths"] == ["a.py"]
     assert calls[1]["predetermined_architect_files"] == ["b.py"]
     assert calls[1]["allowed_write_relpaths"] == ["b.py"]
