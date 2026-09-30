@@ -239,11 +239,16 @@ def test_an_explicit_role_binding_sends_its_own_temperature(monkeypatch):
     llm = LLMClient(cfg)
 
     async def call():
-        with patch("kriya.core.llm.AsyncOpenAI") as client_cls:
+        # LLMClient reuses its client per (endpoint, key) (PROVIDER-CONTRACT-001):
+        # the role binding shares the primary's, so that client is the one to double -
+        # otherwise the call reaches the real local server.
+        with patch("kriya.core.llm.AsyncOpenAI") as client_cls, \
+                patch.object(llm.client.chat.completions, "create", new=capture.create):
             client_cls.return_value.chat.completions.create = capture.create
             await call_with_escalation(llm, "s", "p", [cfg.agent_llms.spec_compliance.llm], role="spec_compliance")
 
     asyncio.run(call())
+    assert capture.create.await_count == 1  # the double answered: nothing reached a real server
     expected = role_inference_settings(cfg, "spec_compliance", MODEL)
     assert expected.temperature == 0.05
     assert capture.dispatch_settings[-1].digest == expected.digest
