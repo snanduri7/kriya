@@ -75,7 +75,8 @@ def _response(content):
     response.choices[0].message.reasoning = None
     response.choices[0].message.tool_calls = None
     response.choices[0].finish_reason = "stop"
-    response.usage = MagicMock(prompt_tokens=40, completion_tokens=20)
+    # No measured prompt count: a canned response has no request to measure.
+    response.usage = MagicMock(prompt_tokens=0, completion_tokens=20)
     return response
 
 
@@ -225,7 +226,10 @@ async def test_developer_request_on_the_fallback_matches_the_fallback_runtime(mo
     assert files and files[0]["filepath"] == "App.java"
     sent = [call[1] for call in create.call_args_list]
     assert all(request["model"] == FALLBACK for request in sent)
-    assert all(request["extra_body"]["options"]["num_ctx"] == 8192 for request in sent)
+    # The fallback's own window is requested and budgeted; the /v1 wire never
+    # carries it (PROVIDER-CONTRACT-001: /v1 ignores options.num_ctx).
+    assert all("options" not in (request["extra_body"] or {}) for request in sent)
+    assert developer.llm.last_completion.budget["context_state"]["requested_context_window"] == 8192
     assert all(request["max_tokens"] == 2048 for request in sent)
     # No JSON mode, no tool schema, no streaming for a model whose profile has none.
     assert all(request.get("response_format") is None for request in sent)
@@ -270,7 +274,7 @@ async def test_the_hop_is_recorded_field_by_field(tmp_path, monkeypatch):
     assert hop["changes"]["edit_protocol"] == {"from": "small_native_tools", "to": "full_file"}
     assert hop["changes"]["context_window"] == {"from": 32768, "to": 8192}
     assert hop["to"]["qualification"] == mq.MISSING  # recorded, not refused
-    assert create.call_args_list[1][1]["extra_body"]["options"]["num_ctx"] == 8192
+    assert "options" not in (create.call_args_list[1][1]["extra_body"] or {})
 
 
 # --- explicit incompatibility ---------------------------------------------------------------
@@ -509,7 +513,7 @@ async def test_a_required_patch_moves_the_call_to_the_next_patch_capable_fallbac
 
     sent = [call[1] for call in create.call_args_list]
     assert sent and all(request["model"] == SECOND for request in sent)
-    assert all(request["extra_body"]["options"]["num_ctx"] == 16384 for request in sent)
+    assert all("options" not in (request["extra_body"] or {}) for request in sent)
     (event,) = [e for e in state.run_events if e.kind == "model.fallback_selection"]
     assert event.details["phase"] == "call"
     assert (event.details["requested"], event.details["selected"]) == (FALLBACK, SECOND)

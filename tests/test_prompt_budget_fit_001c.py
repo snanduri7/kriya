@@ -252,7 +252,7 @@ def test_kriya_fix_reports_a_refused_final_review_truthfully(tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(refused)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
 
     assert "Files applied to workspace and committed (direct), not rolled back: m1.py" in result.output

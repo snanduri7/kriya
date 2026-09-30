@@ -1,0 +1,5 @@
+extra=                               reasoning_chars 616 content '4' usage 181
+extra=,"reasoning_effort":"none"     reasoning_chars 0 content '2 + 2 = 4' usage 8
+extra=,"options":{"think":false}     reasoning_chars 814 content 'The answer is **4**.' usage 234
+extra=,"think":false                 reasoning_chars 606 content '2 + 2 = **4**' usage 200
+thinking_chars 0 content '2 + 2 = 4' eval 8

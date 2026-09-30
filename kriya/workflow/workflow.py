@@ -5551,6 +5551,12 @@ class WorkflowEngine:
                 bool(state.environment_failure)
                 and state.environment_failure.startswith("CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE:")
             )
+            # PROVIDER-CONTRACT-001: same convention - a provider contract
+            # violation (kriya/core/provider_contract.py reason codes).
+            from kriya.core.provider_contract import PROVIDER_CONTRACT_REASON_CODES
+
+            is_provider_contract_stop = bool(state.environment_failure) and any(
+                state.environment_failure.startswith(f"{code}:") for code in PROVIDER_CONTRACT_REASON_CODES)
             # MODEL-EVIDENCE-HARDENING-001: same convention - a production
             # retry identity that is not qualified (attempt.py).
             is_retry_identity_stop = (
@@ -5592,6 +5598,7 @@ class WorkflowEngine:
                 else "regression_unattributed" if is_regression_unattributed_stop
                 else "fallback_model_incompatible" if is_fallback_incompatible_stop
                 else "context_edit_protocol_unsatisfiable" if is_edit_protocol_stop
+                else "provider_contract_violation" if is_provider_contract_stop
                 else "retry_identity_not_qualified" if is_retry_identity_stop
                 else "requirements_unresolved" if is_requirements_unresolved_stop
                 else "contract_registry_blocked" if is_contract_registry_stop

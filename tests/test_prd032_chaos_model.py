@@ -42,7 +42,7 @@ GOAL = "add sub to calc.py"
 # --- Investigation loop over the real LLMClient -----------------------------------
 
 def _tool_calls(*calls, content=""):
-    return ChatResponse(content=content, finish_reason="tool_calls", prompt_tokens=5, completion_tokens=2,
+    return ChatResponse(content=content, finish_reason="tool_calls", prompt_tokens=0, completion_tokens=2,
                         tool_calls=[RawToolCall(f"call-{i}", name, args) for i, (name, args) in enumerate(calls)])
 
 
@@ -297,7 +297,7 @@ def test_fabricated_success_never_passes(chaos_case, tmp_path):
 
 @chaos("A12")
 def test_a_truncated_completion_is_never_accepted(chaos_case, tmp_path):
-    truncated = ChatResponse(content=CALC_WITH_SUB, finish_reason="length", prompt_tokens=11, completion_tokens=3)
+    truncated = ChatResponse(content=CALC_WITH_SUB, finish_reason="length", prompt_tokens=0, completion_tokens=3)
     workspace, runtime = _pipeline(tmp_path, truncated)
     result = _run(chaos_case, workspace, runtime)
     audit, attempts = _unchanged_failure(chaos_case, workspace, result, runtime)
@@ -306,7 +306,7 @@ def test_a_truncated_completion_is_never_accepted(chaos_case, tmp_path):
 
 @chaos("A13")
 def test_an_empty_completion_is_a_typed_failure(chaos_case, tmp_path):
-    empty = ChatResponse(content="", finish_reason="stop", prompt_tokens=11, completion_tokens=0)
+    empty = ChatResponse(content="", finish_reason="stop", prompt_tokens=0, completion_tokens=0)
     workspace, runtime = _pipeline(tmp_path, empty)
     result = _run(chaos_case, workspace, runtime)
     audit, attempts = _unchanged_failure(chaos_case, workspace, result, runtime)

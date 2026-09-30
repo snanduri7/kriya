@@ -52,7 +52,11 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-INFERENCE_SETTINGS_VERSION = 1
+# /2 (PROVIDER-CONTRACT-001): the settings are what the request's WIRE
+# carries (the runtime adapter's request plan), never configuration the
+# provider ignores; the served model's own configuration is part of the
+# runtime fingerprint (server_parameters).
+INFERENCE_SETTINGS_VERSION = 2
 
 
 
@@ -108,11 +112,24 @@ class InferenceSettings:
         return {**self.identity_fields(), "digest": self.digest, "output_ceiling": self.output_ceiling}
 
 
+def wire_settings_body(extra_body: Optional[Mapping[str, Any]], *, reasoning: bool, runtime: Any = None
+                       ) -> Dict[str, Any]:
+    """The part of a request's settings the provider receives: the runtime
+    adapter's wire body for ``extra_body`` (PROVIDER-CONTRACT-001), numbers
+    normalized. Settings the provider cannot carry never appear here."""
+    from kriya.core.inference_runtime import runtime_adapter
+
+    adapter = runtime if runtime is not None else runtime_adapter()
+    plan = adapter.request_plan(dict(extra_body) if isinstance(extra_body, Mapping) else None, temperature=None,
+                                reasoning_flag=bool(reasoning), requested_context_window=None)
+    return _normalize(copy.deepcopy(plan.wire_body))
+
+
 def request_settings(*, temperature: Optional[float], reasoning: bool,
                      extra_body: Optional[Mapping[str, Any]],
-                     output_ceiling: Optional[int] = None) -> InferenceSettings:
-    """The settings of one request, as sent."""
-    body = normalized_extra_body(extra_body)
+                     output_ceiling: Optional[int] = None, runtime: Any = None) -> InferenceSettings:
+    """The settings of one request, as the provider receives them."""
+    body = wire_settings_body(extra_body, reasoning=reasoning, runtime=runtime)
     return InferenceSettings(
         temperature=None if temperature is None else float(temperature),
         reasoning=bool(reasoning),
@@ -134,6 +151,7 @@ def _role_temperature(config: Any, role: str, binding: Any) -> Optional[float]:
 def binding_inference_settings(config: Any, role: str, binding: Any = None) -> InferenceSettings:
     """What ``role``'s calls to ``binding`` (default: the primary llm) send.
     See the module docstring for the per-role temperature rule."""
+    from kriya.core.inference_runtime import runtime_for_binding
     from kriya.core.model_runtime import binding_output_tokens
 
     binding = binding if binding is not None else config.llm
@@ -142,6 +160,7 @@ def binding_inference_settings(config: Any, role: str, binding: Any = None) -> I
         reasoning=bool(getattr(binding, "reasoning", False)),
         extra_body=getattr(binding, "extra_body", None),
         output_ceiling=binding_output_tokens(config, None if binding is config.llm else binding),
+        runtime=runtime_for_binding(binding),
     )
 
 

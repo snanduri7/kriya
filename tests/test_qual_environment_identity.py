@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from _per_request_window_runtime import per_request_window_runtime
 
 from kriya.config import AppConfig
 from kriya.core import execution_environment as ee
@@ -172,7 +173,13 @@ def test_an_unobservable_environment_never_counts_capacity_evidence(host):
 
 def test_the_context_tier_follows_the_environment(host, monkeypatch):
     """Integration through PRD-016 tier offering: a tier qualified on this
-    machine is offered here and not on a different one."""
+    machine is offered here and not on a different one (on a runtime that
+    applies a per-request window - PROVIDER-CONTRACT-001)."""
+    with per_request_window_runtime() as runtime:
+        _context_tier_follows_the_environment(host, monkeypatch, runtime)
+
+
+def _context_tier_follows_the_environment(host, monkeypatch, runtime):
     def probe(**kw):
         return _fp(alias=kw["model"], configured_context_window=kw["configured_context"],
                    effective_context_window=kw["configured_context"], kriya_protocol=kw["kriya_protocol"])
@@ -181,6 +188,7 @@ def test_the_context_tier_follows_the_environment(host, monkeypatch):
     monkeypatch.setattr(model_runtime, "probe_model_runtime", probe)
     cfg = AppConfig()
     cfg.llm.model = MODEL
+    cfg.llm.inference_runtime = runtime
     cfg.llm.extra_body = {"reasoning_effort": "none", "options": {"num_ctx": 32768}}
     cfg.llm.temperature = 0.7
     cfg.llm_chain = []
@@ -255,5 +263,6 @@ def test_the_context_window_request_field_is_the_adapters():
     body = model_runtime.with_context_window({"reasoning_effort": "none"}, 65536)
     assert model_runtime.configured_context_window(body) == 65536
     assert model_runtime.without_context_window(body) == {"reasoning_effort": "none"}
-    assert model_runtime.supports_per_request_context_window(_fp())
+    # PROVIDER-CONTRACT-001: Ollama's /v1 ignores a per-request window.
+    assert not model_runtime.supports_per_request_context_window(_fp())
     assert not model_runtime.supports_per_request_context_window(_fp(provider="vllm"))

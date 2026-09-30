@@ -19,6 +19,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _provider_usage import plausible_prompt_tokens
 from click.testing import CliRunner
 from test_prd020_milestone_requirements import _probe
 from test_prompt_budget_fit_001ab import GOAL, REFERENCE, REPORT, _config, _ledger, _workspace_with_index
@@ -65,7 +66,7 @@ class Transport:
             content = self.report_content
         else:
             content = "Review: Approved"
-        return {"content": content, "reasoning_chars": 0, "prompt_tokens": 10, "completion_tokens": 5,
+        return {"content": content, "reasoning_chars": 0, "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
     def by(self, model, *markers):
@@ -478,7 +479,7 @@ def test_a_milestone_unit_review_is_refitted_for_a_smaller_reviewer_fallback(tmp
             content = f"Step 1: create {target}"
         else:
             content = large if target == "m2.py" else f"VALUE = '{target}'\n"
-        return {"content": content, "reasoning_chars": 0, "prompt_tokens": 10, "completion_tokens": 5,
+        return {"content": content, "reasoning_chars": 0, "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
     with patch("kriya.cli.load_config", return_value=cfg), patch.object(LLMClient, "_request_once", new=transport):

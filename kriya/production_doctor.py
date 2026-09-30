@@ -380,6 +380,7 @@ PRODUCTION_DOCTOR_CHECK_IDS = (
     "egress.policy",
     "model.connectivity",
     "model.runtime_fingerprint",
+    "model.provider_contract",
     "model.qualification",
     "embedding.connectivity",
     "context.recall_certification",
@@ -415,6 +416,7 @@ RUNTIME_FINGERPRINT_NOT_COMPUTABLE = "RUNTIME_FINGERPRINT_NOT_COMPUTABLE"
 RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE = "RUNTIME_QUALIFICATION_BINDING_UNAVAILABLE"
 MODEL_NOT_QUALIFIED = "MODEL_NOT_QUALIFIED"
 QUALIFICATION_STALE = "QUALIFICATION_STALE"
+PROVIDER_CONTRACT_UNVERIFIED = "PROVIDER_CONTRACT_UNVERIFIED"
 
 _SEVERITY = {CheckStatus.PASS: 0, CheckStatus.WARN: 1, CheckStatus.UNAVAILABLE: 2, CheckStatus.FAIL: 3}
 
@@ -837,6 +839,132 @@ def _check_runtime_fingerprint(ctx: _Context) -> DoctorCheck:
     )
 
 
+def probe_served_context(cfg: AppConfig, model: str) -> Dict[str, Any]:
+    """PROVIDER-CONTRACT-001 controlled probe: the context window the
+    runtime serves ``model`` with. When the model is not loaded, one minimal
+    request through Kriya's own client loads it exactly as a run would (and
+    runs the client's own post-call contract check). Never raises."""
+    import asyncio
+
+    from kriya.core.inference_runtime import runtime_for_binding
+    from kriya.core.llm import LLMClient
+    from kriya.core.model_runtime import binding_object
+
+    binding = binding_object(cfg, model) or cfg.llm
+    base_url = getattr(binding, "base_url", None) or cfg.llm.base_url
+    api_key = getattr(binding, "api_key", None) or cfg.llm.api_key
+    adapter = runtime_for_binding(binding)
+    evidence: Dict[str, Any] = {"served": None, "probe_request_sent": False}
+    try:
+        evidence["served"] = adapter.observe_served_context(base_url=base_url, model=model, api_key=api_key)
+        if evidence["served"] is not None:
+            return evidence
+
+        async def load() -> Any:
+            llm = LLMClient(cfg)
+            try:
+                return await llm.complete_result("", "ok", model_override=model, base_url_override=base_url,
+                                                 api_key_override=api_key, max_tokens_override=1)
+            finally:
+                await llm.aclose()
+
+        evidence["probe_request_sent"] = True
+        result = asyncio.run(load())
+        contract = result.protocol.get("provider_contract", {})
+        evidence["served"] = contract.get("served_context_window_after_call")
+        if "violation" in contract:
+            evidence["violation"] = contract["violation"]
+    except Exception as error:  # the row reports what could not be observed
+        evidence["error"] = f"{type(error).__name__}: {error}"
+        if getattr(error, "reason_code", None):
+            evidence["violation"] = {"reason_code": error.reason_code, **getattr(error, "details", {})}
+    return evidence
+
+
+def _provider_contract_entry(cfg: AppConfig, model: str, runtime: Any) -> Tuple[CheckStatus, Dict[str, Any]]:
+    """One model's contract: every setting its binding relies on, as the
+    provider applies it, and the window it is served with."""
+    from kriya.core.inference_runtime import runtime_for_binding
+    from kriya.core.model_runtime import binding_object, requested_context_window
+    from kriya.core.provider_contract import Provenance, ProviderContractError, context_window_state
+
+    binding = binding_object(cfg, model) or cfg.llm
+    adapter = runtime_for_binding(binding)
+    extra_body = getattr(binding, "extra_body", None) or None
+    temperature = getattr(binding, "temperature", None)
+    requested = requested_context_window(extra_body, getattr(binding, "context_window", None), adapter)
+    plan = adapter.request_plan(extra_body, temperature=temperature if temperature is not None
+                                else cfg.llm.temperature, reasoning_flag=bool(getattr(binding, "reasoning", False)),
+                                requested_context_window=requested, fingerprint=runtime)
+    entry: Dict[str, Any] = {
+        "model": model, "adapter": adapter.name, "capabilities": adapter.provider_capabilities.to_dict(),
+        "runtime_exact": bool(runtime is not None and runtime.exact), "plan": plan.to_dict(),
+        "not_effective": sorted(s.name for s in plan.not_effective()),
+        "unverified": sorted(s.name for s in plan.unverified()),
+    }
+    failures = []
+    try:
+        plan.enforce(strict=True)
+    except ProviderContractError as error:
+        failures.append({"reason_code": error.reason_code, **error.details})
+    served = probe_served_context(cfg, model)
+    entry["served_context"] = served
+    if "violation" in served:
+        failures.append(served["violation"])
+    elif served["served"] is not None:
+        try:
+            entry["context"] = context_window_state(requested, served["served"], Provenance.SERVER_OBSERVED,
+                                                    exact=True).to_dict()
+        except ProviderContractError as error:
+            failures.append({"reason_code": error.reason_code, **error.details})
+    if failures:
+        entry["failures"] = failures
+        return CheckStatus.FAIL, entry
+    if not entry["runtime_exact"] or entry["unverified"] or served["served"] is None:
+        entry["reason_code"] = PROVIDER_CONTRACT_UNVERIFIED
+        return CheckStatus.UNAVAILABLE, entry
+    return CheckStatus.PASS, entry
+
+
+def _check_provider_contract(ctx: _Context) -> DoctorCheck:
+    """PROVIDER-CONTRACT-001: every model a production role can call is
+    proven to be served with the settings Kriya budgets, qualifies and
+    records - request-carried settings accepted by the adapter, server-only
+    settings equal to the served model's own configuration, the served
+    window exactly the requested one. Desired configuration is not
+    effective inference identity."""
+    from kriya.core.model_qualification import role_models
+    from kriya.core.model_runtime import resolve_configured_model_runtime
+
+    entries: List[Dict[str, Any]] = []
+    status = CheckStatus.PASS
+    seen = set()
+    primary = ctx.runtime_probe.get("runtime")
+    for models in role_models(ctx.cfg).values():
+        for model in models:
+            if model.casefold() in seen:
+                continue
+            seen.add(model.casefold())
+            if primary is not None and model.casefold() == ctx.cfg.llm.model.casefold():
+                runtime = primary
+            else:
+                try:
+                    runtime = resolve_configured_model_runtime(ctx.cfg, model, fresh=True)
+                except Exception:  # unidentifiable: its settings cannot be verified
+                    runtime = None
+            model_status, entry = _provider_contract_entry(ctx.cfg, model, runtime)
+            entry["status"] = model_status.value
+            entries.append(entry)
+            if _SEVERITY[model_status] > _SEVERITY[status]:
+                status = model_status
+    return _check(
+        "model.provider_contract", status, evidence={"models": entries},
+        remediation=("Serve each model with exactly the settings its binding declares: pin the server-only "
+                     "settings (`kriya model pin --model <model>`), point the binding at the pinned model, "
+                     "and remove any setting the provider cannot carry."),
+    )
+
+
 def _check_qualification(ctx: _Context) -> DoctorCheck:
     """PRD-014: every production role's every callable model (its binding
     and escalation chain) must have a CURRENT qualification record for its
@@ -1184,6 +1312,7 @@ _CHECKS: Tuple[Tuple[str, Union[bool, Callable[[AppConfig], bool]], Callable[[_C
     ("egress.policy", True, _check_egress),
     ("model.connectivity", True, _check_model_connectivity),
     ("model.runtime_fingerprint", True, _check_runtime_fingerprint),
+    ("model.provider_contract", True, _check_provider_contract),
     ("model.qualification", True, _check_qualification),
     ("embedding.connectivity", True, _check_embedding),
     ("context.recall_certification", _recall_certification_required, _check_recall_certification),

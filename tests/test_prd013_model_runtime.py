@@ -87,10 +87,13 @@ def test_fingerprint_records_every_component_the_runtime_reports():
     assert fp.runtime_parameters_digest.startswith("sha256:")
     assert fp.served_capabilities == ("completion", "tools")
     assert fp.model_context_length == 262144
-    assert fp.configured_context_window == 32768 and fp.effective_context_window == 32768
+    # PROVIDER-CONTRACT-001: the request is never evidence of what is served;
+    # with no num_ctx PARAMETER the served window is unknown until loaded.
+    assert fp.configured_context_window == 32768 and fp.effective_context_window is None
+    assert "top_k 20" in fp.server_parameters and "temperature 0.7" in fp.server_parameters
     assert fp.kriya_protocol == "capabilities-sha256:x"
     assert fp.adapter_version == MODEL_PROTOCOL_ADAPTER_VERSION
-    assert fp.missing_components == ()
+    assert fp.missing_components == ("effective_context_window",)
     assert len(fp.digest) == 64
 
 
@@ -302,5 +305,5 @@ def test_resume_binds_the_model_runtime_only_when_every_role_runtime_is_exact(mo
 def test_fingerprint_to_dict_is_json_serializable_and_complete():
     record = _probe().to_dict()
     json.dumps(record)
-    assert record["exact"] is True and record["missing_components"] == []
+    assert record["exact"] is True and record["missing_components"] == ["effective_context_window"]
     assert set(ModelRuntimeFingerprint.__dataclass_fields__) - {"probe_errors"} <= set(record)

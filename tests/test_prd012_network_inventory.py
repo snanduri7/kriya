@@ -16,8 +16,12 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # (file, client) -> (count, governing authority)
 INVENTORY = {
     ("kriya/core/llm.py", "AsyncOpenAI"): (
-        3, "autonomy.egress_policy: LLMClient.complete/complete_with_tools refuse a non-local "
-           "endpoint under local_only (EgressViolationError); endpoints are SEC-009 config"),
+        1, "autonomy.egress_policy: LLMClient.complete/complete_with_tools refuse a non-local "
+           "endpoint under local_only (EgressViolationError); endpoints are SEC-009 config. One "
+           "construction site (LLMClient._client_for, PROVIDER-CONTRACT-001)"),
+    ("kriya/core/llm.py", "httpx.AsyncClient"): (
+        1, "the transport of LLMClient._client_for's AsyncOpenAI (trust_env=False: never an inherited "
+           "proxy); same egress_policy check as above"),
     ("kriya/memory/vector.py", "httpx.AsyncClient"): (
         2, "autonomy.egress_policy: OllamaEmbeddingClient._enforce_egress before any request "
            "(egress_policy is a required constructor argument)"),
@@ -36,6 +40,8 @@ INVENTORY = {
         1, "probe of the managed service Kriya itself launched (loopback or inside its container)"),
     ("kriya/production_doctor.py", "urlopen"): (
         1, "doctor probe of the configured llm/embedding endpoints (SEC-009 config)"),
+    ("kriya/core/model_qualification.py", "httpx.AsyncClient"): (
+        1, "the transport of the timeout-semantics case's AsyncOpenAI below (trust_env=False)"),
     ("kriya/core/model_qualification.py", "AsyncOpenAI"): (
         1, "PRD-014 timeout-semantics case: the SAME configured model endpoint with a tiny client timeout; "
            "every request still goes through LLMClient.complete_result's local_only egress check"),

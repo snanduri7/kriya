@@ -297,7 +297,7 @@ def test_generate_bootstrap_creates_no_cwd_logs(home, tmp_path, monkeypatch):
     with _fresh_root_logging(), \
          patch("kriya.cli.load_config", return_value=cfg), \
          patch("kriya.cli.Kernel", return_value=kernel), \
-         patch("kriya.cli.LLMClient"), \
+         patch("kriya.cli.LLMClient", autospec=True), \
          patch("kriya.cli.WorkflowEngine"), \
          patch("kriya.cli._dispatch_generation", new=AsyncMock(return_value={"status": "success", "run_id": "r1"})):
         result = CliRunner().invoke(main, ["generate", "a goal", "--json"])

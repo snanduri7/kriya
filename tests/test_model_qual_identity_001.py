@@ -12,6 +12,7 @@ from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _per_request_window_runtime import PER_REQUEST_WINDOW_RUNTIME, per_request_window_runtime
 from click.testing import CliRunner
 
 from kriya.agents.agent import PlannerAgent, call_with_escalation
@@ -77,15 +78,12 @@ def _with_options(**options):
 
 @pytest.mark.parametrize("changed", [
     {"extra_body": {**BASE["extra_body"], "reasoning_effort": "high"}},
-    {"extra_body": {"options": BASE["extra_body"]["options"]}},  # reasoning_effort dropped
-    {"extra_body": {**BASE["extra_body"], "think": False}},
+    {"extra_body": {"options": BASE["extra_body"]["options"]}, "reasoning": True},  # effort dropped, reasoning on
     {"temperature": 0.2},
     {"extra_body": _with_options(top_p=0.95)},
-    {"extra_body": _with_options(top_k=40)},
     {"extra_body": _with_options(seed=7)},
     {"reasoning": True},
-], ids=["reasoning_effort", "reasoning_effort_absent", "think", "temperature", "top_p", "top_k", "seed",
-        "reasoning_flag"])
+], ids=["reasoning_effort", "reasoning_effort_absent", "temperature", "top_p", "seed", "reasoning_flag"])
 def test_a_behaviour_affecting_setting_changes_the_identity(changed):
     base, other = _settings(), _settings(**changed)
     assert base.digest != other.digest
@@ -102,10 +100,26 @@ def test_a_seed_change_changes_the_identity():
     # num_ctx is the runtime fingerprint's input (a PRD-016 tier), never a setting.
     {"extra_body": _with_options(num_ctx=65536)},
     # An integral float equals the integer.
-    {"extra_body": _with_options(top_k=20.0)},
-], ids=["key_order", "num_ctx", "integral_float"])
+    {"extra_body": _with_options(top_p=0.8)},
+    # PROVIDER-CONTRACT-001: the OpenAI-compatible /v1 never applies these,
+    # so they are not request identity (the served model's own top_k is
+    # runtime identity - test_a_served_sampling_parameter_is_runtime_identity).
+    {"extra_body": _with_options(top_k=40)},
+    # think:false is the same reasoning-off the explicit effort already sends.
+    {"extra_body": {**BASE["extra_body"], "think": False}},
+    # reasoning=false with no effort sends reasoning_effort "none" itself.
+    {"extra_body": {"options": BASE["extra_body"]["options"]}},
+], ids=["key_order", "num_ctx", "integral_float", "top_k_not_applied", "think_false", "effort_implicit_none"])
 def test_identical_effective_settings_are_the_same_identity(same):
     assert _settings(**same).digest == _settings().digest
+
+
+def test_a_served_sampling_parameter_is_runtime_identity():
+    """What /v1 cannot carry per request is the served model's own
+    configuration: a different server top_k is a different runtime."""
+    base = _fp(server_parameters=("temperature 0.7", "top_k 20", "top_p 0.8"))
+    other = _fp(server_parameters=("temperature 0.7", "top_k 40", "top_p 0.8"))
+    assert base.digest != other.digest
 
 
 def test_empty_options_equal_absent_options_equal_no_extra_body():
@@ -160,7 +174,8 @@ def _response():
     response.choices[0].message.reasoning = None
     response.choices[0].message.tool_calls = None
     response.choices[0].finish_reason = "stop"
-    response.usage = MagicMock(prompt_tokens=10, completion_tokens=2)
+    # No measured prompt count: a canned response has no request to measure.
+    response.usage = MagicMock(prompt_tokens=0, completion_tokens=2)
     return response
 
 
@@ -242,7 +257,7 @@ def _record(fp, settings, statuses=None):
 def test_a_record_qualifies_only_its_own_inference_identity():
     fp = _fp()
     none_effort = _settings()
-    default_effort = _settings(extra_body={"options": {"num_ctx": 32768, "top_p": 0.8, "top_k": 20}})
+    default_effort = _settings(extra_body={**BASE["extra_body"], "reasoning_effort": "high"})
     mq.save_record(_record(fp, none_effort))
     assert mq.assess(fp, ("plain_completion",), settings=none_effort).status == mq.QUALIFIED
     other = mq.assess(fp, ("plain_completion",), settings=default_effort)
@@ -285,9 +300,18 @@ def test_an_old_policy_record_is_stale_never_missing_and_never_reused():
     assert mq.measured_limits_for(fp, settings=_settings()) == {}
 
 
-def _tier_cfg(*, declared=(65536,)):
+@pytest.fixture
+def tier_runtime():
+    """PRD-016 tiers need a runtime that applies a per-request window;
+    Ollama's /v1 does not (PROVIDER-CONTRACT-001)."""
+    with per_request_window_runtime() as name:
+        yield name
+
+
+def _tier_cfg(*, declared=(65536,), runtime=PER_REQUEST_WINDOW_RUNTIME):
     cfg = AppConfig()
     cfg.llm.model = MODEL
+    cfg.llm.inference_runtime = runtime
     cfg.llm.extra_body = {"options": {"num_ctx": 32768}}
     cfg.llm.context_window = 32768
     cfg.llm_chain = []
@@ -307,13 +331,20 @@ def _tier_runtime(cfg, size):
     return model_runtime.resolve_configured_model_runtime(mq.qualification_config(cfg, MODEL, size), MODEL)
 
 
-def test_a_declared_tier_is_offered_only_while_no_qualification_data_exists(monkeypatch):
+def test_a_declared_tier_is_offered_only_while_no_qualification_data_exists(monkeypatch, tier_runtime):
     _exact_probe(monkeypatch)
     cfg = _tier_cfg()
     assert [t.tokens for t in _offer(cfg).tiers] == [65536]
 
 
-def test_an_old_not_qualified_64k_record_keeps_the_declared_tier_out(monkeypatch):
+def test_no_tier_is_ever_offered_through_the_openai_compatible_v1(monkeypatch):
+    """A declared tier on the packaged /v1 runtime: /v1 ignores the
+    per-request window, so offering it would budget a window never served."""
+    _exact_probe(monkeypatch)
+    assert _offer(_tier_cfg(runtime=None)).tiers == ()
+
+
+def test_an_old_not_qualified_64k_record_keeps_the_declared_tier_out(monkeypatch, tier_runtime):
     """The MODEL-EVAL-001 qwen3.8@64K context_capacity FAIL, recorded under
     policy /2: after the policy bump it is STALE, and a declared 65536 is
     still never offered for it."""
@@ -324,7 +355,7 @@ def test_an_old_not_qualified_64k_record_keeps_the_declared_tier_out(monkeypatch
     assert offer.tiers == () and "65536: STALE" in offer.note
 
 
-def test_a_tier_qualified_under_other_settings_is_not_offered(monkeypatch):
+def test_a_tier_qualified_under_other_settings_is_not_offered(monkeypatch, tier_runtime):
     _exact_probe(monkeypatch)
     cfg = _tier_cfg()
     other = _settings(extra_body={"reasoning_effort": "high"})

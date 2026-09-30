@@ -7,6 +7,12 @@ without it was served at the provider's default window. Now one definition,
 ``requested_context_window`` (an explicit provider option wins, else the
 declared window), feeds the request body, the runtime fingerprint, the
 dispatch budget, the allocation window, qualification and the doctor.
+
+PROVIDER-CONTRACT-001 (measured, Ollama 0.34.4): the OpenAI-compatible /v1
+ignores ``options.num_ctx``, so the window is REQUESTED and budgeted but never
+put on the /v1 wire (claiming it was sent would be claiming it applied). The
+served window is only what the server reports (/api/ps, or the model's own
+num_ctx PARAMETER); one below the requested window is refused.
 """
 import ast
 import copy
@@ -43,7 +49,8 @@ def _response():
     response.choices[0].message.reasoning = None
     response.choices[0].message.tool_calls = None
     response.choices[0].finish_reason = "stop"
-    response.usage = MagicMock(prompt_tokens=40, completion_tokens=2)
+    # No measured prompt count: a canned response has no request to measure.
+    response.usage = MagicMock(prompt_tokens=0, completion_tokens=2)
     return response
 
 
@@ -77,25 +84,26 @@ def exact_ollama(monkeypatch):
 # --- the request carries the budgeted window -----------------------------------
 
 @pytest.mark.asyncio
-async def test_a_fallback_without_the_provider_option_is_sent_its_declared_window():
+async def test_a_fallback_without_the_provider_option_is_budgeted_at_its_declared_window():
     sent, budget = await _sent(_config(context_window=16384), FALLBACK)
-    assert configured_context_window(sent) == 16384
-    assert budget["context_window"] == 16384 and budget["window_source"] == "config_declared"
+    assert "options" not in (sent or {})  # /v1 ignores it: never sent as if applied
+    assert budget["context_window"] == 16384 and budget["window_source"] == "requested_unverified"
+    assert budget["context_state"]["requested_context_window"] == 16384
 
 
 @pytest.mark.asyncio
-async def test_the_primary_is_sent_its_declared_window_too():
+async def test_the_primary_is_budgeted_at_its_declared_window_too():
     config = _config(context_window=16384)
     config.llm.context_window = 8192
     sent, budget = await _sent(config, PRIMARY)
-    assert configured_context_window(sent) == 8192 and budget["context_window"] == 8192
+    assert "options" not in (sent or {}) and budget["context_window"] == 8192
 
 
 @pytest.mark.asyncio
-async def test_an_explicit_provider_option_is_sent_unchanged():
+async def test_an_explicit_provider_option_is_requested_and_only_applied_fields_are_sent():
     body = {"options": {"num_ctx": 32768, "top_p": 0.8}, "reasoning_effort": "none"}
     sent, budget = await _sent(_config(context_window=32768, extra_body=body), FALLBACK)
-    assert sent == body and budget["context_window"] == 32768
+    assert sent == {"top_p": 0.8, "reasoning_effort": "none"} and budget["context_window"] == 32768
 
 
 @pytest.mark.asyncio
@@ -105,7 +113,7 @@ async def test_a_conflicting_explicit_option_wins_everywhere_and_is_reported(cap
     config = _config(context_window=32768, extra_body={"options": {"num_ctx": 8192}})
     with caplog.at_level("WARNING"):
         sent, budget = await _sent(config, FALLBACK)
-    assert configured_context_window(sent) == 8192 and budget["context_window"] == 8192
+    assert "options" not in (sent or {}) and budget["context_window"] == 8192
     assert context_window_overrides(config) == [
         {"model": FALLBACK, "declared_context_window": 32768, "requested_context_window": 8192}]
     assert "declared context_window 32768 is ignored" in caplog.text
@@ -145,8 +153,9 @@ def test_an_undeclared_context_window_is_not_an_override():
 async def test_an_override_extra_body_still_carries_the_models_window():
     """Every escalation site passes the fallback's extra_body as an
     override; the window still comes from that model's own binding."""
-    sent, _ = await _sent(_config(context_window=16384), FALLBACK, extra_body_override={"reasoning_effort": "none"})
-    assert sent == {"reasoning_effort": "none", "options": {"num_ctx": 16384}}
+    sent, budget = await _sent(_config(context_window=16384), FALLBACK,
+                               extra_body_override={"reasoning_effort": "none"})
+    assert sent == {"reasoning_effort": "none"} and budget["context_window"] == 16384
 
 
 @pytest.mark.asyncio
@@ -175,7 +184,7 @@ async def test_a_user_context_window_alone_is_what_is_sent_and_budgeted(tmp_path
     config = _load(tmp_path, "llm:\n  model: primary-model:1\n  context_window: 8192\n")
     assert context_window_overrides(config) == []
     sent, budget = await _sent(config, "primary-model:1")
-    assert configured_context_window(sent) == 8192 and budget["context_window"] == 8192
+    assert "options" not in (sent or {}) and budget["context_window"] == 8192
 
 
 def test_the_packaged_defaults_keep_their_window_and_inference_identity(tmp_path):
@@ -201,21 +210,32 @@ def test_an_unverified_fingerprint_records_the_request_never_a_served_window():
 
 
 @pytest.mark.asyncio
-async def test_an_exact_runtime_serves_the_requested_window(exact_ollama):
-    del exact_ollama
+async def test_an_exact_runtimes_served_window_is_observed_never_taken_from_the_request(exact_ollama):
+    exact_ollama["/api/ps"] = {"models": [{"name": FALLBACK, "context_length": 16384}]}
     sent, budget = await _sent(_config(context_window=16384), FALLBACK)
     fingerprint = resolve_configured_model_runtime(_config(context_window=16384), FALLBACK)
-    assert fingerprint.exact and fingerprint.effective_context_window == 16384 == configured_context_window(sent)
-    assert budget["window_source"] == "served_num_ctx" and budget["context_window"] == 16384
+    # The model has no num_ctx PARAMETER: nothing but the loaded server says what is served.
+    assert fingerprint.exact and fingerprint.effective_context_window is None
+    assert "options" not in (sent or {})
+    assert budget["window_source"] == "served_observed" and budget["context_window"] == 16384
+    assert budget["context_state"]["served_context_provenance"] == "server_observed"
 
 
 @pytest.mark.asyncio
-async def test_a_runtime_cap_is_budgeted_as_served_and_labelled(exact_ollama, caplog):
-    exact_ollama["/api/show"]["model_info"]["qwen3moe.context_length"] = 8192
-    with caplog.at_level("WARNING"):
-        _, budget = await _sent(_config(context_window=16384), FALLBACK)
-    assert budget["context_window"] == 8192 and budget["window_source"] == "runtime_capped"
-    assert "serves a 8192-token context window; 16384 was requested" in caplog.text
+async def test_a_served_window_below_the_requested_one_is_refused_before_inference(exact_ollama):
+    """Formerly budgeted down as "runtime_capped"; a served window below the
+    requested one silently truncates what Kriya admits - refused."""
+    from kriya.core.provider_contract import SERVED_CONTEXT_BELOW_REQUESTED, ProviderContractError
+
+    exact_ollama["/api/ps"] = {"models": [{"name": FALLBACK, "context_length": 8192}]}
+    llm = LLMClient(_config(context_window=16384))
+    create = AsyncMock(return_value=_response())
+    with patch.object(llm.client.chat.completions, "create", new=create):
+        with pytest.raises(ProviderContractError) as refused:
+            await llm.complete_result("system", "user", model_override=FALLBACK)
+    assert refused.value.reason_code == SERVED_CONTEXT_BELOW_REQUESTED
+    assert refused.value.details["served"] == 8192 and refused.value.details["requested"] == 16384
+    create.assert_not_called()
 
 
 def test_every_consumer_sees_the_same_runtime_for_an_implicit_window(exact_ollama):

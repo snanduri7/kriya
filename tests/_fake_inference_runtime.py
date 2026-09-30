@@ -6,6 +6,8 @@ production (tests/test_inf001_runtime_port.py asserts that)."""
 import asyncio
 from typing import Any, Callable, Dict, List, Optional
 
+from _provider_usage import plausible_message_tokens
+
 from kriya.core.inference_runtime import (
     ChatRequest,
     ChatResponse,
@@ -85,7 +87,8 @@ class FakeRuntimeAdapter(InferenceRuntimePort):
             raise reply
         if isinstance(reply, ChatResponse):
             return reply
-        return ChatResponse(content=reply, prompt_tokens=11, completion_tokens=3, finish_reason="stop")
+        return ChatResponse(content=reply, prompt_tokens=plausible_message_tokens(request.messages, request.tools), completion_tokens=3,
+                            finish_reason="stop")
 
     async def complete(self, client: Any, request: ChatRequest) -> ChatResponse:
         await asyncio.sleep(0)
@@ -111,5 +114,6 @@ class FakeRuntimeAdapter(InferenceRuntimePort):
 
 
 def tool_reply(name: str, arguments: str) -> ChatResponse:
-    return ChatResponse(content="", finish_reason="tool_calls", prompt_tokens=5, completion_tokens=2,
+    # No request at hand: reports no prompt count (never an implausible one).
+    return ChatResponse(content="", finish_reason="tool_calls", prompt_tokens=0, completion_tokens=2,
                         tool_calls=[RawToolCall("call-1", name, arguments)])

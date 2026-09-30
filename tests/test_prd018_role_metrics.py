@@ -2,6 +2,7 @@
 import asyncio
 
 import pytest
+from _provider_usage import plausible_prompt_tokens
 
 from kriya.core.role_metrics import (
     UNATTRIBUTED,
@@ -177,7 +178,7 @@ def test_a_real_run_persists_per_role_metrics_and_the_role_runtime_assignment(tm
                    else "Step 1: create mathx.py" if "Planner Agent" in first else "Review: Approved")
         if model == "dev-model" and "File List Planner" not in first:
             content = "def sub(a, b):\n    return a - b\n"
-        return {"content": content, "reasoning_chars": 0, "prompt_tokens": 10, "completion_tokens": 5,
+        return {"content": content, "reasoning_chars": 0, "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
     llm._request_once = request_once

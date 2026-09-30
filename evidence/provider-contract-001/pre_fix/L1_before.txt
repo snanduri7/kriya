@@ -1,0 +1,29 @@
+ollama version is 0.34.4
+NAME                          ID              SIZE      MODIFIED     
+qwen3.5:9b-mlx                203e30078279    8.9 GB    12 days ago     
+qwen3.5:9B                    6488c96fa5fa    6.6 GB    12 days ago     
+llama3.2:latest               a80c4f17acd5    2.0 GB    3 weeks ago     
+qwen3.6:35b-a3b-mtp-q4_K_M    096fdbd02fe6    22 GB     3 weeks ago     
+all-minilm:latest             1b226e2802db    45 MB     5 weeks ago     
+qwen2.5-coder:1.5b            d7372fd82851    986 MB    5 weeks ago     
+qwen3.8:27b-mlx               5642e97495e1    18 GB     6 weeks ago     
+qwen3.8:27b                   22130167c4c2    17 GB     6 weeks ago     
+qwen3.8:27b-mtp-q4_K_M        22130167c4c2    17 GB     6 weeks ago     
+deepseek-r1:32b               edba8017331d    19 GB     6 weeks ago     
+qwen3.6:35b-a3b-q4_K_M        07d35212591f    23 GB     6 weeks ago     
+qwen3-embedding:0.6b          ac6da0dfba84    639 MB    8 weeks ago     
+qwen3-embedding:latest        64b933495768    4.7 GB    2 months ago    
+qwen3-coder:latest            06c1097efce0    18 GB     2 months ago    
+qwen2.5-coder:7b              dae161e27b0e    4.7 GB    2 months ago    
+qwen3-coder:30b               06c1097efce0    18 GB     2 months ago    
+nomic-embed-text:latest       0a109f422b47    274 MB    2 months ago    
+embeddinggemma:latest         85462619ee72    621 MB    2 months ago    
+qwen3:8b                      500a1f067a9f    5.2 GB    2 months ago    
+[?2026h[?25l[1G[K[?25h[?2026l[?25l[2K[1G[?25h== ollama ps after /v1 options.num_ctx=8192
+NAME               ID              SIZE     PROCESSOR    CONTEXT    UNTIL              
+qwen3-coder:30b    06c1097efce0    25 GB    100% GPU     65536      4 minutes from now    
+            "name": "qwen3-coder:30b",
+            "size": 25412721704,
+                "parameter_size": "30.5B",
+            "size_vram": 25412721704,
+            "context_length": 65536

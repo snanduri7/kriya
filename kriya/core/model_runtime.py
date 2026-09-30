@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass, field
@@ -47,7 +48,10 @@ UNAVAILABLE = "unavailable"
 # Bumped whenever Kriya's own request/response handling for a model changes
 # in a way that could change qualification results (message shape, JSON
 # mode, reasoning stripping, tool-call normalization, truncation handling).
-MODEL_PROTOCOL_ADAPTER_VERSION = "kriya-openai-compat/2"
+# /3 (PROVIDER-CONTRACT-001): the wire carries only settings Ollama's /v1
+# applies; the served window and server-side sampling are observed, never
+# taken from the request.
+MODEL_PROTOCOL_ADAPTER_VERSION = "kriya-openai-compat/3"
 
 FINGERPRINT_SCHEMA_VERSION = 1
 
@@ -77,6 +81,10 @@ class ModelRuntimeFingerprint:
     tokenizer_digest: str = UNAVAILABLE
     runtime_parameters_digest: str = UNAVAILABLE
     served_capabilities: Tuple[str, ...] = ()
+    # PROVIDER-CONTRACT-001: the served model's own configuration (Ollama
+    # /api/show parameters, normalized "key value" pairs): the settings a
+    # request cannot carry are these.
+    server_parameters: Tuple[str, ...] = ()
     model_context_length: Optional[int] = None
     configured_context_window: Optional[int] = None
     effective_context_window: Optional[int] = None
@@ -90,6 +98,7 @@ class ModelRuntimeFingerprint:
         fields = asdict(self)
         fields.pop("probe_errors")
         fields["served_capabilities"] = sorted(self.served_capabilities)
+        fields["server_parameters"] = list(self.server_parameters)
         return fields
 
     @property
@@ -319,8 +328,12 @@ def _http_json(url: str, payload: Optional[Dict[str, Any]], api_key: str) -> Dic
         headers["Content-Type"] = "application/json"
         data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(url=url, headers=headers, data=data)
-    with urllib.request.urlopen(request, timeout=_PROBE_TIMEOUT_SECONDS) as response:
-        decoded = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=_PROBE_TIMEOUT_SECONDS) as response:
+            decoded = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        error.close()  # its response stream is released now, never left to the garbage collector
+        raise ValueError(f"HTTP {error.code} from {url}") from None
     if not isinstance(decoded, dict):
         raise ValueError("endpoint response was not a JSON object")
     return decoded
@@ -418,14 +431,16 @@ def probe_model_runtime(
         fields["tokenizer_digest"] = tokenizer_digest
         if isinstance(shown.get("parameters"), str):
             fields["runtime_parameters_digest"] = _sha256_json(_normalized_parameters(shown["parameters"]))
+            fields["server_parameters"] = _normalized_parameters(shown["parameters"])
         if isinstance(shown.get("capabilities"), list):
             fields["served_capabilities"] = tuple(sorted(str(c) for c in shown["capabilities"]))
-        # The served window is num_ctx: Kriya's own request value, else a
-        # Modelfile PARAMETER. With neither, the server's default applies
-        # and is not reported, so the effective window stays unknown rather
-        # than being mistaken for the model's trained maximum.
+        # PROVIDER-CONTRACT-001: the served window is the model's own
+        # num_ctx PARAMETER (its server configuration). Kriya's requested
+        # window is never evidence of what is served (the OpenAI-compatible
+        # API ignores it); without the PARAMETER the server's default
+        # applies, observable only once loaded (observe_served_context).
         context_length = _context_length(model_info)
-        served = configured_context or _parameter_int(shown.get("parameters"), "num_ctx")
+        served = _parameter_int(shown.get("parameters"), "num_ctx")
         if context_length is not None:
             fields["model_context_length"] = context_length
         if served:
@@ -491,6 +506,7 @@ def resolve_model_runtime(
 def clear_model_runtime_cache() -> None:
     with _CACHE_LOCK:
         _CACHE.clear()
+        _UNOBSERVABLE_ENDPOINTS.clear()
 
 
 def resolve_configured_model_runtime(config: Any, model: Optional[str] = None, *, fresh: bool = False,
@@ -627,6 +643,271 @@ def load_recorded_fingerprint(digest: str, config: Any = None) -> Optional[Dict[
         return None
 
 
+# --------------------------------------------------------------------------
+# PROVIDER-CONTRACT-001: Ollama's OpenAI-compatible /v1 contract (measured on
+# Ollama 0.34.4, evidence/provider-contract-001/pre_fix). A binding's
+# extra_body is written in Ollama's dialect (``options.<name>``, or a
+# top-level field); this maps it to semantic settings, then to the exact
+# wire body, and states what the provider applies for each.
+# --------------------------------------------------------------------------
+
+from kriya.core.provider_contract import (  # noqa: E402 - the provider-neutral contract
+    Provenance,
+    ProviderCapabilities,
+    ProviderRequestPlan,
+    SettingState,
+    Support,
+)
+
+# /v1 applies top-level temperature, top_p, seed and reasoning_effort
+# (measured); it ignores every ``options`` field and a top-level top_k.
+# Everything else is the served model's own configuration (its Modelfile
+# PARAMETERs), which Kriya observes and verifies but cannot set per request.
+OPENAI_COMPAT_CAPABILITIES = ProviderCapabilities(
+    settings={
+        "temperature": Support.SUPPORTED, "top_p": Support.SUPPORTED, "seed": Support.SUPPORTED,
+        "reasoning": Support.SUPPORTED,
+        "context_window": Support.SERVER_CONFIG_ONLY, "top_k": Support.SERVER_CONFIG_ONLY,
+        "min_p": Support.SERVER_CONFIG_ONLY, "repeat_penalty": Support.SERVER_CONFIG_ONLY,
+        "presence_penalty": Support.SERVER_CONFIG_ONLY, "frequency_penalty": Support.SERVER_CONFIG_ONLY,
+        "keep_alive": Support.UNSUPPORTED,
+    },
+    features={
+        "stream_usage": Support.SUPPORTED, "prompt_usage": Support.SUPPORTED,
+        "truncate_control": Support.UNSUPPORTED,
+        "served_context_observation": Support.OBSERVABLE_ONLY,
+        "server_parameter_observation": Support.OBSERVABLE_ONLY,
+    },
+)
+
+# Ollama dialect name -> semantic setting.
+_DIALECT_OPTION_SETTINGS = {
+    "num_ctx": "context_window", "temperature": "temperature", "top_p": "top_p", "top_k": "top_k",
+    "min_p": "min_p", "repeat_penalty": "repeat_penalty", "presence_penalty": "presence_penalty",
+    "frequency_penalty": "frequency_penalty", "seed": "seed",
+}
+_DIALECT_TOP_LEVEL_SETTINGS = {
+    "top_p": "top_p", "top_k": "top_k", "min_p": "min_p", "seed": "seed", "repeat_penalty": "repeat_penalty",
+    "presence_penalty": "presence_penalty", "frequency_penalty": "frequency_penalty", "keep_alive": "keep_alive",
+}
+# /v1 accepts ANY reasoning_effort string with HTTP 200 (measured: even
+# "bogus"), so an unknown value would be silently ignored: Kriya refuses
+# anything outside this vocabulary. Only "none" has a measured effect.
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh")
+# The model's own reasoning behaviour (no reasoning field sent).
+REASONING_MODEL_DEFAULT = "model_default"
+# Server PARAMETER name of each setting a request cannot carry.
+_SERVER_PARAMETER_NAMES = {
+    "context_window": "num_ctx", "top_k": "top_k", "min_p": "min_p", "repeat_penalty": "repeat_penalty",
+    "presence_penalty": "presence_penalty", "frequency_penalty": "frequency_penalty", "top_p": "top_p",
+    "temperature": "temperature", "seed": "seed",
+}
+
+
+def dialect_settings(extra_body: Optional[Dict[str, Any]], *, reasoning_flag: bool
+                     ) -> Tuple[Dict[str, Any], List[str], List[str]]:
+    """(semantic settings, unknown request fields, conflicts) of a binding's
+    ``extra_body`` in Ollama's dialect. ``reasoning_flag`` is the binding's
+    ``reasoning``: with no explicit reasoning field, False means reasoning
+    off ("none"), True the model's default."""
+    settings: Dict[str, Any] = {}
+    unknown: List[str] = []
+    conflicts: List[str] = []
+
+    def put(name: str, value: Any, where: str) -> None:
+        if name in settings and settings[name] != value:
+            conflicts.append(f"{name} is set to {settings[name]!r} and {value!r} ({where})")
+        settings.setdefault(name, value)
+
+    body = extra_body if isinstance(extra_body, dict) else {}
+    for key, value in body.items():
+        if key == "options" and isinstance(value, dict):
+            for option, option_value in value.items():
+                if option in _DIALECT_OPTION_SETTINGS:
+                    put(_DIALECT_OPTION_SETTINGS[option], option_value, f"options.{option}")
+                elif option == "think":
+                    put("reasoning", REASONING_MODEL_DEFAULT if option_value else "none", "options.think")
+                else:
+                    unknown.append(f"options.{option}")
+        elif key in _DIALECT_TOP_LEVEL_SETTINGS:
+            put(_DIALECT_TOP_LEVEL_SETTINGS[key], value, key)
+        elif key == "reasoning_effort":
+            if value not in REASONING_EFFORTS:
+                conflicts.append(f"reasoning_effort {value!r} is not one of {REASONING_EFFORTS}")
+            put("reasoning", value, "reasoning_effort")
+        elif key == "think":
+            put("reasoning", REASONING_MODEL_DEFAULT if value else "none", "think")
+        else:
+            unknown.append(key)
+    settings.setdefault("reasoning", REASONING_MODEL_DEFAULT if reasoning_flag else "none")
+    return settings, unknown, conflicts
+
+
+def server_parameters(fingerprint: Any) -> Optional[Dict[str, str]]:
+    """The served model's single-valued PARAMETERs, or None when the probe
+    could not read them (unverifiable)."""
+    pairs = getattr(fingerprint, "server_parameters", None)
+    if not pairs and getattr(fingerprint, "runtime_parameters_digest", UNAVAILABLE) == UNAVAILABLE:
+        return None
+    parameters: Dict[str, str] = {}
+    for pair in pairs or ():
+        name, _, value = pair.partition(" ")
+        parameters.setdefault(name, value.strip())
+    return parameters
+
+
+def _numeric(value: Any) -> Any:
+    if isinstance(value, str):
+        try:
+            number = float(value)
+        except ValueError:
+            return value
+        return int(number) if number.is_integer() else number
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def openai_compat_request_plan(extra_body: Optional[Dict[str, Any]], *, temperature: Optional[float],
+                               reasoning_flag: bool, requested_context_window: Optional[int],
+                               fingerprint: Any = None) -> ProviderRequestPlan:
+    """The exact /v1 wire body (sent as the SDK's extra_body, i.e. top-level
+    JSON fields) and each setting's requested/effective state."""
+    settings, unknown, conflicts = dialect_settings(extra_body, reasoning_flag=reasoning_flag)
+    if temperature is not None:
+        settings["temperature"] = temperature
+    if requested_context_window is not None:
+        settings["context_window"] = requested_context_window
+    served = server_parameters(fingerprint) if fingerprint is not None else None
+    wire: Dict[str, Any] = {}
+    states: List[SettingState] = []
+    for name in sorted(set(settings) | {"top_p", "top_k", "min_p", "repeat_penalty", "presence_penalty"}):
+        requested = settings.get(name)
+        support = OPENAI_COMPAT_CAPABILITIES.setting(name)
+        server_value = (_numeric(served.get(_SERVER_PARAMETER_NAMES[name]))
+                        if served is not None and name in _SERVER_PARAMETER_NAMES
+                        and _SERVER_PARAMETER_NAMES[name] in served else None)
+        if name == "reasoning":
+            if requested != REASONING_MODEL_DEFAULT:
+                wire["reasoning_effort"] = requested
+            states.append(SettingState(name, requested, requested, Provenance.REQUEST, support))
+        elif support is Support.SUPPORTED and requested is not None:
+            if name != "temperature":  # the SDK's own parameter
+                wire[name] = requested
+            states.append(SettingState(name, _numeric(requested), _numeric(requested), Provenance.REQUEST, support))
+        elif served is None:
+            states.append(SettingState(name, _numeric(requested), None, Provenance.UNVERIFIED, support))
+        else:
+            states.append(SettingState(name, _numeric(requested), server_value,
+                                       Provenance.SERVER_MODEL_CONFIG if server_value is not None
+                                       else Provenance.UNVERIFIED, support))
+    for field_name in unknown:
+        if "." not in field_name:
+            wire[field_name] = extra_body[field_name]
+    return ProviderRequestPlan(wire_body=wire, settings=tuple(states), unknown=tuple(unknown),
+                               conflicts=tuple(conflicts))
+
+
+# Endpoints whose loaded-model list cannot be read (no /api/ps): observed
+# once per process, never re-probed on every call.
+_UNOBSERVABLE_ENDPOINTS: set = set()
+
+
+def observe_served_context(*, base_url: str, model: str, api_key: str = "",
+                           transport: Optional[Transport] = None) -> Optional[int]:
+    """The context window the server has loaded for ``model`` (Ollama
+    /api/ps ``context_length``), or None when it is not loaded, the endpoint
+    is not local, or probing is disabled. Never raises."""
+    from kriya.core.llm import is_local_url
+
+    if transport is None:
+        if not probing_enabled():
+            return None
+        transport = _http_json
+    if endpoint_identity(base_url) in _UNOBSERVABLE_ENDPOINTS:
+        return None
+    if not is_local_url(base_url):
+        return None
+    parsed = urllib.parse.urlsplit(base_url)
+    path = parsed.path.rstrip("/")
+    if not path.endswith("/v1"):
+        return None
+    root = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path[:-3], "", "")).rstrip("/")
+    try:
+        loaded = transport(f"{root}/api/ps", None, api_key).get("models", [])
+    except Exception as error:
+        logger.debug("Served-context observation unavailable at %s: %s", base_url, error)
+        _UNOBSERVABLE_ENDPOINTS.add(endpoint_identity(base_url))
+        return None
+    wanted = {model.casefold(), f"{model}:latest".casefold()} if ":" not in model else {model.casefold()}
+    for item in loaded if isinstance(loaded, list) else ():
+        name = str(item.get("name") or item.get("model") or "").casefold() if isinstance(item, dict) else ""
+        value = item.get("context_length") if isinstance(item, dict) else None
+        if name in wanted and isinstance(value, int) and value > 0:
+            return value
+    return None
+
+
+def _native_root(base_url: str) -> str:
+    parsed = urllib.parse.urlsplit(base_url)
+    path = parsed.path.rstrip("/")
+    path = path[:-3] if path.endswith("/v1") else path
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
+
+
+def server_pin_parameters(extra_body: Optional[Dict[str, Any]], *,
+                          requested_context_window: Optional[int]) -> Dict[str, Any]:
+    """The server PARAMETERs that fix a binding's server-only settings: only
+    values the binding itself sets (never a default Kriya invents). A
+    conflicting binding pins nothing (PROVIDER_SETTING_CONFLICT)."""
+    from kriya.core.provider_contract import PROVIDER_SETTING_CONFLICT, ProviderContractError
+
+    settings, _unknown, conflicts = dialect_settings(extra_body, reasoning_flag=True)
+    if conflicts:
+        raise ProviderContractError(PROVIDER_SETTING_CONFLICT, "; ".join(conflicts), {"conflicts": conflicts})
+    parameters: Dict[str, Any] = {}
+    if requested_context_window is not None:
+        parameters["num_ctx"] = int(requested_context_window)
+    for name, value in sorted(settings.items()):
+        if (name != "context_window" and value is not None
+                and OPENAI_COMPAT_CAPABILITIES.setting(name) is Support.SERVER_CONFIG_ONLY):
+            parameters[_SERVER_PARAMETER_NAMES[name]] = _numeric(value)
+    return parameters
+
+
+def pinned_model_name(model: str, parameters: Dict[str, Any]) -> str:
+    """A derived model name bound to the base model and the exact pinned
+    parameters: another parameter set is another name, never an overwrite."""
+    base, _, tag = model.partition(":")
+    digest = _sha256_json({"from": model, "parameters": parameters})[:12]
+    return f"{base}:{tag or 'latest'}-kriya-{digest}"
+
+
+def pin_served_configuration(*, base_url: str, model: str, extra_body: Optional[Dict[str, Any]],
+                             requested_context_window: Optional[int], api_key: str = "", create: bool = True,
+                             transport: Optional[Transport] = None) -> Dict[str, Any]:
+    """Create (``create``) the derived Ollama model serving ``model`` with the
+    binding's server-only settings as PARAMETERs (/api/create ``from`` +
+    ``parameters``). Local endpoints only."""
+    from kriya.core.llm import is_local_url
+    from kriya.core.provider_contract import PROVIDER_SETTING_UNSUPPORTED, ProviderContractError
+
+    parameters = server_pin_parameters(extra_body, requested_context_window=requested_context_window)
+    if not parameters:
+        raise ProviderContractError(PROVIDER_SETTING_UNSUPPORTED,
+                                    f"{model}: the binding sets no server-only setting to pin")
+    name = pinned_model_name(model, parameters)
+    pin = {"model": name, "base_model": model, "parameters": parameters, "created": False}
+    if create:
+        if not is_local_url(base_url):
+            raise ProviderContractError(PROVIDER_SETTING_UNSUPPORTED,
+                                        f"{base_url} is not a local endpoint; a served model is pinned only locally")
+        (transport or _http_json)(f"{_native_root(base_url)}/api/create",
+                                  {"model": name, "from": model, "parameters": parameters, "stream": False}, api_key)
+        pin["created"] = True
+    return pin
+
+
 class OllamaRuntimeAdapter(OpenAICompatibleTransport):
     """The packaged default runtime (INF-001): its OpenAI-compatible chat API
     (the transport), its native identity endpoints (probe_model_runtime) and
@@ -635,7 +916,27 @@ class OllamaRuntimeAdapter(OpenAICompatibleTransport):
     doubles still apply."""
 
     name = "ollama"
-    capabilities = RuntimeCapabilities(per_request_context_window=True, native_identity_probe=True)
+    # PROVIDER-CONTRACT-001: /v1 takes no per-request context window (it
+    # ignores options.num_ctx); the window is the served model's own.
+    capabilities = RuntimeCapabilities(per_request_context_window=False, native_identity_probe=True, stream_usage=True)
+    provider_capabilities = OPENAI_COMPAT_CAPABILITIES
+
+    def request_plan(self, extra_body: Optional[Dict[str, Any]], *, temperature: Optional[float],
+                     reasoning_flag: bool, requested_context_window: Optional[int],
+                     fingerprint: Any = None) -> ProviderRequestPlan:
+        return openai_compat_request_plan(
+            extra_body, temperature=temperature, reasoning_flag=reasoning_flag,
+            requested_context_window=requested_context_window, fingerprint=fingerprint)
+
+    def observe_served_context(self, *, base_url: str, model: str, api_key: str = "") -> Optional[int]:
+        return observe_served_context(base_url=base_url, model=model, api_key=api_key)
+
+    def pin_served_configuration(self, *, base_url: str, model: str, extra_body: Optional[Dict[str, Any]],
+                                 requested_context_window: Optional[int], api_key: str = "",
+                                 create: bool = True) -> Dict[str, Any]:
+        return pin_served_configuration(base_url=base_url, model=model, extra_body=extra_body,
+                                        requested_context_window=requested_context_window, api_key=api_key,
+                                        create=create)
 
     def configured_context_window(self, extra_body: Optional[Dict[str, Any]]) -> Optional[int]:
         return configured_context_window(extra_body)
@@ -647,7 +948,10 @@ class OllamaRuntimeAdapter(OpenAICompatibleTransport):
         return without_context_window(extra_body)
 
     def supports_per_request_context_window(self, fingerprint: Any) -> bool:
-        return bool(fingerprint.exact) and fingerprint.provider in _PER_REQUEST_CONTEXT_PROVIDERS
+        # PROVIDER-CONTRACT-001: /v1 ignores a per-request window, so no
+        # PRD-016 tier can be selected through it (the native adapter can).
+        return (self.capabilities.per_request_context_window and bool(fingerprint.exact)
+                and fingerprint.provider in _PER_REQUEST_CONTEXT_PROVIDERS)
 
     def probe(self, *, base_url: str, model: str, api_key: str, egress_policy: str,
               configured_context: Optional[int], kriya_protocol: str,

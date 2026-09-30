@@ -53,14 +53,17 @@ def fake(monkeypatch):
     model_runtime.clear_model_runtime_cache()
 
 
-def _config(runtime="fake", **fallback):
+def _config(runtime="fake", window=8192, **fallback):
+    """The fake runtime serves 8192 (a provider-managed window), so the
+    bindings declare 8192: a larger declaration is refused
+    (SERVED_CONTEXT_BELOW_REQUESTED, PROVIDER-CONTRACT-001)."""
     config = AppConfig()
     config.llm.model = "primary:1"
     config.llm.inference_runtime = runtime
     config.llm.extra_body = {"reasoning_effort": "none"}
-    config.llm.context_window = 16384
+    config.llm.context_window = window
     config.llm.capabilities = ModelCapabilities(native_tool_calls=True)
-    config.llm_chain = [FallbackModelConfig(model="fb:1", inference_runtime=runtime, context_window=16384,
+    config.llm_chain = [FallbackModelConfig(model="fb:1", inference_runtime=runtime, context_window=window,
                                             temperature=0.3, **fallback)] if fallback is not None else []
     return config
 
@@ -119,16 +122,33 @@ def test_settings_and_reasoning_controls_reach_the_adapter_unchanged(fake):
 
 def test_a_runtime_without_a_per_request_window_is_sent_none_and_budgets_what_it_serves(fake):
     """The body carries no window (the runtime serves what it was started
-    with); the probe reports the served window and the budget uses it."""
+    with); the probe reports the served window, which matches the declared
+    one, and the budget is it - labelled as the server's own configuration."""
     result = _run(LLMClient(_config()).complete_result("s", "u"))
     [request] = fake.requests
     assert FAKE_WINDOW_FIELD not in (request.extra_body or {})
-    assert result.budget["window_source"] == "served_num_ctx" and result.budget["context_window"] == 8192
+    assert result.budget["window_source"] == "server_model_config" and result.budget["context_window"] == 8192
+    assert result.budget["context_state"] == {
+        "requested_context_window": 8192, "served_context_window": 8192,
+        "served_context_provenance": "server_model_config", "budget_context_window": 8192}
+
+
+def test_a_declared_window_the_runtime_does_not_serve_is_refused_before_inference(fake):
+    """PROVIDER-CONTRACT-001: a runtime serving less than the declared
+    window would silently truncate what Kriya admits - refused, never
+    budgeted down (the old runtime_capped behaviour)."""
+    from kriya.core.provider_contract import SERVED_CONTEXT_BELOW_REQUESTED, ProviderContractError
+
+    with pytest.raises(ProviderContractError) as refused:
+        _run(LLMClient(_config(window=16384)).complete_result("s", "u"))
+    assert refused.value.reason_code == SERVED_CONTEXT_BELOW_REQUESTED
+    assert refused.value.details == {"requested": 16384, "served": 8192, "provenance": "server_model_config"}
+    assert fake.requests == []
 
 
 def test_a_provider_managed_window_that_is_not_reported_is_labelled_so(fake):
     fake.served_window = None
-    result = _run(LLMClient(_config()).complete_result("s", "u"))
+    result = _run(LLMClient(_config(window=16384)).complete_result("s", "u"))
     assert result.budget["window_source"] == "provider_managed" and result.budget["context_window"] == 16384
 
 
@@ -139,7 +159,7 @@ def test_a_runtime_with_a_per_request_window_is_sent_the_declared_window_in_its_
     register_runtime_adapter(adapter)
     model_runtime.clear_model_runtime_cache()
     try:
-        result = _run(LLMClient(_config(runtime="fake-window")).complete_result("s", "u"))
+        result = _run(LLMClient(_config(runtime="fake-window", window=16384)).complete_result("s", "u"))
     finally:
         unregister_runtime_adapter(adapter.name)
         model_runtime.clear_model_runtime_cache()

@@ -31,15 +31,12 @@ async def test_llm_client_forwards_extra_body():
         res = await llm.complete("system", "user")
         assert res == "Mock response"
         
-        # Verify that extra_body was forwarded exactly as specified in the configuration
+        # PROVIDER-CONTRACT-001: the /v1 wire carries what /v1 applies -
+        # top_p top-level, reasoning off explicitly - never options.*, which
+        # it ignores (the window is requested and budgeted, not sent).
         mock_create.assert_called_once()
         kwargs = mock_create.call_args[1]
-        assert kwargs.get("extra_body") == {
-            "options": {
-                "num_ctx": 32768,
-                "top_p": 0.8
-            }
-        }
+        assert kwargs.get("extra_body") == {"top_p": 0.8, "reasoning_effort": "none"}
 
 @pytest.mark.asyncio
 async def test_local_egress_policy():
@@ -77,8 +74,9 @@ async def test_complete_uses_fallback_extra_body_not_the_primarys():
     mock_create = AsyncMock(return_value=_mock_response("ok"))
     with patch.object(llm.client.chat.completions, "create", new=mock_create):
         await llm.complete("system", "user", model_override="qwen3.8:27b", extra_body_override={"reasoning_effort": "none"})
-        # Plus the model's requested context window (FALLBACK-CONTEXT-WINDOW-001).
-        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none", "options": {"num_ctx": 32768}}
+        # The fallback's own settings only; its window is requested and
+        # budgeted but never put on the /v1 wire (PROVIDER-CONTRACT-001).
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none"}
 
 
 @pytest.mark.asyncio
@@ -92,7 +90,8 @@ async def test_complete_falls_back_to_primary_extra_body_when_no_override_given(
     mock_create = AsyncMock(return_value=_mock_response("ok"))
     with patch.object(llm.client.chat.completions, "create", new=mock_create):
         await llm.complete("system", "user")
-        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "xhigh", "options": {"num_ctx": 32768}}
+        # The window is budgeted, never put on the /v1 wire (PROVIDER-CONTRACT-001).
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "xhigh"}
 
 
 @pytest.mark.asyncio
@@ -107,7 +106,9 @@ async def test_complete_empty_dict_extra_body_override_means_no_extra_body():
     mock_create = AsyncMock(return_value=_mock_response("ok"))
     with patch.object(llm.client.chat.completions, "create", new=mock_create):
         await llm.complete("system", "user", model_override="some-other-model", extra_body_override={})
-        assert mock_create.call_args[1].get("extra_body") == {"options": {"num_ctx": 32768}}
+        # Its own reasoning=false, sent explicitly (PROVIDER-CONTRACT-001);
+        # nothing of the primary's "xhigh".
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none"}
 
 
 @pytest.mark.asyncio
@@ -134,7 +135,7 @@ async def test_complete_with_tools_uses_fallback_extra_body_not_the_primarys():
             [{"role": "user", "content": "hi"}], [],
             model_override="qwen3.8:27b", extra_body_override={"reasoning_effort": "none"},
         )
-        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none", "options": {"num_ctx": 32768}}
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none"}
 
 
 @pytest.mark.asyncio

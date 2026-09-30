@@ -215,6 +215,9 @@ class DispatchBudget:
     considered_tiers: Tuple[Dict[str, Any], ...] = ()
     # Why a configured/recorded larger tier was not offered, if any was.
     tier_note: str = ""
+    # PROVIDER-CONTRACT-001: requested, served and budget context of the
+    # request (provider_contract.ContextWindowState.to_dict()).
+    context_state: Optional[Dict[str, Any]] = None
 
     @property
     def approximate(self) -> bool:
@@ -258,6 +261,7 @@ class DispatchBudget:
             "hard_context_ceiling": self.hard_context_ceiling,
             "hard_output_ceiling": self.hard_output_ceiling,
             "safety_margin": self.safety_margin,
+            "context_state": self.context_state,
             "considered_tiers": [dict(tier) for tier in self.considered_tiers],
             "tier_note": self.tier_note,
         }

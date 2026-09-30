@@ -210,6 +210,8 @@ _SECURITY_AUTHORITY_FIELDS: frozenset = frozenset({
     # INF-001: which runtime adapter serves the model - which native identity
     # endpoints are probed and whether a context window is sent.
     ("llm", "inference_runtime"),
+    # PROVIDER-CONTRACT-001: transport timeouts are resource bounds.
+    ("llm", "transport"),
     # PRD-016: which larger context windows a request may be sent with, and
     # the hard context/output ceilings - resource authority over the host.
     ("llm", "context_policy"),

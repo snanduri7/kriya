@@ -36,6 +36,9 @@ from kriya.workflow.workflow import WorkflowEngine
 from kriya.workflow.workflow_controller import SHADOW_PLANNER_ROLE, WorkflowController
 
 FALLBACK_BODY = {"reasoning_effort": "none", "options": {"num_ctx": 8192, "top_p": 0.95, "top_k": 10, "seed": 7}}
+# PROVIDER-CONTRACT-001: what /v1 receives of FALLBACK_BODY - the fields it
+# applies (never options.*; the window is budgeted, top_k is server config).
+FALLBACK_WIRE = {"reasoning_effort": "none", "top_p": 0.95, "seed": 7}
 
 
 def _route():
@@ -78,9 +81,13 @@ async def test_a_fallback_executes_with_its_own_settings_not_the_primarys(tmp_pa
         fallback_digest = developer.llm.last_completion.inference_settings_digest
 
     primary_sent, fallback_sent = (call.kwargs for call in create.call_args_list)
-    assert primary_sent["temperature"] == 0.7 and primary_sent["extra_body"]["options"]["top_k"] == 20
+    assert primary_sent["temperature"] == 0.7
+    assert primary_sent["extra_body"] == {"top_p": 0.8, "reasoning_effort": "none"}
     assert fallback_sent["temperature"] == 0.2
-    assert fallback_sent["extra_body"] == FALLBACK_BODY  # reasoning_effort, top_p, top_k, seed: its own
+    assert fallback_sent["extra_body"] == FALLBACK_WIRE  # reasoning_effort, top_p, seed: its own
+    # Its top_k (not applicable per request on /v1) is recorded, never silently dropped.
+    fallback_contract = developer.llm.last_completion.protocol["provider_contract"]["settings"]
+    assert fallback_contract["top_k"]["requested"] == 10
     # The executed identity is the qualified identity, on both models.
     assert primary_digest == role_inference_settings(cfg, "developer", PRIMARY).digest
     assert fallback_digest == role_inference_settings(cfg, "developer", FALLBACK).digest
@@ -96,7 +103,7 @@ async def test_a_model_override_alone_never_inherits_the_primarys_sampling(tmp_p
     with patch.object(AsyncCompletions, "create", new=create):
         await llm.complete("s", "u", model_override=FALLBACK)
     sent = create.call_args.kwargs
-    assert sent["temperature"] == 0.2 and sent["extra_body"] == FALLBACK_BODY
+    assert sent["temperature"] == 0.2 and sent["extra_body"] == FALLBACK_WIRE
 
 
 def test_the_qualification_lookup_matches_the_executed_identity_and_follows_changes(monkeypatch):
@@ -125,7 +132,9 @@ async def test_one_runtime_called_with_different_settings_has_separate_metric_bu
     with patch.object(AsyncCompletions, "create", new=create):
         await llm.complete("s", "u", extra_body_override={"reasoning_effort": "none"})
         await llm.complete("s", "u", extra_body_override={"reasoning_effort": "none"})
-        await llm.complete("s", "u")  # default reasoning
+        # (reasoning=false with no effort now sends "none" itself: the same
+        # identity as the two calls above, so a real difference is used.)
+        await llm.complete("s", "u", extra_body_override={"reasoning_effort": "high"})
         await llm.complete("s", "u", temperature_override=0.1)
     rows = llm.role_metrics.take_unreported()
     assert len({row["runtime_digest"] for row in rows}) == 1

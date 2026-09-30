@@ -1,10 +1,15 @@
+import asyncio
 import ipaddress
 import json
 import logging
 import socket
-from typing import Any, Callable, Dict, List, Optional
+import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any, Callable, Dict, Iterator, List, Optional
 from urllib.parse import urlparse
 
+import httpx
 from openai import AsyncOpenAI
 
 from kriya.config import AppConfig
@@ -66,15 +71,57 @@ def is_local_url(url: str) -> bool:
         logger.debug(f"is_local_url check failed for '{url}', treating as non-local (fail closed): {e}")
         return False
 
+# PROVIDER-CONTRACT-001: the monotonic deadline of the Kriya work a model
+# call belongs to (an attempt's remaining time budget); a request's read
+# timeout never exceeds it.
+_INFERENCE_DEADLINE: ContextVar[Optional[float]] = ContextVar("kriya_inference_deadline", default=None)
+
+# Kriya's retry policy alone decides whether another request is sent.
+SDK_MAX_RETRIES = 0
+
+
+@contextmanager
+def inference_deadline(deadline: Optional[float]) -> Iterator[None]:
+    """Bound every model call inside the block by ``deadline``
+    (``time.monotonic()`` seconds); None leaves the configured timeouts."""
+    token = _INFERENCE_DEADLINE.set(deadline)
+    try:
+        yield
+    finally:
+        _INFERENCE_DEADLINE.reset(token)
+
+
+def transport_timeout(config: AppConfig, read_seconds: Optional[float] = None) -> httpx.Timeout:
+    """The Kriya-owned timeout of one request (llm.transport)."""
+    transport = config.llm.transport
+    return httpx.Timeout(
+        connect=transport.connect_timeout_seconds,
+        read=read_seconds if read_seconds is not None else transport.read_timeout_seconds,
+        write=transport.write_timeout_seconds, pool=transport.pool_timeout_seconds,
+    )
+
+
+def plan_requested_window(plan: Any) -> Optional[int]:
+    state = plan.setting("context_window")
+    return state.requested if state is not None else None
+
+
+def dispatched_bytes(messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]]) -> int:
+    """Size of everything a request asks the model to read, whitespace runs
+    counted once (the prompt-consumption check's basis)."""
+    from kriya.core.provider_contract import consumption_bytes
+    from kriya.core.token_budget import dispatch_text
+
+    return consumption_bytes(dispatch_text(messages, tools))
+
+
 class LLMClient:
     """Wrapper around OpenAI-compatible API client for local LLM generation."""
     
     def __init__(self, config: AppConfig) -> None:
         self.config = config
-        self.client = AsyncOpenAI(
-            api_key=config.llm.api_key,
-            base_url=config.llm.base_url
-        )
+        self._clients: Dict[Any, AsyncOpenAI] = {}
+        self.client = self._client_for(config.llm.base_url, config.llm.api_key)
         self.model = config.llm.model
         self.temperature = config.llm.temperature
         self.max_tokens = config.llm.max_tokens
@@ -117,6 +164,142 @@ class LLMClient:
         from kriya.core.role_metrics import RoleMetrics
 
         self.role_metrics = RoleMetrics()
+
+    def _client_for(self, base_url: str, api_key: str) -> AsyncOpenAI:
+        """PROVIDER-CONTRACT-001: one client per (endpoint, key), reused for
+        the life of this LLMClient: never an SDK retry (SDK_MAX_RETRIES), the
+        Kriya-owned timeout, and a direct HTTP transport that ignores proxy
+        variables inherited from the environment (trust_env=False) - local
+        inference traffic never leaves through an operator's proxy."""
+        key = (base_url, api_key)
+        client = self._clients.get(key)
+        if client is None:
+            timeout = transport_timeout(self.config)
+            client = AsyncOpenAI(
+                api_key=api_key, base_url=base_url, max_retries=SDK_MAX_RETRIES, timeout=timeout,
+                http_client=httpx.AsyncClient(trust_env=False, timeout=timeout),
+            )
+            self._clients[key] = client
+        return client
+
+    async def aclose(self) -> None:
+        """Close every transport this client opened (deterministic release of
+        its connection pools)."""
+        clients, self._clients = list(self._clients.values()), {}
+        for client in clients:
+            await client.close()
+
+    def _request_timeout(self) -> httpx.Timeout:
+        """This request's timeout: the configured one, its read timeout cut
+        to the remaining inference deadline. A deadline already passed is a
+        typed timeout before any request."""
+        deadline = _INFERENCE_DEADLINE.get()
+        read = self.config.llm.transport.read_timeout_seconds
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise asyncio.TimeoutError("the inference deadline passed before the request was sent")
+            read = min(read, remaining)
+        return transport_timeout(self.config, read)
+
+    def _limits(self, fingerprint: Any, settings: Any) -> Dict[str, Any]:
+        from kriya.core.model_qualification import measured_limits_for
+
+        return measured_limits_for(fingerprint, self.config, settings=settings) if fingerprint.exact else {}
+
+    def _contract_record(self, runtime: InferenceRuntimePort, plan: Any, budget: Any) -> Dict[str, Any]:
+        """Telemetry of the contract a request was sent under (settings,
+        context and transport policy; never prompt content). The response
+        identifiers, token counts and finish reason are the result's own
+        fields; the prompt consumption verdict is added after the call."""
+        transport = self.config.llm.transport
+        return {
+            "adapter": runtime.name,
+            "settings": plan.identity(),
+            "context": (budget.to_dict() or {}).get("context_state"),
+            "timeout_seconds": {"connect": transport.connect_timeout_seconds,
+                                "read": transport.read_timeout_seconds},
+            "inference_deadline_bound": _INFERENCE_DEADLINE.get() is not None,
+            "sdk_max_retries": SDK_MAX_RETRIES,
+            "proxy_policy": "direct",
+        }
+
+    def _strict_identity(self) -> bool:
+        """Production requires the exact runtime identity: requested
+        settings the provider verifiably does not apply, unknown request
+        fields and a served window other than the requested one are refused."""
+        return getattr(self.config, "runtime_profile", None) == "production"
+
+    def _provider_plan(self, runtime: InferenceRuntimePort, *, extra_body: Optional[Dict[str, Any]],
+                       temperature: Optional[float], is_reasoning: bool, declared_window: Optional[int],
+                       fingerprint: Any) -> Any:
+        """PROVIDER-CONTRACT-001: this request's settings as the provider
+        receives them, refused before inference when they cannot be proven
+        (ProviderContractError)."""
+        requested = runtime.configured_context_window(extra_body) or declared_window
+        plan = runtime.request_plan(extra_body, temperature=temperature, reasoning_flag=is_reasoning,
+                                    requested_context_window=requested, fingerprint=fingerprint)
+        plan.enforce(strict=self._strict_identity())
+        return plan
+
+    async def _observe_served(self, runtime: InferenceRuntimePort, *, model: str, base_url: str,
+                              api_key: str) -> Optional[int]:
+        """The context window the runtime has loaded for ``model`` right now
+        (None: not loaded or not observable). Never raises."""
+        try:
+            return await asyncio.to_thread(runtime.observe_served_context, base_url=base_url, model=model,
+                                           api_key=api_key)
+        except Exception as error:
+            logger.debug("Served-context observation unavailable for %s: %s", model, error)
+            return None
+
+    async def _check_after_call(self, result, runtime: InferenceRuntimePort, *, model: str, base_url: str,
+                                api_key: str, requested_window: Optional[int], dispatched_bytes: int,
+                                limits: Dict[str, Any], identified: bool) -> None:
+        """PROVIDER-CONTRACT-001, after the response: the window the call was
+        actually served with, and whether the provider evaluated the whole
+        prompt. A violation turns the result into PROVIDER_CONTRACT_VIOLATION
+        carrying the typed error (the content is never used)."""
+        from kriya.core.completion import CompletionStatus
+        from kriya.core.provider_contract import (
+            PROVIDER_PROMPT_TRUNCATED,
+            Provenance,
+            ProviderContractError,
+            check_prompt_consumption,
+            context_window_state,
+        )
+
+        violation = None
+        served = await self._observe_served(runtime, model=model, base_url=base_url, api_key=api_key)
+        contract = result.protocol.setdefault("provider_contract", {})
+        if served is not None:
+            contract["served_context_window_after_call"] = served
+            try:
+                context_window_state(requested_window, served, Provenance.SERVER_OBSERVED,
+                                     exact=self._strict_identity())
+            except ProviderContractError as error:
+                violation = error
+        # Provider usage is evidence only from an identified (exact) runtime.
+        truncation = check_prompt_consumption(
+            dispatched_bytes=dispatched_bytes, reported_prompt_tokens=result.prompt_tokens_reported,
+            bytes_per_token_ceiling=limits.get("bytes_per_token_ceiling")) if identified else None
+        contract["prompt_tokens_reported"] = result.prompt_tokens_reported
+        contract["dispatched_bytes"] = dispatched_bytes
+        contract["prompt_consumption"] = (
+            "truncated" if truncation is not None
+            else "consistent" if identified and result.prompt_tokens_reported else "unverified")
+        if truncation is not None:
+            violation = ProviderContractError(
+                PROVIDER_PROMPT_TRUNCATED,
+                f"the provider evaluated {truncation['reported_prompt_tokens']} prompt tokens, fewer than the "
+                f"{truncation['minimum_expected_tokens']} a {dispatched_bytes}-byte prompt can tokenize to: input "
+                "was dropped", truncation)
+        if violation is not None:
+            logger.error("%s: %s", model, violation)
+            contract["violation"] = {"reason_code": violation.reason_code, **violation.details}
+            result.status = CompletionStatus.PROVIDER_CONTRACT_VIOLATION
+            result.backend_error = str(violation)[:500]
+            result.error = violation
 
     def _audit_llm_network_access(self, url: str) -> None:
         """MA4.3 - audit-only ExecutionPolicy consultation, wired in front of
@@ -194,7 +377,6 @@ class LLMClient:
                                    extra_body: Optional[Dict[str, Any]]):
         """PRD-013: the exact runtime this call goes to (cached per process),
         recorded on the active run. Never fails the call."""
-        import asyncio
 
         from kriya.control.run_coordinator import record_model_runtime_use
         from kriya.core.model_runtime import (
@@ -225,7 +407,8 @@ class LLMClient:
 
     def _dispatch_budget(self, *, model: str, fingerprint, messages: List[Dict[str, Any]],
                          tools: Optional[List[Dict[str, Any]]], max_tokens: int, is_reasoning: bool,
-                         base_url: str, api_key: str, settings, expected_output=None):
+                         base_url: str, api_key: str, settings, expected_output=None,
+                         served_context: Optional[int] = None):
         """PRD-016: choose this request's context window and output budget
         (kriya/core/token_budget.py plan_dispatch). Raises
         ContextBudgetUnsatisfiableError / OutputBudgetUnsatisfiableError
@@ -235,29 +418,38 @@ class LLMClient:
         from dataclasses import replace
 
         from kriya.core.model_qualification import measured_limits_for
+        from kriya.core.provider_contract import Provenance, context_window_state
         from kriya.core.token_budget import DEFAULT_REASONING_ALLOWANCE_TOKENS, plan_dispatch
 
         binding = self._binding(model)
         policy = binding["context_policy"]
         limits = measured_limits_for(fingerprint, self.config, settings=settings) if fingerprint.exact else {}
-        requested = fingerprint.configured_context_window
-        per_request = self._runtime(model).capabilities.per_request_context_window
-        if fingerprint.effective_context_window:
-            window, source = fingerprint.effective_context_window, "served_num_ctx"
-            if requested and window < requested:
-                # The runtime serves less than was asked (e.g. the model's
-                # trained length): budget what is served, and say so.
-                source = "runtime_capped"
-                logger.warning("%s serves a %d-token context window; %d was requested.", model, window, requested)
-        elif per_request:
-            # Unverified: the window requested of the runtime (sent with
-            # the request), never a window the runtime reported serving.
-            window, source = requested or binding.get("context_window"), "config_declared"
+        requested = fingerprint.configured_context_window or binding.get("context_window")
+        runtime = self._runtime(model)
+        # PROVIDER-CONTRACT-001: requested, served and budget are separate
+        # facts. Served is only what the runtime reports: its loaded window
+        # (observed), else the model's own configured window; never the
+        # request. A served window below the requested one is refused, and
+        # so is a different one under production's exact identity; the
+        # budget is never raised above the requested window because the
+        # server happens to serve more.
+        if served_context is not None:
+            served, provenance, source = served_context, Provenance.SERVER_OBSERVED, "served_observed"
+        elif fingerprint.effective_context_window:
+            served, provenance, source = (fingerprint.effective_context_window, Provenance.SERVER_MODEL_CONFIG,
+                                          "server_model_config")
+        elif runtime.capabilities.per_request_context_window:
+            # Sent with the request and applied by this runtime (declared),
+            # not yet observed.
+            served, provenance, source = None, Provenance.UNVERIFIED, "requested_per_request"
+        elif runtime.provider_capabilities.feature("served_context_observation").value != "unsupported":
+            served, provenance, source = None, Provenance.UNVERIFIED, "requested_unverified"
         else:
-            # INF-001: a runtime that takes no per-request window serves
-            # whatever it was started with; the declared window is only an
-            # assumption about it, and is labelled as such.
-            window, source = binding.get("context_window"), "provider_managed"
+            # INF-001: a runtime that takes no per-request window and cannot
+            # report one serves whatever it was started with.
+            served, provenance, source = None, Provenance.UNVERIFIED, "provider_managed"
+        state = context_window_state(requested, served, provenance, exact=self._strict_identity())
+        window = state.budget
         reasoning = 0
         if is_reasoning:
             reasoning = int(limits.get("reasoning_tokens_max") or DEFAULT_REASONING_ALLOWANCE_TOKENS)
@@ -281,7 +473,7 @@ class LLMClient:
             if note and getattr(refusal, "decision", None) is not None:
                 refusal.decision = replace(refusal.decision, tier_note=note)
             raise
-        return replace(decision, tier_note=note) if note else decision
+        return replace(decision, tier_note=note, context_state=state.to_dict())
 
     def _request_options(self, extra_body: Optional[Dict[str, Any]], budget, model: str) -> Optional[Dict[str, Any]]:
         """The request's extra_body asking the runtime for the selected
@@ -323,7 +515,6 @@ class LLMClient:
     def _finish(self, result, *, started: float, budget) -> None:
         """Common post-call bookkeeping: timing, budget comparison, the
         usage line and the observational metrics."""
-        import time
 
         import click
 
@@ -452,8 +643,6 @@ class LLMClient:
         a file being rewritten); under the adaptive budget policy it may
         enlarge the output budget and select a larger qualified context
         window (PRD-016). Without it the output never grows."""
-        import asyncio
-        import time
 
         from kriya.core.completion import CompletionResult, CompletionStatus, classify, split_reasoning
 
@@ -473,10 +662,8 @@ class LLMClient:
         client = self.client
 
         if base_url_override or api_key_override:
-            client = AsyncOpenAI(
-                api_key=api_key_override or self.config.llm.api_key,
-                base_url=base_url_override or self.config.llm.base_url
-            )
+            client = self._client_for(base_url_override or self.config.llm.base_url,
+                                      api_key_override or self.config.llm.api_key)
 
         if reasoning_override is not None:
             is_reasoning = reasoning_override
@@ -514,24 +701,32 @@ class LLMClient:
 
         self.last_call_metrics = None
         self.last_completion = None
+        runtime = self._runtime(model)
         fingerprint = await self._runtime_fingerprint(
             model, url_to_check, api_key_override or self.config.llm.api_key, extra_body,
         )
-        # The executed inference identity (the settings actually sent).
-        settings = request_settings(temperature=temperature, reasoning=is_reasoning, extra_body=extra_body)
+        plan = self._provider_plan(runtime, extra_body=extra_body, temperature=temperature,
+                                   is_reasoning=is_reasoning, declared_window=own["context_window"],
+                                   fingerprint=fingerprint)
+        # The executed inference identity (the settings the provider receives).
+        settings = request_settings(temperature=temperature, reasoning=is_reasoning, extra_body=extra_body,
+                                    runtime=runtime)
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
         api_key = api_key_override or self.config.llm.api_key
+        served = await self._observe_served(runtime, model=model, base_url=url_to_check, api_key=api_key)
         budget = self._dispatch_budget(
             model=model, fingerprint=fingerprint, messages=messages, tools=None,
             max_tokens=max_tokens, is_reasoning=is_reasoning, base_url=url_to_check, api_key=api_key,
-            settings=settings,
+            settings=settings, served_context=served,
             expected_output=expected_output,
         )
         max_tokens = budget.max_tokens
+        wire_body = plan.wire_body or None
         if budget.context_expanded:
             # The selected tier is a different runtime input (num_ctx), so a
             # different fingerprint: the call is attributed to it.
             extra_body = self._request_options(extra_body, budget, model)
+            wire_body = self._request_options(wire_body, budget, model)
             fingerprint = await self._runtime_fingerprint(model, url_to_check, api_key, extra_body)
 
         logger.info(f"Sending completion request to local LLM [Model: {model}, Stream: {stream_callback is not None}, JSON Mode: {json_mode}, Reasoning: {is_reasoning}]")
@@ -542,7 +737,8 @@ class LLMClient:
             inference_settings_digest=settings.digest,
             protocol={"json_mode": json_mode, "streaming": stream_callback is not None, "tools": False,
                       "reasoning_model": is_reasoning, "response_format_dropped": False,
-                      "empty_content_floor_retry": False},
+                      "empty_content_floor_retry": False,
+                      "provider_contract": self._contract_record(runtime, plan, budget)},
             max_tokens=max_tokens,
         )
 
@@ -550,7 +746,7 @@ class LLMClient:
             try:
                 raw = await self._request_once(
                     client, model, system_prompt, user_prompt, temperature, max_tokens,
-                    extra_body, response_format, stream_callback
+                    wire_body, response_format, stream_callback
                 )
             except Exception as e:
                 # Only reasoning models risk this combination being unsupported by some
@@ -569,7 +765,7 @@ class LLMClient:
                     result.protocol["response_format_dropped"] = True
                     raw = await self._request_once(
                         client, model, system_prompt, user_prompt, temperature, max_tokens,
-                        extra_body, None, stream_callback
+                        wire_body, None, stream_callback
                     )
                 else:
                     raise
@@ -605,7 +801,7 @@ class LLMClient:
                 result.max_tokens = floor
                 raw = await self._request_once(
                     client, model, system_prompt, user_prompt, temperature, floor,
-                    extra_body, response_format, stream_callback
+                    wire_body, response_format, stream_callback
                 )
                 content, hidden = split_reasoning(raw["content"], anywhere=True)
         except asyncio.CancelledError:
@@ -634,10 +830,16 @@ class LLMClient:
         prompt_tokens, completion_tokens = raw["prompt_tokens"], raw["completion_tokens"]
         result.tokens_estimated = prompt_tokens == 0 or completion_tokens == 0
         result.prompt_tokens = prompt_tokens or int((len(system_prompt) + len(user_prompt)) / 4)
+        result.prompt_tokens_reported = prompt_tokens or None
         result.completion_tokens = completion_tokens or int(len(content) / 4)
         result.status, result.parser_status = classify(
             content=content, finish_reason=result.finish_reason, tool_calls=[], structured=json_mode,
         )
+        await self._check_after_call(
+            result, runtime, model=model, base_url=url_to_check, api_key=api_key,
+            requested_window=budget.preferred_context_window or plan_requested_window(plan),
+            dispatched_bytes=dispatched_bytes(messages, None), limits=self._limits(fingerprint, settings),
+            identified=fingerprint.exact)
         self._finish(result, started=start_time, budget=budget)
         return result
 
@@ -655,7 +857,7 @@ class LLMClient:
             model=model,
             messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
             temperature=temperature, max_tokens=max_tokens, extra_body=extra_body,
-            response_format=response_format, stream_callback=stream_callback,
+            response_format=response_format, stream_callback=stream_callback, timeout=self._request_timeout(),
         ))
         return response.to_raw()
 
@@ -715,8 +917,6 @@ class LLMClient:
         JSON or Qwen XML ``<tool_call>`` blocks its own parser did not
         convert), they are recovered here too, and every call's arguments go
         through the same capability validation."""
-        import asyncio
-        import time
 
         from kriya.core.completion import (
             CompletionResult,
@@ -749,10 +949,8 @@ class LLMClient:
             )
         client = self.client
         if base_url_override or api_key_override:
-            client = AsyncOpenAI(
-                api_key=api_key_override or self.config.llm.api_key,
-                base_url=base_url_override or self.config.llm.base_url
-            )
+            client = self._client_for(base_url_override or self.config.llm.base_url,
+                                      api_key_override or self.config.llm.api_key)
 
         own = self._binding(model)
         temperature = temperature_override if temperature_override is not None else own["temperature"]
@@ -772,32 +970,40 @@ class LLMClient:
             model, url_to_check, api_key_override or self.config.llm.api_key, extra_body,
         )
         api_key = api_key_override or self.config.llm.api_key
+        runtime = self._runtime(model)
+        plan = self._provider_plan(runtime, extra_body=extra_body, temperature=temperature,
+                                   is_reasoning=bool(own["reasoning"]), declared_window=own["context_window"],
+                                   fingerprint=fingerprint)
         # The executed inference identity, with the binding's reasoning flag
         # as the role identity records it (this path applies no reasoning
         # floor of its own).
-        settings = request_settings(temperature=temperature, reasoning=bool(own["reasoning"]), extra_body=extra_body)
+        settings = request_settings(temperature=temperature, reasoning=bool(own["reasoning"]), extra_body=extra_body,
+                                    runtime=runtime)
+        served = await self._observe_served(runtime, model=model, base_url=url_to_check, api_key=api_key)
         budget = self._dispatch_budget(
             model=model, fingerprint=fingerprint, messages=messages, tools=tools,
             max_tokens=max_tokens, is_reasoning=False, base_url=url_to_check, api_key=api_key,
-            settings=settings,
+            settings=settings, served_context=served,
         )
         max_tokens = budget.max_tokens
+        wire_body = plan.wire_body or None
         if budget.context_expanded:
             extra_body = self._request_options(extra_body, budget, model)
+            wire_body = self._request_options(wire_body, budget, model)
             fingerprint = await self._runtime_fingerprint(model, url_to_check, api_key, extra_body)
         start_time = time.time()
         result = CompletionResult(
             status=CompletionStatus.OK, model=model,
             runtime_fingerprint=fingerprint.digest, runtime_fingerprint_exact=fingerprint.exact,
             inference_settings_digest=settings.digest,
-            protocol={"json_mode": False, "streaming": False, "tools": True, "tool_count": len(tools)},
+            protocol={"json_mode": False, "streaming": False, "tools": True, "tool_count": len(tools),
+                      "provider_contract": self._contract_record(runtime, plan, budget)},
             max_tokens=max_tokens,
         )
-        runtime = self._runtime(model)
         try:
             response = await runtime.complete_with_tools(client, ChatRequest(
                 model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
-                extra_body=extra_body, tools=tools,
+                extra_body=wire_body, tools=tools, timeout=self._request_timeout(),
             ))
         except asyncio.CancelledError:
             result.status = CompletionStatus.CANCELLED
@@ -869,11 +1075,17 @@ class LLMClient:
         prompt_tokens, completion_tokens = response.prompt_tokens, response.completion_tokens
         result.tokens_estimated = prompt_tokens == 0 or completion_tokens == 0
         result.prompt_tokens = prompt_tokens or None
+        result.prompt_tokens_reported = prompt_tokens or None
         result.completion_tokens = completion_tokens or None
         status, _ = classify(content=content, finish_reason=result.finish_reason, tool_calls=tool_calls,
                              structured=False)
         result.status = status
         if result.parser_status == "not_applicable" and tool_calls:
             result.parser_status = "ok"
+        await self._check_after_call(
+            result, runtime, model=model, base_url=url_to_check, api_key=api_key,
+            requested_window=budget.preferred_context_window or plan_requested_window(plan),
+            dispatched_bytes=dispatched_bytes(messages, tools), limits=self._limits(fingerprint, settings),
+            identified=fingerprint.exact)
         self._finish(result, started=start_time, budget=budget)
         return result

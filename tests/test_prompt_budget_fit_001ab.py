@@ -25,6 +25,7 @@ import subprocess
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from _provider_usage import plausible_prompt_tokens
 from test_prd020_milestone_requirements import _probe
 
 from kriya.agents.agent import ReviewerAgent
@@ -185,7 +186,7 @@ class Transport:
             content = self.report_content
         else:
             content = "Review: Approved"
-        return {"content": content, "reasoning_chars": 0, "prompt_tokens": 10, "completion_tokens": 5,
+        return {"content": content, "reasoning_chars": 0, "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
     def by(self, *markers):

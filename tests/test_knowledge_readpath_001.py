@@ -124,7 +124,7 @@ def _generate(cfg, spy, args, dispatch_name):
     one, many = spy.patches()
     with one, many, patch("kriya.cli.load_config", return_value=cfg), \
          patch("kriya.cli.Kernel", return_value=strict_kernel(cfg)), \
-         patch("kriya.cli.LLMClient"), patch("kriya.cli.WorkflowEngine"), \
+         patch("kriya.cli.LLMClient", autospec=True), patch("kriya.cli.WorkflowEngine"), \
          patch(f"kriya.cli.{dispatch_name}", new=dispatch):
         result = CliRunner().invoke(main, ["generate", *args, "--json", "-y"])
     assert dispatch.await_count == 1, result.output

@@ -13,6 +13,7 @@ import subprocess
 from unittest.mock import patch
 
 import pytest
+from _provider_usage import plausible_prompt_tokens
 from click.testing import CliRunner
 
 from kriya.cli import main
@@ -101,7 +102,7 @@ class Transport:
             content = "def value(:\n" if broken else f"VALUE = '{target}'\n"
         else:
             content = "Review: Approved"
-        return {"content": content, "reasoning_chars": 0, "prompt_tokens": 10, "completion_tokens": 5,
+        return {"content": content, "reasoning_chars": 0, "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
 

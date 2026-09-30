@@ -344,7 +344,9 @@ def test_only_mandatory_text_counts_as_shown_source(tmp_path, where):
 
     source = "def calc(a, b):\n    return a + b\n"
     (tmp_path / "calc.py").write_text(source)
-    ctx = _attempt_ctx(tmp_path, _cfg(), developer=None)
+    cfg = _cfg()
+    cfg.llm.inference_runtime = None  # the packaged runtime (that module's tier double is not registered here)
+    ctx = _attempt_ctx(tmp_path, cfg, developer=None)
     shown = f"=== File: calc.py ===\n{source}"
     kwargs = {"known_target_files": ["calc.py"], "existing_code_context": "HEAD\n" + shown}
     if where == "optional":

@@ -1,0 +1,27 @@
+import subprocess, sys, pathlib
+M = [
+ ("kriya/core/llm.py", "SDK_MAX_RETRIES = 0", "SDK_MAX_RETRIES = 2", "one_failing_call"),
+ ("kriya/core/llm.py", "httpx.AsyncClient(trust_env=False, timeout=timeout)", "httpx.AsyncClient(trust_env=True, timeout=timeout)", "proxy_variables"),
+ ("kriya/core/model_runtime.py", 'settings.setdefault("reasoning", REASONING_MODEL_DEFAULT if reasoning_flag else "none")', 'settings.setdefault("reasoning", REASONING_MODEL_DEFAULT)', "reasoning_false"),
+ ("kriya/core/model_runtime.py", '            if name != "temperature":  # the SDK\'s own parameter\n                wire[name] = requested', '            pass', "wire_carries_only"),
+ ("kriya/core/provider_contract.py", "        if exact and served != requested:", "        if False:", "identity_mismatch"),
+ ("kriya/core/provider_contract.py", "        if served < requested:", "        if False:", "smaller_served"),
+ ("kriya/core/provider_contract.py", "        if strict and self.unknown:", "        if False:", "unknown_field"),
+ ("kriya/core/provider_contract.py", "        if self.conflicts:", "        if False:", "conflicting"),
+ ("kriya/core/provider_contract.py", "        if strict and missing:", "        if False:", "server_only_setting_is_compared"),
+ ("kriya/core/llm.py", "            read = min(read, remaining)", "            pass", "read_timeout_never_exceeds"),
+ ("kriya/core/llm.py", "            if remaining <= 0:", "            if False:", "passed_deadline"),
+ ("kriya/core/llm.py", "            await client.close()", "            pass", "aclose_releases"),
+ ("kriya/core/llm.py", "bytes_per_token_ceiling=limits.get(\"bytes_per_token_ceiling\")) if identified else None", "bytes_per_token_ceiling=limits.get(\"bytes_per_token_ceiling\")) if False else None", "evaluating_less"),
+ ("kriya/core/provider_contract.py", "    budget = requested if requested is not None else served", "    budget = served if served is not None else requested", "budget_is_the_requested"),
+]
+for path, old, new, k in M:
+    p = pathlib.Path(path); src = p.read_text()
+    assert src.count(old) == 1, (path, old)
+    p.write_text(src.replace(old, new))
+    try:
+        r = subprocess.run([".venv/bin/pytest", "tests/test_provider_contract_001.py", "-q", "-p", "no:cacheprovider", "-k", k], capture_output=True, text=True)
+        last = r.stdout.strip().splitlines()[-1]
+        print(("KILLED  " if r.returncode else "SURVIVED"), k, "|", last)
+    finally:
+        p.write_text(src)

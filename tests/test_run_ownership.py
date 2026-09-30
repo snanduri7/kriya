@@ -409,7 +409,7 @@ def test_generate_acquires_and_releases_workspace_lock(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path) as cwd:
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine()), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
         assert result.exit_code == 0, result.output
         # Released on normal completion - reacquiring must succeed.
@@ -421,7 +421,7 @@ def test_fix_acquires_and_releases_workspace_lock(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path) as cwd:
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine()), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["fix", "-e", "some error", "-y"])
         assert result.exit_code == 0, result.output
         with acquire_run_lock(cwd):
@@ -433,7 +433,7 @@ def test_proposal_execute_acquires_and_releases_workspace_lock(runner, tmp_path)
         with patch("kriya.workflow.proposal_promotion.execute_approved_proposal",
                     new=AsyncMock(return_value=_FAKE_RESULT)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["proposal", "execute", "P1", "-y"])
         assert result.exit_code == 0, result.output
         with acquire_run_lock(cwd):
@@ -445,7 +445,7 @@ def test_lock_held_error_surfaces_as_clean_nonzero_exit_not_a_traceback(runner, 
         with acquire_run_lock(cwd):
             with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine()), \
                  patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-                 patch("kriya.cli.LLMClient"):
+                 patch("kriya.cli.LLMClient", autospec=True):
                 result = runner.invoke(main, ["generate", "do a thing", "-y"])
         assert result.exit_code == 1
         assert "Workspace Locked" in result.output
@@ -457,7 +457,7 @@ def test_review_does_not_acquire_workspace_lock(runner, tmp_path):
     java_file.write_text("class T { void m() {} }")
     with acquire_run_lock(str(tmp_path)):
         # A held mutating-run lock must never block a read-only review.
-        with patch("kriya.cli.LLMClient") as mock_llm_cls:
+        with patch("kriya.cli.LLMClient", autospec=True) as mock_llm_cls:
             mock_llm_cls.return_value.complete = AsyncMock(
                 return_value='{"member_reviews": [], "overview": "x"}'
             )
@@ -494,7 +494,7 @@ def _run_generate_blocking_until_released(cwd, ready_evt, release_evt, result_q)
     runner = CliRunner()
     with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(side_effect=_blocking)), \
          patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-         patch("kriya.cli.LLMClient"):
+         patch("kriya.cli.LLMClient", autospec=True):
         result = runner.invoke(main, ["generate", "do a thing", "-y"])
     result_q.put(result.exit_code)
 
@@ -512,7 +512,7 @@ def test_generate_vs_generate_real_cross_process_contention(tmp_path, monkeypatc
         runner = CliRunner()
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine()), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             loser = runner.invoke(main, ["generate", "do a thing", "-y"])
         assert loser.exit_code == 1
         assert "Workspace Locked" in loser.output
@@ -536,7 +536,7 @@ def test_proposal_execute_vs_generate_real_cross_process_contention(tmp_path, mo
         with patch("kriya.workflow.proposal_promotion.execute_approved_proposal",
                     new=AsyncMock(return_value=_FAKE_RESULT)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             loser = runner.invoke(main, ["proposal", "execute", "P1", "-y"])
         assert loser.exit_code == 1
         assert "Workspace Locked" in loser.output
@@ -559,7 +559,7 @@ def test_resume_flag_contends_the_same_as_a_fresh_run(tmp_path, monkeypatch):
         runner = CliRunner()
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine()), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             loser = runner.invoke(main, ["generate", "do a thing", "-y", "--resume"])
         assert loser.exit_code == 1
         assert "Workspace Locked" in loser.output
@@ -585,7 +585,7 @@ def test_losing_process_makes_zero_source_mutation(tmp_path, monkeypatch):
         runner = CliRunner()
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine()), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             loser = runner.invoke(main, ["generate", "do a thing", "-y"])
         assert loser.exit_code == 1
     finally:
@@ -607,7 +607,7 @@ def _run_milestone_sequence_blocking(cwd, plan_path, ready_evt, release_evt, res
     with patch("kriya.cli._dispatch_milestones", new=AsyncMock(side_effect=_blocking_dispatch)), \
          patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine()), \
          patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-         patch("kriya.cli.LLMClient"):
+         patch("kriya.cli.LLMClient", autospec=True):
         result = runner.invoke(main, ["generate", "--from-milestones", plan_path, "-y"])
     result_q.put(result.exit_code)
 
@@ -636,7 +636,7 @@ def test_milestone_execution_holds_lock_across_the_whole_command(tmp_path, monke
         runner = CliRunner()
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine()), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             loser = runner.invoke(main, ["generate", "do a thing", "-y"])
         assert loser.exit_code == 1
         assert "Workspace Locked" in loser.output

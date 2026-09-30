@@ -37,12 +37,15 @@ class CompletionStatus(str, Enum):
     BACKEND_ERROR = "BACKEND_ERROR"
     TIMEOUT = "TIMEOUT"
     CANCELLED = "CANCELLED"
+    # PROVIDER-CONTRACT-001: the provider did not apply what Kriya relies on
+    # (a served window below the requested one, a silently truncated prompt).
+    PROVIDER_CONTRACT_VIOLATION = "PROVIDER_CONTRACT_VIOLATION"
 
 
 PROTOCOL_FAILURE_STATUSES = frozenset({
     CompletionStatus.EMPTY_CONTENT, CompletionStatus.MALFORMED_STRUCTURED_OUTPUT,
     CompletionStatus.OUTPUT_TRUNCATED, CompletionStatus.BACKEND_ERROR,
-    CompletionStatus.TIMEOUT, CompletionStatus.CANCELLED,
+    CompletionStatus.TIMEOUT, CompletionStatus.CANCELLED, CompletionStatus.PROVIDER_CONTRACT_VIOLATION,
 })
 
 
@@ -66,6 +69,9 @@ class CompletionResult:
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
     finish_reason: Optional[str] = None
     prompt_tokens: Optional[int] = None
+    # PROVIDER-CONTRACT-001: the provider's own prompt-token count (None when
+    # it reported none - never an estimate).
+    prompt_tokens_reported: Optional[int] = None
     completion_tokens: Optional[int] = None
     tokens_estimated: bool = True
     elapsed_seconds: float = 0.0

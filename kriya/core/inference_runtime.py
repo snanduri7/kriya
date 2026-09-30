@@ -67,6 +67,10 @@ class RuntimeCapabilities:
 
     per_request_context_window: bool
     native_identity_probe: bool
+    # PROVIDER-CONTRACT-001: the runtime reports usage on a stream when asked
+    # (OpenAI stream_options.include_usage). Declared, never discovered by
+    # sending a request and resending it differently when that one fails.
+    stream_usage: bool = False
 
 
 @dataclass(frozen=True)
@@ -79,6 +83,9 @@ class ChatRequest:
     response_format: Optional[Dict[str, Any]] = None
     stream_callback: Optional[Callable[[str], None]] = None
     tools: Optional[List[Dict[str, Any]]] = None
+    # PROVIDER-CONTRACT-001: the Kriya-owned timeout of this one request
+    # (None: the client's own, itself Kriya-configured).
+    timeout: Any = None
 
 
 @dataclass(frozen=True)
@@ -138,6 +145,50 @@ class InferenceRuntimePort(abc.ABC):
         PRD-016 context tier can be selected for one request."""
         return self.capabilities.per_request_context_window and bool(getattr(fingerprint, "exact", False))
 
+    # -- PROVIDER-CONTRACT-001: the provider contract ------------------------
+    @property
+    def provider_capabilities(self) -> Any:
+        """How this runtime carries each semantic setting
+        (kriya/core/provider_contract.py). Default: nothing declared, so
+        every setting is UNSUPPORTED and every value unverified."""
+        from kriya.core.provider_contract import ProviderCapabilities
+
+        return ProviderCapabilities()
+
+    def request_plan(self, extra_body: Optional[Dict[str, Any]], *, temperature: Optional[float],
+                     reasoning_flag: bool, requested_context_window: Optional[int],
+                     fingerprint: Any = None) -> Any:
+        """The exact wire body of a request with these settings and each
+        setting's requested/effective state. Default: the body is sent as is
+        (without the window field) and nothing is verified."""
+        from kriya.core.provider_contract import Provenance, ProviderRequestPlan, SettingState, Support
+
+        states = [SettingState("temperature", temperature, None, Provenance.UNVERIFIED, Support.UNSUPPORTED)]
+        if requested_context_window is not None:
+            states.append(SettingState("context_window", requested_context_window, None, Provenance.UNVERIFIED,
+                                       Support.UNSUPPORTED))
+        wire = self.without_context_window(extra_body)
+        if self.capabilities.per_request_context_window and requested_context_window is not None:
+            wire = self.with_context_window(wire, requested_context_window)
+        return ProviderRequestPlan(wire_body=wire, settings=tuple(states))
+
+    def observe_served_context(self, *, base_url: str, model: str, api_key: str = "") -> Optional[int]:
+        """The context window the runtime has loaded for ``model``, when it
+        can be observed (default: never)."""
+        return None
+
+    def pin_served_configuration(self, *, base_url: str, model: str, extra_body: Optional[Dict[str, Any]],
+                                 requested_context_window: Optional[int], api_key: str = "",
+                                 create: bool = True) -> Dict[str, Any]:
+        """Serve ``model`` with the binding's server-only settings fixed in
+        the runtime's own model configuration (a derived model identity).
+        Returns {"model": derived name, "base_model", "parameters",
+        "created"}. Default: the runtime has no such mechanism."""
+        from kriya.core.provider_contract import PROVIDER_SETTING_UNSUPPORTED, ProviderContractError
+
+        raise ProviderContractError(PROVIDER_SETTING_UNSUPPORTED,
+                                    f"runtime {self.name!r} cannot pin a served model configuration")
+
     # -- identity ----------------------------------------------------------
     @abc.abstractmethod
     def probe(self, *, base_url: str, model: str, api_key: str, egress_policy: str,
@@ -187,6 +238,10 @@ def _provider_metadata(response: Any) -> Dict[str, Any]:
     }
 
 
+def _timeout_kwarg(request: ChatRequest) -> Dict[str, Any]:
+    return {"timeout": request.timeout} if request.timeout is not None else {}
+
+
 class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
     """The OpenAI-compatible chat API over an ``openai.AsyncOpenAI``-shaped
     client (the handle LLMClient owns). Every provider field is read
@@ -198,7 +253,7 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
 
     async def complete(self, client: Any, request: ChatRequest) -> ChatResponse:
         common = dict(model=request.model, messages=request.messages, temperature=request.temperature,
-                      max_tokens=request.max_tokens)
+                      max_tokens=request.max_tokens, **_timeout_kwarg(request))
         if request.stream_callback is None:
             response = await client.chat.completions.create(
                 **common, extra_body=request.extra_body, response_format=request.response_format,
@@ -213,17 +268,13 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
             out.reasoning_chars = len(reasoning) if reasoning else 0
             out.content = (message.content or "").strip()
             return out
-        try:
-            stream = await client.chat.completions.create(
-                **common, stream=True, stream_options={"include_usage": True},
-                extra_body=request.extra_body, response_format=request.response_format,
-            )
-        except Exception as error:  # CancelledError is not an Exception: it propagates
-            logger.debug("Streaming request with stream_options failed, retrying without it "
-                         "(server may not support it): %s", error)
-            stream = await client.chat.completions.create(
-                **common, stream=True, extra_body=request.extra_body, response_format=request.response_format,
-            )
+        # PROVIDER-CONTRACT-001: exactly one request. A failure is the
+        # caller's typed failure, never a silent resend in another shape.
+        stream_options = {"stream_options": {"include_usage": True}} if self.capabilities.stream_usage else {}
+        stream = await client.chat.completions.create(
+            **common, stream=True, **stream_options,
+            extra_body=request.extra_body, response_format=request.response_format,
+        )
         out = ChatResponse(content="")
         chunks: List[str] = []
         async for chunk in stream:
@@ -251,6 +302,7 @@ class OpenAICompatibleTransport(InferenceRuntimePort, abc.ABC):
         response = await client.chat.completions.create(
             model=request.model, messages=request.messages, tools=request.tools, tool_choice="auto",
             temperature=request.temperature, max_tokens=request.max_tokens, extra_body=request.extra_body,
+            **_timeout_kwarg(request),
         )
         message = response.choices[0].message
         reasoning = _str_or_none(getattr(message, "reasoning", None))

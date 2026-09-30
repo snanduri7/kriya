@@ -39,6 +39,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Seque
 import pytest
 from _chaos_report import PHASE_REPORTS
 from _fake_inference_runtime import FakeRuntimeAdapter
+from _provider_usage import plausible_message_tokens
 
 from kriya.config.config import AppConfig
 from kriya.control.persistence import scan_run_records
@@ -412,7 +413,8 @@ class ChaosRuntime(FakeRuntimeAdapter):
             raise reply
         if isinstance(reply, ChatResponse):
             return reply
-        return ChatResponse(content=str(reply), prompt_tokens=11, completion_tokens=3, finish_reason="stop")
+        return ChatResponse(content=str(reply), prompt_tokens=plausible_message_tokens(request.messages, request.tools),
+                            completion_tokens=3, finish_reason="stop")
 
     def count(self, role: str) -> int:
         return self.roles.count(role)
@@ -457,7 +459,9 @@ def chaos_config(runtime_name: str = "chaos", *, sections: Optional[Mapping[str,
     cfg = AppConfig(**dict(sections or {}))
     cfg.llm.inference_runtime = runtime_name
     cfg.llm.model = "chaos-model:1"
-    cfg.llm.context_window = 32768
+    # The window ChaosRuntime serves (a provider-managed window): declaring
+    # a larger one is SERVED_CONTEXT_BELOW_REQUESTED (PROVIDER-CONTRACT-001).
+    cfg.llm.context_window = 8192
     cfg.llm.extra_body = {}
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False

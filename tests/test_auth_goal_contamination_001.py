@@ -228,7 +228,7 @@ def test_generate_hands_the_workflow_the_users_exact_goal_on_every_dispatch(tmp_
     dispatch = AsyncMock(side_effect=[first_result, DONE])
     with patch("kriya.cli.load_config", return_value=cfg), \
          patch("kriya.cli.Kernel", return_value=strict_kernel(cfg)), \
-         patch("kriya.cli.LLMClient"), patch("kriya.cli.WorkflowEngine"), \
+         patch("kriya.cli.LLMClient", autospec=True), patch("kriya.cli.WorkflowEngine"), \
          patch("kriya.cli._learned_reference_context", new=AsyncMock(return_value=HOSTILE)), \
          patch("kriya.cli._dispatch_generation", new=dispatch):
         result = CliRunner().invoke(main, ["generate", USER_GOAL, "--json", "-y"])

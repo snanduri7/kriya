@@ -6,6 +6,7 @@ from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _provider_usage import plausible_prompt_tokens
 
 from kriya.config import AppConfig
 from kriya.core import model_runtime
@@ -250,7 +251,8 @@ def _response(content="ok"):
     response.choices[0].message.content = content
     response.choices[0].message.reasoning = None
     response.choices[0].finish_reason = "stop"
-    response.usage = MagicMock(prompt_tokens=40, completion_tokens=2)
+    # No measured prompt count: a canned response has no request to measure.
+    response.usage = MagicMock(prompt_tokens=0, completion_tokens=2)
     return response
 
 
@@ -284,7 +286,7 @@ async def test_the_output_budget_sent_is_the_reduced_one(monkeypatch):
     sent = create.call_args[1]["max_tokens"]
     assert sent < 4096 and result.budget["output_reduced"] is True
     assert result.budget["prompt_tokens"] + sent <= 8192
-    assert result.budget["window_source"] == "served_num_ctx"
+    assert result.budget["window_source"] == "server_model_config"
 
 
 @pytest.mark.asyncio
@@ -294,7 +296,7 @@ async def test_without_an_exact_runtime_the_config_window_is_the_declared_assump
     llm = LLMClient(cfg)
     with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=_response())):
         result = await llm.complete_result("s", "u")
-    assert result.budget["window_source"] == "config_declared" and result.budget["context_window"] == 4096
+    assert result.budget["window_source"] == "requested_unverified" and result.budget["context_window"] == 4096
     with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=_response())) as create:
         with pytest.raises(tb.ContextBudgetUnsatisfiableError):
             await llm.complete("s", "x" * int(2.5 * 4096))
@@ -389,7 +391,7 @@ def test_a_refusal_inside_a_real_attempt_is_a_typed_failure_and_nothing_is_writt
             developer_requests.append(user_prompt)
         content = ('["calc.py"]' if "File List Planner" in first else "Step 1: add sub to calc.py"
                    if "Planner Agent" in first else "Review: Approved")
-        return {"content": content, "reasoning_chars": 0, "prompt_tokens": 10, "completion_tokens": 5,
+        return {"content": content, "reasoning_chars": 0, "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
     llm._request_once = request_once

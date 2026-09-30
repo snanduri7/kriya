@@ -496,6 +496,9 @@ async def _record_attempt_failure(
             # the authoritative context; nothing was sent, and resending the
             # same unwinnable request cannot change that.
             "context_edit_protocol_unsatisfiable",
+            # PROVIDER-CONTRACT-001: the provider verifiably does not apply
+            # what Kriya relies on; resending cannot change the provider.
+            "provider_contract",
             # MODEL-EVIDENCE-HARDENING-001: a production Developer retry
             # whose retry-temperature identity is not QUALIFIED. Retrying
             # cannot qualify it.

@@ -26,7 +26,7 @@ def invoke(tmp_path, monkeypatch):
     def run(payload=None, args=(), input_text=None, setup_error=None, workflow_error=None):
         with patch("kriya.cli.load_config", return_value=cfg), \
              patch("kriya.cli.Kernel", return_value=kernel), \
-             patch("kriya.cli.LLMClient", side_effect=setup_error), \
+             patch("kriya.cli.LLMClient", autospec=True, side_effect=setup_error), \
              patch("kriya.cli.WorkflowEngine"), \
              patch("kriya.cli._dispatch_generation", new=AsyncMock(return_value=payload, side_effect=workflow_error)):
             return CliRunner().invoke(main, ["generate", "test goal", "--json", *args], input=input_text)

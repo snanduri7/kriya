@@ -117,6 +117,7 @@ def test_the_investigation_loop_fits_its_first_request_and_stops_before_an_unfit
 def test_the_investigation_loop_without_a_fit_is_unchanged(tmp_path):
     workspace = git_workspace(tmp_path, {"a.py": "def f():\n    return 1\n"})
     runtime = ChaosRuntime(lambda role, request: "Ready to implement.")
+    runtime.served_window = 32768  # it serves the window the binding declares (PROVIDER-CONTRACT-001)
     cfg = _loop_config(32768)
     with RuntimeRegistration(runtime):
         result = asyncio.run(run_investigation_loop(

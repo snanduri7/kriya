@@ -1,0 +1,4 @@
+chars 66010
+/v1 options.num_ctx=8192: {'prompt_tokens': 24011, 'prompt_tokens_details': {'cached_tokens': 3}, 'completion_tokens': 3, 'total_tokens': 24014} None None
+/api/chat num_ctx=8192: {'prompt_eval_count': 4098, 'eval_count': 3, 'done_reason': 'stop', 'HTTPError': None, 'body': None}
+/api/chat num_ctx=8192 truncate=false: {'prompt_eval_count': None, 'eval_count': None, 'done_reason': None, 'HTTPError': 400, 'body': '{"error":"{\\"error\\":{\\"code\\":400,\\"message\\":\\"request (24011 tokens) exceeds the available context size (8192 tokens), try increasing it\\",\\"type\\":\\"exceed_context_size_error\\",\\"n_prompt_tokens\\":24011,\\"n_ctx\\":8192}}"}'}

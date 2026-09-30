@@ -1,0 +1,23 @@
+Q1 Modelfile num_ctx=32768 via /v1 -> served [('kriya-probe-tmp:c32k', 32768), ('qwen3.6:35b-a3b-q4_K_M', 65536)]
+Q1 /api/show parameters: 'temperature                    0.7\ntop_k                          20\ntop_p                          0.8\nnum_ctx                        32768\nrepeat_penalty                 1.05\nstop                           "<|im_start|>"\nstop                           "<|im_end|>"\nstop                           "<|endoftext|>"' digest-ish {'parent_model': 'qwen3-coder:30b', 'format': 'gguf', 'family': 'qwen3moe', 'families': ['qwen3moe'], 'parameter_size': '30.5B', 'quantization_level': 'Q4_K_M'}
+Q2 reasoning_effort none on qwen3-coder: None None Hi there! How
+Q3 /v1 top-level top_p=0.01 distinct= 1
+Q4 stream_options include_usage: True ason":"length"}]} |  | data: {"id":"chatcmpl-808","object":"chat.completion.chunk","created":1790747919,"model":"qwen3-coder:30b","system_fingerprint":"fp_ollama","choices":[],"usage":{"prompt_tokens":9,"prompt_tokens_details":{"cached_tokens":8},"completion_tokens":4,"total_tokens":13}} |  | data: [DONE] |  | 
+Q5 served after plain qwen3-coder /v1: [('qwen3-coder:30b', 65536)]
+== qwen3-coder:30b
+repeat_penalty                 1.05
+stop                           "<|im_start|>"
+stop                           "<|im_end|>"
+stop                           "<|endoftext|>"
+temperature                    0.7
+top_k                          20
+top_p                          0.8
+capabilities ['completion', 'tools']
+== qwen3.6:35b-a3b-q4_K_M
+top_k                          20
+top_p                          0.95
+min_p                          0
+presence_penalty               1.5
+repeat_penalty                 1
+temperature                    1
+capabilities ['completion', 'vision', 'tools', 'thinking']

@@ -52,6 +52,23 @@ class ContextPolicyConfig(BaseModel):
         return sorted(set(value))
 
 
+class LLMTransportConfig(BaseModel):
+    """PROVIDER-CONTRACT-001: Kriya-owned transport policy for every local
+    model call. The provider SDK's own defaults (automatic retries, a
+    600-second read timeout, proxy variables inherited from the environment)
+    are never authoritative: requests go direct (no environment proxies),
+    are sent exactly once (Kriya's retry policy alone decides on another),
+    and are bounded by these timeouts - and, inside an attempt, by its
+    remaining time budget. SECURITY_AUTHORITY: they are resource bounds."""
+
+    connect_timeout_seconds: float = Field(default=10.0, gt=0)
+    # Non-streaming calls return only after the whole generation, so the
+    # read timeout bounds one full completion.
+    read_timeout_seconds: float = Field(default=900.0, gt=0)
+    write_timeout_seconds: float = Field(default=60.0, gt=0)
+    pool_timeout_seconds: float = Field(default=10.0, gt=0)
+
+
 class LLMConfig(BaseModel):
     provider: str = Field(default="openai")
     model: str = Field(default="llama3")
@@ -72,6 +89,7 @@ class LLMConfig(BaseModel):
     # SECURITY_AUTHORITY: it decides which native identity endpoints are
     # probed and whether a context window is sent.
     inference_runtime: Optional[str] = Field(default=None)
+    transport: LLMTransportConfig = Field(default_factory=LLMTransportConfig)
     knowledge_cutoff: str = Field(default="2023-12-01")
     knowledge_cutoff_confidence: str = Field(default="estimated")
     # Applied ONLY to Developer generation calls that are directly responding to a

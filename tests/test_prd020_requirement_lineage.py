@@ -520,7 +520,7 @@ def test_the_fix_command_marks_its_goal_as_kriyas_own():
     runner = CliRunner()
     with runner.isolated_filesystem():
         with patch("kriya.cli.WorkflowEngine", Engine), patch("kriya.cli.Kernel", side_effect=strict_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
     assert captured.get("requirements_from_goal") is False
 

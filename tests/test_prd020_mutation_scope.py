@@ -16,6 +16,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _provider_usage import plausible_prompt_tokens
 from click.testing import CliRunner
 
 from kriya.config import AppConfig
@@ -415,7 +416,9 @@ class _MilestoneTransport:
             content = f"VALUE = 'final {target}'\n"
         else:
             content = "Review: Approved"
-        return {"content": content, "reasoning_chars": 0, "prompt_tokens": 10, "completion_tokens": 5,
+        # A realistic prompt count: the runtime is exact, so usage is evidence (PROVIDER-CONTRACT-001).
+        return {"content": content, "reasoning_chars": 0,
+                "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
 

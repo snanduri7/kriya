@@ -763,7 +763,7 @@ def test_cli_proposal_execute_approved_valid_invokes_generation(tmp_path):
     fake_we.run_generation_workflow = AsyncMock(return_value={"quality_gates_passed": True, "files": {}})
     try:
         os.chdir(ws)
-        with patch("kriya.cli.WorkflowEngine", return_value=fake_we), patch("kriya.cli.LLMClient"):
+        with patch("kriya.cli.WorkflowEngine", return_value=fake_we), patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["proposal", "execute", pid, "-y"])
     finally:
         os.chdir(old_cwd)

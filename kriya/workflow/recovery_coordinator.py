@@ -128,10 +128,25 @@ def classify_attempt_exception(
         if unclassified and isinstance(exc, ContextBudgetUnsatisfiableError)
         else None
     )
+    # PROVIDER-CONTRACT-001: the provider does not apply what Kriya relies
+    # on (an unapplied or unknown setting, a served window below the
+    # requested one, a silently truncated prompt). Resending the same
+    # request cannot change the provider, so it is a typed stop.
+    from kriya.core.provider_contract import ProviderContractError
+
+    contract_failure = (
+        Failure(
+            type="provider_contract", message=str(exc), raw_output=str(exc), source="orchestrator",
+            diagnostics={"reason_code": exc.reason_code, **exc.details},
+        )
+        if unclassified and isinstance(exc, ProviderContractError)
+        else None
+    )
     failure: Failure = (
         attached_failure
         or scope_denial_failure
         or budget_failure
+        or contract_failure
         or Failure(
             type=(
                 "containment_setup_failed" if containment_setup_failure

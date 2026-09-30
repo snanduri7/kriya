@@ -105,6 +105,15 @@ def _bootstrap_logging(cfg: AppConfig, file_logging: bool = True) -> None:
         click.secho(f"Error configuring logging: {error}", fg="red", err=True)
         sys.exit(1)
 
+
+async def _closing(llm: Any, coroutine: Any) -> Any:
+    """Run ``coroutine``, then close ``llm``'s transports deterministically
+    (PROVIDER-CONTRACT-001): on every exit path, SystemExit included."""
+    try:
+        return await coroutine
+    finally:
+        await llm.aclose()
+
 @click.group(invoke_without_command=True)
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to Kriya configuration YAML file.')
 @click.option('--trust-file', type=click.Path(), default=None,
@@ -586,7 +595,7 @@ def prompt_generate(ctx: click.Context, description: str) -> None:
         )
 
     try:
-        res = asyncio.run(run_gen())
+        res = asyncio.run(_closing(llm, run_gen()))
         click.echo()
 
         # Inside `kriya repl` there's no shell pipe between two typed lines -
@@ -1035,6 +1044,46 @@ def model_fingerprint(ctx: click.Context, model_name: Optional[str], json_output
             click.echo(f"  {key}: {record[key]}")
     if not fingerprint.exact:
         ctx.exit(1)
+
+
+@model_group.command(name="pin")
+@click.option("--model", "model_name", default=None, help="Model to pin (default: llm.model).")
+@click.option("--dry-run", is_flag=True, help="Show the derived model and its parameters; create nothing.")
+@click.option("--json", "json_output", is_flag=True, help="Emit the pin as JSON.")
+@click.pass_context
+def model_pin(ctx: click.Context, model_name: Optional[str], dry_run: bool, json_output: bool) -> None:
+    """Serve a model with its binding's server-only settings (PROVIDER-CONTRACT-001).
+
+    Settings a request cannot carry (context window, top_k, ...) are fixed in
+    a derived, content-named model on the local runtime. Only values the
+    binding itself declares are pinned. The configuration is not changed:
+    point the binding at the printed model name, then qualify it."""
+    from kriya.core.inference_runtime import runtime_for_binding
+    from kriya.core.model_runtime import binding_object, requested_context_window
+    from kriya.core.provider_contract import ProviderContractError
+
+    cfg = _model_cfg(ctx)
+    model = model_name or cfg.llm.model
+    binding = binding_object(cfg, model)
+    if binding is None:
+        raise click.ClickException(f"{model} is not bound by this configuration")
+    adapter = runtime_for_binding(binding)
+    extra_body = getattr(binding, "extra_body", None) or None
+    try:
+        pin = adapter.pin_served_configuration(
+            base_url=getattr(binding, "base_url", None) or cfg.llm.base_url, model=model, extra_body=extra_body,
+            requested_context_window=requested_context_window(extra_body, getattr(binding, "context_window", None),
+                                                              adapter),
+            api_key=getattr(binding, "api_key", None) or cfg.llm.api_key, create=not dry_run)
+    except ProviderContractError as error:
+        raise click.ClickException(str(error)) from error
+    if json_output:
+        click.echo(json.dumps(pin, indent=2, sort_keys=True))
+        return
+    click.secho(f"{'Would create' if dry_run else 'Created'} {pin['model']} from {pin['base_model']}", bold=True)
+    for name, value in sorted(pin["parameters"].items()):
+        click.echo(f"  PARAMETER {name} {value}")
+    click.echo(f"Set this binding's model to {pin['model']}, then run: kriya model qualify --model {pin['model']}")
 
 
 @model_group.command(name="qualify")
@@ -2570,7 +2619,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
 
         try:
             with begin_mutating_run(os.getcwd()):
-                milestone_result = asyncio.run(run_milestone_sequence())
+                milestone_result = asyncio.run(_closing(llm, run_milestone_sequence()))
         except UncertainWorkspaceStateError as e:
             click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
             output.fail(str(e))
@@ -2794,7 +2843,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                 if res.get("environment_failure") and res.get("failure_category") not in (
                     "unauthorized_generation_target", "candidate_independent_deterministic_failure",
                     "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
-                    "fallback_model_incompatible", "context_edit_protocol_unsatisfiable",
+                    "fallback_model_incompatible", "context_edit_protocol_unsatisfiable", "provider_contract_violation",
                     "requirements_unresolved", "contract_registry_blocked",
                     "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
                     "workspace_commit_failed",
@@ -3030,7 +3079,7 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
 
     try:
         with begin_mutating_run(os.getcwd()):
-            final_res = asyncio.run(run_workflow())
+            final_res = asyncio.run(_closing(llm, run_workflow()))
     except UncertainWorkspaceStateError as e:
         click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
         output.fail(str(e))
@@ -3104,7 +3153,7 @@ def plan_milestones_cmd(ctx: click.Context, goal: Optional[str], file: Optional[
         return result
 
     try:
-        run_state, err = asyncio.run(run_plan())
+        run_state, err = asyncio.run(_closing(llm, run_plan()))
     except Exception as e:
         click.secho(f"Milestone planning error: {e}", fg="red")
         sys.exit(1)
@@ -3974,7 +4023,7 @@ def proposal_execute(ctx: click.Context, proposal_id: str, yes: bool) -> None:
 
     try:
         with begin_mutating_run(workspace_root):
-            res = asyncio.run(run_execution())
+            res = asyncio.run(_closing(llm, run_execution()))
     except UncertainWorkspaceStateError as e:
         click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red", err=True)
         sys.exit(1)
@@ -4081,7 +4130,7 @@ def ask(ctx: click.Context, question: str) -> None:
         return await llm.complete(system_prompt, user_prompt, stream_callback=on_stream)
         
     try:
-        asyncio.run(run_query())
+        asyncio.run(_closing(llm, run_query()))
         click.echo()
     except Exception as e:
         click.secho(f"Failed to fetch answer: {e}", fg="red")
@@ -4328,7 +4377,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             if res.get("environment_failure") and res.get("failure_category") not in (
                 "unauthorized_generation_target", "candidate_independent_deterministic_failure",
                 "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
-                "fallback_model_incompatible", "context_edit_protocol_unsatisfiable",
+                "fallback_model_incompatible", "context_edit_protocol_unsatisfiable", "provider_contract_violation",
                 "requirements_unresolved", "contract_registry_blocked",
                 "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
                 "workspace_commit_failed",
@@ -4442,7 +4491,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
 
     try:
         with begin_mutating_run(os.path.abspath(workspace)):
-            asyncio.run(run_fix())
+            asyncio.run(_closing(llm, run_fix()))
     except UncertainWorkspaceStateError as e:
         click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
         sys.exit(1)

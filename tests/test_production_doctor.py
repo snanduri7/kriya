@@ -85,6 +85,9 @@ def _exact_runtime(model="qwen3-coder:30b", **changes):
         alias=model, endpoint="http://localhost:11434/v1", provider="ollama", provider_version="0.34.2",
         artifact_digest="sha256:abc", weights_digest="sha256:def", quantization="Q4_K_M",
         tokenizer_identity="gpt2/qwen2", kriya_protocol="capabilities-sha256:x",
+        # PROVIDER-CONTRACT-001: the served model carries the binding's
+        # server-only settings (the default window and top_k).
+        server_parameters=("num_ctx 32768", "top_k 20"),
     )
     return replace(fp, **changes)
 
@@ -106,6 +109,8 @@ def _healthy_boundaries(runtime=None):
          patch("kriya.core.model_runtime.resolve_configured_model_runtime",
                side_effect=lambda cfg, model=None, **kw: _exact_runtime(model or cfg.llm.model)), \
          patch("kriya.production_doctor.probe_embedding", return_value={"dimensions": 384}), \
+         patch("kriya.production_doctor.probe_served_context",
+               return_value={"served": 32768, "probe_request_sent": False}), \
          patch("kriya.tools.lsp.find_jdtls", return_value=None):
         yield
 
@@ -185,7 +190,8 @@ def test_check_ids_are_pinned_unique_and_always_complete(tmp_path):
         "persistence.checkpoints", "persistence.traces", "persistence.logs", "capacity.workspace",
         "capacity.temp", "git.worktree", "isolation.candidate_worktree", "toolchain.required",
         "containment.oci_smoke", "containment.no_host_fallback", "egress.policy",
-        "model.connectivity", "model.runtime_fingerprint", "model.qualification",
+        # PROVIDER-CONTRACT-001 (deliberate characterization change): the provider contract row.
+        "model.connectivity", "model.runtime_fingerprint", "model.provider_contract", "model.qualification",
         "embedding.connectivity", "context.recall_certification", "lsp.java", "models.role_independence",
         "semantic.precision_boundary",
         # PRD-031A (deliberate characterization change): seven static-analysis rows.

@@ -73,6 +73,7 @@ from kriya.core.file_stamp import FileStamp, file_stamp, unchanged_since
 from kriya.core.inference_runtime import ChatRequest, runtime_adapter, runtime_for_binding
 from kriya.core.inference_settings import InferenceSettings, qualification_identity
 from kriya.core.model_runtime import MODEL_PROTOCOL_ADAPTER_VERSION, ModelRuntimeFingerprint
+from kriya.core.provider_contract import budget_window
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 # /3 (MODEL-QUAL-IDENTITY-001): records are keyed by runtime + inference
@@ -1225,13 +1226,19 @@ async def run_qualification(
     llm = llm or LLMClient(config)
 
     def default_factory(timeout: float) -> Any:
+        import httpx
         from openai import AsyncOpenAI
+
+        from kriya.core.llm import SDK_MAX_RETRIES
 
         binding = _binding_for(config, model)
         probe = LLMClient(config)
+        # PROVIDER-CONTRACT-001: the same direct, single-request transport as
+        # every other local model call (no environment proxy, no SDK retry).
         probe.client = AsyncOpenAI(api_key=binding.get("api_key") or config.llm.api_key,
                                    base_url=binding.get("base_url") or config.llm.base_url,
-                                   timeout=timeout, max_retries=0)
+                                   timeout=timeout, max_retries=SDK_MAX_RETRIES,
+                                   http_client=httpx.AsyncClient(trust_env=False, timeout=timeout))
         return probe
 
     runtime = runtime_for_binding(_binding_for(config, model))
@@ -1246,8 +1253,9 @@ async def run_qualification(
         # qualification_config put the requested window into extra_body.
         "extra_body": config.llm.extra_body,
         "base_url": (_binding_for(config, model).get("base_url") or config.llm.base_url),
-        "context_window": (fingerprint.effective_context_window
-                           or requested_context_window(config.llm.extra_body, config.llm.context_window, runtime)),
+        "context_window": budget_window(
+            requested_context_window(config.llm.extra_body, config.llm.context_window, runtime),
+            fingerprint.effective_context_window),
     }
     wanted = set(only) if only else None
     results: List[CaseResult] = []

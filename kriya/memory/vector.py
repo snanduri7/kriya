@@ -49,7 +49,7 @@ class OllamaEmbeddingClient:
                 text = prefix + text
         try:
             if client is None:
-                async with httpx.AsyncClient(timeout=30.0) as client_instance:
+                async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client_instance:
                     emb = await self._get_embedding_with_client(text, client_instance)
             else:
                 emb = await self._get_embedding_with_client(text, client)
@@ -99,7 +99,7 @@ class OllamaEmbeddingClient:
         batches = [texts[i:i + batch_size] for i in range(0, len(texts), batch_size)]
         
         all_embeddings = []
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, trust_env=False) as client:
             for batch in batches:
                 processed_batch = []
                 for text in batch:

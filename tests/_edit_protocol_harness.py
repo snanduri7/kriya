@@ -169,7 +169,11 @@ def run_edit_protocol(tmp_path, monkeypatch, developer_answers: List[str], *, wi
             content = answers.pop(0) if len(answers) > 1 else answers[0]
         else:
             content = "Review: Approved"
-        return {"content": content, "reasoning_chars": 0, "prompt_tokens": 10, "completion_tokens": 5,
+        # A plausible provider count (about 3.5 bytes per token): an
+        # identified runtime reporting far fewer tokens than the prompt can
+        # tokenize to is PROVIDER_PROMPT_TRUNCATED.
+        prompt_tokens = len(((system_prompt or "") + (user_prompt or "")).encode("utf-8")) * 2 // 7
+        return {"content": content, "reasoning_chars": 0, "prompt_tokens": prompt_tokens, "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
     def record_spy(state, event):

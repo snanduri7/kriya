@@ -47,6 +47,8 @@ _REAL_FAILURE_TYPES = {
     "fallback_incompatible": FailureCategory.RESOURCE,
     # CONTEXT-EDIT-PROTOCOL-001: no feasible mutation operation, before inference.
     "context_edit_protocol_unsatisfiable": FailureCategory.RESOURCE,
+    # PROVIDER-CONTRACT-001: provider/runtime contract violation.
+    "provider_contract": FailureCategory.RESOURCE,
     # MODEL-EVIDENCE-HARDENING-001: a production Developer retry whose
     # retry-temperature inference identity is not qualified.
     "retry_identity_not_qualified": FailureCategory.RESOURCE,

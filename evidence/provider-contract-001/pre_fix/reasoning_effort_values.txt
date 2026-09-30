@@ -1,0 +1,7 @@
+none     200 reasoning_chars 0 
+minimal  200 reasoning_chars 126 
+low      200 reasoning_chars 90 
+medium   200 reasoning_chars 114 
+high     200 reasoning_chars 90 
+xhigh    200 reasoning_chars 114 
+bogus    200 reasoning_chars 108 

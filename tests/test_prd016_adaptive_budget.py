@@ -6,7 +6,13 @@ larger context tier that is qualified for the exact runtime (a current
 qualification record at that num_ctx passing context_capacity and the
 model's role cases) or - while no qualification data exists for it -
 declared safe by the operator; output grows only for a grounded
-expectation. Every expansion is recorded and reaches the run trace."""
+expectation. Every expansion is recorded and reaches the run trace.
+
+PROVIDER-CONTRACT-001: a tier is a per-request window, which Ollama's
+OpenAI-compatible /v1 ignores (measured), so no tier is ever offered through
+it. These tests exercise the tier mechanism on a runtime that does apply a
+per-request window (PER_REQUEST_WINDOW_RUNTIME, a test double of such an
+OpenAI-compatible runtime; Ollama's native API is one)."""
 import asyncio
 import json
 import sqlite3
@@ -14,6 +20,8 @@ from dataclasses import replace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _per_request_window_runtime import PER_REQUEST_WINDOW_RUNTIME, per_request_window_runtime
+from _provider_usage import plausible_prompt_tokens
 
 from kriya.config import AppConfig
 from kriya.config.authority import FieldClassification, classify_field
@@ -26,6 +34,10 @@ from kriya.core.llm import LLMClient
 from kriya.core.model_runtime import ModelRuntimeFingerprint
 
 MODEL = "qwen3-coder:30b"
+@pytest.fixture(autouse=True)
+def _per_request_window_runtime():
+    with per_request_window_runtime():
+        yield
 
 
 def _response(content="ok", finish_reason="stop"):
@@ -35,7 +47,8 @@ def _response(content="ok", finish_reason="stop"):
     response.choices[0].message.reasoning = None
     response.choices[0].message.tool_calls = None
     response.choices[0].finish_reason = finish_reason
-    response.usage = MagicMock(prompt_tokens=40, completion_tokens=2)
+    # No measured prompt count: a canned response has no request to measure.
+    response.usage = MagicMock(prompt_tokens=0, completion_tokens=2)
     return response
 
 
@@ -57,6 +70,7 @@ def _exact_ollama(monkeypatch, *, model_context_length=262144, provider="ollama"
 def _cfg(*, declared=(), mode="adaptive", max_tokens=4096, max_context=None, max_output=None):
     cfg = AppConfig()
     cfg.llm.model = MODEL
+    cfg.llm.inference_runtime = PER_REQUEST_WINDOW_RUNTIME
     cfg.llm.extra_body = {"options": {"num_ctx": 32768}}
     cfg.llm.context_window = 32768
     cfg.llm.max_tokens = max_tokens
@@ -402,6 +416,7 @@ def test_an_expansion_during_a_real_run_is_persisted_in_the_trace(tmp_path, monk
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.llm.model = "developer-small-window"
+    cfg.llm.inference_runtime = PER_REQUEST_WINDOW_RUNTIME
     cfg.llm.extra_body = {"options": {"num_ctx": 1536}}
     cfg.llm.context_window = 1536
     cfg.llm.max_tokens = 256
@@ -422,7 +437,7 @@ def test_an_expansion_during_a_real_run_is_persisted_in_the_trace(tmp_path, monk
                    if "Planner Agent" in first else "Review: Approved")
         if model == "developer-small-window" and "File List Planner" not in first:
             content = "def add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n"
-        return {"content": content, "reasoning_chars": 0, "prompt_tokens": 10, "completion_tokens": 5,
+        return {"content": content, "reasoning_chars": 0, "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
     llm._request_once = request_once
@@ -488,7 +503,7 @@ def _developer_run(tmp_path, monkeypatch, *, max_output, protocol="small_native_
         requests.append({"system": system_prompt, "max_tokens": max_tokens})
         body = ("FIX ANALYSIS: rename.\nSEARCH:\ndef add0(a, b):\nREPLACE:\ndef plus0(a, b):\n"
                 if "MODE: REPAIR." in system_prompt else source.replace("def add0", "def plus0"))
-        return {"content": body, "reasoning_chars": 0, "prompt_tokens": 10, "completion_tokens": 5,
+        return {"content": body, "reasoning_chars": 0, "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
     llm._request_once = request_once
@@ -597,7 +612,7 @@ def _sibling_run(monkeypatch, *, design_tokens=0):
 
     async def request_once(client, model, system_prompt, user_prompt, *a, **k):
         prompts.append(user_prompt)
-        return {"content": body, "reasoning_chars": 0, "prompt_tokens": 10, "completion_tokens": 5,
+        return {"content": body, "reasoning_chars": 0, "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
     llm._request_once = request_once

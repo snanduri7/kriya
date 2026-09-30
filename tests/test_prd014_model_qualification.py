@@ -408,4 +408,5 @@ def test_the_doctor_and_qualify_fingerprint_the_same_runtime_identically(monkeyp
     doctor = probe_llm_runtime(cfg)["runtime"]
     record = asyncio.run(mq.run_qualification(cfg, llm=FakeLLM(_result("READY")), only=["plain_completion"]))
     assert doctor.exact and record["fingerprint_digest"] == doctor.digest
-    assert doctor.effective_context_window == 16384
+    # Requested, recorded as requested - never as served (PROVIDER-CONTRACT-001).
+    assert doctor.configured_context_window == 16384 and doctor.effective_context_window is None

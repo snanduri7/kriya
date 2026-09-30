@@ -335,13 +335,17 @@ def role_binding(config: Any, role: str) -> Any:
 
 
 def _served_window(fingerprint: Any, binding: Any) -> Optional[int]:
-    """The window the runtime reports serving, else the one requested of it
-    (FALLBACK-CONTEXT-WINDOW-001: an explicit provider option wins)."""
+    """The window a request to the candidate is budgeted at: the one
+    requested of it (FALLBACK-CONTEXT-WINDOW-001: an explicit provider option
+    wins), bounded by the window the runtime reports serving - never a
+    larger served window (PROVIDER-CONTRACT-001)."""
     from kriya.core.inference_runtime import runtime_for_binding
     from kriya.core.model_runtime import requested_context_window
+    from kriya.core.provider_contract import budget_window
 
-    return getattr(fingerprint, "effective_context_window", None) or requested_context_window(
-        getattr(binding, "extra_body", None), getattr(binding, "context_window", None), runtime_for_binding(binding))
+    return budget_window(requested_context_window(
+        getattr(binding, "extra_body", None), getattr(binding, "context_window", None), runtime_for_binding(binding)),
+        getattr(fingerprint, "effective_context_window", None))
 
 
 def candidate_evidence(config: Any, role: str, model: str, *, order: int, explicit: bool,

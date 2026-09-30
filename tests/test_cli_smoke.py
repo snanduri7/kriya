@@ -161,7 +161,7 @@ def test_generate_json_flag_prints_only_json_on_stdout(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(_FAKE_GENERATE_RESULT)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y", "--json"])
 
     assert result.exit_code == 0, result.output + result.stderr
@@ -180,7 +180,7 @@ def test_generate_json_flag_exit_code_reflects_quality_gates_failure(runner, tmp
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(failing_result)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y", "--json"])
 
     assert result.exit_code == 1
@@ -191,7 +191,7 @@ def test_generate_without_json_flag_is_unchanged(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(_FAKE_GENERATE_RESULT)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
     assert result.exit_code == 0, result.output + result.stderr
@@ -212,7 +212,7 @@ def test_generate_without_json_returns_nonzero_when_quality_gates_fail(runner, t
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(failing_result)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
     assert result.exit_code == 1
@@ -231,7 +231,7 @@ def test_generate_renders_streamed_reviewer_report_only_once(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
     assert result.exit_code == 0, result.output + result.stderr
@@ -258,7 +258,7 @@ def test_generate_does_not_reprint_review_already_in_approval(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
     assert result.exit_code == 0, result.output + result.stderr
@@ -274,7 +274,7 @@ def test_fix_reprints_full_reviewer_report(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(fake_result)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
 
     assert result.exit_code == 0, result.output
@@ -297,7 +297,7 @@ def test_generate_labels_rejected_candidate_review_distinctly(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
     assert "=== Rejected Candidate Review" in result.output
@@ -312,7 +312,7 @@ def test_generate_accepted_candidate_still_gets_run_instructions_header(runner, 
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(dict(_FAKE_GENERATE_RESULT))), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
     assert "=== Reviewer Report & Run Instructions ===" in result.output
@@ -329,7 +329,7 @@ def test_fix_labels_rejected_candidate_review_distinctly(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
 
     assert "=== Rejected Candidate Review" in result.output
@@ -356,7 +356,7 @@ def test_generate_budget_exhausted_shows_no_toolchain_advice(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
     assert "[GENERATION BUDGET EXHAUSTED]" in result.output
@@ -381,7 +381,7 @@ def test_generate_genuine_environment_failure_still_shows_toolchain_advice(runne
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
     assert "[ENVIRONMENT/TOOLCHAIN ISSUE]" in result.output
@@ -401,7 +401,7 @@ def test_fix_does_not_mislabel_a_human_rejection_as_a_reviewer_report(runner, tm
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
 
     assert result.exit_code == 0, result.output
@@ -428,7 +428,7 @@ def test_fix_does_not_preview_or_reprint_review_already_in_approval(runner, tmp_
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["fix", "--error", "compile failed", "-y"])
 
     assert result.exit_code == 0, result.output
@@ -493,7 +493,7 @@ def test_generate_marks_in_progress_before_knowledge_gap_retry_runs(runner, tmp_
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"), \
+             patch("kriya.cli.LLMClient", autospec=True), \
              patch("kriya.cli._mark_run_in_progress", side_effect=_record_mark):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
@@ -642,7 +642,7 @@ def test_plan_milestones_bare_output_filename_does_not_crash(runner, tmp_path):
         mock_we.milestone_planner.run_with_milestone_list = AsyncMock(return_value=("raw", fake_milestones))
         with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
              patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["plan-milestones", "a goal", "--output", "plan.json"])
 
         assert result.exit_code == 0, result.output
@@ -712,7 +712,7 @@ def test_review_propose_flag_absent_leaves_a1_report_unchanged(runner, tmp_path)
     java_file.write_text(_A2_TARGET_SRC)
 
     with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), \
-         patch("kriya.cli.LLMClient"):
+         patch("kriya.cli.LLMClient", autospec=True):
         result = runner.invoke(main, ["review", str(java_file)])
 
     assert result.exit_code == 0, result.output + result.stderr
@@ -729,7 +729,7 @@ def test_review_propose_valid_finding_renders_advisory_proposal(runner, tmp_path
     before = _hash_dir(str(tmp_path))
 
     with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), \
-         patch("kriya.cli.LLMClient"):
+         patch("kriya.cli.LLMClient", autospec=True):
         result = runner.invoke(main, ["review", str(java_file), "--propose", "F1"])
 
     assert result.exit_code == 0, result.output + result.stderr
@@ -749,7 +749,7 @@ def test_review_propose_unknown_finding_id_is_rejected(runner, tmp_path):
     java_file.write_text(_A2_TARGET_SRC)
 
     with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), \
-         patch("kriya.cli.LLMClient"):
+         patch("kriya.cli.LLMClient", autospec=True):
         result = runner.invoke(main, ["review", str(java_file), "--propose", "F999"])
 
     assert result.exit_code != 0
@@ -766,7 +766,7 @@ def test_review_propose_rejected_outright_for_non_structured_review_path(runner,
     mock_reviewer = MagicMock()
     mock_reviewer.run = AsyncMock()
     with patch("kriya.cli.ReviewerAgent", return_value=mock_reviewer), \
-         patch("kriya.cli.LLMClient"):
+         patch("kriya.cli.LLMClient", autospec=True):
         result = runner.invoke(main, ["review", str(py_file), "--propose", "F1"])
 
     assert result.exit_code != 0
@@ -789,7 +789,7 @@ def test_review_propose_never_invokes_write_capable_components(runner, tmp_path)
         raise AssertionError("A2 zero-write violation: a write-capable component was invoked")
 
     with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), \
-         patch("kriya.cli.LLMClient"), \
+         patch("kriya.cli.LLMClient", autospec=True), \
          patch("kriya.policy.filesystem.AuthorizedFileWriter.commit_file", side_effect=_raise), \
          patch("kriya.agents.agent.DeveloperAgent.run_generation", side_effect=_raise), \
          patch("kriya.workflow.workflow.WorkflowEngine.run_generation_workflow", side_effect=_raise):
@@ -806,7 +806,7 @@ def test_review_propose_never_invokes_write_capable_components(runner, tmp_path)
 def test_review_propose_without_save_does_not_persist(runner, tmp_path):
     java_file = tmp_path / "Target.java"
     java_file.write_text(_A2_TARGET_SRC)
-    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), patch("kriya.cli.LLMClient"):
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), patch("kriya.cli.LLMClient", autospec=True):
         result = runner.invoke(main, ["review", str(java_file), "--propose", "F1"])
     assert result.exit_code == 0, result.output + result.stderr
     assert "Saved:" not in result.output
@@ -816,7 +816,7 @@ def test_review_propose_without_save_does_not_persist(runner, tmp_path):
 def test_review_propose_save_persists_then_cli_approve_flow(runner, tmp_path):
     java_file = tmp_path / "Target.java"
     java_file.write_text(_A2_TARGET_SRC)
-    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), patch("kriya.cli.LLMClient"):
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), patch("kriya.cli.LLMClient", autospec=True):
         result = runner.invoke(main, ["review", str(java_file), "--propose", "F1", "--save"])
     assert result.exit_code == 0, result.output + result.stderr
     assert "Saved:" in result.output
@@ -850,7 +850,7 @@ def test_review_propose_save_persists_then_cli_approve_flow(runner, tmp_path):
 def test_proposal_reject_cli_then_cannot_approve(runner, tmp_path):
     java_file = tmp_path / "Target.java"
     java_file.write_text(_A2_TARGET_SRC)
-    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), patch("kriya.cli.LLMClient"):
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), patch("kriya.cli.LLMClient", autospec=True):
         runner.invoke(main, ["review", str(java_file), "--propose", "F1", "--save"])
 
     old_cwd = os.getcwd()
