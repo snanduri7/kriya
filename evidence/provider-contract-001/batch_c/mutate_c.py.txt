@@ -1,0 +1,22 @@
+import subprocess, pathlib
+F="kriya/core/model_runtime.py"
+M = [
+ ('    wire: Dict[str, Any] = {"truncate": False}\n    states: List[SettingState] = []\n    for name in sorted(set(settings) | {"top_p", "top_k", "min_p", "repeat_penalty", "presence_penalty"}):\n        requested = settings.get(name)\n        support = OLLAMA_NATIVE_CAPABILITIES', '    wire: Dict[str, Any] = {}\n    states: List[SettingState] = []\n    for name in sorted(set(settings) | {"top_p", "top_k", "min_p", "repeat_penalty", "presence_penalty"}):\n        requested = settings.get(name)\n        support = OLLAMA_NATIVE_CAPABILITIES', "every_setting_travels"),
+ ('        payload["truncate"] = False\n', '', "refuses_truncation"),
+ ('                options[_NATIVE_OPTION_NAMES[name]] = _numeric(requested)', '                pass', "every_setting or truncate_false"),
+ ('_NATIVE_THINK = {"none": False,', '_NATIVE_THINK = {"none": None,', "reasoning_maps or truncate_false"),
+ ('        if status == 400 and any(marker in message for marker in _CONTEXT_EXCEEDED_MARKERS):', '        if False:', "over_window"),
+ ('            return RuntimeErrorKind.SERVER  # never retried with a changed request', '            return RuntimeErrorKind.REQUEST', "over_window or classified"),
+ ('        return _replace(fingerprint, adapter_version=NATIVE_PROTOCOL_ADAPTER_VERSION,', '        return _replace(fingerprint,', "never_shared"),
+ ("            wire[\"keep_alive\"] = requested\n", "", "keep_alive"),
+]
+for old, new, k in M:
+    p = pathlib.Path(F); src = p.read_text()
+    assert src.count(old) == 1, old[:60]
+    p.write_text(src.replace(old, new))
+    try:
+        r = subprocess.run([".venv/bin/pytest", "tests/test_provider_contract_native.py", "-q", "-p", "no:cacheprovider", "-k", k], capture_output=True, text=True)
+        last = r.stdout.strip().splitlines()[-1]
+        print(("KILLED  " if r.returncode == 1 else "SURVIVED" if r.returncode == 0 else f"RC{r.returncode}"), k, "|", last)
+    finally:
+        p.write_text(src)

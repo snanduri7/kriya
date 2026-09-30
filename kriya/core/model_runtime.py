@@ -36,8 +36,13 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from kriya.core.inference_runtime import (
+    ChatRequest,
+    ChatResponse,
+    InferenceRuntimePort,
     OpenAICompatibleTransport,
+    RawToolCall,
     RuntimeCapabilities,
+    RuntimeErrorKind,
     register_runtime_adapter,
 )
 
@@ -963,6 +968,328 @@ class OllamaRuntimeAdapter(OpenAICompatibleTransport):
 
 
 register_runtime_adapter(OllamaRuntimeAdapter(), default=True)
+
+
+# --------------------------------------------------------------------------
+# PROVIDER-CONTRACT-001 Batch C: Ollama's native chat API (/api/chat).
+# Registered as "ollama_native"; never the default until qualified. Every
+# sampling setting and the context window travel per request in
+# ``options`` (measured: honoured natively), reasoning as ``think`` and the
+# model's residency as ``keep_alive``; every request sends
+# ``truncate: false`` (measured: the native default silently truncates an
+# over-window prompt, false answers HTTP 400 instead).
+# --------------------------------------------------------------------------
+
+NATIVE_PROTOCOL_ADAPTER_VERSION = "kriya-ollama-native/1"
+NATIVE_RUNTIME_NAME = "ollama_native"
+
+OLLAMA_NATIVE_CAPABILITIES = ProviderCapabilities(
+    settings={
+        "context_window": Support.SUPPORTED, "temperature": Support.SUPPORTED, "top_p": Support.SUPPORTED,
+        "top_k": Support.SUPPORTED, "min_p": Support.SUPPORTED, "repeat_penalty": Support.SUPPORTED,
+        "presence_penalty": Support.SUPPORTED, "frequency_penalty": Support.SUPPORTED, "seed": Support.SUPPORTED,
+        "reasoning": Support.SUPPORTED, "keep_alive": Support.SUPPORTED,
+    },
+    features={
+        "stream_usage": Support.SUPPORTED, "prompt_usage": Support.SUPPORTED,
+        "truncate_control": Support.SUPPORTED,
+        "served_context_observation": Support.OBSERVABLE_ONLY,
+        "server_parameter_observation": Support.OBSERVABLE_ONLY,
+    },
+)
+# Semantic setting -> native ``options`` key.
+_NATIVE_OPTION_NAMES = {
+    "context_window": "num_ctx", "temperature": "temperature", "top_p": "top_p", "top_k": "top_k",
+    "min_p": "min_p", "repeat_penalty": "repeat_penalty", "presence_penalty": "presence_penalty",
+    "frequency_penalty": "frequency_penalty", "seed": "seed",
+}
+# Reasoning effort -> native ``think`` (None: not sent, the model's default).
+_NATIVE_THINK = {"none": False, "low": "low", "medium": "medium", "high": "high", REASONING_MODEL_DEFAULT: None}
+# An over-window prompt refused under truncate:false (measured error text).
+_CONTEXT_EXCEEDED_MARKERS = ("exceed_context_size", "exceeds the context", "context length")
+
+
+class NativeRuntimeError(RuntimeError):
+    """An HTTP error answer of the native API."""
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(f"HTTP {status}: {message}")
+        self.status = status
+        self.message = message
+
+
+def native_request_plan(extra_body: Optional[Dict[str, Any]], *, temperature: Optional[float],
+                        reasoning_flag: bool, requested_context_window: Optional[int],
+                        fingerprint: Any = None) -> ProviderRequestPlan:
+    """The exact native body fields (``options``, ``think``, ``keep_alive``,
+    ``truncate``) and each setting's state. Everything requested is carried
+    by the request (REQUEST); settings not requested are the served model's
+    own (SERVER_MODEL_CONFIG, when readable)."""
+    settings, unknown, conflicts = dialect_settings(extra_body, reasoning_flag=reasoning_flag)
+    if temperature is not None:
+        settings["temperature"] = temperature
+    if requested_context_window is not None:
+        settings["context_window"] = requested_context_window
+    served = server_parameters(fingerprint) if fingerprint is not None else None
+    options: Dict[str, Any] = {}
+    wire: Dict[str, Any] = {"truncate": False}
+    states: List[SettingState] = []
+    for name in sorted(set(settings) | {"top_p", "top_k", "min_p", "repeat_penalty", "presence_penalty"}):
+        requested = settings.get(name)
+        support = OLLAMA_NATIVE_CAPABILITIES.setting(name)
+        if name == "reasoning":
+            if requested not in _NATIVE_THINK:
+                conflicts.append(f"reasoning_effort {requested!r} has no native think equivalent")
+            elif _NATIVE_THINK[requested] is not None:
+                wire["think"] = _NATIVE_THINK[requested]
+            states.append(SettingState(name, requested, requested, Provenance.REQUEST, support))
+        elif name == "keep_alive":
+            wire["keep_alive"] = requested
+            states.append(SettingState(name, requested, requested, Provenance.REQUEST, support))
+        elif requested is not None:
+            if name != "temperature":  # carried from the request's own temperature
+                options[_NATIVE_OPTION_NAMES[name]] = _numeric(requested)
+            states.append(SettingState(name, _numeric(requested), _numeric(requested), Provenance.REQUEST, support))
+        else:
+            server_value = (_numeric(served.get(_SERVER_PARAMETER_NAMES[name]))
+                            if served is not None and _SERVER_PARAMETER_NAMES.get(name) in served else None)
+            states.append(SettingState(name, None, server_value,
+                                       Provenance.SERVER_MODEL_CONFIG if server_value is not None
+                                       else Provenance.UNVERIFIED, support))
+    if options:
+        wire["options"] = options
+    for field_name in unknown:
+        if "." not in field_name:
+            wire[field_name] = extra_body[field_name]
+    return ProviderRequestPlan(wire_body=wire, settings=tuple(states), unknown=tuple(unknown),
+                               conflicts=tuple(conflicts))
+
+
+def _native_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """OpenAI-shaped messages as the native API takes them (a tool call's
+    arguments are an object, not a JSON string)."""
+    out = []
+    for message in messages:
+        converted = {k: v for k, v in message.items() if k in ("role", "content", "tool_name", "images")}
+        converted.setdefault("content", message.get("content") or "")
+        calls = []
+        for call in message.get("tool_calls") or []:
+            function = (call or {}).get("function") or {}
+            arguments = function.get("arguments")
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except ValueError:
+                    arguments = {"_raw": arguments}
+            calls.append({"function": {"name": function.get("name"), "arguments": arguments or {}}})
+        if calls:
+            converted["tool_calls"] = calls
+        out.append(converted)
+    return out
+
+
+class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
+    """Ollama's native /api/chat (PROVIDER-CONTRACT-001 Batch C). Uses the
+    same Kriya-owned HTTP transport as every other call (the client
+    LLMClient built: direct, no retry, Kriya timeouts); one request per
+    call, streamed as NDJSON when asked."""
+
+    name = NATIVE_RUNTIME_NAME
+    capabilities = RuntimeCapabilities(per_request_context_window=True, native_identity_probe=True, stream_usage=True)
+    provider_capabilities = OLLAMA_NATIVE_CAPABILITIES
+
+    def request_plan(self, extra_body: Optional[Dict[str, Any]], *, temperature: Optional[float],
+                     reasoning_flag: bool, requested_context_window: Optional[int],
+                     fingerprint: Any = None) -> ProviderRequestPlan:
+        return native_request_plan(extra_body, temperature=temperature, reasoning_flag=reasoning_flag,
+                                   requested_context_window=requested_context_window, fingerprint=fingerprint)
+
+    def observe_served_context(self, *, base_url: str, model: str, api_key: str = "") -> Optional[int]:
+        return observe_served_context(base_url=base_url, model=model, api_key=api_key)
+
+    def pin_served_configuration(self, *, base_url: str, model: str, extra_body: Optional[Dict[str, Any]],
+                                 requested_context_window: Optional[int], api_key: str = "",
+                                 create: bool = True) -> Dict[str, Any]:
+        from kriya.core.provider_contract import PROVIDER_SETTING_UNSUPPORTED, ProviderContractError
+
+        raise ProviderContractError(PROVIDER_SETTING_UNSUPPORTED,
+                                    "the native API carries every setting per request; nothing to pin")
+
+    def configured_context_window(self, extra_body: Optional[Dict[str, Any]]) -> Optional[int]:
+        return configured_context_window(extra_body)
+
+    def with_context_window(self, extra_body: Optional[Dict[str, Any]], tokens: int) -> Dict[str, Any]:
+        return with_context_window(extra_body, tokens)
+
+    def without_context_window(self, extra_body: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        return without_context_window(extra_body)
+
+    def supports_per_request_context_window(self, fingerprint: Any) -> bool:
+        return bool(fingerprint.exact) and fingerprint.provider in _PER_REQUEST_CONTEXT_PROVIDERS
+
+    def probe(self, *, base_url: str, model: str, api_key: str, egress_policy: str,
+              configured_context: Optional[int], kriya_protocol: str,
+              transport: Optional[Callable[..., Any]] = None) -> "ModelRuntimeFingerprint":
+        fingerprint = probe_model_runtime(
+            base_url=base_url, model=model, api_key=api_key, egress_policy=egress_policy,
+            configured_context=configured_context, kriya_protocol=kriya_protocol, transport=transport,
+        )
+        # Its own protocol identity (never sharing evidence with /v1), and the
+        # window every request carries is the window served (per request).
+        return _replace(fingerprint, adapter_version=NATIVE_PROTOCOL_ADAPTER_VERSION,
+                        effective_context_window=configured_context or fingerprint.effective_context_window)
+
+    # -- transport ----------------------------------------------------------
+    @staticmethod
+    def _http(client: Any) -> Any:
+        http = getattr(client, "_client", None)  # the httpx client LLMClient gave the SDK client
+        if http is None:
+            raise TypeError("the native adapter needs LLMClient's HTTP transport")
+        return http
+
+    @staticmethod
+    def _payload(request: ChatRequest, *, stream: bool) -> Dict[str, Any]:
+        body = dict(request.extra_body or {})
+        options = dict(body.pop("options", None) or {})
+        if request.temperature is not None:
+            options["temperature"] = request.temperature
+        options["num_predict"] = int(request.max_tokens)
+        payload: Dict[str, Any] = {"model": request.model, "messages": _native_messages(request.messages),
+                                   "stream": stream, "options": options, **body}
+        # Never silent truncation, whatever the body asked (an unknown
+        # "truncate" field included): the provider refuses instead.
+        payload["truncate"] = False
+        if request.response_format and request.response_format.get("type") == "json_object":
+            payload["format"] = "json"
+        if request.tools:
+            payload["tools"] = request.tools
+        return payload
+
+    @staticmethod
+    def _url(client: Any) -> str:
+        return f"{_native_root(str(client.base_url))}/api/chat"
+
+    @staticmethod
+    def _headers(client: Any) -> Dict[str, str]:
+        key = getattr(client, "api_key", "") or ""
+        return {"Authorization": f"Bearer {key}"} if key else {}
+
+    @staticmethod
+    def _raise_for(status: int, text: str) -> None:
+        from kriya.core.provider_contract import PROVIDER_PROMPT_TRUNCATED, ProviderContractError
+
+        try:
+            message = str(json.loads(text).get("error") or text)
+        except (ValueError, AttributeError):
+            message = text
+        if status == 400 and any(marker in message for marker in _CONTEXT_EXCEEDED_MARKERS):
+            # truncate:false made the provider refuse instead of dropping input.
+            raise ProviderContractError(PROVIDER_PROMPT_TRUNCATED,
+                                        f"the prompt exceeds the served context window: {message[:300]}",
+                                        {"provider_status": status})
+        raise NativeRuntimeError(status, message[:500])
+
+    @staticmethod
+    def _read(out: ChatResponse, chunk: Dict[str, Any]) -> None:
+        if chunk.get("done"):
+            out.prompt_tokens = _int(chunk.get("prompt_eval_count"))
+            out.completion_tokens = _int(chunk.get("eval_count"))
+            reason = chunk.get("done_reason")
+            out.finish_reason = reason if isinstance(reason, str) and reason else None
+        model = chunk.get("model")
+        if isinstance(model, str) and model and "model" not in out.provider_metadata:
+            out.provider_metadata["model"] = model
+
+    async def complete(self, client: Any, request: ChatRequest) -> ChatResponse:
+        http = self._http(client)
+        timeout = request.timeout if request.timeout is not None else http.timeout
+        out = ChatResponse(content="")
+        if request.stream_callback is None:
+            response = await http.post(self._url(client), json=self._payload(request, stream=False),
+                                       headers=self._headers(client), timeout=timeout)
+            if response.status_code >= 400:
+                self._raise_for(response.status_code, response.text)
+            data = response.json()
+            message = data.get("message") or {}
+            out.content = (message.get("content") or "").strip()
+            out.reasoning_chars = len(message.get("thinking") or "")
+            self._read(out, {**data, "done": True})
+            return out
+        # Exactly one request, streamed as NDJSON.
+        chunks: List[str] = []
+        async with http.stream("POST", self._url(client), json=self._payload(request, stream=True),
+                               headers=self._headers(client), timeout=timeout) as response:
+            if response.status_code >= 400:
+                self._raise_for(response.status_code, (await response.aread()).decode("utf-8", "replace"))
+            async for line in response.aiter_lines():
+                if not line.strip():
+                    continue
+                chunk = json.loads(line)
+                if chunk.get("error"):
+                    self._raise_for(500, str(chunk["error"]))
+                message = chunk.get("message") or {}
+                out.reasoning_chars += len(message.get("thinking") or "")
+                piece = message.get("content") or ""
+                if piece:
+                    chunks.append(piece)
+                    request.stream_callback(piece)
+                self._read(out, chunk)
+        out.content = "".join(chunks).strip()
+        return out
+
+    async def complete_with_tools(self, client: Any, request: ChatRequest) -> ChatResponse:
+        http = self._http(client)
+        timeout = request.timeout if request.timeout is not None else http.timeout
+        response = await http.post(self._url(client), json=self._payload(request, stream=False),
+                                   headers=self._headers(client), timeout=timeout)
+        if response.status_code >= 400:
+            self._raise_for(response.status_code, response.text)
+        data = response.json()
+        message = data.get("message") or {}
+        out = ChatResponse(content=message.get("content") or "", reasoning_chars=len(message.get("thinking") or ""))
+        for index, call in enumerate(message.get("tool_calls") or []):
+            function = (call or {}).get("function") or {}
+            arguments = function.get("arguments")
+            out.tool_calls.append(RawToolCall(
+                str(call.get("id") or f"call_{index}"), str(function.get("name") or ""),
+                arguments if isinstance(arguments, str) else json.dumps(arguments or {})))
+        self._read(out, {**data, "done": True})
+        return out
+
+    def classify_error(self, error: BaseException) -> RuntimeErrorKind:
+        import asyncio
+
+        import httpx
+
+        from kriya.core.provider_contract import ProviderContractError
+
+        if isinstance(error, (httpx.TimeoutException, asyncio.TimeoutError, TimeoutError)):
+            return RuntimeErrorKind.TIMEOUT
+        if isinstance(error, httpx.TransportError):
+            return RuntimeErrorKind.CONNECTION
+        if isinstance(error, ProviderContractError):
+            return RuntimeErrorKind.SERVER  # never retried with a changed request
+        if isinstance(error, NativeRuntimeError):
+            if error.status in (401, 403):
+                return RuntimeErrorKind.AUTHENTICATION
+            if error.status == 429:
+                return RuntimeErrorKind.RATE_LIMITED
+            if error.status >= 500:
+                return RuntimeErrorKind.SERVER
+        return RuntimeErrorKind.REQUEST
+
+    def list_models(self, base_url: str, api_key: str,
+                    fetch_json: Callable[..., Dict[str, Any]]) -> List[Dict[str, Any]]:
+        listing = fetch_json(f"{_native_root(base_url)}/api/tags", api_key=api_key)
+        return [{"id": item.get("name") or item.get("model")} for item in listing.get("models", [])
+                if isinstance(item, dict)]
+
+
+def _int(value: Any) -> int:
+    return value if isinstance(value, int) and value > 0 else 0
+
+
+register_runtime_adapter(OllamaNativeRuntimeAdapter())
 
 
 __all__ = [
