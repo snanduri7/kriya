@@ -414,6 +414,19 @@ class GenerationState:
     # counter so a later attempt always starts fresh without needing an
     # explicit reset call anywhere.
     investigation_turns_used_by_attempt: Dict[int, int] = field(default_factory=dict)
+    # CONTEXT-EDIT-PROTOCOL-001 (kriya/workflow/edit_capability.py): path ->
+    # the EditCapability of the latest Developer invocation, read by both
+    # the operation contract and the response validators; path -> real
+    # lines an anchor matched outside the authoritative context (loci for
+    # the next window); path -> (failure family, capability digest,
+    # (model, requested operation)) of the last edit-protocol failure, so
+    # retrying it on the same model with the same contract and an unchanged
+    # capability is not progress.
+    edit_capabilities: Dict[str, Any] = field(default_factory=dict)
+    edit_capabilities_attempt: int = 0
+    edit_anchor_loci: Dict[str, List[int]] = field(default_factory=dict)
+    edit_failure_capability: Dict[str, Tuple[str, str, Any]] = field(default_factory=dict)
+    edit_capability_models: Dict[str, Tuple[str, Optional[str]]] = field(default_factory=dict)
     # PRD-017: the request profile (kriya/workflow/model_transition.py) of the
     # last Developer call, so a model change between attempts is recorded
     # field by field as a model.transition run event.

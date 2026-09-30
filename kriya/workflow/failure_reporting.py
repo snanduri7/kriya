@@ -136,6 +136,8 @@ _FAILURE_TYPE_TO_CATEGORY: Dict[str, FailureCategory] = {
     "output_budget_unsatisfiable": FailureCategory.RESOURCE,
     # PRD-017: a fallback model that cannot serve the attempt it was chosen for.
     "fallback_incompatible": FailureCategory.RESOURCE,
+    # CONTEXT-EDIT-PROTOCOL-001: no feasible mutation operation, before inference.
+    "context_edit_protocol_unsatisfiable": FailureCategory.RESOURCE,
     # MODEL-EVIDENCE-HARDENING-001: an unqualified production retry identity.
     "retry_identity_not_qualified": FailureCategory.RESOURCE,
 

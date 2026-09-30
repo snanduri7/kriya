@@ -99,6 +99,7 @@ from kriya.workflow.dependency_invalidation import (
     invalidate_validated_revisions,
 )
 from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
+from kriya.workflow.edit_capability import exact_window_reserve
 from kriya.workflow.edit_safety import (
     StagedFileWrite,
     apply_anchored_edits,
@@ -728,6 +729,12 @@ def _compute_retry_evidence_fingerprint(
             item.member_id if item else None,
             item.omitted_regions if item else None,
             tuple(sorted(member_hints.get(path, ()))),
+            # CONTEXT-EDIT-PROTOCOL-001: the exact-window escalation inputs
+            # (anchor failures widen the window; an anchor found outside the
+            # authoritative context becomes a locus) - new evidence the next
+            # invocation will show.
+            state.budgets.anchor_failure_counts.get(path, 0),
+            tuple(state.edit_anchor_loci.get(path, ())),
         )
         for path, item in (
             (path, state.known_target_context_items.get(path))
@@ -869,9 +876,8 @@ def _prepare_retry_context(
             developer_reference(prompt_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan),
             ctx.design, ctx.plan, base_code_context,
         )
-        retry_member_rendered, retry_member_package = build_known_target_context(
-            list(retry_member_hints.keys()), ctx.workspace_path, ctx.worktree_path, retry_member_limit,
-            member_hints=retry_member_hints, cache=ctx.source_cache,
+        retry_member_rendered, retry_member_package = _target_package_with_window_reserve(
+            ctx, list(retry_member_hints.keys()), retry_member_limit, prompt_window, retry_member_hints,
         )
         if retry_member_rendered:
             member_hint_rendered = retry_member_rendered
@@ -1209,6 +1215,17 @@ def _has_authoritative_full_source(
     return not item.revision or current_revision == item.revision
 
 
+def _current_revision(filepath: str, ctx: "AttemptContext") -> Optional[str]:
+    full_path = os.path.join(ctx.worktree_path, filepath)
+    if not os.path.exists(full_path):
+        full_path = os.path.join(ctx.workspace_path, filepath)
+    try:
+        with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
+            return content_revision(handle.read())
+    except OSError:
+        return None
+
+
 def _validate_actual_mutation_authority(
     filepath: str, actual_operation: CodeOperation, *,
     file_exists: bool, ctx: "AttemptContext", state: Optional[GenerationState],
@@ -1252,9 +1269,14 @@ def _validate_actual_mutation_authority(
         return None
     if not file_exists:
         return None
-    if _is_restore_public_contract_phase(state):
-        return None
-    if _has_authoritative_full_source(filepath, ctx, state):
+    # CONTEXT-EDIT-PROTOCOL-001: the capability this invocation's contract
+    # was built from decides, never a second evaluation - bound to the
+    # revision it was decided for.
+    capability = _current_edit_capability(state, filepath)
+    if capability is not None:
+        if capability.full_file and _current_revision(filepath, ctx) == capability.revision:
+            return None
+    elif _is_restore_public_contract_phase(state) or _has_authoritative_full_source(filepath, ctx, state):
         return None
     return (
         "a full-file replacement was returned, but this file's context this attempt was not "
@@ -2060,6 +2082,219 @@ def _developer_optional_sections(
     return tuple(sections)
 
 
+def _target_package_with_window_reserve(
+    ctx: "AttemptContext", paths: List[str], limit: int, prompt_window: int, member_hints: Dict[str, List[str]],
+) -> Tuple[str, Any]:
+    """build_known_target_context at its full budget; when a target is not
+    shown whole and exact there, exact windows may be added to the request
+    (CONTEXT-EDIT-PROTOCOL-001), so it is rebuilt with their reserve held
+    back and the windows never push the request past its capacity."""
+    rendered, package = build_known_target_context(
+        paths, ctx.workspace_path, ctx.worktree_path, limit, member_hints=member_hints, cache=ctx.source_cache,
+    )
+    shown_whole = {item.path for item in package.relevant_files if item.tier == "full" and item.is_exact}
+    if set(paths) <= shown_whole:
+        return rendered, package
+    return build_known_target_context(
+        paths, ctx.workspace_path, ctx.worktree_path, max(0, limit - exact_window_reserve(prompt_window)),
+        member_hints=member_hints, cache=ctx.source_cache,
+    )
+
+
+def _edit_capability_loci(state: GenerationState, ctx: "AttemptContext", path: str, lines: List[str]) -> List[int]:
+    """Deterministic edit loci for ``path``: code the user's goal quotes,
+    the lines the last failure names, and where every rejected SEARCH block
+    pointed in the real source (_remember_anchor_loci)."""
+    from kriya.workflow.edit_capability import goal_code_fragments, locate_fragments
+
+    loci = locate_fragments(lines, goal_code_fragments(ctx.goal))
+    failure = state.last_failure
+    if failure is not None:
+        loci.extend(loc.line for loc in failure.file_locations if loc.filepath == path and loc.line)
+    loci.extend(state.edit_anchor_loci.get(path, ()))
+    return loci
+
+
+def _remember_anchor_loci(state: GenerationState, path: str, edits: List[Dict[str, str]], current: str) -> None:
+    """Where a rejected SEARCH block points in the real source, kept for
+    every later invocation (an intervening stop must not forget it, or the
+    capability could fall back to one already tried)."""
+    from kriya.workflow.edit_capability import locate_search_text
+
+    lines = current.splitlines()
+    located = {locus for edit in edits for locus in locate_search_text(lines, edit.get("search", ""))}
+    if located:
+        state.edit_anchor_loci[path] = sorted(set(state.edit_anchor_loci.get(path, [])) | located)
+
+
+def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """CONTEXT-EDIT-PROTOCOL-001: one EditCapability per existing target of
+    this Developer invocation (kriya/workflow/edit_capability.py), decided
+    before inference. Its exact windows join the mandatory context, the
+    feasible operations go to the Developer contract, and the response
+    validators read the same record. No feasible operation is a typed stop
+    before inference; an edit-protocol failure that meets an unchanged
+    capability is no progress."""
+    from kriya.workflow.context_budget import allocation_window
+    from kriya.workflow.edit_capability import (
+        ANCHOR_CONTEXT_NOT_ESCALATED,
+        CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE,
+        build_edit_capability,
+        exact_window_reserve,
+        render_exact_spans,
+        shown_exact_texts,
+    )
+
+    candidates = kwargs.get("known_target_files") or ctx.expected_files_upfront or []
+    targets = []
+    for path in dict.fromkeys(candidates):
+        for root in (ctx.worktree_path, ctx.workspace_path):
+            full = os.path.join(root, path) if root else None
+            if full and os.path.isfile(full):
+                targets.append((path, full))
+                break
+    if not targets:
+        return {}
+    binding = _chain_binding(ctx, kwargs.get("model_override"))
+    model = kwargs.get("model_override") or ctx.kernel.config.llm.model
+    # Only mandatory text is certain to be sent: an optional section may be
+    # trimmed or dropped by the request fit, so it never makes source shown.
+    mandatory_context = kwargs.get("existing_code_context") or ""
+    for section in kwargs.get("optional_sections") or ():
+        if section.text:
+            mandatory_context = mandatory_context.replace(section.text, "", 1)
+    budget_chars = exact_window_reserve(allocation_window(ctx.kernel.config, binding)) * 4 // len(targets)
+    capabilities: Dict[str, Any] = {}
+    for path, full in targets:
+        with open(full, "r", encoding="utf-8", errors="replace") as handle:
+            content = handle.read()
+        # Pieces already shown count only when Kriya's producer vouches for
+        # their bytes (a member_exact slice; an implementation excerpt's head
+        # and tail, exact by construction) and they are of the current revision.
+        item = state.known_target_context_items.get(path)
+        shown = (
+            shown_exact_texts(item.tier, item.content)
+            if item is not None and (item.is_exact or item.tier == "implementation_excerpt")
+            and (not item.revision or item.revision == content_revision(content)) else []
+        )
+        # Whatever renderer put it there (a retry prompt's current content),
+        # the whole current file present verbatim in this request's mandatory
+        # text is exact anchor source - checked on the bytes, not on a label.
+        # Whole-file replacement authority stays D1's alone.
+        if content.strip() and content in mandatory_context:
+            shown = [("shown_full", content)]
+        capabilities[path] = build_edit_capability(
+            path, content,
+            full_file=_is_restore_public_contract_phase(state) or _has_authoritative_full_source(path, ctx, state),
+            loci=_edit_capability_loci(state, ctx, path, content.splitlines()),
+            budget_chars=budget_chars,
+            level=state.budgets.anchor_failure_counts.get(path, 0),
+            shown=shown,
+        )
+    if state.edit_capabilities_attempt != state.attempt_number:
+        state.edit_capabilities = {}
+        state.edit_capabilities_attempt = state.attempt_number
+    state.edit_capabilities.update(capabilities)
+    requested = {path: _requested_operation(kwargs, path) for path in capabilities}
+    state.edit_capability_models.update({path: (model, requested[path]) for path in capabilities})
+    state.record_event(RunEvent(
+        kind="context.edit_capability",
+        attempt=state.attempt_number,
+        source="attempt._decide_edit_capabilities",
+        authority=EventAuthority.ADVISORY,
+        message="Mutation operations decided from this invocation's authoritative context.",
+        details={"model": model, "budget_chars": budget_chars,
+                 "targets": [capability.summary() for capability in capabilities.values()]},
+    ))
+
+    infeasible = [path for path, capability in capabilities.items() if not capability.feasible]
+    if infeasible:
+        detail = "; ".join(
+            f"{path}: no authoritative full source, and no exact source for "
+            + (f"located line(s) {list(capabilities[path].uncovered_loci)} within the window budget"
+               if capabilities[path].uncovered_loci else "any located edit region")
+            for path in infeasible
+        )
+        message = (f"{CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE}: no mutation operation is feasible under the "
+                   f"authoritative context of this Developer invocation - {detail}. Nothing was sent to the model.")
+        logger.error(message)
+        raise QualityGateFailure(Failure(
+            type="context_edit_protocol_unsatisfiable", message=message, raw_output=message,
+            source="orchestrator", attempt=state.attempt_number, likely_files=infeasible,
+            diagnostics={"reason_code": CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE,
+                         "capabilities": [capabilities[path].summary() for path in infeasible]},
+        ))
+
+    model = kwargs.get("model_override") or ctx.kernel.config.llm.model
+    for path, capability in capabilities.items():
+        previous = state.edit_failure_capability.get(path)
+        if previous is not None and previous[1:] == (capability.digest, (model, requested[path])):
+            message = (f"{ANCHOR_CONTEXT_NOT_ESCALATED}: the last {previous[0]} failure in {path} would be "
+                       f"retried on {model} with the same authoritative context, the same feasible operations "
+                       f"({', '.join(capability.operations)}) and the same requested operation "
+                       f"({requested[path]}); nothing new can be shown within the budget.")
+            raise QualityGateFailure(Failure(
+                type="no_progress_retry", message=message, raw_output=f"edit_capability={capability.digest}",
+                source="orchestrator", attempt=state.attempt_number, mode=state.last_attempt_mode,
+                likely_files=[path], diagnostics={"reason_code": ANCHOR_CONTEXT_NOT_ESCALATED},
+            ))
+
+    windows = "".join(render_exact_spans(capability) for capability in capabilities.values())
+    if windows:
+        kwargs["existing_code_context"] = (kwargs.get("existing_code_context") or "") + windows
+    kwargs["edit_operations"] = {path: capability.operations for path, capability in capabilities.items()}
+    return capabilities
+
+
+def _requested_operation(kwargs: Dict[str, Any], path: str) -> Optional[str]:
+    """The operation this invocation's contract requests for ``path``."""
+    operation = (kwargs.get("operation_by_file") or {}).get(path, kwargs.get("default_operation"))
+    return getattr(operation, "value", operation)
+
+
+def _current_edit_capability(state: Optional[GenerationState], path: str) -> Any:
+    """The EditCapability this attempt's Developer invocation decided for
+    ``path``, or None (no invocation decided one this attempt)."""
+    if state is None or state.edit_capabilities_attempt != state.attempt_number:
+        return None
+    return state.edit_capabilities.get(path)
+
+
+def _record_edit_protocol_failure(state: GenerationState, path: str, family: str) -> None:
+    """Remember the capability, model and requested operation an
+    edit-protocol failure happened under; it stands until an edit to
+    ``path`` is accepted."""
+    capability = _current_edit_capability(state, path)
+    if capability is not None:
+        state.edit_failure_capability[path] = (family, capability.digest, state.edit_capability_models.get(path))
+
+
+def _authorize_anchors(state: GenerationState, path: str, edits: List[Dict[str, str]], current: str) -> None:
+    """The response side of the same capability: every SEARCH block must lie
+    in the exact source this invocation was authorized to rely on. An anchor
+    that is real but was never shown records its lines as loci for the next
+    window; one that is not in the file at all is fabricated or stale."""
+    from kriya.workflow.edit_capability import ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT
+
+    capability = _current_edit_capability(state, path)
+    if capability is None:
+        return
+    for index, edit in enumerate(edits, 1):
+        status = capability.anchor_status(edit.get("search", ""), current)
+        if status is None:
+            continue
+        if status == ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT:
+            raise ValueError(
+                f"{status}: Anchor matching failed for edit #{index}: the search block is real source, but not "
+                "source this attempt was authorized to rely on (it was not in the exact current source shown). "
+                "Its location is now shown as exact source."
+            )
+        raise ValueError(
+            f"{status}: Anchor matching failed for edit #{index}: the search block does not occur in the "
+            "current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
+        )
+
+
 async def _run_developer_generation(
     state: GenerationState, ctx: "AttemptContext", **kwargs,
 ) -> List[Dict[str, str]]:
@@ -2083,6 +2318,7 @@ async def _run_developer_generation_as_developer(
         state, ctx, file_count=file_count, active_model=active_model,
     )
     await _maybe_run_developer_investigation(state, ctx, kwargs, active_model)
+    _decide_edit_capabilities(state, ctx, kwargs)
     # DEVELOPER-PROMPT-FIT-001: every request is fitted into the capacity of
     # the binding it is sent to, its optional sections shrinking first.
     kwargs["request_fit"] = DeveloperRequestFit(
@@ -2090,6 +2326,9 @@ async def _run_developer_generation_as_developer(
         kwargs.pop("optional_sections", None) or (),
     )
     if "expected_output_by_file" not in kwargs:
+        # A target whose capability excludes the full file is always asked
+        # for an anchored patch, to which the Developer applies no
+        # expectation (CONTEXT-EDIT-PROTOCOL-001).
         kwargs["expected_output_by_file"] = _grounded_output_expectations(
             ctx, kwargs.get("known_target_files"), _chain_binding(ctx, kwargs.get("model_override")),
         )
@@ -6421,9 +6660,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # gets {} and build_known_target_context() falls back to its
             # existing file-level handling unchanged.
             known_target_member_hints = _resolve_known_target_member_hints(ctx, known_target_files)
-            known_target_rendered, known_target_package = build_known_target_context(
-                known_target_files, ctx.workspace_path, ctx.worktree_path, known_target_limit,
-                member_hints=known_target_member_hints, cache=ctx.source_cache,
+            known_target_rendered, known_target_package = _target_package_with_window_reserve(
+                ctx, known_target_files, known_target_limit, active_prompt_window, known_target_member_hints,
             )
             if known_target_rendered:
                 active_code_context += known_target_rendered
@@ -7052,8 +7290,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 diagnostics={"reason_code": "ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED"},
                 attempt=state.attempt_number,
             )
+            _record_edit_protocol_failure(state, filepath, failure.type)
             state.gate_outcomes.append(failure.to_gate_outcome())
             raise QualityGateFailure(failure)
+        if actual_operation in (CodeOperation.CREATE_FULL_FILE, CodeOperation.REPAIR_WITH_FULL_FILE):
+            state.edit_failure_capability.pop(filepath, None)  # an authorized whole-file edit was accepted
         # VAL-001 G1 D1-B: only reached once this file's actual mutation
         # shape has cleared authority - see this cache's own recording-site
         # comment above for why an unconditional/earlier recording would
@@ -7346,6 +7587,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     orig_text = fh.read()
 
             try:
+                _authorize_anchors(state, filepath, edits, orig_text)
                 new_content = apply_anchored_edits(orig_text, edits, active_code_context)
             except ValueError as anchor_ex:
                 # apply_anchored_edits() itself never receives a filepath, so its
@@ -7421,6 +7663,9 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 state.budgets.anchor_failure_counts[filepath] = (
                     state.budgets.anchor_failure_counts.get(filepath, 0) + 1
                 )
+                _record_edit_protocol_failure(state, filepath, "anchored_edit")
+                _remember_anchor_loci(state, filepath, edits, orig_text)
+                anchor_reason = str(anchor_ex).split(":", 1)[0]
                 failure = Failure(
                     type="anchored_edit",
                     message=f"ANCHORED EDIT FAILURE in {filepath}: {anchor_ex}",
@@ -7429,12 +7674,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     likely_files=[filepath],
                     failed_content={filepath: orig_text},
                     attempted_edits=edits,
+                    diagnostics=({"reason_code": anchor_reason} if anchor_reason.isupper() else {}),
                     attempt=state.attempt_number,
                 )
                 state.gate_outcomes.append(failure.to_gate_outcome())
                 raise QualityGateFailure(failure) from anchor_ex
 
             state.budgets.anchor_failure_counts[filepath] = 0
+            state.edit_failure_capability.pop(filepath, None)
 
             # Layer 0 pre-flight check (see find_whole_response_no_op's own
             # docstring): purely structural, no analysis text or fail_type

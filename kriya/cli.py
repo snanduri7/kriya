@@ -2794,7 +2794,8 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                 if res.get("environment_failure") and res.get("failure_category") not in (
                     "unauthorized_generation_target", "candidate_independent_deterministic_failure",
                     "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
-                    "fallback_model_incompatible", "requirements_unresolved", "contract_registry_blocked",
+                    "fallback_model_incompatible", "context_edit_protocol_unsatisfiable",
+                    "requirements_unresolved", "contract_registry_blocked",
                     "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
                     "workspace_commit_failed",
                 ):
@@ -2895,6 +2896,14 @@ def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
                         "Nothing was applied. The verifier gave no accepted evidence for these "
                         "requirements of your goal; restate them concretely, or review the result "
                         "(autonomy.requirement_unknown_policy / requirement_unverified_policy).",
+                        fg="yellow", bold=True
+                    )
+                if res.get("failure_category") == "context_edit_protocol_unsatisfiable":
+                    click.secho(
+                        f"\n[NO FEASIBLE EDIT OPERATION] {res['environment_failure']}\n"
+                        "Kriya stopped before asking the model for an edit it could not authorize: "
+                        "the target's exact source for the change could not be localized or did not "
+                        "fit, and its complete source was not available.",
                         fg="yellow", bold=True
                     )
                 if res.get("failure_category") == "fallback_model_incompatible":
@@ -4319,7 +4328,8 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             if res.get("environment_failure") and res.get("failure_category") not in (
                 "unauthorized_generation_target", "candidate_independent_deterministic_failure",
                 "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
-                "fallback_model_incompatible", "requirements_unresolved", "contract_registry_blocked",
+                "fallback_model_incompatible", "context_edit_protocol_unsatisfiable",
+                "requirements_unresolved", "contract_registry_blocked",
                 "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
                 "workspace_commit_failed",
             ):

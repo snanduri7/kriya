@@ -706,6 +706,32 @@ It certifies Kriya plus an exact identity. The identity is the Developer runtime
   - A failed or incomplete matrix, a matrix on another identity, or an identity change mid-trial resets the streak to 0. No trial is dropped, and a tampered log is never overwritten.
 - **What the matrix covers.** It runs the direct workflow path. The production profile's enforce path is certified by the PRD-036 canary (`scripts/prd036_canary.sh`) and `kriya doctor --production`. `scripts/prd036_gate.py` binds all of them into one decision.
 
+### 2.9h Edit-Protocol Capability (CONTEXT-EDIT-PROTOCOL-001, `kriya/workflow/edit_capability.py`)
+
+Invariant: Kriya never offers a mutation operation that is infeasible under the authoritative context of that
+Developer invocation. At the Developer choke point (`attempt._decide_edit_capabilities`) every existing target gets
+one `EditCapability` (run event `context.edit_capability`), read by the operation contract (`edit_operations` ->
+`DeveloperAgent._fill_missing_content`) and by the response validators (`_authorize_anchors`,
+`_validate_actual_mutation_authority`) alike.
+
+- **Full file** only with D1 authority (`_has_authoritative_full_source`) or the deterministic restore phase; the
+  contract omits `FILE CONTENT:` otherwise, overriding a capability profile's full-file preference.
+- **Anchored edit** only when byte-exact spans cover every located edit locus. Exact spans: a `full`/`member_exact`
+  package item, an implementation excerpt's head and tail, the whole file verbatim in the request's mandatory text
+  (optional sections can be trimmed and never count), or derived exact-source windows. Skeleton text never counts.
+- **Loci** are deterministic: code the user's goal quotes and that occurs verbatim in the target, the lines the last
+  failure names, and where every rejected SEARCH block points in the real source (remembered across attempts).
+- **Windows**: per locus its enclosing member, else indentation block, when that fits an equal share of the budget;
+  otherwise a local window, all of one radius (the largest that fits, up to `8 * 2^anchor_failures`). The budget is
+  `EXACT_WINDOW_SHARE` (12%) of the binding's allocation window, held back from the known-target/retry-member package
+  only when a target is not shown whole. Windows are rendered between marker lines naming file and line span.
+- **No feasible operation**: `CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE` before inference (typed stop,
+  `failure_category: context_edit_protocol_unsatisfiable`).
+- **Anchors**: real text outside the exact spans is `ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT` (its location becomes a locus
+  for the next window); text not in the file is `ANCHOR_NOT_IN_FILE`; a span of an older revision authorizes nothing.
+- **Retry**: an edit-protocol failure followed by the same capability digest, model and requested operation is
+  `ANCHOR_CONTEXT_NOT_ESCALATED`, a stop before inference that always counts toward the no-progress limit.
+
 ### 2.10 `kriya/workflow/` Module Layout
 
 `kriya/workflow/workflow.py` had grown to ~4700 lines - every helper this section describes (context budgeting, edit safety, failure grounding, toolchain detection, retry-prompt building, skill extraction, live lookup, LSP integration, worktree lifecycle) lived in one file, making both navigation and full-file context loading during development increasingly costly. Mechanically extracted (2026-08-11) into focused modules, each re-exported back into `workflow.py`'s own namespace so every existing `from kriya.workflow.workflow import X` and `unittest.mock.patch("kriya.workflow.workflow.X", ...)` call site across the codebase and test suite kept working unchanged - a pure move, not a rewrite; `run_generation_workflow()`'s own internal orchestration logic is untouched and stays in `workflow.py` (~2600 lines) for now, deliberately deferred as separate, higher-risk follow-up work:

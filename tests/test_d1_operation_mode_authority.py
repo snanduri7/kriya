@@ -1017,7 +1017,12 @@ class TestApprovalNeverReached:
         ))
 
         assert result["quality_gates_passed"] is False
-        assert result["failure_category"] == "quality_gates_exhausted"
+        # CONTEXT-EDIT-PROTOCOL-001: the target is shown only as a skeleton and
+        # the goal localizes nothing, so no mutation operation is feasible -
+        # the run stops before any Developer request (previously the
+        # unauthorized full file was requested and rejected until the retry
+        # budget ran out). The invariant below holds either way.
+        assert result["failure_category"] == "context_edit_protocol_unsatisfiable"
         assert approval_callback.call_count == 0, (
             "an unauthorized full-file candidate must never reach human approval at all - "
             "approval must not be relied on, or even reached, to contain this class of defect"

@@ -1706,6 +1706,7 @@ class DeveloperAgent(BaseAgent):
         generation_protocol: Optional[Any] = None,
         expected_output_by_file: Optional[Dict[str, Any]] = None,
         request_fit: Optional[Any] = None,
+        edit_operations: Optional[Dict[str, Iterable[str]]] = None,
     ) -> List[Dict[str, str]]:
         """Passes through any entry that already has real content/edits unchanged (no
         extra call), and individually generates content for any entry that doesn't -
@@ -1930,6 +1931,19 @@ class DeveloperAgent(BaseAgent):
                     "Developer: model capability profile prefers full-file repair; "
                     f"using that safe fallback for '{filepath}'."
                 )
+            # CONTEXT-EDIT-PROTOCOL-001: when the attempt decided this file's
+            # feasible operations from its authoritative context, they - not
+            # the capability profile's preference or the requested operation -
+            # decide what the contract offers: the full file only with
+            # authoritative full source, an anchored patch only with exact
+            # source for the edit. The response validators read the same record.
+            file_operations = None if edit_operations is None else edit_operations.get(filepath)
+            full_file_offered = file_operations is None or "full_file_replacement" in file_operations
+            if file_operations is not None:
+                if "full_file_replacement" not in file_operations:
+                    requested_operation_value = "repair_with_patch"
+                elif "anchored_edit" not in file_operations and requested_operation_value == "repair_with_patch":
+                    requested_operation_value = "repair_with_full_file"
 
             # The exact broken source line(s), read fresh from the worktree by
             # extract_error_source_locations()/_build_error_source_context()
@@ -1978,7 +1992,7 @@ class DeveloperAgent(BaseAgent):
             # patch is just as well-grounded as it is for a compile-error locator.
             prefer_anchored_edit = (
                 requested_operation_value == "repair_with_patch"
-                if requested_operation is not None
+                if requested_operation is not None or file_operations is not None
                 else apply_fix_analysis and (
                     bool(source_context_block)
                     or filepath in (files_with_current_content or ())
@@ -2055,9 +2069,9 @@ class DeveloperAgent(BaseAgent):
                     "  \"SEARCH:\" <exact original text, copied verbatim from the source shown to you>\n"
                     "  \"REPLACE:\" <the corrected replacement - only the lines that actually change, plus "
                     "the minimum surrounding context needed to uniquely identify them>\n"
-                    "or, only if the fix genuinely requires broader restructuring than a small patch:\n"
-                    "  \"FILE CONTENT:\" <the complete corrected file>\n"
-                    "or, if this file genuinely needs no code change (the bug is entirely in a different "
+                    + ("or, only if the fix genuinely requires broader restructuring than a small patch:\n"
+                       "  \"FILE CONTENT:\" <the complete corrected file>\n" if full_file_offered else "")
+                    + "or, if this file genuinely needs no code change (the bug is entirely in a different "
                     "file this error also implicates):\n"
                     "  \"NO CHANGE NEEDED:\" <one sentence explaining why>\n"
                     "Never combine these outcomes, and never return raw file content with no FIX ANALYSIS "
@@ -2099,12 +2113,17 @@ class DeveloperAgent(BaseAgent):
                     "(copied verbatim from the source context above) that needs to change, then the line "
                     "\"REPLACE:\" followed by the corrected code - include only the lines that actually "
                     "need to change plus the minimum surrounding context needed to uniquely identify them, "
-                    "not the whole file. Only if the fix genuinely requires broader restructuring beyond a "
-                    "small patch, instead write \"FILE CONTENT:\" followed by the complete corrected file. "
-                    f"If, after your analysis, THIS SPECIFIC FILE genuinely requires no code change to "
+                    "not the whole file. "
+                    + ("Only if the fix genuinely requires broader restructuring beyond a "
+                       "small patch, instead write \"FILE CONTENT:\" followed by the complete corrected file. "
+                       if full_file_offered else
+                       "A whole-file replacement is not available for this file: its complete current source "
+                       "was not shown, so copy SEARCH text only from exact source shown above. ")
+                    + f"If, after your analysis, THIS SPECIFIC FILE genuinely requires no code change to "
                     f"{_no_change_topic} (for example, this file only calls into or references another file "
                     "where the actual work belongs), instead write the line \"NO CHANGE NEEDED:\" followed by "
-                    "one sentence explaining why, and do NOT write a SEARCH:/REPLACE:/FILE CONTENT: block "
+                    "one sentence explaining why, and do NOT write a SEARCH:/REPLACE:"
+                    + ("/FILE CONTENT:" if full_file_offered else "") + " block "
                     "at all - do not invent an edit just to have one.\n"
                 )
             elif apply_fix_analysis:
@@ -2216,8 +2235,9 @@ class DeveloperAgent(BaseAgent):
                 generation_directive = (
                     f"Follow the REPAIR contract above for '{filepath}' ONLY - do not touch or return "
                     "content for any other file, even one mentioned above: write FIX ANALYSIS first, then "
-                    "exactly one of SEARCH:/REPLACE:, FILE CONTENT:, or NO CHANGE NEEDED:. Never return "
-                    "raw file content with no FIX ANALYSIS line.\n"
+                    + ("exactly one of SEARCH:/REPLACE:, FILE CONTENT:, or NO CHANGE NEEDED:. "
+                       if full_file_offered else "exactly one of SEARCH:/REPLACE: or NO CHANGE NEEDED:. ")
+                    + "Never return raw file content with no FIX ANALYSIS line.\n"
                 )
             elif apply_fix_analysis:
                 generation_directive = (
@@ -2502,6 +2522,7 @@ class DeveloperAgent(BaseAgent):
         default_operation: Optional[Any] = None,
         expected_output_by_file: Optional[Dict[str, Any]] = None,
         request_fit: Optional[Any] = None,
+        edit_operations: Optional[Dict[str, Iterable[str]]] = None,
     ) -> List[Dict[str, str]]:
         """Generates code files based on planner task and architect design. Prefers
         per-file generation for reliability (filling in only what's missing), falling
@@ -2561,7 +2582,7 @@ class DeveloperAgent(BaseAgent):
                 prior_error_context, implicated_files, error_source_context, retry_temperature,
                 extra_fix_instruction, files_with_current_content, sibling_content_budget,
                 operation_by_file, default_operation, generation_protocol, expected_output_by_file,
-                request_fit,
+                request_fit, edit_operations,
             )
 
         try:
@@ -2577,7 +2598,7 @@ class DeveloperAgent(BaseAgent):
                     prior_error_context, implicated_files, error_source_context, retry_temperature,
                     extra_fix_instruction, files_with_current_content, sibling_content_budget,
                     operation_by_file, default_operation, generation_protocol, expected_output_by_file,
-                    request_fit,
+                    request_fit, edit_operations,
                 )
 
         except ContextBudgetUnsatisfiableError:

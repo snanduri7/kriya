@@ -211,7 +211,7 @@ def test_a_request_whose_mandatory_text_alone_cannot_fit_is_refused_before_infer
     assert reduction["sections"]["graph_context"]["omitted"] and reduction["file"] == "A.java"
 
 
-def test_the_choke_point_fits_for_the_binding_actually_called_with_its_sections(monkeypatch):
+def test_the_choke_point_fits_for_the_binding_actually_called_with_its_sections(monkeypatch, tmp_path):
     """Every Developer generation goes through _run_developer_generation:
     the request fit it hands the agent names the llm_chain binding the call
     is sent to (the primary when there is no override) and carries the
@@ -237,6 +237,7 @@ def test_the_choke_point_fits_for_the_binding_actually_called_with_its_sections(
     monkeypatch.setattr(attempt, "_ensure_generation_time_budget", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(attempt, "_maybe_run_developer_investigation", no_investigation)
     ctx = SimpleNamespace(kernel=SimpleNamespace(config=cfg), chain=[fallback], expected_files_upfront=None,
+                          worktree_path=str(tmp_path), workspace_path=str(tmp_path),
                           developer=SimpleNamespace(run_generation=run_generation, llm=None))
     section = _section("graph_context", "graph")
     for override in ("dev-fallback", None):

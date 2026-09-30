@@ -472,6 +472,8 @@ def _big_calc(tmp_path):
 def _developer_run(tmp_path, monkeypatch, *, max_output, protocol="small_native_tools"):
     from kriya.agents.agent import DeveloperAgent
     from kriya.workflow.attempt import _run_developer_generation
+    from kriya.workflow.context_package import make_context_item
+    from kriya.workflow.edit_safety import content_revision
     from kriya.workflow.operations import CodeOperation
     from kriya.workflow.state import GenerationState
 
@@ -493,6 +495,14 @@ def _developer_run(tmp_path, monkeypatch, *, max_output, protocol="small_native_
     ctx = _attempt_ctx(tmp_path, cfg, DeveloperAgent("developer", llm))
     state = GenerationState()
     state.attempt_number = 1
+    # A full-file request presupposes whole-file authority: the complete,
+    # exact current source was shown (CONTEXT-EDIT-PROTOCOL-001 offers the
+    # full file only then; D1's recorded provenance, as the known-target
+    # package records it when the file fits).
+    state.known_target_context_items["calc.py"] = make_context_item(
+        path="calc.py", content=source, reason="test", source_type="named_in_request",
+        trust_level="repository", tier="full", is_exact=True, revision=content_revision(source),
+    )
     files = asyncio.run(_run_developer_generation(
         state, ctx, task_description="Rename add0 to plus0", design_context="Design: rename",
         existing_code_context=f"=== File: calc.py ===\n{source}", known_target_files=["calc.py"],

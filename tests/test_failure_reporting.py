@@ -45,6 +45,8 @@ _REAL_FAILURE_TYPES = {
     "output_budget_unsatisfiable": FailureCategory.RESOURCE,
     # PRD-017: a fallback model that cannot serve the attempt.
     "fallback_incompatible": FailureCategory.RESOURCE,
+    # CONTEXT-EDIT-PROTOCOL-001: no feasible mutation operation, before inference.
+    "context_edit_protocol_unsatisfiable": FailureCategory.RESOURCE,
     # MODEL-EVIDENCE-HARDENING-001: a production Developer retry whose
     # retry-temperature inference identity is not qualified.
     "retry_identity_not_qualified": FailureCategory.RESOURCE,

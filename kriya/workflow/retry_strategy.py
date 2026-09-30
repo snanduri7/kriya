@@ -43,6 +43,7 @@ from kriya.workflow.deterministic_failure_diagnostic import (
     DeterministicFailureCorrectability,
     evaluate_candidate_independent_failure,
 )
+from kriya.workflow.edit_capability import ANCHOR_CONTEXT_NOT_ESCALATED
 from kriya.workflow.failure import (
     Failure,
     FailureAttributionKind,
@@ -74,6 +75,7 @@ from kriya.workflow.retry_policy import (
 from kriya.workflow.retry_progress import (
     NO_PROGRESS_TERMINAL_REASON,
     REGRESSION,
+    REPEATED_ACTION,
     ProgressVector,
     build_progress_vector,
     classify_progress,
@@ -160,6 +162,7 @@ def record_workspace_progress(
     files=None,
     action: Optional[str] = None,
     vector: Optional[ProgressVector] = None,
+    capability_unchanged: bool = False,
 ) -> bool:
     """Classify every failed attempt and bound retries without progress.
 
@@ -167,7 +170,12 @@ def record_workspace_progress(
     this run already produced is REPEATED_VECTOR and counts toward
     ``limit``, whatever changed in between. That closes the A -> B -> A
     cycle the pairwise comparison below cannot see. Without a vector the
-    pre-PRD-026 pairwise rules apply unchanged."""
+    pre-PRD-026 pairwise rules apply unchanged.
+
+    ``capability_unchanged`` (CONTEXT-EDIT-PROTOCOL-001): the attempt stopped
+    before inference because the edit capability for the same model and
+    failure could not change; a strategy change that cannot change it is
+    not a transition, so it always counts."""
     normalized_files = tuple(sorted(set(files or ())))
     same_workspace = workspace_hash == state.last_failed_workspace_hash
     stage_order = {
@@ -194,6 +202,8 @@ def record_workspace_progress(
         same_workspace=same_workspace, action_changed=action_changed,
         stage_regressed=stage_regressed, repeated_action=repeated_action,
     )
+    if capability_unchanged and not counts:
+        classification, counts = REPEATED_ACTION, True
     if counts:
         state.consecutive_no_progress_attempts += 1
     else:
@@ -482,6 +492,10 @@ async def _record_attempt_failure(
             # failed qualification, a required patch it cannot return, no
             # prompt room). Re-sending it cannot change that.
             "fallback_incompatible",
+            # CONTEXT-EDIT-PROTOCOL-001: no mutation operation is feasible under
+            # the authoritative context; nothing was sent, and resending the
+            # same unwinnable request cannot change that.
+            "context_edit_protocol_unsatisfiable",
             # MODEL-EVIDENCE-HARDENING-001: a production Developer retry
             # whose retry-temperature identity is not QUALIFIED. Retrying
             # cannot qualify it.
@@ -701,6 +715,10 @@ async def _record_attempt_failure(
         vector=_attempt_progress_vector(
             state, ctx, failure, current_failure_signature, current_workspace_hash,
             e.missing_files if is_incomplete_generation else (),
+        ),
+        capability_unchanged=(
+            isinstance(getattr(failure, "diagnostics", None), dict)
+            and failure.diagnostics.get("reason_code") == ANCHOR_CONTEXT_NOT_ESCALATED
         ),
     ):
         logger.error(

@@ -463,7 +463,10 @@ written in the same batch (names only; `model.optional_context_reduced`). If it 
 inference: `CONTEXT_BUDGET_UNSATISFIABLE` when the prompt itself cannot fit, `OUTPUT_BUDGET_UNSATISFIABLE` when the prompt fits but the grounded output cannot. For a full-file
 rewrite of an existing file the Developer then asks once for an anchored patch instead (models whose capability profile
 accepts patches), recorded as `model.output_budget_protocol_fallback`; otherwise the attempt fails with the typed
-reason. An answer the provider cuts off is `OUTPUT_TRUNCATED` and is never written; a retry does not enlarge the output
+reason. A whole-file answer is only ever asked for when the complete current source of that file was shown; a patch
+only when the exact lines to change are shown (Kriya adds exact line windows around code your goal quotes, around
+failure locations and around anchors that missed). When neither is possible the run stops before calling the model
+with `CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE` - quote the line to change in the goal, or name the function. An answer the provider cuts off is `OUTPUT_TRUNCATED` and is never written; a retry does not enlarge the output
 unless the expectation is grounded. `llm.context_policy` is SECURITY_AUTHORITY: a repository cannot grant itself a
 larger window.
 

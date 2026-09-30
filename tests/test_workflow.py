@@ -23281,7 +23281,7 @@ def test_apply_anchored_edits_chained_grounding_still_rejects_fabricated_search_
     shown_context = original
     edits = [{"search": "<parameter name=\"totally_fake\"/>", "replace": "<property name=\"totally_fake\"/>"}]
 
-    with pytest.raises(ValueError, match="elided in the skeletonized context"):
+    with pytest.raises(ValueError, match="ANCHOR_NOT_IN_FILE"):
         apply_anchored_edits(original, edits, shown_context)
 
 

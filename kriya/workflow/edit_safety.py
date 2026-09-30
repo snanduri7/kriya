@@ -815,9 +815,11 @@ def apply_anchored_edits(original_content: str, edits: List[Dict[str, str]], sho
             norm_shown = normalize_whitespace(shown_context)
             norm_current = normalize_whitespace(current_content)
             if norm_search not in norm_shown and norm_search not in norm_current:
+                # CONTEXT-EDIT-PROTOCOL-001: neither shown nor in the file - a
+                # fabricated or stale block, not an elided one.
                 raise ValueError(
-                    f"Anchor matching failed for edit #{idx}: The search block contains code segments "
-                    f"that were elided in the skeletonized context and not shown to the model."
+                    f"ANCHOR_NOT_IN_FILE: Anchor matching failed for edit #{idx}: the search block occurs "
+                    f"neither in the source shown to the model nor in the current file (fabricated or stale)."
                 )
 
         exact_count = current_content.count(search_block)

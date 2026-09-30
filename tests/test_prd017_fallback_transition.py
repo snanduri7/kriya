@@ -118,10 +118,10 @@ def _ctx(workspace, cfg, developer):
     )
 
 
-def _fallback_kwargs(cfg, **extra):
+def _fallback_kwargs(cfg, existing_code_context="", **extra):
     fallback = cfg.llm_chain[0]
     return dict(
-        task_description="Fix it", design_context="Design", existing_code_context="",
+        task_description="Fix it", design_context="Design", existing_code_context=existing_code_context,
         model_override=fallback.model, base_url_override=fallback.base_url,
         api_key_override=fallback.api_key, extra_body_override=fallback.extra_body, **extra,
     )
@@ -275,8 +275,14 @@ async def test_the_hop_is_recorded_field_by_field(tmp_path, monkeypatch):
 
 # --- explicit incompatibility ---------------------------------------------------------------
 
+SERVICE_SOURCE = "class Service {\n    void run() {}\n}\n"
+# The current source a real patch request shows (CONTEXT-EDIT-PROTOCOL-001:
+# an anchored patch is offered only with exact source to anchor in).
+SHOWN_SERVICE = f"=== File: Service.java ===\n{SERVICE_SOURCE}"
+
+
 def _existing_target(tmp_path):
-    (tmp_path / "Service.java").write_text("class Service {\n    void run() {}\n}\n")
+    (tmp_path / "Service.java").write_text(SERVICE_SOURCE)
 
 
 @pytest.mark.asyncio
@@ -328,7 +334,8 @@ async def test_a_patch_capable_fallback_is_not_refused_for_the_same_attempt(tmp_
     state = GenerationState()
     await _run_developer_generation(
         state, ctx, known_target_files=["Service.java"],
-        operation_by_file={"Service.java": CodeOperation.REPAIR_WITH_PATCH}, **_fallback_kwargs(cfg),
+        operation_by_file={"Service.java": CodeOperation.REPAIR_WITH_PATCH},
+        **_fallback_kwargs(cfg, existing_code_context=SHOWN_SERVICE),
     )
     developer.run_generation.assert_awaited_once()
 
@@ -497,7 +504,7 @@ async def test_a_required_patch_moves_the_call_to_the_next_patch_capable_fallbac
         await _run_developer_generation(
             state, ctx, known_target_files=["Service.java"],
             operation_by_file={"Service.java": CodeOperation.REPAIR_WITH_PATCH},
-            **_fallback_kwargs(cfg),
+            **_fallback_kwargs(cfg, existing_code_context=SHOWN_SERVICE),
         )
 
     sent = [call[1] for call in create.call_args_list]

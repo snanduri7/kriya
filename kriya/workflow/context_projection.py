@@ -40,6 +40,10 @@ class FileProjection:
         )
 
 
+# The line an implementation excerpt puts between its exact head and tail.
+EXCERPT_OMISSION_MARKER = "\n... [middle omitted from working context; canonical source remains local] ...\n"
+
+
 def project_implementation_source(
     content: str, path: str, max_chars: int, *, reason: str,
     known_revision: Optional[str] = None,
@@ -52,7 +56,7 @@ def project_implementation_source(
     of this function re-hashing the full content a second time - safe only
     when the caller can guarantee content hasn't changed on disk since that
     revision was computed, which callers must verify themselves."""
-    marker = "\n... [middle omitted from working context; canonical source remains local] ...\n"
+    marker = EXCERPT_OMISSION_MARKER
     if len(content) <= max_chars:
         projected = content
         omitted = False
