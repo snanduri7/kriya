@@ -1,0 +1,1 @@
+{"check": "L1_native_postfix", "status": "OK", "prompt_tokens": 24, "reasoning_chars": 0, "budget_window": 32768, "window_source": "requested_per_request", "served_after_call": 32768, "consumption": "consistent", "violation": null, "api_ps": 32768, "http_requests": 1}

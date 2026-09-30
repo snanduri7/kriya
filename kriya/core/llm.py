@@ -446,13 +446,13 @@ class LLMClient:
         # server happens to serve more.
         if served_context is not None:
             served, provenance, source = served_context, Provenance.SERVER_OBSERVED, "served_observed"
+        elif runtime.capabilities.per_request_context_window:
+            # Sent with the request and applied by this runtime (declared),
+            # not yet observed; checked against the served window after the call.
+            served, provenance, source = None, Provenance.UNVERIFIED, "requested_per_request"
         elif fingerprint.effective_context_window:
             served, provenance, source = (fingerprint.effective_context_window, Provenance.SERVER_MODEL_CONFIG,
                                           "server_model_config")
-        elif runtime.capabilities.per_request_context_window:
-            # Sent with the request and applied by this runtime (declared),
-            # not yet observed.
-            served, provenance, source = None, Provenance.UNVERIFIED, "requested_per_request"
         elif runtime.provider_capabilities.feature("served_context_observation").value != "unsupported":
             served, provenance, source = None, Provenance.UNVERIFIED, "requested_unverified"
         else:

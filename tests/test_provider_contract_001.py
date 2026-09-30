@@ -857,3 +857,21 @@ def test_the_doctor_controlled_probe_never_writes_to_stdout(fake, capsys):
     evidence = probe_served_context(_fake_config(), "primary:1")
     assert evidence["probe_request_sent"] is True and fake.requests
     assert capsys.readouterr().out == ""
+
+
+def test_a_per_request_window_is_labelled_as_carried_by_the_request(monkeypatch):
+    """Live L1 (2026-09-30): native calls reported window_source
+    server_model_config although the window travels with each request."""
+    monkeypatch.setenv(model_runtime.PROBE_ENV_VAR, "1")
+    monkeypatch.setattr(model_runtime, "record_fingerprint", lambda *a, **k: None)
+    adapter = FakeRuntimeAdapter("fake_per_request", per_request_context_window=True)
+    register_runtime_adapter(adapter)
+    model_runtime.clear_model_runtime_cache()
+    try:
+        config = _fake_config()
+        config.llm.inference_runtime = "fake_per_request"
+        result = asyncio.run(LLMClient(config).complete_result("s", "u"))
+    finally:
+        unregister_runtime_adapter(adapter.name)
+        model_runtime.clear_model_runtime_cache()
+    assert result.budget["window_source"] == "requested_per_request"
