@@ -470,6 +470,30 @@ with `CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE` - quote the line to change in the goa
 unless the expectation is grounded. `llm.context_policy` is SECURITY_AUTHORITY: a repository cannot grant itself a
 larger window.
 
+### 2.0f The provider contract: what reaches the model (PROVIDER-CONTRACT-001)
+
+Kriya records, budgets and qualifies only settings it can prove reach the provider.
+
+- **What Ollama's `/v1` API applies.** It applies `temperature`, `top_p`, `seed` and `reasoning_effort` per request. `reasoning: false` is sent as `reasoning_effort: "none"`.
+- **What only the served model's own configuration applies.** `options.num_ctx`, `options.top_k`, `min_p` and the penalties are applied only by the served model. Kriya compares them with the model's own PARAMETERs.
+  - Outside production, a mismatch is recorded.
+  - Under `runtime_profile: production`, the request is refused (`PROVIDER_SETTING_NOT_EFFECTIVE`).
+  - A served context window other than the requested one is refused (`RUNTIME_CONTEXT_IDENTITY_MISMATCH`). A smaller one is always refused (`SERVED_CONTEXT_BELOW_REQUESTED`).
+- **Pin those settings into a derived model and bind it:**
+
+```bash
+kriya model pin --model qwen3-coder:30b --dry-run   # shows qwen3-coder:30b-kriya-<hash> with PARAMETER num_ctx/top_k
+kriya model pin --model qwen3-coder:30b             # creates it on the local Ollama
+# set llm.model to the printed name, then:
+kriya model qualify --model qwen3-coder:30b-kriya-<hash>
+```
+
+- **Qualification (policy /4)** refuses an identity it cannot verify (`QUALIFICATION_IDENTITY_UNVERIFIED`), for example an unpinned window. `kriya doctor --production` has a `model.provider_contract` row: it sends one controlled request per role model and checks the served window.
+- **Transport.** `llm.transport` sets Kriya's own timeouts: `connect_timeout_seconds`, `read_timeout_seconds`, `write_timeout_seconds` and `pool_timeout_seconds`. Inside an attempt, a request never waits past the attempt's remaining time. Each call is exactly one HTTP request (no SDK retries), and it never goes through `HTTP(S)_PROXY`/`ALL_PROXY`.
+- **Truncation.** A response whose reported prompt tokens show the provider dropped input is rejected (`PROVIDER_PROMPT_TRUNCATED`).
+- **Output budgets per role.** `agent_llms.<role>.max_output_tokens` gives each role its own output budget; otherwise the role uses its model binding's `max_tokens`, and the Planner uses `llm.planner_max_tokens`. A reasoning identity adds the reasoning reserve its qualification measured.
+- **Native API.** `inference_runtime: ollama_native` uses Ollama's native `/api/chat`, keeping the usual `base_url` ending in `/v1`. Every setting and the window travel per request, and the provider refuses over-long prompts because `truncate: false` is always sent. It is not the default: qualify it before relying on it.
+
 ### 2.1 Per-Role Model Selection (`agent_llms`)
 Planner, Architect, Developer, Reviewer, RunVerifier, and SkillGapAgent (skill-gap extraction and conflict-checking) don't have to share one model - each is independently configurable, with its own optional escalation chain.
 

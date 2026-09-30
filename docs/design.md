@@ -457,6 +457,22 @@ Fixed with a new deterministic extraction function, `extract_planner_code_blocks
 
 **The `.java`-only table left every other language with zero coverage, and Python's own failure shape defeats the keyword-heuristic approach entirely (2026-08-13, found live via the eval harness's `python_greeter` goal, reproduced identically across two separate runs).** A Planner-drafted `greet.py` had Kriya's own `"[VERIFICATION] PASS"` runtime-verification marker embedded as a bare, unquoted line rather than inside a `print()` call - syntactically invalid Python - but the file still contained a real `def`/`print` elsewhere, so a Java-style keyword-presence check would have accepted it: unlike Java, valid Python has no required top-level keyword to search for at all (a file with nothing but `print("hi")` is completely valid). The reused, unreviewed content took the Developer retry loop 5 attempts to recover from live, including two genuine model misdiagnoses (guessing "invisible Unicode whitespace," "encoding issues") before ever identifying the real cause. Fixed by generalizing `_MIN_PLAUSIBLE_CODE_PATTERN` (now `_MIN_PLAUSIBLE_CODE_CHECK`) from a `Dict[str, re.Pattern]` to a `Dict[str, Callable[[str], bool]]` - `.java` keeps its existing keyword-regex check unchanged (no stdlib Java parser available); `.py` gets a strictly stronger check, `ast.parse()` wrapped in a try/except, since Python's own standard library can validate real syntax exactly rather than approximate it. 2 new tests mirroring the Java pair (the exact incident shape, confirmed rejected; a sibling proving genuinely valid Python - including code with no `class`/`def` at all - is still accepted normally). Extensions with no entry in the table still get no plausibility check at all - this remains a known, incomplete allowlist by design, not a claim of full language coverage.
 
+### 2.4b Provider contract (PROVIDER-CONTRACT-001, KAD-062)
+
+The inference runtime port (§2.4a) gained a provider-neutral contract (`kriya/core/provider_contract.py`).
+
+- **Capabilities.** An adapter declares how it carries each semantic setting (SUPPORTED per request, SERVER_CONFIG_ONLY, OBSERVABLE_ONLY, UNSUPPORTED).
+- **Request plan.** It turns a binding's `extra_body` into a `ProviderRequestPlan`: the exact wire body, plus each setting's requested and effective value with its provenance.
+- **Context windows.** Requested, served (observed) and budget windows are separate, and the budget never exceeds the requested window.
+- **Qualification.** Records bind the effective identity:
+  - inference settings /3 are the wire body plus the requested server-only settings;
+  - policy /4 refuses an identity that cannot be verified;
+  - the capacity case checks the served window.
+- **Transport.** It is Kriya-owned: no SDK retry, no inherited proxy, Kriya timeouts, one request per call, and deterministic close.
+- **Adapters.** The `/v1` adapter (`ollama`, default) and the native adapter (`ollama_native`, `/api/chat`, not the default) both live in `kriya/core/model_runtime.py`.
+
+Full design and measured provider facts: `handover/PROVIDER_CONTRACT_001.md`.
+
 ### 2.7 Runtime Verification Gate
 Compiling and passing unit tests doesn't prove a running system behaves correctly - the gate that motivated this was catching messaging-config mistakes (wrong broker settings, wrong delivery semantics) that only manifest at runtime, invisible to compile-only checking. Placed as a new tier right after targeted-test success, deliberately *before* the pre-apply human-approval gate and before worktree cleanup, so the generated files are guaranteed to still be present to run:
 *   **Judge**: `RunVerifierAgent.judge()` decides `should_run`, infers a `run_command` if the goal doesn't state one explicitly, and defines success criteria against the goal text.
