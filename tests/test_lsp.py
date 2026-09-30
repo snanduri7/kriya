@@ -303,9 +303,9 @@ def test_format_diagnostics_for_prompt_is_forceful_ground_truth_framing():
 # --- LEAK-JDTLS-START-FAILURE-001: a failed start() releases what it acquired ---
 
 def _silent_jdtls(tmp_path) -> str:
-    """A real executable standing in for jdtls: records its pid, never answers."""
+    """A real executable standing in for jdtls: never answers."""
     script = tmp_path / "fake-jdtls"
-    script.write_text(f"#!/bin/sh\necho $$ > '{tmp_path / 'pid'}'\nexec sleep 120\n")
+    script.write_text("#!/bin/sh\nexec sleep 120\n")
     script.chmod(0o755)
     return str(script)
 
@@ -326,12 +326,24 @@ def temp_root(tmp_path, monkeypatch):
 async def test_initialize_timeout_releases_data_dir_process_and_reader(tmp_path, temp_root, monkeypatch):
     monkeypatch.setattr(lsp, "JDTLS_INIT_TIMEOUT_SECONDS", 1.0)
     monkeypatch.setattr(lsp, "find_jdtls", lambda: _silent_jdtls(tmp_path))
+    # The pid of the process Kriya spawned, not one the child writes itself: under load
+    # the child could still be starting when the 1 s timeout kills it.
+    spawned = []
+    real_spawn = asyncio.create_subprocess_exec
+
+    async def recording_spawn(*args, **kwargs):
+        process = await real_spawn(*args, **kwargs)
+        spawned.append(process.pid)
+        return process
+
+    monkeypatch.setattr(lsp.asyncio, "create_subprocess_exec", recording_spawn)
 
     client = await _get_or_start_jdtls_client(None, str(tmp_path))
 
     assert client is None  # degraded to no LSP grounding, as before
     assert _jdtls_data_dirs(temp_root) == []
-    pid = int((tmp_path / "pid").read_text())
+    assert len(spawned) == 1
+    pid = spawned[0]
     with pytest.raises(ProcessLookupError):
         os.kill(pid, 0)  # terminated and reaped, not left running
     assert not [t for t in asyncio.all_tasks() if "_read_loop" in repr(t.get_coro())]
