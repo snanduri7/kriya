@@ -4097,10 +4097,14 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         ) or getattr(getattr(getattr(self.workflow_engine, "kernel", None), "config", None), "llm", None)
         if planner_model is not None and not isinstance(planner_model, str):
             planner_model = getattr(planner_model, "model", None)
-        planner_token_cap = getattr(
-            getattr(getattr(getattr(self.workflow_engine, "kernel", None), "config", None), "llm", None),
-            "planner_max_tokens", None,
-        )
+        # The Planner agent's own output budget (agent_llms.planner.max_output_tokens,
+        # else llm.planner_max_tokens; set at its construction).
+        planner_token_cap = getattr(self.workflow_engine.planner, "max_output_tokens", None)
+        if not isinstance(planner_token_cap, int):
+            planner_token_cap = getattr(
+                getattr(getattr(getattr(self.workflow_engine, "kernel", None), "config", None), "llm", None),
+                "planner_max_tokens", None,
+            )
         logger.info("Generating validated EngineeringPlan (planner_model=%s)...", planner_model or "default")
         planning_repository_candidates = _authoritative_planner_extension_candidates(
             workspace_path, goal=goal,

@@ -90,14 +90,15 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
     ``config.llm`` by default, or an ``llm_chain`` entry). Never raises: an
     unresolvable runtime is recorded as unavailable."""
     from kriya.core.inference_settings import binding_inference_settings, retry_inference_settings
-    from kriya.core.llm import REASONING_MIN_MAX_TOKENS
+    from kriya.core.llm import reasoning_max_tokens
     from kriya.core.model_capabilities import resolve_model_capability_profile
-    from kriya.core.model_qualification import assess, policy_digest_for, required_capabilities
+    from kriya.core.model_qualification import assess, measured_limits_for, policy_digest_for, required_capabilities
     from kriya.core.model_runtime import (
         binding_output_tokens,
         endpoint_identity,
         resolve_configured_model_runtime,
     )
+    from kriya.core.provider_contract import budget_window
     from kriya.workflow.context_budget import allocation_window
 
     binding = binding if binding is not None else config.llm
@@ -106,6 +107,7 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
     caps = capability.capabilities
     runtime_digest, runtime_exact, qualification, failed = "unavailable", False, "UNAVAILABLE", ()
     served_window = None
+    measured_reasoning = None
     retry_settings = retry_inference_settings(config, DEVELOPER_ROLE, binding)
     retry_digest: Optional[str] = retry_settings.digest if retry_settings is not None else None
     retry_qualification: Optional[str] = "UNAVAILABLE" if retry_settings is not None else None
@@ -122,6 +124,9 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
                             settings=binding_inference_settings(config, DEVELOPER_ROLE, binding),
                             policy_digest=policy_digest)
         qualification, failed = assessment.status, tuple(assessment.failed)
+        measured_reasoning = measured_limits_for(
+            fingerprint, config, settings=binding_inference_settings(config, DEVELOPER_ROLE, binding),
+        ).get("reasoning_tokens_max")
         if retry_settings is not None:
             retry_qualification = assess(fingerprint, required_capabilities(config, DEVELOPER_ROLE, model),
                                          settings=retry_settings, policy_digest=policy_digest).status
@@ -129,7 +134,7 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
         logger.debug("Request profile of %s: runtime unavailable: %s", model, error)
     output = binding_output_tokens(config, binding)
     if binding.reasoning:
-        output = max(output, REASONING_MIN_MAX_TOKENS)
+        output = reasoning_max_tokens(output, measured_reasoning)
     return ModelRequestProfile(
         model=model,
         endpoint=endpoint_identity(binding.base_url),
@@ -144,7 +149,8 @@ def resolve_request_profile(config: Any, binding: Any = None) -> ModelRequestPro
         streaming=bool(caps.streaming),
         edit_protocol=str(caps.preferred_edit_protocol),
         reasoning=bool(binding.reasoning),
-        context_window=served_window or binding.context_window,
+        # The window requests are budgeted at (never a larger served one).
+        context_window=budget_window(binding.context_window, served_window),
         allocation_window=allocation_window(config, binding),
         output_tokens=int(output),
         context_policy=binding.context_policy.mode,

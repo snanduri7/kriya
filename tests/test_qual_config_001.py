@@ -21,8 +21,9 @@ from kriya.config.authority import FieldClassification, classify_field, is_known
 from kriya.config.config import ModelQualificationConfig
 from kriya.core import model_qualification as mq
 from kriya.core.completion import CompletionStatus
-from kriya.core.inference_runtime import ChatResponse
+from kriya.core.inference_runtime import ChatResponse, RuntimeCapabilities
 from kriya.core.inference_settings import InferenceSettings
+from kriya.core.provider_contract import ProviderRequestPlan
 
 # The kriya-qualification/3 budgets as they were hard-coded (git: unchanged
 # from the /3 bump at 6c163f2 until this change). Written out, never derived
@@ -282,8 +283,19 @@ def test_environment_evidence_is_not_merged_across_policies():
 # --- policy-driven bounds beyond max_tokens ----------------------------------------------------
 
 class _CapacityRuntime:
+    """A /v1-shaped runtime (no per-request window) whose served window is
+    not observable; the plan passes the body through."""
+
+    capabilities = RuntimeCapabilities(per_request_context_window=False, native_identity_probe=False)
+
     def __init__(self, answer):
         self.requests, self.answer = [], answer
+
+    def request_plan(self, extra_body, **_):
+        return ProviderRequestPlan(wire_body=dict(extra_body or {}), settings=())
+
+    def observe_served_context(self, **_):
+        return None
 
     async def complete(self, client, request):
         self.requests.append(request)

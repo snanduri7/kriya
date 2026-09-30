@@ -604,3 +604,213 @@ def test_prompts_are_sized_to_the_requested_window_never_a_larger_served_one(ser
         capacity = request_capacity(config)
     assert capacity.tokens == expected - 4096 - TWO_MESSAGE_FRAMING_TOKENS - DISPATCH_SAFETY_MARGIN_TOKENS
     assert _served_window(fingerprint, config.llm) == expected
+
+
+# === Batch B: output/reasoning budgeting and qualification identity =====================================
+
+def test_a_reasoning_identity_reserves_its_measured_reasoning_on_top_of_its_role_output():
+    from kriya.core.llm import REASONING_MIN_MAX_TOKENS, reasoning_max_tokens
+
+    assert reasoning_max_tokens(1024, 3000) == 4024
+    # Unmeasured: the fixed floor, never less than the role's own output.
+    assert reasoning_max_tokens(1024, None) == REASONING_MIN_MAX_TOKENS
+    assert reasoning_max_tokens(20000, None) == 20000
+
+
+@pytest.mark.parametrize(("measured", "sent", "source"), [(3000, 4024, "qualified"),
+                                                          (None, 12288, "unqualified_default")])
+def test_the_request_carries_the_qualified_reasoning_reserve(fake, monkeypatch, measured, sent, source):
+    from kriya.core import model_qualification
+
+    limits = {"reasoning_tokens_max": measured} if measured else {}
+    monkeypatch.setattr(model_qualification, "measured_limits_for", lambda *a, **k: dict(limits))
+    config = _fake_config(window=32768)
+    fake.served_window = 32768
+    config.llm.reasoning = True
+    config.llm.max_tokens = 1024
+    result = asyncio.run(LLMClient(config).complete_result("s", "u"))
+    assert fake.requests[-1].max_tokens == sent
+    assert result.budget["reasoning_reserve_source"] == source
+
+
+def test_a_non_reasoning_identity_reserves_no_reasoning():
+    from kriya.workflow.context_budget import request_capacity
+
+    config = AppConfig()
+    config.llm.context_window, config.llm.max_tokens, config.llm.reasoning = 32768, 2048, False
+    from unittest.mock import patch
+
+    with patch("kriya.core.model_runtime.resolve_configured_model_runtime",
+               side_effect=RuntimeError("no runtime")):
+        plain = request_capacity(config)
+        config.llm.reasoning = True
+        reasoning = request_capacity(config)
+    # Unmeasured reasoning: the floor (12288) is reserved; without reasoning only the output.
+    assert plain.tokens - reasoning.tokens == 12288 - 2048
+
+
+def test_each_role_gets_its_own_output_budget_never_the_developers():
+    from kriya.core.kernel import Kernel
+    from kriya.workflow.workflow import WorkflowEngine
+
+    config = AppConfig()
+    config.llm.max_tokens = 16384
+    config.agent_llms.reviewer.max_output_tokens = 2048
+    config.agent_llms.spec_compliance.max_output_tokens = 1024
+    config.agent_llms.planner.max_output_tokens = 6000
+    engine = WorkflowEngine(Kernel(config=config), LLMClient(config))
+    assert engine.reviewer.max_output_tokens == 2048
+    assert engine.spec_compliance.max_output_tokens == 1024
+    assert engine.planner.max_output_tokens == 6000  # wins over llm.planner_max_tokens
+    assert engine.architect.max_output_tokens is None  # unset: the model binding's own budget
+
+
+
+def test_a_role_output_budget_below_the_minimum_is_rejected():
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        AppConfig(agent_llms={"reviewer": {"max_output_tokens": 16}})
+
+
+def test_a_requested_server_only_setting_is_part_of_the_inference_identity():
+    from kriya.core.inference_settings import request_settings
+
+    top_k_20 = request_settings(temperature=0.2, reasoning=False, extra_body={"options": {"top_k": 20}})
+    top_k_40 = request_settings(temperature=0.2, reasoning=False, extra_body={"options": {"top_k": 40}})
+    assert top_k_20.extra_body == top_k_40.extra_body == {"reasoning_effort": "none"}  # same wire
+    assert top_k_20.digest != top_k_40.digest  # different identity
+    assert top_k_20.server_config == {"top_k": 20}
+
+
+def _qualify(config, fingerprint):
+    from kriya.core import model_qualification as mq
+
+    class _NoCalls:
+        async def complete_result(self, *args, **kwargs):
+            raise AssertionError("a case ran")
+
+    # A case that sends nothing: the identity check runs before any case.
+    return asyncio.run(mq.run_qualification(config, config.llm.model, llm=_NoCalls(), fingerprint=fingerprint,
+                                            only=["endpoint_restart_semantics"]))
+
+
+def _pinned_fp(**parameters):
+    from dataclasses import replace
+
+    return replace(_exact(**parameters), alias="m:1")
+
+
+@pytest.mark.parametrize(("parameters", "problem"), [
+    ({}, "context_window: requested 32768, not verifiable"),                  # unpinned window
+    ({"num_ctx": 65536, "top_k": 20}, "context_window: requested 32768, served 65536"),
+    ({"num_ctx": 32768, "top_k": 40}, "top_k: requested 20, served 40"),
+])
+def test_qualification_refuses_an_identity_the_provider_does_not_verifiably_apply(parameters, problem):
+    from kriya.core import model_qualification as mq
+
+    config = AppConfig()
+    config.llm.model = "m:1"
+    config.llm.context_window = 32768
+    config.llm.extra_body = {"options": {"top_p": 0.8, "top_k": 20}}
+    with pytest.raises(mq.QualificationError) as refused:
+        _qualify(config, _pinned_fp(**parameters))
+    assert "QUALIFICATION_IDENTITY_UNVERIFIED" in str(refused.value) and problem in str(refused.value)
+
+
+def test_qualification_proceeds_on_a_model_pinned_to_the_binding():
+    from kriya.core import model_qualification as mq
+
+    config = AppConfig()
+    config.llm.model = "m:1"
+    config.llm.context_window = 32768
+    config.llm.extra_body = {"options": {"top_p": 0.8, "top_k": 20}}
+    record = _qualify(config, _pinned_fp(num_ctx=32768, top_k=20))
+    assert record["policy_version"] == mq.QUALIFICATION_POLICY_VERSION == "kriya-qualification/4"
+
+
+def test_a_policy_3_record_is_stale():
+    from kriya.core import model_qualification as mq
+    from kriya.core.inference_settings import request_settings
+
+    settings = request_settings(temperature=0.2, reasoning=False, extra_body=None)
+    fingerprint = _pinned_fp(num_ctx=32768)
+    record = mq.build_record(fingerprint, [], settings=settings)
+    assert mq.record_is_current(record, fingerprint, settings)[0]
+    record["policy_version"] = "kriya-qualification/3"
+    current, reasons = mq.record_is_current(record, fingerprint, settings)
+    assert not current and any("qualification policy changed" in reason for reason in reasons)
+
+
+@pytest.mark.parametrize(("served", "reason"), [(65536, RUNTIME_CONTEXT_IDENTITY_MISMATCH),
+                                                (16384, SERVED_CONTEXT_BELOW_REQUESTED)])
+def test_the_capacity_case_fails_when_the_served_window_is_not_the_qualified_one(served, reason):
+    from kriya.config.config import ModelQualificationConfig
+    from kriya.core import model_qualification as mq
+    from kriya.core.inference_runtime import RuntimeCapabilities
+    from kriya.core.provider_contract import ProviderRequestPlan
+
+    class _Runtime:
+        capabilities = RuntimeCapabilities(per_request_context_window=False, native_identity_probe=False)
+
+        def request_plan(self, extra_body, **_):
+            return ProviderRequestPlan(wire_body={}, settings=())
+
+        def observe_served_context(self, **_):
+            return served
+
+        async def complete(self, client, request):
+            text = "".join(m["content"] for m in request.messages)
+            if request.max_tokens == 1:
+                return ChatResponse(content="", prompt_tokens=len(text) // 4, finish_reason="length")
+            head = request.messages[0]["content"].split("first code is ")[1].split(".")[0]
+            tail = request.messages[1]["content"].split("second code is ")[1].split(".")[0]
+            return ChatResponse(content=f"{head} {tail}", prompt_tokens=len(text) // 4, finish_reason="stop")
+
+    ctx = {"policy": ModelQualificationConfig(), "context_window": 32768, "runtime": _Runtime(),
+           "base_url": "http://localhost:11434/v1",
+           "client_factory": lambda timeout: SimpleNamespace(client=object())}
+    result = asyncio.run(mq.case_context_capacity(None, "m:1", ctx))
+    assert result.status == mq.FAIL and result.evidence["reason_code"] == reason
+    assert result.evidence["served_context_window"] == served
+
+
+def test_the_tokenizer_case_measures_a_consumption_ceiling_never_below_the_calibrated_default():
+    from kriya.config.config import ModelQualificationConfig
+    from kriya.core import model_qualification as mq
+    from kriya.core.provider_contract import DEFAULT_BYTES_PER_TOKEN_CEILING, consumption_bytes
+
+    class _Tokenizer:
+        def __init__(self, bytes_per_token):
+            self.bytes_per_token = bytes_per_token
+
+        async def complete_result(self, system, text, **_):
+            return SimpleNamespace(prompt_tokens=max(1, int(len(text.encode()) / self.bytes_per_token)),
+                                   tokens_estimated=False)
+
+    ctx = {"policy": ModelQualificationConfig()}
+    ordinary = asyncio.run(mq.case_tokenizer_measurement(_Tokenizer(4.0), "m:1", ctx))
+    assert ordinary.measured["bytes_per_token_ceiling"] == DEFAULT_BYTES_PER_TOKEN_CEILING
+    # A far more compressive tokenizer raises the ceiling (a truncation verdict never becomes a false positive).
+    dense = asyncio.run(mq.case_tokenizer_measurement(_Tokenizer(20.0), "m:1", ctx))
+    text = mq.TOKENIZER_CORPORA["indented"]
+    tokens = max(1, int(len(text.encode()) / 20.0))
+    assert dense.measured["bytes_per_token_ceiling"] >= consumption_bytes(text) / tokens / 0.9 - 1e-3
+    assert dense.measured["bytes_per_token_ceiling"] > DEFAULT_BYTES_PER_TOKEN_CEILING
+
+
+def test_the_runtime_tokenizer_ceiling_is_the_largest_any_current_record_measured():
+    """A floor is conservative when smallest; a ceiling when largest - a
+    smaller ceiling would call honest prompts truncated."""
+    from kriya.core import model_qualification as mq
+    from kriya.core.inference_settings import request_settings
+
+    fingerprint = _pinned_fp(num_ctx=32768)
+    first = request_settings(temperature=0.2, reasoning=False, extra_body=None)
+    second = request_settings(temperature=0.7, reasoning=False, extra_body=None)
+    for settings, ceiling, floor in ((first, 8.0, 3.0), (second, 9.5, 2.5)):
+        record = mq.build_record(fingerprint, [], settings=settings)
+        record["measured_limits"] = {"bytes_per_token_ceiling": ceiling, "bytes_per_token_floor": floor}
+        mq.save_record(record)
+    limits = mq.measured_limits_for(fingerprint, settings=first)
+    assert limits["bytes_per_token_ceiling"] == 9.5 and limits["bytes_per_token_floor"] == 2.5

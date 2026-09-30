@@ -966,6 +966,12 @@ class AgentModelConfig(BaseModel):
     # top-level llm/llm_chain exactly as before.
     llm: Optional[LLMConfig] = Field(default=None)
     llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
+    # PROVIDER-CONTRACT-001: this role's own output budget (visible answer
+    # tokens; a reasoning identity's measured reasoning reserve is added on
+    # top). None: the model binding's own max_tokens (the Planner:
+    # llm.planner_max_tokens). Roles have different real protocols - a
+    # verdict is not a file rewrite - so no role inherits another's budget.
+    max_output_tokens: Optional[int] = Field(default=None, ge=256)
 
 class AgentRolesConfig(BaseModel):
     # Developer deliberately has no entry here - it stays on the top-level llm/

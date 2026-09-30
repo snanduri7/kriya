@@ -583,9 +583,10 @@ _INVESTIGATION_EVIDENCE_SHARE = 0.10
 def prompt_allocation_window(context_window: int, output_budget: int, *,
                              bytes_per_token: Optional[float] = None) -> int:
     """Allocator-unit tokens a two-message prompt may occupy in
-    ``context_window`` while ``output_budget`` stays free (at most half the
-    window: a config whose output budget is larger has declared an
-    output-dominated call, and the dispatch check then reduces max_tokens)."""
+    ``context_window`` while ``output_budget`` (the call's own output and
+    reasoning reserve, PROVIDER-CONTRACT-001) stays free - at most half the
+    window: a configured output is a ceiling, and the dispatch check trims
+    it to the room left."""
     from kriya.core.token_budget import (
         DEFAULT_BYTES_PER_TOKEN,
         DISPATCH_SAFETY_MARGIN_TOKENS,
@@ -647,7 +648,7 @@ def request_capacity(config: Any, binding: Any = None, *, role: str = "developer
     served window, output reserve and counting ratio the dispatch check uses
     for that call (kriya/core/llm.py::complete_result)."""
     from kriya.core.inference_runtime import runtime_for_binding
-    from kriya.core.llm import REASONING_MIN_MAX_TOKENS
+    from kriya.core.llm import reasoning_max_tokens
     from kriya.core.model_runtime import binding_output_tokens, requested_context_window
     from kriya.core.provider_contract import budget_window
     from kriya.core.token_budget import DISPATCH_SAFETY_MARGIN_TOKENS, TWO_MESSAGE_FRAMING_TOKENS
@@ -675,7 +676,14 @@ def request_capacity(config: Any, binding: Any = None, *, role: str = "developer
         logger.debug("Request capacity of %s uses the configured window: %s", binding.model, error)
     output = output_tokens if output_tokens is not None else binding_output_tokens(config, binding)
     if binding.reasoning:
-        output = max(output, REASONING_MIN_MAX_TOKENS)
+        output = reasoning_max_tokens(output, limits.get("reasoning_tokens_max"))
+    # PROVIDER-CONTRACT-001: the reserve is this request's own - its role's
+    # output budget plus, for a reasoning identity, the reasoning reserve its
+    # qualification measured - never one universal value for every role. A
+    # configured output is a ceiling, not the protocol's need, so it never
+    # takes more than half the window from the prompt; dispatch trims it to
+    # the room left and refuses a request whose grounded output need cannot
+    # fit (OUTPUT_BUDGET_UNSATISFIABLE / CONTEXT_BUDGET_UNSATISFIABLE).
     reserve = min(max(0, int(output)), int(window) // 2)
     return RequestCapacity(
         tokens=max(0, int(window) - reserve - TWO_MESSAGE_FRAMING_TOKENS - DISPATCH_SAFETY_MARGIN_TOKENS),

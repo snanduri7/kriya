@@ -22,6 +22,9 @@ def _fp(**changes):
     fp = ModelRuntimeFingerprint(
         alias=MODEL, endpoint="http://localhost:11434/v1", provider="ollama", provider_version="0.34.2",
         artifact_digest="sha256:abc", kriya_protocol="capabilities-sha256:x",
+        # A pinned served model (PROVIDER-CONTRACT-001): its own num_ctx is
+        # the requested window, so the qualified identity is verifiable.
+        server_parameters=("num_ctx 32768",),
     )
     return replace(fp, **changes)
 
@@ -393,8 +396,9 @@ def test_the_doctor_and_qualify_fingerprint_the_same_runtime_identically(monkeyp
         "/v1/models": {"data": [{"id": MODEL, "created": 1}]},
         "/api/version": {"version": "0.34.2"},
         "/api/tags": {"models": [{"name": MODEL, "digest": "abc"}]},
+        # A pinned served model: its own num_ctx is the requested window.
         "/api/show": {"details": {"format": "gguf", "quantization_level": "Q4_K_M"},
-                      "modelfile": "FROM /b/sha256-99\nRENDERER r\nPARSER p\n",
+                      "modelfile": "FROM /b/sha256-99\nRENDERER r\nPARSER p\n", "parameters": "num_ctx 16384",
                       "model_info": {"general.architecture": "a", "a.context_length": 32768}},
     }
 
@@ -408,5 +412,5 @@ def test_the_doctor_and_qualify_fingerprint_the_same_runtime_identically(monkeyp
     doctor = probe_llm_runtime(cfg)["runtime"]
     record = asyncio.run(mq.run_qualification(cfg, llm=FakeLLM(_result("READY")), only=["plain_completion"]))
     assert doctor.exact and record["fingerprint_digest"] == doctor.digest
-    # Requested, recorded as requested - never as served (PROVIDER-CONTRACT-001).
-    assert doctor.configured_context_window == 16384 and doctor.effective_context_window is None
+    # Requested as requested; served only from the served model's own configuration (PROVIDER-CONTRACT-001).
+    assert doctor.configured_context_window == 16384 and doctor.effective_context_window == 16384

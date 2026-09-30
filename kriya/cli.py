@@ -3197,7 +3197,8 @@ def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str]
     cfg: AppConfig = ctx.obj['config']
 
     llm = LLMClient(cfg)
-    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain,
+                             max_output_tokens=cfg.agent_llms.reviewer.max_output_tokens)
 
     REVIEW_EXTENSIONS = (".py", ".java", ".xml", ".rb")
 

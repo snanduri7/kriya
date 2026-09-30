@@ -56,7 +56,10 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 # carries (the runtime adapter's request plan), never configuration the
 # provider ignores; the served model's own configuration is part of the
 # runtime fingerprint (server_parameters).
-INFERENCE_SETTINGS_VERSION = 2
+# /3: plus the server-only settings the binding REQUESTS (top_k, ...), so an
+# identity qualified while the served model applied them never covers a
+# binding that asks for other values (QUALIFICATION_IDENTITY_UNVERIFIED).
+INFERENCE_SETTINGS_VERSION = 3
 
 
 
@@ -88,6 +91,9 @@ class InferenceSettings:
     temperature: Optional[float]
     reasoning: bool
     extra_body_json: str = "{}"
+    # Server-only settings the binding requests (PROVIDER-CONTRACT-001): the
+    # served model must carry exactly these (verified at qualification).
+    server_config_json: str = "{}"
     # Metadata only: PRD-016 sizes max_tokens per call.
     output_ceiling: Optional[int] = field(default=None, compare=False)
 
@@ -95,12 +101,17 @@ class InferenceSettings:
     def extra_body(self) -> Dict[str, Any]:
         return json.loads(self.extra_body_json)
 
+    @property
+    def server_config(self) -> Dict[str, Any]:
+        return json.loads(self.server_config_json)
+
     def identity_fields(self) -> Dict[str, Any]:
         return {
             "version": INFERENCE_SETTINGS_VERSION,
             "temperature": _normalize(self.temperature),
             "reasoning": bool(self.reasoning),
             "extra_body": self.extra_body,
+            "server_config": self.server_config,
         }
 
     @property
@@ -112,28 +123,45 @@ class InferenceSettings:
         return {**self.identity_fields(), "digest": self.digest, "output_ceiling": self.output_ceiling}
 
 
+def _settings_plan(extra_body: Optional[Mapping[str, Any]], *, reasoning: bool, runtime: Any = None) -> Any:
+    from kriya.core.inference_runtime import runtime_adapter
+
+    adapter = runtime if runtime is not None else runtime_adapter()
+    return adapter.request_plan(dict(extra_body) if isinstance(extra_body, Mapping) else None, temperature=None,
+                                reasoning_flag=bool(reasoning), requested_context_window=None)
+
+
 def wire_settings_body(extra_body: Optional[Mapping[str, Any]], *, reasoning: bool, runtime: Any = None
                        ) -> Dict[str, Any]:
     """The part of a request's settings the provider receives: the runtime
     adapter's wire body for ``extra_body`` (PROVIDER-CONTRACT-001), numbers
     normalized. Settings the provider cannot carry never appear here."""
-    from kriya.core.inference_runtime import runtime_adapter
+    return _normalize(copy.deepcopy(_settings_plan(extra_body, reasoning=reasoning, runtime=runtime).wire_body))
 
-    adapter = runtime if runtime is not None else runtime_adapter()
-    plan = adapter.request_plan(dict(extra_body) if isinstance(extra_body, Mapping) else None, temperature=None,
-                                reasoning_flag=bool(reasoning), requested_context_window=None)
-    return _normalize(copy.deepcopy(plan.wire_body))
+
+def server_config_request(plan: Any) -> Dict[str, Any]:
+    """The server-only settings ``plan`` requests (the context window aside:
+    PRD-016 and the served-window checks own it), numbers normalized."""
+    from kriya.core.provider_contract import Support
+
+    return _normalize({state.name: state.requested for state in plan.settings
+                       if state.support is Support.SERVER_CONFIG_ONLY and state.name != "context_window"
+                       and state.requested is not None})
 
 
 def request_settings(*, temperature: Optional[float], reasoning: bool,
                      extra_body: Optional[Mapping[str, Any]],
                      output_ceiling: Optional[int] = None, runtime: Any = None) -> InferenceSettings:
-    """The settings of one request, as the provider receives them."""
-    body = wire_settings_body(extra_body, reasoning=reasoning, runtime=runtime)
+    """The settings of one request, as the provider receives them, plus the
+    server-only settings it relies on the served model carrying."""
+    plan = _settings_plan(extra_body, reasoning=reasoning, runtime=runtime)
     return InferenceSettings(
         temperature=None if temperature is None else float(temperature),
         reasoning=bool(reasoning),
-        extra_body_json=json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True),
+        extra_body_json=json.dumps(_normalize(copy.deepcopy(plan.wire_body)), sort_keys=True,
+                                   separators=(",", ":"), ensure_ascii=True),
+        server_config_json=json.dumps(server_config_request(plan), sort_keys=True, separators=(",", ":"),
+                                      ensure_ascii=True),
         output_ceiling=output_ceiling,
     )
 
@@ -172,9 +200,13 @@ def retry_inference_settings(config: Any, role: str, binding: Any = None) -> Opt
     retry = getattr(config.llm, "retry_temperature", None)
     if role != "developer" or retry is None:
         return None
+    from kriya.core.inference_runtime import runtime_for_binding
+
+    binding = binding if binding is not None else config.llm
     normal = binding_inference_settings(config, role, binding)
-    retried = request_settings(temperature=retry, reasoning=normal.reasoning, extra_body=normal.extra_body,
-                               output_ceiling=normal.output_ceiling)
+    retried = request_settings(temperature=retry, reasoning=normal.reasoning,
+                               extra_body=getattr(binding, "extra_body", None),
+                               output_ceiling=normal.output_ceiling, runtime=runtime_for_binding(binding))
     return None if retried.digest == normal.digest else retried
 
 

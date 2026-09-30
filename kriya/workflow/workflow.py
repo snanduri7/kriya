@@ -1127,19 +1127,24 @@ class WorkflowEngine:
         # a distinct agent, not the ordinary Planner path this fixes.
         self.planner = PlannerAgent(
             "planner", llm_client, roles.planner.llm, roles.planner.llm_chain,
-            max_output_tokens=kernel.config.llm.planner_max_tokens,
+            max_output_tokens=roles.planner.max_output_tokens or kernel.config.llm.planner_max_tokens,
         )
         # No dedicated agent_llms entry (unlike the roles above) - this agent is
         # new (kriya/workflow/milestones.py's orchestrator), and adding a config
         # schema field is out of scope for this feature; falls back to
         # LLMClient's own default model like DeveloperAgent already does below.
         self.milestone_planner = MilestonePlannerAgent("milestone_planner", llm_client)
-        self.architect = ArchitectAgent("architect", llm_client, roles.architect.llm, roles.architect.llm_chain)
+        self.architect = ArchitectAgent("architect", llm_client, roles.architect.llm, roles.architect.llm_chain,
+            max_output_tokens=roles.architect.max_output_tokens)
         self.developer = DeveloperAgent("developer", llm_client)
-        self.reviewer = ReviewerAgent("reviewer", llm_client, roles.reviewer.llm, roles.reviewer.llm_chain)
-        self.run_verifier = RunVerifierAgent("run_verifier", llm_client, roles.run_verifier.llm, roles.run_verifier.llm_chain)
-        self.skill_gap_agent = SkillGapAgent("skill_gap", llm_client, roles.skill_gap.llm, roles.skill_gap.llm_chain)
-        self.spec_compliance = SpecComplianceAgent("spec_compliance", llm_client, roles.spec_compliance.llm, roles.spec_compliance.llm_chain)
+        self.reviewer = ReviewerAgent("reviewer", llm_client, roles.reviewer.llm, roles.reviewer.llm_chain,
+            max_output_tokens=roles.reviewer.max_output_tokens)
+        self.run_verifier = RunVerifierAgent("run_verifier", llm_client, roles.run_verifier.llm, roles.run_verifier.llm_chain,
+            max_output_tokens=roles.run_verifier.max_output_tokens)
+        self.skill_gap_agent = SkillGapAgent("skill_gap", llm_client, roles.skill_gap.llm, roles.skill_gap.llm_chain,
+            max_output_tokens=roles.skill_gap.max_output_tokens)
+        self.spec_compliance = SpecComplianceAgent("spec_compliance", llm_client, roles.spec_compliance.llm, roles.spec_compliance.llm_chain,
+            max_output_tokens=roles.spec_compliance.max_output_tokens)
         # MA1 of the control-plane implementation plan (kriya/workflow/triage.py) -
         # deliberately not constructed alongside the roles above: this isn't an
         # "agent" (no LLM call happens in it yet, see EngineeringTriageService's

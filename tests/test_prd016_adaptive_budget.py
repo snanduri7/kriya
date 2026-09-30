@@ -297,12 +297,17 @@ def test_recorded_tiers_are_discovered_for_the_same_artifact_only(monkeypatch):
     assert mq.recorded_context_sizes(other, settings) == []
 
 
-def _capacity_client(*, recall_head=True, fill=0.97, usage=True):
+def _capacity_client(*, recall_head=True, fill=0.97, usage=True, served=65536, sent=None):
     """Fake endpoint: prompt tokens proportional to the filler, answer
-    recalls the markers found in the request."""
+    recalls the markers found in the request. It serves ``served`` tokens
+    whatever the request asks (PROVIDER-CONTRACT-001: a window is the
+    server's, never read back from the request); ``sent`` collects each
+    request's extra_body."""
     per_unit = 12
 
     async def create(model, messages, max_tokens, temperature, extra_body, **_):
+        if sent is not None:
+            sent.append(extra_body)
         # **_: the request shape of the runtime adapter's text transport
         # (response_format=None), which the capacity probe goes through (INF-001).
         text = "".join(m["content"] for m in messages)
@@ -313,7 +318,7 @@ def _capacity_client(*, recall_head=True, fill=0.97, usage=True):
         if max_tokens == 1:
             tokens = 20 + units * per_unit
         else:
-            tokens = int(extra_body["options"]["num_ctx"] * fill)
+            tokens = int(served * fill)
             head = messages[0]["content"].split("is ")[1].split(".")[0]
             tail = messages[1]["content"].split("second code is ")[1].split(".")[0]
             response.choices[0].message.content = f"{head if recall_head else 'unknown'} {tail}"
@@ -334,9 +339,12 @@ def _capacity(llm, window=65536):
 
 
 def test_context_capacity_passes_when_a_near_window_prompt_keeps_both_markers():
-    result = _capacity(_capacity_client())
+    sent = []
+    result = _capacity(_capacity_client(sent=sent))
     assert result.status == mq.PASS, result.evidence
     assert result.evidence["first_marker_recalled"] and result.evidence["fill_ratio"] > 0.9
+    # The probe carries what a production request carries: never provider options.
+    assert sent and all("options" not in (body or {}) for body in sent)
 
 
 def test_context_capacity_fails_when_the_front_of_the_prompt_is_dropped():
@@ -656,7 +664,7 @@ def test_context_capacity_refuses_a_non_local_endpoint():
 
 def test_context_capacity_uses_the_model_binding_client_when_one_is_given():
     used = []
-    probe = _capacity_client()
+    probe = _capacity_client(served=8192)
 
     def factory(timeout):
         used.append(timeout)

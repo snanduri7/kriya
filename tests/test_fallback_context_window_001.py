@@ -295,9 +295,11 @@ def test_the_demo03_shape_is_unchanged():
 
 @pytest.mark.asyncio
 async def test_qualification_cases_are_sent_the_window_they_qualify(exact_ollama):
-    """The context-capacity case talks to the endpoint directly: it must
-    send the same window the record's fingerprint was requested with."""
-    del exact_ollama
+    """The context-capacity case talks to the endpoint directly. On /v1 the
+    window is the served model's own (PROVIDER-CONTRACT-001: a request
+    option would be ignored), so qualification runs only against a model
+    pinned to the requested window and the wire never pretends to set it."""
+    exact_ollama["/api/show"]["parameters"] += "\nnum_ctx 16384"
     config = _config(context_window=16384)
     sent = []
 
@@ -309,7 +311,21 @@ async def test_qualification_cases_are_sent_the_window_they_qualify(exact_ollama
     client.chat.completions.create = create
     factory = MagicMock(return_value=MagicMock(client=client))
     await run_qualification(config, FALLBACK, client_factory=factory, only=["context_capacity"])
-    assert sent and all(configured_context_window(body) == 16384 for body in sent)
+    assert sent and all(configured_context_window(body) is None and "options" not in (body or {}) for body in sent)
+
+
+@pytest.mark.asyncio
+async def test_an_unpinned_served_window_cannot_be_qualified(exact_ollama):
+    """The measured default: the served model carries no num_ctx, so the
+    server's environment decides the window - the identity is not provable."""
+    from kriya.core.model_qualification import QualificationError
+
+    del exact_ollama
+    factory = MagicMock()
+    with pytest.raises(QualificationError, match="QUALIFICATION_IDENTITY_UNVERIFIED"):
+        await run_qualification(_config(context_window=16384), FALLBACK, client_factory=factory,
+                                only=["context_capacity"])
+    factory.assert_not_called()
 
 
 # --- structure ------------------------------------------------------------------

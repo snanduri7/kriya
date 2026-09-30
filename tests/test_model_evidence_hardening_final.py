@@ -24,7 +24,7 @@ from kriya.config import AppConfig
 from kriya.core import model_qualification as mq
 from kriya.core import model_routing as mr
 from kriya.core import role_metrics as rm
-from kriya.core.inference_settings import request_settings, role_inference_settings
+from kriya.core.inference_settings import role_inference_settings
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
 from kriya.core.model_runtime import resolve_configured_model_runtime
@@ -91,8 +91,11 @@ async def test_a_fallback_executes_with_its_own_settings_not_the_primarys(tmp_pa
     # The executed identity is the qualified identity, on both models.
     assert primary_digest == role_inference_settings(cfg, "developer", PRIMARY).digest
     assert fallback_digest == role_inference_settings(cfg, "developer", FALLBACK).digest
-    assert request_settings(temperature=fallback_sent["temperature"], reasoning=True,
-                            extra_body=fallback_sent["extra_body"]).digest == fallback_digest
+    # The wire is exactly the qualified identity's wire; its requested
+    # server-only settings (top_k) are identity too (settings /3).
+    fallback_settings = role_inference_settings(cfg, "developer", FALLBACK)
+    assert fallback_settings.extra_body == fallback_sent["extra_body"]
+    assert fallback_settings.server_config == {"top_k": 10}
 
 
 @pytest.mark.asyncio

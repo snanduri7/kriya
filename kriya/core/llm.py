@@ -22,8 +22,19 @@ from kriya.policy.model import ActionRequest, ActionType
 logger = logging.getLogger(__name__)
 
 # A reasoning model's max_tokens covers hidden reasoning and visible output
-# together, so it never runs below this.
+# together. Without a measured reasoning reserve it never runs below this.
 REASONING_MIN_MAX_TOKENS = 12288
+
+
+def reasoning_max_tokens(output_tokens: int, measured_reasoning_tokens: Optional[int]) -> int:
+    """max_tokens of a reasoning identity (PROVIDER-CONTRACT-001): the role's
+    visible output budget plus the reasoning reserve this exact identity's
+    qualification measured (reasoning_tokens_max); without a measurement,
+    the fixed floor REASONING_MIN_MAX_TOKENS. The one rule the request, its
+    prompt sizing and its transition profile use."""
+    if measured_reasoning_tokens:
+        return int(output_tokens) + int(measured_reasoning_tokens)
+    return max(int(output_tokens), REASONING_MIN_MAX_TOKENS)
 
 class EgressViolationError(ValueError):
     """Raised when an LLM completion request violates local_only egress policy.
@@ -451,8 +462,12 @@ class LLMClient:
         state = context_window_state(requested, served, provenance, exact=self._strict_identity())
         window = state.budget
         reasoning = 0
+        reasoning_source = None
         if is_reasoning:
-            reasoning = int(limits.get("reasoning_tokens_max") or DEFAULT_REASONING_ALLOWANCE_TOKENS)
+            measured = limits.get("reasoning_tokens_max")
+            reasoning = int(measured or DEFAULT_REASONING_ALLOWANCE_TOKENS)
+            reasoning_source = "qualified" if measured else "unqualified_default"
+            max_tokens = reasoning_max_tokens(max_tokens, measured)
         tokenizer = fingerprint.tokenizer_digest if fingerprint.tokenizer_digest != "unavailable" else None
         from kriya.core.model_qualification import offered_context_tiers
 
@@ -473,7 +488,7 @@ class LLMClient:
             if note and getattr(refusal, "decision", None) is not None:
                 refusal.decision = replace(refusal.decision, tier_note=note)
             raise
-        return replace(decision, tier_note=note, context_state=state.to_dict())
+        return replace(decision, tier_note=note, context_state=state.to_dict(), reasoning_reserve_source=reasoning_source)
 
     def _request_options(self, extra_body: Optional[Dict[str, Any]], budget, model: str) -> Optional[Dict[str, Any]]:
         """The request's extra_body asking the runtime for the selected
@@ -680,7 +695,9 @@ class LLMClient:
         base_max_tokens = (
             max_tokens_override if max_tokens_override is not None else self._binding(model)["max_tokens"]
         )
-        max_tokens = max(base_max_tokens, REASONING_MIN_MAX_TOKENS) if is_reasoning else base_max_tokens
+        # A reasoning identity's reasoning reserve is added in _dispatch_budget,
+        # where its measured limits are known.
+        max_tokens = base_max_tokens
         if extra_body_override is not None:
             extra_body = extra_body_override or None
         else:

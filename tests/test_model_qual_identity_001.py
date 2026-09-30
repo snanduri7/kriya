@@ -39,6 +39,8 @@ def _fp(**changes):
         alias=MODEL, endpoint="http://localhost:11434/v1", provider="ollama", provider_version="0.34.2",
         artifact_digest="sha256:abc", tokenizer_digest="sha256:tok", model_context_length=262144,
         configured_context_window=32768, effective_context_window=32768,
+        # A pinned served model (PROVIDER-CONTRACT-001).
+        server_parameters=("num_ctx 32768",),
     )
     return replace(base, **changes)
 
@@ -83,7 +85,11 @@ def _with_options(**options):
     {"extra_body": _with_options(top_p=0.95)},
     {"extra_body": _with_options(seed=7)},
     {"reasoning": True},
-], ids=["reasoning_effort", "reasoning_effort_absent", "temperature", "top_p", "seed", "reasoning_flag"])
+    # PROVIDER-CONTRACT-001 (/3 settings): a server-only setting the binding
+    # REQUESTS is identity - the served model must carry exactly it.
+    {"extra_body": _with_options(top_k=40)},
+], ids=["reasoning_effort", "reasoning_effort_absent", "temperature", "top_p", "seed", "reasoning_flag",
+        "requested_top_k"])
 def test_a_behaviour_affecting_setting_changes_the_identity(changed):
     base, other = _settings(), _settings(**changed)
     assert base.digest != other.digest
@@ -101,15 +107,11 @@ def test_a_seed_change_changes_the_identity():
     {"extra_body": _with_options(num_ctx=65536)},
     # An integral float equals the integer.
     {"extra_body": _with_options(top_p=0.8)},
-    # PROVIDER-CONTRACT-001: the OpenAI-compatible /v1 never applies these,
-    # so they are not request identity (the served model's own top_k is
-    # runtime identity - test_a_served_sampling_parameter_is_runtime_identity).
-    {"extra_body": _with_options(top_k=40)},
     # think:false is the same reasoning-off the explicit effort already sends.
     {"extra_body": {**BASE["extra_body"], "think": False}},
     # reasoning=false with no effort sends reasoning_effort "none" itself.
     {"extra_body": {"options": BASE["extra_body"]["options"]}},
-], ids=["key_order", "num_ctx", "integral_float", "top_k_not_applied", "think_false", "effort_implicit_none"])
+], ids=["key_order", "num_ctx", "integral_float", "think_false", "effort_implicit_none"])
 def test_identical_effective_settings_are_the_same_identity(same):
     assert _settings(**same).digest == _settings().digest
 
@@ -271,7 +273,7 @@ def test_a_record_names_its_identity_and_keeps_the_output_ceiling_as_metadata():
     assert record["qualification_identity"] == qualification_identity(fp.digest, settings)
     assert record["inference_settings_digest"] == settings.digest
     assert record["inference_settings"]["output_ceiling"] == 16384
-    assert record["policy_version"] == "kriya-qualification/3"
+    assert record["policy_version"] == "kriya-qualification/4"
     path = mq.save_record(record)
     assert os.path.basename(path) == f"{record['qualification_identity']}.json"
 

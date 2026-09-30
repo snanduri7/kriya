@@ -73,12 +73,25 @@ from kriya.core.file_stamp import FileStamp, file_stamp, unchanged_since
 from kriya.core.inference_runtime import ChatRequest, runtime_adapter, runtime_for_binding
 from kriya.core.inference_settings import InferenceSettings, qualification_identity
 from kriya.core.model_runtime import MODEL_PROTOCOL_ADAPTER_VERSION, ModelRuntimeFingerprint
-from kriya.core.provider_contract import budget_window
+from kriya.core.provider_contract import (
+    DEFAULT_BYTES_PER_TOKEN_CEILING,
+    QUALIFICATION_IDENTITY_UNVERIFIED,
+    RUNTIME_CONTEXT_IDENTITY_MISMATCH,
+    SERVED_CONTEXT_BELOW_REQUESTED,
+    budget_window,
+    consumption_bytes,
+)
 from kriya.platform.filesystem_semantics import PathRelation, path_relation
 
 # /3 (MODEL-QUAL-IDENTITY-001): records are keyed by runtime + inference
 # settings; every /2 record is STALE and must be re-qualified.
-QUALIFICATION_POLICY_VERSION = "kriya-qualification/3"
+# /4 (PROVIDER-CONTRACT-001): a record binds the EFFECTIVE inference
+# identity - qualification refuses a binding whose settings the provider
+# cannot be shown to apply (QUALIFICATION_IDENTITY_UNVERIFIED), the capacity
+# case goes through the adapter's request plan and checks the served window,
+# and the tokenizer case measures the prompt-consumption ceiling. Every /3
+# record is STALE (its identity was desired, not proven).
+QUALIFICATION_POLICY_VERSION = "kriya-qualification/4"
 QUALIFICATION_SCHEMA_VERSION = 2
 QUALIFICATION_HOME_ENV = "KRIYA_QUALIFICATION_HOME"
 
@@ -562,7 +575,9 @@ def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str], *, set
 
 # Measured limits that describe the runtime's tokenizer, not its sampling:
 # the same for every inference identity of one runtime.
-RUNTIME_SCOPED_LIMITS = ("bytes_per_token_floor", "non_ascii_bytes_per_token_floor")
+RUNTIME_SCOPED_LIMITS = ("bytes_per_token_floor", "non_ascii_bytes_per_token_floor", "bytes_per_token_ceiling")
+# Runtime-scoped limits whose conservative value is the largest, not the smallest.
+_RUNTIME_SCOPED_CEILINGS = frozenset({"bytes_per_token_ceiling"})
 
 
 def _runtime_current(record: Dict[str, Any], fingerprint: ModelRuntimeFingerprint, policy_digest: str) -> bool:
@@ -600,7 +615,7 @@ def measured_limits_for(fingerprint: ModelRuntimeFingerprint, config: Any = None
             and isinstance((stored.get("measured_limits") or {}).get(key), (int, float))
         ]
         if values:
-            limits[key] = min(values)
+            limits[key] = max(values) if key in _RUNTIME_SCOPED_CEILINGS else min(values)
     return limits
 
 
@@ -668,6 +683,9 @@ TOKENIZER_CORPORA: Dict[str, str] = {
         "Grüße aus Köln – naïve café. Привет, мир! 你好，世界。こんにちは世界。안녕하세요. "
         "مرحبا بالعالم. שלום עולם. Γειά σου Κόσμε. ✓ ★ → ∑ ∞ ≠ 😀 🚀 🎉\n"
     ),
+    # Whitespace-dense (deep indentation): the most compressible real text,
+    # which bounds the prompt-consumption ceiling (PROVIDER-CONTRACT-001).
+    "indented": "".join(f"{' ' * (4 * depth)}if level_{depth}:\n" for depth in range(1, 13)) + " " * 52 + "pass\n",
     "stacktrace": (
         'Exception in thread "main" java.lang.IllegalStateException: order 42 is closed\n'
         "\tat com.example.orders.OrderService.close(OrderService.java:88)\n"
@@ -1054,6 +1072,12 @@ async def case_tokenizer_measurement(llm, model, ctx):
         return CaseResult("", UNAVAILABLE, {"reason": "the endpoint did not report prompt token usage",
                                             "reported_prompt_tokens": reported})
     ascii_floor = min(ascii_ratios.values())
+    # The prompt-consumption ceiling (whitespace runs counted once, as the
+    # dispatch-side check counts them): the most compressible class, widened
+    # by the margin; never tighter than the calibrated default.
+    consumption_ratios = {name: consumption_bytes(TOKENIZER_CORPORA[name]) / reported[name]
+                          for name in ascii_ratios}
+    ceiling = max(DEFAULT_BYTES_PER_TOKEN_CEILING, max(consumption_ratios.values()) / margin)
     unicode_text = TOKENIZER_CORPORA["unicode"]
     ascii_part = sum(1 for ch in unicode_text if ord(ch) < 128)
     non_ascii_bytes = len(unicode_text.encode("utf-8")) - ascii_part
@@ -1062,10 +1086,12 @@ async def case_tokenizer_measurement(llm, model, ctx):
     return CaseResult("", PASS, {
         "ascii_bytes_per_token": {k: round(v, 4) for k, v in ascii_ratios.items()},
         "non_ascii_bytes_per_token": round(non_ascii_ratio, 4),
+        "consumption_bytes_per_token": {k: round(v, 4) for k, v in consumption_ratios.items()},
         "reported_prompt_tokens": reported,
     }, {
         "bytes_per_token_floor": round(ascii_floor * margin, 4),
         "non_ascii_bytes_per_token_floor": round(non_ascii_ratio * margin, 4),
+        "bytes_per_token_ceiling": round(ceiling, 4),
     })
 
 
@@ -1108,8 +1134,14 @@ async def case_context_capacity(llm, model, ctx):
                  min_fill_ratio=policy.min_fill_ratio, request_timeout_seconds=policy.request_timeout_seconds)
     factory = ctx.get("client_factory")
     client = factory(policy.request_timeout_seconds).client if factory is not None else llm.client
-    extra_body = ctx.get("extra_body") or None
     runtime = ctx.get("runtime") or runtime_adapter()
+    # PROVIDER-CONTRACT-001: exactly what a production request carries (the
+    # adapter's wire body), never provider options it would ignore.
+    extra_body = runtime.request_plan(ctx.get("extra_body") or None, temperature=None,
+                                      reasoning_flag=bool(ctx.get("reasoning")),
+                                      requested_context_window=int(window)).wire_body or None
+    if runtime.capabilities.per_request_context_window:
+        extra_body = runtime.with_context_window(extra_body, int(window))
 
     async def send(messages, max_tokens):
         # Through the model's runtime adapter (INF-001), straight to the
@@ -1142,6 +1174,8 @@ async def case_context_capacity(llm, model, ctx):
     ], answer_tokens)
     reported = prompt_tokens(response)
     content = response.content
+    # The window the capacity was measured in must be the one qualified.
+    served = runtime.observe_served_context(base_url=base_url or "", model=model, api_key=ctx.get("api_key") or "")
     evidence = {
         # This probe measures the server's window, so it is sent at
         # temperature 0.0 whatever the qualified inference settings say.
@@ -1150,7 +1184,12 @@ async def case_context_capacity(llm, model, ctx):
         "fill_ratio": round(reported / int(window), 4) if reported else None,
         "first_marker_recalled": head in content, "last_marker_recalled": tail in content,
         "finish_reason": response.finish_reason,
+        "served_context_window": served,
     }
+    if served is not None and served != int(window):
+        evidence["reason_code"] = (SERVED_CONTEXT_BELOW_REQUESTED if served < int(window)
+                                   else RUNTIME_CONTEXT_IDENTITY_MISMATCH)
+        return CaseResult("", FAIL, evidence)
     if reported is None:
         return CaseResult("", UNAVAILABLE, {"reason": "the endpoint did not report prompt token usage", **evidence})
     ok = (head in content and tail in content and reported >= int(policy.min_fill_ratio * target)
@@ -1223,6 +1262,8 @@ async def run_qualification(
             f"{', '.join(c for c in ('artifact_digest', 'provider_version') if c in fingerprint.missing_components)} "
             f"({'; '.join(fingerprint.probe_errors) or 'no native metadata'})"
         )
+    runtime = runtime_for_binding(_binding_for(config, model))
+    require_verified_identity(config, model, fingerprint, settings, runtime)
     llm = llm or LLMClient(config)
 
     def default_factory(timeout: float) -> Any:
@@ -1241,7 +1282,6 @@ async def run_qualification(
                                    http_client=httpx.AsyncClient(trust_env=False, timeout=timeout))
         return probe
 
-    runtime = runtime_for_binding(_binding_for(config, model))
     policy = qualification_policy_of(config)
     ctx: Dict[str, Any] = {
         "policy": policy,
@@ -1253,6 +1293,7 @@ async def run_qualification(
         # qualification_config put the requested window into extra_body.
         "extra_body": config.llm.extra_body,
         "base_url": (_binding_for(config, model).get("base_url") or config.llm.base_url),
+        "api_key": (_binding_for(config, model).get("api_key") or config.llm.api_key),
         "context_window": budget_window(
             requested_context_window(config.llm.extra_body, config.llm.context_window, runtime),
             fingerprint.effective_context_window),
@@ -1270,6 +1311,34 @@ async def run_qualification(
                         environment=environment_for_fingerprint(fingerprint), policy=policy)
 
 
+def require_verified_identity(config: Any, model: str, fingerprint: ModelRuntimeFingerprint,
+                              settings: InferenceSettings, runtime: Any) -> Any:
+    """PROVIDER-CONTRACT-001: the identity a record would certify is the
+    one the provider verifiably applies - every setting the binding relies on
+    is carried by the request or equals the served model's own configuration
+    (requested window included). Returns the request plan; raises
+    QualificationError(QUALIFICATION_IDENTITY_UNVERIFIED) otherwise, before
+    any case runs."""
+    from kriya.core.model_runtime import binding_object, requested_context_window
+
+    binding = binding_object(config, model) or config.llm
+    extra_body = getattr(binding, "extra_body", None) or None
+    plan = runtime.request_plan(
+        extra_body, temperature=settings.temperature, reasoning_flag=settings.reasoning,
+        requested_context_window=requested_context_window(extra_body, getattr(binding, "context_window", None),
+                                                          runtime),
+        fingerprint=fingerprint)
+    problems = [f"conflict: {c}" for c in plan.conflicts] + [f"unknown request field {u}" for u in plan.unknown]
+    problems += [f"{s.name}: requested {s.requested!r}, served {s.effective!r}" for s in plan.not_effective()]
+    problems += [f"{s.name}: requested {s.requested!r}, not verifiable on this runtime" for s in plan.unverified()]
+    if problems:
+        raise QualificationError(
+            f"{QUALIFICATION_IDENTITY_UNVERIFIED}: {model!r} cannot be qualified - the inference identity the "
+            f"provider applies is not the one configured ({'; '.join(problems)}). Pin the served model's "
+            "configuration (kriya model pin) and bind the pinned model.")
+    return plan
+
+
 def qualification_config(config: Any, model: str, context_window: Optional[int] = None, *,
                          settings: Optional[InferenceSettings] = None) -> Any:
     """A copy of ``config`` for qualifying ``model``: optionally at another
@@ -1279,6 +1348,7 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
     primary binding's), and a strict budget policy so no case is itself sent
     with a different window."""
     from kriya.core.inference_runtime import runtime_for_binding
+    from kriya.core.inference_settings import request_settings
     from kriya.core.model_runtime import binding_object, requested_context_window
 
     copy = config.model_copy(deep=True)
@@ -1288,7 +1358,13 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
         runtime = runtime_for_binding(binding)
         window = requested_context_window(getattr(binding, "extra_body", None), getattr(binding, "context_window", None),
                                           runtime)
-        extra_body = settings.extra_body
+        # The binding's own extra_body when it expresses exactly these settings
+        # (it also carries the server-only settings, which the wire body does
+        # not); otherwise the qualified wire body.
+        own = getattr(binding, "extra_body", None)
+        own_settings = request_settings(temperature=settings.temperature, reasoning=settings.reasoning,
+                                        extra_body=own, runtime=runtime)
+        extra_body = own if own_settings.digest == settings.digest else settings.extra_body
         binding.extra_body = (runtime.with_context_window(extra_body, window) if window is not None
                               else extra_body)
         binding.reasoning = settings.reasoning
