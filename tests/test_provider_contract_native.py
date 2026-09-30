@@ -8,7 +8,7 @@ speaking the native protocol and assert what arrives on the wire."""
 import asyncio
 import json
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
 import httpx
@@ -129,6 +129,13 @@ def test_errors_are_classified_for_kriyas_policy(error, kind):
 
 # --- on the wire ---------------------------------------------------------------------------------------
 
+class _Loopback(ThreadingHTTPServer):
+    """A test server whose teardown never waits on a stalled connection."""
+
+    daemon_threads = True
+    block_on_close = False
+
+
 class _NativeServer:
     def __init__(self):
         self.requests = []
@@ -140,6 +147,8 @@ class _NativeServer:
         server = self
 
         class Handler(BaseHTTPRequestHandler):
+            timeout = 5  # a stalled client (a timed-out probe) never pins a handler
+
             def log_message(self, *args):
                 pass
 
@@ -165,7 +174,7 @@ class _NativeServer:
                 self.end_headers()
                 self.wfile.write(payload)
 
-        self.httpd = HTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd = _Loopback(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.httpd.server_port}/v1"
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 

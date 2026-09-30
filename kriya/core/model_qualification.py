@@ -54,6 +54,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -986,8 +987,11 @@ async def case_timeout_semantics(llm, model, ctx):
     # Not policy: the 1 ms client timeout forces the timeout under test; the
     # request never completes, so its output budget is irrelevant.
     probe = ctx["client_factory"](timeout=0.001)
-    r = await probe.complete_result("You are a helpful assistant.", "Write a long story about a lighthouse.",
-                                    model_override=model, max_tokens_override=512)
+    try:
+        r = await probe.complete_result("You are a helpful assistant.", "Write a long story about a lighthouse.",
+                                        model_override=model, max_tokens_override=512)
+    finally:
+        await _close_probe(probe)
     ok = r.status.value == "TIMEOUT" and r.error is not None
     return CaseResult("", PASS if ok else FAIL, {"status": r.status.value, "backend_error": r.backend_error})
 
@@ -1098,8 +1102,26 @@ async def case_tokenizer_measurement(llm, model, ctx):
 _CAPACITY_UNIT = "alpha beta gamma delta epsilon zeta eta theta iota kappa. "
 
 
+async def _close_probe(probe: Any) -> None:
+    """Release a probe client's transport (a timed-out request can leave its
+    connection open)."""
+    closer = getattr(probe, "aclose", None)
+    if closer is not None and inspect.iscoroutinefunction(closer):
+        await closer()
+
+
 @_case("context_capacity")
 async def case_context_capacity(llm, model, ctx):
+    """See _context_capacity; every probe client it opens is closed."""
+    opened: List[Any] = []
+    try:
+        return await _context_capacity(llm, model, ctx, opened)
+    finally:
+        for probe in opened:
+            await _close_probe(probe)
+
+
+async def _context_capacity(llm, model, ctx, opened: List[Any]):
     """A near-window request actually fits the served window: the filler's
     real token rate is measured on two small probes, a prompt of about
     (window - headroom) real tokens is sent with a marker in the system
@@ -1133,7 +1155,9 @@ async def case_context_capacity(llm, model, ctx):
                                   + ("reasoning_headroom_tokens" if reasoning_headroom else "headroom_tokens")),
                  min_fill_ratio=policy.min_fill_ratio, request_timeout_seconds=policy.request_timeout_seconds)
     factory = ctx.get("client_factory")
-    client = factory(policy.request_timeout_seconds).client if factory is not None else llm.client
+    if factory is not None:
+        opened.append(factory(policy.request_timeout_seconds))
+    client = opened[-1].client if opened else llm.client
     runtime = ctx.get("runtime") or runtime_adapter()
     # PROVIDER-CONTRACT-001: exactly what a production request carries (the
     # adapter's wire body), never provider options it would ignore.

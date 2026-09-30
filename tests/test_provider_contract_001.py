@@ -13,7 +13,7 @@ import json
 import socketserver
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
 import httpx
@@ -256,6 +256,13 @@ def test_a_larger_served_window_is_refused_before_inference_only_under_productio
 
 # --- the real transport, on the wire ------------------------------------------------------------------
 
+class _Loopback(ThreadingHTTPServer):
+    """A test server whose teardown never waits on a stalled connection."""
+
+    daemon_threads = True
+    block_on_close = False
+
+
 class _Server:
     """A loopback OpenAI-compatible endpoint recording every request body."""
 
@@ -266,6 +273,8 @@ class _Server:
         server = self
 
         class Handler(BaseHTTPRequestHandler):
+            timeout = 5  # a stalled client (a timed-out probe) never pins a handler
+
             def log_message(self, *args):
                 pass
 
@@ -294,7 +303,7 @@ class _Server:
                 self.end_headers()
                 self.wfile.write(payload)
 
-        self.httpd = HTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd = _Loopback(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.httpd.server_port}/v1"
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
 
@@ -316,7 +325,8 @@ class _Proxy:
                 self.request.recv(65536)
                 self.request.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
 
-        self.tcp = socketserver.TCPServer(("127.0.0.1", 0), Handler)
+        self.tcp = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+        self.tcp.daemon_threads, self.tcp.block_on_close = True, False
         self.url = f"http://127.0.0.1:{self.tcp.server_address[1]}"
         threading.Thread(target=self.tcp.serve_forever, daemon=True).start()
 
@@ -875,3 +885,32 @@ def test_a_per_request_window_is_labelled_as_carried_by_the_request(monkeypatch)
         unregister_runtime_adapter(adapter.name)
         model_runtime.clear_model_runtime_cache()
     assert result.budget["window_source"] == "requested_per_request"
+
+
+def test_a_stalled_client_never_hangs_the_test_server_teardown():
+    """Closure suite at 3eb5718 hung: the timeout probe connected, timed out
+    before sending its request line and was never closed, so the test
+    server's single serving thread blocked in readline and shutdown()
+    waited forever."""
+    import socket
+
+    endpoint = _Server()
+    stalled = socket.create_connection(("127.0.0.1", endpoint.httpd.server_port))
+    try:
+        closer = threading.Thread(target=endpoint.close, daemon=True)
+        closer.start()
+        closer.join(timeout=10)
+        assert not closer.is_alive(), "server teardown blocked by a stalled client"
+    finally:
+        stalled.close()
+
+
+def test_the_qualification_probe_clients_are_closed_after_the_timeout_case(server):
+    from kriya.core import model_qualification as mq
+
+    made = []
+    factory = mq.qualification_client_factory(_wire_config(server.url), "m:1")
+    server.delay = 0.5
+    asyncio.run(mq.case_timeout_semantics(None, "m:1", {"client_factory": lambda timeout: made.append(
+        factory(timeout)) or made[-1]}))
+    assert made and all(probe._clients == {} for probe in made)  # pylint: disable=protected-access
