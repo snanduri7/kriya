@@ -262,6 +262,7 @@ class _Server:
     def __init__(self):
         self.bodies = []
         self.status = 200
+        self.delay = 0.0
         server = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -271,6 +272,7 @@ class _Server:
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 server.bodies.append(body)
+                time.sleep(server.delay)
                 if server.status != 200:
                     self._send(server.status, "application/json", b'{"error":{"message":"boom"}}')
                 elif body.get("stream"):
@@ -819,3 +821,29 @@ def test_the_runtime_tokenizer_ceiling_is_the_largest_any_current_record_measure
         mq.save_record(record)
     limits = mq.measured_limits_for(fingerprint, settings=first)
     assert limits["bytes_per_token_ceiling"] == 9.5 and limits["bytes_per_token_floor"] == 2.5
+
+
+def test_the_qualification_timeout_probe_really_times_out(server):
+    """Live qualification (2026-09-30) reported timeout_semantics FAIL with
+    OUTPUT_TRUNCATED: the probe's 1 ms client timeout was overridden by the
+    per-request Kriya transport timeout, so a slow request simply completed.
+    The probe's timeout must be the one its requests carry."""
+    from kriya.core import model_qualification as mq
+
+    server.delay = 0.5
+    config = _wire_config(server.url)
+    result = asyncio.run(mq.case_timeout_semantics(None, "m:1", {
+        "client_factory": mq.qualification_client_factory(config, "m:1")}))
+    assert result.status == mq.PASS, result.evidence
+    assert result.evidence["status"] == "TIMEOUT"
+
+
+def test_a_qualification_probe_client_carries_the_kriya_transport_policy():
+    from kriya.core import model_qualification as mq
+
+    probe = mq.qualification_client_factory(AppConfig(), AppConfig().llm.model)(42.0)
+    try:
+        assert probe.client.max_retries == 0 and probe.client._client._trust_env is False  # pylint: disable=protected-access
+        assert probe._request_timeout().read == 42.0  # pylint: disable=protected-access
+    finally:
+        asyncio.run(probe.aclose())

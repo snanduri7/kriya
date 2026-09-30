@@ -1266,21 +1266,7 @@ async def run_qualification(
     require_verified_identity(config, model, fingerprint, settings, runtime)
     llm = llm or LLMClient(config)
 
-    def default_factory(timeout: float) -> Any:
-        import httpx
-        from openai import AsyncOpenAI
-
-        from kriya.core.llm import SDK_MAX_RETRIES
-
-        binding = _binding_for(config, model)
-        probe = LLMClient(config)
-        # PROVIDER-CONTRACT-001: the same direct, single-request transport as
-        # every other local model call (no environment proxy, no SDK retry).
-        probe.client = AsyncOpenAI(api_key=binding.get("api_key") or config.llm.api_key,
-                                   base_url=binding.get("base_url") or config.llm.base_url,
-                                   timeout=timeout, max_retries=SDK_MAX_RETRIES,
-                                   http_client=httpx.AsyncClient(trust_env=False, timeout=timeout))
-        return probe
+    default_factory = qualification_client_factory(config, model)
 
     policy = qualification_policy_of(config)
     ctx: Dict[str, Any] = {
@@ -1309,6 +1295,30 @@ async def run_qualification(
             progress(result)
     return build_record(fingerprint, results, settings=settings,
                         environment=environment_for_fingerprint(fingerprint), policy=policy)
+
+
+def qualification_client_factory(config: Any, model: str) -> Callable[[float], Any]:
+    """A factory of probe clients for ``model``'s own endpoint and key with
+    a given timeout (the timeout and capacity cases). The timeout is the
+    probe's ``llm.transport`` policy - the one owner of every request's
+    timeout (LLMClient sends it per request, which overrides any timeout set
+    on the SDK client) - and the client is Kriya's own (direct transport, no
+    SDK retry)."""
+    from kriya.core.llm import LLMClient
+    from kriya.core.model_runtime import _binding_for
+
+    binding = _binding_for(config, model)
+
+    def factory(timeout: float) -> Any:
+        probe_config = config.model_copy(deep=True)
+        probe_config.llm.base_url = binding.get("base_url") or config.llm.base_url
+        probe_config.llm.api_key = binding.get("api_key") or config.llm.api_key
+        transport = probe_config.llm.transport
+        transport.connect_timeout_seconds = transport.read_timeout_seconds = timeout
+        transport.write_timeout_seconds = transport.pool_timeout_seconds = timeout
+        return LLMClient(probe_config)
+
+    return factory
 
 
 def require_verified_identity(config: Any, model: str, fingerprint: ModelRuntimeFingerprint,

@@ -1,0 +1,127 @@
+Qualifying qwen3-coder:30b-kriya-e52213655394 for developer, planner, architect, reviewer, run_verifier, skill_gap, spec_compliance (inference settings sha256:9e929b038e293a2c9a7caee18d9e0de3f14ff5fcf398d19cf2de977625315e5e: temperature=0.7, reasoning=False, extra_body={"reasoning_effort":"none","top_p":0.8}) ...
+2026-09-30 14:00:13,713 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3-coder:30b-kriya-e52213655394, Source: explicit_primary, native_tool_calls=True, json_mode=True, reliable_multiline_json=False, preferred_edit_protocol=small_native_tools]
+2026-09-30 14:00:13,939 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:21,958 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 26 input tokens, 2 output tokens | Time: 8.03s | Finish: stop]
+  plain_completion             PASS           8.04s
+2026-09-30 14:00:21,972 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:22,101 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 26 input tokens, 3 output tokens | Time: 0.13s | Finish: stop]
+  finish_reason_stop           PASS           0.14s
+2026-09-30 14:00:22,106 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: True, Reasoning: False]
+2026-09-30 14:00:22,471 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 45 input tokens, 17 output tokens | Time: 0.37s | Finish: stop]
+  structured_json              PASS           0.38s
+2026-09-30 14:00:22,481 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: True, Reasoning: False]
+2026-09-30 14:00:23,146 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 77 input tokens, 40 output tokens | Time: 0.67s | Finish: stop]
+  multiline_json               PASS           0.67s
+2026-09-30 14:00:23,817 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 14:00:23,824 WARNING kriya.core.token_budget: Token budget under-predicted for qwen3-coder:30b-kriya-e52213655394: predicted 138 prompt tokens (default_byte_bound), provider reported 297. Qualify this runtime (kriya model qualify) to measure its tokenizer.
+
+[Usage: 297 input tokens, 22 output tokens | Time: 0.67s | Finish: tool_calls]
+  native_tool_calls            PASS           0.68s
+2026-09-30 14:00:24,539 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 14:00:24,545 WARNING kriya.core.token_budget: Token budget under-predicted for qwen3-coder:30b-kriya-e52213655394: predicted 160 prompt tokens (default_byte_bound), provider reported 308. Qualify this runtime (kriya model qualify) to measure its tokenizer.
+
+[Usage: 308 input tokens, 45 output tokens | Time: 0.72s | Finish: tool_calls]
+  multiple_tool_calls          PASS           0.72s
+2026-09-30 14:00:25,547 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 14:00:25,555 WARNING kriya.core.token_budget: Token budget under-predicted for qwen3-coder:30b-kriya-e52213655394: predicted 190 prompt tokens (default_byte_bound), provider reported 328. Qualify this runtime (kriya model qualify) to measure its tokenizer.
+
+[Usage: 328 input tokens, 49 output tokens | Time: 1.01s | Finish: tool_calls]
+  tool_argument_integrity      PASS           1.01s
+2026-09-30 14:00:25,557 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: True, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:25,699 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 36 input tokens, 51 output tokens | Time: 0.77s | Finish: stop]
+  streaming_assembly           PASS           0.77s
+2026-09-30 14:00:26,327 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:26,680 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 34 input tokens, 16 output tokens | Time: 0.36s | Finish: length | OUTPUT_TRUNCATED]
+  output_truncation            PASS           0.36s
+2026-09-30 14:00:26,688 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:26,871 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 52 input tokens, 3 output tokens | Time: 0.19s | Finish: stop]
+  reasoning_behavior           PASS           0.19s
+2026-09-30 14:00:26,877 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:28,133 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 98 input tokens, 85 output tokens | Time: 1.26s | Finish: stop]
+  full_file_raw_content        PASS           1.27s
+2026-09-30 14:00:28,150 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:29,433 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 139 input tokens, 85 output tokens | Time: 1.29s | Finish: stop]
+  anchored_edit_protocol       PASS           1.30s
+2026-09-30 14:00:29,438 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:30,114 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 54 input tokens, 42 output tokens | Time: 0.68s | Finish: stop]
+  malformed_output_recovery    PASS           0.68s
+2026-09-30 14:00:30,135 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:36,626 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 28 input tokens, 512 output tokens | Time: 6.49s | Finish: length | OUTPUT_TRUNCATED]
+  timeout_semantics            FAIL           6.51s
+2026-09-30 14:00:36,632 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: True, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:36,759 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: None input tokens, None output tokens | Time: 0.13s | Finish: unreported | CANCELLED]
+2026-09-30 14:00:36,768 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:36,921 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 26 input tokens, 2 output tokens | Time: 0.16s | Finish: stop]
+  cancellation_semantics       PASS           0.30s
+2026-09-30 14:00:36,929 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: kriya-qualification-no-such-model:0, Source: unverified_conservative_default, native_tool_calls=False, json_mode=False, reliable_multiline_json=False, preferred_edit_protocol=full_file]
+2026-09-30 14:00:36,956 INFO kriya.core.llm: Sending completion request to local LLM [Model: kriya-qualification-no-such-model:0, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:36,967 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+  endpoint_error_semantics     PASS           0.04s
+  endpoint_restart_semantics   UNAVAILABLE    0.00s
+2026-09-30 14:00:36,970 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:37,201 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 103 input tokens, 1 output tokens | Time: 0.24s | Finish: length | OUTPUT_TRUNCATED]
+2026-09-30 14:00:37,212 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:37,439 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 105 input tokens, 1 output tokens | Time: 0.24s | Finish: length | OUTPUT_TRUNCATED]
+2026-09-30 14:00:37,451 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:37,705 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 141 input tokens, 1 output tokens | Time: 0.26s | Finish: length | OUTPUT_TRUNCATED]
+2026-09-30 14:00:37,718 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:37,950 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 119 input tokens, 1 output tokens | Time: 0.24s | Finish: length | OUTPUT_TRUNCATED]
+2026-09-30 14:00:37,956 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:38,132 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 76 input tokens, 1 output tokens | Time: 0.18s | Finish: length | OUTPUT_TRUNCATED]
+2026-09-30 14:00:38,139 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:38,326 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 86 input tokens, 1 output tokens | Time: 0.20s | Finish: length | OUTPUT_TRUNCATED]
+2026-09-30 14:00:38,338 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:00:38,576 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+
+[Usage: 116 input tokens, 1 output tokens | Time: 0.24s | Finish: length | OUTPUT_TRUNCATED]
+  tokenizer_measurement        PASS           1.62s
+2026-09-30 14:00:39,136 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 14:00:39,712 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 14:02:42,589 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+  context_capacity             PASS         124.01s
+
+Summary: {'PASS': 17, 'FAIL': 1, 'UNAVAILABLE': 1}  measured limits: {'verified_tool_argument_chars': 87, 'reasoning_observed': False, 'bytes_per_token_floor': 2.1101, 'non_ascii_bytes_per_token_floor': 2.9499, 'bytes_per_token_ceiling': 8.0}
+Runtime fingerprint: 4ef4192f5c82c9e344a0cee1335a5423bc3e9755807d967a37451266cfeadacd
+Qualification identity: 4bcf44baaf4be45a489ba8d307369533156aa51808e102aaa9086a7b7ef66a10
+Qualification policy: sha256:d9ba816202804271520609d7af0eecc30d9a987b99d8f76467830c7ae8ad5e09 (model_qualification)
+Execution environment: sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d (darwin/arm64, metal Apple M1 Max, 64 GiB class, ollama/0.34.4; exact=True) - capacity evidence counts only here
+Record: /Users/sriramnanduri/.kriya/qualifications/4bcf44baaf4be45a489ba8d307369533156aa51808e102aaa9086a7b7ef66a10.json
+exit 0
