@@ -1525,6 +1525,13 @@ def build_code_context_package(
         graph_rag_context += (
             f"\n(Left out for the context budget, not shown above: {', '.join(budget_omitted)})\n"
         )
+    if not items and not budget_omitted:
+        # Nothing to show and nothing left out: no section at all. A bare
+        # header is text every caller's `if context:` guard treats as
+        # content, and an optional section that is only its header can occur
+        # twice in a request (DEVELOPER-PROMPT-FIT-001 then keeps it as
+        # mandatory text).
+        graph_rag_context = ""
 
     package = build_context_package(
         relevant_files=tuple(items),
