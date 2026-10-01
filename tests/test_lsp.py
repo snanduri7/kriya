@@ -82,8 +82,13 @@ class _FakeStdin:
         pass
 
 
-def _make_client(messages: List[Dict[str, Any]]) -> JdtlsClient:
-    client = JdtlsClient("/fake/project", "/fake/jdtls")
+def _make_client(messages: List[Dict[str, Any]], project=None, mirror=None) -> JdtlsClient:
+    """A client over a fake process. ``project``/``mirror``: a real candidate
+    directory and JDTLS's private mirror of it, for tests that query
+    without start() (start() creates the mirror itself)."""
+    client = JdtlsClient(str(project) if project else "/fake/project", "/fake/jdtls")
+    if mirror is not None:
+        client._mirror = os.path.realpath(str(mirror))
     client.process = MagicMock()
     client.process.stdin = _FakeStdin()
     client.process.stdout = _FakeStdout(messages)
@@ -118,29 +123,34 @@ async def test_write_message_uses_correct_content_length_framing():
 
 
 @pytest.mark.asyncio
-async def test_check_file_sends_did_open_on_first_call_then_did_change():
-    client = _make_client([])
-    client._diagnostics["file:///App.java"] = []  # pre-populate so polling returns immediately
+async def test_check_file_sends_did_open_on_first_call_then_did_change(tmp_path):
+    (tmp_path / "project").mkdir()
+    (tmp_path / "mirror").mkdir()
+    client = _make_client([], tmp_path / "project", tmp_path / "mirror")
+    app = str(tmp_path / "project" / "App.java")
+    client._diagnostics["file://" + client._mirror_path(app)] = []  # pre-populate so polling returns immediately
 
-    await client.check_file("/App.java", "class App {}", timeout=1)
+    await client.check_file(app, "class App {}", timeout=1)
     first_write = client.process.stdin.written.decode("utf-8")
     assert '"method": "textDocument/didOpen"' in first_write or "textDocument/didOpen" in first_write
 
     client.process.stdin.written = b""
-    await client.check_file("/App.java", "class App { int x; }", timeout=1)
+    await client.check_file(app, "class App { int x; }", timeout=1)
     second_write = client.process.stdin.written.decode("utf-8")
     assert "textDocument/didChange" in second_write
     assert '"version": 2' in second_write
 
 @pytest.mark.asyncio
-async def test_check_file_returns_empty_on_timeout_without_raising():
-    client = _make_client([])
+async def test_check_file_returns_empty_on_timeout_without_raising(tmp_path):
+    (tmp_path / "project").mkdir()
+    (tmp_path / "mirror").mkdir()
+    client = _make_client([], tmp_path / "project", tmp_path / "mirror")
     # No diagnostics ever arrive - must degrade to empty, not hang or raise.
-    result = await client.check_file("/App.java", "class App {}", timeout=0.3)
+    result = await client.check_file(str(tmp_path / "project" / "App.java"), "class App {}", timeout=0.3)
     assert result == []
 
 @pytest.mark.asyncio
-async def test_start_and_check_file_end_to_end_via_fake_process():
+async def test_start_and_check_file_end_to_end_via_fake_process(tmp_path, temp_root):
     """Full round trip through the real read loop: initialize's response
     unblocks start(), then a publishDiagnostics notification pushed AFTER
     check_file() sends its didOpen (matching how a real server behaves -
@@ -153,22 +163,24 @@ async def test_start_and_check_file_end_to_end_via_fake_process():
         "message": "The import org.apache.ignite.cache.IgniteCache cannot be resolved",
     }]
     init_response = {"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {}}}
-    client = _make_client([init_response])
+    project = tmp_path / "project"
+    project.mkdir()
+    client = _make_client([init_response], project)
+    source = str(project / "IntegrationApp.java")
 
     async def push_diagnostics_after_delay():
         await asyncio.sleep(0.1)
         client.process.stdout.append({
             "jsonrpc": "2.0",
             "method": "textDocument/publishDiagnostics",
-            "params": {"uri": "file:///IntegrationApp.java", "diagnostics": diagnostics_payload},
+            # JDTLS publishes the (canonical) URI of the file it analyzed: the mirror's.
+            "params": {"uri": "file://" + client._mirror_path(source), "diagnostics": diagnostics_payload},
         })
 
-    with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=client.process)), \
-         patch("tempfile.mkdtemp", return_value="/tmp/fake-jdtls-data"), \
-         patch("shutil.rmtree"):
+    with patch("asyncio.create_subprocess_exec", new=AsyncMock(return_value=client.process)):
         await client.start()
         push_task = asyncio.create_task(push_diagnostics_after_delay())
-        result = await client.check_file("/IntegrationApp.java", "class IntegrationApp {}", timeout=2)
+        result = await client.check_file(source, "class IntegrationApp {}", timeout=2)
         await push_task
         client.process.stdout.close()
         client._reader_task.cancel()  # skip the real shutdown handshake - not what this test covers
