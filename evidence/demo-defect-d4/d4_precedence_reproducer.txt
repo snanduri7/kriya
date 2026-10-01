@@ -1,0 +1,44 @@
+[
+ {
+  "variant": "pom-config",
+  "argv": [
+   "mvn",
+   "-X",
+   "-e",
+   "exec:java",
+   "-Dexec.mainClass=demo.ExistingB"
+  ],
+  "pom_plugin_configuration": "<configuration><mainClass>demo.NonexistentA</mainClass></configuration>",
+  "plugin_version_used": [
+   "3.1.0"
+  ],
+  "mojo_configuration_mainClass": [
+   "demo.NonexistentA"
+  ],
+  "class_not_found": [
+   "demo.NonexistentA"
+  ],
+  "existing_b_ran": false,
+  "returncode": 1
+ },
+ {
+  "variant": "no-config",
+  "argv": [
+   "mvn",
+   "-X",
+   "-e",
+   "exec:java",
+   "-Dexec.mainClass=demo.ExistingB"
+  ],
+  "pom_plugin_configuration": "(none)",
+  "plugin_version_used": [
+   "3.1.0"
+  ],
+  "mojo_configuration_mainClass": [
+   "demo.ExistingB"
+  ],
+  "class_not_found": [],
+  "existing_b_ran": true,
+  "returncode": 0
+ }
+]
