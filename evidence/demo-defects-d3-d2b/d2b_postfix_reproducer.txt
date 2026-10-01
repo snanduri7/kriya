@@ -1,0 +1,10 @@
+# D2B reproducer, POST-FIX (tooling-only runtime acquisition), contained OCI, fresh Maven cache
+{
+ "compile_success": true,
+ "exec_plugin_cached_before_runtime": false,
+ "runtime_returncode": 0,
+ "candidate_executions": 1,
+ "executions": [
+  "CANDIDATE_MAIN_RAN https.proxyHost=null registry=no network (UnknownHostException)"
+ ]
+}

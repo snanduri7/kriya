@@ -1,0 +1,26 @@
+# D3 reproducer, PRE-FIX at d36e3eb (product = d36e3eb; D3 code path unchanged since 28fa21f)
+{
+ "target_ignored": false,
+ "compile_success": true,
+ "class_after_compile": true,
+ "same_sandbox": true,
+ "class_after_reset": false,
+ "runtime_success": false,
+ "app_ran": false,
+ "class_not_found": true,
+ "classification": "runtime command could not load its configured application entrypoint",
+ "prerequisite_build": false
+}
+## with target/ git-ignored
+{
+ "target_ignored": true,
+ "compile_success": true,
+ "class_after_compile": true,
+ "same_sandbox": true,
+ "class_after_reset": true,
+ "runtime_success": true,
+ "app_ran": true,
+ "class_not_found": false,
+ "classification": null,
+ "prerequisite_build": false
+}
