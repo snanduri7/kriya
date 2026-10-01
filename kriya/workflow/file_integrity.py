@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
+import subprocess
 from dataclasses import dataclass, replace
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -415,6 +416,11 @@ def mutate_snapshot(snapshot: FileSnapshot, edits: Sequence[Dict[str, str]]) -> 
 # ---------------------------------------------------------------- verification tree binding
 
 VERIFICATION_GATE_MUTATED_TRACKED_FILES = "VERIFICATION_GATE_MUTATED_TRACKED_FILES"
+# FILE-INTEGRITY-CONTRACT-001B: a gate created repository content - a file Git
+# neither tracks nor ignores - that is not candidate output; the tree the
+# later gates verify is then not the tree that would be committed.
+VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE = "VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE"
+VERIFICATION_TREE_STOP_CODES = (VERIFICATION_GATE_MUTATED_TRACKED_FILES, VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE)
 
 
 def _stat_identity(path: str) -> Optional[Tuple[int, int, int, int, int]]:
@@ -464,6 +470,54 @@ class VerificationTreeMutated(QualityGateFailure):
         self.gate = gate
 
 
+class VerificationGateCreatedFiles(QualityGateFailure):
+    """FILE-INTEGRITY-CONTRACT-001B: a verification gate created a file Git
+    neither tracks nor ignores (repository content by Git's own semantics)
+    that is not candidate output. A deterministic stop like
+    VerificationTreeMutated: the verified tree would not be the committed
+    one. Ignored build output is never repository content."""
+
+    def __init__(self, gate: str, paths: Sequence[str], phase: str = "after") -> None:
+        where = (f"the {gate} gate created" if phase == "after"
+                 else f"between verification steps (detected before the {gate} gate), something created")
+        message = (
+            f"{VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE}: {where} repository content Kriya did not authorize - "
+            f"untracked and not ignored by Git ({', '.join(list(paths)[:10])}). The tree verified would not be "
+            "the tree committed; ignore real build output in the repository's .gitignore."
+        )
+        super().__init__(Failure(
+            type="verification_tree_mutated", message=message, raw_output=message, source="orchestrator",
+            authority="deterministic", likely_files=list(paths)[:50],
+            diagnostics={"reason_code": VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE, "gate": gate, "phase": phase,
+                         "created": [{"path": path, "tracked": False, "ignored": False} for path in list(paths)[:200]]},
+        ))
+        self.gate = gate
+
+
+def _bytecode_cache(relpath: str) -> bool:
+    """CPython's own bytecode cache (PEP 3147: ``__pycache__/<name>.<tag>.pyc``),
+    written beside the sources it is derived from by any gate that imports or
+    compiles Python - interpreter output, never repository content."""
+    parts = relpath.split("/")
+    return "__pycache__" in parts[:-1] and parts[-1].endswith((".pyc", ".pyo"))
+
+
+def untracked_repository_paths(root: str) -> frozenset:
+    """Every file under ``root`` that Git neither tracks nor ignores (its own
+    exclude semantics: .gitignore, info/exclude, core.excludesFile), Kriya's
+    ``.kriya/`` state excluded. Not a Git work tree: none. A failing listing
+    raises (fail closed)."""
+    inside = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=root, capture_output=True, text=True)
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        return frozenset()
+    result = subprocess.run(["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=root,
+                            capture_output=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"git ls-files --others failed: {os.fsdecode(result.stderr).strip() or result.returncode}")
+    return frozenset(path for path in (os.fsdecode(item) for item in result.stdout.split(b"\0") if item)
+                     if path != ".kriya" and not path.startswith(".kriya/"))
+
+
 class VerificationTreeBinding:
     """FILE-INTEGRITY-CONTRACT-001: the exact tree a verification sequence
     runs against - every repository content path (git-tracked in the
@@ -483,6 +537,10 @@ class VerificationTreeBinding:
         self._expected: Dict[str, Tuple[Optional[Tuple[int, int, int, int, int]], Optional[str]]] = {}
         for relpath in set(content_paths) | set(candidate_paths):
             self._record(relpath)
+        # FILE-INTEGRITY-CONTRACT-001B: untracked, non-ignored content that
+        # already existed is never attributed to a gate.
+        self._untracked_before = untracked_repository_paths(root)
+        self._output_roots: set = set()
 
     def _record(self, relpath: str) -> None:
         path = os.path.join(self.root, relpath)
@@ -495,6 +553,12 @@ class VerificationTreeBinding:
     def authorize(self, relpath: str) -> None:
         """Kriya itself just wrote ``relpath`` through the authorized writer."""
         self._record(relpath)
+
+    def authorize_output_root(self, relroot: str) -> None:
+        """A Kriya gate designates ``relroot`` as its own output directory (e.g.
+        the Java gate's ``javac -d build``): what it writes there is
+        verification output Kriya chose, never repository content."""
+        self._output_roots.add(relroot.strip("/"))
 
     def changes(self) -> List[Tuple[str, Optional[str], Optional[str]]]:
         changed = []
@@ -517,3 +581,14 @@ class VerificationTreeBinding:
         changed = self.changes()
         if changed:
             raise VerificationTreeMutated(gate, changed, phase)
+        created = self.created()
+        if created:
+            raise VerificationGateCreatedFiles(gate, created, phase)
+
+    def created(self) -> List[str]:
+        """Untracked, non-ignored files that appeared since the binding and
+        are neither candidate nor Kriya-authorized output."""
+        return sorted(
+            path for path in untracked_repository_paths(self.root) - self._untracked_before - set(self._expected)
+            if not _bytecode_cache(path)
+            and not any(path == root or path.startswith(root + "/") for root in self._output_roots))

@@ -200,7 +200,6 @@ from kriya.workflow.workflow import (
     extract_error_source_locations,
     extract_expected_files,
     extract_implicated_files,
-    extract_planner_code_blocks,
     find_edits_ignoring_own_diagnosis,
     find_edits_ignoring_reported_line,
     find_misdirected_edit_target,
@@ -7385,220 +7384,6 @@ def test_resolve_run_command_mainclass_correction_does_not_apply_to_exec_exec(tm
     _write_java_class(tmp_path, "src/main/java/com/example/Main.java", "com.example", "Main")
     assert _resolve_run_command(["mvn", "-e", "exec:exec"], str(tmp_path)) == ["mvn", "-e", "exec:exec"]
 
-def test_extract_planner_code_blocks_matches_full_paths():
-    plan = (
-        "### pom.xml\n```xml\n<project>pom content</project>\n```\n\n"
-        "### src/main/java/com/example/protocol/Protocol.java\n"
-        "```java\npackage com.example.protocol;\npublic class Protocol {}\n```\n\n"
-        "### src/main/java/com/example/protocol/ProtocolParser.java\n"
-        "```java\npackage com.example.protocol;\npublic class ProtocolParser {}\n```\n"
-    )
-    expected = [
-        "pom.xml",
-        "src/main/java/com/example/protocol/Protocol.java",
-        "src/main/java/com/example/protocol/ProtocolParser.java",
-    ]
-    result = extract_planner_code_blocks(plan, expected)
-    assert set(result.keys()) == set(expected)
-    assert "public class ProtocolParser {}" in result["src/main/java/com/example/protocol/ProtocolParser.java"]
-
-def test_extract_planner_code_blocks_resolves_closest_match_not_first_found():
-    """Regression test for a real bug caught before this feature ever shipped:
-    matching against an unordered set and stopping at the first substring hit
-    let an EARLIER file's own heading (still within the lookback window once
-    2+ files are shown close together) steal a LATER block's match - e.g.
-    Protocol.java's heading, mentioned before ProtocolParser.java's own
-    heading+fence, could silently claim ProtocolParser's content instead.
-    Fixed by always preferring whichever candidate's mention sits closest
-    (rightmost) to the fence, checked with a 3-file fixture where a naive
-    first-match approach demonstrably picks the wrong file."""
-    plan = (
-        "### src/main/java/com/example/protocol/Protocol.java\n"
-        "```java\npublic class Protocol {}\n```\n\n"
-        "### src/main/java/com/example/protocol/ProtocolParser.java\n"
-        "```java\npublic class ProtocolParser {}\n```\n"
-    )
-    expected = [
-        "src/main/java/com/example/protocol/Protocol.java",
-        "src/main/java/com/example/protocol/ProtocolParser.java",
-    ]
-    result = extract_planner_code_blocks(plan, expected)
-    assert result["src/main/java/com/example/protocol/Protocol.java"].strip() == "public class Protocol {}"
-    assert result["src/main/java/com/example/protocol/ProtocolParser.java"].strip() == "public class ProtocolParser {}"
-
-def test_extract_planner_code_blocks_basename_fallback():
-    plan = "### Main.java\n```java\npublic class Main {}\n```\n"
-    result = extract_planner_code_blocks(plan, ["src/main/java/com/example/Main.java"])
-    assert result == {"src/main/java/com/example/Main.java": "public class Main {}\n"}
-
-def test_extract_planner_code_blocks_skips_empty_fences():
-    plan = "### Foo.java\n```java\n```\n"
-    assert extract_planner_code_blocks(plan, ["Foo.java"]) == {}
-
-def test_extract_planner_code_blocks_ignores_fences_matching_no_expected_file():
-    plan = (
-        "Here is an example JMS message payload:\n```json\n{\"foo\": \"bar\"}\n```\n\n"
-        "### Foo.java\n```java\npublic class Foo {}\n```\n"
-    )
-    result = extract_planner_code_blocks(plan, ["Foo.java"])
-    assert list(result.keys()) == ["Foo.java"]
-
-def test_extract_planner_code_blocks_partial_coverage_returns_only_matched_files():
-    plan = "### Foo.java\n```java\npublic class Foo {}\n```\n"
-    result = extract_planner_code_blocks(plan, ["Foo.java", "Bar.java"])
-    assert list(result.keys()) == ["Foo.java"]
-
-def test_extract_planner_code_blocks_empty_inputs():
-    assert extract_planner_code_blocks("", ["Foo.java"]) == {}
-    assert extract_planner_code_blocks("some plan text", []) == {}
-
-def test_extract_planner_code_blocks_rejects_non_java_content_for_java_file():
-    """Regression test for a real bug found live (2026-08-12 eval harness
-    batch, ignite_qpid_person): the Planner mentioned IgniteQpidPersonDemo.java,
-    then later - within the lookback window - wrote a fenced "how to run this"
-    snippet quoting the qpid/ignite-java17 skill's own documented run-command
-    example, not real Java source. Extraction had no way to tell a run-command
-    snippet apart from real code, so it got reused as the file's ENTIRE
-    content, and only the (much more expensive) compile gate caught it
-    afterward. A single-line, class-less fence for a .java file must be
-    rejected - the caller's own all-or-nothing check then falls through to a
-    real Developer generation instead of writing this straight to disk."""
-    plan = (
-        "### src/main/java/com/example/IgniteQpidPersonDemo.java\n"
-        "Run it via:\n"
-        "```\nmvn -q compile exec:exec -Dexec.mainClass=com.example.IgniteQpidPersonDemo\n```\n"
-    )
-    result = extract_planner_code_blocks(plan, ["src/main/java/com/example/IgniteQpidPersonDemo.java"])
-    assert result == {}
-
-def test_extract_planner_code_blocks_still_accepts_real_java_content():
-    """Sibling to the rejection test above - confirms the new plausibility
-    check doesn't false-positive on genuinely valid Java content that merely
-    lacks a top-level class/interface/enum/record on this particular fence
-    (e.g. a real class declaration is still accepted normally)."""
-    plan = (
-        "### Foo.java\n```java\npackage com.example;\npublic class Foo {}\n```\n"
-    )
-    result = extract_planner_code_blocks(plan, ["Foo.java"])
-    assert result == {"Foo.java": "package com.example;\npublic class Foo {}\n"}
-
-def test_extract_planner_code_blocks_rejects_syntactically_invalid_python():
-    """Regression test for a real bug found live (2026-08-13 eval harness,
-    python_greeter): the Planner's fenced greet.py content had Kriya's own
-    "[VERIFICATION] PASS" runtime-verification marker embedded as a bare,
-    unquoted line rather than inside a print() call - syntactically invalid,
-    but it still contained real `def`/`print` elsewhere, so the .java-style
-    keyword-presence check this table originally shipped with would have
-    missed it entirely (unlike Java, valid Python has no required top-level
-    keyword to search for). The reused, unreviewed content then took the
-    Developer retry loop 5 attempts to recover from live. A .py fence that
-    doesn't actually parse must be rejected the same way a .java fence that
-    doesn't look like Java is."""
-    plan = (
-        "### greet.py\n```python\n"
-        "def greet(name: str) -> str:\n"
-        "    return f\"Hello, {name}!\"\n\n"
-        "[VERIFICATION] PASS\n"
-        "print(greet('World'))\n"
-        "```\n"
-    )
-    result = extract_planner_code_blocks(plan, ["greet.py"])
-    assert result == {}
-
-def test_extract_planner_code_blocks_still_accepts_real_python_content():
-    """Sibling to the rejection test above - confirms the new ast.parse()-based
-    plausibility check doesn't false-positive on genuinely valid Python (e.g.
-    a file with no class/def at all, just top-level statements, is still
-    accepted normally - unlike Java's keyword check, Python has no required
-    keyword to look for)."""
-    plan = (
-        "### greet.py\n```python\n"
-        "def greet(name: str) -> str:\n"
-        "    return f\"Hello, {name}!\"\n\n"
-        "print(greet('World'))\n"
-        "```\n"
-    )
-    result = extract_planner_code_blocks(plan, ["greet.py"])
-    assert result == {
-        "greet.py": "def greet(name: str) -> str:\n    return f\"Hello, {name}!\"\n\nprint(greet('World'))\n"
-    }
-
-def test_extract_planner_code_blocks_rejects_run_command_for_xml_file():
-    """Regression test for the identical failure shape as the .java test
-    above, recurring live 2026-08-17 (ignite_qpid_person, run b-10k) through
-    the one gap that test's own fix never covered: .xml had no entry in
-    _MIN_PLAUSIBLE_CODE_CHECK, so the same "mvn -q compile exec:exec ..."
-    run-command snippet got silently accepted as ignite-config.xml's entire
-    content, causing "malformed XML: syntax error: line 1, column 0" - the
-    much more expensive structural-corruption/compile gate had to catch it
-    instead of extraction rejecting it up front."""
-    plan = (
-        "### src/main/resources/ignite-config.xml\n"
-        "Run it via:\n"
-        "```\nmvn -q compile exec:exec -Dexec.mainClass=com.example.PersonApp\n```\n"
-    )
-    result = extract_planner_code_blocks(plan, ["src/main/resources/ignite-config.xml"])
-    assert result == {}
-
-def test_extract_planner_code_blocks_still_accepts_real_xml_content():
-    """Sibling to the rejection test above, AND confirms the real incident's
-    exact shape: a valid XML fence followed by an unrelated run-command fence
-    closer to the heading must not let the later, invalid fence win via
-    last-block-wins - the earlier, genuinely valid XML must still be the one
-    returned."""
-    plan = (
-        "### ignite-config.xml\n"
-        "```xml\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-        "<beans xmlns=\"http://www.springframework.org/schema/beans\">\n"
-        "    <bean id=\"ignite.cfg\" class=\"org.apache.ignite.configuration.IgniteConfiguration\"/>\n"
-        "</beans>\n```\n"
-        "Run instructions for ignite-config.xml:\n"
-        "```bash\nmvn -q compile exec:exec -Dexec.mainClass=com.example.PersonApp\n```\n"
-    )
-    result = extract_planner_code_blocks(plan, ["ignite-config.xml"])
-    assert result.get("ignite-config.xml", "").strip().startswith("<?xml")
-
-def test_extract_planner_code_blocks_rejects_valid_xml_fragment_as_pom():
-    """A Planner dependency example is valid XML but is not a complete POM.
-
-    This is artifact validation, not an Ignite/Qpid rule: every Maven pom.xml
-    is a standalone project document, regardless of what it depends on.
-    """
-    plan = (
-        "### pom.xml Dependencies\n"
-        "```xml\n<dependencies>\n"
-        "  <dependency><groupId>org.example</groupId><artifactId>lib</artifactId></dependency>\n"
-        "</dependencies>\n```\n"
-    )
-    assert extract_planner_code_blocks(plan, ["pom.xml"]) == {}
-
-def test_extract_planner_code_blocks_accepts_namespaced_complete_pom():
-    plan = (
-        "### pom.xml\n```xml\n"
-        '<project xmlns="http://maven.apache.org/POM/4.0.0">\n'
-        "  <modelVersion>4.0.0</modelVersion>\n"
-        "  <groupId>org.example</groupId><artifactId>app</artifactId><version>1</version>\n"
-        "</project>\n```\n"
-    )
-    assert "pom.xml" in extract_planner_code_blocks(plan, ["pom.xml"])
-
-def test_extract_planner_code_blocks_rejects_run_command_for_json_file():
-    # Same shape, .json - added alongside .xml for the same reason (equally
-    # common in this pipeline's generated projects, equally guessable via a
-    # real parser).
-    plan = (
-        "### src/main/resources/qpid-initial-config.json\n"
-        "Run it via:\n"
-        "```\nmvn -q compile exec:exec -Dexec.mainClass=com.example.PersonApp\n```\n"
-    )
-    result = extract_planner_code_blocks(plan, ["src/main/resources/qpid-initial-config.json"])
-    assert result == {}
-
-def test_extract_planner_code_blocks_still_accepts_real_json_content():
-    plan = '### config.json\n```json\n{"name": "test"}\n```\n'
-    result = extract_planner_code_blocks(plan, ["config.json"])
-    assert result == {"config.json": '{"name": "test"}\n'}
-
 @pytest.mark.asyncio
 async def test_workflow_uses_per_role_model_config(tmp_path):
     """Configured agent_llms overrides must actually reach each role's real
@@ -14141,17 +13926,14 @@ async def test_run_attempt_does_not_scope_a_later_full_set_attempt(tmp_path):
     assert call_kwargs["known_target_files"] is None
 
 @pytest.mark.asyncio
-async def test_run_attempt_reuses_planner_code_when_full_coverage(tmp_path):
-    """The actual payoff: when the Planner's own plan text already has
-    complete code for every expected file, run_attempt() must use it
-    directly - developer.run_generation() should never be called at all -
-    while still going through the exact same compile gate as any other
-    attempt."""
+async def test_run_attempt_never_writes_planner_code_even_with_full_coverage(tmp_path):
+    """FILE-INTEGRITY-CONTRACT-001B: a plan whose fenced blocks cover every
+    expected file is still not repository content - attempt 1 asks the
+    Developer, and only its parsed answer is written (this test pinned the
+    removed Planner-reuse bypass until 2e8b09f)."""
     state = GenerationState()
     developer = developer_double()
-    developer.run_generation = AsyncMock(
-        side_effect=AssertionError("developer.run_generation() must not be called when Planner coverage is complete")
-    )
+    developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "print('from developer')\n"}])
     plan = (
         "### app.py\n```python\nprint('hi')\n```\n"
     )
@@ -14168,8 +13950,8 @@ async def test_run_attempt_reuses_planner_code_when_full_coverage(tmp_path):
     ):
         await run_attempt(state, ctx)
 
-    developer.run_generation.assert_not_called()
-    assert (tmp_path / "app.py").read_text() == "print('hi')\n"
+    developer.run_generation.assert_awaited_once()
+    assert (tmp_path / "app.py").read_text() == "print('from developer')\n"
     assert state.gate_outcomes[-1] == {
         "attempt": 1, "type": "compile", "success": True, "output": "compiled fine",
     }

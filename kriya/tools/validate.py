@@ -1485,6 +1485,10 @@ class PolymorphicValidator:
             cmd = ["javac", "-proc:none", "-d", os.path.join(self.workspace_path, "build")]
             cmd.extend(java_files)
             os.makedirs(os.path.join(self.workspace_path, "build"), exist_ok=True)
+            if self.tree_binding is not None:
+                # FILE-INTEGRITY-CONTRACT-001B: Kriya chose this output directory.
+                self.tree_binding.authorize_output_root(
+                    os.path.relpath(os.path.join(self.workspace_path, "build"), self.tree_binding.root))
             
             try:
                 res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)

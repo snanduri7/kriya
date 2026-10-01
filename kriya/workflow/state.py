@@ -511,19 +511,6 @@ class GenerationState:
     # wrong, since fallback_targeted_attempted is deliberately flipped True
     # as the first action inside the fallback_targeted branch itself.
     last_attempt_mode: Optional[str] = None
-    # Whether attempt 1 reused the Planner's own over-delivered code blocks
-    # verbatim (extract_planner_code_blocks(), attempt.py) instead of a fresh
-    # Developer generation call - None until attempt 1's full-set branch
-    # actually runs (never reassigned after, since that branch only executes
-    # once per run: gated on state.budgets.retry_count == 0). Recorded purely
-    # for observability - added 2026-08-16 specifically to make "does
-    # Planner-reuse correlate with more first-attempt failures than fresh
-    # Developer generation" an answerable-from-data question (an external
-    # review raised this as a real hypothesis, evidenced by two of that same
-    # day's live incidents both tracing back to reused Planner content) rather
-    # than something argued from a handful of anecdotes - never read or
-    # branched on anywhere in the retry loop itself.
-    planner_reuse_used_attempt1: Optional[bool] = None
     # The model/endpoint override the most recent run_attempt() call actually
     # used (None means the primary model) - the caller needs these afterward
     # to gate lesson extraction on "this successful attempt used a non-primary
@@ -545,8 +532,7 @@ class GenerationState:
     # by retry_strategy.py (pre-prompt narrowing of last_implicated_files)
     # and attempt.py (pre-apply_anchored_edits rejection in the per-file
     # write loop). Pure observability/diagnostics, accumulates across the
-    # whole run - never read or branched on by the retry loop itself, same
-    # posture as planner_reuse_used_attempt1 above.
+    # whole run - never read or branched on by the retry loop itself.
     rejected_generation_targets: List[str] = field(default_factory=list)
     # PRV-17 (2026-09-03): counts attempts aborted by a PolicyDeniedError
     # (FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE) that

@@ -581,13 +581,9 @@ def build_subtask_plan_text(subtask: Subtask) -> str:
     predetermined_plan/predetermined_design bypass (kriya/workflow/
     workflow.py::run_generation_workflow) that lets _run_structured_enforce
     stop re-running a fresh Planner+Architect cycle for an already-validated
-    Subtask. Deliberately short, plain prose with no fenced code blocks -
-    run_attempt()'s own extract_planner_code_blocks(ctx.plan, ...) call
-    looks for inline code a real Planner sometimes drafts directly; finding
-    none here is correct (this subtask has no drafted code yet, only a
-    validated description/file list), and that extraction already degrades
-    gracefully to an ordinary fresh Developer generation call when it finds
-    nothing - exactly the behavior a bounded subtask needs."""
+    Subtask. Deliberately short, plain prose: a plan is never a source of
+    file content (FILE-INTEGRITY-CONTRACT-001B), so the subtask's files come
+    from an ordinary Developer generation call."""
     return f"Implement: {subtask.description}"
 
 

@@ -1,16 +1,14 @@
 """Expected-vs-written file detection for the Developer retry loop completeness check and missing-file recovery. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
 import ast
-import json
 import logging
 import os
 import re
 import shlex
 import shutil
 import sys
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from kriya.workflow.failure import Failure, FileLocation
 
@@ -2219,117 +2217,8 @@ def _resolve_run_command(command: List[str], workspace_path: Optional[str] = Non
     return command
 
 
-_FENCED_CODE_BLOCK_PATTERN = re.compile(r"```[a-zA-Z0-9_+-]*\n(.*?)```", re.DOTALL)
-_PLANNER_CODE_REUSE_LOOKBACK_CHARS = 300
-
-
-def _looks_like_java(content: str) -> bool:
-    return bool(re.search(r"\b(class|interface|enum|record)\b", content))
-
-
-def _looks_like_python(content: str) -> bool:
-    # A real syntax check, not a keyword heuristic - unlike Java, valid Python
-    # has no required top-level keyword to search for (a file with nothing
-    # but `print("hi")` is completely valid), so a regex can't distinguish
-    # plausible-looking-but-broken content from real source the way the Java
-    # check does. ast.parse() is exact rather than approximate: it catches
-    # the actual failure mode this table exists for (2026-08-13, live -
-    # Kriya's own "[VERIFICATION] PASS" runtime-verification marker ended up
-    # embedded as a bare, unquoted line in a Planner-drafted greet.py -
-    # syntactically invalid, but it still contains real `def`/`print`
-    # elsewhere, so a keyword-presence check would have missed it entirely).
-    try:
-        ast.parse(content)
-        return True
-    except SyntaxError:
-        return False
-
-
-def _looks_like_xml(content: str) -> bool:
-    try:
-        ET.fromstring(content)
-        return True
-    except ET.ParseError:
-        return False
-
-
-def _looks_like_json(content: str) -> bool:
-    try:
-        json.loads(content)
-        return True
-    except (json.JSONDecodeError, ValueError):
-        return False
-
-
-# Extension -> plausibility check. Each entry answers "does this content
-# genuinely look like/parse as this language" for a Planner-drafted fenced
-# code block before it's trusted as a file's real content (see
-# extract_planner_code_blocks() below). Deliberately per-language rather than
-# one shared heuristic - Java's cheapest reliable signal is a keyword regex
-# (no stdlib Java parser available here); Python/XML/JSON's are exact syntax
-# validation via a real parser, which is strictly stronger where available.
-# Extensions with no entry here get no plausibility check at all - this is a
-# known, incomplete allowlist, not a claim of full coverage (no reliable
-# syntax check exists for something like `.properties`, arbitrary key=value
-# text - adding a weak heuristic there risks its own false positives/
-# negatives, so it's deliberately left unchecked rather than guessed at).
-# Root cause of this table's very first version (2026-08-12): a fenced block
-# near a ".java" file's heading that was actually the qpid/ignite-java17
-# skill's own documented run-command example ("mvn -q compile exec:exec
-# -Dexec.mainClass=..."), not Java source - the Planner had written it as a
-# "here's how to run this" note, and extraction had no way to tell it apart
-# from real code before this check existed. The identical failure shape
-# recurred live, 2026-08-17 (ignite_qpid_person, run b-10k), through the
-# exact gap this table's own docstring already warned about: `.xml` had no
-# entry, so a fenced block near `ignite-config.xml`'s heading - whatever its
-# actual content, not recoverable after the fact since the worktree is
-# reused/reset across retries with no per-attempt git history - was accepted
-# unconditionally and immediately failed structural corruption with
-# "malformed XML: syntax error: line 1, column 0", consistent with non-XML
-# content (anything not starting with `<` fails `ET.fromstring()` at the
-# very first character). `.json` added alongside it for the same reason
-# (equally common in this pipeline's generated projects, equally guessable
-# via a real parser).
-_MIN_PLAUSIBLE_CODE_CHECK: Dict[str, Callable[[str], bool]] = {
-    ".java": _looks_like_java,
-    ".py": _looks_like_python,
-    ".xml": _looks_like_xml,
-    ".json": _looks_like_json,
-}
-
-
-def _is_complete_maven_pom(content: str) -> bool:
-    """A Maven POM is a standalone document rooted at ``project``.
-
-    XML well-formedness alone is insufficient here: Planner prose often uses
-    valid XML fragments (for example ``<dependencies>...</dependencies>``) to
-    illustrate one step.  Such a fragment is useful documentation, but it is
-    not complete content for the conventional Maven artifact ``pom.xml``.
-    Namespace attributes are intentionally ignored by comparing the local
-    name; both minimal test fixtures and normal namespaced Maven POMs remain
-    valid.
-    """
-    try:
-        root = ET.fromstring(content)
-    except ET.ParseError:
-        return False
-    return root.tag.rsplit("}", 1)[-1] == "project"
-
-
-# Conventional artifact name -> standalone-file contract.  This layer is
-# deliberately separate from the extension parser above: extension checks ask
-# whether a block is syntactically valid source, while these checks ask whether
-# it is a complete instance of the specific standard artifact the Architect
-# requested.  Add only ecosystem conventions with an objective root/container
-# contract; never project class names, dependency names, or use-case strings.
-_STANDALONE_ARTIFACT_CHECK: Dict[str, Callable[[str], bool]] = {
-    "pom.xml": _is_complete_maven_pom,
-}
-
-
-# Coarse "did the Planner call clearly fail" bar - not a quality check, the
-# same kind of cheap sanity gate _MIN_PLAUSIBLE_CODE_CHECK above applies to a
-# single fenced block, just applied to the whole plan. Real, reproduced
+# Coarse "did the Planner call clearly fail" bar - not a quality check, a
+# cheap sanity gate applied to the whole plan. Real, reproduced
 # twice this session (SME review of PlannerAgent + spikes/model_speed_poc/
 # planner_reasoning_poc.py, a real ignite_qpid_protocol run): a thinking-
 # capable model can burn its entire token budget on invisible reasoning and
@@ -2583,102 +2472,6 @@ def classify_plan_completeness(
             None,
         )
     return PlanCompletenessResult("complete", None, None)
-
-
-def extract_planner_code_blocks(plan_text: str, expected_files: Iterable[str]) -> Dict[str, str]:
-    """PlannerAgent's own system prompt only ever asks for a step-by-step plan
-    ("outline what files need to be created... Format your plan clearly in
-    Markdown") - never full code - but qwen3-coder:30b and others routinely
-    over-deliver complete, plausible-looking file content in fenced code
-    blocks anyway (confirmed live, 2026-08-11: a real Planner response wrote
-    out full, syntactically valid pom.xml/Protocol.java/ProtocolParser.java/
-    Main.java content under "### path/to/File.java" headings). Architect then
-    explicitly discards it (its own prompt: "DO NOT write or output the full
-    implementation code"), and Developer regenerates every file from scratch
-    regardless of whether the Planner's own draft was already correct -
-    confirmed via direct code read this session that nothing anywhere reuses
-    it. This function is the first step of closing that gap: given the raw
-    plan text and the Architect's own resolved expected-file list, finds
-    every fenced code block whose PRECEDING text names one of those specific
-    files (by full path or basename) - not any code-looking fence, only ones
-    matching a file Kriya ALREADY knows it needs, the same safety scoping
-    extract_expected_files() uses elsewhere. Uses the LAST fence found for a
-    given file if it's mentioned more than once (a plan that shows a file,
-    then a corrected/final version of it later, should yield the final one).
-
-    A matched fence is also checked against _MIN_PLAUSIBLE_CODE_CHECK (for
-    extensions with an entry there) before being trusted - a fence that
-    doesn't even look like (or, where checkable, doesn't actually parse as)
-    the target language is rejected rather than returned, so a filename
-    mention followed by an unrelated snippet (e.g. a run-command example) or
-    genuinely broken content doesn't get treated as that file's real content.
-    Standard artifacts with an objective whole-document contract are then
-    checked by _STANDALONE_ARTIFACT_CHECK.  This distinguishes a syntactically
-    valid documentation fragment from a complete reusable file (for example a
-    ``<dependencies>`` fragment versus a Maven ``<project>`` document).
-
-    Otherwise deliberately does nothing more than this extraction - whether/
-    how the result gets used (and re-verified through the exact same
-    Quality Gates any Developer-generated content goes through) is the
-    caller's decision, not this function's."""
-    expected_files = list(expected_files)
-    if not expected_files or not plan_text:
-        return {}
-    basename_to_path: Dict[str, str] = {}
-    for f in expected_files:
-        basename_to_path.setdefault(os.path.basename(f), f)
-
-    results: Dict[str, str] = {}
-    for match in _FENCED_CODE_BLOCK_PATTERN.finditer(plan_text):
-        content = match.group(1)
-        if not content.strip():
-            continue
-        preceding = plan_text[max(0, match.start() - _PLANNER_CODE_REUSE_LOOKBACK_CHARS):match.start()]
-        # Full paths and basenames are both candidates; whichever mention sits
-        # CLOSEST to the fence (the largest rfind position) wins - not just
-        # whichever candidate happens to be checked first. An earlier file's
-        # own heading is still within the lookback window once the plan has
-        # shown 2+ files close together, so "first substring match found"
-        # (via an unordered set, no less) would silently steal a later
-        # block's match - confirmed as a real bug via a 3-file test fixture
-        # before this rfind-based fix.
-        best_pos = -1
-        found_path = None
-        for path in expected_files:
-            pos = preceding.rfind(path)
-            if pos > best_pos:
-                best_pos = pos
-                found_path = path
-        for basename, path in basename_to_path.items():
-            pos = preceding.rfind(basename)
-            if pos > best_pos:
-                best_pos = pos
-                found_path = path
-        if found_path:
-            ext = os.path.splitext(found_path)[1]
-            check = _MIN_PLAUSIBLE_CODE_CHECK.get(ext)
-            if check and not check(content):
-                # Reject, don't just skip silently into results - the
-                # caller's own existing all-or-nothing check (reuse Planner
-                # code only when EVERY expected file matched) then safely
-                # falls through to a real Developer generation for the
-                # whole set, instead of writing obviously-wrong content
-                # straight to disk with zero review.
-                logger.debug(
-                    f"Rejected a Planner code block for '{found_path}': content doesn't look "
-                    f"like valid {ext} source - likely an unrelated snippet (e.g. a run-command "
-                    "example) near the file's heading, or genuinely broken content."
-                )
-                continue
-            artifact_check = _STANDALONE_ARTIFACT_CHECK.get(os.path.basename(found_path))
-            if artifact_check and not artifact_check(content):
-                logger.debug(
-                    f"Rejected a Planner code block for '{found_path}': content is a valid "
-                    "snippet but not a complete standalone instance of that standard artifact."
-                )
-                continue
-            results[found_path] = content
-    return results
 
 
 EXPECTED_FILE_EXTENSIONS = ("java", "xml", "properties", "ya?ml", "json", "gradle", "py", "rb")

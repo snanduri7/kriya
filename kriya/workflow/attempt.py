@@ -141,7 +141,6 @@ from kriya.workflow.file_resolution import (
     downgrade_ungrounded_goal_explicit_commands,
     ensure_maven_covers_nonconventional_java_files,
     extract_jvm_module_flags,
-    extract_planner_code_blocks,
     extract_target_test,
     find_brownfield_public_api_changes,
     find_explanatory_prose_contamination,
@@ -6826,93 +6825,39 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 },
             ))
 
-        # PlannerAgent's own prompt never asks for full code, but models
-        # routinely over-deliver it anyway in fenced blocks inside the plan
-        # text - Architect explicitly discards it, and Developer previously
-        # always regenerated every file from scratch regardless, paying a
-        # full completion per file for work already done. On attempt 1 only
-        # (never a retry - a plan that already led to a failure isn't a
-        # trustworthy source for a fresh attempt), if the Planner's own text
-        # already has usable code for EVERY expected file, use it directly
-        # instead of asking Developer to redo it - still subject to the
-        # exact same compile/test/Runtime-Verification gates as any other
-        # attempt, so a wrong or incomplete Planner draft costs at most one
-        # gate cycle before falling through to a real Developer generation
-        # on the next attempt, the same downside a bad first Developer
-        # attempt would already have. Deliberately all-or-nothing: a partial
-        # match (some but not all expected files present) is NOT reused, to
-        # avoid a third, harder-to-verify code path that mixes Planner and
-        # Developer output for the same attempt.
-        reused_files = None
-        has_brownfield_targets = any(
-            os.path.isfile(os.path.join(ctx.workspace_path, path))
-            for path in (known_target_files or [])
+        # FILE-INTEGRITY-CONTRACT-001B: Planner prose is never repository
+        # mutation authority. A fenced block in the plan is never written as
+        # a file (the former attempt-1 "Planner reuse" committed a shell line
+        # as config.yaml); every attempt's files come from a parsed Developer
+        # response through the authorized writer.
+        # Generate code files
+        dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
+        files = await _run_developer_generation(
+            state, ctx,
+            optional_sections=_developer_optional_sections(
+                ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
+            task_description=task_desc,
+            design_context=ctx.design,
+            existing_code_context=active_code_context,
+            stream_callback=dev_stream,
+            model_override=model_override,
+            base_url_override=base_url_override,
+            api_key_override=api_key_override,
+            extra_body_override=extra_body_override,
+            known_target_files=known_target_files,
+            prior_error_context=retry_error_context or None,
+            implicated_files=state.last_implicated_files,
+            error_source_context=state.last_error_source_context or None,
+            retry_temperature=ctx.kernel.config.llm.retry_temperature,
+            extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+            files_with_current_content=state.all_files_written,
+            sibling_content_budget=_reserve_sibling_content_budget(active_prompt_window),
+            operation_by_file=(
+                _operation_map(ctx, known_target_files, attempt_operation, state)
+                if known_target_files else None
+            ),
+            default_operation=attempt_operation,
         )
-        if (
-            state.budgets.retry_count == 0 and ctx.expected_files_upfront
-            and not has_brownfield_targets
-        ):
-            planner_blocks = extract_planner_code_blocks(ctx.plan, ctx.expected_files_upfront)
-            if set(planner_blocks.keys()) == set(ctx.expected_files_upfront):
-                reused_files = [{"filepath": fp, "content": content} for fp, content in planner_blocks.items()]
-                logger.info(
-                    f"Planner's own plan already contains complete code for all "
-                    f"{len(reused_files)} expected file(s) - reusing it directly instead of "
-                    "a fresh Developer generation call, subject to the same Quality Gates "
-                    "as any other attempt."
-                )
-
-        # Logged symmetrically on BOTH branches (previously only the reused
-        # branch logged anything) so a run's log alone - via the same grep-
-        # based analysis this session has used all day - can already answer
-        # "did attempt 1 use Planner-reused content or fresh Developer
-        # generation" without needing new tooling. See
-        # state.planner_reuse_used_attempt1's own docstring for why this is
-        # worth tracking at all: an external review raised, and two of the
-        # same day's live incidents supported, the hypothesis that reused
-        # Planner content correlates with more first-attempt failures than
-        # fresh Developer generation - this makes that measurable from
-        # ordinary run logs instead of argued from a handful of anecdotes.
-        if state.budgets.retry_count == 0:
-            state.planner_reuse_used_attempt1 = reused_files is not None
-            if reused_files is None:
-                logger.info(
-                    "Attempt 1: Planner's plan did not contain usable code for every expected "
-                    "file (or none was expected upfront) - using a fresh Developer generation "
-                    "call for all files."
-                )
-
-        if reused_files is not None:
-            files = reused_files
-        else:
-            # Generate code files
-            dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-            files = await _run_developer_generation(
-                state, ctx,
-                optional_sections=_developer_optional_sections(
-                    ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
-                task_description=task_desc,
-                design_context=ctx.design,
-                existing_code_context=active_code_context,
-                stream_callback=dev_stream,
-                model_override=model_override,
-                base_url_override=base_url_override,
-                api_key_override=api_key_override,
-                extra_body_override=extra_body_override,
-                known_target_files=known_target_files,
-                prior_error_context=retry_error_context or None,
-                implicated_files=state.last_implicated_files,
-                error_source_context=state.last_error_source_context or None,
-                retry_temperature=ctx.kernel.config.llm.retry_temperature,
-                extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
-                files_with_current_content=state.all_files_written,
-                sibling_content_budget=_reserve_sibling_content_budget(active_prompt_window),
-                operation_by_file=(
-                    _operation_map(ctx, known_target_files, attempt_operation, state)
-                    if known_target_files else None
-                ),
-                default_operation=attempt_operation,
-            )
 
     # Recorded now, not derived by the caller afterward - see the fields'
     # own docstring in kriya/workflow/state.py. Every branch above sets all

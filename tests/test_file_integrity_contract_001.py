@@ -1314,7 +1314,8 @@ def test_f4_untracked_build_output_touches_and_authorized_writes_are_not_mutatio
     binding = _binding(root)
     (root / "target" / "classes").mkdir(parents=True)
     (root / "target" / "classes" / "App.class").write_bytes(b"\xca\xfe")        # ignored build output
-    (root / "build.log").write_text("untracked, not ignored\n")                  # untracked output
+    # (An untracked, NOT ignored file is repository content since
+    # FILE-INTEGRITY-CONTRACT-001B: see test_file_integrity_contract_001b.py.)
     os.utime(root / "README.md", ns=(1, 1))                                      # touch, same bytes
     (root / "README.md").write_text("readme\n")
     binding.check("compile")

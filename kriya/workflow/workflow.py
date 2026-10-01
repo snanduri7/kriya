@@ -167,7 +167,7 @@ from kriya.workflow.failure_grounding import (
 from kriya.workflow.failure_reporting import build_failure_report_entry
 from kriya.workflow.file_integrity import (
     DETERMINISTIC_FILE_INTEGRITY_STOPS,
-    VERIFICATION_GATE_MUTATED_TRACKED_FILES,
+    VERIFICATION_TREE_STOP_CODES,
     display_text,
     raw_digest,
 )
@@ -195,9 +195,6 @@ from kriya.workflow.file_resolution import (
 )
 from kriya.workflow.file_resolution import (
     downgrade_ungrounded_goal_explicit_commands as downgrade_ungrounded_goal_explicit_commands,
-)
-from kriya.workflow.file_resolution import (
-    extract_planner_code_blocks as extract_planner_code_blocks,
 )
 from kriya.workflow.file_resolution import (
     find_missing_expected_files as find_missing_expected_files,
@@ -5658,8 +5655,8 @@ class WorkflowEngine:
             # engine cannot mutate byte-exactly (file_integrity.py reason codes).
             is_file_integrity_stop = bool(state.environment_failure) and any(
                 state.environment_failure.startswith(f"{code}:") for code in DETERMINISTIC_FILE_INTEGRITY_STOPS)
-            is_verification_tree_stop = bool(state.environment_failure) and state.environment_failure.startswith(
-                f"{VERIFICATION_GATE_MUTATED_TRACKED_FILES}:")
+            is_verification_tree_stop = bool(state.environment_failure) and any(
+                state.environment_failure.startswith(f"{code}:") for code in VERIFICATION_TREE_STOP_CODES)
             # PRD-031A: a static-analysis gate stop (StaticAnalysisGateResult.gap).
             static_analysis_stop = next(
                 (
