@@ -1620,7 +1620,7 @@ def _ensure_generation_time_budget(
     budget = autonomy.generation_time_budget_seconds
     if budget is None:
         return
-    elapsed = time.monotonic() - state.generation_started_monotonic
+    elapsed = time.monotonic() - state.budget_started_monotonic
     remaining = max(0.0, budget - elapsed)
     estimate = _estimated_generation_seconds(
         state,

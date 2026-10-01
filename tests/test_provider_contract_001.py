@@ -24,7 +24,14 @@ from kriya.config import AppConfig
 from kriya.core import model_runtime
 from kriya.core.completion import CompletionStatus
 from kriya.core.inference_runtime import ChatResponse, register_runtime_adapter, unregister_runtime_adapter
-from kriya.core.llm import SDK_MAX_RETRIES, LLMClient, inference_deadline, transport_timeout
+from kriya.core.llm import (
+    INFERENCE_DEADLINE_EXHAUSTED,
+    SDK_MAX_RETRIES,
+    InferenceDeadlineError,
+    LLMClient,
+    inference_deadline,
+    transport_timeout,
+)
 from kriya.core.model_runtime import REASONING_MODEL_DEFAULT, openai_compat_request_plan
 from kriya.core.provider_contract import (
     PROVIDER_PROMPT_TRUNCATED,
@@ -457,13 +464,16 @@ def test_the_read_timeout_never_exceeds_the_remaining_inference_deadline():
     asyncio.run(llm.aclose())
 
 
-def test_a_passed_deadline_is_a_timeout_before_any_request(server):
+def test_a_passed_deadline_is_a_typed_refusal_before_any_request(server):
+    # PROVIDER-CONTRACT-001A: a typed Kriya stop, never a provider timeout.
     async def run():
         with inference_deadline(time.monotonic() - 1):
             return await _call(_wire_config(server.url))
 
-    result = asyncio.run(run())
-    assert result.status is CompletionStatus.TIMEOUT and server.bodies == []
+    with pytest.raises(InferenceDeadlineError) as refused:
+        asyncio.run(run())
+    assert refused.value.reason_code == INFERENCE_DEADLINE_EXHAUSTED and server.bodies == []
+    assert refused.value.details["deadline_source"] == "local_cap"
 
 
 def test_aclose_releases_every_transport_the_client_opened(server):

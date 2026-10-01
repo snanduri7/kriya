@@ -142,11 +142,26 @@ def classify_attempt_exception(
         if unclassified and isinstance(exc, ProviderContractError)
         else None
     )
+    # PROVIDER-CONTRACT-001A: the run's generation deadline stopped a model
+    # call. No retry or fallback can make time, so it is the same
+    # deterministic stop as the pre-generation budget check.
+    from kriya.core.llm import InferenceDeadlineError
+
+    deadline_failure = (
+        Failure(
+            type="time_budget_exhausted",
+            message=f"GENERATION TIME BUDGET EXHAUSTED: {exc}", raw_output=str(exc), source="orchestrator",
+            diagnostics={"reason_code": exc.reason_code, **exc.details},
+        )
+        if unclassified and isinstance(exc, InferenceDeadlineError)
+        else None
+    )
     failure: Failure = (
         attached_failure
         or scope_denial_failure
         or budget_failure
         or contract_failure
+        or deadline_failure
         or Failure(
             type=(
                 "containment_setup_failed" if containment_setup_failure

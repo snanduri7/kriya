@@ -6,7 +6,7 @@ import socket
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Any, Callable, Dict, Iterator, List, Optional
+from typing import Any, Awaitable, Callable, Dict, Iterator, List, Optional, Tuple, TypeVar
 from urllib.parse import urlparse
 
 import httpx
@@ -82,10 +82,32 @@ def is_local_url(url: str) -> bool:
         logger.debug(f"is_local_url check failed for '{url}', treating as non-local (fail closed): {e}")
         return False
 
-# PROVIDER-CONTRACT-001: the monotonic deadline of the Kriya work a model
-# call belongs to (an attempt's remaining time budget); a request's read
-# timeout never exceeds it.
+# PROVIDER-CONTRACT-001A: a model call's deadline. The authority is the
+# active run's generation budget (run_coordinator.claim_run_generation_clock
+# + autonomy.generation_time_budget_seconds); inference_deadline() may only
+# narrow it (a local cap). The transport timeout never extends either.
 _INFERENCE_DEADLINE: ContextVar[Optional[float]] = ContextVar("kriya_inference_deadline", default=None)
+
+INFERENCE_DEADLINE_EXHAUSTED = "INFERENCE_DEADLINE_EXHAUSTED"  # no time left before dispatch
+INFERENCE_DEADLINE_EXCEEDED = "INFERENCE_DEADLINE_EXCEEDED"  # the request outlived the remaining budget
+DEADLINE_SOURCE_RUN_BUDGET = "run_generation_budget"
+DEADLINE_SOURCE_LOCAL_CAP = "local_cap"
+
+_T = TypeVar("_T")
+
+
+class InferenceDeadlineError(Exception):
+    """A model call refused before dispatch (EXHAUSTED) or stopped
+    mid-request (EXCEEDED) by Kriya's own deadline: a typed stop, never a
+    provider timeout to retry or escalate."""
+
+    def __init__(self, reason_code: str, details: Dict[str, Any]):
+        self.reason_code = reason_code
+        self.details = details
+        super().__init__(
+            f"{reason_code}: the {details.get('deadline_source')} deadline "
+            f"left {details.get('remaining_budget_at_dispatch_ms')} ms for this model call"
+        )
 
 # Kriya's retry policy alone decides whether another request is sent.
 SDK_MAX_RETRIES = 0
@@ -200,18 +222,73 @@ class LLMClient:
         for client in clients:
             await client.close()
 
+    def _deadline(self) -> Tuple[Optional[float], Optional[str]]:
+        """The absolute monotonic deadline of a model call made now, and its
+        source: the active run's generation budget, narrowed by an
+        inference_deadline() cap; (None, None) when neither applies."""
+        from kriya.control.run_coordinator import claim_run_generation_clock
+
+        candidates = []
+        started = claim_run_generation_clock()
+        budget = self.config.autonomy.generation_time_budget_seconds
+        if started is not None and budget is not None:
+            candidates.append((started + budget, DEADLINE_SOURCE_RUN_BUDGET))
+        cap = _INFERENCE_DEADLINE.get()
+        if cap is not None:
+            candidates.append((cap, DEADLINE_SOURCE_LOCAL_CAP))
+        return min(candidates) if candidates else (None, None)
+
+    def _deadline_record(self) -> Dict[str, Any]:
+        """The deadline a request dispatched now is bound by (telemetry and
+        the typed error's evidence; never prompt content)."""
+        deadline, source = self._deadline()
+        configured = self.config.llm.transport.read_timeout_seconds
+        record: Dict[str, Any] = {"deadline_bound": deadline is not None, "deadline_source": source,
+                                  "configured_transport_timeout_ms": int(configured * 1000)}
+        if deadline is not None:
+            remaining = max(0.0, deadline - time.monotonic())
+            record["remaining_budget_at_dispatch_ms"] = int(remaining * 1000)
+            record["effective_request_timeout_ms"] = int(min(configured, remaining) * 1000)
+        else:
+            record["effective_request_timeout_ms"] = int(configured * 1000)
+        return record
+
+    def _require_time_left(self) -> None:
+        """INFERENCE_DEADLINE_EXHAUSTED before any provider contact (runtime
+        probe, served-context observation or inference request)."""
+        record = self._deadline_record()
+        if record["deadline_bound"] and record["remaining_budget_at_dispatch_ms"] <= 0:
+            raise InferenceDeadlineError(INFERENCE_DEADLINE_EXHAUSTED, record)
+
     def _request_timeout(self) -> httpx.Timeout:
         """This request's timeout: the configured one, its read timeout cut
-        to the remaining inference deadline. A deadline already passed is a
-        typed timeout before any request."""
-        deadline = _INFERENCE_DEADLINE.get()
-        read = self.config.llm.transport.read_timeout_seconds
-        if deadline is not None:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise asyncio.TimeoutError("the inference deadline passed before the request was sent")
-            read = min(read, remaining)
-        return transport_timeout(self.config, read)
+        to the remaining deadline. A deadline already passed is
+        INFERENCE_DEADLINE_EXHAUSTED before any request."""
+        record = self._deadline_record()
+        if record["deadline_bound"] and record["remaining_budget_at_dispatch_ms"] <= 0:
+            raise InferenceDeadlineError(INFERENCE_DEADLINE_EXHAUSTED, record)
+        return transport_timeout(self.config, record["effective_request_timeout_ms"] / 1000)
+
+    async def _within_deadline(self, model: str,
+                               request: Callable[[httpx.Timeout], Awaitable[_T]]) -> _T:
+        """One request, bounded in total by the deadline: the read timeout
+        bounds each wait for bytes, so a streamed answer is also cut at the
+        deadline itself. A timeout the deadline caused is
+        INFERENCE_DEADLINE_EXCEEDED, never a provider timeout."""
+        timeout = self._request_timeout()
+        deadline, _source = self._deadline()
+        if deadline is None:
+            return await request(timeout)
+        record = self._deadline_record()
+        deadline_binding = record["effective_request_timeout_ms"] < record["configured_transport_timeout_ms"]
+        try:
+            return await asyncio.wait_for(request(timeout), timeout=max(0.0, deadline - time.monotonic()))
+        except Exception as error:
+            timed_out = isinstance(error, asyncio.TimeoutError) or (
+                self._runtime(model).classify_error(error) is RuntimeErrorKind.TIMEOUT)
+            if timed_out and (deadline_binding or time.monotonic() >= deadline):
+                raise InferenceDeadlineError(INFERENCE_DEADLINE_EXCEEDED, record) from error
+            raise
 
     def _limits(self, fingerprint: Any, settings: Any) -> Dict[str, Any]:
         from kriya.core.model_qualification import measured_limits_for
@@ -224,13 +301,15 @@ class LLMClient:
         identifiers, token counts and finish reason are the result's own
         fields; the prompt consumption verdict is added after the call."""
         transport = self.config.llm.transport
+        deadline = self._deadline_record()
         return {
             "adapter": runtime.name,
             "settings": plan.identity(),
             "context": (budget.to_dict() or {}).get("context_state"),
             "timeout_seconds": {"connect": transport.connect_timeout_seconds,
                                 "read": transport.read_timeout_seconds},
-            "inference_deadline_bound": _INFERENCE_DEADLINE.get() is not None,
+            "inference_deadline_bound": deadline["deadline_bound"],
+            "deadline": deadline,
             "sdk_max_retries": SDK_MAX_RETRIES,
             "proxy_policy": "direct",
         }
@@ -254,15 +333,18 @@ class LLMClient:
         return plan
 
     async def _observe_served(self, runtime: InferenceRuntimePort, *, model: str, base_url: str,
-                              api_key: str) -> Optional[int]:
-        """The context window the runtime has loaded for ``model`` right now
-        (None: not loaded or not observable). Never raises."""
+                              api_key: str) -> Any:
+        """One typed observation of the window the runtime has loaded for
+        ``model`` right now (model_runtime.ServedContextObservation). Never
+        raises: an adapter error is an OBSERVATION_FAILED result."""
+        from kriya.core.model_runtime import OBSERVATION_FAILED, ServedContextObservation
+
         try:
-            return await asyncio.to_thread(runtime.observe_served_context, base_url=base_url, model=model,
+            return await asyncio.to_thread(runtime.observe_served_context_state, base_url=base_url, model=model,
                                            api_key=api_key)
         except Exception as error:
-            logger.debug("Served-context observation unavailable for %s: %s", model, error)
-            return None
+            logger.warning("Served-context observation failed for %s: %s", model, error)
+            return ServedContextObservation(OBSERVATION_FAILED, reason=f"{type(error).__name__}: {error}"[:300])
 
     async def _check_after_call(self, result, runtime: InferenceRuntimePort, *, model: str, base_url: str,
                                 api_key: str, requested_window: Optional[int], dispatched_bytes: int,
@@ -272,8 +354,10 @@ class LLMClient:
         prompt. A violation turns the result into PROVIDER_CONTRACT_VIOLATION
         carrying the typed error (the content is never used)."""
         from kriya.core.completion import CompletionStatus
+        from kriya.core.model_runtime import OBSERVED
         from kriya.core.provider_contract import (
             PROVIDER_PROMPT_TRUNCATED,
+            SERVED_CONTEXT_UNOBSERVABLE,
             Provenance,
             ProviderContractError,
             check_prompt_consumption,
@@ -281,15 +365,32 @@ class LLMClient:
         )
 
         violation = None
-        served = await self._observe_served(runtime, model=model, base_url=base_url, api_key=api_key)
+        observation = await self._observe_served(runtime, model=model, base_url=base_url, api_key=api_key)
         contract = result.protocol.setdefault("provider_contract", {})
-        if served is not None:
-            contract["served_context_window_after_call"] = served
+        contract["served_context_observation"] = observation.to_dict()
+        if observation.status == OBSERVED:
+            contract["served_context_window_after_call"] = observation.window
             try:
-                context_window_state(requested_window, served, Provenance.SERVER_OBSERVED,
+                context_window_state(requested_window, observation.window, Provenance.SERVER_OBSERVED,
                                      exact=self._strict_identity())
             except ProviderContractError as error:
                 violation = error
+        elif runtime.provider_capabilities.feature("served_context_observation").value != "unsupported":
+            # PROVIDER-CONTRACT-001A: the served window this call ran with is
+            # not known. Production on an exact runtime refuses the result;
+            # otherwise it is recorded as unverified, never as observed.
+            if self._strict_identity() and identified:
+                violation = ProviderContractError(
+                    SERVED_CONTEXT_UNOBSERVABLE,
+                    f"the served context window of '{model}' could not be observed after the call "
+                    f"({observation.status}: {observation.reason or 'model not loaded'}); production "
+                    "requires the exact served identity (a runtime that unloads the model right "
+                    "after a request, such as OLLAMA_KEEP_ALIVE=0, cannot provide it)",
+                    {"model": model, "observation": observation.to_dict()})
+            else:
+                contract["served_context_window_after_call_provenance"] = Provenance.UNVERIFIED.value
+                logger.warning("Served context window of %s after the call is unverified (%s: %s)",
+                               model, observation.status, observation.reason)
         # Provider usage is evidence only from an identified (exact) runtime.
         truncation = check_prompt_consumption(
             dispatched_bytes=dispatched_bytes, reported_prompt_tokens=result.prompt_tokens_reported,
@@ -527,6 +628,19 @@ class LLMClient:
             event["expected_output_tokens"], event["qualification_source"],
         )
 
+    def _record_deadline_stop(self, result, stopped: "InferenceDeadlineError", *, started: float, budget) -> None:
+        """A deadline stop is a recorded TIMEOUT carrying its reason code
+        (the typed error is then raised to the caller)."""
+        from kriya.core.completion import CompletionStatus
+
+        result.status = CompletionStatus.TIMEOUT
+        result.backend_status = "deadline"
+        result.backend_error = str(stopped)[:500]
+        result.error = stopped
+        result.protocol.setdefault("provider_contract", {}).setdefault("deadline", {})["timeout_reason"] = (
+            stopped.reason_code)
+        self._finish(result, started=started, budget=budget)
+
     def _finish(self, result, *, started: float, budget) -> None:
         """Common post-call bookkeeping: timing, budget comparison, the
         usage line and the observational metrics."""
@@ -536,6 +650,9 @@ class LLMClient:
         from kriya.core.token_budget import compare_with_usage
 
         result.elapsed_seconds = time.time() - started
+        deadline = (result.protocol or {}).get("provider_contract", {}).get("deadline")
+        if deadline is not None:
+            deadline["elapsed_request_ms"] = int(result.elapsed_seconds * 1000)
         role_metrics = getattr(self, "role_metrics", None)
         if role_metrics is not None:
             role_metrics.record_call(
@@ -649,7 +766,8 @@ class LLMClient:
         """PRD-015: one completion as a normalized ``CompletionResult``.
 
         Raises only for policy refusals (egress, CONTEXT_BUDGET_UNSATISFIABLE,
-        OUTPUT_BUDGET_UNSATISFIABLE) and cancellation (recorded as CANCELLED
+        OUTPUT_BUDGET_UNSATISFIABLE), a Kriya deadline stop
+        (InferenceDeadlineError: recorded as TIMEOUT first) and cancellation (recorded as CANCELLED
         first, never swallowed); a backend error or timeout is returned as
         BACKEND_ERROR/TIMEOUT.
 
@@ -718,6 +836,7 @@ class LLMClient:
 
         self.last_call_metrics = None
         self.last_completion = None
+        self._require_time_left()
         runtime = self._runtime(model)
         fingerprint = await self._runtime_fingerprint(
             model, url_to_check, api_key_override or self.config.llm.api_key, extra_body,
@@ -730,7 +849,7 @@ class LLMClient:
                                     runtime=runtime)
         messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
         api_key = api_key_override or self.config.llm.api_key
-        served = await self._observe_served(runtime, model=model, base_url=url_to_check, api_key=api_key)
+        served = (await self._observe_served(runtime, model=model, base_url=url_to_check, api_key=api_key)).window
         budget = self._dispatch_budget(
             model=model, fingerprint=fingerprint, messages=messages, tools=None,
             max_tokens=max_tokens, is_reasoning=is_reasoning, base_url=url_to_check, api_key=api_key,
@@ -772,7 +891,7 @@ class LLMClient:
                 # excludes failures that are clearly unrelated to response_format
                 # (connection/timeout/auth/rate-limit/server errors, as the
                 # runtime adapter classifies them - INF-001).
-                if (response_format is not None and is_reasoning
+                if (response_format is not None and is_reasoning and not isinstance(e, InferenceDeadlineError)
                         and self._runtime(model).classify_error(e) is RuntimeErrorKind.REQUEST):
                     logger.warning(
                         f"Completion request with response_format={response_format} failed for "
@@ -821,6 +940,9 @@ class LLMClient:
                     wire_body, response_format, stream_callback
                 )
                 content, hidden = split_reasoning(raw["content"], anywhere=True)
+        except InferenceDeadlineError as stopped:
+            self._record_deadline_stop(result, stopped, started=start_time, budget=budget)
+            raise
         except asyncio.CancelledError:
             result.status = CompletionStatus.CANCELLED
             result.backend_status = "cancelled"
@@ -870,12 +992,13 @@ class LLMClient:
         reasoning field), prompt_tokens, completion_tokens, finish_reason and
         provider_metadata. Split out from complete_result() so a reasoning
         model's response_format can be retried once without it."""
-        response = await self._runtime(model).complete(client, ChatRequest(
-            model=model,
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
-            temperature=temperature, max_tokens=max_tokens, extra_body=extra_body,
-            response_format=response_format, stream_callback=stream_callback, timeout=self._request_timeout(),
-        ))
+        response = await self._within_deadline(model, lambda timeout: self._runtime(model).complete(
+            client, ChatRequest(
+                model=model,
+                messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}],
+                temperature=temperature, max_tokens=max_tokens, extra_body=extra_body,
+                response_format=response_format, stream_callback=stream_callback, timeout=timeout,
+            )))
         return response.to_raw()
 
     async def complete_with_tools(
@@ -983,6 +1106,7 @@ class LLMClient:
 
         self.last_call_metrics = None
         self.last_completion = None
+        self._require_time_left()
         fingerprint = await self._runtime_fingerprint(
             model, url_to_check, api_key_override or self.config.llm.api_key, extra_body,
         )
@@ -996,7 +1120,7 @@ class LLMClient:
         # floor of its own).
         settings = request_settings(temperature=temperature, reasoning=bool(own["reasoning"]), extra_body=extra_body,
                                     runtime=runtime)
-        served = await self._observe_served(runtime, model=model, base_url=url_to_check, api_key=api_key)
+        served = (await self._observe_served(runtime, model=model, base_url=url_to_check, api_key=api_key)).window
         budget = self._dispatch_budget(
             model=model, fingerprint=fingerprint, messages=messages, tools=tools,
             max_tokens=max_tokens, is_reasoning=False, base_url=url_to_check, api_key=api_key,
@@ -1018,10 +1142,14 @@ class LLMClient:
             max_tokens=max_tokens,
         )
         try:
-            response = await runtime.complete_with_tools(client, ChatRequest(
-                model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
-                extra_body=wire_body, tools=tools, timeout=self._request_timeout(),
-            ))
+            response = await self._within_deadline(model, lambda timeout: runtime.complete_with_tools(
+                client, ChatRequest(
+                    model=model, messages=messages, temperature=temperature, max_tokens=max_tokens,
+                    extra_body=wire_body, tools=tools, timeout=timeout,
+                )))
+        except InferenceDeadlineError as stopped:
+            self._record_deadline_stop(result, stopped, started=start_time, budget=budget)
+            raise
         except asyncio.CancelledError:
             result.status = CompletionStatus.CANCELLED
             result.backend_status = "cancelled"

@@ -27,13 +27,14 @@ from kriya.analyzer.analyzer import RepositoryAnalyzer
 from kriya.control.persistence import UnreadableRunRecordError, load_run_record
 from kriya.control.run_coordinator import (
     annotate_run,
+    claim_run_generation_clock,
     coordinated_mutation,
     mark_run_stage,
     owning_run_work_unit,
 )
 from kriya.control.run_record import RunLifecycle
 from kriya.core.kernel import Kernel
-from kriya.core.llm import LLMClient
+from kriya.core.llm import InferenceDeadlineError, LLMClient
 from kriya.core.model_routing import resume_routes_from
 from kriya.core.state_paths import trace_db_path
 from kriya.core.token_budget import ContextBudgetUnsatisfiableError
@@ -1730,11 +1731,16 @@ class WorkflowEngine:
         # object instead of the bare `error_context` parameter early on and
         # `state.error_context` later. See kriya/workflow/state.py for the
         # rationale behind every other field.
+        # PROVIDER-CONTRACT-001A: the generation budget is the run's, not this
+        # invocation's - a milestone unit or enforce subtask never restarts it.
+        run_clock = claim_run_generation_clock()
         state = GenerationState(
             error_context=error_context or "",
             engineering_route=engineering_route,
             process_profile=control.process_profile if control is not None else None,
         )
+        if run_clock is not None:
+            state.budget_started_monotonic = run_clock
         # PRD-012: every outbound channel's configured authority (capability
         # class, destinations, the trusted field they come from, the
         # containment they run under) is persisted with the run. Telemetry
@@ -5481,11 +5487,13 @@ class WorkflowEngine:
                         system_prompt_override=reviewer_system_prompt_override,
                         candidate_prompt=batch_prompts,
                     )
-                except ContextBudgetUnsatisfiableError as refusal:
+                except (ContextBudgetUnsatisfiableError, InferenceDeadlineError) as refusal:
                     # PROMPT-BUDGET-FIT-001C: PRD-016 refused the request
-                    # before inference. The run ends as a typed non-success
-                    # that keeps what already happened (the candidate may be
-                    # applied and committed); nothing is retried or rolled back.
+                    # before inference (or, PROVIDER-CONTRACT-001A, the run's
+                    # generation deadline refused or stopped it). The run ends
+                    # as a typed non-success that keeps what already happened
+                    # (the candidate may be applied and committed); nothing is
+                    # retried or rolled back.
                     state.final_review_refusal = {
                         "reason_code": refusal.reason_code, "detail": str(refusal),
                         "batch": i, "batches": len(review_batches),
@@ -5493,7 +5501,9 @@ class WorkflowEngine:
                     state.record_event(RunEvent(
                         kind="review.refused", attempt=state.attempt_number, source="workflow",
                         authority=EventAuthority.AUTHORITATIVE,
-                        message="the final review request was refused before inference",
+                        message=("the final review request was stopped by the run's generation deadline"
+                                 if isinstance(refusal, InferenceDeadlineError)
+                                 else "the final review request was refused before inference"),
                         details=dict(state.final_review_refusal),
                     ))
                     logger.error(f"Final review not performed: {refusal}")

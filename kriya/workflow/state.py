@@ -272,6 +272,11 @@ class GenerationState:
     # two counters that don't both advance on every iteration.
     attempt_number: int = 0
     generation_started_monotonic: float = field(default_factory=time.monotonic)
+    # PROVIDER-CONTRACT-001A: the run's generation-budget clock
+    # (run_coordinator.claim_run_generation_clock), shared by every work unit
+    # and retry of one run; generation_started_monotonic stays this
+    # invocation's own start (its wall-time metrics).
+    budget_started_monotonic: float = field(default_factory=time.monotonic)
     # Completed/failed Developer calls used to refine the conservative configured
     # per-file estimate without persisting prompt or proprietary source content.
     # R1 Deliverable 5 (2026-09-08): each dict also carries prompt_tokens/

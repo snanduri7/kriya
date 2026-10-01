@@ -511,7 +511,6 @@ def resolve_model_runtime(
 def clear_model_runtime_cache() -> None:
     with _CACHE_LOCK:
         _CACHE.clear()
-        _UNOBSERVABLE_ENDPOINTS.clear()
 
 
 def resolve_configured_model_runtime(config: Any, model: Optional[str] = None, *, fresh: bool = False,
@@ -813,44 +812,78 @@ def openai_compat_request_plan(extra_body: Optional[Dict[str, Any]], *, temperat
                                conflicts=tuple(conflicts))
 
 
-# Endpoints whose loaded-model list cannot be read (no /api/ps): observed
-# once per process, never re-probed on every call.
-_UNOBSERVABLE_ENDPOINTS: set = set()
+# PROVIDER-CONTRACT-001A: what one served-context observation established.
+# A failure is a fact about that attempt, never about the provider: nothing
+# is cached, so the next call observes again.
+OBSERVED = "observed"
+NOT_LOADED = "not_loaded"  # the runtime is up; the model is not loaded right now
+LOADED_WITHOUT_WINDOW = "loaded_without_window"  # loaded, but no usable context length reported
+OBSERVATION_FAILED = "observation_failed"  # unreachable, timed out or malformed (after one retry)
+NOT_APPLICABLE = "not_applicable"  # probing disabled, non-local or no native root: never observed
+
+# One bounded retry for a transient failure; never a loop.
+SERVED_CONTEXT_OBSERVATION_ATTEMPTS = 2
 
 
-def observe_served_context(*, base_url: str, model: str, api_key: str = "",
-                           transport: Optional[Transport] = None) -> Optional[int]:
+@dataclass(frozen=True)
+class ServedContextObservation:
+    status: str
+    window: Optional[int] = None
+    reason: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"status": self.status, "window": self.window, "reason": self.reason}
+
+
+def observe_served_context_state(*, base_url: str, model: str, api_key: str = "",
+                                 transport: Optional[Transport] = None) -> ServedContextObservation:
     """The context window the server has loaded for ``model`` (Ollama
-    /api/ps ``context_length``), or None when it is not loaded, the endpoint
-    is not local, or probing is disabled. Never raises."""
+    /api/ps ``context_length``) as a typed observation. A failed probe is
+    retried once; a failure is reported, never remembered. Never raises."""
     from kriya.core.llm import is_local_url
 
     if transport is None:
         if not probing_enabled():
-            return None
+            return ServedContextObservation(NOT_APPLICABLE, reason="probing_disabled")
         transport = _http_json
-    if endpoint_identity(base_url) in _UNOBSERVABLE_ENDPOINTS:
-        return None
     if not is_local_url(base_url):
-        return None
-    parsed = urllib.parse.urlsplit(base_url)
-    path = parsed.path.rstrip("/")
-    if not path.endswith("/v1"):
-        return None
-    root = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, path[:-3], "", "")).rstrip("/")
-    try:
-        loaded = transport(f"{root}/api/ps", None, api_key).get("models", [])
-    except Exception as error:
-        logger.debug("Served-context observation unavailable at %s: %s", base_url, error)
-        _UNOBSERVABLE_ENDPOINTS.add(endpoint_identity(base_url))
-        return None
+        return ServedContextObservation(NOT_APPLICABLE, reason="non_local_endpoint")
+    # The /v1 and native adapters share one server: /api/ps sits at its root.
+    root = _native_root(base_url)
+    failure = None
+    for _attempt in range(SERVED_CONTEXT_OBSERVATION_ATTEMPTS):
+        try:
+            response = transport(f"{root}/api/ps", None, api_key)
+        except Exception as error:
+            failure = f"{type(error).__name__}: {error}"[:300]
+            continue
+        loaded = response.get("models") if isinstance(response, dict) else None
+        if not isinstance(loaded, list):
+            failure = "malformed /api/ps response (no models list)"
+            continue
+        return _served_context_from(loaded, model)
+    logger.warning("Served-context observation failed at %s for %s: %s", base_url, model, failure)
+    return ServedContextObservation(OBSERVATION_FAILED, reason=failure)
+
+
+def _served_context_from(loaded: List[Any], model: str) -> ServedContextObservation:
     wanted = {model.casefold(), f"{model}:latest".casefold()} if ":" not in model else {model.casefold()}
-    for item in loaded if isinstance(loaded, list) else ():
+    for item in loaded:
         name = str(item.get("name") or item.get("model") or "").casefold() if isinstance(item, dict) else ""
-        value = item.get("context_length") if isinstance(item, dict) else None
-        if name in wanted and isinstance(value, int) and value > 0:
-            return value
-    return None
+        if name not in wanted:
+            continue
+        value = item.get("context_length")
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return ServedContextObservation(OBSERVED, window=value)
+        return ServedContextObservation(LOADED_WITHOUT_WINDOW, reason="no usable context_length for the model")
+    return ServedContextObservation(NOT_LOADED)
+
+
+def observe_served_context(*, base_url: str, model: str, api_key: str = "",
+                           transport: Optional[Transport] = None) -> Optional[int]:
+    """The observed served window, or None (see observe_served_context_state)."""
+    return observe_served_context_state(base_url=base_url, model=model, api_key=api_key,
+                                        transport=transport).window
 
 
 def _native_root(base_url: str) -> str:
@@ -933,8 +966,9 @@ class OllamaRuntimeAdapter(OpenAICompatibleTransport):
             extra_body, temperature=temperature, reasoning_flag=reasoning_flag,
             requested_context_window=requested_context_window, fingerprint=fingerprint)
 
-    def observe_served_context(self, *, base_url: str, model: str, api_key: str = "") -> Optional[int]:
-        return observe_served_context(base_url=base_url, model=model, api_key=api_key)
+    def observe_served_context_state(self, *, base_url: str, model: str,
+                                     api_key: str = "") -> ServedContextObservation:
+        return observe_served_context_state(base_url=base_url, model=model, api_key=api_key)
 
     def pin_served_configuration(self, *, base_url: str, model: str, extra_body: Optional[Dict[str, Any]],
                                  requested_context_window: Optional[int], api_key: str = "",
@@ -1104,8 +1138,9 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
         return native_request_plan(extra_body, temperature=temperature, reasoning_flag=reasoning_flag,
                                    requested_context_window=requested_context_window, fingerprint=fingerprint)
 
-    def observe_served_context(self, *, base_url: str, model: str, api_key: str = "") -> Optional[int]:
-        return observe_served_context(base_url=base_url, model=model, api_key=api_key)
+    def observe_served_context_state(self, *, base_url: str, model: str,
+                                     api_key: str = "") -> ServedContextObservation:
+        return observe_served_context_state(base_url=base_url, model=model, api_key=api_key)
 
     def pin_served_configuration(self, *, base_url: str, model: str, extra_body: Optional[Dict[str, Any]],
                                  requested_context_window: Optional[int], api_key: str = "",

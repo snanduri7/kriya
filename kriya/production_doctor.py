@@ -883,7 +883,9 @@ def probe_served_context(cfg: AppConfig, model: str) -> Dict[str, Any]:
     adapter = runtime_for_binding(binding)
     evidence: Dict[str, Any] = {"served": None, "probe_request_sent": False}
     try:
-        evidence["served"] = adapter.observe_served_context(base_url=base_url, model=model, api_key=api_key)
+        observation = adapter.observe_served_context_state(base_url=base_url, model=model, api_key=api_key)
+        evidence["observation"] = observation.to_dict()
+        evidence["served"] = observation.window
         if evidence["served"] is not None:
             return evidence
 
@@ -902,6 +904,7 @@ def probe_served_context(cfg: AppConfig, model: str) -> Dict[str, Any]:
             result = asyncio.run(load())
         contract = result.protocol.get("provider_contract", {})
         evidence["served"] = contract.get("served_context_window_after_call")
+        evidence["observation_after_probe"] = contract.get("served_context_observation")
         if "violation" in contract:
             evidence["violation"] = contract["violation"]
     except Exception as error:  # the row reports what could not be observed
@@ -991,7 +994,9 @@ def _check_provider_contract(ctx: _Context) -> DoctorCheck:
         "model.provider_contract", status, evidence={"models": entries},
         remediation=("Serve each model with exactly the settings its binding declares: pin the server-only "
                      "settings (`kriya model pin --model <model>`), point the binding at the pinned model, "
-                     "and remove any setting the provider cannot carry."),
+                     "and remove any setting the provider cannot carry. SERVED_CONTEXT_UNOBSERVABLE: keep "
+                     "the model loaded after a request (no OLLAMA_KEEP_ALIVE=0) so the window it was "
+                     "served with can be verified; Kriya never changes keep-alive itself."),
     )
 
 

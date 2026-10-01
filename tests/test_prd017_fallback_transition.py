@@ -83,8 +83,19 @@ def _response(content):
 
 def _exact_ollama(monkeypatch):
     """Probe stand-in: every model is an exact Ollama runtime serving the
-    num_ctx its binding sends."""
+    num_ctx its binding sends - as its fingerprint says and as /api/ps
+    reports it (PROVIDER-CONTRACT-001A: production verifies the served
+    window after every call)."""
+    served = {}
+
+    def observe(*, base_url, model, api_key="", transport=None):
+        if model in served:
+            return model_runtime.ServedContextObservation(model_runtime.OBSERVED, window=served[model])
+        return model_runtime.ServedContextObservation(model_runtime.NOT_LOADED)
+
     def probe(**kw):
+        if kw["configured_context"]:
+            served[kw["model"]] = kw["configured_context"]
         return ModelRuntimeFingerprint(
             alias=kw["model"], endpoint="http://localhost:11434/v1", provider="ollama",
             provider_version="0.34.2", artifact_digest=f"sha256:{kw['model']}", tokenizer_digest="sha256:tok",
@@ -93,6 +104,7 @@ def _exact_ollama(monkeypatch):
         )
 
     monkeypatch.setattr(model_runtime, "probe_model_runtime", probe)
+    monkeypatch.setattr(model_runtime, "observe_served_context_state", observe)
 
 
 def _qualify(cfg, model, **statuses):

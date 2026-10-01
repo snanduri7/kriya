@@ -172,9 +172,23 @@ class InferenceRuntimePort(abc.ABC):
             wire = self.with_context_window(wire, requested_context_window)
         return ProviderRequestPlan(wire_body=wire, settings=tuple(states))
 
+    def observe_served_context_state(self, *, base_url: str, model: str, api_key: str = "") -> Any:
+        """PROVIDER-CONTRACT-001A: one typed observation of the context window
+        the runtime has loaded for ``model`` (model_runtime
+        .ServedContextObservation). Default: the plain observation below,
+        a None answer being NOT_APPLICABLE (nothing to observe)."""
+        from kriya.core.model_runtime import NOT_APPLICABLE, OBSERVED, ServedContextObservation
+
+        window = self.observe_served_context(base_url=base_url, model=model, api_key=api_key)
+        return (ServedContextObservation(OBSERVED, window=window) if window is not None
+                else ServedContextObservation(NOT_APPLICABLE, reason="adapter_reports_no_window"))
+
     def observe_served_context(self, *, base_url: str, model: str, api_key: str = "") -> Optional[int]:
         """The context window the runtime has loaded for ``model``, when it
-        can be observed (default: never)."""
+        can be observed (default: never; an adapter that can observe
+        overrides observe_served_context_state)."""
+        if type(self).observe_served_context_state is not InferenceRuntimePort.observe_served_context_state:
+            return self.observe_served_context_state(base_url=base_url, model=model, api_key=api_key).window
         return None
 
     def pin_served_configuration(self, *, base_url: str, model: str, extra_body: Optional[Dict[str, Any]],

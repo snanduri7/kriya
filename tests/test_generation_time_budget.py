@@ -58,7 +58,7 @@ def test_time_budget_rejects_doomed_generation_before_model_call():
     config.autonomy.generation_gate_reserve_seconds = 20
     config.autonomy.generation_seconds_per_file_estimate = 15
     state = GenerationState(
-        generation_started_monotonic=time.monotonic() - 60,
+        budget_started_monotonic=time.monotonic() - 60,
     )
 
     with pytest.raises(QualityGateFailure) as exc_info:

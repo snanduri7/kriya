@@ -27,7 +27,7 @@ from kriya.agents.response_protocol import (
     structured_contract,
 )
 from kriya.config.config import FallbackModelConfig, LLMConfig
-from kriya.core.llm import LLMClient
+from kriya.core.llm import InferenceDeadlineError, LLMClient
 from kriya.core.model_runtime import binding_output_tokens
 from kriya.core.role_metrics import model_role
 from kriya.core.token_budget import ContextBudgetUnsatisfiableError, OutputBudgetUnsatisfiableError
@@ -254,6 +254,8 @@ async def _call_with_escalation(
                     reasoning_override=cand.reasoning,
                     extra_body_override=cand.extra_body,
                 )
+        except InferenceDeadlineError:
+            raise  # the run's deadline binds every candidate alike
         except Exception as ex:
             last_exc = ex
             logger.debug(f"Escalation attempt {i + 1}/{len(candidates)} raised: {ex}")

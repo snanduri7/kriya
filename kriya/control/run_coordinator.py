@@ -14,6 +14,7 @@ import inspect
 import logging
 import os
 import subprocess
+import time
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -43,6 +44,9 @@ class _RunLease:
     # this run created and explicitly authorized. Nested mutation of one of
     # them is part of the same run; nothing else is.
     candidate_workspace_ids: set = field(default_factory=set)
+    # PROVIDER-CONTRACT-001A: the monotonic start of this run's generation
+    # budget (claim_run_generation_clock).
+    generation_clock: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -170,6 +174,21 @@ def record_model_runtime_use(fingerprint_id: str) -> None:
         ))
     except Exception as error:
         logger.warning("Run %s: model runtime fingerprint not persisted: %s", context.run_id, error)
+
+
+def claim_run_generation_clock() -> Optional[float]:
+    """PROVIDER-CONTRACT-001A: the monotonic start of the active run's
+    generation budget (``autonomy.generation_time_budget_seconds``). The
+    first claim - the run's first model call or generation pass - starts it;
+    every later work unit, retry and role reads the same value, so nothing
+    inside a run resets the budget. None outside a run."""
+    context = current_run_context()
+    if context is None:
+        return None
+    lease = context._lease
+    if lease.generation_clock is None:
+        lease.generation_clock = time.monotonic()
+    return lease.generation_clock
 
 
 def owning_run_committed_work_units(workspace_path: str) -> Optional[List[str]]:
