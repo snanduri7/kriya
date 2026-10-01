@@ -363,6 +363,11 @@ class GenerationState:
     # writer last staged for each candidate path (None = deleted); checked
     # against the sandbox before every verification gate.
     candidate_digests: Dict[str, Optional[str]] = field(default_factory=dict)
+    # FILE-INTEGRITY-CONTRACT-001: the whole tree the current attempt's
+    # gates verify (file_integrity.VerificationTreeBinding); None before the
+    # first gate. Checked after every gate command and before the terminal
+    # verified-candidate binding.
+    verification_tree_binding: Optional[Any] = None
     # Test-obligation preservation (2026-09-20): populated once, in
     # workflow.py's own Architect-stage prefer_existing_artifact_owners()
     # call, whenever a PLANNED-BUT-NONEXISTENT test file (is_runnable_

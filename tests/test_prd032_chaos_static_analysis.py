@@ -28,6 +28,7 @@ from _chaos_harness import (
     chaos_engine,
     git_workspace,
     inject_after_static_analysis_gate,
+    inject_before_terminal_commit,
     run_direct,
     static_analysis_config,
     typed_failure,
@@ -50,14 +51,14 @@ def _trusted_waiver_store(tmp_path, monkeypatch):
 
 
 def _run(chaos_case, tmp_path, developer_text, *, knobs=None, inject=None, monkeypatch=None,
-         files=None, before_arm=None, **static):
+         files=None, before_arm=None, inject_at=None, **static):
     workspace = git_workspace(tmp_path, files or {"calc.py": CALC})
     if before_arm is not None:
         before_arm(workspace)
     runtime = ChaosRuntime(lambda role, request: developer_text if role == "developer" else benign_roles(role, request))
     with FakeRegistration(knobs or FakeKnobs()) as fake:
         if inject is not None:
-            inject_after_static_analysis_gate(monkeypatch, lambda state: inject(state, workspace, fake))
+            (inject_at or inject_after_static_analysis_gate)(monkeypatch, lambda state: inject(state, workspace, fake))
         chaos_case.arm()
         with RuntimeRegistration(runtime):
             result = run_direct(chaos_engine(static_analysis_config(**static)), GOAL, workspace)
@@ -102,7 +103,10 @@ def test_candidate_bytes_changed_after_the_scan_are_refused(chaos_case, tmp_path
         del state, fake
         _worktree(workspace).joinpath("calc.py").write_text(RISKY)
 
-    workspace, result, runtime = _run(chaos_case, tmp_path, CALC_WITH_SUB, inject=swap_candidate, monkeypatch=monkeypatch)
+    # Swapped after every gate (the terminal regression too): a swap before
+    # it is the verification-tree binding's (FILE-INTEGRITY-CONTRACT-001 F-4).
+    workspace, result, runtime = _run(chaos_case, tmp_path, CALC_WITH_SUB, inject=swap_candidate,
+                                      monkeypatch=monkeypatch, inject_at=inject_before_terminal_commit)
     # The verification binding is checked before the static-analysis guard
     # (CANDIDATE-VERIFIED-DIGEST-BINDING-001); either refusal leaves the
     # workspace unchanged.

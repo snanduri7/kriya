@@ -1,3 +1,4 @@
+import functools
 import hashlib
 import logging
 import os
@@ -203,6 +204,39 @@ def execution_evidence(result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return {key: result[key] for key in _EXECUTION_EVIDENCE_KEYS if result.get(key) is not None}
 
 
+
+def _verification_gate(name: str):
+    """A validator method that runs repository/toolchain code is a named
+    verification gate. FILE-INTEGRITY-CONTRACT-001: when a tree is bound
+    (``self.tree_binding``, file_integrity.VerificationTreeBinding), the gate
+    is preceded by a check (a change between verification steps is caught
+    before this gate runs on it) and followed - after the whole method,
+    outside every handler inside it, so no internal ``except`` can turn it
+    into an ordinary result - by the check
+    that repository content and candidate are exactly what was bound; a
+    change raises the typed VerificationTreeMutated stop. It is checked on
+    the exception path too, so an error never hides a mutation."""
+    def decorate(method):
+        @functools.wraps(method)
+        def wrapper(self, *args, **kwargs):
+            if self.tree_binding is not None:
+                self.tree_binding.check(name, "before")
+            previous, self._gate = self._gate, name
+            try:
+                result = method(self, *args, **kwargs)
+            except BaseException:
+                if self.tree_binding is not None:
+                    self.tree_binding.check(name)
+                raise
+            finally:
+                self._gate = previous
+            if self.tree_binding is not None:
+                self.tree_binding.check(name)
+            return result
+        return wrapper
+    return decorate
+
+
 class PolymorphicValidator:
     """Detects workspace language stack and executes syntactic compile checks and dynamic test runners."""
 
@@ -220,6 +254,12 @@ class PolymorphicValidator:
         self.autonomy_cfg = autonomy_cfg or AutonomyConfig()
         self.stack = self._detect_stack()
         self.toolchain_identity = None
+        # FILE-INTEGRITY-CONTRACT-001: when a verification sequence binds its
+        # tree (file_integrity.VerificationTreeBinding), every gate method
+        # (_verification_gate) is followed by a check that the repository
+        # content and candidate are exactly what was bound.
+        self.tree_binding: Any = None
+        self._gate = "command"
         # Whether this run may change the repository's toolchain declaration
         # (the caller's structured write scope - see
         # kriya/workflow/toolchain.py::toolchain_declaration_mutable). Set
@@ -1066,6 +1106,7 @@ class PolymorphicValidator:
             )
         return second
 
+    @_verification_gate("pom_validate")
     def run_pom_validate(self) -> Dict[str, Any]:
         """Cheap, semantic-level pre-check for a Maven pom.xml - catches a
         well-formed-but-wrong POM (e.g. the wrong root element, a missing
@@ -1175,6 +1216,7 @@ class PolymorphicValidator:
             except OSError:
                 pass
 
+    @_verification_gate("classpath_inspection")
     def inspect_external_class(self, fully_qualified_class_name: str) -> Optional[str]:
         """Deterministic ground truth for an external dependency's REAL
         public API surface, instead of trusting the model's own (possibly
@@ -1206,6 +1248,7 @@ class PolymorphicValidator:
             logger.debug(f"Failed to inspect external class '{fully_qualified_class_name}': {e}")
             return None
 
+    @_verification_gate("compile")
     def run_compile_check(self, files: List[str]) -> Dict[str, Any]:
         """Runs language-specific compilation check on changed files."""
         if not files:
@@ -1504,6 +1547,7 @@ class PolymorphicValidator:
             ),
         }
 
+    @_verification_gate("tests")
     def run_tests(self, target_test: Optional[Union[str, Sequence[str]]] = None) -> Dict[str, Any]:
         """Runs tech-stack specific test execution suite.
 
@@ -1765,6 +1809,7 @@ class PolymorphicValidator:
         ]
         return rewritten, None
 
+    @_verification_gate("runtime_verification")
     def run_app(self, command: List[str], timeout: int = 90) -> Dict[str, Any]:
         """Executes an already-resolved run command for a self-terminating/batch entrypoint
         (not a long-running server) inside the sandboxed workspace, and returns the raw
@@ -1794,6 +1839,7 @@ class PolymorphicValidator:
             "output": res["stdout"] + "\n" + res["stderr"],
         }
 
+    @_verification_gate("runtime_verification")
     def run_app_sequence(
         self, commands: List[List[str]], timeout: int = 90, stdin_payload: Optional[str] = None,
     ) -> Dict[str, Any]:

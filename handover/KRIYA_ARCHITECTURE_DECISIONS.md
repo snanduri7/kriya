@@ -1670,7 +1670,7 @@ KAD-028, KAD-029, KAD-030, KAD-031, KAD-059. Evidence: `evidence/provider-contra
 
 ## KAD-063 — Protocol and Payload Are Separate Trust Boundaries
 
-**Status:** ACTIVE (2026-09-30, FILE-INTEGRITY-CONTRACT-001)  
+**Status:** ACTIVE (2026-09-30, FILE-INTEGRITY-CONTRACT-001; extended 2026-09-30 by its closure pass)  
 **Change class:** EXTEND (KAD-035, KAD-036)
 
 ### Decision
@@ -1696,9 +1696,24 @@ MEASURED at `1200824`:
 
 Revision identity used for mutation safety is `sha256(raw bytes)`. A file Kriya cannot represent byte-exactly is refused, never re-encoded: an unsupported encoding, mixed line endings, or a symbolic link.
 
+### Extension (closure pass, 2026-09-30)
+
+- **Production mutation protocols must provide explicit payload termination.** A payload ends only at its own end marker, and anything after the last block is refused. The production Developer protocol is the structured sentinel protocol, `kriya_sentinel_v1`.
+- **Legacy ambiguous framing is compatibility-only and not equivalent to the production protocol.** The legacy markers (`strict_legacy_v1`) have no payload terminator: prose after a block is indistinguishable from payload, a final newline cannot be expressed, and some fence-bearing files cannot be carried. Production refuses it. One invocation uses exactly one protocol, with no fallback between parsers.
+- **Existing File Convention Policy.** Existing supported files are subject to an explicit policy that preserves the BOM, the line-ending convention and the final-newline state. This convention preservation is part of mutation semantics. It is deterministic, it concerns the file's own convention and never payload content, and it does not authorize heuristic rewriting of payload. Outside the authorized changed span, original bytes remain unchanged.
+- **Qualification evidence is bound to the model-facing mutation protocol identity.** A record qualified under one protocol does not count under another.
+- **A qualification case tests one named capability.** A protocol-fidelity qualification must not depend on unrelated model creativity or solution quality.
+- **Verification binds the whole tree it runs on.** That means the repository's tracked content plus the candidate. A gate that changes tracked content invalidates verification, and the changed bytes are never adopted.
+
+Why (MEASURED):
+- Legacy prose after REPLACE entered payload that stayed valid `.properties`/YAML (F-1).
+- The sentinel protocol was 28/28 valid on both pinned models; strict legacy was 14/28 valid, refusing same-line markers.
+- A `/6` case requiring an invented fenced docstring example failed qwen3.6. Both models omit invented docstring fences (0/8) but return supplied fence content byte-exactly (8/8). The corrected `/7` fidelity case passed on both pins.
+- Evidence: `evidence/file-integrity-contract-001/closure/`.
+
 ### Does not imply
 
-- A particular wire format. The legacy markers (strict) and the sentinel protocol both satisfy this decision. Which one production uses is a qualification question.
+- That the legacy markers are unsafe to parse. They remain available for compatibility and historical replay, never as production-equivalent.
 - Support for encodings beyond UTF-8.
 - That malformed model output is Kriya's to fix. It is the model's to repeat correctly.
 

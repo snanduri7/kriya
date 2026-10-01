@@ -136,7 +136,7 @@ def test_the_goal_named_line_is_shown_exactly_and_its_edit_applies(tmp_path, mon
     assert len(run.developer) == 1
     system, user = run.developer[0]
     assert NAMED_LINE in _code_context(user)
-    assert "SEARCH:" in system
+    assert "<<<KRIYA:SEARCH>>>" in system  # the anchored edit is offered (production sentinel protocol)
     assert run.result["quality_gates_passed"] is True
     assert NAMED_LINE_FIX in (run.workspace / TARGET).read_text()
 

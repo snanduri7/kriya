@@ -9,6 +9,7 @@ actually sent to the fallback, not on mocked intermediate values.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _protocol_responses import as_requested
 from openai.resources.chat.completions import AsyncCompletions
 
 from kriya.agents.agent import DeveloperAgent
@@ -551,12 +552,13 @@ async def test_the_run_escalates_past_an_incompatible_fallback_without_calling_i
             return "Step 1: Write code"
         if n == 2:
             return "Design: Write math.py"
+        system = args[0] if args else kwargs.get("system_prompt", "")
         if n == 3:
-            return "def add(a,b)\n    return a+b"
+            return as_requested("def add(a,b)\n    return a+b", system, "math.py")
         if n in (4, 5, 6, 7):
-            return "FILE CONTENT:\ndef add(a,b)\n    return a+b"
+            return as_requested("FILE CONTENT:\ndef add(a,b)\n    return a+b", system, "math.py")
         if n == 8:
-            return "FILE CONTENT:\ndef add(a,b):\n    return a+b"
+            return as_requested("FILE CONTENT:\ndef add(a,b):\n    return a+b", system, "math.py")
         return "Review: Approved"
 
     llm.complete = mock_complete

@@ -556,6 +556,8 @@ def _dispatch_tool_call(
             return f"ERROR: {denial}"
         modified_files[filepath] = new_content
         observed_revisions[filepath] = new_revision
+        if getattr(validator, "tree_binding", None) is not None:
+            validator.tree_binding.authorize(filepath)  # Kriya's own authorized write
         return (
             f"Patch applied to '{filepath}'. Call {validation_tool_name} to verify "
             "it fixed the failure."

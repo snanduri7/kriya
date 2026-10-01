@@ -86,6 +86,7 @@ def reset_state_for_independent_candidate(state) -> None:
     state.all_original_contents = {}
     state.all_original_raw = {}
     state.candidate_digests = {}
+    state.verification_tree_binding = None
     state.validated_file_revisions = {}
     state.files_written = []
     state.budgets.retry_count = 0

@@ -7663,6 +7663,7 @@ async def test_workflow_successful_run(tmp_path):
 @pytest.mark.asyncio
 async def test_workflow_syntax_error_auto_debugging_loop(tmp_path):
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
@@ -7775,6 +7776,7 @@ async def test_workflow_missing_file_recovery_lets_model_resolve_nested_path(tmp
 async def test_workflow_fallback_chain(tmp_path):
     from kriya.config import FallbackModelConfig
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     cfg.autonomy.mode = "guardrails"
     cfg.llm_chain = [
         FallbackModelConfig(model="fallback-1"),
@@ -7945,6 +7947,7 @@ async def test_workflow_does_not_extract_lesson_from_a_single_targeted_retry(tmp
     attempt - matching the original mechanism's intent (a genuinely hard-won
     lesson, not routine single-retry noise)."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     kernel = Kernel(config=cfg)
@@ -16130,6 +16133,7 @@ async def test_workflow_run_verification_judgment_cached_across_retry_attempts(t
     to False rather than raising) rather than crashing, silently skipping
     verification on attempt 2 instead of correctly re-running it."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     cfg.autonomy.mode = "guardrails"
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
@@ -20677,6 +20681,7 @@ async def test_workflow_targeted_retry_fixes_implicated_file_without_escalating(
     from kriya.config import FallbackModelConfig
     _init_git_repo(tmp_path)
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     cfg.llm_chain = [FallbackModelConfig(model="fallback-1")]

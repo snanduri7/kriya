@@ -21,7 +21,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from _chaos_harness import inject_after_static_analysis_gate, snapshot_tree
+from _chaos_harness import inject_before_terminal_commit, snapshot_tree
 from _fake_static_analysis import DISABLED_STATIC_ANALYSIS, FakeRegistration
 from _milestone_proof_harness import _milestone, git_workspace  # noqa: F401 - pytest fixture
 from test_prd008a_plan_executor import (  # noqa: F401 - pytest fixture
@@ -228,7 +228,7 @@ def _invoke(mode, workspace, monkeypatch, action):
     llm = _role_llm(cfg, CALC_WITH_SUB)
     engine = WorkflowEngine(Kernel(config=cfg), llm)
     engine.run_verifier.judge = AsyncMock(return_value={"should_run": False, "run_commands": None})
-    inject_after_static_analysis_gate(monkeypatch, action)
+    inject_before_terminal_commit(monkeypatch, action)
     import asyncio
 
     if mode == "direct":

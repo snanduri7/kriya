@@ -192,6 +192,8 @@ def test_check_ids_are_pinned_unique_and_always_complete(tmp_path):
         "containment.oci_smoke", "containment.no_host_fallback", "egress.policy",
         # PROVIDER-CONTRACT-001 (deliberate characterization change): the provider contract row.
         "model.connectivity", "model.runtime_fingerprint", "model.provider_contract", "model.qualification",
+        # FILE-INTEGRITY-CONTRACT-001 (deliberate characterization change): the response protocol row.
+        "model.response_protocol",
         "embedding.connectivity", "context.recall_certification", "lsp.java", "models.role_independence",
         "semantic.precision_boundary",
         # PRD-031A (deliberate characterization change): seven static-analysis rows.

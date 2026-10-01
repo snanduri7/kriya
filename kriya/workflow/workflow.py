@@ -164,7 +164,12 @@ from kriya.workflow.failure_grounding import (
     extract_implicated_files as extract_implicated_files,
 )
 from kriya.workflow.failure_reporting import build_failure_report_entry
-from kriya.workflow.file_integrity import DETERMINISTIC_FILE_INTEGRITY_STOPS, display_text, raw_digest
+from kriya.workflow.file_integrity import (
+    DETERMINISTIC_FILE_INTEGRITY_STOPS,
+    VERIFICATION_GATE_MUTATED_TRACKED_FILES,
+    display_text,
+    raw_digest,
+)
 from kriya.workflow.file_resolution import (
     IncompleteGenerationError as IncompleteGenerationError,
 )
@@ -345,6 +350,7 @@ from kriya.workflow.verification_binding import bind_candidate
 from kriya.workflow.verification_contract import extract_contract_verdict as extract_contract_verdict
 from kriya.workflow.verification_contract import pass_verdict_is_grounded as pass_verdict_is_grounded
 from kriya.workflow.worktree import (
+    WorktreeSyncError,
     create_git_worktree,
     remove_git_worktree,
 )
@@ -854,6 +860,7 @@ def _settle_future_owner_verification_obligations(
 def close_requirements_with_named_tests(
     autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
     modified: Iterable[str], revision: Any, java_home_override: Optional[str] = None,
+    tree_binding: Any = None,
 ) -> List[Dict[str, Any]]:
     """PRD-020: runs the tests an UNVERIFIED requirement's own text names, on
     the candidate at ``candidate_root`` (the one the verifier just judged),
@@ -875,6 +882,7 @@ def close_requirements_with_named_tests(
         candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
     )
     validator.java_home_override = java_home_override
+    validator.tree_binding = tree_binding
     return close_unverified_requirements_with_named_tests(
         ledger, requirement_set, test_files=test_files, modified=modified,
         run_tests=lambda paths: validator.run_tests(target_test=list(paths)),
@@ -3707,6 +3715,28 @@ class WorkflowEngine:
             worktree_path = create_git_worktree(workspace_path)
             logger.info(f"Isolated sandbox worktree created at: {worktree_path}")
             mark_run_stage(workspace_path, RunLifecycle.CANDIDATE)
+        except WorktreeSyncError as sync_error:
+            # FILE-INTEGRITY-CONTRACT-001: a sandbox that does not hold the
+            # workspace's exact bytes is a typed deterministic stop, never a
+            # generic sandbox error and never verified against.
+            logger.error(f"Worktree sync refused: {sync_error}")
+            category = sync_error.reason_code.lower()
+            try:
+                from kriya.core.trace import TraceLogger
+                TraceLogger(trace_db_path(self.kernel.config)).log_run(
+                    run_id=trace_id, goal=goal, duration_sec=time.time() - start_time,
+                    attempts=0, status="failure", files_modified=[], failure_category=category,
+                    milestone_group_id=milestone_group_id, milestone_index=milestone_index,
+                    milestone_total=milestone_total, run_events=self._trace_run_events(state),
+                )
+            except Exception as trace_ex:
+                logger.warning(f"Failed to write run trace: {trace_ex}")
+            return {
+                "status": "failure", "failure_category": category, "reason_codes": [sync_error.reason_code],
+                "error": str(sync_error), "plan": plan, "design": design, "goal": goal,
+                "workspace_path": workspace_path, "run_id": trace_id, "files": [],
+                "quality_gates_passed": False,
+            }
         except Exception as e:
             raise RuntimeError(
                 f"Failed to create an isolated generation sandbox: {e}. "
@@ -3885,6 +3915,8 @@ class WorkflowEngine:
                 # (requirements, static analysis, approval, terminal
                 # regression) judges the same candidate, and the terminal
                 # commit refuses any batch that differs from this binding.
+                if state.verification_tree_binding is not None:
+                    state.verification_tree_binding.check("terminal_binding")
                 state.verified_candidate_binding = _bind_direct_candidate(worktree_path, workspace_path, state)
 
                 # Authoritative subtask verification is part of the pre-apply
@@ -4529,6 +4561,7 @@ class WorkflowEngine:
                         write_scope_mode, allowed_write_relpaths, structured_plan,
                     ),
                 )
+                validator.tree_binding = state.verification_tree_binding
 
                 if not state.toolchain_checked:
                     state.toolchain_checked = True
@@ -5615,6 +5648,8 @@ class WorkflowEngine:
             # engine cannot mutate byte-exactly (file_integrity.py reason codes).
             is_file_integrity_stop = bool(state.environment_failure) and any(
                 state.environment_failure.startswith(f"{code}:") for code in DETERMINISTIC_FILE_INTEGRITY_STOPS)
+            is_verification_tree_stop = bool(state.environment_failure) and state.environment_failure.startswith(
+                f"{VERIFICATION_GATE_MUTATED_TRACKED_FILES}:")
             # PRD-031A: a static-analysis gate stop (StaticAnalysisGateResult.gap).
             static_analysis_stop = next(
                 (
@@ -5640,6 +5675,7 @@ class WorkflowEngine:
                 else static_analysis_stop if static_analysis_stop is not None
                 else "workspace_commit_failed" if is_workspace_commit_stop
                 else "file_integrity_unsupported" if is_file_integrity_stop
+                else "verification_tree_mutated" if is_verification_tree_stop
                 else "environment_failure" if state.environment_failure
                 # PRD-026: the retry-progress invariant ended the run.
                 else "no_progress" if state.no_progress_terminated

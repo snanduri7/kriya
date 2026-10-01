@@ -387,7 +387,8 @@ def requested_file(request: ChatRequest) -> Optional[str]:
     """The file a per-file Developer request asks for (the prompt's own
     closing instruction names it)."""
     user = next((m.get("content") or "" for m in reversed(request.messages) if m.get("role") == "user"), "")
-    names = re.findall(r"file '([^']+)'", user)
+    # Legacy directives say "file 'x'"; the structured one "for 'x' ONLY".
+    names = re.findall(r"(?:file|for) '([^']+)'", user)
     return names[-1] if names else None
 
 
@@ -413,6 +414,14 @@ class ChaosRuntime(FakeRuntimeAdapter):
             raise reply
         if isinstance(reply, ChatResponse):
             return reply
+        if role == "developer":
+            # FILE-INTEGRITY-CONTRACT-001: a scripted legacy/raw Developer answer
+            # in the protocol the prompt asks for (also in chaos subprocesses,
+            # where tests/conftest.py's in-process translation does not reach).
+            from _protocol_responses import as_requested
+
+            system = next((str(m.get("content") or "") for m in request.messages if m.get("role") == "system"), "")
+            reply = as_requested(str(reply), system)
         return ChatResponse(content=str(reply), prompt_tokens=plausible_message_tokens(request.messages, request.tools),
                             completion_tokens=3, finish_reason="stop")
 
@@ -505,6 +514,31 @@ def inject_after_static_analysis_gate(monkeypatch: Any, action: Callable[[Any], 
 
     monkeypatch.setattr(workflow_module, "_run_static_analysis_gate", gate_then_inject)
     return results
+
+
+def inject_before_terminal_commit(monkeypatch: Any, action: Callable[[Any], None]) -> List[Any]:
+    """Run ``action(state)`` after every verification gate (the terminal full
+    regression included) and immediately before the direct pipeline
+    materializes its terminal commit batch from the worktree; ``state`` is the
+    run's GenerationState. A change made here is past the last gate, so only
+    the commit-time verified-candidate binding can refuse it (an earlier
+    change is caught by the verification-tree binding at the next gate,
+    FILE-INTEGRITY-CONTRACT-001 F-4). Returns the states it acted on."""
+    from kriya.workflow import workflow as workflow_module
+
+    real = workflow_module._direct_terminal_writes
+    acted: List[Any] = []
+
+    def inject_then_materialize(worktree_path: str, workspace_path: str, state: Any) -> Any:
+        # The same function also takes the verification binding (before the
+        # gates); only the terminal materialization follows a passed regression.
+        if state.terminal_regression_succeeded and not acted:
+            acted.append(state)
+            action(state)
+        return real(worktree_path, workspace_path, state)
+
+    monkeypatch.setattr(workflow_module, "_direct_terminal_writes", inject_then_materialize)
+    return acted
 
 
 def run_direct(engine, goal: str, workspace: Union[str, Path], **kwargs: Any) -> Dict[str, Any]:

@@ -1014,6 +1014,11 @@ class DeveloperAgent(BaseAgent):
             "untouched"
         )
 
+    async def _complete_file(self, system_prompt: str, prompt: str, **options: Any) -> str:
+        """The one per-file Developer completion: its raw text is the response
+        the configured protocol then parses (never rewritten here)."""
+        return await self.llm.complete(system_prompt, prompt, **options)
+
     @staticmethod
     def parse_file_payload(text: str, filepath: str):
         """FILE-INTEGRITY-CONTRACT-001: a raw per-file content response (or a
@@ -1849,11 +1854,26 @@ class DeveloperAgent(BaseAgent):
                 # FILE-INTEGRITY-CONTRACT-001: the sentinel protocol replaces
                 # every legacy marker instruction; the task/mode text stays.
                 repair_outcomes = prefer_anchored_edit or apply_fix_analysis
+                if create_full_file or (requested_operation is None and not apply_fix_analysis):
+                    mode_text = (
+                        "MODE: CREATE_FULL_FILE.\nWrite the complete content of exactly one file - the "
+                        f"requested file path '{filepath}'. Do not include conversational explanation or the "
+                        "content of any other file - even one you're told is also part of this batch; another "
+                        "file's change is out of scope for this response and is handled separately.\n"
+                    )
+                elif repair_full_file_without_failure:
+                    mode_text = (
+                        "MODE: REPAIR_WITH_FULL_FILE.\nReturn the complete replacement content of exactly one "
+                        f"existing file - the requested path '{filepath}'. Preserve every correct declaration "
+                        "and behavior not changed by the task. Never return content for a sibling file.\n"
+                    )
+                else:
+                    mode_text = (
+                        f"MODE: REPAIR.\nRepair exactly one existing file, '{filepath}' - do not touch or return "
+                        "content for any other file, even one you're told is also part of this batch.\n"
+                    )
                 file_sys_prompt = (
-                    "You are the Kriya Developer Agent. "
-                    + ("MODE: REPAIR. Repair exactly one existing file" if repair_outcomes
-                       else "Produce exactly one file")
-                    + f", '{filepath}' - never content for any other file.\n"
+                    "You are the Kriya Developer Agent. " + mode_text
                     + structured_contract(
                         filepath, analysis_required=repair_outcomes, allow_edit=prefer_anchored_edit,
                         allow_file=(not prefer_anchored_edit) or full_file_offered,
@@ -1910,7 +1930,7 @@ class DeveloperAgent(BaseAgent):
             )
             try:
                 try:
-                    content = await self.llm.complete(file_sys_prompt, file_prompt, **completion_options)
+                    content = await self._complete_file(file_sys_prompt, file_prompt, **completion_options)
                 except ContextBudgetUnsatisfiableError as refusal:
                     # PRD-016 fallback 1: the prompt itself does not fit any
                     # allowed window. The already-written siblings' contents
@@ -1934,7 +1954,7 @@ class DeveloperAgent(BaseAgent):
                             "selected_context_window": refusal.decision.context_window,
                         })
                     file_prompt = file_prompt.replace(sibling_section, reduced_sibling_section, 1)
-                    content = await self.llm.complete(file_sys_prompt, file_prompt, **completion_options)
+                    content = await self._complete_file(file_sys_prompt, file_prompt, **completion_options)
             except ContextBudgetUnsatisfiableError as refusal:
                 # Which file could not be budgeted, for the caller's fallback
                 # (a lower-output protocol for that file) and its evidence.
@@ -1977,10 +1997,10 @@ class DeveloperAgent(BaseAgent):
             protocol = developer_response_protocol(self.llm.config)
             repair_protocol = prefer_anchored_edit or apply_fix_analysis
             if protocol == STRUCTURED_PROTOCOL:
-                parsed = parse_structured(
-                    content, filepath, patch_allowed=prefer_anchored_edit,
-                    file_allowed=(not prefer_anchored_edit) or full_file_offered,
-                )
+                # As with the legacy markers, a whole-file outcome is parsed and
+                # then judged by the one operation-authority check downstream
+                # (validate_operation_result / D1), never refused here.
+                parsed = parse_structured(content, filepath, patch_allowed=prefer_anchored_edit)
             elif repair_protocol:
                 parsed = parse_legacy_repair(content, filepath, patch_allowed=prefer_anchored_edit)
             else:

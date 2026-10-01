@@ -765,10 +765,18 @@ measured corrupting legitimate files (`handover/FILE_INTEGRITY_CONTRACT_001.md`)
   must be unique and non-overlapping. The result is re-encoded in the file's own BOM and convention. Unsupported files
   are refused, never re-encoded.
 - **Revisions** are raw-byte digests on every mutation and commit path (commit evidence schema 3).
-- **No hidden writes.** Deterministic corrections are candidate mutations applied before the gates. The sandbox must
-  hold the staged candidate digests before every gate. The committed destination is re-read against the verified bytes.
-  Worktree sync is NUL-delimited and byte-checked. A new filesystem write site fails the audit tripwire until it is
-  classified.
+- **No hidden writes; three bindings.** Deterministic corrections are candidate mutations applied before the gates.
+  - *Candidate binding*: before the first gate of an attempt, the sandbox must hold the staged candidate digests.
+  - *Verification-tree binding*: the whole tree the gates verify (git-tracked repository content plus the candidate)
+    is bound and re-checked after every validator gate (compile, tests, runtime verification, pom validation,
+    classpath inspection) and before the terminal verified-candidate binding. A gate that changes tracked content is
+    the typed stop `VERIFICATION_GATE_MUTATED_TRACKED_FILES`. Untracked build output is not repository content.
+  - *Commit binding*: the committed destination is re-read against the verified bytes.
+  Worktree sync is NUL-delimited, byte-checked and fails closed with a typed reason in direct and enforce runs. A new
+  filesystem write site fails the audit tripwire until it is classified.
+- **Production protocol.** The structured sentinel protocol (`kriya_sentinel_v1`) has explicit payload terminators and
+  is the production protocol; the legacy markers (`strict_legacy_v1`) are compatibility-only. Qualification is bound
+  to the protocol identity (policy `/7`).
 
 ### 2.10 `kriya/workflow/` Module Layout
 

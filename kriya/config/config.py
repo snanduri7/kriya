@@ -562,12 +562,16 @@ class AutonomyConfig(BaseModel):
     shell_network: str = Field(default="unrestricted")
 
     # FILE-INTEGRITY-CONTRACT-001 (kriya/agents/response_protocol.py): the
-    # protocol the Developer is asked to answer in. "legacy_strict" keeps the
-    # historical FIX ANALYSIS/SEARCH/REPLACE/FILE CONTENT/NO CHANGE NEEDED
-    # markers, recognized only as exact lines; "structured" asks for
-    # path-named <<<KRIYA:...>>> sentinel blocks. Both produce the same typed
-    # intent and neither rewrites payload. SECURITY_AUTHORITY under SEC-009.
-    developer_response_protocol: str = Field(default="legacy_strict")
+    # protocol the Developer is asked to answer in. "structured"
+    # (kriya_sentinel_v1, the production protocol) asks for path-named
+    # <<<KRIYA:...>>> blocks with explicit terminators. "legacy_strict"
+    # (strict_legacy_v1) keeps the historical FIX ANALYSIS/SEARCH/REPLACE/
+    # FILE CONTENT/NO CHANGE NEEDED markers as exact lines; it has no payload
+    # terminator, is compatibility-only and is refused under
+    # runtime_profile: production and by doctor --production. Neither
+    # rewrites payload, and there is no fallback between them. Qualification
+    # binds the protocol identity. SECURITY_AUTHORITY under SEC-009.
+    developer_response_protocol: str = Field(default="structured")
 
     @field_validator("developer_response_protocol")
     @classmethod

@@ -68,6 +68,36 @@ def _no_model_runtime_probe(request, monkeypatch, tmp_path_factory):
     model_runtime.clear_model_runtime_cache()
 
 
+@pytest.fixture(autouse=True)
+def _scripted_developer_answers_speak_the_requested_protocol(request, monkeypatch):
+    """FILE-INTEGRITY-CONTRACT-001: the production Developer protocol is the
+    structured sentinel protocol, while most scripted model answers in this
+    suite predate it (raw file content or the legacy markers). At the one
+    per-file completion seam (DeveloperAgent._complete_file) such an answer
+    is rendered into the protocol the prompt asks for - the same intent,
+    read by the real legacy parser (tests/_protocol_responses.py). The
+    production parser is untouched, a malformed answer stays malformed, and
+    an answer already containing a sentinel line is never rewritten. A test
+    that asserts how the production parser treats a non-sentinel answer opts
+    out with @pytest.mark.developer_answers_verbatim; live tests never
+    translate."""
+    if request.node.get_closest_marker("developer_answers_verbatim") or request.node.get_closest_marker("live_model"):
+        yield
+        return
+    from _protocol_responses import as_requested
+
+    from kriya.agents.agent import DeveloperAgent
+
+    real = DeveloperAgent._complete_file
+
+    async def speaking_the_requested_protocol(self, system_prompt, prompt, **options):
+        answer = await real(self, system_prompt, prompt, **options)
+        return as_requested(answer, system_prompt) if isinstance(answer, str) else answer
+
+    monkeypatch.setattr(DeveloperAgent, "_complete_file", speaking_the_requested_protocol)
+    yield
+
+
 # --- PRD-032 chaos report ----------------------------------------------------------
 # Every @chaos test's verdict and observation is collected; with
 # `--chaos-report DIR` the session writes chaos-report.json/.md there

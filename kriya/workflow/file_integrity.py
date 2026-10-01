@@ -29,7 +29,9 @@ import hashlib
 import os
 import stat
 from dataclasses import dataclass, replace
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+
+from kriya.workflow.failure import Failure, QualityGateFailure
 
 EMPTY_SEARCH_BLOCK = "EMPTY_SEARCH_BLOCK"
 ANCHOR_NOT_FOUND = "ANCHOR_NOT_FOUND"
@@ -408,3 +410,110 @@ def mutate_snapshot(snapshot: FileSnapshot, edits: Sequence[Dict[str, str]]) -> 
     """(new text, new bytes) for ``edits`` applied to ``snapshot``."""
     result = apply_line_block_edits(snapshot.text, anchored_replaces(edits))
     return result.text, snapshot.encode(result.text)
+
+
+# ---------------------------------------------------------------- verification tree binding
+
+VERIFICATION_GATE_MUTATED_TRACKED_FILES = "VERIFICATION_GATE_MUTATED_TRACKED_FILES"
+
+
+def _stat_identity(path: str) -> Optional[Tuple[int, int, int, int, int]]:
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    return (info.st_mode, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _content_identity(path: str) -> Optional[str]:
+    """What the tree holds at ``path``: absent (None), a link (its target),
+    or a file (its permission bits and raw-byte digest)."""
+    if not os.path.lexists(path):
+        return None
+    if os.path.islink(path):
+        return "link:" + os.readlink(path)
+    if os.path.isdir(path):
+        return "dir"
+    mode = stat.S_IMODE(os.lstat(path).st_mode)
+    return f"{mode:o}:{file_raw_digest(path)}"
+
+
+class VerificationTreeMutated(QualityGateFailure):
+    """A verification gate changed repository content Kriya did not
+    authorize. A deterministic stop: the verification that ran is invalid,
+    and the modified bytes are never adopted as the candidate."""
+
+    def __init__(self, gate: str, changes: Sequence[Tuple[str, Optional[str], Optional[str]]],
+                 phase: str = "after") -> None:
+        paths = [path for path, _expected, _actual in changes]
+        where = (f"the {gate} gate modified repository content" if phase == "after"
+                 else f"repository content changed between verification steps (detected before the {gate} gate)")
+        message = (
+            f"{VERIFICATION_GATE_MUTATED_TRACKED_FILES}: {where} Kriya did not authorize ({', '.join(paths[:10])}). "
+            "Verification must run on exactly the bound tree; Kriya cannot verify one tree and commit another, "
+            "so this verification is invalid."
+        )
+        super().__init__(Failure(
+            type="verification_tree_mutated", message=message, raw_output=message, source="orchestrator",
+            authority="deterministic", likely_files=paths[:50],
+            diagnostics={"reason_code": VERIFICATION_GATE_MUTATED_TRACKED_FILES, "gate": gate, "phase": phase,
+                         "changed_paths": paths[:200],
+                         "expected_digests": {path: expected for path, expected, _ in changes[:200]},
+                         "actual_digests": {path: actual for path, _, actual in changes[:200]}},
+        ))
+        self.gate = gate
+
+
+class VerificationTreeBinding:
+    """FILE-INTEGRITY-CONTRACT-001: the exact tree a verification sequence
+    runs against - every repository content path (git-tracked in the
+    workspace) and every candidate path, each with its stat identity and
+    content identity (mode + raw digest). ``check`` after a gate re-stats
+    everything and re-hashes only what changed, so a gate that rewrites a
+    tracked file (a formatter bound to the build, a test fixture, the app
+    under runtime verification) is caught at that gate, before any later
+    gate or the commit binding sees it. Untracked, non-candidate output
+    (target/, build/, caches) is not repository content and is never
+    part of the binding. Kriya's own authorized writes during verification
+    (self-correction patches, candidate pom corrections) re-record their
+    path with ``authorize``."""
+
+    def __init__(self, root: str, content_paths: Iterable[str], candidate_paths: Iterable[str]) -> None:
+        self.root = root
+        self._expected: Dict[str, Tuple[Optional[Tuple[int, int, int, int, int]], Optional[str]]] = {}
+        for relpath in set(content_paths) | set(candidate_paths):
+            self._record(relpath)
+
+    def _record(self, relpath: str) -> None:
+        path = os.path.join(self.root, relpath)
+        self._expected[relpath] = (_stat_identity(path), _content_identity(path))
+
+    @property
+    def paths(self) -> Tuple[str, ...]:
+        return tuple(sorted(self._expected))
+
+    def authorize(self, relpath: str) -> None:
+        """Kriya itself just wrote ``relpath`` through the authorized writer."""
+        self._record(relpath)
+
+    def changes(self) -> List[Tuple[str, Optional[str], Optional[str]]]:
+        changed = []
+        for relpath, (identity, expected) in sorted(self._expected.items()):
+            path = os.path.join(self.root, relpath)
+            current_identity = _stat_identity(path)
+            if current_identity == identity:
+                continue
+            actual = _content_identity(path)
+            if actual != expected:
+                changed.append((relpath, expected, actual))
+            else:
+                # Rewritten with identical bytes and mode (a touch): unchanged content.
+                self._expected[relpath] = (current_identity, expected)
+        return changed
+
+    def check(self, gate: str, phase: str = "after") -> None:
+        """``phase``: "after" the gate ran (the gate changed the tree) or
+        "before" it (something between verification steps changed it)."""
+        changed = self.changes()
+        if changed:
+            raise VerificationTreeMutated(gate, changed, phase)

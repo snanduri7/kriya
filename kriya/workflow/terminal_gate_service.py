@@ -444,10 +444,20 @@ class TerminalGateService:
                     logger.info("Original requirement mutation-scope evidence: %s", scope_closures)
                 # An UNVERIFIED requirement naming existing tests: run
                 # exactly those on this candidate (never a model citation).
+                from kriya.workflow.file_integrity import VerificationTreeBinding
+                from kriya.workflow.worktree import repository_content_paths
+
+                # FILE-INTEGRITY-CONTRACT-001: the named tests run repository
+                # code on the candidate; a tracked-content change fails this gate.
+                tree_binding = VerificationTreeBinding(
+                    request.candidate_root, repository_content_paths(request.workspace_path),
+                    _terminal_candidate_paths(request.plan),
+                )
                 closures = await asyncio.to_thread(
                     close_requirements_with_named_tests, autonomy, ledger,
                     requirement_set, request.candidate_root, request.workspace_path,
                     modified=_terminal_candidate_paths(request.plan), revision="terminal",
+                    tree_binding=tree_binding,
                 )
                 if closures:
                     logger.info("Original requirement closure by named tests: %s", closures)

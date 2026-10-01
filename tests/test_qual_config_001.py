@@ -60,8 +60,7 @@ _ANSWERS = {
     "tool_argument_integrity": (mq.case_tool_argument_integrity,
                                 [_result(tool_calls=[_call("save_note", text=mq.NOTE_TEXT)])]),
     "reasoning_behavior": (mq.case_reasoning_behavior, [_result("85")]),
-    "full_file_raw_content": (mq.case_full_file_raw_content, [_result(
-        "import re\n\ndef slugify(text: str) -> str:\n    return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')\n")]),
+    "full_file_raw_content": (mq.case_full_file_raw_content, [_result(mq.FULL_FILE_SOURCE)]),
     "anchored_edit_protocol": (mq.case_anchored_edit_protocol, [_result(
         "FIX ANALYSIS: skip negatives.\nSEARCH:\n        result += p\nREPLACE:\n        if p >= 0:\n"
         "            result += p\n")]),
@@ -220,6 +219,14 @@ def test_the_policy_digest_follows_the_policy_and_nothing_else():
     assert mq.policy_digest_for(unrelated) == mq.policy_digest_for(base)
 
 
+def _bound(policy):
+    """The digest a record made under ``policy`` carries: FILE-INTEGRITY-
+    CONTRACT-001 binds the (default) Developer response protocol identity."""
+    from kriya.agents.response_protocol import response_protocol_identity
+
+    return mq.qualification_policy_digest(policy, response_protocol_identity(None))
+
+
 def _record_under(policy):
     return mq.build_record(_fp(), [mq.CaseResult("plain_completion", mq.PASS)], settings=_settings(),
                            policy=policy)
@@ -229,9 +236,9 @@ def test_a_record_made_under_another_policy_is_stale():
     record = _record_under(ModelQualificationConfig())
     changed = ModelQualificationConfig.model_validate({"cases": {"tool_argument_integrity": {"max_tokens": 4096}}})
     current = mq.assess(_fp(), ("plain_completion",), settings=_settings(), record=record,
-                        policy_digest=mq.qualification_policy_digest(ModelQualificationConfig()))
+                        policy_digest=_bound(ModelQualificationConfig()))
     stale = mq.assess(_fp(), ("plain_completion",), settings=_settings(), record=record,
-                      policy_digest=mq.qualification_policy_digest(changed))
+                      policy_digest=_bound(changed))
     assert current.status == mq.QUALIFIED
     assert stale.status == mq.STALE and any("qualification policy" in r for r in stale.reasons)
 
@@ -241,7 +248,7 @@ def test_a_record_made_under_a_non_default_policy_is_stale_under_the_defaults():
     record = _record_under(changed)
     assert mq.assess(_fp(), ("plain_completion",), settings=_settings(), record=record).status == mq.STALE
     assert mq.assess(_fp(), ("plain_completion",), settings=_settings(), record=record,
-                     policy_digest=mq.qualification_policy_digest(changed)).status == mq.QUALIFIED
+                     policy_digest=_bound(changed)).status == mq.QUALIFIED
 
 
 def test_a_pre_qual_config_record_counts_only_under_the_v3_policy():
@@ -423,7 +430,7 @@ def test_cli_qualify_names_the_controlling_policy_of_a_failed_case(monkeypatch):
     result = CliRunner().invoke(main, ["model", "qualify"])
     assert "max_tokens=512 (model_qualification.cases.tool_argument_integrity.max_tokens)" in result.output
     assert "finish_reason=length" in result.output
-    assert f"Qualification policy: {mq.qualification_policy_digest(ModelQualificationConfig())}" in result.output
+    assert f"Qualification policy: {_bound(ModelQualificationConfig())}" in result.output
 
 
 # --- authority and the production call sites ---------------------------------------------------

@@ -623,6 +623,7 @@ def test_normalize_file_entries_unparseable_returns_none():
 @pytest.mark.asyncio
 async def test_fill_missing_content_only_calls_for_missing_entries():
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
 
     file_list_response = json.dumps([
@@ -669,6 +670,7 @@ async def test_fill_missing_content_shows_freshly_generated_sibling_content_not_
     a plausible-but-inconsistent package with nothing to reconcile them, because
     neither ever saw the other's real content."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
 
     protocol_content = "package com.example;\npublic class Protocol {}"
@@ -706,6 +708,7 @@ async def test_fill_missing_content_sibling_section_respects_explicit_budget():
     notice, distinct from "not yet written") once the explicit budget is
     exhausted, rather than including it unconditionally."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
 
     large_content = "package com.example;\n" + ("// padding line\n" * 200)
@@ -740,6 +743,7 @@ async def test_fill_missing_content_sibling_section_uses_default_budget_when_uns
     call) must fall back to DeveloperAgent.DEFAULT_SIBLING_CONTENT_BUDGET, not
     silently revert to the old unbounded-concatenation behavior."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
 
     protocol_content = "package com.example;\npublic class Protocol {}"
@@ -772,6 +776,7 @@ async def test_fill_missing_content_system_prompt_is_create_mode_on_a_clean_atte
     On a clean, non-retry attempt (no prior_error_context), the system prompt
     must be CREATE_FULL_FILE mode - no FIX ANALYSIS contract mentioned."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value="public class App {}")
     dev = DeveloperAgent("developer", llm)
@@ -793,6 +798,7 @@ async def test_fill_missing_content_system_prompt_is_repair_mode_on_a_retry():
     or files_with_current_content, prefer_anchored_edit is False, so REPAIR
     mode should offer FILE CONTENT:/NO CHANGE NEEDED: but not SEARCH:/REPLACE:."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nFILE CONTENT:\npublic class App {}")
     dev = DeveloperAgent("developer", llm)
@@ -817,6 +823,7 @@ async def test_fill_missing_content_system_prompt_offers_anchored_edit_when_grou
     - prefer_anchored_edit becomes True, and REPAIR mode's system prompt must
     now offer the SEARCH:/REPLACE: anchored-patch option too."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nSEARCH:\nfoo();\nREPLACE:\nbar();")
     dev = DeveloperAgent("developer", llm)
@@ -843,6 +850,7 @@ async def test_run_generation_with_known_target_files_skips_file_list_call():
     revisited, burning the entire retry budget without progress. known_target_files
     must skip that call entirely and generate directly for exactly the given set."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
         "package com.example;\npublic class App {}",
@@ -873,6 +881,7 @@ async def test_fill_missing_content_adds_fix_analysis_instruction_only_with_prio
     requested (and only stripped from saved content) when there's a real
     prior error to analyze - never on a clean first attempt."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(
         return_value="FIX ANALYSIS: raw type bug\nFILE CONTENT:\npublic class App {}"
@@ -895,6 +904,7 @@ async def test_fill_missing_content_adds_fix_analysis_instruction_only_with_prio
 @pytest.mark.asyncio
 async def test_fill_missing_content_no_fix_analysis_instruction_without_prior_error():
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value="public class App {}")
 
@@ -1351,6 +1361,7 @@ async def test_fill_missing_content_scopes_fix_analysis_to_implicated_files_only
     error_source_context; an unrelated file in the same batch must be asked
     to regenerate normally, as if it were a clean attempt."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     file_list_response = json.dumps([
         {"filepath": "Broken.java"},
@@ -1386,6 +1397,7 @@ async def test_fill_missing_content_scopes_fix_analysis_to_implicated_files_only
 async def test_repair_generation_fails_closed_on_dangling_search_marker():
     """The exact malformed envelope that corrupted python_task_tracker source."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=(
         "FIX ANALYSIS: pytest did not discover this file.\n"
@@ -1490,6 +1502,7 @@ async def test_fill_missing_content_repeats_verification_contract_reminder_at_en
     end, right before generation - this reminder must land there too, after
     the "only this file" line."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value="public class App {}")
     dev = DeveloperAgent("developer", llm)
@@ -1529,6 +1542,7 @@ async def test_fill_missing_content_repeats_skill_conventions_reminder_at_end():
     shape, closed the same way: repeated as a short reminder at the very
     end, right before generation."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value="public class App {}")
     dev = DeveloperAgent("developer", llm)
@@ -1669,6 +1683,7 @@ async def test_fill_missing_content_prefers_anchored_edit_when_source_context_kn
     across rewriting the whole file. A small anchored edit has no unrelated
     content for that to happen inside."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(
         return_value=(
@@ -1698,6 +1713,7 @@ async def test_fill_missing_content_prefers_anchored_edit_when_source_context_kn
 @pytest.mark.asyncio
 async def test_developer_explicit_patch_operation_overrides_locator_heuristic():
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     # MODEL-001 P1: an unconfigured model's capability profile now defaults to
     # the conservative preferred_edit_protocol="full_file" (never silently
     # trusting an unverified model with precise small-native-tools patches) -
@@ -1732,6 +1748,7 @@ async def test_developer_explicit_patch_operation_overrides_locator_heuristic():
 @pytest.mark.asyncio
 async def test_developer_existing_file_initial_operation_has_unambiguous_full_contract():
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value="class App { int value = 2; }")
     dev = DeveloperAgent("developer", llm)
@@ -1752,6 +1769,7 @@ async def test_developer_existing_file_initial_operation_has_unambiguous_full_co
 @pytest.mark.asyncio
 async def test_developer_honors_model_full_file_and_non_streaming_capabilities():
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     cfg.llm.capabilities.streaming = False
     cfg.llm.capabilities.preferred_edit_protocol = "full_file"
     llm = LLMClient(cfg)
@@ -1781,6 +1799,7 @@ async def test_fill_missing_content_no_anchored_edit_preference_without_source_c
     this file), the prompt must stay on the plain FILE CONTENT: instruction -
     an anchored edit isn't well-grounded without knowing where to anchor it."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nFILE CONTENT:\nclass App {}")
 
@@ -1809,6 +1828,7 @@ async def test_fill_missing_content_prefers_anchored_edit_when_current_content_k
     naming this file as one whose current content is already embedded in
     existing_code_context should still prefer a small anchored patch."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(
         return_value=(
@@ -1843,6 +1863,7 @@ async def test_fill_missing_content_no_anchored_edit_preference_when_file_not_in
     plain FILE CONTENT: instruction, same as having no files_with_current_content
     at all."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value="FIX ANALYSIS: fixed\nFILE CONTENT:\nclass App {}")
 
@@ -1880,6 +1901,7 @@ async def test_fill_missing_content_no_change_needed_leaves_file_untouched_ancho
     file exactly as it is - no new write-path plumbing needed), not an
     invented edit."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(
         return_value=(
@@ -1922,6 +1944,7 @@ async def test_fill_missing_content_no_change_needed_leaves_file_untouched_plain
     # Same escape hatch, exercised via the plain FIX ANALYSIS/FILE CONTENT:
     # path (no known source location, so no anchored-edit preference).
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(
         return_value="FIX ANALYSIS: the bug is in a different file.\nNO CHANGE NEEDED: nothing to fix here.\n"
@@ -1997,6 +2020,7 @@ async def test_fill_missing_content_implicated_files_none_applies_to_all():
     preserve the pre-existing behavior: apply the fix-analysis instruction to
     every file needing content, not just a subset."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
         "FIX ANALYSIS: fixed a\nFILE CONTENT:\nclass A {}",
@@ -2263,6 +2287,7 @@ async def test_run_generation_recovers_prose_prefixed_file_list_without_fallback
     must now be recovered directly - the single-stage fallback (a much bigger,
     slower call) should never be triggered."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # legacy-protocol behaviour under test
     llm = LLMClient(cfg)
 
     prose_prefixed_list = (

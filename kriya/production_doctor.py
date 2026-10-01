@@ -382,6 +382,7 @@ PRODUCTION_DOCTOR_CHECK_IDS = (
     "model.runtime_fingerprint",
     "model.provider_contract",
     "model.qualification",
+    "model.response_protocol",
     "embedding.connectivity",
     "context.recall_certification",
     "lsp.java",
@@ -766,6 +767,30 @@ def _check_no_host_fallback(ctx: _Context) -> DoctorCheck:
         CheckStatus.FAIL if problems else CheckStatus.PASS,
         evidence=evidence,
         remediation="Use runtime_profile: production with containment_backend: oci.",
+    )
+
+
+def _check_response_protocol(ctx: _Context) -> DoctorCheck:
+    """FILE-INTEGRITY-CONTRACT-001: production mutations use the structured
+    Developer response protocol (explicit payload terminators). The legacy
+    markers are compatibility-only and never production-equivalent; the
+    protocol identity is part of every qualification record's policy digest,
+    so model.qualification is QUALIFIED only for this exact protocol."""
+    from kriya.agents.response_protocol import (
+        STRUCTURED,
+        developer_response_protocol,
+        response_protocol_identity,
+    )
+    from kriya.core.model_qualification import policy_digest_for
+
+    protocol = developer_response_protocol(ctx.cfg)
+    return _check(
+        "model.response_protocol",
+        CheckStatus.PASS if protocol == STRUCTURED else CheckStatus.FAIL,
+        evidence={"developer_response_protocol": protocol, "identity": response_protocol_identity(ctx.cfg),
+                  "qualification_policy_digest": policy_digest_for(ctx.cfg)},
+        remediation=("Use autonomy.developer_response_protocol: structured (the qualified production protocol); "
+                     "legacy_strict is compatibility-only."),
     )
 
 
@@ -1319,6 +1344,7 @@ _CHECKS: Tuple[Tuple[str, Union[bool, Callable[[AppConfig], bool]], Callable[[_C
     ("model.runtime_fingerprint", True, _check_runtime_fingerprint),
     ("model.provider_contract", True, _check_provider_contract),
     ("model.qualification", True, _check_qualification),
+    ("model.response_protocol", True, _check_response_protocol),
     ("embedding.connectivity", True, _check_embedding),
     ("context.recall_certification", _recall_certification_required, _check_recall_certification),
     ("lsp.java", False, _check_lsp),

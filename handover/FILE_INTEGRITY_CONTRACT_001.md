@@ -16,7 +16,11 @@ RAW MODEL RESPONSE
   -> byte-preserving edit engine   kriya/workflow/file_integrity.py (FileSnapshot, apply_line_block_edits)
   -> authorized staged writer      AuthorizedFileWriter -> commit_revision_grounded_batch (raw bytes + raw base revision)
   -> candidate bytes               GenerationState.candidate_digests (the candidate manifest's digests)
-  -> worktree == candidate check   attempt._require_worktree_matches_candidate, before every gate
+  -> candidate binding             attempt._require_worktree_matches_candidate, before the FIRST gate of an attempt
+  -> verification-tree binding     file_integrity.VerificationTreeBinding (tracked content + candidate),
+                                   re-checked AFTER every validator gate and before the terminal binding
+                                   (added in the closure pass, F-4; the original text said "before every gate",
+                                   which was never literally true)
   -> verification binding          verification_binding.bind_candidate (unchanged, now over raw revisions)
   -> transactional commit          terminal_commit.commit_terminal_candidate
   -> committed == verified check   terminal_commit.committed_digest_mismatch (VERIFIED_COMMIT_DIGEST_MISMATCH)
@@ -200,3 +204,92 @@ The qualification and doctor runs used the working tree that became `eeda5c8`, p
   - An undecodable file never matches: its shown revision is prefixed `raw:`.
   - The one difference a text-view match cannot see is a valid UTF-8 file changing only its line-ending convention after it was shown. The engine then applies the edit to the current file and writes it in the current convention. That is not corruption, but it is also not detected as "changed since shown".
 - Legacy recovery evidence (schema 1) compares text revisions to raw digests. Any file other than valid UTF-8 LF classifies FOREIGN (fail closed).
+
+# Closure pass (F-1..F-4, S-1, S-2)
+
+Baseline `c372e0a`. Backup branch `backup/file-integrity-c372e0a`. Bundle `~/kriya-backups/file-integrity-c372e0a.bundle` (sha256 `18a12608…`, incremental on `4b28bef`, verified). Nothing pushed.
+
+| ID | Finding | Classification | Fix | Tests | Status |
+|---|---|---|---|---|---|
+| F-1 | Legacy framing has no payload terminator: prose after REPLACE/FILE CONTENT becomes payload (valid `.properties`/YAML) | CONFIRMED, P0 | The production protocol is the sentinel protocol `kriya_sentinel_v1`: explicit end markers, text after the last block is `INVALID_EDIT_PROTOCOL`. Legacy is compatibility-only, refused under `runtime_profile: production` (`RESPONSE_PROTOCOL_NOT_PRODUCTION`) and by doctor `model.response_protocol`. No parser fallback. | `test_f1_*`, `test_no_fallback_*` | FIXED |
+| F-2 | The sentinel parser appended a newline implicitly | CONFIRMED | Explicit grammar: every FILE line is newline-terminated; `<<<KRIYA:END_FILE no_final_newline>>>` is the only no-final-newline form (`DeveloperResponse.final_newline`). Existing files: Existing File Convention Policy. | `test_f2_*` | FIXED |
+| F-3 | Direct mode re-raised a typed sync failure as a generic `RuntimeError`; enforce mode reported it as `STRUCTURED_PLAN_UNAVAILABLE` | CONFIRMED (traced) | Direct returns a typed terminal result (`reason_codes`, `failure_category`, trace row). Enforce reports `failure_type: WORKTREE_SYNC` with the reason code. | `test_f3_*` (copy failure, source changed during sync, byte mismatch; both modes) | FIXED |
+| F-4 | The candidate was checked only before the first gate; a gate could rewrite tracked content before later gates ran | CONFIRMED (traced) | `VerificationTreeBinding` (git-tracked content + candidate) re-checked before and after every validator gate (`_verification_gate` decorator: compile, tests, runtime verification, pom validate, classpath inspection; also on a gate's exception path) and before the terminal binding. A change found before a gate is reported `phase: before` ("detected before the X gate"), never attributed to that gate, and the gate does not run on it. Typed stop `VERIFICATION_GATE_MUTATED_TRACKED_FILES` (`verification_tree_mutated`). Kriya's own writes use `authorize`. Untracked/ignored output is excluded. Enforce: the named-test gate. | `test_f4_*` (candidate, unrelated tracked, deleted, mode change, compile/tests/runtime gates, exception path, build output, touch, real engine at the detecting gate, a between-gates change caught before the next gate, terminal re-check) | FIXED |
+| F-4a | Found while implementing F-4: `run_app` wraps its command in `except Exception`, which would have turned the tree stop into an ordinary result | CONFIRMED (traced; own design gap, never committed) | The check sits in the gate decorator, outside every internal handler (and on the exception path) | `test_f4_every_validator_gate_*[runtime_verification]` | FIXED |
+| S-1 | Blank edge lines in a sentinel SEARCH | MEASURED: 0 of 26 SEARCH blocks (both models, both protocols) | Decision: no normalization; SEARCH stays exact | `test_s1_*` pins the behaviour | DECIDED |
+| S-2 | Protocol `path=` normalization | — | `normalize_protocol_path`: repo-relative POSIX; absolute, escaping, NUL and backslash paths refused; must equal the requested target | `test_s2_*` | FIXED |
+| — | Structured payload with fence-like content | — | Opaque between sentinels | `test_structured_payload_carries_fence_like_content_verbatim` | VERIFIED |
+
+## Qualification identity and results
+
+- Policy `/6` bound the Developer response protocol identity into the policy digest (`policy_digest_for`) and the record (`developer_response_protocol`). The two protocol cases run the configured protocol.
+- `/6` results (historical, preserved in `closure/live/qualify_v6_*`):
+  - qwen3-coder 18/0/1 QUALIFIED.
+  - **qwen3.6 NOT_QUALIFIED, `full_file_raw_content` FAIL.** The response was a valid, verbatim sentinel FILE that parsed and defined `slugify`, but carried no invented fenced example.
+- Classification: case-design defect. The `/6` case required the model to *invent* a fenced docstring example. §23 measured both models omitting it under both protocols (0/8), while supplied fence content is preserved (8/8). Owner decision: correct the case.
+- `/7` supplies the exact fence-bearing file and requires it back byte for byte through the configured protocol. `/6` records stay historical and do not count under `/7`.
+- `/7` results (`closure/live/qualify_v7_*`, each run once):
+  - qwen3-coder 18 PASS / 0 FAIL / 1 UNAVAILABLE.
+  - qwen3.6 15 / 0 / 4 (the tool cases do not apply).
+  - Every role is QUALIFIED.
+- The instruction-following behaviour (invented docstring fence) is kept as non-gating evaluation evidence, not a qualification case. Adding a case would change the qualification policy schema and every policy digest, and the measurement already exists (§23).
+
+## Generic protocol evaluation (§23)
+
+`closure/live/protocol_eval_23.jsonl`. It used 7 tasks (Java, Python, `application.properties`, YAML and `pom.xml` edits; new Markdown and Python files) × 2 protocols × 2 models × 2 trials = 56 calls, through the real `DeveloperAgent` prompts.
+
+| | Valid protocol | Refusals | Edits applied | Payload verbatim |
+|---|---|---|---|---|
+| sentinel, qwen3-coder | 14/14 | — | 8/10 (2 × `INDENTATION_STYLE_MISMATCH`, Java) | 14/14 |
+| sentinel, qwen3.6 | 14/14 | — | 10/10 | 14/14 |
+| legacy, qwen3-coder | 5/14 | 9 × `MODEL_EDIT_PROTOCOL_INVALID` (same-line `SEARCH:   x`) | 1/1 | 5/5 |
+| legacy, qwen3.6 | 9/14 | 4 × `MODEL_EDIT_PROTOCOL_INVALID`, 1 × `INVALID_EDIT_PROTOCOL` | 5/5 | 9/9 |
+
+- The Java `INDENTATION_STYLE_MISMATCH` is **UNKNOWN**. A one-call diagnostic capture of the same cell applied cleanly (`closure/live/diagnostic_java_indent.json`). The raw text of the two original refusals was not recorded (an evaluation-harness gap). Refusal is the engine's intended behaviour for an inconsistent indentation shift; a false refusal is not excluded. It is not changed on inference.
+
+## Production promotion
+
+The sentinel protocol is the default (`autonomy.developer_response_protocol: structured`) after every gate held:
+- deterministic, fuzz and property tests;
+- `/7` on both pins;
+- the evaluation above;
+- `doctor --production` `production_ready: true`, with `model.response_protocol` and `model.qualification` PASS (`closure/live/doctor_production_v7.json`).
+
+## Mutation evidence
+
+43/43 killed (final run `closure/mutation_closure_r2.txt`, after the pre-gate check and the harness fixes; the first run, 41/41, is kept in `closure/mutation_*.txt`):
+- the original 24;
+- 15 closure mutations: prose after the end marker, protocol identity omitted, a `/6` record reused under `/7`, implicit newline, candidate-only tree check, skipped post-compile and post-test checks, no check before a gate, no check on a gate's exception path, path escape, sentinel→legacy fallback, REPLACE edge trimming, both F-3 paths, skipped terminal re-check;
+- 4 `/7` case mutations: drop exactness, bypass protocol parsing, accept a dropped fence, accept trailing prose.
+
+One closure mutation first survived (the compile validator without the binding was still stopped, but only later, at the terminal re-check). The engine test now asserts the detecting gate, and kills it. A redundant `/7` check (`final_newline is True`, implied by byte equality under the grammar) was removed rather than kept as dead logic. Files: `closure/mutation_*.txt`.
+
+## Legacy residuals (compatibility-only)
+
+The legacy markers:
+- have ambiguous end-of-payload semantics;
+- cannot represent final-newline intent;
+- refuse legitimate non-Markdown files with a column-0 fence;
+- refuse same-line markers.
+
+They are not production-equivalent and get no further heuristics.
+
+## Demo and repository preparation
+
+Hidden `pom.xml` repairs no longer exist, so a demo repository must build before Kriya starts. Inspect line endings and encodings first with `git ls-files --eol` and `file -I <path>`. Non-UTF-8 or mixed-newline files that a demo would edit are refused typed (`UNSUPPORTED_TEXT_ENCODING` / `MIXED_NEWLINE_UNSUPPORTED`), and should be known in advance.
+
+## Tests changed in this pass
+
+- Tests that script legacy/raw Developer answers now either pin `legacy_strict` explicitly (legacy-behaviour tests) or render the same intent in the requested protocol (`tests/_protocol_responses.py::as_requested`: `_scripted_run`, `_edit_protocol_harness`, prd016, prd017).
+- Pins moved:
+  - qualification `/5`→`/7` (two files);
+  - doctor check list (+`model.response_protocol`);
+  - qualification digest tests (protocol-bound);
+  - full-file case fixtures (the supplied `/7` file).
+- Scripted answers in the requested protocol, everywhere:
+  - `tests/conftest.py` autouse fixture `_scripted_developer_answers_speak_the_requested_protocol` translates scripted per-file Developer answers through the `DeveloperAgent._complete_file` seam (opt out: marker `developer_answers_verbatim`; never applied to `live_model`).
+  - `ChaosRuntime` (PRD-032 subprocess-safe harness) translates Developer replies the same way; `requested_file()` reads the structured directive (`for 'x' ONLY`) as well as the legacy one.
+  - Fidelity rule: `as_requested` reproduces exactly what the legacy parser for that request did. A raw answer to a repair request (the contract's analysis-required line, i.e. legacy `repair_protocol`) was INVALID under legacy (no FIX ANALYSIS) and is passed through unchanged, never promoted to a FILE block. An earlier version of the helper promoted it, which changed 3 prompt-fit/goal-dedup runs from `quality_gates_exhausted` to `no_progress` (measured: legacy 7 Developer requests vs structured 2, `operation_authority.rejected` on the promoted FILE). Harness defect, own, fixed before commit.
+- Tamper injection points (PRD-032 D10/E02, `test_candidate_verification_binding`): a candidate changed right after static analysis is now caught by the verification-tree binding before the terminal regression (earlier layer, covered by `test_f4_a_candidate_changed_between_gates_is_caught_before_the_next_gate_runs`). The commit-time verified-candidate binding keeps its own coverage through `_chaos_harness.inject_before_terminal_commit`, which changes the candidate after every gate and immediately before the terminal batch is materialized - the only window that binding alone guards. (A change made after `final_writes` is materialized never reaches the workspace: the commit writes the verified bytes.)
+- `test_agent_contracts` unsafe-path test is parametrized: legacy keeps its historical pass-through pin; structured refuses `../outside.py` at parse time (S-2).
+- `test_worktree_canonical_root` line pin `production_doctor.py:596→597` (the doctor ID list grew by one line; same read-only `git worktree list`).

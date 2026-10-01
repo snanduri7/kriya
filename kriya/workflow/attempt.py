@@ -124,6 +124,7 @@ from kriya.workflow.file_integrity import (
     DETERMINISTIC_FILE_INTEGRITY_STOPS,
     WORKTREE_CONTENT_MISMATCH,
     FileIntegrityError,
+    VerificationTreeBinding,
     display_text,
     file_raw_digest,
     keep_final_newline_state,
@@ -248,7 +249,7 @@ from kriya.workflow.verifier_evidence import (
     apply_runtime_disposition,
     runtime_evidence_outcome_fields,
 )
-from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
+from kriya.workflow.worktree import clean_untracked_files_since, repository_content_paths, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
 
@@ -311,6 +312,8 @@ def _apply_candidate_pom_corrections(
         expected_base_revision=snapshot.raw_sha256, content_bytes=data, mode=snapshot.file_mode,
     )])
     state.candidate_digests["pom.xml"] = raw_digest(data)
+    if state.verification_tree_binding is not None:
+        state.verification_tree_binding.authorize("pom.xml")
     state.record_event(RunEvent(
         kind="candidate.deterministic_transformation", attempt=state.attempt_number,
         source="attempt.pom_corrections", authority=EventAuthority.ADVISORY,
@@ -318,6 +321,19 @@ def _apply_candidate_pom_corrections(
         details={"path": "pom.xml", "corrections": corrections,
                  "before_sha256": snapshot.raw_sha256, "after_sha256": raw_digest(data)},
     ))
+
+
+def _bind_verification_tree(state: GenerationState, ctx: "AttemptContext") -> VerificationTreeBinding:
+    """FILE-INTEGRITY-CONTRACT-001, before the first gate of an attempt:
+    prove the sandbox holds the staged candidate, then bind the whole tree
+    the gates will verify (repository content + candidate). Every validator
+    of this attempt checks it after each command it runs."""
+    _require_worktree_matches_candidate(state, ctx)
+    binding = VerificationTreeBinding(
+        ctx.worktree_path, repository_content_paths(ctx.workspace_path), state.candidate_digests,
+    )
+    state.verification_tree_binding = binding
+    return binding
 
 
 def _require_worktree_matches_candidate(state: GenerationState, ctx: "AttemptContext") -> None:
@@ -1397,8 +1413,8 @@ def _validate_actual_mutation_authority(
         "a full-file replacement was returned, but this file's context this attempt was not "
         "authoritative, complete, exact current source (skeleton/signatures/member-only/stale "
         "revision/candidate-derived) - whole-file replacement requires authoritative pristine "
-        "current source regardless of which operation was originally requested. Return "
-        "SEARCH:/REPLACE: instead."
+        "current source regardless of which operation was originally requested. Return an "
+        "anchored SEARCH/REPLACE edit instead."
     )
 
 
@@ -5230,7 +5246,7 @@ async def _execute_runtime_verification_directly(
     # FILE-INTEGRITY-CONTRACT-001: pom corrections are candidate mutations,
     # applied before the first gate of this attempt, never between gates.
     _apply_candidate_pom_corrections(state, ctx, sorted(state.all_files_written | set(ctx.established_files)))
-    _require_worktree_matches_candidate(state, ctx)
+    validator.tree_binding = _bind_verification_tree(state, ctx)
     command_verification_kind = deterministic_sequence_kind(resolved_run_commands)
     logger.info(
         "Quality Gates: Running %s verification (verification-only subtask): "
@@ -7779,8 +7795,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     message=(
                         f"NO-OP EDIT in {filepath}: every SEARCH/REPLACE pair in your response "
                         f"is byte-identical - this response changes nothing. If this file "
-                        f"genuinely needs no change, write \"NO CHANGE NEEDED:\" instead of a "
-                        f"SEARCH/REPLACE block; otherwise your REPLACE text must actually differ "
+                        f"genuinely needs no change, use the response protocol's no-change outcome "
+                        f"instead of an edit; otherwise your REPLACE text must actually differ "
                         f"from your SEARCH text."
                     ),
                     raw_output="every edit in the response was a no-op (search == replace)",
@@ -8248,6 +8264,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # after the atomic candidate batch so no quality gate can observe a partial
     # model response.  This remains much cheaper than dependency resolution and
     # compilation, and a failed attempt is discarded by the worktree lifecycle.
+    tree_binding = _bind_verification_tree(state, ctx)
     pom_files = [
         filepath for filepath in state.files_written
         if os.path.basename(filepath) == "pom.xml"
@@ -8256,6 +8273,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         pom_validator = PolymorphicValidator(
             ctx.worktree_path, autonomy_cfg=ctx.kernel.config.autonomy,
         )
+        pom_validator.tree_binding = tree_binding
         pom_validate_res = pom_validator.run_pom_validate()
         if not pom_validate_res["success"]:
             filepath = pom_files[0]
@@ -8431,6 +8449,8 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # Maven-convention shape.
         _apply_candidate_pom_corrections(state, ctx, compile_known_files)
         _require_worktree_matches_candidate(state, ctx)
+        tree_binding.check("pre_compile")
+        validator.tree_binding = tree_binding
 
         _compile_started = time.monotonic()
         compile_res = validator.run_compile_check(compile_known_files)

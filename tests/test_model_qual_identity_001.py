@@ -278,7 +278,7 @@ def test_a_record_names_its_identity_and_keeps_the_output_ceiling_as_metadata():
     assert record["qualification_identity"] == qualification_identity(fp.digest, settings)
     assert record["inference_settings_digest"] == settings.digest
     assert record["inference_settings"]["output_ceiling"] == 16384
-    assert record["policy_version"] == "kriya-qualification/5"
+    assert record["policy_version"] == "kriya-qualification/7"
     path = mq.save_record(record)
     assert os.path.basename(path) == f"{record['qualification_identity']}.json"
 

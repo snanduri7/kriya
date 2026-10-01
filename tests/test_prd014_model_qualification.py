@@ -89,8 +89,7 @@ CASES = [
     (mq.case_reasoning_behavior, [_result("85", reasoning_present=True, reasoning_chars=900, completion_tokens=300)],
      [_result("<think>let me see</think>85")]),
     (mq.case_full_file_raw_content,
-     [_result("```python\nimport re\n\ndef slugify(text: str) -> str:\n    return re.sub(r'[^a-z0-9]+', '-', "
-              "text.lower()).strip('-')\n```")],
+     [_result("```python\n" + mq.FULL_FILE_SOURCE + "```")],  # /7: the supplied file, returned unchanged
      [_result("Here is the file: def slugify(text) return text")]),
     (mq.case_anchored_edit_protocol,
      [_result("FIX ANALYSIS: skip negatives.\nSEARCH:\n        result += p\nREPLACE:\n        if p >= 0:\n"

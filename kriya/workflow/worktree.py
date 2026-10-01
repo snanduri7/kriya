@@ -242,6 +242,25 @@ def _sync_uncommitted_changes_into_worktree(repo_path: str, worktree_path: str) 
         )
 
 
+def repository_content_paths(workspace_path: str) -> List[str]:
+    """The repository's own content under ``workspace_path``: every path Git
+    tracks there (``git ls-files -z``, relative to the workspace - also for a
+    workspace nested inside an enclosing repository), Kriya's ``.kriya/``
+    state excluded. Untracked output (target/, build/, caches) is never
+    repository content. A workspace that is not a Git work tree has none (a
+    real run never gets here: create_git_worktree bootstraps Git first); any
+    other failure to list it raises (fail closed)."""
+    inside = subprocess.run(["git", "rev-parse", "--is-inside-work-tree"], cwd=workspace_path,
+                            capture_output=True, text=True)
+    if inside.returncode != 0 or inside.stdout.strip() != "true":
+        return []
+    result = subprocess.run(["git", "ls-files", "-z"], cwd=workspace_path, capture_output=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"git ls-files failed: {os.fsdecode(result.stderr).strip() or result.returncode}")
+    return [path for path in (os.fsdecode(item) for item in result.stdout.split(b"\0") if item)
+            if path != ".kriya" and not path.startswith(".kriya/")]
+
+
 class WorktreeSyncError(RuntimeError):
     """FILE-INTEGRITY-CONTRACT-001: the sandbox could not be made to hold the
     workspace's uncommitted work exactly; nothing is verified against it."""

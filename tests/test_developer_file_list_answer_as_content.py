@@ -64,7 +64,9 @@ def test_data_format_targets_keep_json_shaped_content(filepath, content):
 # --- the producer -------------------------------------------------------------
 
 async def _generate(response, filepath="calc.py", operation=CodeOperation.REPAIR_WITH_FULL_FILE, **kwargs):
-    llm = LLMClient(AppConfig())
+    cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # the incident's raw/legacy response shapes
+    llm = LLMClient(cfg)
     llm.complete = AsyncMock(return_value=response)
     return await DeveloperAgent("developer", llm).run_generation(
         "Task", "Design", "Existing code",
@@ -135,6 +137,7 @@ def test_the_rejected_entry_is_a_contract_failure_never_a_no_change_assessment()
 
 def _config():
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # these tests replay legacy/raw Developer responses
     cfg.autonomy.mode = "guardrails"
     cfg.autonomy.run_verification_enabled = False
     return cfg

@@ -524,6 +524,10 @@ async def _record_attempt_failure(
             # edit engine can mutate byte-exactly (not UTF-8, mixed line
             # endings, a symbolic link); regenerating cannot change the file.
             "file_integrity_unsupported",
+            # A verification gate changed repository content Kriya did not
+            # authorize; the verification is invalid and a retry would
+            # verify a tree the commit does not carry.
+            "verification_tree_mutated",
         }
         else classify_environment_failure(
             raw_error_context,

@@ -97,7 +97,22 @@ from kriya.platform.filesystem_semantics import PathRelation, path_relation
 # protocol parser and the complete-line edit engine (no payload sanitizer,
 # no substring/whitespace-collapsing anchors). A /4 PASS was judged under the
 # old parsing, so every /4 record is STALE.
-QUALIFICATION_POLICY_VERSION = "kriya-qualification/5"
+# /6 (FILE-INTEGRITY-CONTRACT-001 closure): a record binds the model-facing
+# Developer response protocol identity (strict_legacy_v1 | kriya_sentinel_v1,
+# in the policy digest and the record), and both protocol cases run the
+# configured protocol (full-file content now carries a fenced docstring
+# example). Every /5 record is STALE.
+# /7 (FILE-INTEGRITY-CONTRACT-001 closure): full_file_raw_content measures
+# ONE capability - protocol/payload fidelity. The /6 case also required the
+# model to INVENT a fenced docstring example, confounding instruction-
+# following with fidelity (measured: both pinned models omit an invented
+# docstring fence under both protocols, 0/8, while supplied fence content is
+# preserved 8/8). The prompt now supplies the exact fence-bearing file and
+# the case requires it back byte for byte through the configured protocol.
+# /6 records stay as historical evidence (qwen3.6's /6 NOT_QUALIFIED
+# included) and are STALE under /7. A qualification case tests one named
+# capability; protocol fidelity never depends on model creativity.
+QUALIFICATION_POLICY_VERSION = "kriya-qualification/7"
 QUALIFICATION_SCHEMA_VERSION = 2
 QUALIFICATION_HOME_ENV = "KRIYA_QUALIFICATION_HOME"
 
@@ -131,19 +146,27 @@ def qualification_policy_of(config: Any) -> ModelQualificationConfig:
     return policy if isinstance(policy, ModelQualificationConfig) else ModelQualificationConfig()
 
 
-def qualification_policy_digest(policy: ModelQualificationConfig) -> str:
+def qualification_policy_digest(policy: ModelQualificationConfig, response_protocol: Optional[str] = None) -> str:
     """Digest of the values in effect. An unset optional knob (None) is left
     out, so adding a new, off-by-default knob to the schema does not change
-    the identity of any existing policy (or stale its records)."""
-    canonical = json.dumps({"schema": QUALIFICATION_POLICY_SCHEMA,
-                            "policy": policy.model_dump(mode="json", exclude_none=True)},
-                           sort_keys=True, separators=(",", ":"))
+    the identity of any existing policy (or stale its records).
+    ``response_protocol``: the Developer response protocol identity the
+    protocol cases ran (FILE-INTEGRITY-CONTRACT-001); a record under another
+    protocol is STALE."""
+    payload: Dict[str, Any] = {"schema": QUALIFICATION_POLICY_SCHEMA,
+                               "policy": policy.model_dump(mode="json", exclude_none=True)}
+    if response_protocol is not None:
+        payload["developer_response_protocol"] = response_protocol
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def policy_digest_for(config: Any) -> str:
-    """The digest a record must carry to count under ``config``."""
-    return qualification_policy_digest(qualification_policy_of(config))
+    """The digest a record must carry to count under ``config``: its
+    qualification policy and its Developer response protocol identity."""
+    from kriya.agents.response_protocol import response_protocol_identity
+
+    return qualification_policy_digest(qualification_policy_of(config), response_protocol_identity(config))
 
 
 def record_policy_digest(record: Dict[str, Any]) -> str:
@@ -151,7 +174,7 @@ def record_policy_digest(record: Dict[str, Any]) -> str:
 
 
 def _current_policy_digest(policy_digest: Optional[str]) -> str:
-    return policy_digest or qualification_policy_digest(ModelQualificationConfig())
+    return policy_digest or policy_digest_for(None)
 
 CAPABILITIES: Tuple[str, ...] = (
     "plain_completion",
@@ -895,19 +918,58 @@ async def case_reasoning_behavior(llm, model, ctx):
                        **_completion_evidence(r)}, measured)
 
 
+# The exact file the full_file_raw_content case supplies and requires back:
+# a fence-bearing docstring (fence-like payload) plus the function the case
+# checks. The fence is indented inside the docstring, so both protocols can
+# carry it; the structured protocol would carry a column-0 fence as well.
+FULL_FILE_SOURCE = (
+    '"""Slug helpers.\n'
+    "\n"
+    "Example:\n"
+    "\n"
+    "    ```python\n"
+    '    slugify("Hello, World!")  # -> "hello-world"\n'
+    "    ```\n"
+    '"""\n'
+    "import re\n"
+    "\n"
+    "\n"
+    "def slugify(text: str) -> str:\n"
+    '    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")\n'
+)
+
+
 @_case("full_file_raw_content")
 async def case_full_file_raw_content(llm, model, ctx):
+    """ONE capability: whole-file payload fidelity through the configured
+    Developer response protocol. The prompt supplies the exact file (with a
+    fenced docstring example - fence-like payload) and the model must return
+    it unchanged; the case requires the parsed payload to equal it byte for
+    byte (the legacy raw protocol's trailing newline is framing), the
+    protocol to be well formed (for the structured protocol: explicit
+    termination, nothing after the block, the declared final newline), and
+    the file to parse and define slugify. Nothing asks the model to invent
+    content (FILE-INTEGRITY-CONTRACT-001, /7)."""
     from kriya.agents.agent import DeveloperAgent
+    from kriya.agents.response_protocol import STRUCTURED, parse_structured, structured_contract
 
-    r = await llm.complete_result(
-        "You are a senior software engineer. You write complete, correct source files.",
-        "Please generate the complete, correct file content for: 'slug.py'\n"
-        "It must define slugify(text: str) -> str that lowercases text, replaces runs of non-alphanumeric "
-        "characters with a single '-', and strips leading/trailing '-'.\n"
-        "Return ONLY the content of 'slug.py' - nothing before it, nothing after it, no other file.",
-        model_override=model, max_tokens_override=_case_budget(ctx, "full_file_raw_content"),
-    )
-    parsed = DeveloperAgent.parse_file_payload(r.content or "", "slug.py")
+    protocol = ctx.get("response_protocol")
+    supplied = f"=== slug.py (return this exact file) ===\n{FULL_FILE_SOURCE}=== end of slug.py ===\n"
+    if protocol == STRUCTURED:
+        system = ("You are a senior software engineer. You write complete, correct source files.\n"
+                  + structured_contract("slug.py", analysis_required=False, allow_edit=False, allow_file=True,
+                                        allow_no_change=False))
+        prompt = (f"{supplied}Return the complete file 'slug.py' exactly as shown above - every character "
+                  "unchanged - using the RESPONSE PROTOCOL.")
+    else:
+        system = "You are a senior software engineer. You write complete, correct source files."
+        prompt = (f"{supplied}Return the complete content of 'slug.py' exactly as shown above - every character "
+                  "unchanged. Return ONLY the content of 'slug.py' - nothing before it, nothing after it.")
+    r = await llm.complete_result(system, prompt, model_override=model,
+                                  max_tokens_override=_case_budget(ctx, "full_file_raw_content"))
+    raw = r.content or ""
+    parsed = (parse_structured(raw, "slug.py", patch_allowed=False) if protocol == STRUCTURED
+              else DeveloperAgent.parse_file_payload(raw, "slug.py"))
     content = (parsed.content or "") if parsed.kind == "file" else ""
     # Model output is never executed on the host: the check is structural.
     defines = False
@@ -917,40 +979,71 @@ async def case_full_file_raw_content(llm, model, ctx):
         defines = any(isinstance(node, ast.FunctionDef) and node.name == "slugify" for node in ast.walk(tree))
     except SyntaxError:
         parses = False
-    ok = r.status.value == "OK" and parses and defines
+    if protocol == STRUCTURED:
+        # The grammar decides the final newline: a payload declared
+        # no_final_newline cannot equal the supplied file (which ends with one).
+        payload_exact = parsed.kind == "file" and content == FULL_FILE_SOURCE
+    else:
+        payload_exact = parsed.kind == "file" and content.rstrip("\n") == FULL_FILE_SOURCE.rstrip("\n")
+    ok = r.status.value == "OK" and payload_exact and parses and defines
     return CaseResult("", PASS if ok else FAIL,
-                      {"parses": parses, "defines_slugify": defines,
-                       "raw_had_fence": r.content.lstrip().startswith("```"),
+                      {"parses": parses, "defines_slugify": defines, "payload_exact": payload_exact,
+                       "fence_preserved": "```python" in content, "response_protocol": protocol,
+                       "raw_had_fence": raw.lstrip().startswith("```"),
                        "protocol_reason_code": parsed.reason_code, **_completion_evidence(r)})
 
 
 _EDIT_SOURCE = "def total(prices):\n    result = 0\n    for p in prices:\n        result += p\n    return result\n"
+_EDIT_PATH = "src/calc.py"
 
 
 @_case("anchored_edit_protocol")
 async def case_anchored_edit_protocol(llm, model, ctx):
-    from kriya.agents.response_protocol import parse_legacy_repair
-    from kriya.workflow.edit_safety import apply_anchored_edits
+    """An anchored edit through the configured Developer response protocol,
+    applied by the one edit engine to the source in both LF and CRLF form:
+    the anchor must match exactly once and the result must keep each file's
+    own line-ending convention."""
+    import tempfile
 
-    r = await llm.complete_result(
-        "You are a senior software engineer.",
-        f"=== calc.py ===\n{_EDIT_SOURCE}\n"
-        "Task: total() must ignore negative prices.\n"
-        "Before writing any code, write a line \"FIX ANALYSIS:\" with one sentence. Then write the line "
-        "\"SEARCH:\" followed by the exact original code (copied verbatim from calc.py above) that needs to "
-        "change, then the line \"REPLACE:\" followed by the corrected code - include only the lines that "
-        "need to change plus the minimum context to identify them, not the whole file.",
-        model_override=model, max_tokens_override=_case_budget(ctx, "anchored_edit_protocol"),
-    )
-    parsed = parse_legacy_repair(r.content or "", "calc.py", patch_allowed=True)
-    analysis, edits = parsed.analysis, parsed.edit_dicts() if parsed.kind == "edits" else None
-    applied = None
+    from kriya.agents.response_protocol import STRUCTURED, parse_legacy_repair, parse_structured, structured_contract
+    from kriya.workflow.file_integrity import FileIntegrityError, load_snapshot, mutate_snapshot, newline_style
+
+    protocol = ctx.get("response_protocol")
+    task = f"=== {_EDIT_PATH} ===\n{_EDIT_SOURCE}\nTask: total() must ignore negative prices.\n"
+    if protocol == STRUCTURED:
+        system = ("You are a senior software engineer.\n"
+                  + structured_contract(_EDIT_PATH, analysis_required=True, allow_edit=True, allow_file=False,
+                                        allow_no_change=False))
+        prompt = (task + "Write one sentence of analysis, then an EDIT block whose SEARCH copies the exact lines "
+                  "that change - only those lines plus the minimum context, not the whole file.")
+    else:
+        system = "You are a senior software engineer."
+        prompt = (task + "Before writing any code, write a line \"FIX ANALYSIS:\" with one sentence. Then write the "
+                  "line \"SEARCH:\" followed by the exact original code (copied verbatim from the file above) that "
+                  "needs to change, then the line \"REPLACE:\" followed by the corrected code - include only the "
+                  "lines that need to change plus the minimum context to identify them, not the whole file.")
+    r = await llm.complete_result(system, prompt, model_override=model,
+                                  max_tokens_override=_case_budget(ctx, "anchored_edit_protocol"))
+    raw = r.content or ""
+    parsed = (parse_structured(raw, _EDIT_PATH, file_allowed=False) if protocol == STRUCTURED
+              else parse_legacy_repair(raw, _EDIT_PATH, patch_allowed=True))
+    edits = parsed.edit_dicts() if parsed.kind == "edits" else None
+    applied: Optional[str] = None
+    conventions: List[bool] = []
     if edits:
-        try:
-            applied = apply_anchored_edits(_EDIT_SOURCE, edits, _EDIT_SOURCE)
-        except Exception as error:
-            applied = None
-            ctx.setdefault("notes", []).append(str(error))
+        with tempfile.TemporaryDirectory() as scratch:
+            try:
+                for name, data in (("lf.py", _EDIT_SOURCE.encode()),
+                                   ("crlf.py", _EDIT_SOURCE.replace("\n", "\r\n").encode())):
+                    path = os.path.join(scratch, name)
+                    with open(path, "wb") as handle:
+                        handle.write(data)
+                    text, new_bytes = mutate_snapshot(load_snapshot(path), edits)
+                    applied = applied or text
+                    conventions.append(newline_style(new_bytes) == newline_style(data))
+            except FileIntegrityError as error:
+                applied = None
+                ctx.setdefault("notes", []).append(str(error))
     # Structural check only (model output is never executed on the host):
     # the edit applied exactly once, the result parses, still defines
     # total(), and changed the loop.
@@ -963,10 +1056,12 @@ async def case_anchored_edit_protocol(llm, model, ctx):
             )
         except SyntaxError:
             changed = False
-    ok = r.status.value == "OK" and bool(analysis) and bool(edits) and changed
+    convention_kept = len(conventions) == 2 and all(conventions)
+    ok = r.status.value == "OK" and bool(parsed.analysis) and bool(edits) and changed and convention_kept
     return CaseResult("", PASS if ok else FAIL,
-                      {"analysis": bool(analysis), "edit_count": len(edits or []), "applied": applied is not None,
-                       "protocol_reason_code": parsed.reason_code,
+                      {"analysis": bool(parsed.analysis), "edit_count": len(edits or []), "applied": applied is not None,
+                       "response_protocol": protocol, "protocol_reason_code": parsed.reason_code,
+                       "convention_kept": convention_kept,
                        "applied_parses_and_changed": changed, **_completion_evidence(r)})
 
 
@@ -1301,9 +1396,13 @@ async def run_qualification(
 
     default_factory = qualification_client_factory(config, model)
 
+    from kriya.agents.response_protocol import developer_response_protocol, response_protocol_identity
+
     policy = qualification_policy_of(config)
     ctx: Dict[str, Any] = {
         "policy": policy,
+        # The protocol cases speak the configured Developer response protocol.
+        "response_protocol": developer_response_protocol(config),
         # Capability-aware budgets follow the identity qualified, never a name.
         "reasoning": bool(settings.reasoning),
         "runtime": runtime,
@@ -1327,7 +1426,8 @@ async def run_qualification(
         if progress is not None:
             progress(result)
     return build_record(fingerprint, results, settings=settings,
-                        environment=environment_for_fingerprint(fingerprint), policy=policy)
+                        environment=environment_for_fingerprint(fingerprint), policy=policy,
+                        response_protocol=response_protocol_identity(config))
 
 
 def qualification_client_factory(config: Any, model: str) -> Callable[[float], Any]:
@@ -1430,7 +1530,8 @@ def qualification_config(config: Any, model: str, context_window: Optional[int] 
 
 def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult], *,
                  settings: InferenceSettings, environment: Optional[ExecutionEnvironment] = None,
-                 policy: Optional[ModelQualificationConfig] = None) -> Dict[str, Any]:
+                 policy: Optional[ModelQualificationConfig] = None,
+                 response_protocol: Optional[str] = None) -> Dict[str, Any]:
     """The record of one qualification run, bound to the effective
     qualification ``policy`` (defaults when None). Functional cases go to
     ``cases``; environment-dependent ones to ``environment_evidence`` under
@@ -1444,6 +1545,10 @@ def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult]
     dependent = [r for r in results if r.capability in ENVIRONMENT_DEPENDENT_CAPABILITIES]
     qualified_at = datetime.now(timezone.utc).isoformat()
     policy = policy if policy is not None else ModelQualificationConfig()
+    if response_protocol is None:
+        from kriya.agents.response_protocol import response_protocol_identity
+
+        response_protocol = response_protocol_identity(None)
     evidence = ({environment.digest: {"environment": environment.to_dict(), "qualified_at": qualified_at,
                                       "cases": [asdict(r) for r in dependent]}} if dependent else {})
     return {
@@ -1458,8 +1563,9 @@ def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult]
         # output_ceiling inside is metadata (the configured max_tokens), never identity.
         "inference_settings": settings.to_dict(),
         # QUAL-CONFIG-001: the policy the verdicts were reached under.
-        POLICY_DIGEST_FIELD: qualification_policy_digest(policy),
+        POLICY_DIGEST_FIELD: qualification_policy_digest(policy, response_protocol),
         "qualification_policy": policy.model_dump(mode="json"),
+        "developer_response_protocol": response_protocol,
         "qualified_at": qualified_at,
         # The environment this run was served from (capacity evidence below
         # is keyed by its digest; functional cases hold in any environment).

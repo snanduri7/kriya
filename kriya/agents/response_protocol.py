@@ -15,9 +15,37 @@ Two protocols emit the same ``DeveloperResponse``:
   one outcome - ``SEARCH:``/``REPLACE:`` pairs, one ``FILE CONTENT:``, or
   ``NO CHANGE NEEDED`` (text may follow). A marker line inside a payload is
   ambiguous and refused.
-* ``structured`` - sentinel lines naming their target path, with explicit
-  terminators (``STRUCTURED_*`` below); payload lines are opaque, and a
-  payload line that itself starts with the sentinel prefix is refused.
+* ``structured`` (``kriya_sentinel_v1``, the production protocol) - the
+  grammar is: an optional free-text analysis section, then outcome blocks,
+  then nothing but blank lines. Every block is opened and closed by exact
+  sentinel lines naming the target path::
+
+      <<<KRIYA:FILE path="p">>>        ... <<<KRIYA:END_FILE>>>
+                                          (or <<<KRIYA:END_FILE no_final_newline>>>)
+      <<<KRIYA:EDIT path="p">>>        <<<KRIYA:SEARCH>>> ... <<<KRIYA:REPLACE>>> ...
+                                       (pairs repeat)  <<<KRIYA:END_EDIT>>>
+      <<<KRIYA:NO_CHANGE path="p">>>
+
+  A payload ends only at its own end marker; any text after the last block
+  is INVALID_EDIT_PROTOCOL and never reaches a file. Payload lines are
+  opaque; a payload line that itself starts with the sentinel prefix is
+  refused. Newline semantics are explicit: every FILE payload line is
+  newline-terminated, and ``no_final_newline`` on the end marker is the one
+  way to state that the file has no final newline. For an existing file the
+  Existing File Convention Policy (file_integrity.keep_final_newline_state,
+  FileSnapshot.encode) then keeps that file's BOM, line endings and final
+  newline state. ``path`` is metadata: it is normalized as a safe
+  repository-relative POSIX path (normalize_protocol_path) and must equal
+  the requested target; an absolute, escaping or malformed path is refused.
+  The whole response may be wrapped in one outer fence (a grammar rule, not
+  a payload rewrite). There is never an automatic fallback to another
+  protocol: one invocation has exactly one protocol.
+
+``legacy_strict`` (``strict_legacy_v1``) is compatibility-only: the legacy
+markers have no payload terminator, so prose after a REPLACE or FILE
+CONTENT block cannot be told apart from payload, a final newline cannot be
+expressed, and a non-Markdown file with a column-0 fence cannot be carried.
+It is not production-equivalent to the structured protocol.
 
 Raw content (a first-pass file with no markers) accepts one legacy wrapper:
 the whole response is a single fenced block. Anything else containing a
@@ -28,6 +56,7 @@ fences are content.
 from __future__ import annotations
 
 import os
+import posixpath
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -35,6 +64,12 @@ from typing import Dict, List, Optional, Sequence, Tuple
 LEGACY_STRICT = "legacy_strict"
 STRUCTURED = "structured"
 RESPONSE_PROTOCOLS = (LEGACY_STRICT, STRUCTURED)
+# The versioned, model-facing identity of each protocol: bound into
+# qualification (model_qualification.policy_digest_for) - a record qualified
+# under one protocol is STALE under another.
+PROTOCOL_IDENTITIES = {LEGACY_STRICT: "strict_legacy_v1", STRUCTURED: "kriya_sentinel_v1"}
+# Must equal AutonomyConfig.developer_response_protocol's default (tested).
+DEFAULT_RESPONSE_PROTOCOL = STRUCTURED
 
 AMBIGUOUS_FILE_RESPONSE_PROTOCOL = "AMBIGUOUS_FILE_RESPONSE_PROTOCOL"
 INVALID_EDIT_PROTOCOL = "INVALID_EDIT_PROTOCOL"
@@ -63,6 +98,7 @@ _STRUCTURED_OPEN_RE = re.compile(r'^<<<KRIYA:(FILE|EDIT|NO_CHANGE) path="([^"]+)
 _STRUCTURED_SEARCH = "<<<KRIYA:SEARCH>>>"
 _STRUCTURED_REPLACE = "<<<KRIYA:REPLACE>>>"
 _STRUCTURED_END = {"FILE": "<<<KRIYA:END_FILE>>>", "EDIT": "<<<KRIYA:END_EDIT>>>"}
+_END_FILE_NO_FINAL_NEWLINE = "<<<KRIYA:END_FILE no_final_newline>>>"
 
 
 @dataclass(frozen=True)
@@ -76,6 +112,8 @@ class DeveloperResponse:
     edits: Tuple[Tuple[str, str], ...] = field(default_factory=tuple)
     reason_code: Optional[str] = None
     detail: Optional[str] = None
+    # Structured FILE only: the payload's declared final-newline state.
+    final_newline: Optional[bool] = None
 
     @property
     def error(self) -> Optional[str]:
@@ -90,10 +128,33 @@ def _invalid(protocol: str, code: str, detail: str, analysis: Optional[str] = No
 
 
 def developer_response_protocol(config) -> str:
-    """The configured Developer response protocol (autonomy.developer_response_protocol)."""
+    """The configured Developer response protocol (autonomy.developer_response_protocol);
+    the default protocol when the config names none. An unknown value is refused
+    by config validation, never mapped to another protocol."""
     autonomy = getattr(config, "autonomy", None)
-    value = getattr(autonomy, "developer_response_protocol", LEGACY_STRICT)
-    return value if value in RESPONSE_PROTOCOLS else LEGACY_STRICT
+    value = getattr(autonomy, "developer_response_protocol", DEFAULT_RESPONSE_PROTOCOL)
+    if value not in RESPONSE_PROTOCOLS:
+        raise ValueError(f"unknown developer response protocol {value!r}")
+    return value
+
+
+def response_protocol_identity(config) -> str:
+    """The versioned protocol identity (``kriya_sentinel_v1``...) of ``config``."""
+    return PROTOCOL_IDENTITIES[developer_response_protocol(config)]
+
+
+def normalize_protocol_path(path: str) -> Optional[str]:
+    """A protocol ``path=`` value as a safe repository-relative POSIX path
+    (``./a//b.py`` -> ``a/b.py``), or None when it is empty, absolute, holds
+    a NUL or backslash, or leaves the repository root after normalization.
+    Normalization never widens scope: the result must still equal the
+    requested target, which is authorized separately."""
+    if not path or "\x00" in path or "\\" in path or path.startswith("/") or re.match(r"^[A-Za-z]:", path):
+        return None
+    normalized = posixpath.normpath(path)
+    if normalized in (".", "..") or normalized.startswith("../") or normalized.startswith("/"):
+        return None
+    return normalized
 
 
 def is_markdown_target(filepath: Optional[str]) -> bool:
@@ -290,6 +351,7 @@ def parse_structured(text: str, filepath: str, *, patch_allowed: bool = True,
     analysis: List[str] = []
     outcome: Optional[str] = None
     content: Optional[str] = None
+    final_file_newline: Optional[bool] = None
     edits: List[Tuple[str, str]] = []
     index = 0
 
@@ -309,7 +371,10 @@ def parse_structured(text: str, filepath: str, *, patch_allowed: bool = True,
         if not opened:
             return _fail(INVALID_EDIT_PROTOCOL, f"unexpected protocol line {line!r}")
         kind, path = opened.group(1), opened.group(2)
-        if path != filepath:
+        normalized = normalize_protocol_path(path)
+        if normalized is None:
+            return _fail(INVALID_EDIT_PROTOCOL, f"block path {path!r} is not a safe repository-relative path")
+        if normalized != normalize_protocol_path(filepath):
             return _fail(INVALID_EDIT_PROTOCOL, f"block names '{path}', expected '{filepath}'")
         new_outcome = {"FILE": FILE, "EDIT": EDITS, "NO_CHANGE": NO_CHANGE}[kind]
         if outcome is not None and (outcome != new_outcome or outcome != EDITS):
@@ -319,17 +384,22 @@ def parse_structured(text: str, filepath: str, *, patch_allowed: bool = True,
         if kind == "NO_CHANGE":
             continue
         end = _STRUCTURED_END[kind]
+        ends = (end, _END_FILE_NO_FINAL_NEWLINE) if kind == "FILE" else (end,)
         body: List[str] = []
-        while index < len(lines) and lines[index].rstrip(" \t\r") != end:
+        while index < len(lines) and lines[index].rstrip(" \t\r") not in ends:
             body.append(lines[index])
             index += 1
         if index >= len(lines):
             return _fail(INVALID_EDIT_PROTOCOL, f"missing {end}")
+        final_newline = lines[index].rstrip(" \t\r") != _END_FILE_NO_FINAL_NEWLINE
         index += 1
         if kind == "FILE":
             if any(item.startswith(SENTINEL_PREFIX) for item in body):
                 return _fail(INVALID_EDIT_PROTOCOL, "a sentinel line inside a FILE payload")
-            content = "\n".join(body) + "\n" if body else ""
+            # Explicit grammar: each payload line is newline-terminated, unless
+            # the end marker declares no_final_newline.
+            content = "\n".join(body) + ("\n" if body and final_newline else "")
+            final_file_newline = final_newline
             continue
         parsed = _structured_edit_pairs(body)
         if isinstance(parsed, str):
@@ -343,7 +413,8 @@ def parse_structured(text: str, filepath: str, *, patch_allowed: bool = True,
     if outcome == FILE and not file_allowed:
         return _fail(INVALID_EDIT_PROTOCOL, "a whole-file replacement was not offered for this file")
     return DeveloperResponse(kind=outcome, protocol=STRUCTURED, analysis=analysis_text,
-                             content=content, edits=tuple(edits))
+                             content=content, edits=tuple(edits),
+                             final_newline=final_file_newline if outcome == FILE else None)
 
 
 def _structured_edit_pairs(body: List[str]):
@@ -396,7 +467,8 @@ def structured_contract(filepath: str, *, analysis_required: bool, allow_edit: b
             "complete lines that occur exactly once in the file and must not overlap another SEARCH)"
         )
     if allow_file:
-        parts.append(f'<<<KRIYA:FILE path="{filepath}">>>\n<the complete file content>\n<<<KRIYA:END_FILE>>>')
+        parts.append(f'<<<KRIYA:FILE path="{filepath}">>>\n<the complete file content>\n<<<KRIYA:END_FILE>>>\n'
+                     "(every line you write ends with a newline in the file)")
     if allow_no_change:
         parts.append(f'<<<KRIYA:NO_CHANGE path="{filepath}">>>   (only if this file needs no change)')
     parts.append(

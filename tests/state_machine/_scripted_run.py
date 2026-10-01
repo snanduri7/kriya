@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional
 from unittest.mock import MagicMock
 
+from _protocol_responses import sentinel, wants_structured
+
 from kriya.config import AppConfig
 from kriya.config.config import FallbackModelConfig
 from kriya.core.kernel import Kernel
@@ -71,7 +73,9 @@ def script(llm, *, plan: str, target: str, developer: Callable[[str, int, str], 
         model = kwargs.get("model_override") or PRIMARY
         record.developer_calls.append(model)
         content = developer(model, len(record.developer_calls), text)
-        if "FILE CONTENT:" in text:  # a repair request: the marker response shape
+        if wants_structured(system_prompt):  # the production protocol: a sentinel FILE block
+            return sentinel(target, analysis=f"repair {target}", content=content)
+        if "FILE CONTENT:" in text:  # a legacy repair request: the marker response shape
             return f"FIX ANALYSIS: repair {target}\nFILE CONTENT:\n{content}"
         return json.dumps([{"filepath": target, "content": content}])
 

@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from typing import Callable, List
 from unittest.mock import AsyncMock, patch
 
+from _protocol_responses import as_requested
+
 from kriya.config import AppConfig
 from kriya.core import model_runtime
 from kriya.core.kernel import Kernel
@@ -166,7 +168,7 @@ def run_edit_protocol(tmp_path, monkeypatch, developer_answers: List[str], *, wi
             content = json.dumps({"files": [TARGET]})
         elif "Developer Agent" in first:
             run.developer.append((system_prompt, user_prompt))
-            content = answers.pop(0) if len(answers) > 1 else answers[0]
+            content = as_requested(answers.pop(0) if len(answers) > 1 else answers[0], system_prompt, TARGET)
         else:
             content = "Review: Approved"
         # A plausible provider count (about 3.5 bytes per token): an

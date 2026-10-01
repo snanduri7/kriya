@@ -53,6 +53,7 @@ def _workspace(tmp_path):
 
 def _engine(chain=True):
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = "legacy_strict"  # these tests replay legacy/raw Developer responses
     cfg.llm.model = PRIMARY
     cfg.autonomy.run_verification_enabled = False
     cfg.llm_chain = [FallbackModelConfig(model=FALLBACK, base_url=cfg.llm.base_url)] if chain else []

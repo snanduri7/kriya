@@ -21,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from _per_request_window_runtime import PER_REQUEST_WINDOW_RUNTIME, per_request_window_runtime
+from _protocol_responses import as_requested
 from _provider_usage import plausible_prompt_tokens
 
 from kriya.config import AppConfig
@@ -509,8 +510,9 @@ def _developer_run(tmp_path, monkeypatch, *, max_output, protocol="small_native_
 
     async def request_once(client, model, system_prompt, user_prompt, temperature, max_tokens, *a, **k):
         requests.append({"system": system_prompt, "max_tokens": max_tokens})
-        body = ("FIX ANALYSIS: rename.\nSEARCH:\ndef add0(a, b):\nREPLACE:\ndef plus0(a, b):\n"
-                if "MODE: REPAIR." in system_prompt else source.replace("def add0", "def plus0"))
+        body = as_requested(("FIX ANALYSIS: rename.\nSEARCH:\ndef add0(a, b):\nREPLACE:\ndef plus0(a, b):\n"
+                             if "MODE: REPAIR." in system_prompt else source.replace("def add0", "def plus0")),
+                            system_prompt, "calc.py")
         return {"content": body, "reasoning_chars": 0, "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
@@ -620,7 +622,7 @@ def _sibling_run(monkeypatch, *, design_tokens=0):
 
     async def request_once(client, model, system_prompt, user_prompt, *a, **k):
         prompts.append(user_prompt)
-        return {"content": body, "reasoning_chars": 0, "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
+        return {"content": as_requested(body, system_prompt), "reasoning_chars": 0, "prompt_tokens": plausible_prompt_tokens(system_prompt, user_prompt), "completion_tokens": 5,
                 "finish_reason": "stop", "provider_metadata": {}}
 
     llm._request_once = request_once

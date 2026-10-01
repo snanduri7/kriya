@@ -31,6 +31,7 @@ from _chaos_harness import (
     chaos_engine,
     git_workspace,
     inject_after_static_analysis_gate,
+    inject_before_terminal_commit,
     requested_file,
     run_direct,
     static_analysis_config,
@@ -369,7 +370,7 @@ def test_static_analysis_disabled_a_candidate_changed_after_the_gates_is_refused
         assert state.static_analysis_result.outcome.value == "DISABLED"
         Path(workspace, ".kriya", "worktree", "calc.py").write_text(tampered)
 
-    inject_after_static_analysis_gate(monkeypatch, change_candidate)
+    inject_before_terminal_commit(monkeypatch, change_candidate)
     runtime = _good_runtime()
     chaos_case.arm()
     with RuntimeRegistration(runtime):

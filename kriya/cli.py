@@ -932,6 +932,15 @@ def _workflow_config(cfg: AppConfig, *, resume: bool = False, resume_id: Optiona
             click.secho(f"Model route: {decision.role} -> {decision.model} ({decision.source}: {decision.reason})",
                         fg="cyan", err=True)
         cfg = routed
+    from kriya.agents.response_protocol import STRUCTURED, developer_response_protocol
+
+    if cfg.runtime_profile == "production" and developer_response_protocol(cfg) != STRUCTURED:
+        # FILE-INTEGRITY-CONTRACT-001: the legacy markers have no payload
+        # terminator; production never runs them as if equivalent.
+        click.secho("[RESPONSE_PROTOCOL_NOT_PRODUCTION] runtime_profile: production requires "
+                    "autonomy.developer_response_protocol: structured (legacy_strict is compatibility-only).",
+                    fg="red", err=True)
+        sys.exit(1)
     if cfg.model_policy.independent_roles:
         from kriya.core.role_metrics import ROLE_INDEPENDENCE_REQUIRED, independence_violations, role_runtimes
 

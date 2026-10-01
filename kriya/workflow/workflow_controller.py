@@ -248,7 +248,7 @@ from kriya.workflow.triage import ChangeKind
 from kriya.workflow.verification_report import build_verification_report
 from kriya.workflow.workflow import _log_phase_banner
 from kriya.workflow.workflow_types import SubtaskResult, SubtaskStatus, VerificationReport, WorkflowResult
-from kriya.workflow.worktree import create_git_worktree, remove_git_worktree
+from kriya.workflow.worktree import WorktreeSyncError, create_git_worktree, remove_git_worktree
 
 
 def _evaluate_subtask_verification(
@@ -3328,6 +3328,18 @@ class WorkflowController:
                     "error": str(e),
                     "run_id": run_id,
                 }
+            except WorktreeSyncError as e:
+                logger.error(f"WorkflowController enforce run {run_id!r}: worktree sync refused: {e}")
+                legacy_result = {
+                    "status": "failure",
+                    "quality_gates_passed": False,
+                    "files": [],
+                    "failure_type": "WORKTREE_SYNC",
+                    "failure_category": e.reason_code.lower(),
+                    "reason_codes": [e.reason_code],
+                    "error": str(e),
+                    "run_id": run_id,
+                }
             except _StructuredPlanUnavailable as e:
                 logger.error(
                     f"WorkflowController enforce run {run_id!r}: structured plan unavailable "
@@ -4882,6 +4894,11 @@ A structural, PRE-EXECUTION problem (no parseable plan, zero subtasks,
         # needs_review WorkflowResult.
         try:
             plan_workspace_path = create_git_worktree(workspace_path)
+        except WorktreeSyncError:
+            # FILE-INTEGRITY-CONTRACT-001: a sandbox that does not hold the
+            # workspace's exact bytes is a typed stop (execute() reports its
+            # reason code), never a planning problem.
+            raise
         except Exception as e:
             raise _StructuredPlanUnavailable(
                 f"failed to create isolated plan-level worktree sandbox: {e}"
