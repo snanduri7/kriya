@@ -957,6 +957,22 @@ async def _record_attempt_failure(
                     "process termination; production behavior is not a repair target."
                 ),
             )
+        elif fail_type == "candidate_runtime_entrypoint_invalid":
+            # D4: the validator's deterministic entrypoint diagnosis (POM read
+            # as XML, current source, fresh build) names the candidate
+            # configuration file that selects a nonexistent main class -
+            # parsed build-manifest evidence, the same authority as
+            # migration's manifest evidence. From a unit that owns no files
+            # this grounds the existing cross-owner (PLAN_SCOPE_DEFECT)
+            # recovery below; the unit's own write scope is never widened.
+            attribution = AttributionResult(
+                tier="authoritative_deterministic", files=list(failure.likely_files),
+                confidence="high" if failure.likely_files else "low",
+                reasoning=(
+                    "The candidate's build configuration selects a runtime main class that no current "
+                    "source declares and the fresh build did not produce (deterministic entrypoint diagnosis)."
+                ),
+            )
         else:
             attribution = await attribute_failure(
                 failure,

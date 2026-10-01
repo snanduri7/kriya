@@ -2002,9 +2002,146 @@ class PolymorphicValidator:
             "returncode": res["returncode"],
             "output": res["stdout"] + "\n" + res["stderr"],
             "runtime_prerequisite": prerequisite,
+            "entrypoint_diagnosis": (self.diagnose_runtime_entrypoint(command)
+                                     if res["returncode"] != 0 and not res["timeout"] else None),
         }
 
     RUNTIME_PREREQUISITE_FAILED = "RUNTIME_PREREQUISITE_FAILED"
+
+    # D4: who chose the main class a runtime command actually runs.
+    ENTRYPOINT_KRIYA_COMMAND = "KRIYA_COMMAND"
+    ENTRYPOINT_CANDIDATE_BUILD_CONFIG = "CANDIDATE_BUILD_CONFIG"
+    ENTRYPOINT_UNKNOWN = "UNKNOWN"
+    _EXEC_PLUGIN = "exec-maven-plugin"
+    _JAVA_OPTIONS_WITH_VALUE = frozenset({"-cp", "-classpath", "--class-path", "-p", "--module-path", "--add-opens",
+                                          "--add-exports", "--add-modules", "--add-reads", "--patch-module"})
+
+    def _exec_plugin_main_class(self, cli_properties: Dict[str, str]) -> Tuple[Optional[str], Optional[str], str]:
+        """(value, config key, provenance) of the main class the project's own
+        POM gives exec-maven-plugin's `mainClass`, by Maven's precedence for a
+        command-line `exec:java`: the `default-cli` execution's configuration,
+        else the plugin's own, else pluginManagement's - each of which beats a
+        `-Dexec.mainClass` user property (measured, evidence/demo-defect-d4).
+        A `${property}` value resolves from the command's -D properties
+        (KRIYA_COMMAND) or the POM's <properties> (CANDIDATE_BUILD_CONFIG); a
+        value it cannot resolve, or no local configuration under a <parent>
+        (which may configure it), is UNKNOWN. No POM configuration at all:
+        (None, None, KRIYA_COMMAND) - the command's property decides."""
+        try:
+            root = ET.parse(os.path.join(self.workspace_path, "pom.xml")).getroot()
+        except (OSError, ET.ParseError):
+            return None, None, self.ENTRYPOINT_UNKNOWN
+
+        def local(element: ET.Element) -> str:
+            return element.tag.rsplit("}", 1)[-1]
+
+        def child(element: ET.Element, name: str) -> Optional[ET.Element]:
+            return next((c for c in element if local(c) == name), None)
+
+        def main_class(element: Optional[ET.Element]) -> Optional[str]:
+            configuration = child(element, "configuration") if element is not None else None
+            value = child(configuration, "mainClass") if configuration is not None else None
+            return (value.text or "").strip() if value is not None else None
+
+        properties = {local(e): (e.text or "").strip() for p in root if local(p) == "properties" for e in p}
+        build = child(root, "build")
+        candidates: List[Tuple[Optional[str], str]] = []
+        for section, key_prefix in ((build, "build/plugins"), (child(build, "pluginManagement") if build is not None
+                                                               else None, "build/pluginManagement/plugins")):
+            plugins = child(section, "plugins") if section is not None else None
+            for plugin in (plugins if plugins is not None else []):
+                if local(plugin) != "plugin" or (child(plugin, "artifactId") is None
+                                                  or (child(plugin, "artifactId").text or "").strip() != self._EXEC_PLUGIN):
+                    continue
+                key = f"{key_prefix}/plugin[{self._EXEC_PLUGIN}]"
+                executions = child(plugin, "executions")
+                for execution in (executions if executions is not None else []):
+                    if (child(execution, "id") is not None and (child(execution, "id").text or "").strip() == "default-cli"
+                            and main_class(execution) is not None):
+                        candidates.append((main_class(execution), f"{key}/executions/execution[default-cli]/configuration/mainClass"))
+                if main_class(plugin) is not None:
+                    candidates.append((main_class(plugin), f"{key}/configuration/mainClass"))
+        if not candidates:
+            if child(root, "parent") is not None:
+                return None, None, self.ENTRYPOINT_UNKNOWN
+            return None, None, self.ENTRYPOINT_KRIYA_COMMAND
+        value, key = candidates[0]
+        reference = re.fullmatch(r"\$\{([^}]+)\}", value or "")
+        if reference:
+            name = reference.group(1)
+            if name in cli_properties:
+                return cli_properties[name], key, self.ENTRYPOINT_KRIYA_COMMAND
+            if name in properties and "$" not in properties[name]:
+                return properties[name], key, self.ENTRYPOINT_CANDIDATE_BUILD_CONFIG
+            return None, key, self.ENTRYPOINT_UNKNOWN
+        if not value or "$" in value:
+            return None, key, self.ENTRYPOINT_UNKNOWN
+        return value, key, self.ENTRYPOINT_CANDIDATE_BUILD_CONFIG
+
+    def diagnose_runtime_entrypoint(self, command: List[str]) -> Optional[Dict[str, Any]]:
+        """D4: a deterministic account of the main class a failed JVM runtime
+        command ran - what was requested, what actually ran and who chose it,
+        and whether the CURRENT source declares it and the fresh build (the D3
+        prerequisite) produced it. Read from the command, the POM (as XML) and
+        the tree; never from the model and never from output text alone.
+        None for commands that do not launch a JVM main class."""
+        if not command:
+            return None
+        tool, requested, effective, provenance, config_key = os.path.basename(command[0]), None, None, None, None
+        if tool in ("mvn", "mvnw"):
+            goals = [g for g in command[1:] if not g.startswith("-")]
+            if not any(g == "exec:java" or (g.endswith(":java") and self._EXEC_PLUGIN in g) for g in goals):
+                return None
+            cli = dict(arg[2:].split("=", 1) for arg in command[1:] if arg.startswith("-D") and "=" in arg)
+            requested = cli.get("exec.mainClass")
+            effective, config_key, provenance = self._exec_plugin_main_class(cli)
+            if provenance == self.ENTRYPOINT_KRIYA_COMMAND and config_key is None:
+                effective = requested
+        elif tool == "java":
+            args, i = command[1:], 0
+            while i < len(args) and args[i].startswith("-"):
+                if args[i] in ("-jar", "--module", "-m"):
+                    return None
+                i += 2 if args[i] in self._JAVA_OPTIONS_WITH_VALUE else 1
+            requested = effective = args[i] if i < len(args) else None
+            provenance = self.ENTRYPOINT_KRIYA_COMMAND
+        else:
+            return None
+        if not effective:
+            provenance = self.ENTRYPOINT_UNKNOWN
+        relative = (effective or "").replace(".", "/")
+        simple, package = (effective or "").rsplit(".", 1)[-1], (effective or "").rpartition(".")[0]
+        declared = bool(effective) and any(
+            source.endswith(f"/{relative}.java") or source == f"{relative}.java"
+            or self._source_declares(source, package, simple)
+            for source in self._java_sources())
+        compiled = bool(effective) and self._compiled_class_exists(f"{relative}.class")
+        return {"requested_entrypoint": requested, "effective_entrypoint": effective,
+                "effective_entrypoint_provenance": provenance,
+                "candidate_config_source": "pom.xml" if provenance == self.ENTRYPOINT_CANDIDATE_BUILD_CONFIG else None,
+                "candidate_config_key": config_key if provenance == self.ENTRYPOINT_CANDIDATE_BUILD_CONFIG else None,
+                "source_declares_entrypoint": declared, "compiled_artifact_exists": compiled,
+                "command": list(command)}
+
+    def _compiled_class_exists(self, class_file: str) -> bool:
+        """Whether any module's target/classes holds ``class_file`` (the
+        fresh D3 build output; VCS, Kriya state and other build trees skipped)."""
+        for directory, dirnames, _ in os.walk(self.workspace_path):
+            if os.path.isfile(os.path.join(directory, "target", "classes", class_file)):
+                return True
+            dirnames[:] = [d for d in dirnames if d not in (".git", ".kriya", "target", "node_modules")]
+        return False
+
+    def _source_declares(self, source: str, package: str, simple: str) -> bool:
+        try:
+            with open(os.path.join(self.workspace_path, source), encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
+        except OSError:
+            return False
+        declares_package = (re.search(rf"^\s*package\s+{re.escape(package)}\s*;", text, re.M) is not None
+                            if package else re.search(r"^\s*package\s", text, re.M) is None)
+        return declares_package and re.search(
+            rf"\b(class|record|enum|interface)\s+{re.escape(simple)}\b", text) is not None
 
     def _runtime_needs_compiled_classes(self, command: List[str]) -> bool:
         """D3: a runtime command that consumes this Maven project's compiled
@@ -2117,6 +2254,7 @@ class PolymorphicValidator:
             return not_ready
 
         output_parts = [f"=== Runtime prerequisite: {prerequisite} ==="] if prerequisite else []
+        entrypoint: Optional[Dict[str, Any]] = None
         steps = []
         sequence_toolchain: Dict[str, Any] = {}
         overall_success = True
@@ -2176,6 +2314,8 @@ class PolymorphicValidator:
                 break
             if res["returncode"] != 0:
                 overall_success = False
+                # D4: diagnose on the fresh build, before anything cleans it.
+                entrypoint = entrypoint or self.diagnose_runtime_entrypoint(command)
 
         return {
             "success": overall_success and not any_timed_out,
@@ -2184,6 +2324,7 @@ class PolymorphicValidator:
             "output": "\n\n".join(output_parts),
             "steps": steps,
             "runtime_prerequisite": prerequisite,
+            "entrypoint_diagnosis": entrypoint,
             **sequence_toolchain,
         }
 

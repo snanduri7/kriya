@@ -240,6 +240,47 @@ def run_command_targets_missing_entrypoint(output: str) -> bool:
 RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE = "RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE"
 MAVEN_PLUGIN_UNAVAILABLE = "MAVEN_PLUGIN_UNAVAILABLE"
 RUNTIME_PREREQUISITE_BUILD_FAILED = "RUNTIME_PREREQUISITE_BUILD_FAILED"
+# D4: runtime entrypoint failures, classified by who chose the entrypoint and
+# what the freshly built candidate holds - never "missing main class =
+# infrastructure" alone.
+CANDIDATE_RUNTIME_ENTRYPOINT_INVALID = "CANDIDATE_RUNTIME_ENTRYPOINT_INVALID"  # A: candidate defect
+RUNTIME_COMMAND_ENTRYPOINT_INVALID = "RUNTIME_COMMAND_ENTRYPOINT_INVALID"  # B: Kriya's command
+RUNTIME_ENTRYPOINT_NOT_LOADABLE = "RUNTIME_ENTRYPOINT_NOT_LOADABLE"  # C: built, still not loaded
+RUNTIME_ENTRYPOINT_NOT_BUILT = "RUNTIME_ENTRYPOINT_NOT_BUILT"  # D: source declares it, build lacks it
+_CLASS_NOT_FOUND = re.compile(r"(?:ClassNotFoundException|NoClassDefFoundError|could not find or load main class)"
+                              r":?\s+([\w.$/]+)", re.IGNORECASE)
+
+
+def classify_runtime_entrypoint(diagnosis: Optional[Dict[str, Any]], output: str) -> Optional[str]:
+    """D4: the owner of a runtime entrypoint failure, from the validator's
+    deterministic diagnosis (PolymorphicValidator.diagnose_runtime_entrypoint).
+
+    Only for a launch failure (missing-entrypoint output); only when the class
+    the JVM reports missing is the diagnosed effective entrypoint (the output
+    confirms the diagnosis, never replaces it); UNKNOWN provenance -> None,
+    the caller's existing classification stands.
+      A  candidate build configuration selects a class no current source
+         declares and the fresh build did not produce -> candidate defect
+      B  Kriya's own command selects such a class -> verifier infrastructure
+      C  declared and built, yet not loaded -> runtime/classpath infrastructure
+      D  declared, but the prerequisite build did not produce it -> build
+         diagnosis (infrastructure, never a guessed candidate typo)"""
+    if not diagnosis or not run_command_targets_missing_entrypoint(output):
+        return None
+    effective = diagnosis.get("effective_entrypoint")
+    provenance = diagnosis.get("effective_entrypoint_provenance")
+    if not effective or provenance not in ("KRIYA_COMMAND", "CANDIDATE_BUILD_CONFIG"):
+        return None
+    reported = {name.replace("/", ".") for name in _CLASS_NOT_FOUND.findall(output or "")}
+    if effective not in reported:
+        return None
+    declared, built = diagnosis.get("source_declares_entrypoint"), diagnosis.get("compiled_artifact_exists")
+    if built:
+        return RUNTIME_ENTRYPOINT_NOT_LOADABLE
+    if declared:
+        return RUNTIME_ENTRYPOINT_NOT_BUILT
+    return (CANDIDATE_RUNTIME_ENTRYPOINT_INVALID if provenance == "CANDIDATE_BUILD_CONFIG"
+            else RUNTIME_COMMAND_ENTRYPOINT_INVALID)
 _MAVEN_PLUGIN_PREFIX_UNRESOLVED = re.compile(r"No plugin found for prefix '[^']+'")
 
 

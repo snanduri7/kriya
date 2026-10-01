@@ -56,6 +56,8 @@ from kriya.tools.service_runtime import (
 # attempt.py, so there is no cycle).
 from kriya.tools.validate import PolymorphicValidator, execution_evidence, get_pom_dependencies
 from kriya.workflow.acceptance import (
+    CANDIDATE_RUNTIME_ENTRYPOINT_INVALID,
+    classify_runtime_entrypoint,
     output_confirms_nonzero_test_execution,
     runtime_verification_infrastructure_reason,
     subtask_owns_test_obligation,
@@ -3781,9 +3783,20 @@ def _raise_runtime_verification_infrastructure_failure(
     """
     if deterministic_sequence_kind(commands) is not None:
         return
+    # D4: a missing entrypoint is owned by whoever chose it (the validator's
+    # deterministic diagnosis of the fresh build), not infrastructure by default.
+    entrypoint = run_result.get("entrypoint_diagnosis")
+    ownership = classify_runtime_entrypoint(entrypoint, run_result.get("output", ""))
+    if ownership == CANDIDATE_RUNTIME_ENTRYPOINT_INVALID:
+        _raise_candidate_runtime_entrypoint_failure(state, run_result, commands, entrypoint)
     reason = runtime_verification_infrastructure_reason(run_result)
     if reason is None:
         return
+    if ownership is not None:
+        reason = (f"{ownership}: the runtime entrypoint {entrypoint['effective_entrypoint']} "
+                  f"(chosen by {entrypoint['effective_entrypoint_provenance']}; declared in source: "
+                  f"{entrypoint['source_declares_entrypoint']}; compiled: {entrypoint['compiled_artifact_exists']}) "
+                  "could not be loaded")
     state.cached_run_verification_judgment = None
     message = (
         "VERIFICATION_INFRASTRUCTURE_FAILURE: runtime behavior was not observed because "
@@ -3795,6 +3808,34 @@ def _raise_runtime_verification_infrastructure_failure(
         type="verification_infrastructure_failure", message=message,
         raw_output=run_result.get("output", ""), attempt=state.attempt_number,
         diagnostics={"reason_code": code} if code.isupper() and "_" in code else None,
+    )
+    outcome = failure.to_gate_outcome()
+    outcome.update({"commands": commands, "steps": run_result.get("steps", [])})
+    state.gate_outcomes.append(outcome)
+    raise QualityGateFailure(failure)
+
+
+def _raise_candidate_runtime_entrypoint_failure(
+    state: GenerationState, run_result: Dict[str, Any], commands: List[List[str]], entrypoint: Dict[str, Any],
+) -> None:
+    """D4 case A: the candidate's own build configuration selects a main class
+    that no current source declares and the fresh build did not produce. A
+    candidate defect implicating that configuration file - routed through the
+    ordinary repair path (the file's own work unit, or, from a unit that owns
+    no files, the existing grounded cross-owner recovery). The evidence names
+    the defect; Kriya never rewrites the configuration itself."""
+    config = entrypoint["candidate_config_source"]
+    message = (
+        f"{CANDIDATE_RUNTIME_ENTRYPOINT_INVALID}: the candidate's {config} selects the runtime main class "
+        f"{entrypoint['effective_entrypoint']} ({entrypoint['candidate_config_key']}), but no source in the "
+        "project declares it and the fresh build did not produce it. Maven uses this configuration over the run "
+        f"command's -Dexec.mainClass={entrypoint['requested_entrypoint']}, so the application cannot start.\n\n"
+        f"Captured output:\n{run_result.get('output', '')}"
+    )
+    failure = Failure(
+        type="candidate_runtime_entrypoint_invalid", message=message,
+        raw_output=run_result.get("output", ""), attempt=state.attempt_number, likely_files=[config],
+        diagnostics={"reason_code": CANDIDATE_RUNTIME_ENTRYPOINT_INVALID, "entrypoint_diagnosis": entrypoint},
     )
     outcome = failure.to_gate_outcome()
     outcome.update({"commands": commands, "steps": run_result.get("steps", [])})

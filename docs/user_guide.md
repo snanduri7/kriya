@@ -305,6 +305,12 @@ falls back to the host's tools.
   - Your application never runs with network access. If the plugin still can't be fetched, or the command names no
     plugin at all (for example `mvn test` as a run command), the run stops with
     `RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE`, never a Developer repair.
+  - If the app's main class can't be found, Kriya first works out who chose it. If your `pom.xml` configures
+    `exec-maven-plugin` with a `mainClass` that no source file declares, that setting wins over the run command
+    (Maven's rule). Kriya reports it as your project's defect (`CANDIDATE_RUNTIME_ENTRYPOINT_INVALID`, naming
+    `pom.xml` and the exact setting) and sends the fix to the step that wrote `pom.xml`, allowed to change only
+    `pom.xml`. If Kriya's own command named a wrong class, or the class exists and still won't load, that is a
+    verifier problem and nothing in your project is changed.
 - **Unsupported.** Other versions (e.g. Java 7, Python 3.9) and toolchains without a profile fail closed.
   `kriya doctor --production` reports this as `toolchain.required`.
 
