@@ -2161,9 +2161,10 @@ class WorkflowEngine:
             # shared with kriya/knowledge/channels/repo_manifest.py so both call
             # sites use one implementation of "is this skill relevant to this repo".
             from kriya.skills.skill import fact_match as _fact_match
+            from kriya.skills.skill import mentions_term as _mentions_term
             is_relevant = (
-                skill.name.lower() in goal.lower() or
-                any(tag.lower() in goal.lower() for tag in skill.tags) or
+                _mentions_term(goal, skill.name) or
+                any(_mentions_term(goal, tag) for tag in skill.tags) or
                 skill.name.lower() == f"auto-{repo_slug}" or
                 _fact_match(skill, repo_model)
             )
@@ -2178,7 +2179,7 @@ class WorkflowEngine:
                 from kriya.tools.knowledge import extract_library_versions
                 libs = extract_library_versions(goal)
                 for lib, ver in libs:
-                    if lib.lower() in skill.name.lower() or any(t.lower() in lib.lower() for t in skill.tags):
+                    if _mentions_term(skill.name, lib) or any(_mentions_term(lib, t) for t in skill.tags):
                         if skill.supported_versions != "*":
                             from kriya.skills.skill import is_version_supported
                             if not is_version_supported(ver, skill.supported_versions):

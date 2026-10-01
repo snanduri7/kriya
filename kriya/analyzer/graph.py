@@ -1,4 +1,5 @@
 import ast
+import json
 import logging
 import os
 import re
@@ -30,6 +31,22 @@ _DEFAULT_RELATION_WEIGHT = 0.5
 _JAVA_PRIMITIVE_FIELD_TYPES = frozenset({"String", "int", "long", "double", "float", "boolean", "char", "byte", "short"})
 _JAVA_INJECTION_ANNOTATIONS = frozenset({"Autowired", "Resource", "Inject", "Qualifier"})
 _JAVA_IGNORED_CALLS = frozenset({"println", "print", "equals", "toString", "split", "replace"})
+# Bump when the symbols/relations this graph stores change shape or meaning.
+STRUCTURAL_INDEX_SCHEMA_VERSION = "kriya-structural-index/1"
+
+
+def structural_identity() -> Dict[str, str]:
+    """Everything that decides what this graph stores for the same bytes."""
+    from kriya.code_intel.parsing import parser_identity
+
+    parser = parser_identity()
+    return {
+        "schema_version": STRUCTURAL_INDEX_SCHEMA_VERSION, "tree_sitter": parser.tree_sitter,
+        "java_grammar": parser.java_grammar, "python_grammar": parser.python_grammar,
+        "structural_parser": parser.structural_parser,
+    }
+
+
 # Top-level type declarations (a nested type is stored as nested_<kind>).
 _TOP_LEVEL_TYPE_SYMBOLS = ("class", "interface", "enum", "record", "annotation_type")
 
@@ -140,8 +157,43 @@ class DependencyGraph:
         # clear_file()'s own OR-fallback clause for NULL rows is unaffected
         # by whether source_file is indexed.
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_source_file ON relations(source_file)")
+        # Code Intelligence R1: the raw-byte sha256 each file's structure was
+        # parsed from, and the identity of the parser that produced it.
+        try:
+            cursor.execute("ALTER TABLE files ADD COLUMN source_digest TEXT")
+        except Exception:
+            pass
+        cursor.execute("CREATE TABLE IF NOT EXISTS index_manifest (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
 
         self.conn.commit()
+
+    def manifest(self) -> Dict[str, str]:
+        return dict(self.conn.execute("SELECT key, value FROM index_manifest").fetchall())
+
+    def adopt_structural_identity(self, embedding_fingerprint: Optional[str] = None) -> bool:
+        """Bind this graph to the current structural identity (schema +
+        tree-sitter + grammar + structural parser versions). Structure built
+        under any other identity - including a pre-R1 graph with no manifest
+        at all - is never reused: every file's symbols/relations are dropped
+        so the next pass re-parses them. Returns True when that happened."""
+        identity = structural_identity()
+        stored = self.manifest().get("structural_identity")
+        with self.conn:
+            stale = stored != json.dumps(identity, sort_keys=True) and self.has_indexed_files()
+            if stale:
+                for table in ("relations", "symbols", "files"):
+                    self.conn.execute(f"DELETE FROM {table}")
+            self.conn.execute("INSERT OR REPLACE INTO index_manifest (key, value) VALUES (?, ?)",
+                              ("structural_identity", json.dumps(identity, sort_keys=True)))
+            if embedding_fingerprint is not None:
+                self.conn.execute("INSERT OR REPLACE INTO index_manifest (key, value) VALUES (?, ?)",
+                                  ("embedding_fingerprint", embedding_fingerprint))
+        return stale
+
+    def record_manifest(self, **values: str) -> None:
+        with self.conn:
+            for key, value in values.items():
+                self.conn.execute("INSERT OR REPLACE INTO index_manifest (key, value) VALUES (?, ?)", (key, value))
 
     def has_indexed_files(self) -> bool:
         """Cheap existence check (a single-row LIMIT 1, not a COUNT scan) - True
@@ -170,6 +222,13 @@ class DependencyGraph:
         cursor.execute("SELECT hash FROM files WHERE filepath = ?", (filepath,))
         row = cursor.fetchone()
         return row[0] if row and row[0] else None
+
+    def indexed_paths(self) -> set:
+        """Every file this graph holds symbols or file-sourced relations for."""
+        rows = self.conn.execute(
+            "SELECT filepath FROM files UNION SELECT filepath FROM symbols"
+            " UNION SELECT source_file FROM relations WHERE source_file IS NOT NULL").fetchall()
+        return {row[0] for row in rows}
 
     def clear_file(self, filepath: str) -> None:
         """Delete old symbols and relationships associated with a file.
@@ -200,7 +259,8 @@ class DependencyGraph:
         cursor.execute("DELETE FROM files WHERE filepath = ?", (filepath,))
         self.conn.commit()
 
-    def index_file(self, rel_path: str, content: str, mtime: float, file_hash: Optional[str] = None) -> None:
+    def index_file(self, rel_path: str, content: str, mtime: float, file_hash: Optional[str] = None,
+                   source_digest: Optional[str] = None) -> None:
         """Parse source code of a file and populate SQLite database indices."""
         if file_hash is None:
             import hashlib
@@ -229,7 +289,8 @@ class DependencyGraph:
         # Write to SQLite
         cursor = self.conn.cursor()
         
-        cursor.execute("INSERT OR REPLACE INTO files (filepath, mtime, hash) VALUES (?, ?, ?)", (rel_path, mtime, file_hash))
+        cursor.execute("INSERT OR REPLACE INTO files (filepath, mtime, hash, source_digest) VALUES (?, ?, ?, ?)",
+                       (rel_path, mtime, file_hash, source_digest))
         
         for sym in symbols:
             cursor.execute("""

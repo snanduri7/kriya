@@ -4,7 +4,7 @@ import os
 import re
 import sqlite3
 import struct
-from typing import Any, Dict, List, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Set
 
 import click
 import numpy as np
@@ -337,13 +337,19 @@ class LocalVectorStore:
         return docs
 
     def remove_file(self, filepath: str) -> None:
-        cursor = self.conn.cursor()
-        cursor.execute("DELETE FROM vector_chunks WHERE filepath = ?", (filepath,))
-        if self.use_fts:
-            cursor.execute("DELETE FROM fts_chunks WHERE filepath = ?", (filepath,))
-        else:
-            cursor.execute("DELETE FROM fts_chunks_fallback WHERE filepath = ?", (filepath,))
-        self.conn.commit()
+        """Every trace of ``filepath`` - vectors, lexical rows and its file
+        cache entry (E-17) - in one transaction."""
+        lexical = "fts_chunks" if self.use_fts else "fts_chunks_fallback"
+        with self.conn:
+            self.conn.execute("DELETE FROM vector_chunks WHERE filepath = ?", (filepath,))
+            self.conn.execute(f"DELETE FROM {lexical} WHERE filepath = ?", (filepath,))
+            self.conn.execute("DELETE FROM file_metadata WHERE filepath = ?", (filepath,))
+
+    def indexed_paths(self) -> Set[str]:
+        """Every repository path this store holds anything for."""
+        rows = self.conn.execute(
+            "SELECT filepath FROM vector_chunks UNION SELECT filepath FROM file_metadata").fetchall()
+        return {row[0] for row in rows}
 
     def add_document(self, filepath: str, text: str, embedding: List[float], chunk_index: int = 0, model_name: str = "default", dimensions: int = 768) -> None:
         # Re-raise to prevent silent index wipe on model/dim mismatch

@@ -270,9 +270,10 @@ def _skill_verification_context(skill: Any, goal: str) -> str:
     to automatically re-trigger anything; reuses the same version-extraction already
     used for supported_versions filtering and missing-skill detection."""
     try:
+        from kriya.skills.skill import mentions_term
         from kriya.tools.knowledge import extract_library_versions
         for lib, ver in extract_library_versions(goal):
-            if lib.lower() in skill.name.lower() or any(t.lower() in lib.lower() for t in skill.tags):
+            if mentions_term(skill.name, lib) or any(mentions_term(lib, t) for t in skill.tags):
                 return f"{lib} {ver}"
     except Exception as ex:
         logger.debug(f"Failed to compute skill verification context: {ex}")

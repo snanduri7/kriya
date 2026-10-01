@@ -323,19 +323,36 @@ def is_version_supported(ver_str: str, range_str: str) -> bool:
     return True
 
 
+_TERM_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def term_tokens(text: str) -> Tuple[str, ...]:
+    """Lower-case alphanumeric tokens: ``org.springframework:spring-boot`` ->
+    (org, springframework, spring, boot)."""
+    return tuple(_TERM_TOKEN_RE.findall(text.lower()))
+
+
+def mentions_term(text: str, term: str) -> bool:
+    """E-14: ``term``'s tokens occur as a contiguous token run in ``text``.
+    Token equality, never substring: "java" does not match "javascript",
+    "spring-boot" matches "spring-boot-starter-web"."""
+    needle = term_tokens(term)
+    if not needle:
+        return False
+    haystack = term_tokens(text)
+    width = len(needle)
+    return any(haystack[i:i + width] == needle for i in range(len(haystack) - width + 1))
+
+
 def fact_match(skill: "Skill", repo_model: RepositoryModel) -> bool:
-    """Does any of this skill's tags substring-match a dependency or framework the
-    repo analyzer actually found in the target repo? Extracted from the inline check
-    that used to live only in kriya/workflow/workflow.py's skill-activation loop, so
-    other consumers (e.g. the repo-manifest knowledge channel) share one implementation
+    """Does any of this skill's tags name a dependency or framework the repo
+    analyzer actually found in the target repo (normalized token equality,
+    ``mentions_term``)? Extracted from the inline check that used to live only
+    in kriya/workflow/workflow.py's skill-activation loop, so other consumers
+    (e.g. the repo-manifest knowledge channel) share one implementation
     instead of a second copy that could silently drift from it."""
-    for tag in skill.tags:
-        tag_lower = tag.lower()
-        if any(tag_lower in dep.lower() for dep in repo_model.dependencies):
-            return True
-        if any(tag_lower in f.lower() for f in repo_model.frameworks):
-            return True
-    return False
+    facts = list(repo_model.dependencies) + list(repo_model.frameworks)
+    return any(mentions_term(fact, tag) for tag in skill.tags for fact in facts)
 
 class Skill(BaseModel):
     name: str = Field(description="Name of the skill.")

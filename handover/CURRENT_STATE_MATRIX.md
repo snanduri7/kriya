@@ -9,23 +9,23 @@ Retrieval/indexing commits since the snapshot: `c57d21f` (EMBEDDING-CONTRACT-001
 
 | Finding | Status at eeae1ac | Evidence | Action / result on this branch |
 |---|---|---|---|
-| E-01 `analyze --changed` deletes unchanged files | STILL OPEN | TRACED: deletion set = change-filtered `files_to_index` (analyzer.py deleted-files loop) | Stage 4: deletions from the full walk |
-| E-02 Java symbols miss 30–60 % | STILL OPEN | TRACED: regex `_parse_java` (graph.py), fake spans `idx+5`/`idx+2`; no tree-sitter | Stage 3: tree-sitter structural model |
+| E-01 `analyze --changed` deletes unchanged files | STILL OPEN | TRACED: deletion set = change-filtered `files_to_index` (analyzer.py deleted-files loop) | FIXED slice 2: deletions = (every path any index layer holds) − full walk; regression + mutation |
+| E-02 Java symbols miss 30–60 % | STILL OPEN | TRACED: regex `_parse_java` (graph.py), fake spans `idx+5`/`idx+2`; no tree-sitter | FIXED slice 1: graph reads the tree-sitter model (methods+ctors 36.2 %→100 % on commons-lang) |
 | E-03 graph adds noise | PARTIALLY CLOSED | PRD-027 corroborated seeds narrow the walk; extraction still regex | improved indirectly by E-02 |
 | E-04 target member dropped by per-file packing | STILL OPEN | packing tiers unchanged | Stage 7 (T0 never dropped) |
 | E-05 failed query embedding → zero vector | CLOSED | `c57d21f` | — |
 | E-06 no scale to 300k LOC | STILL OPEN | brute-force NumPy scan | Stage 6 measures structural lookup latency |
 | E-07 Ruby | DEFERRED | out of scope by owner decision | — |
 | E-08 Spring XML namespaces | STILL OPEN | namespace strip predates snapshot; measured failure stands | not in this batch unless reached |
-| E-09 `async def` not indexed | STILL OPEN | TRACED: graph.py `_parse_python` has no `AsyncFunctionDef` | Stage 3 regression |
+| E-09 `async def` not indexed | STILL OPEN | TRACED: graph.py `_parse_python` has no `AsyncFunctionDef` | FIXED slice 1 (`async def` in the graph; model carries `async`) |
 | E-10 signatures tier drops fields | STILL OPEN | context_budget.py unchanged | Stage 7 (T0 header carries fields) |
 | E-11 huge chunks vs 2048 context | PARTIALLY CLOSED | truncation fixed by segmentation (`c57d21f`); chunk size/header bloat remain | later |
-| E-12 index identity / refresh / relative memory | PARTIALLY CLOSED | embedding fingerprint carries versions; no parser identity; `_ensure_repository_indexed` only indexes an EMPTY graph (workflow.py) | Stage 4 manifest identity |
-| E-13 `skills/` indexed as code | STILL OPEN | index walk filters by `.gitignore` only | Stage 4 |
-| E-14 skill tag substring match | STILL OPEN | skill.py `tag in dep` | Stage 4 |
+| E-12 index identity / refresh / relative memory | PARTIALLY CLOSED | embedding fingerprint carries versions; no parser identity; `_ensure_repository_indexed` only indexes an EMPTY graph (workflow.py) | PARTIALLY FIXED slice 2: graph manifest binds schema + tree-sitter + grammar + parser versions + embedding fingerprint + repository revision; per-file raw sha256; another identity is re-parsed (vectors untouched). Refresh-before-run still open |
+| E-13 `skills/` indexed as code | STILL OPEN | index walk filters by `.gitignore` only | FIXED slice 2: skill-package marker + configured skills/memory roots + `.kriya` excluded; a code dir named `skills` stays indexed |
+| E-14 skill tag substring match | STILL OPEN | skill.py `tag in dep` | FIXED slice 2: `mentions_term` token-run equality at every skill-relevance site (fact_match, goal/name, library/version, manifest channel, skill extraction) |
 | E-15 token estimates | STILL OPEN | `len//4`, 2.5 bytes/token | later |
 | E-16 | — | no such finding in the register | — |
-| E-17 bookkeeping | STILL OPEN | `file_metadata` rows never deleted; module chunk line range wrong | Stage 4 |
+| E-17 bookkeeping | STILL OPEN | `file_metadata` rows never deleted; module chunk line range wrong | FIXED slice 2: `remove_file` deletes vectors+lexical+cache in one transaction; module chunk records first..last line |
 
 ## 2. Code Intelligence seam map (TRACED)
 
@@ -70,6 +70,8 @@ seam (`DependencyGraph._parse_java` / `find_symbol_locations`). No engine conver
 |---|---|---|
 | `graph.py::_parse_java` regex parser (class/method/field/import regexes, line scan, fake `idx+5`/`idx+2` spans; ~140 lines) | `kriya/code_intel/parsing.py` structural model | DELETED (slice 1) |
 | `graph.py` import of `JAVA_METHOD_SIGNATURE_CORE` | — | DELETED (slice 1) |
+| substring tag matching (`tag in dep`, `tag in goal`, `lib in name`) at 5 sites | `skill.mentions_term` | REPLACED (slice 2) |
+| analyzer's file-cache-only deletion loop | union of index layers − full walk | REPLACED (slice 2) |
 
 ## 4. Code Intelligence boundary
 
