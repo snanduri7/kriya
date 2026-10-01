@@ -1512,6 +1512,30 @@ _RESULT_DESCRIBING_INSTEAD_OF_RE = re.compile(
 )
 
 
+# D7 (KNOW A on demo-runtime-4, 2026-10-01): a diagnosis names an offending
+# call in signature notation - `Ignition.getOrCreateIgnite(Object)`,
+# `Ignition.getOrCreateIgnite()` - which never occurs literally in code. The
+# construct it denotes is the call `Ignition.getOrCreateIgnite(`.
+_CALL_SIGNATURE_RE = re.compile(r"^((?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*)\([^()]*\)$")
+
+
+def _construct_removed(quote: str, pairs: List[Tuple[str, str]], orig_text: str) -> bool:
+    """A signature-notation quote names a call this edit removed: the call
+    occurs in the pre-edit source, every occurrence lies inside the replaced
+    regions, and none remains in any replacement. Exact token matching
+    (the qualified name, bounded on the left by a non-identifier character,
+    then `(`). A literal quote is already handled by the removal signal in
+    find_edits_ignoring_own_diagnosis."""
+    match = _CALL_SIGNATURE_RE.match(quote.strip())
+    if match is None:
+        return False
+    token = re.compile(r"(?<![\w$.])" + re.escape(match.group(1)) + r"\s*\(")
+    present = len(token.findall(orig_text))
+    return (present > 0
+            and sum(len(token.findall(search)) for search, _ in pairs) == present
+            and not any(token.search(replace) for _, replace in pairs))
+
+
 def _still_contains(needle: str, haystack: str) -> bool:
     """Word-boundary-aware containment check, only anchoring `\\b` at
     whichever edge of `needle` is itself a word character (alnum/underscore).
@@ -1726,6 +1750,8 @@ def find_edits_ignoring_own_diagnosis(
         )
 
     for q in quoted:
+        if _construct_removed(q, pairs, orig_text):
+            return None
         # Signal (b) is deliberately scoped to "the quote IS the entire old
         # text OF THIS SAME PAIR" (not just present somewhere within a larger
         # old_text, and not borrowed from a DIFFERENT pair) - a broader
