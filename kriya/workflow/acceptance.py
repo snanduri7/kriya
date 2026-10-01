@@ -239,6 +239,7 @@ def run_command_targets_missing_entrypoint(output: str) -> bool:
 
 RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE = "RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE"
 MAVEN_PLUGIN_UNAVAILABLE = "MAVEN_PLUGIN_UNAVAILABLE"
+RUNTIME_PREREQUISITE_BUILD_FAILED = "RUNTIME_PREREQUISITE_BUILD_FAILED"
 _MAVEN_PLUGIN_PREFIX_UNRESOLVED = re.compile(r"No plugin found for prefix '[^']+'")
 
 
@@ -260,6 +261,13 @@ def runtime_verification_infrastructure_reason(result: Dict[str, Any]) -> Option
     if _MAVEN_PLUGIN_PREFIX_UNRESOLVED.search(output):
         return (f"{MAVEN_PLUGIN_UNAVAILABLE}: the runtime command names a Maven plugin prefix that could not be "
                 "resolved")
+    # D3: the runtime gate rebuilds the application from the current source
+    # before running it; when that build fails nothing ran, so there is no
+    # runtime behavior to grade or repair (the compile gate owns compile
+    # failures of the candidate itself).
+    if result.get("prerequisite_failed") or output.startswith("RUNTIME_PREREQUISITE_FAILED:"):
+        return (f"{RUNTIME_PREREQUISITE_BUILD_FAILED}: the application could not be built from the current source "
+                "before runtime verification, so nothing was run")
     for step in result.get("steps") or []:
         if step.get("exit_code") is None and not step.get("timed_out"):
             return "runtime verification command could not be executed"

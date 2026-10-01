@@ -874,7 +874,7 @@ class PolymorphicValidator:
     def build_containment_profile_and_backend(
         self, *, network: NetworkAuthority = NetworkAuthority.DENIED,
         dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
-        acquisition: bool = False,
+        acquisition: bool = False, workspace_path: Optional[str] = None,
     ) -> Tuple[Optional[ContainmentProfile], Optional[ContainmentBackend]]:
         """SEC-001-P6 (2026-09-11): the real-containment counterpart to
         `build_subprocess_env_and_preexec`, gated by
@@ -947,7 +947,9 @@ class PolymorphicValidator:
         )
         profile = ContainmentProfile(
             trust_class=TrustClass.UNTRUSTED_EXECUTION,
-            workspace_path=self.workspace_path,
+            # D2B: a tooling-only acquisition mounts an empty Kriya-owned
+            # directory instead of the candidate (never anything wider).
+            workspace_path=workspace_path or self.workspace_path,
             network=network,
             network_destinations=network_destinations,
             env_allowlist=self.autonomy_cfg.sandbox_env_allowlist,
@@ -964,13 +966,14 @@ class PolymorphicValidator:
         self, cmd: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
         network: NetworkAuthority = NetworkAuthority.DENIED,
         dependency_cache_path: Optional[str] = None, dependency_cache_writable: bool = False,
-        acquisition: bool = False,
+        acquisition: bool = False, workspace_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         self._audit_run_command(cmd, cwd)
         self._register_gate_output(cmd, cwd)
         profile, backend = self.build_containment_profile_and_backend(
             network=network, dependency_cache_path=dependency_cache_path,
             dependency_cache_writable=dependency_cache_writable, acquisition=acquisition,
+            workspace_path=workspace_path,
         )
         if profile is not None:
             result = ProcessController().run(
@@ -1027,7 +1030,7 @@ class PolymorphicValidator:
     _MAVEN_ACQUISITION_INCOMPLETE_MARKER = "MAVEN_ACQUISITION_INCOMPLETE:"
 
     def _run_maven_cmd(self, goals: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
-                       deadline: Optional[float] = None) -> Dict[str, Any]:
+                       deadline: Optional[float] = None, tooling_only: bool = False) -> Dict[str, Any]:
         """The `contained_execution_required`-aware replacement for a
         direct `_run_cmd_with_timeout(["mvn"] + goals, ...)` call - SEC-001
         live-validation follow-up (2026-09-11): the ORIGINAL version of
@@ -1066,7 +1069,19 @@ class PolymorphicValidator:
         caller can tell "acquisition could not complete" apart from an
         ordinary code-level test/compile failure - never a third
         acquisition, never a loop, never a fallback to unrestricted
-        networking for the goals themselves."""
+        networking for the goals themselves.
+
+        ``tooling_only`` (D2B, runtime verification): the acquisition never
+        runs ``goals`` - for a runtime command those execute the candidate
+        application, which must never hold registry network authority. It
+        resolves only the Maven plugins the command names, through each
+        plugin's inert ``help`` goal, in an empty Kriya-owned directory
+        mounted as the container's workspace (no candidate POM, ``.mvn/``,
+        sources or classes exist there), then the exact command runs offline
+        once more. A command that names no plugin goal gets no acquisition.
+        Compile and test keep the goal-derived acquisition above: those goals
+        build and test candidate code by design, and their dependency set is
+        not knowable without the project's own build."""
         if not self.autonomy_cfg.contained_execution_required:
             # Byte-for-byte pass-through (stdin only when a runtime step has one).
             stdin = {"stdin_payload": stdin_payload} if stdin_payload is not None else {}
@@ -1095,6 +1110,9 @@ class PolymorphicValidator:
         goal_desc = f"mvn {' '.join(goals)}"
 
         def _acquire_for_this_goal() -> None:
+            if tooling_only:
+                self._acquire_maven_tooling(goals, cache_dir, _bounded(timeout))
+                return
             # PREPARATION/ACQUISITION ONLY - network=DEPENDENCY_REGISTRY_ONLY
             # (SEC-006: registry-scoped, not unrestricted), same goals as
             # the authoritative offline run, result discarded. Never
@@ -1133,6 +1151,10 @@ class PolymorphicValidator:
 
         if _deadline_exhausted():
             return self._acquisition_incomplete(first, goals, "the run's generation deadline left no time to acquire it")
+        if tooling_only and not self._maven_plugin_goals(goals):
+            return self._acquisition_incomplete(
+                first, goals, "the runtime command names no Maven plugin goal, and runtime verification never "
+                "acquires by running candidate goals")
         logger.info(
             "mvn %s failed offline with a missing-dependency signature - running ONE bounded "
             "acquisition (network-enabled, preparation only, goals=%s) then one more offline "
@@ -1173,6 +1195,61 @@ class PolymorphicValidator:
             second = self._acquisition_incomplete(
                 second, goals, "it is still missing after one bounded, network-enabled reacquisition attempt")
         return second
+
+    @staticmethod
+    def _maven_plugin_goals(goals: List[str]) -> List[str]:
+        """The plugin invocations of a Maven command line (``prefix:goal`` or
+        ``group:artifact[:version]:goal``); lifecycle phases and options excluded."""
+        return [goal for goal in goals if not goal.startswith("-") and ":" in goal]
+
+    def _declared_maven_plugin(self, prefix: str) -> Optional[str]:
+        """``group:artifact[:version]`` of the plugin the project's own POM
+        declares for ``prefix`` (Maven's naming: ``<prefix>-maven-plugin`` or
+        ``maven-<prefix>-plugin``), read as XML - never by running Maven."""
+        try:
+            root = ET.parse(os.path.join(self.workspace_path, "pom.xml")).getroot()
+        except (OSError, ET.ParseError):
+            return None
+
+        def local(element: ET.Element) -> str:
+            return element.tag.rsplit("}", 1)[-1]  # namespace-agnostic tag name
+        properties = {local(e): (e.text or "").strip() for p in root if local(p) == "properties" for e in p}
+        for plugin in (e for e in root.iter() if local(e) == "plugin"):
+            fields = {local(child): (child.text or "").strip() for child in plugin}
+            if fields.get("artifactId") not in (f"{prefix}-maven-plugin", f"maven-{prefix}-plugin"):
+                continue
+            group = fields.get("groupId") or "org.apache.maven.plugins"
+            version = re.sub(r"^\$\{([^}]+)\}$", lambda m: properties.get(m.group(1), ""), fields.get("version", ""))
+            return f"{group}:{fields['artifactId']}" + (f":{version}" if version and "$" not in version else "")
+        return None
+
+    def _acquire_maven_tooling(self, goals: List[str], cache_dir: str, timeout: int) -> None:
+        """D2B: resolve exactly the plugins ``goals`` invoke - nothing of the
+        candidate runs. One registry-scoped process in an empty Kriya-owned
+        directory: ``mvn <coordinate>:help`` per plugin (a prefix the POM does
+        not declare is resolved the way Maven itself resolves it, from the
+        plugin groups' metadata)."""
+        coordinates = []
+        for goal in self._maven_plugin_goals(goals):
+            plugin = goal.rsplit(":", 1)[0]
+            coordinate = (self._declared_maven_plugin(plugin) or plugin) if ":" not in plugin else plugin
+            if coordinate not in coordinates:
+                coordinates.append(coordinate)
+        desc = f"mvn {' '.join(c + ':help' for c in coordinates)} (tooling only)"
+        with tempfile.TemporaryDirectory(prefix="kriya-maven-tooling-") as empty:
+            empty = os.path.realpath(empty)
+            try:
+                result = self._run_cmd_with_timeout(
+                    ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}", *(c + ":help" for c in coordinates)],
+                    cwd=empty, timeout=timeout, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
+                    dependency_cache_path=cache_dir, dependency_cache_writable=True, workspace_path=empty,
+                )
+            except ContainmentSetupError:
+                raise  # SEC-006: a setup failure is never an ordinary acquisition outcome
+            except Exception as e:
+                logger.warning(f"Maven tooling acquisition ({desc}) failed to invoke: {e}")
+                return
+        log_acquisition_outcome("maven", desc, returncode=result["returncode"], timed_out=result.get("timeout", False))
 
     def _acquisition_incomplete(self, result: Dict[str, Any], goals: List[str], why: str) -> Dict[str, Any]:
         """``result`` marked as a dependency-acquisition gap (the
@@ -1329,8 +1406,12 @@ class PolymorphicValidator:
             return None
 
     @_verification_gate("compile")
-    def run_compile_check(self, files: List[str]) -> Dict[str, Any]:
-        """Runs language-specific compilation check on changed files."""
+    def run_compile_check(self, files: List[str], *, deadline: Optional[float] = None) -> Dict[str, Any]:
+        """Runs language-specific compilation check on changed files.
+
+        ``deadline`` (D3): the run's root generation deadline, when the check
+        runs as a runtime-verification prerequisite; the Maven compile is then
+        bounded by what remains of it. The ordinary compile gate passes none."""
         if not files:
             return {"success": True, "output": "No files to compile check."}
 
@@ -1413,7 +1494,7 @@ class PolymorphicValidator:
                             "-Dmaven.compiler.showWarnings=true",
                             "-Dmaven.compiler.compilerArgument=-Xlint:rawtypes,unchecked",
                         ],
-                        cwd=self.workspace_path, timeout=300,
+                        cwd=self.workspace_path, timeout=300, deadline=deadline,
                     )
                     if res["returncode"] == 0:
                         # Found live, 2026-08-22 (ignite_qpid_protocol): a
@@ -1903,6 +1984,9 @@ class PolymorphicValidator:
         if install_error:
             return {"success": False, "timed_out": False, "returncode": None, "output": install_error}
         command = commands[0]
+        not_ready, prerequisite = self._prepare_runtime([command])
+        if not_ready is not None:
+            return not_ready
         try:
             res = self._run_runtime_step(command, timeout)
         except ContainmentSetupError:
@@ -1917,7 +2001,58 @@ class PolymorphicValidator:
             "timed_out": res["timeout"],
             "returncode": res["returncode"],
             "output": res["stdout"] + "\n" + res["stderr"],
+            "runtime_prerequisite": prerequisite,
         }
+
+    RUNTIME_PREREQUISITE_FAILED = "RUNTIME_PREREQUISITE_FAILED"
+
+    def _runtime_needs_compiled_classes(self, command: List[str]) -> bool:
+        """D3: a runtime command that consumes this Maven project's compiled
+        classes - any Maven invocation, or a JVM launched on target/classes."""
+        if not command or not os.path.isfile(os.path.join(self.workspace_path, "pom.xml")):
+            return False
+        tool = os.path.basename(command[0])
+        return tool in ("mvn", "mvnw") or (tool == "java" and any("target/classes" in arg for arg in command[1:]))
+
+    def _java_sources(self) -> List[str]:
+        """Every .java source of the project, workspace-relative (build output,
+        VCS and Kriya state excluded)."""
+        sources = []
+        for directory, dirnames, names in os.walk(self.workspace_path):
+            dirnames[:] = [d for d in dirnames if d not in (".git", ".kriya", "target")]
+            sources += [os.path.relpath(os.path.join(directory, n), self.workspace_path)
+                        for n in names if n.endswith(".java")]
+        return sorted(sources)
+
+    def _prepare_runtime(self, commands: List[List[str]]) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """D3 (KNOW-A 2026-10-01): a runtime verification establishes its own
+        prerequisites from the CURRENT source, never from build output an
+        earlier work unit left behind. Each work unit resets the sandbox with
+        `git clean -fd`, which deletes an untracked target/ (and keeps an
+        ignored one, whose classes may then be stale), and a runtime command
+        such as `mvn exec:java` builds nothing itself. So before a command
+        that consumes the compiled classes of a Maven project runs, the
+        existing compile gate (`mvn clean compile`, its own bounded
+        acquisition, within the run's root deadline) rebuilds them; whether
+        the command itself says `compile` does not matter. Other stacks need
+        no preparation here (an interpreted Python run has none; a raw javac
+        run compiles in its own command). Returns None when ready, else the
+        runtime result that stops verification before anything runs, plus the
+        prerequisite that ran (None when the command needs none)."""
+        if not any(self._runtime_needs_compiled_classes(c) for c in commands):
+            return None, None
+        if self.stack != "java":
+            # A pom.xml is present, and _detect_stack checks it first: this is a
+            # Java project even when the validator was built before it existed.
+            self.stack = self._detect_stack()
+            self._resolve_toolchain_identity()
+        prepared = self.run_compile_check(self._java_sources() or ["pom.xml"], deadline=self._run_deadline())
+        if prepared["success"]:
+            return None, "mvn clean compile (current source): PASSED"
+        return {"success": False, "timed_out": False, "returncode": None, "prerequisite_failed": True,
+                "output": (f"{self.RUNTIME_PREREQUISITE_FAILED}: the application could not be built from the "
+                           f"current source before runtime verification (mvn clean compile); nothing was run.\n\n"
+                           f"{prepared['output']}")}, "mvn clean compile (current source): FAILED"
 
     def _run_runtime_step(self, command: List[str], timeout: int,
                           stdin_payload: Optional[str] = None) -> Dict[str, Any]:
@@ -1928,7 +2063,8 @@ class PolymorphicValidator:
         deadline; anything else runs as is."""
         if command and os.path.basename(command[0]) == "mvn":
             return self._run_maven_cmd(list(command[1:]), cwd=self.workspace_path, timeout=timeout,
-                                       stdin_payload=stdin_payload, deadline=self._run_deadline())
+                                       stdin_payload=stdin_payload, deadline=self._run_deadline(),
+                                       tooling_only=True)
         return self._run_cmd_with_timeout(command, cwd=self.workspace_path, timeout=timeout,
                                           stdin_payload=stdin_payload)
 
@@ -1976,8 +2112,11 @@ class PolymorphicValidator:
         commands, install_error = self._substitute_python_interpreter(commands)
         if install_error:
             return {"success": False, "timed_out": False, "returncode": None, "output": install_error}
+        not_ready, prerequisite = self._prepare_runtime(commands)
+        if not_ready is not None:
+            return not_ready
 
-        output_parts = []
+        output_parts = [f"=== Runtime prerequisite: {prerequisite} ==="] if prerequisite else []
         steps = []
         sequence_toolchain: Dict[str, Any] = {}
         overall_success = True
@@ -2044,6 +2183,7 @@ class PolymorphicValidator:
             "returncode": last_returncode,
             "output": "\n\n".join(output_parts),
             "steps": steps,
+            "runtime_prerequisite": prerequisite,
             **sequence_toolchain,
         }
 

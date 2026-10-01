@@ -293,6 +293,18 @@ falls back to the host's tools.
     `gate_outcomes`): image, digest, and required and observed versions.
   - It is also the toolchain fingerprint that resume and milestone reuse compare (§3.4). A different image digest or
     required version means the gates run again.
+- **Running the application (runtime verification).**
+  - Kriya rebuilds the app from the current source before running it: before a Maven command (or `java` on
+    `target/classes`), the compile gate runs `mvn clean compile`. This happens whether or not the run command itself
+    says `compile`, and never relies on build output left by an earlier work unit, which each work unit's reset may
+    have deleted or left stale. If that build fails, nothing runs, and the run stops with
+    `RUNTIME_PREREQUISITE_BUILD_FAILED`.
+  - If the run command needs a Maven plugin that isn't cached, Kriya fetches only that plugin. It runs the plugin's
+    `help` goal with registry-only network, in an empty directory with none of your project's files. Your
+    application then runs once, offline.
+  - Your application never runs with network access. If the plugin still can't be fetched, or the command names no
+    plugin at all (for example `mvn test` as a run command), the run stops with
+    `RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE`, never a Developer repair.
 - **Unsupported.** Other versions (e.g. Java 7, Python 3.9) and toolchains without a profile fail closed.
   `kriya doctor --production` reports this as `toolchain.required`.
 

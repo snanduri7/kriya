@@ -564,9 +564,15 @@ def create_git_worktree(repo_path: str) -> str:
                 logger.debug(f"git worktree prune failed (non-fatal): {e}")
             subprocess.run(["git", *_HOOKS_DISABLED, "worktree", "add", "--detach", worktree_path], cwd=repo_path, check=True, capture_output=True)
         else:
-            # Reset but preserve target/ and other build directories. "HEAD" here
-            # must be resolved against repo_path, not checked out literally inside
-            # the worktree - see _resolve_repo_head for why.
+            # Reset to the repository's HEAD. `git clean -fd` removes every
+            # untracked file and directory that is not git-ignored, and keeps
+            # ignored ones: build output (target/, build/, ...) survives only
+            # when the project's .gitignore ignores it, and is then whatever an
+            # earlier work unit built. Nothing may rely on it either way; a
+            # runtime verification rebuilds from the current source itself
+            # (D3, PolymorphicValidator._prepare_runtime). "HEAD" here must be
+            # resolved against repo_path, not checked out literally inside the
+            # worktree - see _resolve_repo_head for why.
             target = _resolve_repo_head(repo_path)
             subprocess.run(["git", *_HOOKS_DISABLED, "checkout", "-f", target or "HEAD"], cwd=worktree_path, check=True, capture_output=True)
             subprocess.run(["git", "clean", "-fd"], cwd=worktree_path, check=True, capture_output=True)
