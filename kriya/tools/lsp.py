@@ -28,7 +28,7 @@ import logging
 import os
 import shutil
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,12 @@ JDTLS_DIAGNOSTICS_TIMEOUT_SECONDS = 30
 # are worth interrupting a retry prompt for; a hint/info-level diagnostic is
 # exactly the kind of noise this whole mechanism exists to cut through, not add.
 LSP_SEVERITY_ERROR = 1
+
+
+# Never mirrored into JDTLS's private project copy: VCS data, Kriya's own state,
+# build output and IDE metadata (JDTLS regenerates its own inside the mirror).
+_MIRROR_SKIP_DIRS = frozenset({".git", ".kriya", "target", "build", ".gradle", "node_modules", ".settings", ".idea"})
+_MIRROR_SKIP_FILES = frozenset({".project", ".classpath"})
 
 
 def find_jdtls() -> Optional[str]:
@@ -75,9 +81,32 @@ class JdtlsClient:
         self._diagnostics: Dict[str, List[Dict[str, Any]]] = {}
         self._open_docs: Dict[str, int] = {}
         self._reader_task: Optional[asyncio.Task] = None
+        # D1 (2026-10-01): JDTLS never sees the candidate tree. Its Maven
+        # import writes .project/.classpath/.settings/ and builds target/ into
+        # whatever project root it is given (measured with the real 1.60.0,
+        # import/autobuild preferences included), so it is rooted at a
+        # Kriya-owned private mirror (canonical path) that is synced from the
+        # candidate before every query; the candidate is only ever read.
+        self._mirror: Optional[str] = None
+        self._mirrored: Dict[str, Tuple[int, int]] = {}
 
     async def start(self) -> None:
+        """Launch jdtls and complete the initialize handshake. On ANY failure
+        (launch error, initialize timeout, cancellation) everything already
+        acquired - the data dir, the process, the reader task - is released
+        before the exception propagates: the caller degrades to no LSP
+        grounding and never holds the client, so nothing else would ever
+        call shutdown() (LEAK-JDTLS-START-FAILURE-001)."""
+        try:
+            await self._start()
+        except BaseException:
+            await self._release()
+            raise
+
+    async def _start(self) -> None:
         self._data_dir = tempfile.mkdtemp(prefix="kriya-jdtls-data-")
+        self._mirror = os.path.realpath(tempfile.mkdtemp(prefix="kriya-jdtls-mirror-"))
+        self._sync_mirror()
         # Confirmed live, not theoretical: jdtls's own launcher REFUSES to start
         # ("Exception: jdtls requires at least Java 21") if a JAVA_HOME inherited
         # from the parent process resolves to anything older - and Kriya's own
@@ -96,7 +125,7 @@ class JdtlsClient:
             env=jdtls_env,
         )
         self._reader_task = asyncio.create_task(self._read_loop())
-        root_uri = "file://" + self.project_root
+        root_uri = "file://" + self._mirror
         await self._request(
             "initialize",
             {"processId": os.getpid(), "rootUri": root_uri, "capabilities": {}},
@@ -115,7 +144,8 @@ class JdtlsClient:
         within `timeout` (possibly empty, never raises on timeout - a slow or
         stuck check degrades to "no LSP grounding for this attempt", not a
         failure)."""
-        uri = "file://" + file_path
+        self._sync_mirror()
+        uri = "file://" + self._mirror_path(file_path)
         self._diagnostics.pop(uri, None)
         if uri in self._open_docs:
             self._open_docs[uri] += 1
@@ -137,6 +167,47 @@ class JdtlsClient:
             await asyncio.sleep(0.2)
         return self._diagnostics.get(uri, [])
 
+    def _mirror_path(self, file_path: str) -> str:
+        """The mirror path (canonical, so it matches the URIs JDTLS
+        publishes) of a candidate file."""
+        rel = os.path.relpath(os.path.realpath(file_path), os.path.realpath(self.project_root))
+        if rel == os.pardir or rel.startswith(os.pardir + os.sep) or os.path.isabs(rel):
+            raise ValueError(f"{file_path!r} is outside the analyzed project {self.project_root!r}")
+        return os.path.join(self._mirror, rel)
+
+    def _sync_mirror(self) -> None:
+        """Make the mirror hold the candidate's current source files: copy
+        new/changed files (stat-compared), drop deleted ones. Kriya's state,
+        VCS data and build output are never mirrored. Reads the candidate
+        only."""
+        root = os.path.realpath(self.project_root)
+        seen = set()
+        for directory, subdirs, files in os.walk(root):
+            subdirs[:] = [d for d in subdirs if d not in _MIRROR_SKIP_DIRS]
+            for name in files:
+                if name in _MIRROR_SKIP_FILES:
+                    continue
+                source = os.path.join(directory, name)
+                rel = os.path.relpath(source, root)
+                try:
+                    st = os.stat(source)
+                except FileNotFoundError:
+                    continue
+                stamp = (st.st_size, st.st_mtime_ns)
+                seen.add(rel)
+                if self._mirrored.get(rel) == stamp:
+                    continue
+                target = os.path.join(self._mirror, rel)
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                shutil.copyfile(source, target)
+                self._mirrored[rel] = stamp
+        for rel in set(self._mirrored) - seen:
+            try:
+                os.remove(os.path.join(self._mirror, rel))
+            except FileNotFoundError:
+                pass
+            del self._mirrored[rel]
+
     async def shutdown(self) -> None:
         try:
             await asyncio.wait_for(self._request("shutdown", {}, timeout=10), timeout=10)
@@ -144,8 +215,14 @@ class JdtlsClient:
         except Exception as ex:
             logger.debug(f"jdtls shutdown handshake failed, terminating directly: {ex}")
         finally:
-            if self._reader_task:
-                self._reader_task.cancel()
+            await self._release()
+
+    async def _release(self) -> None:
+        """Cancel the reader, stop the process (SIGTERM, then SIGKILL) and
+        remove the data dir - shared by shutdown() and a failed start()."""
+        if self._reader_task:
+            self._reader_task.cancel()
+        try:
             if self.process:
                 # SIGTERM alone, with no wait/confirmation and no SIGKILL
                 # fallback, is the same leaked-orphan-subprocess bug class
@@ -166,8 +243,12 @@ class JdtlsClient:
                     pass
                 except Exception as ex:
                     logger.debug(f"jdtls process termination failed: {ex}")
-            if self._data_dir:
-                shutil.rmtree(self._data_dir, ignore_errors=True)
+        finally:
+            for attr in ("_data_dir", "_mirror"):
+                path = getattr(self, attr)
+                if path:
+                    shutil.rmtree(path, ignore_errors=True)
+                    setattr(self, attr, None)
 
     async def _read_loop(self) -> None:
         while True:

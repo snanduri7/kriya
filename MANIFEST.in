@@ -1,0 +1,13 @@
+include README.md pyproject.toml requirements.txt MANIFEST.in
+include .github/workflows/ci.yml
+include kriya/config/default_config.yaml
+# Whole release trees, not per-extension patterns: an extension list silently
+# dropped tracked test fixtures (*.json) and skill content (rules.txt, *.java,
+# *.xml, *.properties). kriya.distribution --source-root verifies the sdist
+# contains every git-tracked file under these trees.
+graft plugins/core_tools
+graft scripts
+graft skills
+graft tests
+global-exclude *.py[cod] .DS_Store
+recursive-exclude * __pycache__

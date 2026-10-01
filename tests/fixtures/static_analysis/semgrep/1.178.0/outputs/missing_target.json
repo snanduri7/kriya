@@ -1,0 +1,1 @@
+{"version":"1.178.0","results":[],"errors":[{"code":2,"level":"error","type":"SemgrepError","message":"Invalid scanning root: missing/Nope.java"}],"paths":{"scanned":[],"skipped":[]},"engine_requested":"OSS","skipped_rules":[],"profiling_results":[]}

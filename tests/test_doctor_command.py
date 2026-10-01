@@ -10,7 +10,6 @@ from kriya.config import AppConfig
 def _cfg(tmp_path):
     cfg = AppConfig()
     cfg.paths.memory = str(tmp_path / "memory")
-    cfg.paths.logs = str(tmp_path / "logs")
     cfg.paths.skills = str(tmp_path / "skills")
     cfg.plugins.directory = str(tmp_path / "plugins")
     return cfg

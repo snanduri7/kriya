@@ -1,0 +1,17 @@
+{
+  "status": "IN_PROGRESS",
+  "path": "/Users/sriramnanduri/.kriya/certifications/streaks/4845003189350e43996e4af4230965e63128dc5976fa36ef3c89be2594a87bab.json",
+  "streak": 0,
+  "required": 3,
+  "trials": [
+    {
+      "trial": 1,
+      "outcome": "FAILED",
+      "streak_after": 0,
+      "reasons": [
+        "matrix_not_certified",
+        "case_C8_FAILED"
+      ]
+    }
+  ]
+}

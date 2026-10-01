@@ -1,0 +1,71 @@
+Qualifying qwen3-coder:30b-kriya-e52213655394 for developer, planner, architect, reviewer, run_verifier, skill_gap, spec_compliance (inference settings sha256:9e929b038e293a2c9a7caee18d9e0de3f14ff5fcf398d19cf2de977625315e5e: temperature=0.7, reasoning=False, extra_body={"reasoning_effort":"none","top_p":0.8}) ...
+
+[Usage: 26 input tokens, 2 output tokens | Time: 8.82s | Finish: stop]
+  plain_completion             PASS           8.83s
+
+[Usage: 26 input tokens, 3 output tokens | Time: 0.17s | Finish: stop]
+  finish_reason_stop           PASS           0.17s
+
+[Usage: 45 input tokens, 17 output tokens | Time: 0.39s | Finish: stop]
+  structured_json              PASS           0.40s
+
+[Usage: 77 input tokens, 40 output tokens | Time: 0.67s | Finish: stop]
+  multiline_json               PASS           0.67s
+
+[Usage: 297 input tokens, 22 output tokens | Time: 0.67s | Finish: tool_calls]
+  native_tool_calls            PASS           0.67s
+
+[Usage: 308 input tokens, 45 output tokens | Time: 0.73s | Finish: tool_calls]
+  multiple_tool_calls          PASS           0.73s
+
+[Usage: 328 input tokens, 49 output tokens | Time: 1.00s | Finish: tool_calls]
+  tool_argument_integrity      PASS           1.00s
+
+[Usage: 36 input tokens, 51 output tokens | Time: 0.77s | Finish: stop]
+  streaming_assembly           PASS           0.77s
+
+[Usage: 34 input tokens, 16 output tokens | Time: 0.37s | Finish: length | OUTPUT_TRUNCATED]
+  output_truncation            PASS           0.37s
+
+[Usage: 52 input tokens, 3 output tokens | Time: 0.19s | Finish: stop]
+  reasoning_behavior           PASS           0.19s
+
+[Usage: 98 input tokens, 85 output tokens | Time: 1.25s | Finish: stop]
+  full_file_raw_content        PASS           1.25s
+
+[Usage: 139 input tokens, 85 output tokens | Time: 1.31s | Finish: stop]
+  anchored_edit_protocol       PASS           1.31s
+
+[Usage: 54 input tokens, 42 output tokens | Time: 0.67s | Finish: stop]
+  malformed_output_recovery    PASS           0.67s
+  timeout_semantics            PASS           0.01s
+
+[Usage: None input tokens, None output tokens | Time: 0.13s | Finish: unreported | CANCELLED]
+
+[Usage: 26 input tokens, 2 output tokens | Time: 0.16s | Finish: stop]
+  cancellation_semantics       PASS           0.30s
+  endpoint_error_semantics     PASS           0.06s
+  endpoint_restart_semantics   UNAVAILABLE    0.00s
+
+[Usage: 103 input tokens, 1 output tokens | Time: 0.25s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 105 input tokens, 1 output tokens | Time: 0.23s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 141 input tokens, 1 output tokens | Time: 0.26s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 119 input tokens, 1 output tokens | Time: 0.24s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 76 input tokens, 1 output tokens | Time: 0.18s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 86 input tokens, 1 output tokens | Time: 0.19s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 116 input tokens, 1 output tokens | Time: 0.25s | Finish: length | OUTPUT_TRUNCATED]
+  tokenizer_measurement        PASS           1.63s
+  context_capacity             PASS         122.52s
+
+Summary: {'PASS': 18, 'FAIL': 0, 'UNAVAILABLE': 1}  measured limits: {'verified_tool_argument_chars': 87, 'reasoning_observed': False, 'bytes_per_token_floor': 2.1101, 'non_ascii_bytes_per_token_floor': 2.9499, 'bytes_per_token_ceiling': 8.0}
+Runtime fingerprint: 4ef4192f5c82c9e344a0cee1335a5423bc3e9755807d967a37451266cfeadacd
+Qualification identity: 4bcf44baaf4be45a489ba8d307369533156aa51808e102aaa9086a7b7ef66a10
+Qualification policy: sha256:d9ba816202804271520609d7af0eecc30d9a987b99d8f76467830c7ae8ad5e09 (model_qualification)
+Execution environment: sha256:14c376d9902adef681992f09574182776af1d9eefea04995708c495563e63d0d (darwin/arm64, metal Apple M1 Max, 64 GiB class, ollama/0.34.4; exact=True) - capacity evidence counts only here
+Record: /Users/sriramnanduri/.kriya/qualifications/4bcf44baaf4be45a489ba8d307369533156aa51808e102aaa9086a7b7ef66a10.json

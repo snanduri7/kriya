@@ -1,0 +1,16 @@
+
+==================================== ERRORS ====================================
+____________ ERROR collecting tests/test_distribution_integrity.py _____________
+ImportError while importing test module '/Users/sriramnanduri/Documents/Codex/2026-09-20/from-folder-users-sriramnanduri-workingdirectory-ai/work/kriya-prd/tests/test_distribution_integrity.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_distribution_integrity.py:7: in <module>
+    from kriya.distribution import REQUIRED_RUNTIME_FILES, check_distribution
+E   ModuleNotFoundError: No module named 'kriya.distribution'
+=========================== short test summary info ============================
+ERROR tests/test_distribution_integrity.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.09s

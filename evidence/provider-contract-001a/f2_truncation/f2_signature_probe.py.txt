@@ -1,0 +1,73 @@
+"""PROVIDER-CONTRACT-001A F-2, second measurement: Ollama /v1's truncation
+signature, sized by REAL tokens. For each corpus the bytes/token ratio is
+measured on a small prompt first; prompts are then built to reach the given
+multiples of the served window in real tokens. Records reported prompt
+tokens, Kriya's admission count and the byte lower bound for each.
+Run from the approved workspace:  python f2_signature_probe.py <production config>"""
+import json, random, string, sys, time, urllib.request
+
+from kriya.config.config import load_config
+from kriya.core.inference_settings import role_inference_settings
+from kriya.core.model_qualification import measured_limits_for
+from kriya.core.model_runtime import observe_served_context, resolve_configured_model_runtime
+from kriya.core.provider_contract import DEFAULT_BYTES_PER_TOKEN_CEILING, consumption_bytes
+from kriya.core.token_budget import PER_MESSAGE_OVERHEAD_TOKENS, REQUEST_OVERHEAD_TOKENS, count_tokens, dispatch_text
+
+CODE = '''def handle_request(request, store):
+    """Validate a request and persist it."""
+    if not request.get("id"):
+        raise ValueError("missing id")
+    record = {"id": request["id"], "items": [item.strip() for item in request.get("items", [])]}
+    store.save(record)
+    return record
+
+'''
+rng = random.Random(7)
+DENSE = " ".join("".join(rng.choice(string.ascii_letters + string.digits) for _ in range(rng.randint(3, 9)))
+                 for _ in range(400)) + "\n"  # identifier-like noise: few bytes per token
+CORPORA = {"code": CODE, "dense": DENSE}
+cfg = load_config(sys.argv[1])
+model = cfg.llm.model
+fp = resolve_configured_model_runtime(cfg, model, fresh=True)
+limits = measured_limits_for(fp, cfg, settings=role_inference_settings(cfg, "developer", model))
+floor, ceiling = limits.get("bytes_per_token_floor"), limits.get("bytes_per_token_ceiling")
+window = observe_served_context(base_url="http://localhost:11434/v1", model=model) or fp.effective_context_window
+
+
+def send(messages):
+    body = {"model": model, "messages": messages, "max_tokens": 16, "temperature": 0.0, "stream": False}
+    req = urllib.request.Request("http://localhost:11434/v1/chat/completions", json.dumps(body).encode(),
+                                 {"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=900) as resp:
+        return json.load(resp)["usage"]["prompt_tokens"]
+
+
+def messages_for(unit, count):
+    return [{"role": "system", "content": "Answer in one word."},
+            {"role": "user", "content": unit * count + "\nAnswer yes."}]
+
+
+for name, unit in CORPORA.items():
+    calibration = send(messages_for(unit, 20))
+    base = send(messages_for(unit, 0))
+    per_unit = (calibration - base) / 20
+    for multiple in (0.9, 0.98, 1.02, 1.1, 1.3, 1.6, 2.5, 4.0):
+        count = max(1, int((multiple * window - base) / per_unit))
+        messages = messages_for(unit, count)
+        text = dispatch_text(messages)
+        predicted = count_tokens(text, qualified_bytes_per_token=floor,
+                                 qualified_non_ascii_bytes_per_token=limits.get("non_ascii_bytes_per_token_floor")
+                                 ).tokens + REQUEST_OVERHEAD_TOKENS + PER_MESSAGE_OVERHEAD_TOKENS * len(messages)
+        expected_real = int(base + per_unit * count)
+        started = time.monotonic()
+        try:
+            reported, error = send(messages), None
+        except Exception as exc:
+            reported, error = None, f"{type(exc).__name__}: {exc}"
+        print(json.dumps({
+            "model": model, "corpus": name, "served_window": window, "real_multiple": multiple,
+            "expected_real_tokens": expected_real, "predicted_at_dispatch": predicted,
+            "byte_lower_bound": int(consumption_bytes(text) / (ceiling or DEFAULT_BYTES_PER_TOKEN_CEILING)),
+            "reported_prompt_tokens": reported, "bytes": len(text.encode()),
+            "seconds": round(time.monotonic() - started, 1), "error": error,
+        }), flush=True)

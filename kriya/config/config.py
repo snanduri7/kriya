@@ -1,11 +1,73 @@
 import logging
 import os
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
+
+
+class ModelCapabilities(BaseModel):
+    """Measured local-model protocol capabilities, never inferred from API shape."""
+
+    native_tool_calls: bool = Field(default=True)
+    json_mode: bool = Field(default=True)
+    reliable_multiline_json: bool = Field(default=False)
+    streaming: bool = Field(default=True)
+    max_tool_argument_chars: int = Field(default=8192, ge=256)
+    preferred_edit_protocol: str = Field(default="small_native_tools")
+
+class ContextPolicyConfig(BaseModel):
+    """PRD-016 adaptive budget policy of one model binding. The binding's
+    context window (the num_ctx it sends) and max_tokens are its PREFERRED
+    operating values. ``adaptive`` lets a request that does not fit be sent
+    with the smallest larger context tier that is qualified for this exact
+    runtime (a current ``kriya model qualify --context-window N`` record with
+    a passing near-window capacity probe), or - while no qualification data
+    exists for that tier - one listed in ``declared_safe_context_tiers``; and
+    lets the output grow above max_tokens for a grounded expectation.
+    ``strict`` never exceeds the preferred values. Ceilings are hard limits
+    for either. SECURITY_AUTHORITY under SEC-009: a repository cannot grant
+    itself a larger window."""
+
+    mode: str = Field(default="adaptive")
+    declared_safe_context_tiers: List[int] = Field(default_factory=list)
+    max_context_tokens: Optional[int] = Field(default=None, ge=1024)
+    max_output_tokens: Optional[int] = Field(default=None, ge=256)
+
+    @field_validator("mode")
+    @classmethod
+    def _known_mode(cls, value: str) -> str:
+        if value not in ("adaptive", "strict"):
+            raise ValueError("context_policy.mode must be 'adaptive' or 'strict'")
+        return value
+
+    @field_validator("declared_safe_context_tiers")
+    @classmethod
+    def _positive_tiers(cls, value: List[int]) -> List[int]:
+        if any(tier < 1024 for tier in value):
+            raise ValueError("context_policy.declared_safe_context_tiers entries must be at least 1024 tokens")
+        return sorted(set(value))
+
+
+class LLMTransportConfig(BaseModel):
+    """PROVIDER-CONTRACT-001: Kriya-owned transport policy for every local
+    model call. The provider SDK's own defaults (automatic retries, a
+    600-second read timeout, proxy variables inherited from the environment)
+    are never authoritative: requests go direct (no environment proxies),
+    are sent exactly once (Kriya's retry policy alone decides on another),
+    and are bounded by these timeouts - and, inside an attempt, by its
+    remaining time budget. SECURITY_AUTHORITY: they are resource bounds."""
+
+    connect_timeout_seconds: float = Field(default=10.0, gt=0)
+    # Non-streaming calls return only after the whole generation, so the
+    # read timeout bounds one full completion.
+    read_timeout_seconds: float = Field(default=900.0, gt=0)
+    write_timeout_seconds: float = Field(default=60.0, gt=0)
+    pool_timeout_seconds: float = Field(default=10.0, gt=0)
+
 
 class LLMConfig(BaseModel):
     provider: str = Field(default="openai")
@@ -14,9 +76,20 @@ class LLMConfig(BaseModel):
     base_url: str = Field(default="http://localhost:11434/v1")
     temperature: float = Field(default=0.2)
     max_tokens: int = Field(default=4096)
+    # Planner responses are execution metadata, not implementation bodies.
+    # Keep their output budget independent from Developer generation, but large
+    # enough for dependency-rich authoritative plans without truncation.
+    planner_max_tokens: int = Field(default=8192, ge=256)
     extra_body: Dict[str, Any] = Field(default_factory=dict)
     reasoning: bool = Field(default=False)
     context_window: int = Field(default=32768)
+    # INF-001: the inference runtime adapter serving this binding
+    # (kriya/core/inference_runtime.py). None is the packaged default; an
+    # unregistered name is refused, never served by the default instead.
+    # SECURITY_AUTHORITY: it decides which native identity endpoints are
+    # probed and whether a context window is sent.
+    inference_runtime: Optional[str] = Field(default=None)
+    transport: LLMTransportConfig = Field(default_factory=LLMTransportConfig)
     knowledge_cutoff: str = Field(default="2023-12-01")
     knowledge_cutoff_confidence: str = Field(default="estimated")
     # Applied ONLY to Developer generation calls that are directly responding to a
@@ -51,24 +124,251 @@ class LLMConfig(BaseModel):
     # which would silently require re-specifying model/base_url/max_tokens/etc. too
     # just to change one sampling parameter.
     reviewer_temperature: Optional[float] = Field(default=None)
+    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
+    context_policy: ContextPolicyConfig = Field(default_factory=ContextPolicyConfig)
 
 class PluginsConfig(BaseModel):
     directory: str = Field(default="./plugins")
     enabled: List[str] = Field(default_factory=list)
 
+REMOVED_PATHS_LOGS_MESSAGE = (
+    "paths.logs was removed; use logging.directory for logs or paths.state for trace state."
+)
+REMOVED_LOGGING_FILE_MESSAGE = (
+    "logging.file was removed; use logging.directory to configure the log directory "
+    "(or logging.file_enabled: false to turn the application log off)."
+)
+
+
+class RemovedConfigFieldError(ValueError):
+    """A configuration names a field Kriya has removed; never reinterpreted."""
+
+
 class PathsConfig(BaseModel):
+    """`state` holds persistent run history (traces.db): KRIYA_STATE_DIR >
+    `state` > ~/.kriya/state - see kriya/core/state_paths.py. A relative value
+    resolves against the config file's directory at load; inside the workspace
+    it must sit beneath <workspace>/.kriya/. File logs are logging.directory."""
     skills: str = Field(default="./skills")
     memory: str = Field(default="./memory")
-    logs: str = Field(default="./logs")
+    state: Optional[str] = Field(default=None)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "logs" in data:
+            raise RemovedConfigFieldError(REMOVED_PATHS_LOGS_MESSAGE)
+        return data
+
+
+class SkillsConfig(BaseModel):
+    load_global: bool = Field(default=True)
+    load_cwd: bool = Field(default=True)
 
 class LoggingConfig(BaseModel):
+    """Log locations are owned by kriya/core/logging_setup.py: the directory is
+    KRIYA_LOG_DIR > `directory` (absolute; canonicalized once at load) >
+    ~/.kriya/logs, never the process CWD."""
     level: str = Field(default="INFO")
-    file: Optional[str] = Field(default="./logs/kriya.log")
+    directory: Optional[str] = Field(default=None)
+    file_enabled: bool = Field(default=True)
+    run_file_enabled: bool = Field(default=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_removed_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "file" in data:
+            raise RemovedConfigFieldError(REMOVED_LOGGING_FILE_MESSAGE)
+        return data
+
+class MCPCapabilityConfig(BaseModel):
+    """TOOL-003 P1 (2026-09-13): the operator-controlled MAXIMUM
+    filesystem/network authority a given `mcp.<server>` may ever be
+    declared to possess. Defines and governs capability authority only -
+    does NOT yet enforce it at the OS/container boundary (that is TOOL-003
+    P2, real OCI containment). See kriya/mcp/capability.py's module
+    docstring for the full resolved-profile/canonicalization/digest
+    machinery this config resolves into, and CLAUDE.md's "MCP capability
+    authority" section for the overall mechanism.
+
+    SAFE DEFAULT (every field defaults to the most restrictive value -
+    "declares nothing"): with no containment backend wired to this profile
+    yet, no default can make an untrusted MCP process ACTUALLY safer today
+    - the only meaningful thing a default can do is avoid pre-declaring
+    broad authority that a future enforcement pass would then either have
+    to honor (defeating the point of finally landing containment) or
+    silently downgrade (a false sense of security in the interim). So the
+    default declares NOTHING (no filesystem/network authority at all) -
+    every existing `mcp.<server>` block with no `capabilities` section
+    keeps running exactly as it does today (nothing is enforced yet - see
+    the P1 security statement), but the day TOOL-003 P2 wires this profile
+    into real containment, an operator who never explicitly widened a
+    server's declared authority will find it starts genuinely restricted,
+    not grandfathered into broad implicit trust that would then need to be
+    manually locked back down.
+
+    `extra="forbid"` (unlike MCPServerConfig itself): an unrecognized
+    capability field must be a hard pydantic ValidationError, not silently
+    dropped - SEC-009 already denies-without-approval any `mcp.*` field by
+    virtue of the whole `mcp.<server>` block being SECURITY_AUTHORITY
+    (kriya/config/authority.py's `classify_field()`), but a silently-
+    ignored unknown field would still let a future typo'd/renamed field
+    pass validation while doing nothing, which is a worse failure mode
+    than refusing to load the config at all.
+
+    PROCESS is deliberately NOT a configurable field here at all (Task 8):
+    SEC-004's process-group isolation (`start_new_session=True`) is
+    LIFECYCLE ownership only (guaranteed cleanup on shutdown/timeout), not
+    an execution-capability restriction - it does not, and was never
+    claimed to, restrict what a live MCP server's process tree can do
+    while running. Adding a boolean like `allow_process_spawn` here would
+    be a decorative, non-enforceable policy field (nothing currently
+    reads or enforces it) that could mislead a future reader into thinking
+    process capability is already governed - it is not, until real OCI
+    containment (TOOL-003 P2) exists. See
+    kriya/mcp/capability.py::PROCESS_AUTHORITY_STATEMENT for the fixed,
+    honest constant every resolved profile carries instead.
+
+    NETWORK reuses `kriya.tools.containment.NetworkAuthority`'s exact
+    DENIED/UNRESTRICTED semantics by value-string convention (see
+    kriya/mcp/capability.py::MCPNetworkAuthority for why this is a
+    dedicated MCP-local enum rather than an added member of the shared
+    ContainmentProfile-facing enum - reusing that shared enum's own type
+    was evaluated and rejected: kriya/tools/containment_oci.py's
+    `OCIContainmentBackend.prepare()` has no exhaustive-match ValueError
+    guard for `ContainmentProfile.network` - an unrecognized member
+    silently falls through to full UNRESTRICTED networking, so adding a
+    third member to that SHARED, ALREADY-IN-PRODUCTION enum risks a live
+    SEC-006 regression in the completely unrelated target-code sandboxing
+    path if any future code ever constructed a ContainmentProfile with the
+    new member by mistake - not a risk worth taking for a value that MCP
+    capability profiles never feed into ContainmentBackend in this
+    package anyway)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_read: bool = Field(default=False)
+    workspace_write: bool = Field(default=False)
+    temp_read_write: bool = Field(default=False)
+    dependency_cache_read: bool = Field(default=False)
+    # Resolved to absolute, escape-checked real paths by
+    # resolve_config_state() BEFORE SEC-009 authority resolution ever
+    # inspects this config (see that function's own "MCP capability path
+    # resolution" block) - by the time AppConfig validates this model, and
+    # by the time kriya/mcp/capability.py's resolve_mcp_capability_profile()
+    # ever sees these values, they are always already-safe absolute paths,
+    # never raw operator-supplied relative strings. A relative string that
+    # resolves outside the anchor root is rejected at that same resolution
+    # point (ValueError), never silently accepted here downstream.
+    additional_read_paths: List[str] = Field(default_factory=list)
+    additional_write_paths: List[str] = Field(default_factory=list)
+    network: str = Field(default="denied")
+    # Only meaningful (and required non-empty) when network=="explicit_destinations" -
+    # see kriya/mcp/capability.py::resolve_mcp_capability_profile()'s own check.
+    network_hosts: List[str] = Field(default_factory=list)
+
+    @field_validator("network")
+    @classmethod
+    def _network_must_be_recognized(cls, v: str) -> str:
+        if v not in ("denied", "explicit_destinations", "unrestricted"):
+            raise ValueError(
+                f"mcp.<server>.capabilities.network must be one of "
+                f"'denied'/'explicit_destinations'/'unrestricted', got {v!r}"
+            )
+        return v
 
 class MCPServerConfig(BaseModel):
     command: str
     args: List[str] = Field(default_factory=list)
     env: Dict[str, str] = Field(default_factory=dict)
+    capabilities: MCPCapabilityConfig = Field(default_factory=MCPCapabilityConfig)
+
+class MCPLifecycleConfig(BaseModel):
+    """SEC-004 (2026-09-13): bounded MCP subprocess lifecycle/resource
+    controls, applied uniformly to every configured `mcp.<server>` -
+    deliberately ONE coherent section rather than per-server overrides
+    or scattered module-level constants (this risk's own explicit
+    instruction: "do not introduce unnecessary tuning knobs if two
+    bounds can share one clearly defined setting"). Every field here is
+    SECURITY_AUTHORITY under SEC-009 (kriya/config/authority.py) -
+    weakening any bound (a longer timeout, a bigger stdout limit, a
+    higher resource ceiling) is a security-relevant capability change, so
+    a repository can never set any of these without explicit SEC-009
+    approval; only the packaged default (this file) is trusted.
+
+    `startup_timeout_seconds` bounds the ENTIRE launch sequence (process
+    spawn + initialize request + initialize response/handshake
+    completion) - a child that starts but never completes the handshake
+    cannot hang Kriya past this bound.
+
+    `request_timeout_seconds` bounds every individual protocol request
+    made through `_send_request()` after startup (tools/list, tools/call,
+    any future method) - independent of the startup bound, since a
+    server can complete its handshake and then hang on a specific call.
+
+    `shutdown_grace_seconds` is how long `stop()` waits for a SIGTERM'd
+    process tree to exit cooperatively before escalating to SIGKILL.
+    `force_kill_reap_seconds` is the separate, additional bound on
+    reaping the tree AFTER the forced kill is sent - kept distinct from
+    the grace period because a killed process's exit is normally
+    near-instant, so a much shorter bound is appropriate there than the
+    grace period given to a cooperative shutdown attempt.
+
+    `max_stdout_line_bytes` is the hard ceiling on a single stdout
+    protocol line/frame (enforced via asyncio's own StreamReader `limit`,
+    which raises deterministically rather than allocating unboundedly -
+    see kriya/mcp/lifecycle.py). Measured empirically against Kriya's own
+    shipped MCP server's real `tools/list` response (1282 bytes) - the
+    default here is deliberately generous headroom over that, sized for
+    a legitimately tool-rich third-party server, not the smallest value
+    that happens to work today.
+
+    `max_stderr_buffer_bytes` bounds the ROLLING (not cumulative) stderr
+    buffer kept for diagnostics - a flooding server's stderr is
+    continuously drained (never blocking the child's own write()) but
+    only the most recent bytes up to this bound are retained.
+
+    `cpu_seconds`/`memory_mb` reuse `kriya/tools/sandbox.py::
+    posix_resource_limits_preexec_fn()` (SEC-001) exactly as-is - the
+    same primitive already used for target-code sandbox execution.
+    IMPORTANT ASYMMETRY, stated honestly rather than flattened: `memory_mb`
+    (RLIMIT_AS) is a true ceiling, deterministic/fail-closed on Linux,
+    advisory-only on macOS (an already-accepted SEC-001 platform
+    limitation, not new here). `cpu_seconds` (RLIMIT_CPU) is a CUMULATIVE
+    LIFETIME BUDGET, not a rate limit - appropriate for a finite
+    compile/test job, but an MCP server is a long-lived daemon for the
+    life of a Kriya session, so this is deliberately generous (a
+    legitimately busy server should not be SIGKILL'd mid-session for
+    having done a lot of honest work). It still bounds a genuinely
+    CPU-spinning/pathological server, which is the property SEC-004
+    requires - true CPU RATE limiting (cgroups CPU shares/quota) would
+    need real container/cgroup containment and belongs to the
+    not-yet-registered MCP invocation/execution authority work (NOT the
+    register's existing SEC-005 row, which is an unrelated
+    package-installation/network-access broker risk), not attempted
+    here (see docs/assurance/KRIYA_PRODUCTION_RISK_REGISTER.md's SEC-004
+    entry for the full native-vs-OCI decision record)."""
+
+    startup_timeout_seconds: int = Field(default=30, ge=1)
+    request_timeout_seconds: int = Field(default=60, ge=1)
+    shutdown_grace_seconds: int = Field(default=5, ge=0)
+    force_kill_reap_seconds: int = Field(default=5, ge=0)
+    max_stdout_line_bytes: int = Field(default=4_000_000, ge=1024)
+    max_stderr_buffer_bytes: int = Field(default=1_000_000, ge=1024)
+    cpu_seconds: Optional[int] = Field(default=3600, ge=1)
+    memory_mb: Optional[int] = Field(default=2048, ge=1)
+    # TOOL-003 P2 (2026-09-13): a containerized MCP server's teardown has a
+    # SECOND lifecycle layer beyond the process-group kill terminate_mcp_process()
+    # already bounds - the host `docker rm -f <container>` authoritative
+    # cleanup (PreparedContainment.cleanup's own docstring: a VM-mediated
+    # container runtime like Docker Desktop does not reliably stop on a
+    # host-side process-group SIGKILL alone). Bounds THAT separate call,
+    # invoked via run_in_executor (never blocking the event loop) after
+    # terminate_mcp_process() already ran - additive to, not a replacement
+    # for, shutdown_grace_seconds/force_kill_reap_seconds above. Only
+    # meaningful when mcp_contained_execution_required is True; ignored
+    # entirely for host-side (uncontained) MCP servers.
+    container_cleanup_timeout_seconds: int = Field(default=15, ge=1)
 
 class EmbeddingConfig(BaseModel):
     model: str = Field(default="nomic-embed-text:latest")
@@ -89,8 +389,308 @@ class AutonomyConfig(BaseModel):
     ])
     sandbox_cpu_seconds: int = Field(default=240)
     sandbox_memory_mb: int = Field(default=4096)
+    # SEC-007 (2026-09-12): dependency/build-tool ACQUISITION resource
+    # authority, deliberately separate from sandbox_cpu_seconds/
+    # sandbox_memory_mb above - those two bound TARGET/generated code
+    # execution and are meant to be tightened aggressively for a
+    # suspected-hostile application; acquisition (Maven/pip resolving a
+    # real, possibly large dependency/plugin tree with real network
+    # access) is trusted-purpose tooling with different, usually larger,
+    # resource needs. Confirmed live, 2026-09-11/12: a fixture's own
+    # sandbox_memory_mb=128 (chosen to make an application's OWN
+    # resource-abuse probe meaningful) OOM-killed Maven's acquisition-
+    # phase JVM (real returncode 137) resolving a legitimately large
+    # transitive plugin tree - lowering the target cap to test hostile
+    # code should never also break legitimate build tooling. Defaults
+    # generous enough for ordinary Maven/pip dependency resolution
+    # without being unbounded.
+    acquisition_cpu_seconds: int = Field(default=300)
+    acquisition_memory_mb: int = Field(default=2048)
+    # SEC-006 (2026-09-12): the ONLY source of destination authority for
+    # NetworkAuthority.DEPENDENCY_REGISTRY_ONLY acquisition - a hostile
+    # repository's pom.xml/requirements.txt/settings.xml/pip.conf can never
+    # enlarge this set (Invariant: repository content cannot enlarge
+    # authority). Exact hostnames only, empirically the minimum needed for
+    # real Maven Central + PyPI acquisition (verified live, 2026-09-12):
+    # `repo.maven.apache.org` (Maven Central itself), `pypi.org` (the PyPI
+    # index), `files.pythonhosted.org` (the Fastly CDN PyPI actually serves
+    # wheels from - NOT reachable via pypi.org's own host). Deliberately NO
+    # organizational wildcard (`.apache.org`/`.python.org`) even though one
+    # would be more convenient - the packaged default must contain only
+    # what was empirically required, per this risk's own explicit
+    # instruction. A private/internal registry needs an explicit additional
+    # entry here; it is never inferred from repository content.
+    acquisition_registry_hosts: List[str] = Field(
+        default_factory=lambda: ["repo.maven.apache.org", "pypi.org", "files.pythonhosted.org"],
+        # validate_default: without this, pydantic v2 does not run
+        # field_validator over a DEFAULT value at all (only over an
+        # explicitly-supplied one) - the packaged default would then stay
+        # in its literal declaration order while any explicit config value
+        # gets canonicalized (sorted/deduped/lowercased), a real
+        # inconsistency for a field whose canonical form doubles as the
+        # authority-identity hash input (kriya/tools/containment_oci.py's
+        # compute_authority_id).
+        validate_default=True,
+    )
+
+    @field_validator("acquisition_registry_hosts")
+    @classmethod
+    def _validate_acquisition_registry_hosts(cls, hosts: List[str]) -> List[str]:
+        """Normalizes to a canonical form (lowercase, no trailing dot,
+        deduped, sorted) - this exact canonical form is also the input to
+        the per-run authority-identity hash (kriya/tools/containment_oci.py),
+        so two configs naming the same hosts in a different order/case
+        always produce the same authority identity. Rejects anything that
+        isn't a bare exact hostname: no scheme/path (a URL smuggling a
+        different real destination than it appears to), no port, no
+        wildcard/leading-dot convenience entries (this risk's own explicit
+        instruction - a wildcard is a materially larger authority grant
+        than the exact host it looks like), no empty/whitespace entries."""
+        normalized = []
+        for raw in hosts:
+            host = raw.strip().lower()
+            if not host:
+                raise ValueError("autonomy.acquisition_registry_hosts: empty hostname entry is not allowed.")
+            if "://" in host or "/" in host:
+                raise ValueError(
+                    f"autonomy.acquisition_registry_hosts: {raw!r} looks like a URL, not a bare "
+                    "hostname - registry authority must be an exact hostname (e.g. 'pypi.org'), "
+                    "never a URL/path."
+                )
+            if ":" in host:
+                raise ValueError(
+                    f"autonomy.acquisition_registry_hosts: {raw!r} includes a port - registry "
+                    "authority must be a bare hostname with no port."
+                )
+            if host.startswith(".") or host.startswith("*"):
+                raise ValueError(
+                    f"autonomy.acquisition_registry_hosts: {raw!r} is a wildcard/organizational "
+                    "entry - this risk's own instruction forbids convenience wildcards (e.g. "
+                    "'.apache.org'). List each exact registry hostname explicitly."
+                )
+            host = host.rstrip(".")
+            if not host:
+                raise ValueError("autonomy.acquisition_registry_hosts: empty hostname entry is not allowed.")
+            normalized.append(host)
+        return sorted(set(normalized))
+    # SEC-001 foundation (2026-09-11): which ContainmentBackend
+    # (kriya/tools/containment.py) ProcessController composes for a
+    # profile that requires one. "none" (NullContainmentBackend) is the
+    # ONLY packaged value today - it reproduces the exact env-allowlist +
+    # best-effort-rlimit behavior sandbox_execution already provided
+    # before this field existed, so this default changes nothing about
+    # current behavior. No production (OCI/sandbox-exec) backend name is
+    # registered yet - see docs/architecture/SEC001_HOSTILE_CODE_CONTAINMENT_DESIGN.md;
+    # an unrecognized value fails closed (BackendUnavailableError), never
+    # silently falls back to uncontained execution.
+    containment_backend: str = Field(default="none")
+    # SEC-001-P6 (2026-09-11): opt-in gate for routing PolymorphicValidator's
+    # compile/test commands and service_runtime's application-under-test
+    # process through a real ContainmentProfile (network=DENIED, real
+    # filesystem/process isolation via `containment_backend`) instead of
+    # today's env-allowlist/rlimit-only behavior. Default False preserves
+    # "existing behavior must remain compatible when containment is not
+    # required by the current execution profile" exactly - flipping this to
+    # True with containment_backend still "none" fails CLOSED (Null backend
+    # now refuses any non-UNRESTRICTED-network profile), by design: this
+    # flag means "these paths must be really contained", not merely "try
+    # to". Versioned toolchain selection and image attestation are owned by
+    # PolymorphicValidator/OCIContainmentBackend (PRD-011).
+    contained_execution_required: bool = Field(default=False)
+    # TOOL-003 P2 (2026-09-13): the MCP analogue of contained_execution_required
+    # immediately above, deliberately a SEPARATE flag rather than reusing that
+    # one - contained_execution_required governs target-code compile/test/
+    # managed-service sandboxing (PolymorphicValidator/service_runtime), a
+    # different execution surface with a different risk profile and a
+    # different operator who might reasonably want one contained without the
+    # other. Default False preserves 100% of today's MCP behavior (host-side
+    # execution, unchanged) for every existing deployment and the entire
+    # existing MCP test corpus - this is a decision made explicitly with the
+    # user (2026-09-13), not a default flip: "always require containment for
+    # every MCP server" was considered and rejected as this pass's default
+    # because it would make Docker a hard MCP dependency and require rewriting
+    # ~40 existing tests that spawn real MCP subprocesses via sys.executable
+    # with no Docker involved - a strict superset relationship holds instead
+    # (flipping this to True later is a one-line config change, not a
+    # rearchitecture). Same fail-closed semantics as contained_execution_required:
+    # flipping this to True with containment_backend still "none" (or Docker
+    # simply unavailable) means every MCP server refuses to start - "no raw-host
+    # fallback" is the explicit, non-negotiable requirement (2026-09-13 user
+    # instruction) - never a silent downgrade to host-side execution just
+    # because containment could not be established. When False, MCP still gets
+    # TOOL-002 invocation authorization and a resolved/audited MCPCapabilityProfile
+    # (TOOL-003 P1) - only the OS/container enforcement boundary is absent, and
+    # every real MCP connection's own telemetry records this fact explicitly
+    # (kriya/mcp/mcp.py's own "containment_required"/"containment_active"
+    # fields) - a host-side run must never be misread as containment evidence.
+    mcp_contained_execution_required: bool = Field(default=False)
+    # CORR-018 (2026-09-13): opt-in strict semantic-region enforcement for
+    # ordinary generate/fix Java brownfield mutations - the general-case
+    # analogue of contained_execution_required/mcp_contained_execution_
+    # required immediately above, same shape, same reasoning. Default False
+    # preserves 100% of today's ordinary generate/fix behavior: neither
+    # CORR-016's own grounding_goal-regex derivation nor a deterministic
+    # repository relationship (e.g. interface -> implementer) can name
+    # which member a natural bug-fix-shaped goal ("fix the NPE when X is
+    # null") needs to touch - that is discovered during generation, not
+    # statable up front - so making this unconditional would fail closed
+    # on the overwhelming majority of real brownfield usage (a deliberate,
+    # explicit decision with the user, 2026-09-13; see kriya/workflow/
+    # semantic_scope_derivation.py's own module docstring). When True,
+    # every mutation to an EXISTING Java source file must be covered by
+    # requirement-grounded semantic-region authority (explicit grounding_
+    # goal derivation or deterministic repository-grounded necessity) or
+    # the candidate is rejected before write - never a silent downgrade
+    # to file-level-only protection. Flipping this to True does not touch
+    # A3's own existing authorized_semantic_regions caller (proposal_
+    # promotion.py already supplies its own explicit region list, which
+    # this flag never overrides or narrows).
+    semantic_region_enforcement_required: bool = Field(default=False)
+    # ShellTool previously had no wall-clock timeout at all (SEC-001
+    # execution-surface inventory finding, 2026-09-11) - every other real
+    # command primitive in this codebase (ProcessController.run(), used by
+    # PolymorphicValidator/service_runtime) always has one.
+    shell_command_timeout_seconds: int = Field(default=300)
+    # PRD-012: network authority for ShellTool commands that are not a
+    # recognized package-manager invocation (SEC-005 classifies those).
+    # "unrestricted" (the default, SEC-005's documented behavior) is the
+    # explicitly privileged class: such a command keeps its execution
+    # environment's network. "denied" gives it no network at all, and a
+    # recognized package manager still gets SEC-006 registry-scoped
+    # authority when contained. The production runtime profile forces
+    # "denied". SECURITY_AUTHORITY under SEC-009.
+    shell_network: str = Field(default="unrestricted")
+
+    # FILE-INTEGRITY-CONTRACT-001 (kriya/agents/response_protocol.py): the
+    # protocol the Developer is asked to answer in. "structured"
+    # (kriya_sentinel_v1, the production protocol) asks for path-named
+    # <<<KRIYA:...>>> blocks with explicit terminators. "legacy_strict"
+    # (strict_legacy_v1) keeps the historical FIX ANALYSIS/SEARCH/REPLACE/
+    # FILE CONTENT/NO CHANGE NEEDED markers as exact lines; it has no payload
+    # terminator, is compatibility-only and is refused under
+    # runtime_profile: production and by doctor --production. Neither
+    # rewrites payload, and there is no fallback between them. Qualification
+    # binds the protocol identity. SECURITY_AUTHORITY under SEC-009.
+    developer_response_protocol: str = Field(default="structured")
+
+    @field_validator("developer_response_protocol")
+    @classmethod
+    def _developer_response_protocol_must_be_known(cls, v: str) -> str:
+        if v not in ("legacy_strict", "structured"):
+            raise ValueError(
+                f"autonomy.developer_response_protocol must be 'legacy_strict' or 'structured', got {v!r}"
+            )
+        return v
+
+    @field_validator("shell_network")
+    @classmethod
+    def _shell_network_must_be_known(cls, v: str) -> str:
+        if v not in ("unrestricted", "denied"):
+            raise ValueError(f"autonomy.shell_network must be 'unrestricted' or 'denied', got {v!r}")
+        return v
+
+    # PRD-020 (kriya/workflow/requirements.py): what an original requirement
+    # (REQ-n, the user's own goal statement) without a verifier verdict
+    # (unknown) or with a verdict that it cannot be confirmed from source
+    # (unverified) does to the terminal decision. "record" reports it in
+    # the result and the run's events; "block" refuses success
+    # (REQUIREMENTS_UNRESOLVED) before anything is applied. A violated
+    # requirement always blocks. Production seals the unknown policy to
+    # "block". SECURITY_AUTHORITY under SEC-009: a repository must not be
+    # able to relax either.
+    # PRD-023 (kriya/workflow/contract_classification.py): whether an
+    # evidence-backed POTENTIALLY_DERIVED/INDETERMINATE public contract change
+    # may be offered to a human ("human"; needs a human-in-the-loop run with
+    # an approval callback, otherwise it stays blocked) or is always blocked
+    # ("deny", the default). A clearly unauthorized change is never offered.
+    # SECURITY_AUTHORITY under SEC-009.
+    contract_change_escalation: str = Field(default="deny")
+
+    @field_validator("contract_change_escalation")
+    @classmethod
+    def _contract_change_escalation_must_be_known(cls, v: str) -> str:
+        if v not in ("deny", "human"):
+            raise ValueError(f"autonomy.contract_change_escalation must be 'deny' or 'human', got {v!r}")
+        return v
+
+    requirement_unknown_policy: str = Field(default="record")
+    requirement_unverified_policy: str = Field(default="record")
+
+    @field_validator("requirement_unknown_policy", "requirement_unverified_policy")
+    @classmethod
+    def _requirement_policy_must_be_known(cls, v: str) -> str:
+        if v not in ("record", "block"):
+            raise ValueError(f"requirement policies must be 'record' or 'block', got {v!r}")
+        return v
+    # VAL-001 brownfield validation baselining (2026-09-18, kriya/workflow/
+    # validation_baseline.py): both fields default to a complete no-op for
+    # every existing caller - zero new subprocess invocation, zero behavior
+    # change - deliberately, per this same precedent's own documented
+    # run_verification_enabled blast-radius lesson a few lines below (~110
+    # explicit test opt-outs needed for THAT default-True flip). Brownfield
+    # baselining is opt-in per-campaign, never an unconditional new default.
+    #
+    # brownfield_baseline_target_test: an explicit PolymorphicValidator.
+    # run_tests(target_test=...) value naming the "relevant/targeted" test
+    # scope for a brownfield PRE/POST baseline comparison - a single string
+    # (one target) or an ORDERED LIST of strings (VAL-001 G1-R3: several
+    # specific targets at once, e.g. VAL-001 G1's own two C# test files,
+    # represented STRUCTURALLY as a YAML list - never as one shell-joined
+    # string; kriya/tools/validate.py's own PolymorphicValidator.run_tests()
+    # passes each list entry as its own separate argv entry, no shell
+    # involved anywhere in this path). None (default) means no targeted
+    # baseline is captured at all - this is deliberately NOT auto-derived
+    # from architect_files (that would require inventing a new affected-
+    # test-discovery heuristic, explicitly out of scope for this package -
+    # "do not create a parallel validation framework").
+    brownfield_baseline_target_test: Optional[Union[str, List[str]]] = Field(default=None)
+    # brownfield_full_regression_baseline_policy: "auto" | "required" |
+    # "disabled". "required": capture a pristine full-suite PRE baseline
+    # once (before the first Developer call) and delta-compare the final
+    # candidate's own full-regression run against it - NEW_FAILURE/
+    # CHANGED_FAILURE block, PRE_EXISTING_FAILURE does not. "disabled":
+    # today's exact unmodified behavior (the full suite still runs
+    # post-approval as it always has; no PRE baseline, no delta - any
+    # failure blocks, matching current behavior byte-for-byte). "auto"
+    # (PRD-024, kriya/workflow/baseline_policy.py): "required" exactly when
+    # a deterministic trigger fires - a brownfield route (task/enhancement/
+    # refactor) with a git identity, an existing test suite and a planned
+    # change to an existing source, plus any risk signal (risk >= MEDIUM,
+    # a non-LIGHT weight, a refactor, a risky impact component, or a changed
+    # source an existing test names); "disabled" otherwise. Engineering
+    # triage must be enabled for the route signal. A triggered baseline is
+    # as binding as "required" (indeterminate stops the run before
+    # generation).
+    brownfield_full_regression_baseline_policy: str = Field(default="auto")
+
+    @field_validator("brownfield_full_regression_baseline_policy")
+    @classmethod
+    def _brownfield_policy_must_be_known_value(cls, v: str) -> str:
+        if v not in ("auto", "required", "disabled"):
+            raise ValueError(
+                "autonomy.brownfield_full_regression_baseline_policy must be "
+                f"'auto', 'required', or 'disabled', got {v!r}"
+            )
+        return v
     run_verification_enabled: bool = Field(default=True)
     run_verification_timeout_seconds: int = Field(default=90)
+    # Gates on SpecComplianceAgent (kriya/agents/agent.py): unlike compile/test/
+    # run-verification, checks whether the goal's LITERALLY named requirements
+    # (an exact field/method/class name, exact type, exact constant) actually
+    # appear in the generated code - closes a gap compile/test/LSP grounding
+    # structurally can't (syntactically valid, semantically non-compliant code
+    # passes every other gate). Runs once, only after every other gate already
+    # passed. Default False (opt-in), unlike run_verification_enabled's
+    # default True - this is a genuinely NEW unconditional agent call, and
+    # run_verification_enabled's own introduction required ~110 explicit
+    # `cfg.autonomy.run_verification_enabled = False` opt-outs across
+    # tests/test_workflow.py just to keep its shared llm.complete mock
+    # side_effect sequencing intact; repeating that blast radius for a new,
+    # separately-optional gate isn't warranted. Same "new capability, off
+    # until proven" default already used for web_lookup_enabled and
+    # self_correction_loop_enabled above.
+    spec_compliance_enabled: bool = Field(default=False)
+    max_consecutive_no_progress_attempts: int = Field(default=2, ge=1)
     web_lookup_enabled: bool = Field(default=False)
     # A live-lookup query's CONTENT is already hard-restricted (bare technology-name
     # strings only, enforced in code, never goal/design/code/error text) - this is a
@@ -103,16 +703,48 @@ class AutonomyConfig(BaseModel):
     web_lookup_auto_approve: bool = Field(default=False)
     # Off by default for the same reason as web_lookup_enabled above: this activates
     # a genuinely new capability (the Developer's own model gets a bounded native
-    # tool-calling loop against the sandbox worktree on a compile failure, before
-    # falling back to today's full-regeneration retry) rather than tuning an existing
-    # one. Native tool-calling is confirmed reliable only for SMALL tool-call
-    # arguments on local models (spikes/tool_call_developer/README.md) - the loop's
-    # toolset (kriya/workflow/self_correction.py) is deliberately restricted to
-    # small-argument-only actions on files already in the sandbox, never full file
-    # content and never a new file, so this stays a narrow, additive recovery path,
-    # not a parallel generation architecture.
+    # tool-calling loop against the sandbox worktree on a compile OR run-verification
+    # failure, before falling back to today's full-regeneration retry) rather than
+    # tuning an existing one. Native tool-calling is confirmed reliable only for
+    # SMALL tool-call arguments on local models (spikes/tool_call_developer/README.md)
+    # - the loop's toolset (kriya/workflow/self_correction.py) is deliberately
+    # restricted to small-argument-only actions (including, since 2026-08-22, 4
+    # read-only "ground truth" lookups - a project's real declared dependencies, an
+    # external dependency's real public API via javap against the resolved
+    # classpath, a Maven Central coordinate lookup, and a real compiled-output
+    # listing - closing the gap where a fix needs grounding in something that isn't
+    # any one file's content), never full file content and never a new file, so this
+    # stays a narrow, additive recovery path, not a parallel generation architecture.
     self_correction_loop_enabled: bool = Field(default=False)
     self_correction_loop_max_turns: int = Field(default=4)
+    # DEV-INV-001 (2026-09-19): off by default for the same reason as
+    # self_correction_loop_enabled above - a genuinely new capability (the
+    # Developer may request bounded, read-only repository evidence -
+    # inspect_member/find_symbol/find_callers/search_code, kriya/workflow/
+    # investigation.py - mid-attempt, BEFORE proposing any code), not a
+    # tuning knob on an existing one. Strictly read-only: every path-backed
+    # result passes through kriya/policy/filesystem.py::AuthorizedFileReader
+    # (workspace containment + sensitive-path denial) before being shown to
+    # the model, and D1's own `_completeness_gated_operation` (kriya/
+    # workflow/attempt.py) is completely unchanged - investigation evidence
+    # can only ever help authorize a MORE precise patch, never a whole-file
+    # replacement it wouldn't otherwise be authorized for.
+    developer_investigation_enabled: bool = Field(default=False)
+    # Per-attempt budget (shared across every _run_developer_generation call
+    # within the SAME attempt_number, including coordinated-repair's several
+    # per-participant calls - see kriya/workflow/attempt.py's own
+    # investigation_turns_used_by_attempt accounting), not per-call: a
+    # coordinated repair with several participants must not get this many
+    # turns EACH.
+    #
+    # Raised from 4 to 10 (2026-09-19, VAL-001 G1 follow-up): safe to raise
+    # now that run_investigation_loop() stops itself the moment mutation-
+    # readiness is achieved (see that function's own EVIDENCE-DRIVEN
+    # PROGRESSION docstring) rather than only on the model's own say-so or
+    # this count - this ceiling is now a genuine safety valve for a
+    # pathological loop, not the primary stopping mechanism, so a higher
+    # default costs nothing in the common (readiness-reached-early) case.
+    developer_investigation_max_turns: int = Field(default=10, ge=0)
     # Default 1 = today's exact behavior (a single first attempt, unchanged). A value
     # above 1 tries that many INDEPENDENT full-set candidates for the very first
     # generation attempt only (never on later retries, which already have real error
@@ -127,6 +759,45 @@ class AutonomyConfig(BaseModel):
     # effect when a real isolated worktree sandbox exists (see best_of_n.py's own
     # guard) - never risks writing a discarded candidate's files into the real project.
     best_of_n_first_attempt: int = Field(default=1)
+    # Optional end-to-end generation deadline. None preserves unbounded normal
+    # CLI behavior; eval/demo harnesses with an outer timeout should set this to
+    # the same or a slightly smaller value so Kriya can stop cleanly instead of
+    # starting a model pass the harness will kill mid-generation.
+    generation_time_budget_seconds: Optional[int] = Field(default=None, ge=1)
+    generation_gate_reserve_seconds: int = Field(default=120, ge=0)
+    generation_seconds_per_file_estimate: int = Field(default=90, ge=1)
+    # Closes a real, confirmed-in-code gap (2026-08-23): index_repository() -
+    # the only thing that ever populates dependency_graph.db's files/symbols
+    # tables and vector_index.db's code embeddings - is called EXCLUSIVELY
+    # from the `kriya analyze` CLI command, never from run_generation_workflow()
+    # itself. A repo never explicitly `kriya analyze`-d therefore has an
+    # empty persisted graph for the entire life of every `generate`/`fix`
+    # call against it - already known to silently degrade the duplicate-type
+    # and cross-package-mismatch Quality Gates to their in-memory-only
+    # fallback (see docs/design.md §7.45's follow-up), and, for a genuinely
+    # pre-existing repo Kriya never wrote itself, there's no established_files-
+    # style fallback covering that gap at all. When True, run_generation_workflow()
+    # checks once, before state.generation_started_monotonic starts (i.e. this
+    # cost is structurally excluded from generation_time_budget_seconds, not
+    # counted against it) whether dependency_graph.db has any indexed files
+    # for this workspace; if not, it runs a real, one-time index_repository()
+    # pass (never with changed=True - that flag scopes to files `git diff`
+    # reports as modified/staged/untracked, which would silently index NOTHING
+    # for a fully-committed pre-existing repo, exactly the case this exists to
+    # cover) before proceeding. A repeat call against an already-indexed
+    # workspace (milestone 2+ in a sequence, or a second `fix` call) is a
+    # cheap no-op row check, not a re-index - the same file-level mtime cache
+    # index_repository() already has makes this safe to leave enabled across
+    # a whole milestone sequence. Any failure (embedding endpoint down, model
+    # not pulled) is caught and logged as a warning - generation proceeds
+    # exactly as it does today with an empty graph, never blocked by this.
+    # Defaults False here (same "new capability, off until proven" rollout
+    # already used for spec_compliance_enabled above - this is the first time
+    # `generate`/`fix` would trigger real, uncontrolled embedding-endpoint
+    # traffic implicitly rather than only on an explicit `kriya analyze`) -
+    # candidate to flip True in default_config.yaml once live-validated, same
+    # two-step rollout spec_compliance_enabled already went through.
+    auto_index_missing_dependency_graph: bool = Field(default=False)
 
 class SearchConfig(BaseModel):
     # Empty by default - live lookup stays fully inert unless a project explicitly
@@ -141,17 +812,171 @@ class SearchConfig(BaseModel):
     # search backend) - trying several in order meaningfully improves the odds of
     # actually finding something usable, which is the whole point of the feature.
     top_k: int = Field(default=3)
+    # Extra identifiers the project owner explicitly declares public. Unknown
+    # terms never receive unattended auto-approval.
+    public_terms: List[str] = Field(default_factory=list)
+
+def _packaged_llm_max_tokens() -> int:
+    """The packaged llm.max_tokens (default_config.yaml, the canonical
+    default every configuration is layered on)."""
+    with open(os.path.join(os.path.dirname(__file__), "default_config.yaml"), "r", encoding="utf-8") as handle:
+        return int(yaml.safe_load(handle)["llm"]["max_tokens"])
+
+
+# The shared output budget: what a model binding that leaves max_tokens unset
+# asks for. Read from the packaged default, never a second copy of the value.
+DEFAULT_OUTPUT_TOKENS = _packaged_llm_max_tokens()
+
 
 class FallbackModelConfig(BaseModel):
     model: str
     base_url: str = Field(default="http://localhost:11434/v1")
     api_key: str = Field(default="local-key")
     temperature: float = Field(default=0.2)
-    max_tokens: int = Field(default=4096)
+    # PRD-017: this model's own output budget; every call to this model uses
+    # it (the Developer retry hop used to reuse the primary's value whatever
+    # this said). None (unset) means the shared default DEFAULT_OUTPUT_TOKENS,
+    # never the primary's own llm.max_tokens: that is the primary binding's
+    # setting, not a chain-wide one. PRD-016 still bounds the final per-call
+    # output by the model's window and max_output_tokens.
+    max_tokens: Optional[int] = Field(default=None, ge=1)
+    capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
     reasoning: bool = Field(default=False)
+    # Mirrors LLMConfig.extra_body (below) - a fallback model can need request
+    # shape the primary model doesn't (e.g. qwen3.8:27b's reasoning_effort
+    # string, distinct from the `reasoning` bool above, which only gates this
+    # client's own <think>-stripping/token-floor logic). Before this field
+    # existed, every call site that escalates to a fallback model (call_with_
+    # escalation, attribution's triage tier, self_correction's tool loop, the
+    # Developer retry loop's targeted/fallback-targeted/full-set paths, lesson
+    # extraction) still unconditionally used the PRIMARY model's own extra_body
+    # regardless of which model was actually being called - harmless when the
+    # fallback ignores unknown fields, but silently wrong whenever it doesn't.
+    extra_body: Dict[str, Any] = Field(default_factory=dict)
     context_window: int = Field(default=32768)
+    # INF-001: the inference runtime adapter serving this binding
+    # (kriya/core/inference_runtime.py). None is the packaged default; an
+    # unregistered name is refused, never served by the default instead.
+    # SECURITY_AUTHORITY: it decides which native identity endpoints are
+    # probed and whether a context window is sent.
+    inference_runtime: Optional[str] = Field(default=None)
     knowledge_cutoff: str = Field(default="2023-12-01")
     knowledge_cutoff_confidence: str = Field(default="estimated")
+    context_policy: ContextPolicyConfig = Field(default_factory=ContextPolicyConfig)
+
+_POLICY_ROLES = ("planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance")
+
+
+# The settings a model binding's runtime identity and protocol depend on
+# (kriya/core/model_runtime.py, model_capabilities.py).
+_BINDING_IDENTITY_FIELDS = ("base_url", "extra_body", "context_window", "reasoning", "capabilities", "context_policy")
+
+
+def _binding_identity(binding: Any) -> Dict[str, Any]:
+    identity: Dict[str, Any] = {}
+    for name in _BINDING_IDENTITY_FIELDS:
+        value = getattr(binding, name, None)
+        if isinstance(value, BaseModel):
+            identity[name] = (value.model_dump(), sorted(value.model_fields_set))
+        else:
+            identity[name] = value
+    return identity
+
+
+def routing_alias_conflicts(config: Any) -> List[str]:
+    """Routing candidates whose alias names another binding (the primary
+    llm, an llm_chain entry, an agent_llms role's llm or chain) with
+    different identity-relevant settings."""
+    others = [("llm", config.llm)]
+    others += [(f"llm_chain[{index}]", entry) for index, entry in enumerate(config.llm_chain)]
+    for role in _POLICY_ROLES:
+        role_cfg = getattr(config.agent_llms, role, None)
+        if role_cfg is None:
+            continue
+        if role_cfg.llm is not None:
+            others.append((f"agent_llms.{role}.llm", role_cfg.llm))
+        others += [(f"agent_llms.{role}.llm_chain[{index}]", entry) for index, entry in enumerate(role_cfg.llm_chain)]
+    conflicts = []
+    for candidate in config.model_policy.routing.candidates:
+        for where, other in others:
+            if (other.model.casefold() == candidate.model.casefold()
+                    and _binding_identity(other) != _binding_identity(candidate)):
+                conflicts.append(
+                    f"candidate {candidate.model!r} has the alias of {where} but different settings; model "
+                    "bindings are resolved by alias, so give the candidate a distinct alias (an Ollama tag "
+                    "copy) or identical settings")
+    return conflicts
+
+
+class ModelRoutingConfig(BaseModel):
+    """PRD-019: opt-in evidence-based model routing (kriya/core/model_routing.py).
+    ``roles`` maps a role (developer or an agent_llms role) to candidate
+    aliases in operator preference order; a candidate is eligible only when
+    its exact runtime is QUALIFIED for that role as routed. ``table_path``
+    is the between-run metrics table (``kriya model metrics --write-table``;
+    default: the state directory); ``frozen_routes_path`` the table
+    ``kriya model routes --freeze`` wrote, replayed by ``mode: frozen``."""
+
+    mode: str = Field(default="off")
+    candidates: List[FallbackModelConfig] = Field(default_factory=list)
+    roles: Dict[str, List[str]] = Field(default_factory=dict)
+    min_calls: int = Field(default=5, ge=1)
+    min_context_window: Optional[int] = Field(default=None, ge=1)
+    table_path: Optional[str] = Field(default=None)
+    frozen_routes_path: Optional[str] = Field(default=None)
+
+    @field_validator("mode")
+    @classmethod
+    def _known_mode(cls, mode: str) -> str:
+        if mode not in ("off", "evidence", "frozen"):
+            raise ValueError(f"model_policy.routing.mode must be off, evidence or frozen, got {mode!r}")
+        return mode
+
+    @field_validator("table_path", "frozen_routes_path")
+    @classmethod
+    def _absolute_path(cls, path: Optional[str]) -> Optional[str]:
+        if path is not None and not os.path.isabs(os.path.expanduser(path)):
+            raise ValueError(f"model_policy.routing paths must be absolute, got {path!r}")
+        return os.path.realpath(os.path.expanduser(path)) if path is not None else None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "ModelRoutingConfig":
+        aliases = [candidate.model for candidate in self.candidates]
+        if len(set(aliases)) != len(aliases):
+            raise ValueError("model_policy.routing.candidates: aliases must be unique")
+        unknown_roles = sorted(set(self.roles) - {"developer", *_POLICY_ROLES})
+        if unknown_roles:
+            raise ValueError(f"model_policy.routing.roles: unknown role(s) {unknown_roles}")
+        for role, role_aliases in self.roles.items():
+            missing = sorted(set(role_aliases) - set(aliases))
+            if missing:
+                raise ValueError(f"model_policy.routing.roles.{role}: {missing} are not configured candidates")
+        if self.mode == "frozen" and not self.frozen_routes_path:
+            raise ValueError("model_policy.routing.mode frozen requires frozen_routes_path")
+        return self
+
+
+class ModelPolicyConfig(BaseModel):
+    """PRD-018: role-model independence policy. By default every role may
+    share the Developer's model (the local single-model setup); the
+    operator can require selected roles (typically the verifier roles
+    run_verifier, spec_compliance, reviewer) to run on an exact runtime
+    distinct from the Developer's. Enforced before a workflow starts and by
+    ``doctor --production``. A second model's opinion is still never
+    verification evidence. SECURITY_AUTHORITY: a repository cannot relax it."""
+
+    independent_roles: List[str] = Field(default_factory=list)
+    routing: ModelRoutingConfig = Field(default_factory=ModelRoutingConfig)
+
+    @field_validator("independent_roles")
+    @classmethod
+    def _known_roles(cls, roles: List[str]) -> List[str]:
+        unknown = sorted(set(roles) - set(_POLICY_ROLES))
+        if unknown:
+            raise ValueError(f"model_policy.independent_roles: unknown role(s) {unknown}; "
+                             f"expected any of {list(_POLICY_ROLES)}")
+        return list(dict.fromkeys(roles))
+
 
 class AgentModelConfig(BaseModel):
     # llm=None means "use the top-level llm config" (today's single-model behavior) -
@@ -162,6 +987,12 @@ class AgentModelConfig(BaseModel):
     # top-level llm/llm_chain exactly as before.
     llm: Optional[LLMConfig] = Field(default=None)
     llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
+    # PROVIDER-CONTRACT-001: this role's own output budget (visible answer
+    # tokens; a reasoning identity's measured reasoning reserve is added on
+    # top). None: the model binding's own max_tokens (the Planner:
+    # llm.planner_max_tokens). Roles have different real protocols - a
+    # verdict is not a file rewrite - so no role inherits another's budget.
+    max_output_tokens: Optional[int] = Field(default=None, ge=256)
 
 class AgentRolesConfig(BaseModel):
     # Developer deliberately has no entry here - it stays on the top-level llm/
@@ -173,6 +1004,7 @@ class AgentRolesConfig(BaseModel):
     reviewer: AgentModelConfig = Field(default_factory=AgentModelConfig)
     run_verifier: AgentModelConfig = Field(default_factory=AgentModelConfig)
     skill_gap: AgentModelConfig = Field(default_factory=AgentModelConfig)
+    spec_compliance: AgentModelConfig = Field(default_factory=AgentModelConfig)
 
 class RoutingConfig(BaseModel):
     # On by default (since 2026-08-02) - a first-time kriya repl user typing a
@@ -213,28 +1045,690 @@ class KnowledgeConfig(BaseModel):
     training_cutoff: str = Field(default="2023-12-01")  # ISO date
     check_enabled: bool = Field(default=True)
     offline_mode: bool = Field(default=False)
+    release_cache_ttl_days: int = Field(default=30, ge=1)
+
+class EngineeringTriageConfig(BaseModel):
+    """MA1 of the control-plane implementation plan (kriya/workflow/triage.py) -
+    kind/risk_class/execution_weight classification for a generation request.
+    Two independent switches, same "flipping one alone does nothing" pattern
+    already used for autonomy.web_lookup_enabled + search.base_url: `enabled`
+    turns classification ON (so it actually runs and gets logged), `shadow_mode`
+    keeps its result from affecting anything current Kriya does. MA1 requires
+    shadow_mode to stay True regardless of `enabled` - nothing reads
+    EngineeringRoute for a real decision until MA2. Both default False here at
+    the pydantic-model level (the safe bare-AppConfig() fallback, same
+    convention as spec_compliance_enabled/auto_index_missing_dependency_graph
+    above) - default_config.yaml is what actually turns shadow classification
+    on for real usage once MA1.3 wires it in."""
+
+    enabled: bool = Field(default=False)
+    shadow_mode: bool = Field(default=True)
+
+class ProcessProfilesConfig(BaseModel):
+    """MA2 of the control-plane implementation plan - whether a resolved
+    ProcessProfile (kriya/workflow/process_profile.py) actually gets to
+    change run_generation_workflow()'s behavior, and which behaviors
+    specifically. Deliberately separate from EngineeringTriageConfig above:
+    `engineering_triage.enabled` controls whether classification runs and
+    is observable at all (MA1's scope, unchanged by this); `enabled` here
+    plus each per-capability `enforce_*` flag controls whether MA2's actual
+    behavioral changes are live - "safe incremental activation" per the
+    control-plane plan, so MA2.5's approval gating can be validated live
+    without MA2.6's context/verification changes also being active, and
+    vice versa. All default False - a new capability stays off until it's
+    been live-validated, same convention as spec_compliance_enabled/
+    auto_index_missing_dependency_graph (kriya/config/config.py's
+    AutonomyConfig, above)."""
+
+    enabled: bool = Field(default=False)
+    enforce_approval: bool = Field(default=False)
+    enforce_context_depth: bool = Field(default=False)
+    # MA2.6b explicit decision (control-plane implementation plan): "ProcessProfile
+    # may increase safety/process cost, but it may not reduce Kriya's existing
+    # verification baseline." MA2 ships verification depth as telemetry-only -
+    # verification_tier is recorded, but PolymorphicValidator/Quality Gates run
+    # IDENTICALLY regardless of execution_weight (the full regression suite stays
+    # unconditional for LIGHT too, exactly as it is today). Rejected here, not just
+    # left unread, so a misconfiguration can never quietly believe reduced-LIGHT-
+    # verification is active when it isn't - see the validator below.
+    enforce_verification_depth: bool = Field(default=False)
+
+    @field_validator("enforce_verification_depth")
+    @classmethod
+    def _not_yet_implemented(cls, v: bool) -> bool:
+        if v:
+            raise ValueError(
+                "process_profiles.enforce_verification_depth is not implemented yet - MA2 "
+                "ships verification depth as telemetry-only by explicit design decision "
+                "('a triage misclassification cannot reduce regression-test coverage in "
+                "MA2'). Setting this to true would silently do nothing rather than actually "
+                "changing verification behavior, which is exactly the quiet misconfiguration "
+                "this validator exists to prevent. Leave it false until a future milestone "
+                "implements real, deterministically-safeguarded behavioral enforcement."
+            )
+        return v
+
+class ExecutionPolicyConfig(BaseModel):
+    """MA4.15 of the control-plane implementation plan - whether
+    kriya/policy/execution.py::ExecutionPolicy's real decisions ever get to
+    influence Kriya's actual behavior, beyond being computed and logged.
+
+    `enabled` defaults to True, unlike engineering_triage.enabled/
+    process_profiles.enabled above (both default False at the pydantic-model
+    level - "a new capability stays off until it's been live-validated").
+    ExecutionPolicy's audit-only consultation is NOT a new, unvalidated
+    capability the way those were when their own config sections were
+    introduced: every MA4.3-4.14 real call site (kriya/core/llm.py,
+    kriya/tools/validate.py, kriya/workflow/edit_safety.py, kriya/tools/
+    web.py, kriya/workflow/worktree.py, kriya/workflow/workflow.py) has
+    already been calling ExecutionPolicy.evaluate() unconditionally, safely,
+    and exception-guarded for this task's entire duration - defaulting
+    `enabled` to False now would be a real regression (telemetry that's
+    already flowing today would silently stop), not a safe-activation
+    default. `enabled` only gates WorkflowEngine's own two call sites today
+    (_audit_approval_rules, _authorize_action's Stage 2A caller) - it is not
+    yet threaded through every real call site (see kriya/policy/execution.py
+    and kriya/workflow/workflow.py's own comments for the honestly-tracked
+    boundary on that).
+
+    `mode` is the actual audit-vs-enforce gate. MA4 rolled out in AUDIT mode
+    only, "before any future ENFORCE mode is considered" - not "before it
+    is implemented," which MA4.13 already did (WorkflowEngine.
+    _authorize_action's enforce=True branch was real, tested code from the
+    start). POL-001-P2 (2026-09-10) is the explicit, confirmed-with-the-user
+    decision that restriction was always waiting on - mirroring how
+    workflow_controller.mode's own analogous "shadow"-only restriction was
+    lifted (§8.5 of docs/design.md) only after being asked first, never
+    silently. `mode` still defaults to `"audit"` - lifting the rejection
+    makes `"enforce"` SELECTABLE, it does not change what a project gets
+    without explicitly opting in. Every real call site this now actually
+    activates (WorkflowEngine._authorize_action's Stage 2A caller,
+    plugins/core_tools/__init__.py::GitTool's commit gate) was already
+    built, tested, and dormant specifically so no new architecture would
+    need to be invented under pressure once this moment arrived."""
+
+    enabled: bool = Field(default=True)
+    mode: str = Field(default="audit")
+
+    @field_validator("mode")
+    @classmethod
+    def _mode_must_be_audit_or_enforce(cls, v: str) -> str:
+        if v not in ("audit", "enforce"):
+            raise ValueError(f"execution_policy.mode must be 'audit' or 'enforce', got {v!r}")
+        return v
+
+class WorkflowControllerConfig(BaseModel):
+    """MA6.13/6.14 of the MA6 structured-execution implementation plan
+    (kriya/workflow/workflow_controller.py) - mirrors ExecutionPolicyConfig's
+    own audit/enforce precedent immediately above: `enabled` defaults False
+    (a new, not-yet-broadly-validated capability stays off, same "ship the
+    mechanism, default it off" pattern as engineering_triage/process_profiles
+    when THEY were introduced). `mode` is the real gate - "shadow" builds a
+    real EngineeringPlan and runs SubtaskExecutor against it for every
+    subtask, but never lets the result affect real files or the run's
+    actual outcome (kriya/workflow/workflow_controller.py's
+    _run_structured_shadow) - the existing, unmodified run_generation_workflow()
+    still owns the real outcome unconditionally in this mode.
+
+    TRIED AND REVERTED, 2026-08-24: `enabled` was briefly flipped to
+    True-by-default the same day, reasoned as "zero risk" because shadow
+    mode is provably non-mutating (never affects real generation output).
+    That reasoning covered CORRECTNESS but missed RESOURCE REACHABILITY:
+    shadow mode still makes its own real Planner/Architect/SubtaskExecutor
+    LLM calls through the real WorkflowEngine, independent of whatever
+    run_generation_workflow() itself does. A widespread test pattern in
+    this suite (tests/test_file_goal.py and others) mocks ONLY
+    WorkflowEngine.run_generation_workflow (not Kernel/LLMClient), which
+    was previously sufficient to guarantee zero real network calls end to
+    end - once workflow_controller.enabled defaulted True, that same
+    pattern silently let shadow's own agent calls reach a REAL, unmocked
+    LLMClient, hanging/failing against a live network endpoint the test
+    never expected to hit. Reverted same-day (never reached origin).
+    Re-attempting this default flip needs a real test-suite audit first
+    (every run_generation_workflow-only mock site, not just an explicit
+    assertion about the default value) - not something to redo casually.
+
+    "enforce" (MA7.8, 2026-08-24) is now real, allowed code - lifting the
+    prior rejection was its own deliberate decision, confirmed with the
+    user directly (mirroring how MA7.3 handled the analogous
+    execution_policy.mode restriction: asked first, never silently
+    lifted). SubtaskExecutor (MA6.5) still deliberately stops at "get file
+    content or a tool result" - "enforce" does NOT port compile/test
+    verification or approval gating into new machinery; instead
+    WorkflowController._run_structured_enforce reuses the existing,
+    mature run_generation_workflow() itself, once per subtask, the same
+    real pattern kriya/workflow/milestones.py::run_milestones() already
+    uses for milestones - see that method's own docstring for exactly
+    what it does and its honest remaining scope boundaries (TOOL-tagged
+    subtasks are refused outright, not silently skipped). `enabled`/`mode`
+    both still default to False/"shadow" - "enforce" only ever runs for a
+    project that explicitly opts in."""
+
+    enabled: bool = Field(default=False)
+    mode: str = Field(default="shadow")
+
+    @field_validator("mode")
+    @classmethod
+    def _mode_must_be_valid(cls, v: str) -> str:
+        if v not in ("shadow", "enforce"):
+            raise ValueError(f"workflow_controller.mode must be 'shadow' or 'enforce', got {v!r}")
+        return v
+
+_VALID_RUNTIME_PROFILES = (None, "legacy", "validated", "hardened", "production")
+
+# A production run must have a finite outer deadline.  One hour is deliberately
+# generous enough for local-model generation while still preventing an
+# unbounded run.  The reserve and per-file estimates remain independently
+# configurable only outside the sealed profile.
+PRODUCTION_GENERATION_TIME_BUDGET_SECONDS = 3600
+
+# These guarantees have no weakening configuration knob: generation already
+# refuses to run in the application workspace when isolated-worktree creation
+# fails (workflow.py), and checkpoints/traces are persistent workflow artifacts.
+# Declaring them is not evidence that the deployment can honor them:
+# `kriya doctor --production` (kriya/production_doctor.py) verifies each one
+# against the real environment and derives `runtime.fixed_guarantees` from those
+# checks, so these identifiers stay the shared vocabulary, not a PASS.
+PRODUCTION_FIXED_RUNTIME_GUARANTEES = frozenset({
+    "candidate_isolation_fail_closed",
+    "checkpoint_persistence",
+    "trace_persistence",
+    "no_uncontained_host_fallback",
+})
+
+
+def _production_budget_is_at_least_as_strict(value: Any) -> bool:
+    return (
+        isinstance(value, int) and not isinstance(value, bool)
+        and 0 < value <= PRODUCTION_GENERATION_TIME_BUDGET_SECONDS
+    )
+
+
+# Sealed leaves for which a strictly safer explicit value is accepted in place
+# of the preset value. Every other sealed leaf already carries its strictest
+# setting, so it must equal the preset exactly.
+_PRODUCTION_STRICTER_ACCEPTED = {
+    ("autonomy", "generation_time_budget_seconds"): (
+        _production_budget_is_at_least_as_strict,
+        f"{PRODUCTION_GENERATION_TIME_BUDGET_SECONDS!r} or a smaller positive integer",
+    ),
+}
+
+
+def production_sealed_value_satisfied(key: Tuple[str, str], value: Any) -> bool:
+    """Whether ``value`` meets the production seal for ``key``: the preset
+    value itself, or - for the leaves in _PRODUCTION_STRICTER_ACCEPTED - a
+    value at least as strict."""
+    stricter = _PRODUCTION_STRICTER_ACCEPTED.get(key)
+    if stricter is not None:
+        return stricter[0](value)
+    return value == runtime_profile_preset_fields("production")[key]
+
+
+def production_sealed_requirement(key: Tuple[str, str]) -> str:
+    stricter = _PRODUCTION_STRICTER_ACCEPTED.get(key)
+    return stricter[1] if stricter is not None else repr(runtime_profile_preset_fields("production")[key])
+
+
+_PolicyAction = Literal["allow", "warn", "block"]
+_CoverageAction = Literal["warn", "block"]
+
+
+class StaticAnalysisSeverityPolicy(BaseModel):
+    """PRD-031A: allow/warn/block per normalized severity (unknown is decided as high)."""
+
+    model_config = ConfigDict(extra="forbid")
+    critical: _PolicyAction = "block"
+    high: _PolicyAction = "block"
+    medium: _PolicyAction = "warn"
+    low: _PolicyAction = "allow"
+    info: _PolicyAction = "allow"
+
+
+class StaticAnalysisPolicyConfig(BaseModel):
+    """PRD-031A §7.3: Kriya-owned policy; adapters never see it. UNKNOWN is
+    not configurable: when analysis is enabled it always blocks."""
+
+    model_config = ConfigDict(extra="forbid")
+    introduced: StaticAnalysisSeverityPolicy = Field(default_factory=StaticAnalysisSeverityPolicy)
+    worsened: StaticAnalysisSeverityPolicy = Field(default_factory=StaticAnalysisSeverityPolicy)
+    existing: StaticAnalysisSeverityPolicy = Field(default_factory=lambda: StaticAnalysisSeverityPolicy(
+        critical="warn", high="warn", medium="allow", low="allow", info="allow",
+    ))
+    partial_coverage: _CoverageAction = "warn"
+    unsupported_language: _CoverageAction = "warn"
+    prerequisites_missing: _CoverageAction = "block"
+    # A required target that was not analyzed (scanner did not confirm it,
+    # or it is above max_target_bytes): block -> UNKNOWN, warn -> partial
+    # coverage. Never PASS either way.
+    analysis_errors: _CoverageAction = "block"
+    # UNAVAILABLE under requirement: optional (outside production).
+    when_unavailable: _CoverageAction = "warn"
+
+
+class StaticAnalysisWaiversConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # None -> ~/.kriya/static_analysis/waivers/<workspace_id>.json. An
+    # explicit path must resolve outside the workspace (checked at use).
+    store: Optional[str] = None
+
+
+class StaticAnalysisConfig(BaseModel):
+    """PRD-031A: the pluggable static-analysis gate (handover/PRD-031A_TASK.md).
+
+    Disabled by default; disabled is reported as DISABLED (or
+    NOT_CONFIGURED when never set), never PASS. Every field is
+    SECURITY_AUTHORITY (kriya/config/authority.py): a repository can neither
+    disable nor soften it. ``providers.<name>`` is validated by that
+    provider's own settings model (kriya/static_analysis/registry.py)."""
+
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1] = 1
+    enabled: bool = False
+    provider: Optional[str] = None
+    requirement: Literal["optional", "required"] = "optional"
+    # auto = the provider's minimum trustworthy scope; an explicit scope
+    # may be broader, never narrower.
+    scope: Literal["auto", "changed_files", "module", "repository", "build_graph"] = "auto"
+    # Trusted, auditable path globs; applied by Kriya's scope planner,
+    # never passed to the provider as targets.
+    exclusions: List[str] = Field(default_factory=list)
+    # Kriya-enforced before submission (the provider's own size flag is
+    # defense in depth only). An oversized target is recorded, never
+    # silently omitted.
+    max_target_bytes: int = Field(default=1_000_000, gt=0)
+    timeout_seconds: int = Field(default=300, gt=0)
+    policy: StaticAnalysisPolicyConfig = Field(default_factory=StaticAnalysisPolicyConfig)
+    waivers: StaticAnalysisWaiversConfig = Field(default_factory=StaticAnalysisWaiversConfig)
+    providers: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "StaticAnalysisConfig":
+        if self.requirement == "required" and not self.enabled:
+            raise ValueError("static_analysis.requirement is 'required' but static_analysis.enabled is false")
+        if not self.enabled:
+            return self
+        if not self.provider:
+            raise ValueError("static_analysis.enabled requires static_analysis.provider")
+        from kriya.static_analysis.registry import is_registered, validate_provider_settings
+
+        if not is_registered(self.provider):
+            raise ValueError(f"static_analysis.provider {self.provider!r} is not a registered provider")
+        # Normalize through the provider's own model: an invalid version,
+        # image reference or rule pack fails here, at load.
+        self.providers = {
+            **self.providers,
+            self.provider: validate_provider_settings(self.provider, self.providers.get(self.provider, {})),
+        }
+        return self
+
+
+class QualificationCaseBudget(BaseModel):
+    """QUAL-CONFIG-001: the output budget one live qualification case sends.
+
+    ``reasoning_max_tokens`` (None = ``max_tokens``) applies only when the
+    inference identity being qualified sends ``reasoning: true``: the
+    binding's capability, never a model name. The sent budget can still be
+    raised by LLMClient's own reasoning floor on the plain-completion path;
+    the record reports both the configured and the sent value."""
+
+    model_config = ConfigDict(extra="forbid")
+    max_tokens: int = Field(gt=0)
+    reasoning_max_tokens: Optional[int] = Field(default=None, gt=0)
+
+
+class QualificationCancellationPolicy(QualificationCaseBudget):
+    """``cancellation_semantics``: the streamed request cancelled after its
+    first delta, the healthy-endpoint check after it, and the two timing
+    bounds of the PASS decision."""
+
+    max_tokens: int = Field(default=1024, gt=0)
+    health_check_max_tokens: int = Field(default=64, gt=0)
+    first_delta_timeout_seconds: float = Field(default=120.0, gt=0)
+    max_settle_seconds: float = Field(default=10.0, gt=0)
+
+
+class QualificationContextCapacityPolicy(QualificationCaseBudget):
+    """``context_capacity``: the near-window probe. ``max_tokens`` is the
+    answer budget (the two recalled markers); ``headroom_tokens`` is what the
+    filler leaves below the served window for the answer and the chat
+    template; the reported prompt must reach ``min_fill_ratio`` of the
+    target."""
+
+    max_tokens: int = Field(default=64, gt=0)
+    headroom_tokens: int = Field(default=384, gt=0)
+    # The headroom for a reasoning identity (None = headroom_tokens), which
+    # must hold that identity's answer budget (reasoning_max_tokens).
+    reasoning_headroom_tokens: Optional[int] = Field(default=None, gt=0)
+    min_fill_ratio: float = Field(default=0.9, gt=0, le=1)
+    request_timeout_seconds: float = Field(default=600.0, gt=0)
+
+    @model_validator(mode="after")
+    def _answer_fits_the_headroom(self) -> "QualificationContextCapacityPolicy":
+        """The headroom is the room below the served window for the answer
+        and the chat template: an answer budget it cannot hold would let the
+        request outgrow the window, and a server that then drops the front
+        of the prompt would lose the first marker (a false FAIL)."""
+        if self.headroom_tokens <= self.max_tokens:
+            raise ValueError(f"context_capacity.headroom_tokens ({self.headroom_tokens}) must exceed "
+                             f"max_tokens ({self.max_tokens})")
+        answer = self.reasoning_max_tokens or self.max_tokens
+        headroom = self.reasoning_headroom_tokens or self.headroom_tokens
+        if headroom <= answer:
+            raise ValueError(f"context_capacity reasoning headroom ({headroom}) must exceed the reasoning "
+                             f"answer budget ({answer}); set reasoning_headroom_tokens")
+        return self
+
+
+def _budget(tokens: int) -> Any:
+    return Field(default_factory=lambda: QualificationCaseBudget(max_tokens=tokens))
+
+
+class QualificationCasesConfig(BaseModel):
+    """Per-case budgets. Cases whose budget is part of what they test
+    (output_truncation, timeout_semantics, endpoint_error_semantics,
+    tokenizer_measurement, the capacity token-rate probes) have none here:
+    those values stay in kriya/core/model_qualification.py."""
+
+    model_config = ConfigDict(extra="forbid")
+    plain_completion: QualificationCaseBudget = _budget(64)
+    finish_reason_stop: QualificationCaseBudget = _budget(256)
+    structured_json: QualificationCaseBudget = _budget(256)
+    multiline_json: QualificationCaseBudget = _budget(512)
+    native_tool_calls: QualificationCaseBudget = _budget(256)
+    multiple_tool_calls: QualificationCaseBudget = _budget(512)
+    tool_argument_integrity: QualificationCaseBudget = _budget(512)
+    streaming_assembly: QualificationCaseBudget = _budget(256)
+    reasoning_behavior: QualificationCaseBudget = _budget(2048)
+    full_file_raw_content: QualificationCaseBudget = _budget(1024)
+    anchored_edit_protocol: QualificationCaseBudget = _budget(1024)
+    malformed_output_recovery: QualificationCaseBudget = _budget(512)
+    cancellation_semantics: QualificationCancellationPolicy = Field(default_factory=QualificationCancellationPolicy)
+    context_capacity: QualificationContextCapacityPolicy = Field(
+        default_factory=QualificationContextCapacityPolicy)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _partial_case_keeps_its_defaults(cls, data: Any) -> Any:
+        """A case given only some fields (e.g. just reasoning_max_tokens)
+        keeps that case's own defaults for the rest. Unknown cases and
+        fields are still rejected (extra="forbid")."""
+        if not isinstance(data, dict):
+            return data
+        merged = dict(data)
+        for name, value in data.items():
+            field = cls.model_fields.get(name)
+            if field is not None and field.default_factory is not None and isinstance(value, dict):
+                merged[name] = {**field.default_factory().model_dump(), **value}
+        return merged
+
+
+class QualificationMeasurementPolicy(BaseModel):
+    """How measured limits are derived from passing cases: the margin on the
+    smallest measured bytes-per-token ratio, and the headroom multiplier on
+    the reasoning tokens observed."""
+
+    model_config = ConfigDict(extra="forbid")
+    bytes_per_token_margin: float = Field(default=0.9, gt=0, le=1)
+    reasoning_tokens_headroom: float = Field(default=1.5, ge=1)
+
+
+class ModelQualificationConfig(BaseModel):
+    """QUAL-CONFIG-001: live model qualification policy (PRD-014 mechanics
+    stay in kriya/core/model_qualification.py). Defaults reproduce the
+    kriya-qualification/3 values exactly. The effective policy's digest is
+    part of every record, and a record made under another policy is STALE.
+    SECURITY_AUTHORITY as a whole (kriya/config/authority.py): a repository
+    cannot change what qualifies a model. Which cases a role requires is not
+    configurable."""
+
+    model_config = ConfigDict(extra="forbid")
+    cases: QualificationCasesConfig = Field(default_factory=QualificationCasesConfig)
+    measurement: QualificationMeasurementPolicy = Field(default_factory=QualificationMeasurementPolicy)
+
 
 class AppConfig(BaseModel):
+    """runtime_profile (2026-08-25, external review P2) - a named
+    preset in place of remembering which combination of independent
+    toggles (engineering_triage.shadow_mode, process_profiles.enabled,
+    workflow_controller.enabled/mode) "hardened" actually means. Deliberately
+    NOT a new independent config surface of its own: load_config() applies
+    it as a straightforward, unconditional override of those existing
+    fields AFTER the normal default+user merge. `legacy`, `validated`, and
+    `hardened` are coherent presets; a user config must pick a profile OR
+    hand-tune the individual fields, never mix both. None (the
+    default) changes nothing - every field keeps behaving exactly as it
+    always has, matching every existing kriya.yaml unchanged.
+
+    Deliberately does NOT touch execution_policy.mode - that field's own
+    validator has always hard-rejected "enforce" as a distinct, separate,
+    later decision (kriya/config/config.py's own ExecutionPolicyConfig
+    docstring), and this preset does not silently reach around that
+    restriction. The narrow, always-on hard-invariant enforcement
+    (kriya/policy/enforcement.py, MA7.3) and control-plane persistence
+    already happen unconditionally whenever workflow_controller.enabled is
+    true - there is no separate, real toggle for either one to include
+    here, despite how the original review phrased the preset's contents.
+
+    `production` is the separately sealed posture. It requires WorkflowController
+    and ExecutionPolicy enforcement, local-only model egress, a finite generation
+    deadline (3600 seconds, or an explicitly stricter smaller value), OCI
+    target-code containment, MCP containment for any configured MCP server, and a
+    required brownfield full-regression baseline. Candidate isolation,
+    checkpoint/trace persistence, and refusal to fall back to raw-host execution
+    are fixed runtime guarantees named in PRODUCTION_FIXED_RUNTIME_GUARANTEES, not
+    decorative switches; `kriya doctor --production` verifies each against the
+    real deployment (`runtime.fixed_guarantees` is derived from those checks).
+    semantic_region_enforcement_required is intentionally not forced: language
+    support remains incomplete until PRD-028, and the production doctor reports
+    that precision boundary as `semantic.precision_boundary`."""
+
     llm: LLMConfig = Field(default_factory=LLMConfig)
     llm_chain: List[FallbackModelConfig] = Field(default_factory=list)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     mcp: Dict[str, MCPServerConfig] = Field(default_factory=dict)
+    mcp_lifecycle: MCPLifecycleConfig = Field(default_factory=MCPLifecycleConfig)
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     autonomy: AutonomyConfig = Field(default_factory=AutonomyConfig)
     knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     agent_llms: AgentRolesConfig = Field(default_factory=AgentRolesConfig)
+    model_policy: ModelPolicyConfig = Field(default_factory=ModelPolicyConfig)
     routing: RoutingConfig = Field(default_factory=RoutingConfig)
+    engineering_triage: EngineeringTriageConfig = Field(default_factory=EngineeringTriageConfig)
+    process_profiles: ProcessProfilesConfig = Field(default_factory=ProcessProfilesConfig)
+    execution_policy: ExecutionPolicyConfig = Field(default_factory=ExecutionPolicyConfig)
+    workflow_controller: WorkflowControllerConfig = Field(default_factory=WorkflowControllerConfig)
+    static_analysis: StaticAnalysisConfig = Field(default_factory=StaticAnalysisConfig)
+    model_qualification: ModelQualificationConfig = Field(default_factory=ModelQualificationConfig)
+    runtime_profile: Optional[str] = Field(default=None)
+    # PRD-019: the routing plan a workflow command applied to this (routed)
+    # configuration, recorded by the run as model.route events. Not a
+    # configuration field.
+    _routing_plan: Any = PrivateAttr(default=None)
 
-def load_config(config_path: Optional[str] = None) -> AppConfig:
-    """Load configuration from a YAML file, merging with default configs."""
-    config_dict = {}
-    
+    @field_validator("runtime_profile")
+    @classmethod
+    def _runtime_profile_must_be_valid(cls, v: Optional[str]) -> Optional[str]:
+        if v not in _VALID_RUNTIME_PROFILES:
+            raise ValueError(f"runtime_profile must be one of {_VALID_RUNTIME_PROFILES!r}, got {v!r}")
+        return v
+
+    @model_validator(mode="after")
+    def _routing_candidates_must_not_alias_other_bindings(self) -> "AppConfig":
+        """PRD-019: model bindings are looked up by alias, so a routing
+        candidate that shares its alias with another binding but not its
+        settings would silently take that binding's capabilities and runtime
+        identity when routed."""
+        conflicts = routing_alias_conflicts(self)
+        if conflicts:
+            raise ValueError("model_policy.routing.candidates: " + "; ".join(conflicts))
+        return self
+
+    @model_validator(mode="after")
+    def _production_profile_must_remain_sealed(self) -> "AppConfig":
+        """Reject an incompletely expanded or manually weakened production profile.
+
+        load_config() expands the preset before constructing AppConfig, but callers
+        also construct AppConfig directly in integrations and tests. Validating the
+        effective object here prevents that second path from treating the profile
+        name as evidence while retaining unsafe defaults.
+        """
+        if self.runtime_profile != "production":
+            return self
+
+        required = runtime_profile_preset_fields("production")
+        violations = []
+        # The sealed value is checked by predicate, not equality with the preset.
+        for top, leaf in required:
+            actual = getattr(getattr(self, top), leaf)
+            # MCP containment is conditional on MCP execution being enabled. The
+            # expanded preset still turns it on pre-emptively, so later adding an
+            # MCP server cannot weaken the posture by omission.
+            if (top, leaf) == ("autonomy", "mcp_contained_execution_required") and not self.mcp:
+                continue
+            if not production_sealed_value_satisfied((top, leaf), actual):
+                violations.append(
+                    f"{top}.{leaf} must be {production_sealed_requirement((top, leaf))}, got {actual!r}"
+                )
+
+        # PRD-031A: production does not force static analysis on; when it is
+        # enabled, trustworthy evidence is mandatory (UNAVAILABLE, UNKNOWN,
+        # incomplete required coverage and scanner/config errors all block).
+        # A conditional seal, so it is checked here, not as a preset field.
+        static = self.static_analysis
+        if static.enabled:
+            for leaf, actual, required_value in (
+                ("requirement", static.requirement, "required"),
+                ("policy.analysis_errors", static.policy.analysis_errors, "block"),
+                ("policy.prerequisites_missing", static.policy.prerequisites_missing, "block"),
+            ):
+                if actual != required_value:
+                    violations.append(
+                        f"static_analysis.{leaf} must be {required_value!r} when static analysis is enabled, got {actual!r}"
+                    )
+
+        if violations:
+            raise ValueError(
+                "runtime_profile 'production' is sealed; unsafe effective settings: "
+                + "; ".join(violations)
+            )
+        return self
+
+def runtime_profile_preset_fields(profile: Optional[str]) -> Dict[Any, Any]:
+    """The exact (top_key, leaf_key) -> value mapping a runtime_profile
+    preset expands to - see AppConfig's own docstring for what each preset
+    means. Extracted as its own function so it can be tested directly
+    without going through load_config() (whose SEC-009 P1 authority
+    resolution denies a repository-sourced runtime_profile outright,
+    independent of what it would have expanded to - see
+    tests/test_sec009_config_authority.py) or through AppConfig's
+    constructor (which does not itself apply this expansion - only
+    load_config() does, deliberately, post-merge/pre-authority)."""
+    if profile == "legacy":
+        return {
+            ("engineering_triage", "shadow_mode"): True,
+            ("process_profiles", "enabled"): False,
+            ("workflow_controller", "enabled"): False,
+            ("workflow_controller", "mode"): "shadow",
+        }
+    if profile == "validated":
+        return {
+            ("engineering_triage", "shadow_mode"): False,
+            ("process_profiles", "enabled"): True,
+            ("workflow_controller", "enabled"): True,
+            ("workflow_controller", "mode"): "shadow",
+        }
+    if profile == "hardened":
+        return {
+            ("engineering_triage", "shadow_mode"): False,
+            ("process_profiles", "enabled"): True,
+            ("workflow_controller", "enabled"): True,
+            ("workflow_controller", "mode"): "enforce",
+        }
+    if profile == "production":
+        return {
+            ("engineering_triage", "shadow_mode"): False,
+            ("process_profiles", "enabled"): True,
+            ("workflow_controller", "enabled"): True,
+            ("workflow_controller", "mode"): "enforce",
+            ("execution_policy", "enabled"): True,
+            ("execution_policy", "mode"): "enforce",
+            ("autonomy", "egress_policy"): "local_only",
+            ("autonomy", "generation_time_budget_seconds"): PRODUCTION_GENERATION_TIME_BUDGET_SECONDS,
+            ("autonomy", "containment_backend"): "oci",
+            ("autonomy", "contained_execution_required"): True,
+            ("autonomy", "mcp_contained_execution_required"): True,
+            # Production always captures the pristine full-suite baseline and
+            # fails closed if it is indeterminate - stricter than PRD-024's
+            # risk-derived `auto`, which skips trivial changes.
+            ("autonomy", "brownfield_full_regression_baseline_policy"): "required",
+            # PRD-012 deny-by-default: an arbitrary shell command gets no
+            # network (package managers stay registry-scoped), and
+            # KnowledgeGuard never sends goal-named library names to public
+            # registries (cached release metadata only).
+            ("autonomy", "shell_network"): "denied",
+            ("knowledge", "offline_mode"): True,
+            # PRD-020: an original requirement with no verifier verdict, or
+            # one the verifier cannot confirm from code and no deterministic
+            # evidence closed, never lets a production run succeed.
+            ("autonomy", "requirement_unknown_policy"): "block",
+            ("autonomy", "requirement_unverified_policy"): "block",
+        }
+    return {}
+
+
+@dataclass
+class ConfigResolutionState:
+    """Everything load_config() resolves BEFORE authority is checked -
+    extracted into its own function (resolve_config_state()) so both
+    load_config() and `kriya authority inspect`/`approve` (kriya/cli.py)
+    share exactly one code path for what counts as a violation and what the
+    live effective value of each field is. approve() in particular must see
+    EXACTLY what load_config() would compute - a second, slightly-different
+    re-implementation here would be a real correctness risk, not just
+    duplication."""
+    config_dict: Dict[str, Any]
+    workspace_root: str
+    violations: List[Any]  # List[ConfigAuthorityViolation] - Any to avoid a module-level authority.py import
+
+
+def resolve_config_state(config_path: Optional[str] = None) -> ConfigResolutionState:
+    """Source -> provenance -> expansion -> field classification -> violation
+    list. Never raises for a violation (that's load_config()'s job, after
+    consulting SEC-009 P2 approval) and never constructs AppConfig - pure
+    resolution, safe to call from `kriya authority inspect`/`approve` even
+    when the config would ultimately be denied.
+    """
+    from kriya.config.authority import (
+        ConfigSource,
+        FieldClassification,
+        FieldPath,
+        agent_role_field_classification,
+        compute_violations,
+        explicit_config_source,
+        path_field_classification,
+    )
+
+    config_dict: Dict[str, Any] = {}
+    user_data: Dict[str, Any] = {}
+    # provenance[(top_key, leaf_key)] = ConfigSource that set that field.
+    # top_key is None for scalar/list top-level fields (runtime_profile,
+    # llm_chain). Granularity mirrors the merge loop below exactly - this is
+    # the actual unit a source can independently set.
+    provenance: Dict[FieldPath, ConfigSource] = {}
+    # Runtime-resolved overrides for fields whose classification depends on a
+    # resolved value, not just the field name (paths.* containment check).
+    classification_overrides: Dict[FieldPath, FieldClassification] = {}
+
+    workspace_root = os.path.realpath(os.getcwd())
+
     # Determine Kriya Installation Directory
     KRIYA_INSTALL_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-    
+
     # Try to load default configuration from package path
     default_path = os.path.join(os.path.dirname(__file__), "default_config.yaml")
     if os.path.exists(default_path):
@@ -246,26 +1740,34 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
                     if "paths" in default_data:
                         for k, v in default_data["paths"].items():
                             if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
-                                default_data["paths"][k] = os.path.abspath(os.path.join(KRIYA_INSTALL_DIR, v))
+                                default_data["paths"][k] = os.path.realpath(os.path.join(KRIYA_INSTALL_DIR, v))
                     if "plugins" in default_data and "directory" in default_data["plugins"]:
                         v = default_data["plugins"]["directory"]
                         if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
-                            default_data["plugins"]["directory"] = os.path.abspath(os.path.join(KRIYA_INSTALL_DIR, v))
+                            default_data["plugins"]["directory"] = os.path.realpath(os.path.join(KRIYA_INSTALL_DIR, v))
                     config_dict.update(default_data)
+                    for top_key, val in default_data.items():
+                        if isinstance(val, dict):
+                            for leaf_key in val:
+                                provenance[(top_key, leaf_key)] = ConfigSource.PACKAGED_DEFAULT
+                        else:
+                            provenance[(None, top_key)] = ConfigSource.PACKAGED_DEFAULT
         except Exception as e:
             logger.warning(f"Failed to load packaged default configuration at '{default_path}', falling back to bare defaults: {e}")
-            
+
     # If no config_path is explicitly provided, look for 'kriya.yaml' or 'kriya.yml' in current directory
     # If not found, look for it in the Kriya Installation Directory
     config_dir = os.getcwd()
+    source: Optional["ConfigSource"] = None
     if not config_path:
         for filename in ["kriya.yaml", "kriya.yml"]:
             path = os.path.join(os.getcwd(), filename)
             if os.path.exists(path):
                 config_path = path
                 config_dir = os.getcwd()
+                source = ConfigSource.AUTO_DISCOVERED_CWD
                 break
-        
+
         if not config_path:
             # Fall back to Kriya installation directory
             for filename in ["kriya.yaml", "kriya.yml"]:
@@ -273,45 +1775,341 @@ def load_config(config_path: Optional[str] = None) -> AppConfig:
                 if os.path.exists(path):
                     config_path = path
                     config_dir = KRIYA_INSTALL_DIR
+                    source = ConfigSource.AUTO_DISCOVERED_INSTALL_DIR
                     break
     else:
-        config_path = os.path.abspath(config_path)
+        # realpath (not just abspath) so a symlinked --config path is
+        # classified and resolved by its REAL target, not its apparent
+        # location - closes the symlinked-config gap (SEC-009 P1).
+        config_path = os.path.realpath(config_path)
         config_dir = os.path.dirname(config_path)
+        source = explicit_config_source(config_path, workspace_root)
 
     # Load user config if specified and exists
     if config_path and os.path.exists(config_path):
         try:
             with open(config_path, "r") as f:
-                user_data = yaml.safe_load(f)
+                user_data = yaml.safe_load(f) or {}
                 if user_data:
-                    # Resolve relative paths in user config to config_dir
+                    # Resolve relative paths in user config to config_dir (realpath -
+                    # resolves symlinks in the resulting path, not just abspath).
+                    if isinstance(user_data.get("paths"), dict) and "logs" in user_data["paths"]:
+                        raise RemovedConfigFieldError(f"{config_path}: {REMOVED_PATHS_LOGS_MESSAGE}")
+                    if isinstance(user_data.get("logging"), dict) and "file" in user_data["logging"]:
+                        raise RemovedConfigFieldError(f"{config_path}: {REMOVED_LOGGING_FILE_MESSAGE}")
                     if "paths" in user_data:
                         for k, v in user_data["paths"].items():
                             if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
-                                user_data["paths"][k] = os.path.abspath(os.path.join(config_dir, v))
+                                user_data["paths"][k] = os.path.realpath(os.path.join(config_dir, v))
+                        # paths.state: ANY relative value (not only "./"-
+                        # prefixed) anchors to config_dir, never the CWD; "~"
+                        # expands; resolved once so SEC-009 classifies exactly
+                        # the directory kriya/core/state_paths.py opens.
+                        state_value = user_data["paths"].get("state")
+                        if isinstance(state_value, str):
+                            from kriya.core.state_paths import require_workspace_local_state_under_kriya_dir
+                            expanded = os.path.expanduser(state_value)
+                            user_data["paths"]["state"] = os.path.realpath(
+                                expanded if os.path.isabs(expanded) else os.path.join(config_dir, expanded)
+                            )
+                            # Inside the workspace, state lives only beneath
+                            # <workspace>/.kriya/ (never a repository-visible
+                            # ./state or ./logs); outside it, SEC-009 below.
+                            require_workspace_local_state_under_kriya_dir(
+                                user_data["paths"]["state"], workspace_root, state_value,
+                            )
                     if "plugins" in user_data and "directory" in user_data["plugins"]:
                         v = user_data["plugins"]["directory"]
                         if isinstance(v, str) and (v.startswith("./") or v.startswith("../")):
-                            user_data["plugins"]["directory"] = os.path.abspath(os.path.join(config_dir, v))
-                    
-                    # Simple deep merge of level-1 dicts
+                            user_data["plugins"]["directory"] = os.path.realpath(os.path.join(config_dir, v))
+
+                    # logging.directory - canonicalized ONCE here (expand ~,
+                    # realpath) so the value SEC-009 digests is exactly the
+                    # directory kriya/core/logging_setup.py opens. A relative
+                    # value is a typed error: it is never anchored to the CWD
+                    # or to config_dir.
+                    if isinstance(user_data.get("logging"), dict) and user_data["logging"].get("directory") is not None:
+                        from kriya.core.logging_setup import canonical_log_directory
+                        user_data["logging"]["directory"] = canonical_log_directory(
+                            user_data["logging"]["directory"], "logging.directory"
+                        )
+
+                    # TOOL-003 P1: MCP capability filesystem paths - resolved
+                    # and escape-checked HERE, anchored to config_dir (same
+                    # anchor and same realpath-based idiom as paths.*/
+                    # logging.directory above, for the identical reason: the value
+                    # SEC-009 authority resolution digests below and the
+                    # value kriya/mcp/capability.py's resolve_mcp_capability_
+                    # profile() eventually binds to a real MCPClient must be
+                    # the SAME single resolved value, computed ONCE, never
+                    # independently re-resolved later against a possibly-
+                    # different CWD (the exact classify-here/execute-there
+                    # split the SEC-009 bypass-closure fix of 2026-09-12 exists to
+                    # prevent).
+                    # A `capabilities` key is unconditionally backfilled to
+                    # `{}` for every configured server (even one that never
+                    # mentions `capabilities` at all) so an omitted key and
+                    # an explicit empty `capabilities: {}` always produce the
+                    # IDENTICAL effective dict from this point forward -
+                    # otherwise the two would digest differently under
+                    # SEC-009 P2 (build_security_field_records() digests this
+                    # exact dict) even though pydantic resolves both to the
+                    # same default MCPCapabilityConfig(), causing a spurious
+                    # "approval invalidated" the moment an operator adds a
+                    # no-op explicit empty block.
+                    # PRD-031A: static-analysis rule packs and the waiver
+                    # store are resolved against config_dir ONCE here (never
+                    # the process CWD), realpath'd, like every other path
+                    # field - the value SEC-009 digests is the value used.
+                    # static_analysis.* is SECURITY_AUTHORITY as a whole, so
+                    # a path may name a location outside config_dir (a rule
+                    # pack outside the workspace is the recommended layout).
+                    _static = user_data.get("static_analysis")
+                    if isinstance(_static, dict):
+                        def _anchor(raw: Any) -> Any:
+                            if not isinstance(raw, str) or not raw:
+                                return raw
+                            expanded = os.path.expanduser(raw)
+                            return os.path.realpath(
+                                expanded if os.path.isabs(expanded) else os.path.join(config_dir, expanded)
+                            )
+
+                        _waivers = _static.get("waivers")
+                        if isinstance(_waivers, dict) and _waivers.get("store"):
+                            _waivers["store"] = _anchor(_waivers["store"])
+                        _providers = _static.get("providers")
+                        if isinstance(_providers, dict):
+                            for _provider_cfg in _providers.values():
+                                packs = _provider_cfg.get("rule_packs") if isinstance(_provider_cfg, dict) else None
+                                if isinstance(packs, list):
+                                    _provider_cfg["rule_packs"] = [
+                                        {**pack, "path": _anchor(pack.get("path"))} if isinstance(pack, dict)
+                                        else _anchor(pack)
+                                        for pack in packs
+                                    ]
+                    if isinstance(user_data.get("mcp"), dict):
+                        for _server_name, _server_cfg in user_data["mcp"].items():
+                            if not isinstance(_server_cfg, dict):
+                                continue
+                            caps = _server_cfg.setdefault("capabilities", {})
+                            if not isinstance(caps, dict):
+                                continue
+                            for _path_field in ("additional_read_paths", "additional_write_paths"):
+                                raw_paths = caps.get(_path_field)
+                                if not isinstance(raw_paths, list):
+                                    continue
+                                resolved_paths = []
+                                for raw in raw_paths:
+                                    if not isinstance(raw, str):
+                                        resolved_paths.append(raw)
+                                        continue
+                                    if os.path.isabs(raw):
+                                        # Absolute -> an explicit host path.
+                                        # Unambiguous by construction - no
+                                        # anchor, no escape check applies (an
+                                        # absolute path was never workspace-
+                                        # relative to begin with).
+                                        resolved_paths.append(os.path.realpath(raw))
+                                        continue
+                                    # Relative -> workspace-relative-only:
+                                    # resolved against config_dir and
+                                    # canonicalized (realpath follows both
+                                    # `..` traversal and any intermediate
+                                    # symlink to its real target) - REJECTED
+                                    # if the real target does not stay inside
+                                    # the real config_dir. A relative-looking
+                                    # path must never be able to smuggle an
+                                    # outside-anchor target past someone
+                                    # reading the config, and must never
+                                    # silently receive host-path authority it
+                                    # did not explicitly ask for by being
+                                    # written as an absolute path.
+                                    real_root = os.path.realpath(config_dir)
+                                    real_target = os.path.realpath(os.path.join(real_root, raw))
+                                    if real_target != real_root and not real_target.startswith(real_root + os.sep):
+                                        raise ValueError(
+                                            f"mcp.{_server_name}.capabilities.{_path_field} entry "
+                                            f"{raw!r} is a relative path that resolves outside "
+                                            f"{real_root!r} - a relative capability path must stay "
+                                            f"within the config's own directory; use an absolute "
+                                            f"path to explicitly authorize a host path outside it."
+                                        )
+                                    resolved_paths.append(real_target)
+                                caps[_path_field] = resolved_paths
+
+                    # paths.{skills,memory,logs} classification depends on the
+                    # resolved value (in-workspace vs. escaping) - resolve
+                    # non-relative values too (an absolute path or a
+                    # symlinked one) so containment is checked against the
+                    # real target in every case, not just the "./"-prefixed
+                    # relative-path branch above. Anchored to config_dir (the
+                    # directory the SETTING config file lives in), not
+                    # workspace_root/CWD - see path_field_classification()'s
+                    # own docstring for why: an explicit --config living
+                    # outside CWD with an ordinary relative `./skills` value
+                    # is not an authority escape, just a config that lives
+                    # somewhere else.
+                    if isinstance(user_data.get("paths"), dict):
+                        for k, v in user_data["paths"].items():
+                            if k in ("skills", "memory", "state") and isinstance(v, str):
+                                resolved = v if os.path.isabs(v) else os.path.join(config_dir, v)
+                                classification_overrides[("paths", k)] = path_field_classification(
+                                    k, resolved, config_dir
+                                )
+                            elif k == "state" and v is None:
+                                # null = the canonical default location; grants nothing
+                                classification_overrides[("paths", k)] = FieldClassification.REPOSITORY_SAFE
+
+                    # agent_llms.<role> is one atomic merge unit (see
+                    # agent_role_field_classification()'s docstring) -
+                    # REPOSITORY_SAFE unless it redirects a network
+                    # destination (base_url) somewhere within it.
+                    if isinstance(user_data.get("agent_llms"), dict):
+                        for role, role_val in user_data["agent_llms"].items():
+                            classification_overrides[("agent_llms", role)] = agent_role_field_classification(role_val)
+
+                    # logging.directory: null (the canonical default) grants
+                    # nothing; any directory is a filesystem write target and
+                    # falls to its static SECURITY_AUTHORITY entry.
+                    if isinstance(user_data.get("logging"), dict) and "directory" in user_data["logging"]:
+                        if user_data["logging"]["directory"] is None:
+                            classification_overrides[("logging", "directory")] = FieldClassification.REPOSITORY_SAFE
+
+                    # Simple deep merge of level-1 dicts, tracking provenance
+                    # at the exact same granularity the merge itself uses.
                     for key, val in user_data.items():
                         if isinstance(val, dict) and key in config_dict and isinstance(config_dict[key], dict):
                             config_dict[key].update(val)
+                            for leaf_key in val:
+                                provenance[(key, leaf_key)] = source
                         else:
                             config_dict[key] = val
+                            if isinstance(val, dict):
+                                for leaf_key in val:
+                                    provenance[(key, leaf_key)] = source
+                            else:
+                                provenance[(None, key)] = source
         except Exception as e:
+            from kriya.core.logging_setup import LogDirectoryError
+            from kriya.core.state_paths import StateDirectoryError
+            if isinstance(e, (LogDirectoryError, StateDirectoryError, RemovedConfigFieldError)):
+                raise  # already typed and names the field
             raise ValueError(f"Failed to load configuration at {config_path}: {e}") from e
-            
-    cfg = AppConfig(**config_dict)
-    
+
+    # --- runtime_profile expansion (dict-level, BEFORE AppConfig/authority) ---
+    # Applied before AppConfig construction so authority resolution below
+    # inspects the FULLY EXPANDED effective configuration - a repository
+    # setting runtime_profile cannot launder a security-sensitive field
+    # change through preset expansion and have it slip past classification
+    # simply because the raw `runtime_profile` scalar was the only thing
+    # checked. Derived fields inherit RUNTIME_PROFILE_OVERRIDE provenance
+    # (itself denied for any repository-equivalent source) whenever the
+    # runtime_profile value itself did not come from a trusted source.
+    runtime_profile = config_dict.get("runtime_profile")
+    if runtime_profile is not None:
+        preset_fields = runtime_profile_preset_fields(runtime_profile)
+        if runtime_profile == "production":
+            contradictory = []
+            for top, leaf in preset_fields:
+                explicit_section = user_data.get(top)
+                if (
+                    isinstance(explicit_section, dict)
+                    and leaf in explicit_section
+                    and not production_sealed_value_satisfied((top, leaf), explicit_section[leaf])
+                ):
+                    contradictory.append(
+                        f"{top}.{leaf}={explicit_section[leaf]!r} "
+                        f"(production requires {production_sealed_requirement((top, leaf))})"
+                    )
+            if contradictory:
+                raise ValueError(
+                    "runtime_profile 'production' rejects contradictory overrides: "
+                    + "; ".join(sorted(contradictory))
+                )
+        else:
+            # Preserve the original all-or-nothing behavior of the three older
+            # presets exactly. Production is more precise because its sealed
+            # surface spans only selected leaves in larger sections such as
+            # autonomy, where unrelated settings remain legitimate.
+            conflicting = sorted(
+                key for key in ("engineering_triage", "process_profiles", "workflow_controller")
+                if key in user_data
+            )
+            if conflicting:
+                raise ValueError(
+                    f"runtime_profile cannot be combined with explicit {conflicting!r}; choose the preset "
+                    "or configure the individual subsystems"
+                )
+
+        rp_source = provenance.get((None, "runtime_profile"), ConfigSource.PACKAGED_DEFAULT)
+        derived_source = (
+            ConfigSource.RUNTIME_PROFILE_OVERRIDE if rp_source not in (
+                ConfigSource.PACKAGED_DEFAULT, ConfigSource.PLATFORM_FLOOR
+            ) else rp_source
+        )
+
+        for (top, leaf), value in preset_fields.items():
+            if runtime_profile == "production":
+                explicit_section = user_data.get(top)
+                if (
+                    isinstance(explicit_section, dict)
+                    and leaf in explicit_section
+                    and explicit_section[leaf] != value
+                ):
+                    # Past the contradiction check above, a differing explicit
+                    # value is a stricter one (e.g. a shorter deadline): keep it,
+                    # with its own provenance, rather than loosening it back to
+                    # the preset.
+                    continue
+            config_dict.setdefault(top, {})[leaf] = value
+            provenance[(top, leaf)] = derived_source
+
+    violations = compute_violations(provenance, classification_overrides)
+    return ConfigResolutionState(config_dict=config_dict, workspace_root=workspace_root, violations=violations)
+
+
+def load_config(config_path: Optional[str] = None, trust_file: Optional[str] = None) -> AppConfig:
+    """Resolves config_path via resolve_config_state(), then applies SEC-009
+    P1/P2 authority: any violation is checked against a valid, digest-
+    matching, currently-valid approval artifact (kriya/config/
+    authority_approval.py) - the local per-workspace store, or `trust_file`
+    for CI/operator-supplied trust (defaulting to the KRIYA_TRUST_FILE env
+    var if not passed explicitly). Only violations that remain uncovered
+    after that check raise ConfigAuthorityError, BEFORE AppConfig is ever
+    constructed and therefore BEFORE Kernel/PluginManager/MCPManager can see
+    this configuration. With no valid approval, behavior is byte-identical
+    to P1 (fail closed is the unconditional floor - see
+    authority_approval.py's module docstring for why the trust sources
+    supported here cannot become blanket repository trust).
+    """
+    from kriya.config.authority import ConfigAuthorityError
+    from kriya.config.authority_approval import resolve_with_approval, validate_trust_path_outside_workspace
+
+    state = resolve_config_state(config_path)
+
+    if state.violations:
+        effective_trust_file = trust_file or os.environ.get("KRIYA_TRUST_FILE")
+        if effective_trust_file:
+            # Refuses a trust-file path resolving inside the workspace root -
+            # the load-bearing guard against a checked-out branch shipping
+            # both a hostile config and its own matching "approval" (see
+            # authority_approval.py's module docstring). Raises before any
+            # approval lookup even happens - never silently falls through to
+            # the local store when an explicit trust_file is itself unsafe.
+            validate_trust_path_outside_workspace(effective_trust_file, state.workspace_root)
+        remaining = resolve_with_approval(state.violations, state.config_dict, state.workspace_root, effective_trust_file)
+        if remaining:
+            raise ConfigAuthorityError(remaining)
+
+    cfg = AppConfig(**state.config_dict)
+
     # Enforce baseline sensitive paths inheritance
     baseline_sensitive = [
-        r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile", 
+        r".*\.env$", r".*secrets.*", r"\.github/workflows/.*", r"Jenkinsfile",
         r".*credentials.*", r".*password.*"
     ]
     for pattern in baseline_sensitive:
         if pattern not in cfg.autonomy.sensitive_paths:
             cfg.autonomy.sensitive_paths.append(pattern)
-            
+
     return cfg

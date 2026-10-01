@@ -1,0 +1,37 @@
+OK    #1 README verbatim: '# Title\n\nUse it like this:\n\n```python\nx = 1\n```\n\nMore prose.\n'
+OK    #1b col0 docstring fence refused typed: 'AMBIGUOUS_FILE_RESPONSE_PROTOCOL'
+OK    #2-4 payload yaml byte-identical: 'responses:\n    200:\n      description: ok\n    404:\n      description: nf\n'
+OK    #2-4 payload dict byte-identical: "CODES = {\n    200: 'ok',\n    404: 'nf',\n}\n"
+OK    #2-4 payload doctest byte-identical: 'def f():\n    """\n>>> f()\n1\n"""\n    return 1\n'
+OK    #2-4 payload bitshift byte-identical: 'x = (a\n>> 8)\n'
+OK    #2-4 payload xml-java byte-identical: 'String s = "<!-- a -- b -->";\n'
+OK    #2-4 payload xml-py byte-identical: 's = "<!-- x--y -->"\n'
+OK    #2-4 payload xml-props byte-identical: 'k=<!-- a -- b -->\n'
+OK    #2-4 payload file-content-doc byte-identical: 'Reads a file.\n\nFile content: the raw bytes are returned.\nMore docs.\n'
+OK    #4b chain intact: "def f():\n    '''\n    File content: bytes\n    '''\n    return 1\n"
+OK    #5 NO CHANGE in payload keeps file: DeveloperResponse(kind='file', protocol='legacy_strict', analysis='add guard', content='# no change needed for legacy callers\ndef f(x):\n    return max(x, 0)\n', edits=(), reason_code=None, detail=None)
+OK    #5 NO CHANGE in payload keeps edit: (('def f(x):\n    return x', 'def f(x):\n    # No changes needed upstream\n    return max(x, 0)'),)
+OK    #6 YAML marker-like keys stay payload: (('config:\n  mode: a', 'config:\n  mode: b\n  search: enabled\n  replace: never'),)
+OK    #6 docstring marker-like stays payload: (('def f():\n    return 1', 'def f():\n    """\n    Search: the index\n    """\n    return 2'),)
+OK    #7 bytes crlf.py: got=b'a = 1\r\nb = 20\r\nc = 3\r\n'
+OK    #7 bytes nofinal.py: got=b'x = 10\n  y = 2'
+OK    #7 bytes ff.py: got=b's = "a\x0cb"\nx = 10\n  y = 2\n'
+OK    #7 bytes u2028.py: got=b's = "a\xe2\x80\xa8b"\nx = 10\n  y = 2\n'
+OK    #7 bytes bom.py: got=b'\xef\xbb\xbfx = 10\r\n'
+OK    #7 refusal latin1.py: UNSUPPORTED_TEXT_ENCODING, untouched=True
+OK    #7 refusal mixed.py: MIXED_NEWLINE_UNSUPPORTED, untouched=True
+OK    #7 refusal nofinal_bad_indent.py: INDENTATION_STYLE_MISMATCH, untouched=True
+OK    #10 revision invalid bytes distinct: 
+OK    #10 revision CRLF vs LF distinct: 
+OK    #8 substring anchor refused: ANCHOR_NOT_FOUND
+OK    #9 empty SEARCH refused: EMPTY_SEARCH_BLOCK
+OK    #9 blank lines not collapsed: ANCHOR_NOT_FOUND
+OK    #9 tabs vs spaces refused: INDENTATION_STYLE_MISMATCH
+OK    #12 worktree sync 'café.txt': worktree has 'v2-uncommitted\n'
+OK    #12 worktree sync 'tab\there.txt': worktree has 'v2-uncommitted\n'
+OK    #12 worktree sync 'sp ace.txt': worktree has 'v2-uncommitted\n'
+TOTAL 32 / 32
+status: None gates: True files: ['app/App.java']
+compile-gate saw pom sha 2da925b6cb70 committed pom sha 2da925b6cb70
+#11 pom verified != committed: same
+verified pom widened: False committed widened: False

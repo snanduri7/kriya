@@ -1,0 +1,82 @@
+{
+  "validated_at_utc": "2026-09-17T12:11:05.517602+00:00",
+  "kriya_head": "291647012d95bb19493733dee9fbf75d6fe72ae6",
+  "worktree_clean": true,
+  "models": [
+    "qwen3-coder:30b",
+    "qwen3.6:35b-a3b-q4_K_M",
+    "qwen3.5:9B"
+  ],
+  "results": [
+    {
+      "model": "qwen3-coder:30b",
+      "resolved_source": "known_production_profile",
+      "resolved_capabilities": {
+        "native_tool_calls": true,
+        "json_mode": true,
+        "reliable_multiline_json": true,
+        "streaming": true,
+        "max_tool_argument_chars": 8192,
+        "preferred_edit_protocol": "small_native_tools"
+      },
+      "expected_capabilities": {
+        "native_tool_calls": true,
+        "json_mode": true,
+        "reliable_multiline_json": true,
+        "streaming": true,
+        "max_tool_argument_chars": 8192,
+        "preferred_edit_protocol": "small_native_tools"
+      },
+      "profile_matches_campaign_evidence": true,
+      "interaction": "native tool call succeeded",
+      "passed": true
+    },
+    {
+      "model": "qwen3.6:35b-a3b-q4_K_M",
+      "resolved_source": "known_production_profile",
+      "resolved_capabilities": {
+        "native_tool_calls": true,
+        "json_mode": true,
+        "reliable_multiline_json": true,
+        "streaming": true,
+        "max_tool_argument_chars": 8192,
+        "preferred_edit_protocol": "small_native_tools"
+      },
+      "expected_capabilities": {
+        "native_tool_calls": true,
+        "json_mode": true,
+        "reliable_multiline_json": true,
+        "streaming": true,
+        "max_tool_argument_chars": 8192,
+        "preferred_edit_protocol": "small_native_tools"
+      },
+      "profile_matches_campaign_evidence": true,
+      "interaction": "native tool call succeeded",
+      "passed": true
+    },
+    {
+      "model": "qwen3.5:9B",
+      "resolved_source": "known_production_profile",
+      "resolved_capabilities": {
+        "native_tool_calls": true,
+        "json_mode": true,
+        "reliable_multiline_json": true,
+        "streaming": true,
+        "max_tool_argument_chars": 8192,
+        "preferred_edit_protocol": "small_native_tools"
+      },
+      "expected_capabilities": {
+        "native_tool_calls": true,
+        "json_mode": true,
+        "reliable_multiline_json": true,
+        "streaming": true,
+        "max_tool_argument_chars": 8192,
+        "preferred_edit_protocol": "small_native_tools"
+      },
+      "profile_matches_campaign_evidence": true,
+      "interaction": "native tool call succeeded",
+      "passed": true
+    }
+  ],
+  "all_passed": true
+}

@@ -1,0 +1,94 @@
+{
+  "contract_registry": {
+    "after_digest": "245c5b75879ab3c147f41785759cfcfcb9e8326ac78ace634f751ab3fe3b1681",
+    "before_digest": "fc2f1418cc17a4ba850c4b13362f714abb804c01755489f67372bf310797e589",
+    "changed": [],
+    "created": [
+      "api:pricing.py"
+    ],
+    "downstream_verification": {
+      "required": true,
+      "satisfied": true,
+      "satisfied_by": "terminal_full_regression"
+    },
+    "established_capabilities": [],
+    "invalidated_consumers": [
+      {
+        "consumer": "checkout.py",
+        "contract": "api:pricing.py",
+        "reason": "CONTRACT_REVISION_CHANGED",
+        "symbols": [
+          "total"
+        ]
+      }
+    ],
+    "revision": 1,
+    "source_revision": "20260927T005953-7a5dc382-2233991a209a:1145f585ca8b6b05c58288a8c68be673252ab7b756b59644d9a1ae3e28537ea0",
+    "stale": []
+  },
+  "quality_gates_passed": true,
+  "registry": {
+    "contracts": {
+      "api:pricing.py": [
+        {
+          "authorization": {
+            "authorizations": [
+              {
+                "authorization_id": "grounding_goal::pricing.py::total::modify",
+                "change_category": "modify",
+                "owner": "pricing.py",
+                "provenance": "direct",
+                "symbol": "total"
+              }
+            ],
+            "changed_symbols": [
+              "total"
+            ]
+          },
+          "consumer_provenance": [
+            {
+              "consumer": "checkout.py",
+              "provenance": "name_reference_scan",
+              "symbols": [
+                "total"
+              ]
+            }
+          ],
+          "consumers": [
+            "checkout.py"
+          ],
+          "consumers_complete": false,
+          "content_hash": "de9fcd088fbcba9689e57fbdf90ac5be314509e01d71f11df44a4c5ef671cb6f",
+          "created_at": "2026-09-26T19:30:51.866929+00:00",
+          "id": "api:pricing.py",
+          "invalidated_consumers": [
+            {
+              "consumer": "checkout.py",
+              "contract": "api:pricing.py",
+              "reason": "CONTRACT_REVISION_CHANGED",
+              "symbols": [
+                "total"
+              ]
+            }
+          ],
+          "kind": "public_api",
+          "name": "pricing.py",
+          "owner": "pricing.py",
+          "provider_milestone_id": "",
+          "revision": "v1",
+          "shape": [
+            "total(items, tax_rate=0.0)"
+          ],
+          "source_revision": "20260927T005953-7a5dc382-2233991a209a:1145f585ca8b6b05c58288a8c68be673252ab7b756b59644d9a1ae3e28537ea0",
+          "stale_reason": null,
+          "state": "implemented",
+          "updated_at": "2026-09-26T19:30:51.866986+00:00"
+        }
+      ]
+    },
+    "revision": 1,
+    "schema_version": 2,
+    "source_revision": "20260927T005953-7a5dc382-2233991a209a:1145f585ca8b6b05c58288a8c68be673252ab7b756b59644d9a1ae3e28537ea0"
+  },
+  "status": "LIVE_EXERCISED"
+}

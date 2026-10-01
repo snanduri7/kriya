@@ -48,6 +48,12 @@ public class BrokerServer {
         attributes.put("type", "Memory");
         attributes.put("initialConfigurationLocation",
                 getClass().getClassLoader().getResource("qpid-initial-config.json").toExternalForm());
+        // Required even when no custom system properties are set: an empty
+        // src/main/resources/system.properties is enough. Without this key,
+        // SystemLauncher loads "classpath:system.properties" itself and fails
+        // with "unknown protocol: classpath" under exec:java (see rules.txt).
+        attributes.put("initialSystemPropertiesLocation",
+                getClass().getClassLoader().getResource("system.properties").toExternalForm());
         attributes.put("startupLoggedToSystemOut", true);
         systemLauncher.startup(attributes);
     }

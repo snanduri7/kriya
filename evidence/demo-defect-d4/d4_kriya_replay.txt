@@ -1,0 +1,39 @@
+{
+ "A candidate pom names a nonexistent class": {
+  "runtime_prerequisite": "mvn clean compile (current source): PASSED",
+  "success": false,
+  "diagnosis": {
+   "requested_entrypoint": "demo.ExistingB",
+   "effective_entrypoint": "demo.NonexistentA",
+   "effective_entrypoint_provenance": "CANDIDATE_BUILD_CONFIG",
+   "candidate_config_source": "pom.xml",
+   "candidate_config_key": "build/plugins/plugin[exec-maven-plugin]/configuration/mainClass",
+   "source_declares_entrypoint": false,
+   "compiled_artifact_exists": false
+  },
+  "ownership": "CANDIDATE_RUNTIME_ENTRYPOINT_INVALID",
+  "pre_d4_infrastructure_reason": "runtime command could not load its configured application entrypoint"
+ },
+ "B Kriya's command names a nonexistent class": {
+  "runtime_prerequisite": "mvn clean compile (current source): PASSED",
+  "success": false,
+  "diagnosis": {
+   "requested_entrypoint": "demo.WrongMain",
+   "effective_entrypoint": "demo.WrongMain",
+   "effective_entrypoint_provenance": "KRIYA_COMMAND",
+   "candidate_config_source": null,
+   "candidate_config_key": null,
+   "source_declares_entrypoint": false,
+   "compiled_artifact_exists": false
+  },
+  "ownership": "RUNTIME_COMMAND_ENTRYPOINT_INVALID",
+  "pre_d4_infrastructure_reason": "runtime command could not load its configured application entrypoint"
+ },
+ "valid (control)": {
+  "runtime_prerequisite": "mvn clean compile (current source): PASSED",
+  "success": true,
+  "diagnosis": null,
+  "ownership": null,
+  "pre_d4_infrastructure_reason": null
+ }
+}

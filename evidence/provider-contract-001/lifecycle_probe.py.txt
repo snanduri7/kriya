@@ -1,0 +1,26 @@
+import asyncio, gc, warnings, sys, threading, json
+from http.server import BaseHTTPRequestHandler, HTTPServer
+sys.path.insert(0, ".")
+warnings.simplefilter("always")
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_POST(self):
+        self.rfile.read(int(self.headers["Content-Length"]))
+        body = json.dumps({"id":"x","object":"chat.completion","created":0,"model":"m","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}).encode()
+        self.send_response(200); self.send_header("Content-Type","application/json"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+srv = HTTPServer(("127.0.0.1", 0), H); threading.Thread(target=srv.serve_forever, daemon=True).start()
+from kriya.config import AppConfig
+from kriya.core.llm import LLMClient
+cfg = AppConfig(); cfg.llm.base_url = f"http://127.0.0.1:{srv.server_port}/v1"; cfg.llm.model = "m"
+mode = sys.argv[1]
+async def main():
+    llm = LLMClient(cfg)
+    print(await llm.complete("s", "u"))
+    if mode == "close":
+        await llm.aclose()
+    return llm
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    keep = asyncio.run(main())
+    del keep; gc.collect()
+print(mode, "warnings:", [f"{w.category.__name__}: {str(w.message)[:80]}" for w in caught])

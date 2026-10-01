@@ -4,8 +4,10 @@ from kriya.config.config import (
     LLMConfig,
     LoggingConfig,
     MCPServerConfig,
+    ModelCapabilities,
     PathsConfig,
     PluginsConfig,
+    SkillsConfig,
     load_config,
 )
 
@@ -14,8 +16,10 @@ __all__ = [
     "LLMConfig",
     "PluginsConfig",
     "PathsConfig",
+    "SkillsConfig",
     "LoggingConfig",
     "MCPServerConfig",
     "FallbackModelConfig",
+    "ModelCapabilities",
     "load_config"
 ]

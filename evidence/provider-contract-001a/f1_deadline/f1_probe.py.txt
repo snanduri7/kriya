@@ -1,0 +1,55 @@
+"""F-1 pre-fix measurement (run with the revision's own package on sys.path).
+(1) a model call inside a run with a generation budget: is it deadline-bound,
+    and what read timeout is sent?
+(2) two run_generation_workflow calls (units) of one run: does the budget
+    clock restart?"""
+import asyncio, os, sys, tempfile, time
+from unittest.mock import AsyncMock
+sys.path.insert(0, os.path.join(sys.argv[1], "tests"))
+from _fake_inference_runtime import FakeRuntimeAdapter
+from kriya.config import AppConfig
+from kriya.control.run_coordinator import begin_mutating_run, authorize_candidate_workspace
+from kriya.core import model_runtime
+from kriya.core.inference_runtime import register_runtime_adapter
+from kriya.core.kernel import Kernel
+from kriya.core.llm import LLMClient
+from kriya.workflow import attempt
+from kriya.workflow.workflow import WorkflowEngine
+
+os.environ[model_runtime.PROBE_ENV_VAR] = "1"
+model_runtime.record_fingerprint = lambda *a, **k: None
+fake = FakeRuntimeAdapter(); register_runtime_adapter(fake)
+with tempfile.TemporaryDirectory() as tmp:
+    os.environ["KRIYA_STATE_DIR"] = os.path.join(tmp, "state")
+    cfg = AppConfig(); cfg.llm.model = "primary:1"; cfg.llm.inference_runtime = "fake"; cfg.llm.context_window = 8192; cfg.llm_chain = []
+    cfg.autonomy.generation_time_budget_seconds = 600
+    llm = LLMClient(cfg)
+    ws = os.path.join(tmp, "ws"); os.makedirs(ws)
+    with begin_mutating_run(ws):
+        result = asyncio.run(llm.complete_result("s", "u"))
+    print("(1) inference_deadline_bound =", result.protocol["provider_contract"]["inference_deadline_bound"],
+          "| read timeout sent =", fake.requests[0].timeout.read, "s with a 600 s run budget")
+
+    seen = []
+    current_unit = [None]
+    real = attempt._ensure_generation_time_budget
+    def spy(state, ctx, **kw):
+        seen.append((current_unit[0], getattr(state, 'budget_started_monotonic', state.generation_started_monotonic))); return real(state, ctx, **kw)
+    attempt._ensure_generation_time_budget = spy
+    async def units():
+        for unit in ("one", "two"):
+            current_unit[0] = unit
+            path = os.path.join(ws, unit); os.makedirs(path); authorize_candidate_workspace(path)
+            c = AppConfig(); c.autonomy.mode = "guardrails"; c.autonomy.run_verification_enabled = False
+            c.autonomy.generation_time_budget_seconds = 3600
+            l = LLMClient(c); l.complete = AsyncMock(side_effect=["Step 1", "Design: Write math.py", "def add(a,b):\n    return a+b", "Review: Approved"])
+            r = await WorkflowEngine(Kernel(config=c), l).run_generation_workflow(goal="Create math library", workspace_path=path)
+            print('   unit', unit, 'quality_gates_passed =', r.get('quality_gates_passed'))
+            await asyncio.sleep(0.5)
+    with begin_mutating_run(ws):
+        asyncio.run(units())
+    first = {}
+    for unit, value in seen:
+        first.setdefault(unit, value)
+    print("(2) budget clock start per unit:", {k: round(v, 3) for k, v in first.items()},
+          "| restarted for unit two:", first["one"] != first["two"])

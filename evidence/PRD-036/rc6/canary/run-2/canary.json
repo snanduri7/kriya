@@ -1,0 +1,116 @@
+{
+  "checks": {
+    "cli_exit_zero": {
+      "exit_code": 1,
+      "passed": false
+    },
+    "commit_committed": {
+      "passed": false,
+      "state": null,
+      "transaction_id": null
+    },
+    "enforce_controller_exercised": {
+      "passed": true,
+      "subtasks": [
+        {
+          "status": "completed",
+          "subtask_id": "s1"
+        }
+      ]
+    },
+    "head_unchanged": {
+      "after": [
+        "0d7a09136cfec085156308d706d53b091ecd3cde"
+      ],
+      "before": [
+        "0d7a09136cfec085156308d706d53b091ecd3cde"
+      ],
+      "passed": true
+    },
+    "independent_post_run_compile": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "independent_post_run_test": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "no_leaked_containers": {
+      "leaked": [],
+      "passed": true
+    },
+    "no_leaked_networks": {
+      "leaked": [],
+      "passed": true
+    },
+    "no_leaked_processes": {
+      "leaked": [],
+      "passed": true
+    },
+    "no_uncertain_commit_state": {
+      "passed": true,
+      "reason_codes": []
+    },
+    "only_authorized_workspace_writes": {
+      "changed": [],
+      "expected": [
+        "src/main/java/com/myapp/service/driver/DefaultDriverService.java"
+      ],
+      "passed": false
+    },
+    "production_ready_after": {
+      "blocking": [],
+      "passed": true
+    },
+    "production_ready_before": {
+      "blocking": [],
+      "passed": true
+    },
+    "release_candidate_current": {
+      "changes": [],
+      "passed": true
+    },
+    "run_record_success": {
+      "commits": 0,
+      "lifecycle_state": "FAILURE",
+      "passed": false,
+      "run_id": "20260928T230839-b460f652"
+    },
+    "run_success": {
+      "failure_category": null,
+      "passed": false,
+      "quality_gates_passed": false,
+      "status": "failed"
+    },
+    "starts_from_expected_worktrees": {
+      "expected": [
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo",
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktree",
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktrees/candidate-kriya-worktree-c2a3db38"
+      ],
+      "passed": true,
+      "started": [
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo",
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktree",
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktrees/candidate-kriya-worktree-c2a3db38"
+      ]
+    },
+    "static_analysis_evidence_bound": {
+      "passed": false,
+      "verification_evidence_ids": []
+    },
+    "workspace_lock_released": {
+      "passed": true
+    },
+    "worktrees_managed_and_clean": {
+      "passed": true,
+      "retained": [
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktree",
+        "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktrees/candidate-kriya-worktree-c2a3db38"
+      ],
+      "violations": []
+    }
+  },
+  "run_id": "20260928T230839-b460f652",
+  "verdict": "FAIL"
+}

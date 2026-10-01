@@ -1,0 +1,99 @@
+{
+  "candidate": "edce0229d590f13e7457d746d2c96778dbdc552c2f35ab7f638c3ff404308d7f",
+  "criteria": {
+    "canary": {
+      "failed": [],
+      "passed": true,
+      "verdict": "PASS"
+    },
+    "certified_candidate_identity": {
+      "candidate": "5a569dc8923640682fa248d0317d484cebe837d2f0bd03d006b076764ad7346f",
+      "certified": "5a569dc8923640682fa248d0317d484cebe837d2f0bd03d006b076764ad7346f",
+      "passed": true
+    },
+    "deterministic_certification": {
+      "passed": true,
+      "problems": [],
+      "pytest": {
+        "junit": {
+          "errors": 0,
+          "failures": 0,
+          "passed": 7219,
+          "skipped": 0,
+          "tests": 7219
+        },
+        "skipped": 0,
+        "unexpected_skips": 0
+      },
+      "status": "CERTIFIED"
+    },
+    "evidence_only_since_candidate": {
+      "changed": [],
+      "offending": [],
+      "passed": true
+    },
+    "hosted_ci_at_candidate": {
+      "passed": false,
+      "runs": []
+    },
+    "live_streak": {
+      "contradictions": [],
+      "missing_evidence": [],
+      "passed": true,
+      "streak": 3,
+      "trials": [
+        {
+          "outcome": "CERTIFIED",
+          "streak_after": 1,
+          "trial": 1
+        },
+        {
+          "outcome": "CERTIFIED",
+          "streak_after": 2,
+          "trial": 2
+        },
+        {
+          "outcome": "CERTIFIED",
+          "streak_after": 3,
+          "trial": 3
+        }
+      ]
+    },
+    "no_open_p0_p1": {
+      "open": [],
+      "passed": true
+    },
+    "production_doctor_ready": {
+      "checks": {
+        "run1.production_ready_after": true,
+        "run1.production_ready_before": true,
+        "run2.production_ready_after": true,
+        "run2.production_ready_before": true
+      },
+      "passed": true
+    },
+    "release_stage": {
+      "passed": true
+    },
+    "scanner_executed": {
+      "passed": true,
+      "scanner": {
+        "junit": {
+          "errors": 0,
+          "failures": 0,
+          "passed": 27,
+          "skipped": 0,
+          "tests": 27
+        },
+        "skipped": 0,
+        "unexpected_skips": 0
+      }
+    },
+    "tracked_tree_clean": {
+      "changes": [],
+      "passed": true
+    }
+  },
+  "result": "NOT_VERIFIED",
+  "revision": "7bc686f37383e057dda3143db5e1e6193262c01f"
+}

@@ -1,0 +1,4 @@
+OSError fault immediately after replacement
+first: new first
+second: old second
+commit evidence exists: False

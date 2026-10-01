@@ -1,0 +1,136 @@
+"""MA7.6: failure-vocabulary reporting categories (kriya/workflow/failure_reporting.py) -
+maps the EXISTING Failure.type/AttributionTier vocabulary onto reporting
+categories, per the original MA7 proposal's explicit "reuse the existing
+vocabulary, don't invent a new taxonomy" instruction."""
+
+import pytest
+
+from kriya.workflow.failure_reporting import (
+    FailureCategory,
+    build_failure_report_entry,
+    categorize_failure,
+    dominant_category,
+)
+from kriya.workflow.retry_strategy import _REPAIR_FEEDBACK_FAILURE_TYPES
+
+# The full real Failure.type vocabulary, verified 2026-08-24 by grepping
+# every real construction site (Failure(type=...)/_build_quality_gate_failure) -
+# see failure_reporting.py's own module docstring. Pinned here so a
+# real-world addition/removal of a Failure.type forces a conscious review
+# of this mapping instead of silently falling through to UNCLASSIFIED.
+_REAL_FAILURE_TYPES = {
+    "compile": FailureCategory.BUILD,
+    "pom_semantic_validation": FailureCategory.BUILD,
+    "cross_package_symbol_mismatch": FailureCategory.BUILD,
+    "test": FailureCategory.VERIFICATION,
+    "targeted_test": FailureCategory.VERIFICATION,
+    "run_verification": FailureCategory.VERIFICATION,
+    "run_verification_hung": FailureCategory.VERIFICATION,
+    "regression_test": FailureCategory.VERIFICATION,
+    "goal_spec_compliance": FailureCategory.VERIFICATION,
+    "test_acceptance": FailureCategory.VERIFICATION,
+    "incomplete_generation": FailureCategory.GENERATION_COMPLETENESS,
+    "static_rule_violation": FailureCategory.GENERATION_COMPLETENESS,
+    "structural_corruption": FailureCategory.GENERATION_COMPLETENESS,
+    "duplicate_type_across_files": FailureCategory.GENERATION_COMPLETENESS,
+    "operation_contract": FailureCategory.GENERATION_COMPLETENESS,
+    "anchored_edit": FailureCategory.EDIT_TARGETING,
+    "attribution_rejected": FailureCategory.EDIT_TARGETING,
+    "unaddressed_error_location": FailureCategory.EDIT_TARGETING,
+    "diagnosis_mismatch": FailureCategory.EDIT_TARGETING,
+    "misdirected_edit": FailureCategory.EDIT_TARGETING,
+    "no_op_edit": FailureCategory.EDIT_TARGETING,
+    "time_budget_exhausted": FailureCategory.RESOURCE,
+    "context_budget_unsatisfiable": FailureCategory.RESOURCE,
+    "output_budget_unsatisfiable": FailureCategory.RESOURCE,
+    # PRD-017: a fallback model that cannot serve the attempt.
+    "fallback_incompatible": FailureCategory.RESOURCE,
+    # CONTEXT-EDIT-PROTOCOL-001: no feasible mutation operation, before inference.
+    "context_edit_protocol_unsatisfiable": FailureCategory.RESOURCE,
+    # PROVIDER-CONTRACT-001: provider/runtime contract violation.
+    "provider_contract": FailureCategory.RESOURCE,
+    # MODEL-EVIDENCE-HARDENING-001: a production Developer retry whose
+    # retry-temperature inference identity is not qualified.
+    "retry_identity_not_qualified": FailureCategory.RESOURCE,
+    # PRD-020: an original requirement without accepted evidence.
+    "requirements_unresolved": FailureCategory.VERIFICATION,
+    "contract_registry": FailureCategory.VERIFICATION,
+    # PRD-031A: static-analysis gate stops.
+    "static_analysis_blocked": FailureCategory.VERIFICATION,
+    "static_analysis_unknown": FailureCategory.VERIFICATION,
+    "static_analysis_unavailable": FailureCategory.VERIFICATION,
+    # PRD-032: a verified candidate's terminal commit that did not commit.
+    "workspace_commit": FailureCategory.RESOURCE,
+    "internal_framework_error": FailureCategory.INTERNAL,
+    "general_error": FailureCategory.UNCLASSIFIED,
+}
+
+
+@pytest.mark.parametrize("failure_type,expected_category", sorted(_REAL_FAILURE_TYPES.items()))
+def test_every_real_failure_type_maps_to_the_expected_category(failure_type, expected_category):
+    assert categorize_failure(failure_type) == expected_category
+
+
+def test_unrecognized_failure_type_degrades_to_unclassified_not_an_error():
+    assert categorize_failure("some_future_failure_type_not_added_yet") == FailureCategory.UNCLASSIFIED
+
+
+def test_mapping_covers_exactly_the_pinned_real_vocabulary_no_more_no_less():
+    from kriya.workflow.failure_reporting import _FAILURE_TYPE_TO_CATEGORY
+    assert set(_FAILURE_TYPE_TO_CATEGORY.keys()) == set(_REAL_FAILURE_TYPES.keys())
+
+
+def test_every_real_repair_feedback_type_is_categorized_not_unclassified():
+    """Ties this reporting module to retry_strategy.py's own real,
+    authoritative _REPAIR_FEEDBACK_FAILURE_TYPES set. NOT asserting they're
+    all EDIT_TARGETING - that set is broader than this module's own
+    category boundary (e.g. structural_corruption legitimately reports
+    GENERATION_COMPLETENESS here - a broken file's own content, not a
+    targeting mistake - while still being repair-feedback-worthy for retry
+    purposes; the two vocabularies answer different questions). The real
+    invariant: every type retry logic already treats as repair-worthy must
+    be a REAL, pinned entry in this module's mapping, never silently
+    falling through to UNCLASSIFIED."""
+    from kriya.workflow.failure_reporting import _FAILURE_TYPE_TO_CATEGORY
+    for failure_type in _REPAIR_FEEDBACK_FAILURE_TYPES:
+        assert failure_type in _FAILURE_TYPE_TO_CATEGORY, (
+            f"{failure_type!r} is in retry_strategy.py's real _REPAIR_FEEDBACK_FAILURE_TYPES "
+            "but has no entry in this module's mapping at all"
+        )
+
+
+def test_build_failure_report_entry_carries_the_real_type_verbatim():
+    entry = build_failure_report_entry("compile", attribution_tier="locator")
+    assert entry.failure_type == "compile"
+    assert entry.category == FailureCategory.BUILD
+    assert entry.attribution_tier == "locator"
+
+
+def test_build_failure_report_entry_attribution_tier_defaults_to_none():
+    entry = build_failure_report_entry("general_error")
+    assert entry.attribution_tier is None
+    assert entry.category == FailureCategory.UNCLASSIFIED
+
+
+# --- dominant_category: consumes traces.db's persisted dict shape, not FailureReportEntry ---
+
+def test_dominant_category_empty_list_is_none():
+    assert dominant_category([]) is None
+
+
+def test_dominant_category_single_entry():
+    entries = [{"failure_type": "compile", "category": "build", "attribution_tier": None}]
+    assert dominant_category(entries) == "build"
+
+
+def test_dominant_category_picks_the_most_frequent():
+    entries = (
+        [{"failure_type": "compile", "category": "build", "attribution_tier": None}] * 1
+        + [{"failure_type": "no_op_edit", "category": "edit_targeting", "attribution_tier": "locator"}] * 3
+    )
+    assert dominant_category(entries) == "edit_targeting"
+
+
+def test_dominant_category_ignores_entries_missing_a_category():
+    entries = [{"failure_type": "compile", "attribution_tier": None}]
+    assert dominant_category(entries) is None

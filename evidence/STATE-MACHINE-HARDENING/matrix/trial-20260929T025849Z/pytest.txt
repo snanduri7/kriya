@@ -1,0 +1,820 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 11 items
+
+tests/test_live_prd035_certification.py ...F......F                      [100%]
+
+=================================== FAILURES ===================================
+_____________________ test_c4_exact_requirement_compliance _____________________
+
+case = <test_live_prd035_certification.Case object at 0x10b30b100>
+
+    @certification_case("C4", "exact_requirement")
+    def test_c4_exact_requirement_compliance(case):
+        ws = git_workspace(case.tmp_path, {"README.md": "Text utilities.\n"})
+        result = case.run(ws, (
+            "In text_utils.py create a function slugify(text) that lowercases the text, replaces every run of "
+            "characters that are not letters or digits with a single hyphen, and strips leading and trailing "
+            "hyphens. When text is not a string it must raise TypeError with the message 'text must be a string'."))
+        passed = case.hidden_tests(ws, """
+            import pytest
+            from text_utils import slugify
+            def test_slugify():
+                assert slugify("Hello, World!") == "hello-world"
+                assert slugify("  --Kriya  Rocks--  ") == "kriya-rocks"
+                assert slugify("a__b..c") == "a-b-c"
+            def test_type_error_message():
+                with pytest.raises(TypeError, match="^text must be a string$"):
+                    slugify(42)
+        """)
+        outcomes = ((result.get("requirements") or {}).get("outcomes") or {})
+>       case.finish(result, ws, hidden_acceptance_passed=passed, requirement_outcomes=outcomes)
+
+tests/test_live_prd035_certification.py:265: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_live_prd035_certification.Case object at 0x10b30b100>
+result = {'plan': '```markdown\n## Text Utilities Slugify Function Implementation\n\n### Step 1: Create text_utils.py file with...est_text_utils.py"\n  ]\n}\n```', 'files': ['test_text_utils.py', 'text_utils.py'], 'quality_gates_passed': False, ...}
+workspace = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c4_exact_requirement_comp0/ws')
+required = True
+evidence = {'hidden_acceptance_passed': False, 'requirement_outcomes': {'REQ-1': 'pending', 'REQ-2': 'pending'}}
+
+    def finish(self, result, workspace, *, required=True, **evidence):
+        """Record the case (always, pass or fail) and assert success."""
+        metrics = derive_metrics(load_trace_runs(trace_db_path(self.config)))
+        generation = metrics["outcomes"]["generation"]
+        roles = {}
+        for row in metrics["model_protocol"]:
+            entry = roles.setdefault(row["role"], {"runtime_digests": set(), "settings_digests": set(),
+                                                   "models": set(), "prompt_tokens": 0, "completion_tokens": 0,
+                                                   "calls": 0})
+            entry["runtime_digests"].add(row["runtime_digest"])
+            entry["settings_digests"].add(row["inference_settings_digest"])
+            entry["models"].update(row["models"])
+            for key in ("prompt_tokens", "completion_tokens", "calls"):
+                entry[key] += row[key]
+        records = scan_run_records(str(workspace)).records
+        self.record.update({
+            "final_success": result.get("quality_gates_passed") is True,
+            "failure_category": result.get("failure_category") or result.get("status"),
+            "first_pass_compile": generation["first_pass_compile"],
+            "retries": {k: v.get("value") for k, v in generation["retries"].items()},
+            "fallback_transitions": generation["fallback_transitions"].get("value"),
+            "roles": {role: {k: sorted(v) if isinstance(v, set) else v for k, v in entry.items()}
+                      for role, entry in sorted(roles.items())},
+            "tokens": {"input": sum(r["prompt_tokens"] for r in roles.values()),
+                       "output": sum(r["completion_tokens"] for r in roles.values())},
+            "context_window": self.config.llm.context_window, "max_tokens": self.config.llm.max_tokens,
+            "static_analysis": (result.get("static_analysis") or {}).get("outcome"),
+            "commit_results": [c.get("result") for r in records for c in r.commits],
+            "lifecycles": [r.lifecycle_state.value for r in records],
+            **evidence,
+        })
+        self.request.node.user_properties.append(("model_certification_case", self.record))
+        if required:
+>           assert self.record["final_success"], f"{self.case_id} did not succeed: {self.record['failure_category']}"
+E           AssertionError: C4 did not succeed: quality_gates_exhausted
+E           assert False
+
+tests/test_live_prd035_certification.py:120: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+[Usage: 2833 input tokens, 1139 output tokens | Time: 17.84s | Finish: stop]
+
+[Usage: 1920 input tokens, 27 output tokens | Time: 2.21s | Finish: stop]
+
+[Usage: 2161 input tokens, 239 output tokens | Time: 6.15s | Finish: stop]
+
+[Usage: 2401 input tokens, 388 output tokens | Time: 6.09s | Finish: stop]
+
+[Usage: 3555 input tokens, 2386 output tokens | Time: 45.79s | Finish: stop]
+
+[Usage: 3196 input tokens, 565 output tokens | Time: 14.17s | Finish: stop]
+
+[Usage: 3196 input tokens, 631 output tokens | Time: 11.10s | Finish: stop]
+
+[Usage: 2055 input tokens, 23 output tokens | Time: 10.23s | Finish: stop]
+
+[Usage: 3089 input tokens, 374 output tokens | Time: 32.23s | Finish: stop]
+
+[Usage: 3350 input tokens, 358 output tokens | Time: 11.38s | Finish: stop]
+
+[Usage: 3119 input tokens, 787 output tokens | Time: 19.85s | Finish: stop]
+
+[Usage: 2343 input tokens, 15 output tokens | Time: 1.09s | Finish: stop]
+
+[Usage: 3377 input tokens, 366 output tokens | Time: 8.12s | Finish: stop]
+
+[Usage: 3313 input tokens, 340 output tokens | Time: 11.79s | Finish: stop]
+
+[Usage: 3338 input tokens, 291 output tokens | Time: 9.21s | Finish: stop]
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 1: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 0/4 + targeted 0/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c4_exact_requirement_comp0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 10 items
+
+test_text_utils.py .........F                                            [100%]
+
+=================================== FAILURES ===================================
+________________________ TestSlugify.test_unicode_chars ________________________
+
+self = <test_text_utils.TestSlugify testMethod=test_unicode_chars>
+
+    def test_unicode_chars(self):
+>       self.assertEqual(slugify("café"), "cafe")
+E       AssertionError: 'café' != 'cafe'
+E       - café
+E       ?    ^
+E       + cafe
+E       ?    ^
+
+test_text_utils.py:33: AssertionError
+=========================== short test summary info ============================
+FAILED test_text_utils.py::TestSlugify::test_unicode_chars - AssertionError: ...
+========================= 1 failed, 9 passed in 0.02s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 1: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 0/4 + targeted 0/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c4_exact_requirement_comp0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 10 items
+
+test_text_utils.py .........F                                            [100%]
+
+=================================== FAILURES ===================================
+________________________ TestSlugify.test_unicode_chars ________________________
+
+self = <test_text_utils.TestSlugify testMethod=test_unicode_chars>
+
+    def test_unicode_chars(self):
+>       self.assertEqual(slugify("café"), "cafe")
+E       AssertionError: 'café' != 'cafe'
+E       - café
+E       ?    ^
+E       + cafe
+E       ?    ^
+
+test_text_utils.py:33: AssertionError
+=========================== short test summary info ============================
+FAILED test_text_utils.py::TestSlugify::test_unicode_chars - AssertionError: ...
+========================= 1 failed, 9 passed in 0.02s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 2: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: ANCHORED EDIT FAILURE in test_text_utils.py: Anchor matching failed for edit #2: The search block matched 0 times. Please ensure whitespace and contents match exactly.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 2: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: ANCHORED EDIT FAILURE in test_text_utils.py: Anchor matching failed for edit #2: The search block matched 0 times. Please ensure whitespace and contents match exactly.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 3: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 1/3: NO-OP EDIT in text_utils.py: every SEARCH/REPLACE pair in your response is byte-identical - this response changes nothing. If this file genuinely needs no change, write "NO CHANGE NEEDED:" instead of a SEARCH/REPLACE block; otherwise your REPLACE text must actually differ from your SEARCH text.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 3: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 1/3: NO-OP EDIT in text_utils.py: every SEARCH/REPLACE pair in your response is byte-identical - this response changes nothing. If this file genuinely needs no change, write "NO CHANGE NEEDED:" instead of a SEARCH/REPLACE block; otherwise your REPLACE text must actually differ from your SEARCH text.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 4: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 2/3: TARGET ATTRIBUTION REJECTED: the Developer reported NO CHANGE NEEDED for every targeted file (text_utils.py). No grounded alternate file or authoritative locator was available; widen the next attempt to the full file set.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 4: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 2/3: TARGET ATTRIBUTION REJECTED: the Developer reported NO CHANGE NEEDED for every targeted file (text_utils.py). No grounded alternate file or authoritative locator was available; widen the next attempt to the full file set.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 5: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 1/4 + targeted 4/3: OPERATION CONTRACT FAILURE in test_text_utils.py: a full-file replacement was returned, but this file's context this attempt was not authoritative, complete, exact current source (skeleton/signatures/member-only/stale revision/candidate-derived) - whole-file replacement requires authoritative pristine current source regardless of which operation was originally requested. Return SEARCH:/REPLACE: instead.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 5: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 1/4 + targeted 4/3: OPERATION CONTRACT FAILURE in test_text_utils.py: a full-file replacement was returned, but this file's context this attempt was not authoritative, complete, exact current source (skeleton/signatures/member-only/stale revision/candidate-derived) - whole-file replacement requires authoritative pristine current source regardless of which operation was originally requested. Return SEARCH:/REPLACE: instead.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 6: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 2/4 + targeted 4/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c4_exact_requirement_comp0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 10 items
+
+test_text_utils.py .........F                                            [100%]
+
+=================================== FAILURES ===================================
+________________________ TestSlugify.test_unicode_chars ________________________
+
+self = <test_text_utils.TestSlugify testMethod=test_unicode_chars>
+
+    def test_unicode_chars(self):
+>       self.assertEqual(slugify("café"), "cafe")
+E       AssertionError: 'café' != 'cafe'
+E       - café
+E       ?    ^
+E       + cafe
+E       ?    ^
+
+test_text_utils.py:33: AssertionError
+=========================== short test summary info ============================
+FAILED test_text_utils.py::TestSlugify::test_unicode_chars - AssertionError: ...
+========================= 1 failed, 9 passed in 0.02s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 6: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 2/4 + targeted 4/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c4_exact_requirement_comp0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 10 items
+
+test_text_utils.py .........F                                            [100%]
+
+=================================== FAILURES ===================================
+________________________ TestSlugify.test_unicode_chars ________________________
+
+self = <test_text_utils.TestSlugify testMethod=test_unicode_chars>
+
+    def test_unicode_chars(self):
+>       self.assertEqual(slugify("café"), "cafe")
+E       AssertionError: 'café' != 'cafe'
+E       - café
+E       ?    ^
+E       + cafe
+E       ?    ^
+
+test_text_utils.py:33: AssertionError
+=========================== short test summary info ============================
+FAILED test_text_utils.py::TestSlugify::test_unicode_chars - AssertionError: ...
+========================= 1 failed, 9 passed in 0.02s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 7: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 3/4 + targeted 4/3: OPERATION CONTRACT FAILURE in test_text_utils.py: a full-file replacement was returned, but this file's context this attempt was not authoritative, complete, exact current source (skeleton/signatures/member-only/stale revision/candidate-derived) - whole-file replacement requires authoritative pristine current source regardless of which operation was originally requested. Return SEARCH:/REPLACE: instead.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 7: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 3/4 + targeted 4/3: OPERATION CONTRACT FAILURE in test_text_utils.py: a full-file replacement was returned, but this file's context this attempt was not authoritative, complete, exact current source (skeleton/signatures/member-only/stale revision/candidate-derived) - whole-file replacement requires authoritative pristine current source regardless of which operation was originally requested. Return SEARCH:/REPLACE: instead.
+ERROR    kriya.workflow.recovery_coordinator:recovery_coordinator.py:227 Quality Gates stopped - all applicable retry budgets are exhausted. Continuing to review with errors.
+_______________________ test_c11_static_analysis_enabled _______________________
+
+case = <test_live_prd035_certification.Case object at 0x108f115e0>
+
+    @certification_case("C11", "static_analysis_enabled")
+    def test_c11_static_analysis_enabled(case):
+        from kriya.config.config import StaticAnalysisConfig
+    
+        case.config.static_analysis = StaticAnalysisConfig(
+            enabled=True, provider="semgrep", requirement="required",
+            providers={"semgrep": {"version": PINNED_SEMGREP, "rule_packs": [str(SEMGREP_RULES)]}},
+        )
+        ws = git_workspace(case.tmp_path, {
+            "calc.py": "def add(a, b):\n    return a + b\n",
+            "test_calc.py": "from calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+        })
+        result = case.run(ws, "Add a function sub(a, b) returning a - b to calc.py.")
+        passed = case.hidden_tests(ws, "from calc import sub\ndef test_sub():\n    assert sub(5, 3) == 2\n")
+        evidence_ids = [i for r in scan_run_records(str(ws)).records for i in (r.verification_evidence_ids or [])]
+        bound = [i for i in evidence_ids if i.startswith("static_analysis:")]
+>       case.finish(result, ws, hidden_acceptance_passed=passed, static_analysis_evidence_bound=bool(bound))
+
+tests/test_live_prd035_certification.py:436: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_live_prd035_certification.Case object at 0x108f115e0>
+result = {'plan': '```markdown\n### Plan: Add sub(a, b) function to calc.py\n\n#### Step 1: Verify calc.py exists and is a Pyth...n    "calc.py",\n    "test_calc.py"\n  ]\n}', 'files': ['calc.py', 'test_calc.py'], 'quality_gates_passed': False, ...}
+workspace = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c11_static_analysis_enabl0/ws')
+required = True
+evidence = {'hidden_acceptance_passed': False, 'static_analysis_evidence_bound': False}
+
+    def finish(self, result, workspace, *, required=True, **evidence):
+        """Record the case (always, pass or fail) and assert success."""
+        metrics = derive_metrics(load_trace_runs(trace_db_path(self.config)))
+        generation = metrics["outcomes"]["generation"]
+        roles = {}
+        for row in metrics["model_protocol"]:
+            entry = roles.setdefault(row["role"], {"runtime_digests": set(), "settings_digests": set(),
+                                                   "models": set(), "prompt_tokens": 0, "completion_tokens": 0,
+                                                   "calls": 0})
+            entry["runtime_digests"].add(row["runtime_digest"])
+            entry["settings_digests"].add(row["inference_settings_digest"])
+            entry["models"].update(row["models"])
+            for key in ("prompt_tokens", "completion_tokens", "calls"):
+                entry[key] += row[key]
+        records = scan_run_records(str(workspace)).records
+        self.record.update({
+            "final_success": result.get("quality_gates_passed") is True,
+            "failure_category": result.get("failure_category") or result.get("status"),
+            "first_pass_compile": generation["first_pass_compile"],
+            "retries": {k: v.get("value") for k, v in generation["retries"].items()},
+            "fallback_transitions": generation["fallback_transitions"].get("value"),
+            "roles": {role: {k: sorted(v) if isinstance(v, set) else v for k, v in entry.items()}
+                      for role, entry in sorted(roles.items())},
+            "tokens": {"input": sum(r["prompt_tokens"] for r in roles.values()),
+                       "output": sum(r["completion_tokens"] for r in roles.values())},
+            "context_window": self.config.llm.context_window, "max_tokens": self.config.llm.max_tokens,
+            "static_analysis": (result.get("static_analysis") or {}).get("outcome"),
+            "commit_results": [c.get("result") for r in records for c in r.commits],
+            "lifecycles": [r.lifecycle_state.value for r in records],
+            **evidence,
+        })
+        self.request.node.user_properties.append(("model_certification_case", self.record))
+        if required:
+>           assert self.record["final_success"], f"{self.case_id} did not succeed: {self.record['failure_category']}"
+E           AssertionError: C11 did not succeed: quality_gates_exhausted
+E           assert False
+
+tests/test_live_prd035_certification.py:120: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+[Usage: 2748 input tokens, 1001 output tokens | Time: 22.36s | Finish: stop]
+
+[Usage: 1744 input tokens, 21 output tokens | Time: 3.07s | Finish: stop]
+
+[Usage: 2041 input tokens, 29 output tokens | Time: 4.20s | Finish: stop]
+
+[Usage: 2071 input tokens, 705 output tokens | Time: 15.34s | Finish: stop]
+
+[Usage: 3664 input tokens, 169 output tokens | Time: 11.28s | Finish: stop]
+
+[Usage: 3866 input tokens, 320 output tokens | Time: 15.26s | Finish: stop]
+
+[Usage: 3272 input tokens, 424 output tokens | Time: 15.95s | Finish: stop]
+
+[Usage: 3205 input tokens, 793 output tokens | Time: 19.70s | Finish: stop]
+
+[Usage: 3068 input tokens, 798 output tokens | Time: 24.93s | Finish: stop]
+
+[Usage: 3941 input tokens, 602 output tokens | Time: 23.07s | Finish: stop]
+
+[Usage: 3202 input tokens, 156 output tokens | Time: 9.74s | Finish: stop]
+
+[Usage: 3202 input tokens, 144 output tokens | Time: 3.54s | Finish: stop]
+
+[Usage: 3093 input tokens, 116 output tokens | Time: 8.73s | Finish: stop]
+
+[Usage: 2769 input tokens, 728 output tokens | Time: 22.73s | Finish: stop]
+
+[Usage: 4894 input tokens, 432 output tokens | Time: 20.14s | Finish: stop]
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 1: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 0/4 + targeted 0/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c11_static_analysis_enabl0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 2 items
+
+test_calc.py .F                                                          [100%]
+
+=================================== FAILURES ===================================
+___________________________________ test_sub ___________________________________
+
+    def test_sub():
+        assert sub(5, 3) == 2
+        assert sub(10, 7) == 3
+        assert sub(2, 5) == -3
+        assert sub(0, 0) == 0
+        assert sub(-1, -1) == 0
+        assert sub(100, 50) == 50
+        assert sub(-5, 3) == -8
+        assert sub(3, -5) == 8
+        assert sub(0, 5) == -5
+        assert sub(5, 0) == 5
+        assert sub(-3, -7) == 4
+        assert sub(1.5, 0.5) == 1.0
+>       assert sub(2.7, 1.2) == 1.5
+E       assert 1.5000000000000002 == 1.5
+E        +  where 1.5000000000000002 = sub(2.7, 1.2)
+
+test_calc.py:21: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_sub - assert 1.5000000000000002 == 1.5
+========================= 1 failed, 1 passed in 0.03s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 1: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 0/4 + targeted 0/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c11_static_analysis_enabl0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 2 items
+
+test_calc.py .F                                                          [100%]
+
+=================================== FAILURES ===================================
+___________________________________ test_sub ___________________________________
+
+    def test_sub():
+        assert sub(5, 3) == 2
+        assert sub(10, 7) == 3
+        assert sub(2, 5) == -3
+        assert sub(0, 0) == 0
+        assert sub(-1, -1) == 0
+        assert sub(100, 50) == 50
+        assert sub(-5, 3) == -8
+        assert sub(3, -5) == 8
+        assert sub(0, 5) == -5
+        assert sub(5, 0) == 5
+        assert sub(-3, -7) == 4
+        assert sub(1.5, 0.5) == 1.0
+>       assert sub(2.7, 1.2) == 1.5
+E       assert 1.5000000000000002 == 1.5
+E        +  where 1.5000000000000002 = sub(2.7, 1.2)
+
+test_calc.py:21: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_sub - assert 1.5000000000000002 == 1.5
+========================= 1 failed, 1 passed in 0.03s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 2: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c11_static_analysis_enabl0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 2 items
+
+test_calc.py .F                                                          [100%]
+
+=================================== FAILURES ===================================
+___________________________________ test_sub ___________________________________
+
+    def test_sub():
+        assert sub(5, 3) == 2
+        assert sub(10, 7) == 3
+        assert sub(2, 5) == -3
+        assert sub(0, 0) == 0
+        assert sub(-1, -1) == 0
+        assert sub(100, 50) == 50
+        assert sub(-5, 3) == -8
+        assert sub(3, -5) == 8
+        assert sub(0, 5) == -5
+        assert sub(5, 0) == 5
+        assert sub(-3, -7) == 4
+        assert sub(1.5, 0.5) == 1.0
+        assert abs(sub(2.7, 1.2) - 1.5) < 1e-15
+        assert sub(10, 10.0) == 0.0
+        assert sub(0.1, 0.2) == -0.1
+        assert sub(1e10, 1e10) == 0
+        assert sub(1e-10, 1e-10) == 0
+>       assert sub(1.1111111111111111, 1.111111111111111) == 0.0000000000000001
+E       assert 2.220446049250313e-16 == 1e-16
+E        +  where 2.220446049250313e-16 = sub(1.1111111111111112, 1.111111111111111)
+
+test_calc.py:26: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_sub - assert 2.220446049250313e-16 == 1e-16
+========================= 1 failed, 1 passed in 0.03s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 2: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c11_static_analysis_enabl0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 2 items
+
+test_calc.py .F                                                          [100%]
+
+=================================== FAILURES ===================================
+___________________________________ test_sub ___________________________________
+
+    def test_sub():
+        assert sub(5, 3) == 2
+        assert sub(10, 7) == 3
+        assert sub(2, 5) == -3
+        assert sub(0, 0) == 0
+        assert sub(-1, -1) == 0
+        assert sub(100, 50) == 50
+        assert sub(-5, 3) == -8
+        assert sub(3, -5) == 8
+        assert sub(0, 5) == -5
+        assert sub(5, 0) == 5
+        assert sub(-3, -7) == 4
+        assert sub(1.5, 0.5) == 1.0
+        assert abs(sub(2.7, 1.2) - 1.5) < 1e-15
+        assert sub(10, 10.0) == 0.0
+        assert sub(0.1, 0.2) == -0.1
+        assert sub(1e10, 1e10) == 0
+        assert sub(1e-10, 1e-10) == 0
+>       assert sub(1.1111111111111111, 1.111111111111111) == 0.0000000000000001
+E       assert 2.220446049250313e-16 == 1e-16
+E        +  where 2.220446049250313e-16 = sub(1.1111111111111112, 1.111111111111111)
+
+test_calc.py:26: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_sub - assert 2.220446049250313e-16 == 1e-16
+========================= 1 failed, 1 passed in 0.03s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 3: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: STATIC RULE VIOLATION: [markdown_inline_code_leak] test_calc.py line 27 contains a literal backtick character - Markdown's inline-code delimiter, never valid source syntax in this language - almost always a sign the model's own prose/analysis text (or a Markdown-formatted explanation) leaked into the file's actual content instead of real code: '```'. Regenerate this file's content as plain source, with no inline-code formatting or explanatory text embedded in it.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 3: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: STATIC RULE VIOLATION: [markdown_inline_code_leak] test_calc.py line 27 contains a literal backtick character - Markdown's inline-code delimiter, never valid source syntax in this language - almost always a sign the model's own prose/analysis text (or a Markdown-formatted explanation) leaked into the file's actual content instead of real code: '```'. Regenerate this file's content as plain source, with no inline-code formatting or explanatory text embedded in it.
+WARNING  kriya.agents.agent:agent.py:2369 Developer returned a malformed repair response for 'test_calc.py': incomplete repair markers: SEARCH and REPLACE must form at least one complete pair, or the response must use FILE CONTENT. Refusing to treat response prose as source code.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 4: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: OPERATION CONTRACT FAILURE in test_calc.py: malformed repair response: incomplete repair markers: SEARCH and REPLACE must form at least one complete pair, or the response must use FILE CONTENT. Return exactly the repair_with_patch response shape requested.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 4: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 0/3: OPERATION CONTRACT FAILURE in test_calc.py: malformed repair response: incomplete repair markers: SEARCH and REPLACE must form at least one complete pair, or the response must use FILE CONTENT. Return exactly the repair_with_patch response shape requested.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 5: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 1/3: NO-OP EDIT in test_calc.py: every SEARCH/REPLACE pair in your response is byte-identical - this response changes nothing. If this file genuinely needs no change, write "NO CHANGE NEEDED:" instead of a SEARCH/REPLACE block; otherwise your REPLACE text must actually differ from your SEARCH text.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 5: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 1/4 + targeted 1/3: NO-OP EDIT in test_calc.py: every SEARCH/REPLACE pair in your response is byte-identical - this response changes nothing. If this file genuinely needs no change, write "NO CHANGE NEEDED:" instead of a SEARCH/REPLACE block; otherwise your REPLACE text must actually differ from your SEARCH text.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 6: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 1/4 + targeted 4/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c11_static_analysis_enabl0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 2 items
+
+test_calc.py .F                                                          [100%]
+
+=================================== FAILURES ===================================
+___________________________________ test_sub ___________________________________
+
+    def test_sub():
+        assert sub(5, 3) == 2
+        assert sub(10, 7) == 3
+        assert sub(2, 5) == -3
+        assert sub(0, 0) == 0
+        assert sub(-1, -1) == 0
+        assert sub(100, 50) == 50
+        assert sub(-5, 3) == -8
+        assert sub(3, -5) == 8
+        assert sub(0, 5) == -5
+        assert sub(5, 0) == 5
+        assert sub(-3, -7) == 4
+        assert sub(1.5, 0.5) == 1.0
+        assert abs(sub(2.7, 1.2) - 1.5) < 1e-15
+        assert sub(10, 10.0) == 0.0
+        assert sub(0.1, 0.2) == -0.1
+        assert sub(1e10, 1e10) == 0
+        assert sub(1e-10, 1e-10) == 0
+>       assert abs(sub(1.1111111111111111, 1.111111111111111) - 0.0000000000000001) < 1e-16
+E       assert 1.220446049250313e-16 < 1e-16
+E        +  where 1.220446049250313e-16 = abs((2.220446049250313e-16 - 1e-16))
+E        +    where 2.220446049250313e-16 = sub(1.1111111111111112, 1.111111111111111)
+
+test_calc.py:26: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_sub - assert 1.220446049250313e-16 < 1e-16
+========================= 1 failed, 1 passed in 0.03s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 6: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 1/4 + targeted 4/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c11_static_analysis_enabl0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 2 items
+
+test_calc.py .F                                                          [100%]
+
+=================================== FAILURES ===================================
+___________________________________ test_sub ___________________________________
+
+    def test_sub():
+        assert sub(5, 3) == 2
+        assert sub(10, 7) == 3
+        assert sub(2, 5) == -3
+        assert sub(0, 0) == 0
+        assert sub(-1, -1) == 0
+        assert sub(100, 50) == 50
+        assert sub(-5, 3) == -8
+        assert sub(3, -5) == 8
+        assert sub(0, 5) == -5
+        assert sub(5, 0) == 5
+        assert sub(-3, -7) == 4
+        assert sub(1.5, 0.5) == 1.0
+        assert abs(sub(2.7, 1.2) - 1.5) < 1e-15
+        assert sub(10, 10.0) == 0.0
+        assert sub(0.1, 0.2) == -0.1
+        assert sub(1e10, 1e10) == 0
+        assert sub(1e-10, 1e-10) == 0
+>       assert abs(sub(1.1111111111111111, 1.111111111111111) - 0.0000000000000001) < 1e-16
+E       assert 1.220446049250313e-16 < 1e-16
+E        +  where 1.220446049250313e-16 = abs((2.220446049250313e-16 - 1e-16))
+E        +    where 2.220446049250313e-16 = sub(1.1111111111111112, 1.111111111111111)
+
+test_calc.py:26: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_sub - assert 1.220446049250313e-16 < 1e-16
+========================= 1 failed, 1 passed in 0.03s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 7: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 0/3: ANCHORED EDIT FAILURE in test_calc.py: Anchor matching failed for edit #1: The search block contains code segments that were elided in the skeletonized context and not shown to the model.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 7: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 0/3: ANCHORED EDIT FAILURE in test_calc.py: Anchor matching failed for edit #1: The search block contains code segments that were elided in the skeletonized context and not shown to the model.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 8: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 1/3: NO-OP EDIT in calc.py: every SEARCH/REPLACE pair in your response is byte-identical - this response changes nothing. If this file genuinely needs no change, write "NO CHANGE NEEDED:" instead of a SEARCH/REPLACE block; otherwise your REPLACE text must actually differ from your SEARCH text.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 8: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 1/3: NO-OP EDIT in calc.py: every SEARCH/REPLACE pair in your response is byte-identical - this response changes nothing. If this file genuinely needs no change, write "NO CHANGE NEEDED:" instead of a SEARCH/REPLACE block; otherwise your REPLACE text must actually differ from your SEARCH text.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 9: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 2/3: NO-OP EDIT in calc.py: every SEARCH/REPLACE pair in your response is byte-identical - this response changes nothing. If this file genuinely needs no change, write "NO CHANGE NEEDED:" instead of a SEARCH/REPLACE block; otherwise your REPLACE text must actually differ from your SEARCH text.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 9: FAILED                  
+----------------------------------------------------------------------
+targeted, full-set 2/4 + targeted 2/3: NO-OP EDIT in calc.py: every SEARCH/REPLACE pair in your response is byte-identical - this response changes nothing. If this file genuinely needs no change, write "NO CHANGE NEEDED:" instead of a SEARCH/REPLACE block; otherwise your REPLACE text must actually differ from your SEARCH text.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 10: FAILED                 
+----------------------------------------------------------------------
+full-set, full-set 2/4 + targeted 4/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c11_static_analysis_enabl0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 2 items
+
+test_calc.py .F                                                          [100%]
+
+=================================== FAILURES ===================================
+___________________________________ test_sub ___________________________________
+
+    def test_sub():
+        assert sub(5, 3) == 2
+        assert sub(10, 7) == 3
+        assert sub(2, 5) == -3
+        assert sub(0, 0) == 0
+        assert sub(-1, -1) == 0
+        assert sub(100, 50) == 50
+        assert sub(-5, 3) == -8
+        assert sub(3, -5) == 8
+        assert sub(0, 5) == -5
+        assert sub(5, 0) == 5
+        assert sub(-3, -7) == 4
+        assert sub(1.5, 0.5) == 1.0
+        assert abs(sub(2.7, 1.2) - 1.5) < 1e-15
+        assert sub(10, 10.0) == 0.0
+        assert sub(0.1, 0.2) == -0.1
+        assert sub(1e10, 1e10) == 0
+        assert sub(1e-10, 1e-10) == 0
+>       assert abs(sub(1.1111111111111111, 1.111111111111111) - 0.0000000000000001) < 1e-16
+E       assert 1.220446049250313e-16 < 1e-16
+E        +  where 1.220446049250313e-16 = abs((2.220446049250313e-16 - 1e-16))
+E        +    where 2.220446049250313e-16 = sub(1.1111111111111112, 1.111111111111111)
+
+test_calc.py:26: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_sub - assert 1.220446049250313e-16 < 1e-16
+========================= 1 failed, 1 passed in 0.03s ==========================
+
+
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 10: FAILED                 
+----------------------------------------------------------------------
+full-set, full-set 2/4 + targeted 4/3: TARGETED TEST FAILURE:
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-2161/test_c11_static_analysis_enabl0/ws/.kriya/worktree
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 2 items
+
+test_calc.py .F                                                          [100%]
+
+=================================== FAILURES ===================================
+___________________________________ test_sub ___________________________________
+
+    def test_sub():
+        assert sub(5, 3) == 2
+        assert sub(10, 7) == 3
+        assert sub(2, 5) == -3
+        assert sub(0, 0) == 0
+        assert sub(-1, -1) == 0
+        assert sub(100, 50) == 50
+        assert sub(-5, 3) == -8
+        assert sub(3, -5) == 8
+        assert sub(0, 5) == -5
+        assert sub(5, 0) == 5
+        assert sub(-3, -7) == 4
+        assert sub(1.5, 0.5) == 1.0
+        assert abs(sub(2.7, 1.2) - 1.5) < 1e-15
+        assert sub(10, 10.0) == 0.0
+        assert sub(0.1, 0.2) == -0.1
+        assert sub(1e10, 1e10) == 0
+        assert sub(1e-10, 1e-10) == 0
+>       assert abs(sub(1.1111111111111111, 1.111111111111111) - 0.0000000000000001) < 1e-16
+E       assert 1.220446049250313e-16 < 1e-16
+E        +  where 1.220446049250313e-16 = abs((2.220446049250313e-16 - 1e-16))
+E        +    where 2.220446049250313e-16 = sub(1.1111111111111112, 1.111111111111111)
+
+test_calc.py:26: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_sub - assert 1.220446049250313e-16 < 1e-16
+========================= 1 failed, 1 passed in 0.03s ==========================
+
+
+ERROR    kriya.workflow.recovery_coordinator:recovery_coordinator.py:227 Quality Gates stopped - global attempt bound reached across all failure families. Continuing to review with errors.
+- generated xml file: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/evidence/STATE-MACHINE-HARDENING/matrix/trial-20260929T025849Z/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_live_prd035_certification.py::test_c4_exact_requirement_compliance
+FAILED tests/test_live_prd035_certification.py::test_c11_static_analysis_enabled
+=================== 2 failed, 9 passed in 932.70s (0:15:32) ====================

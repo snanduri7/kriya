@@ -1,0 +1,8 @@
+2026-09-30 14:09:07,979 INFO kriya.workflow.worktree: Workspace '/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-doctor-isolation-933zj835' is not a Git repository; initializing the greenfield repository before creating its isolated worktree.
+2026-09-30 14:09:11,569 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3-coder:30b-kriya-e52213655394, Source: explicit_primary, native_tool_calls=True, json_mode=True, reliable_multiline_json=False, preferred_edit_protocol=small_native_tools]
+2026-09-30 14:09:11,834 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3-coder:30b-kriya-e52213655394, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:09:20,195 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 14:09:20,211 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Source: unverified_conservative_default, native_tool_calls=False, json_mode=False, reliable_multiline_json=False, preferred_edit_protocol=full_file]
+2026-09-30 14:09:20,449 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 14:09:29,068 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 14:09:29,961 INFO httpx: HTTP Request: POST http://localhost:11434/v1/embeddings "HTTP/1.1 200 OK"

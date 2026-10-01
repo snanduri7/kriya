@@ -35,7 +35,7 @@ rather than an oversight):
     general-purpose version of this code.
 """
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from kriya.tools.lsp import JDTLS_INIT_TIMEOUT_SECONDS, JdtlsClient
 
@@ -218,7 +218,7 @@ def _position_to_offset(text: str, line: int, character: int) -> int:
     lines = text.split("\n")
     if line < 0 or line >= len(lines):
         raise ValueError(f"line {line} out of range (file has {len(lines)} lines)")
-    offset = sum(len(l) + 1 for l in lines[:line])
+    offset = sum(len(text) + 1 for text in lines[:line])
     offset += character
     if offset > len(text):
         raise ValueError(f"computed offset {offset} exceeds file length {len(text)}")

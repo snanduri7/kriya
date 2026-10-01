@@ -1,0 +1,3 @@
+(a) first=32768 then healthy -> 32768 (/api/ps requests sent: 3)
+(b) endpoint B after A failed -> 32768
+(c) production exact call, served context unobservable after the call -> status=PROVIDER_CONTRACT_VIOLATION, served_after_call=None

@@ -1,4 +1,3 @@
-import os
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -6,6 +5,7 @@ import pytest
 from kriya.config.config import FallbackModelConfig
 from kriya.workflow.attribution import (
     AttributionResult,
+    _bounded_triage_source,
     attribute_failure,
     extract_self_diagnosed_files,
     read_worktree_file,
@@ -21,6 +21,13 @@ def test_read_worktree_file_reads_real_content(tmp_path):
 
 def test_read_worktree_file_returns_none_for_missing_file(tmp_path):
     assert read_worktree_file(str(tmp_path), "DoesNotExist.java") is None
+
+
+def test_bounded_triage_source_honors_even_a_tiny_budget():
+    content = "abcdefghijklmnopqrstuvwxyz"
+    excerpt = _bounded_triage_source(content, 10)
+    assert excerpt == "abcdefghij"
+    assert len(excerpt) <= 10
 
 
 # --- resolve_fallback_model(): the shared model-escalation formula, in isolation ---
@@ -101,6 +108,349 @@ async def test_attribution_falls_back_to_substring_scan_when_likely_files_empty(
     result = await attribute_failure(failure, ["App.java", "Other.java"], 0, [], llm, lambda fp: None)
     assert result.tier == "judge"
     assert result.files == ["App.java"]
+    llm.complete.assert_not_called()
+
+
+# --- Failure location is not necessarily repair location (PRV-11, 2026-08-30) ---
+#
+# Live incident: a JUnit5 assertion mismatch's own stack trace always
+# locates the test's own assertion call site - CustomerControllerTest.java:8
+# for "expected: <JOHN SMITH> but was: <null>" - which used to be promoted
+# straight to a PLAN_SCOPE_DEFECT `required_repair_files` target via the
+# "locator" tier, even though the Developer's own diagnosis correctly named
+# the real provider, CustomerController.details(). The test's own assertion
+# line is WHERE THE MISMATCH WAS OBSERVED, never evidence the test file
+# itself needs to change.
+
+_JUNIT_ASSERTION_TRACE = (
+    "org.opentest4j.AssertionFailedError: expected: <RIGHT> but was: <WRONG>\n"
+    "\tat org.junit.jupiter.api.AssertionFailureBuilder.build(AssertionFailureBuilder.java:151)\n"
+    "\tat org.junit.jupiter.api.AssertEquals.assertEquals(AssertEquals.java:182)\n"
+    "\tat com.example.FooTest.testService(FooTest.java:20)\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_assertion_failure_locator_excludes_the_test_file_itself():
+    """Test assertion location != production repair target: FooTest fails on
+    line 20 because Foo.service() returned the wrong value - the locator
+    must not claim FooTest.java as the (sole, high-confidence) attribution
+    target merely because that is where Surefire's own stack trace points."""
+    failure = Failure(type="regression_test", message="regression failed", raw_output=_JUNIT_ASSERTION_TRACE)
+    llm = MagicMock()
+    llm.complete = AsyncMock(return_value='{"files": [], "confidence": "low", "reasoning": "no evidence"}')
+    result = await attribute_failure(failure, ["Foo.java", "FooTest.java"], 0, [], llm, lambda fp: "content")
+    assert result.tier != "locator"
+    assert "FooTest.java" not in (result.files or [])
+
+
+@pytest.mark.asyncio
+async def test_test_compile_failure_still_locates_the_test_file():
+    """The nuance that must be preserved: a genuine test COMPILE failure
+    (a malformed/duplicate generated test method - javac's own locator
+    shape, not a JUnit assertion) still correctly locates the test file
+    itself as the repair target - tests absolutely can be the correct
+    repair target."""
+    failure = Failure(
+        type="compile", message="compile failed",
+        raw_output="FooTest.java:[12,10] method testService() is already defined in class FooTest",
+    )
+    llm = MagicMock()
+    result = await attribute_failure(failure, ["Foo.java", "FooTest.java"], 0, [], llm, lambda fp: None)
+    assert result.tier == "locator"
+    assert result.files == ["FooTest.java"]
+    llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_production_compiler_failure_still_locates_the_production_file():
+    """Validates the FIRST PRV-11 recovery event's own shape remains
+    working: a genuine production compiler failure (Bar.java cannot call
+    Foo's changed constructor) is completely unaffected by the assertion-
+    failure filter, since Bar.java is not a test file at all."""
+    failure = Failure(
+        type="compile", message="compile failed",
+        raw_output="Bar.java:[15,8] constructor Foo(String) is undefined",
+    )
+    llm = MagicMock()
+    result = await attribute_failure(failure, ["Foo.java", "Bar.java"], 0, [], llm, lambda fp: None)
+    assert result.tier == "locator"
+    assert result.files == ["Bar.java"]
+    llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_assertion_failure_falls_through_to_the_real_provider_when_known():
+    """Provider outside current scope: once the test-file locator is
+    correctly excluded, a real judge-tier signal (e.g. an upstream
+    diagnosis already naming the provider) takes over instead of being
+    silently outranked by the (wrongly authoritative) locator - matching
+    _attribute_from_locator's own documented "locator always wins over
+    likely_files" precedence, now correctly not triggered by the test
+    file's own assertion-observation site."""
+    failure = Failure(
+        type="regression_test", message="regression failed",
+        raw_output=_JUNIT_ASSERTION_TRACE, likely_files=["Foo.java"],
+    )
+    llm = MagicMock()
+    result = await attribute_failure(failure, ["Foo.java", "FooTest.java"], 0, [], llm, lambda fp: None)
+    assert result.tier == "judge"
+    assert result.files == ["Foo.java"]
+    llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_assertion_failure_with_no_resolvable_provider_fails_closed_not_to_the_test_file():
+    """Provider attribution ambiguous: several plausible providers, none
+    grounded. Must fail closed to full_set (unresolved) - never default to
+    blindly modifying the test merely because it was the only file:line
+    reference in the raw output."""
+    failure = Failure(type="regression_test", message="regression failed", raw_output=_JUNIT_ASSERTION_TRACE)
+    llm = MagicMock()
+    llm.complete = AsyncMock(return_value='{"files": [], "confidence": "low", "reasoning": "no evidence"}')
+    result = await attribute_failure(
+        failure, ["Foo.java", "Bar.java", "FooTest.java"], 0, [], llm, lambda fp: "content",
+    )
+    assert result.tier == "full_set"
+    assert result.files == []
+    assert "FooTest.java" not in result.files
+
+
+# --- Test fixture/precondition failures (P1, 2026-09-04) ---
+#
+# Live incident: EmployeeServiceTest mocked DepartmentRepository but never
+# stubbed existsById() - Mockito's default (false) made the EXISTING,
+# unmodified EmployeeService.hire() guard correctly throw
+# IllegalArgumentException("Department id=101 does not exist") while the
+# test was still seeding fixture data, before ever reaching
+# findByEmailDomain() (the actual behavior under test). The plain locator
+# tier attributed this to EmployeeService.java (the throwing frame) and
+# dispatched a bounded cross-owner recovery there - no edit to hire() could
+# ever satisfy a missing mock stub in the test's own fixture, so recovery
+# exhausted its bounded budget by construction, not chance.
+
+_EMPLOYEE_SERVICE_PATH = "src/main/java/com/example/ignite/service/EmployeeService.java"
+_EMPLOYEE_SERVICE_TEST_PATH = "src/test/java/com/example/ignite/service/EmployeeServiceTest.java"
+
+_HIRE_GUARD_TRACE = (
+    "java.lang.IllegalArgumentException: Department id=101 does not exist\n"
+    "\tat com.example.ignite.service.EmployeeService.hire(EmployeeService.java:3)\n"
+    "\tat com.example.ignite.service.EmployeeServiceTest."
+    "findByEmailDomain_nonMatchingDomain_returnsEmptyList(EmployeeServiceTest.java:10)\n"
+    "\tat java.base/java.lang.reflect.Method.invoke(Method.java:568)\n"
+)
+
+_EMPLOYEE_SERVICE_UNCHANGED = (
+    "package com.example.ignite.service;\n"
+    "public class EmployeeService {\n"
+    "    public Employee hire(Employee e) { if (!deptRepo.existsById(e.getDepartmentId())) throw new IllegalArgumentException(\"x\"); return e; }\n"
+    "}\n"
+)
+
+_EMPLOYEE_SERVICE_NEWLY_WRITTEN = (
+    "package com.example.ignite.service;\n"
+    "public class EmployeeService {\n"
+    "    public Employee hire(Employee e) { if (e.getSalary() < 0) throw new IllegalArgumentException(\"x\"); return e; }\n"
+    "}\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_test_fixture_precondition_failure_attributes_to_test_not_production_guard():
+    """The core fix: an unstubbed mock making an EXISTING production guard
+    throw, called directly from the test's own fixture setup (zero
+    intervening production call depth), attributes to the test file - not
+    the production file the exception happened to surface in."""
+    failure = Failure(type="targeted_test", message="targeted test failed", raw_output=_HIRE_GUARD_TRACE)
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure, [_EMPLOYEE_SERVICE_PATH, _EMPLOYEE_SERVICE_TEST_PATH], 0, [], llm,
+        lambda fp: {_EMPLOYEE_SERVICE_PATH: _EMPLOYEE_SERVICE_UNCHANGED}.get(fp),
+        original_contents={_EMPLOYEE_SERVICE_PATH: _EMPLOYEE_SERVICE_UNCHANGED},
+    )
+    assert result.tier == "locator"
+    assert result.files == [_EMPLOYEE_SERVICE_TEST_PATH]
+    assert _EMPLOYEE_SERVICE_PATH not in result.files
+    llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_test_fixture_precondition_check_falls_through_when_guard_line_is_newly_written():
+    """Genuine product case: the SAME shape (test calls a production method
+    directly, which throws), but the throwing line is NEW - part of THIS
+    generation's own work, not pre-existing behavior - per
+    state.all_original_contents showing a different baseline line. Must
+    still attribute to the production file (falling through to the plain,
+    unmodified locator tier - which, unrelated to this fix, also still
+    names the test file it found in the same raw text; this test's own
+    concern is only that the new check never SUPPRESSES the production
+    file, not the plain locator's separate multi-file behavior); a
+    freshly-written line throwing is real evidence of a defect in the new
+    code, not a fixture gap."""
+    failure = Failure(type="targeted_test", message="targeted test failed", raw_output=_HIRE_GUARD_TRACE)
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure, [_EMPLOYEE_SERVICE_PATH, _EMPLOYEE_SERVICE_TEST_PATH], 0, [], llm,
+        lambda fp: {_EMPLOYEE_SERVICE_PATH: _EMPLOYEE_SERVICE_NEWLY_WRITTEN}.get(fp),
+        original_contents={_EMPLOYEE_SERVICE_PATH: _EMPLOYEE_SERVICE_UNCHANGED},
+    )
+    assert result.tier == "locator"
+    assert _EMPLOYEE_SERVICE_PATH in result.files
+
+
+@pytest.mark.asyncio
+async def test_test_fixture_precondition_check_is_opt_in_without_original_contents():
+    """A caller that doesn't pass original_contents (every pre-2026-09-04
+    caller) sees IDENTICAL behavior to before this parameter existed - the
+    plain locator tier still attributes to the throwing production file
+    (the new check requires original_contents and no-ops entirely without
+    it, per its own docstring)."""
+    failure = Failure(type="targeted_test", message="targeted test failed", raw_output=_HIRE_GUARD_TRACE)
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure, [_EMPLOYEE_SERVICE_PATH, _EMPLOYEE_SERVICE_TEST_PATH], 0, [], llm, lambda fp: "content",
+    )
+    assert result.tier == "locator"
+    assert _EMPLOYEE_SERVICE_PATH in result.files
+
+
+@pytest.mark.asyncio
+async def test_test_fixture_precondition_check_does_not_redirect_a_genuine_multi_layer_production_bug():
+    """A real bug reached through several layers of production code before
+    surfacing (e.g. a hand-rolled parser's decode() called from a broker
+    class, never directly from the test) must NOT redirect to the test file
+    merely because both are known files - the caller frame here is another
+    PRODUCTION file, not the test, so this check never fires and the plain
+    (unmodified) locator tier decides, as before, unaffected by this fix."""
+    raw = (
+        "java.nio.BufferUnderflowException\n"
+        "\tat com.example.ProtocolParser.decode(ProtocolParser.java:42)\n"
+        "\tat com.example.BrokerServer.handle(BrokerServer.java:88)\n"
+        "\tat com.example.BrokerServerTest.testHandle(BrokerServerTest.java:15)\n"
+    )
+    failure = Failure(type="targeted_test", message="targeted test failed", raw_output=raw)
+    llm = MagicMock()
+    parser_baseline = "class ProtocolParser {\n    // unchanged\n    void decode() { throw new java.nio.BufferUnderflowException(); }\n}\n"
+    result = await attribute_failure(
+        failure,
+        ["ProtocolParser.java", "BrokerServer.java", "BrokerServerTest.java"], 0, [], llm,
+        lambda fp: {"ProtocolParser.java": parser_baseline}.get(fp),
+        original_contents={"ProtocolParser.java": parser_baseline},
+    )
+    assert result.tier == "locator"
+    assert "ProtocolParser.java" in result.files
+
+
+_EARLY_RETURN_BASELINE_HIRE = (
+    "package com.example.ignite.service;\n"
+    "public class EmployeeService {\n"
+    "    public Employee hire(Employee e) {\n"
+    "        if (e.getId() > 1000) { return e; }\n"
+    "        if (!deptRepo.existsById(e.getDepartmentId())) throw new IllegalArgumentException(\"x\");\n"
+    "        return e;\n"
+    "    }\n"
+    "}\n"
+)
+
+# Same method, same throwing line (line 5, byte-identical) - but the
+# early-return's OWN threshold on line 4 was widened by this generation,
+# so a request that used to short-circuit BEFORE ever reaching the guard
+# now falls through into it. Line-level baseline comparison alone cannot
+# see this: the throwing line never changed.
+_EARLY_RETURN_MODIFIED_HIRE = (
+    "package com.example.ignite.service;\n"
+    "public class EmployeeService {\n"
+    "    public Employee hire(Employee e) {\n"
+    "        if (e.getId() > 100000) { return e; }\n"
+    "        if (!deptRepo.existsById(e.getDepartmentId())) throw new IllegalArgumentException(\"x\");\n"
+    "        return e;\n"
+    "    }\n"
+    "}\n"
+)
+
+_EARLY_RETURN_TRACE = (
+    "java.lang.IllegalArgumentException: Department id=101 does not exist\n"
+    "\tat com.example.ignite.service.EmployeeService.hire(EmployeeService.java:5)\n"
+    "\tat com.example.ignite.service.EmployeeServiceTest.someFixtureSetup(EmployeeServiceTest.java:20)\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_test_fixture_precondition_check_does_not_redirect_when_enclosing_method_changed_elsewhere():
+    """Method-level strengthening (2026-09-05, user review): the throwing
+    line itself is byte-identical to baseline, called directly from the
+    test with zero intervening production frames - exactly the shape the
+    line-level check would have redirected to the test. But a DIFFERENT
+    statement earlier in the SAME method (the early-return's threshold)
+    was modified by this generation, which is what actually caused
+    execution to reach the pre-existing guard in a case it never used to.
+    That is real evidence of a genuine, newly-introduced production
+    defect - the shortcut must NOT fire; production must stay eligible as
+    repair owner."""
+    failure = Failure(type="targeted_test", message="targeted test failed", raw_output=_EARLY_RETURN_TRACE)
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure, [_EMPLOYEE_SERVICE_PATH, _EMPLOYEE_SERVICE_TEST_PATH], 0, [], llm,
+        lambda fp: {_EMPLOYEE_SERVICE_PATH: _EARLY_RETURN_MODIFIED_HIRE}.get(fp),
+        original_contents={_EMPLOYEE_SERVICE_PATH: _EARLY_RETURN_BASELINE_HIRE},
+    )
+    assert result.tier == "locator"
+    assert _EMPLOYEE_SERVICE_PATH in result.files
+
+
+# --- failure.authoritative_files (PRV-05 run 7, 2026-08-28) ---
+
+@pytest.mark.asyncio
+async def test_attribution_authoritative_files_outranks_self_diagnosis():
+    """A failure type with deterministic STRUCTURAL evidence
+    (authoritative_files - e.g. migration.py's find_migration_incomplete()
+    parsing pom.xml itself) must win over even a signature-confirmed self-
+    diagnosis: the model's own claim about its prior output is real
+    evidence, but it is not allowed to override a fact about the
+    repository. Found live: a self-diagnosis claiming "the fix is really in
+    JsonService.java, not pom.xml" kept beating the manifest's own correct
+    pom.xml evidence across attempts 5-8, none of which could ever satisfy
+    SOURCE_DEPENDENCY_REMAINS since the file that actually needed changing
+    was never retried again."""
+    failure = Failure(
+        type="migration_incomplete",
+        message="MIGRATION INCOMPLETE: ... SOURCE_DEPENDENCY_REMAINS ...",
+        raw_output="MIGRATION INCOMPLETE: ... SOURCE_DEPENDENCY_REMAINS ...",
+        likely_files=["pom.xml", "JsonService.java"],
+        authoritative_files=["pom.xml"],
+    )
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure, ["pom.xml", "JsonService.java"], 0, [], llm, lambda fp: None,
+        self_diagnosed_files=["JsonService.java"],
+    )
+    assert result.tier == "authoritative_deterministic"
+    assert result.files == ["pom.xml"]
+    assert result.confidence == "high"
+    llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_attribution_self_diagnosis_still_wins_when_no_authoritative_evidence():
+    """Confirms the authoritative_files precedence above is scoped to
+    failure types that actually set it - the pre-existing self-diagnosis-
+    over-locator/judge precedence is unchanged for every other failure
+    type, including the real PRV-05 attempt-4 shape this reproduces
+    (structural_corruption in pom.xml, the model's own analysis correctly
+    - for THIS attempt's own outcome - pointing elsewhere)."""
+    failure = Failure(
+        type="structural_corruption",
+        message="STRUCTURAL CORRUPTION in pom.xml: malformed XML",
+        raw_output="malformed XML: syntax error: line 1, column 0",
+        likely_files=["pom.xml"],
+    )
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure, ["pom.xml", "JsonService.java"], 0, [], llm, lambda fp: None,
+        self_diagnosed_files=["JsonService.java"],
+    )
+    assert result.tier == "self_diagnosis"
+    assert result.files == ["JsonService.java"]
     llm.complete.assert_not_called()
 
 
@@ -212,6 +562,77 @@ async def test_ignite_qpid_protocol_regression_triage_identifies_real_culprit():
     assert result.confidence == "high"
 
 
+@pytest.mark.asyncio
+async def test_triage_sees_java_method_bodies_needed_to_localize_runtime_hangs():
+    """Regression for demo1: the former signatures-only triage prompt hid
+    Thread.currentThread().join(), so the classifier saw Spring/Ignite names
+    but not the concrete lifecycle defect and guessed applicationContext.xml.
+    Triage must receive bounded implementation evidence, including method
+    bodies, while still making only the same single classification call."""
+    application = (
+        "package com.example;\n"
+        "public class Application {\n"
+        "  public static void main(String[] args) {\n"
+        "    try (var context = startContext()) {\n"
+        "      Thread.currentThread().join();\n"
+        "    }\n"
+        "  }\n"
+        "}\n"
+    )
+    xml = '<beans><bean id="ignite" class="com.example.IgniteService"/></beans>\n'
+    failure = Failure(
+        type="run_verification_hung",
+        message="The application produced the expected output but did not exit before timeout.",
+        raw_output="Ignite node started and verification passed; process timed out after 90 seconds.",
+        likely_files=[],
+    )
+    llm = MagicMock()
+
+    async def classify(system_prompt, user_prompt, **kwargs):
+        assert "Thread.currentThread().join();" in user_prompt
+        assert "Candidate source excerpts" in user_prompt
+        assert "short skeleton" not in system_prompt
+        return (
+            '{"files": ["src/main/java/com/example/Application.java"], '
+            '"confidence": "high", "reasoning": "The main thread joins itself, '
+            'so the try-with-resources context can never close."}'
+        )
+
+    llm.complete = AsyncMock(side_effect=classify)
+    contents = {
+        "src/main/java/com/example/Application.java": application,
+        "src/main/resources/applicationContext.xml": xml,
+    }
+    result = await attribute_failure(
+        failure, list(contents), 0, [], llm, contents.get,
+    )
+
+    assert result.tier == "triage"
+    assert result.files == ["src/main/java/com/example/Application.java"]
+
+
+@pytest.mark.asyncio
+async def test_rejected_target_without_alternate_widens_without_retriage_call():
+    failure = Failure(
+        type="attribution_rejected",
+        message="Developer reported NO CHANGE NEEDED for applicationContext.xml",
+        raw_output="applicationContext.xml is already correct",
+        likely_files=[],
+    )
+    llm = MagicMock()
+    llm.complete = AsyncMock()
+
+    result = await attribute_failure(
+        failure, ["Application.java", "applicationContext.xml"], 0, [], llm,
+        lambda fp: "content",
+    )
+
+    assert result.tier == "full_set"
+    assert result.files == []
+    assert "rejected" in result.reasoning
+    llm.complete.assert_not_called()
+
+
 # --- Triage tier: model-escalation ladder, and graceful fallback on a bad response ---
 
 @pytest.mark.asyncio
@@ -230,6 +651,23 @@ async def test_triage_rides_the_same_escalation_ladder_as_generation():
     _, kwargs = llm.complete.call_args
     assert kwargs["model_override"] == "devstral-small-2:24b"
     assert kwargs["base_url_override"] == "http://localhost:11434/v1"
+
+
+@pytest.mark.asyncio
+async def test_triage_uses_the_fallback_models_own_extra_body():
+    """Regression test for a real gap, 2026-08-22: triage used to unconditionally
+    inherit the PRIMARY model's own extra_body regardless of which model was
+    actually resolved for this retry - see resolve_fallback_model()'s own
+    escalation-ladder contract this mirrors."""
+    fallback = FallbackModelConfig(model="qwen3.8:27b", extra_body={"reasoning_effort": "none"})
+    failure = Failure(type="run_verification", message="fail", raw_output="no locator here", likely_files=[])
+    llm = MagicMock()
+    llm.complete = AsyncMock(return_value='{"files": ["A.java"], "confidence": "medium", "reasoning": "x"}')
+
+    await attribute_failure(failure, ["A.java", "B.java"], 2, [fallback], llm, lambda fp: "content")
+
+    _, kwargs = llm.complete.call_args
+    assert kwargs["extra_body_override"] == {"reasoning_effort": "none"}
 
 
 @pytest.mark.asyncio
@@ -435,4 +873,34 @@ async def test_validation_2_regression_attribution_redirects_away_from_the_throw
     )
     assert result.tier == "self_diagnosis"
     assert result.files == ["src/main/resources/qpid-initial-config.json"]
+    llm.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_grounded_architectural_owner_outranks_likely_file_guess():
+    failure = Failure(
+        type="goal_spec_compliance",
+        message="response field displayName is missing",
+        likely_files=["src/main/java/example/Customer.java"],
+        diagnostics={
+            "grounded_architectural_owners": [
+                "src/main/java/example/CustomerController.java"
+            ]
+        },
+    )
+    llm = MagicMock()
+    result = await attribute_failure(
+        failure,
+        [
+            "src/main/java/example/Customer.java",
+            "src/main/java/example/CustomerController.java",
+        ],
+        0,
+        [],
+        llm,
+        lambda fp: None,
+    )
+    assert result.tier == "architectural_owner"
+    assert result.confidence == "high"
+    assert result.files == ["src/main/java/example/CustomerController.java"]
     llm.complete.assert_not_called()

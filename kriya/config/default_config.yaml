@@ -14,9 +14,19 @@ llm:
   # identical review block 250 times before hitting the token ceiling).
   reviewer_temperature: 0.7
   max_tokens: 16384
+  planner_max_tokens: 8192  # Long structured plans; independent from Developer implementation output
+  capabilities:
+    native_tool_calls: true
+    json_mode: true
+    reliable_multiline_json: false
+    streaming: true
+    max_tool_argument_chars: 8192
+    preferred_edit_protocol: "small_native_tools"
+  # The context window is llm.context_window (default 32768), sent to the
+  # runtime in its own form (FALLBACK-CONTEXT-WINDOW-001); it is not repeated
+  # here, where it would outrank a user's own context_window.
   extra_body:
     options:
-      num_ctx: 32768        # Sets a 32K context window so the code doesn't truncate
       top_p: 0.8
       top_k: 20
 
@@ -27,13 +37,43 @@ plugins:
 paths:
   skills: "./skills"
   memory: "./memory"
-  logs: "./logs"
+  # Persistent Kriya state (run history, traces.db):
+  # KRIYA_STATE_DIR > paths.state > ~/.kriya/state. A relative value resolves
+  # against this config file's directory, never the CWD; inside a workspace it
+  # must sit beneath <workspace>/.kriya/ (e.g. .kriya/state).
+  state: null
+
+skills:
+  load_global: true
+  load_cwd: true
 
 logging:
   level: "INFO"
-  file: "./logs/kriya.log"
+  # Log files never land in the current directory. Directory precedence:
+  # KRIYA_LOG_DIR > logging.directory (absolute path) > ~/.kriya/logs.
+  # Application log: <dir>/kriya.log; per-run log: <dir>/runs/<run_id>/kriya.log.
+  directory: null
+  file_enabled: true
+  run_file_enabled: true
 
 mcp: {}
+
+# SEC-004 (2026-09-13): bounded MCP subprocess lifecycle/resource controls,
+# applied uniformly to every configured mcp.<server>. Security-sensitive under
+# SEC-009 - a repository can never override any of these (see
+# kriya/config/authority.py's _SECURITY_AUTHORITY_FIELDS). See
+# kriya/config/config.py::MCPLifecycleConfig's own docstring for the full
+# rationale behind each default, including the honest CPU-lifetime-budget-vs-
+# rate-limit distinction.
+mcp_lifecycle:
+  startup_timeout_seconds: 30
+  request_timeout_seconds: 60
+  shutdown_grace_seconds: 5
+  force_kill_reap_seconds: 5
+  max_stdout_line_bytes: 4000000
+  max_stderr_buffer_bytes: 1000000
+  cpu_seconds: 3600
+  memory_mb: 2048
 
 llm_chain:
   # deepseek-r1:32b (the previous entry here) isn't pulled locally (confirmed via
@@ -74,6 +114,117 @@ routing:
   reject_threshold: 0.3
   ask_margin: 0.05
 
+# MA1 of the control-plane implementation plan (kriya/workflow/triage.py) -
+# classifies each generation request's kind/risk_class/execution_weight.
+# enabled: true here so shadow classification actually runs and gets logged
+# (the whole point of MA1 is collecting real data to evaluate before MA2
+# lets it affect anything); shadow_mode: true means current Kriya's
+# behavior - context, planning, approval, retries - is completely unchanged
+# regardless of what gets classified. Do not set shadow_mode: false until
+# MA2 ships and classifications have been evaluated against real Kriya
+# goals (MA1.5).
+engineering_triage:
+  enabled: true
+  shadow_mode: true
+
+# MA2 of the control-plane implementation plan (kriya/workflow/process_profile.py) -
+# whether a resolved ProcessProfile actually changes run_generation_workflow()'s
+# behavior. Separate from engineering_triage above on purpose: shadow_mode controls
+# whether triage's OWN output can affect anything; these flags control whether MA2's
+# specific behavioral changes are live, one at a time, for safe incremental
+# activation. All false here - not yet live-validated. Set enabled + enforce_approval
+# true to test MA2.5 (process-profile-driven human approval) in isolation;
+# enforce_context_depth for MA2.6a (Graph RAG retrieval breadth). Do NOT set
+# enforce_verification_depth - MA2 ships verification depth as telemetry-only by
+# explicit decision ("a triage misclassification cannot reduce regression-test
+# coverage in MA2") and kriya/config/config.py rejects true here at config-load
+# time rather than silently doing nothing.
+process_profiles:
+  enabled: false
+  enforce_approval: false
+  enforce_context_depth: false
+  enforce_verification_depth: false
+
+# MA4 of the control-plane implementation plan (kriya/policy/) - whether
+# ExecutionPolicy's decisions actually influence Kriya's behavior. enabled:
+# true here matches what's already true in practice (every MA4.3-4.14 real
+# call site has been consulting ExecutionPolicy unconditionally all along;
+# this section just gives that an off-switch for the first time, not a new
+# default). mode: audit remains the default. ExecutionPolicyConfig accepts
+# audit and enforce; enforce is an explicit opt-in (POL-001-P2). Config
+# authority checks still apply to overrides. This setting does not enable
+# WorkflowController, which has its own opt-in below.
+execution_policy:
+  enabled: true
+  mode: audit
+
+# MA6/MA7.8 (kriya/workflow/workflow_controller.py) - whether
+# WorkflowController runs at all for `kriya generate`, and in what mode.
+# enabled: false by default - a project opts in explicitly. mode: shadow
+# is observational only (never touches real files); mode: enforce (real
+# as of MA7.8) makes WorkflowController own the real outcome, calling
+# run_generation_workflow() once per subtask instead of once for the
+# whole goal - see workflow_controller.py's own module docstring and
+# _run_structured_enforce's docstring for exactly what that does and its
+# still-open scope boundaries (TOOL-tagged subtasks are refused outright).
+#
+# TRIED AND REVERTED same day (2026-08-24): enabled=true/mode=shadow was
+# briefly the default, reasoned as zero-risk since shadow never affects
+# real output - but shadow still makes its own real Planner/Architect/
+# SubtaskExecutor LLM calls through the real WorkflowEngine, independent
+# of run_generation_workflow(). Several tests (e.g. tests/test_file_goal.py)
+# mock only WorkflowEngine.run_generation_workflow, not Kernel/LLMClient -
+# previously sufficient to guarantee zero real network calls; with this
+# enabled by default, shadow's own calls silently reached a real, unmocked
+# LLMClient and hung/failed against a live endpoint the test never expected
+# to hit. See kriya/config/config.py::WorkflowControllerConfig's own
+# docstring for the full account before trying this again - it needs a
+# real test-suite audit first (every run_generation_workflow-only mock
+# site), not a casual re-flip.
+workflow_controller:
+  enabled: false
+  mode: shadow
+
+# runtime_profile (2026-08-25, external review P2) - unset here on purpose
+# (None, the default - changes nothing). A project that wants the "all of
+# MA1-7's real, opt-in behavior at once" bundle instead of remembering
+# which combination of engineering_triage.shadow_mode/process_profiles.
+# enabled/workflow_controller.enabled+mode to hand-tune can set, in its
+# OWN kriya.yaml:
+#   runtime_profile: hardened
+# Supported presets are legacy, validated, hardened, and production. The
+# first three cannot be
+# combined with explicit engineering_triage/process_profiles/
+# workflow_controller settings in the same user configuration. Hardened
+# sets those four fields to their most-real
+# settings (see kriya/config/config.py::AppConfig's own docstring for
+# exactly what it does and does NOT touch - execution_policy.mode stays
+# separately gated).
+#
+# `production` is an explicit sealed posture. It forces:
+#   engineering_triage.shadow_mode: false
+#   process_profiles.enabled: true
+#   workflow_controller.enabled: true
+#   workflow_controller.mode: enforce
+#   execution_policy.enabled: true
+#   execution_policy.mode: enforce
+#   autonomy.egress_policy: local_only
+#   autonomy.generation_time_budget_seconds: 3600 (a smaller positive value is
+#     accepted as stricter; null or a larger value is rejected)
+#   autonomy.containment_backend: oci
+#   autonomy.contained_execution_required: true
+#   autonomy.mcp_contained_execution_required: true
+#   autonomy.brownfield_full_regression_baseline_policy: required
+# A contradictory explicit value is rejected at load time; matching values
+# are accepted. Candidate worktree isolation, persistent checkpoints/traces,
+# and refusal to fall back to raw-host execution are fixed runtime mechanisms,
+# not optional flags; `kriya doctor --production` verifies each of them against
+# the real deployment. Production deliberately does not force
+# autonomy.semantic_region_enforcement_required until PRD-028 establishes
+# language coverage; the production doctor reports that precision boundary
+# as `semantic.precision_boundary`.
+# runtime_profile: null
+
 autonomy:
   mode: "human-in-the-loop"
   sensitive_paths:
@@ -84,3 +235,44 @@ autonomy:
     - ".*credentials.*"
     - ".*password.*"
   risk_threshold_lines: 500
+  # Leave null for ordinary unbounded CLI runs. A harness with an outer timeout
+  # should set this to the same or a slightly smaller value so Kriya can reserve
+  # validation time and stop before beginning a doomed multi-file model pass.
+  generation_time_budget_seconds: null
+  generation_gate_reserve_seconds: 120
+  generation_seconds_per_file_estimate: 90
+  # SpecComplianceAgent (kriya/agents/agent.py): checks whether the goal's
+  # LITERALLY named requirements (an exact field/method/class name, exact
+  # type, exact constant) actually appear in the generated code - closes a
+  # real gap compile/test/run-verification structurally can't (syntactically
+  # valid, semantically non-compliant code passes every other gate).
+  # Defaults False at the pydantic-model level (kriya/config/config.py's own
+  # comment there explains why - test-suite blast radius, not a trust
+  # concern) but ON here for real usage: validated live, 2026-08-22, against
+  # the actual incident that motivated building it (ignite_qpid_protocol
+  # milestone 1 - a goal naming 5 exact fields, generated code with a
+  # different, incompatible set, every other gate passed anyway) - correctly
+  # caught all 4 missing fields when given the real goal and the real wrong
+  # code. Set to false to opt out.
+  spec_compliance_enabled: true
+  # Stop after this many consecutive failed retries leave the effective
+  # workspace content unchanged, even if failure-family labels churn.
+  max_consecutive_no_progress_attempts: 2
+  # Auto-runs a one-time index_repository() pass (dependency_graph.db +
+  # vector_index.db) before generation starts, only when this workspace has
+  # never been indexed - see kriya/config/config.py's own comment for the
+  # full rationale. False here (unlike spec_compliance_enabled above) - not
+  # yet live-validated; flip to true once it has been.
+  auto_index_missing_dependency_graph: false
+
+# QUAL-CONFIG-001: live model qualification policy (`kriya model qualify`).
+# Not set here on purpose: the defaults live in one place, ModelQualificationConfig
+# (kriya/config/config.py), and equal the kriya-qualification/3 values. An
+# operator config may override any case, e.g.:
+#   model_qualification:
+#     cases:
+#       tool_argument_integrity: {max_tokens: 512, reasoning_max_tokens: 4096}
+#       context_capacity: {max_tokens: 64, headroom_tokens: 384, min_fill_ratio: 0.9}
+#     measurement: {bytes_per_token_margin: 0.9, reasoning_tokens_headroom: 1.5}
+# The effective policy and its digest are recorded in every qualification
+# record, and a record made under another policy is STALE. SECURITY_AUTHORITY.

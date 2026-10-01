@@ -1,0 +1,1721 @@
+"""Milestone-based goal decomposition orchestrator.
+
+Decomposes a large goal into small, independently executable/verifiable
+milestones (MilestonePlannerAgent, kriya/agents/agent.py), then drives the
+EXISTING, unmodified kriya/workflow/workflow.py::run_generation_workflow()
+once per milestone against the same growing workspace_path - see
+docs/design.md's own manually-validated precedent for this exact pattern
+(three sequential real `kriya generate` calls against one growing workspace,
+which found and fixed the two worktree bugs that make this safe today:
+kriya/workflow/worktree.py's _resolve_repo_head and
+_sync_uncommitted_changes_into_worktree).
+
+Zero changes to run_generation_workflow()'s pipeline logic were needed beyond
+the additive milestone_group_id/index/total trace passthrough - each
+milestone's own call applies its changes to workspace_path via a plain file
+copy (never a git commit), and the next milestone's worktree is freshly
+rebuilt from workspace_path's current on-disk state, so "does milestone N+1
+see milestone N's real applied output" is already true by construction, with
+no new plumbing.
+"""
+
+import hashlib
+import json
+import logging
+import os
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from kriya.agents.contracts import Milestone, MilestoneMode, MilestoneV2
+from kriya.control.contracts import (
+    ContractRegistryCorruptError,
+    ContractState,
+    register_provided_capabilities,
+    wire_contract_consumers,
+)
+from kriya.control.control_store import write_control_file
+from kriya.control.persistence import (
+    load_artifact_registry,
+    load_contract_registry,
+    load_control_state,
+    save_artifact_registry,
+    save_contract_registry,
+    save_control_state,
+)
+from kriya.control.run_coordinator import annotate_run, coordinated_mutation, owning_run_commits
+from kriya.control.run_record import COMMIT_COMMITTED
+from kriya.control.workspace_identity import ownership_metadata, validate_ownership
+from kriya.workflow.attempt import _build_python_runtime_grounding
+from kriya.workflow.checkpoint import compute_registry_hash, delete_checkpoint, list_checkpoints
+from kriya.workflow.context_projection import (
+    project_implementation_source,
+    render_established_file_context,  # MA5.8 - moved to context_projection.py, re-exported here for
+    # backward compatibility (tests/test_milestones.py's own import,
+    # any other existing consumer of kriya.workflow.milestones.render_established_file_context).
+)
+from kriya.workflow.edit_safety import read_file_revision
+from kriya.workflow.execution_plan import ExecutionPlan, TerminalPhase, WorkUnit, WorkUnitRole
+from kriya.workflow.file_resolution import _resolve_run_command, ground_python_runtime_target
+from kriya.workflow.milestone_completion import (
+    COMPLETION_RECONSTRUCTION_UNVERIFIED,
+    LOOP_FAILED,
+    LOOP_PASSED,
+    MILESTONE_COMPLETION_SCHEMA_VERSION,
+    MILESTONE_SIDECAR_RELATIVE_DIR,
+    ORIGIN_RUN,
+    MilestoneReuseAssessment,
+    MilestoneReuseDecision,
+    assess_completed_milestone_reuse,
+    completion_proof_for,
+    find_completion_to_reconstruct,
+    no_change_verification,
+    owning_run_commit_count,
+    record_milestone_commits,
+    verification_policy_fingerprint,
+)
+from kriya.workflow.milestone_normalization import normalize_legacy_milestones
+from kriya.workflow.milestone_validation import (
+    MilestonePlanValidator,
+    MilestoneValidationResult,
+    plan_structure_telemetry,
+    topological_order,
+)
+from kriya.workflow.plan_executor import PlanDriver, WorkUnitInvocation, execute_plan
+from kriya.workflow.repository_topology import RepositoryTopology, detect_repository_topology
+from kriya.workflow.resume_fingerprints import FingerprintStatus
+from kriya.workflow.verification_contract import extract_contract_verdict
+from kriya.workflow.workflow import _log_phase_banner
+
+logger = logging.getLogger(__name__)
+
+
+class MilestonePersistenceError(RuntimeError):
+    """Authoritative milestone state could not be made durable."""
+
+    def __init__(self, reason_code: str, store: str, detail: str, milestone_id: Optional[str] = None):
+        super().__init__(detail)
+        self.reason_code = reason_code
+        self.store = store
+        self.milestone_id = milestone_id
+
+    def to_result(self, group_id: str) -> Dict[str, Any]:
+        result: Dict[str, Any] = {
+            "status": "needs_review",
+            "group_id": group_id,
+            "quality_gates_passed": False,
+            "reason_codes": [self.reason_code],
+            "persistence_store": self.store,
+            "persistence_error": str(self),
+        }
+        if self.milestone_id is not None:
+            result["milestone_id"] = self.milestone_id
+        return result
+
+
+def _persist_contract_registry(
+    workspace_path: str, registry: Any, *, authoritative: bool, milestone_id: Optional[str] = None,
+) -> None:
+    try:
+        save_contract_registry(workspace_path, registry)
+    except Exception as exc:
+        if authoritative:
+            raise MilestonePersistenceError(
+                "CONTRACT_REGISTRY_PERSISTENCE_FAILED", "contract_registry", str(exc), milestone_id,
+            ) from exc
+        logger.warning(f"Failed to persist ContractRegistry (non-fatal legacy path): {exc}")
+
+
+def _live_contract_registry(workspace_path: str, milestone_id: Optional[str] = None) -> Any:
+    """PRD-029: the registry as it is on disk now. A milestone unit's own
+    commit can promote public_api contract records into it, so every
+    milestone bookkeeping write builds on this live registry - never on a
+    copy loaded at the start of the run, which would silently overwrite
+    them. An unreadable registry fails closed."""
+    try:
+        return load_contract_registry(workspace_path)
+    except ContractRegistryCorruptError as exc:
+        raise MilestonePersistenceError(exc.reason_code, "contract_registry", str(exc), milestone_id) from exc
+
+
+def _persist_milestone_control_state(
+    workspace_path: str, state: Any, *, authoritative: bool, milestone_id: Optional[str] = None,
+) -> None:
+    try:
+        save_control_state(workspace_path, state)
+    except Exception as exc:
+        if authoritative:
+            raise MilestonePersistenceError(
+                "CONTROL_STATE_PERSISTENCE_FAILED", "control_state", str(exc), milestone_id,
+            ) from exc
+        logger.warning(f"Failed to persist milestone ControlState (non-fatal legacy path): {exc}")
+
+
+def _update_milestone_control_state(
+    workspace_path: str,
+    group_id: str,
+    milestone_id: str,
+    milestone_status: str,
+    artifact_registry: Any,
+    *,
+    authoritative: bool,
+) -> None:
+    state = load_control_state(workspace_path)
+    if state is None or state.milestone_group_id != group_id:
+        if authoritative:
+            raise MilestonePersistenceError(
+                "CONTROL_STATE_PERSISTENCE_FAILED",
+                "control_state",
+                "matching milestone ControlState was not durably initialized before execution",
+                milestone_id,
+            )
+        return
+    updated = state.with_updates(
+        current_milestone_id=milestone_id,
+        milestone_states={**state.milestone_states, milestone_id: milestone_status},
+        # The live registry, not a cached copy (see _live_contract_registry).
+        current_contract_hash=compute_registry_hash(_live_contract_registry(workspace_path, milestone_id).to_dict()),
+        current_artifact_registry_hash=compute_registry_hash(artifact_registry.to_dict()),
+    )
+    _persist_milestone_control_state(
+        workspace_path, updated, authoritative=authoritative, milestone_id=milestone_id,
+    )
+
+
+def render_consumed_contract_context(milestone: MilestoneV2, registry: Any) -> str:
+    """Render current local registry facts for only this consumer's contracts."""
+    if not milestone.consumes:
+        return ""
+    entries = [
+        {
+            "id": record.id,
+            "name": record.name,
+            "provider_milestone_id": record.provider_milestone_id,
+            "revision": record.revision,
+            "shape": record.shape,
+            "state": record.state.value,
+            "content_hash": record.content_hash,
+        }
+        for record in registry.all_records()
+        if record.name in milestone.consumes and milestone.id in record.consumers
+    ]
+    entries.sort(key=lambda entry: entry["id"])
+    if len(entries) != len(set(milestone.consumes)):
+        raise ValueError(
+            f"milestone {milestone.id!r} could not resolve one current contract record per "
+            f"consumed capability: {sorted(milestone.consumes)!r}"
+        )
+    return (
+        "Authoritative consumed contracts (local ContractRegistry facts; do not infer or override):\n"
+        + json.dumps(entries, indent=2, sort_keys=True)
+    )
+
+
+def _transitive_downstream_milestones(
+    milestones: List[MilestoneV2], direct_consumers: set[str],
+) -> set[str]:
+    """Expand invalidation through the validated milestone DAG."""
+    stale = set(direct_consumers)
+    changed = True
+    while changed:
+        changed = False
+        for milestone in milestones:
+            if milestone.id not in stale and set(milestone.depends_on) & stale:
+                stale.add(milestone.id)
+                changed = True
+    return stale
+
+
+def _invalidate_milestone_checkpoints(
+    workspace_path: str, group_id: str, milestone_ids: set[str], ordered: List[MilestoneV2],
+) -> List[str]:
+    ids_by_position = {position: milestone.id for position, milestone in enumerate(ordered, start=1)}
+    deleted: List[str] = []
+    for checkpoint in list_checkpoints(workspace_path):
+        if checkpoint.get("milestone_group_id") != group_id:
+            continue
+        unit = checkpoint.get("work_unit")
+        checkpoint_milestone = (
+            unit.get("milestone_id") if isinstance(unit, dict)
+            else ids_by_position.get(checkpoint.get("milestone_index"))  # pre-S4c checkpoint
+        )
+        if checkpoint_milestone not in milestone_ids:
+            continue
+        run_id = checkpoint.get("run_id")
+        if run_id:
+            delete_checkpoint(workspace_path, run_id)
+            deleted.append(run_id)
+    return sorted(deleted)
+
+# Deliberately language-agnostic (project_implementation_source just bounds
+# raw text by character count - no per-language parsing), not the signature-
+# tier skeletonizer in context_budget.py: that one only has real extraction
+# logic for Python and brace-languages (.java/.cpp/.c/.h/.cs) - anything else
+# (Ruby, JS/TS, Go, HTML, ...) falls through to an unstructured "first 15
+# lines" placeholder there, which for a class definition is often just
+# imports, giving a later milestone's Architect/Developer nothing useful to
+# ground on. A bounded head+tail of the REAL file, in whatever language it's
+# actually written in, degrades gracefully for every stack Kriya supports
+# (see PolymorphicValidator's own multi-language detection) instead of
+# silently degrading to noise for all but two of them. Generous relative to
+# retry_package.py's per-file budgets (which split a much smaller total
+# across potentially many files): here each earlier-milestone file gets its
+# own allowance, and milestone-decomposition's own premise (small vertical
+# slices) keeps the file count and size low in practice.
+_ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE = 4000
+
+
+
+def _is_legacy_milestone_dict(raw: Dict[str, Any]) -> bool:
+    """A v2-shaped dict always has "id" (required field); a v1-shaped dict
+    never does. A saved plan file is never a mix of the two (Kriya itself
+    only ever writes one shape per save), so checking the first entry is
+    sufficient - used by MilestoneRunState.from_dict below to load BOTH an
+    old (pre-MA3.7) saved plan/sidecar file and a new one."""
+    return "id" not in raw
+
+
+@dataclass
+class MilestoneRunState:
+    """Orchestrator-owned bookkeeping for one decomposed goal, persisted to a
+    sidecar JSON file (see save_milestone_run_state/load_milestone_run_state)
+    - deliberately NOT stored in traces.db (no room for a structured command
+    list there, and this is orchestration bookkeeping, not a trace record)
+    or kriya/workflow/state.py's GenerationState (single-call-scoped by
+    design; see the architecture review that led to this module's Option A
+    approach, which keeps that scoping unchanged).
+
+    MA3.7: `milestones` is now Schema v2 (kriya/agents/contracts.py's
+    MilestoneV2) and completion tracking is ID-based
+    (`completed_milestone_ids`) rather than positional
+    (`completed_milestone_indices`) - milestone identity is never list
+    position, per the MA3 design doc's own invariant. from_dict() below
+    still loads an OLD (pre-MA3.7) saved plan/sidecar file transparently,
+    normalizing v1 milestones and migrating index-based progress fields to
+    their v2 id-based equivalents on the fly (Rule 9: "Legacy milestone
+    plans remain loadable")."""
+
+    group_id: str
+    original_goal: str
+    milestones: List[MilestoneV2]
+    completed_milestone_ids: List[str] = field(default_factory=list)
+    established_dependencies: List[str] = field(default_factory=list)
+    # milestone id -> RunVerifierAgent.judge()'s own run_commands shape
+    # (List[List[str]]), persisted so the integration phase's replay step
+    # (replay_prior_milestone_verifications) can re-execute an EARLIER
+    # milestone's real verification without re-asking the model to re-infer
+    # it, and so --resume can pick up mid-sequence.
+    verification_commands: Dict[str, List[List[str]]] = field(default_factory=dict)
+    # filepath -> bounded real content (project_implementation_source, head+
+    # tail if it doesn't fit) of every file an EARLIER, already-completed
+    # milestone wrote - grows monotonically as milestones complete (see
+    # run_milestones()'s post-success capture step) and is folded into every
+    # later milestone's run_generation_workflow() call via
+    # supplementary_context, so Planner/Architect/Developer are grounded on
+    # the REAL API of already-built dependencies instead of guessing one.
+    established_file_context: Dict[str, str] = field(default_factory=dict)
+    stale_milestone_ids: List[str] = field(default_factory=list)
+    invalidation_evidence: List[Dict[str, Any]] = field(default_factory=list)
+    # PRD-008 S4b (kriya/workflow/milestone_completion.py): completed_milestone_ids
+    # alone never authorizes a skip. milestone id -> MilestoneCompletionProof;
+    # the ordered ledger of every COMMITTED cycle this sequence made; the
+    # latest reuse assessment. None schema = a sidecar written before proofs
+    # existed (its completed milestones are UNVERIFIED, never grandfathered).
+    completion_proofs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    commit_ledger: List[Dict[str, Any]] = field(default_factory=list)
+    last_reuse_assessment: Optional[Dict[str, Any]] = None
+    completion_schema_version: Optional[int] = MILESTONE_COMPLETION_SCHEMA_VERSION
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "group_id": self.group_id,
+            "original_goal": self.original_goal,
+            "milestones": [m.model_dump() for m in self.milestones],
+            "completed_milestone_ids": self.completed_milestone_ids,
+            "established_dependencies": self.established_dependencies,
+            "verification_commands": {str(k): v for k, v in self.verification_commands.items()},
+            "established_file_context": self.established_file_context,
+            "stale_milestone_ids": self.stale_milestone_ids,
+            "invalidation_evidence": self.invalidation_evidence,
+            "completion_proofs": self.completion_proofs,
+            "commit_ledger": self.commit_ledger,
+            "last_reuse_assessment": self.last_reuse_assessment,
+            "milestone_completion_schema": self.completion_schema_version,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "MilestoneRunState":
+        raw_milestones = data["milestones"]
+        is_legacy = bool(raw_milestones) and _is_legacy_milestone_dict(raw_milestones[0])
+        milestones = (
+            normalize_legacy_milestones([Milestone(**m) for m in raw_milestones])
+            if is_legacy
+            else [MilestoneV2(**m) for m in raw_milestones]
+        )
+
+        if "completed_milestone_ids" in data:
+            completed_ids = list(data["completed_milestone_ids"])
+        else:
+            # Legacy sidecar (completed_milestone_indices, 1-based list
+            # position) - canonical ids were assigned positionally by
+            # normalize_legacy_milestones (index i -> "M{i}"), so this
+            # migration is a direct, deterministic rename, not a guess.
+            completed_ids = [f"M{i}" for i in data.get("completed_milestone_indices", [])]
+
+        raw_verification_commands = data.get("verification_commands", {})
+        verification_commands = (
+            {f"M{int(k)}": v for k, v in raw_verification_commands.items()}
+            if is_legacy
+            else {str(k): v for k, v in raw_verification_commands.items()}
+        )
+
+        return cls(
+            group_id=data["group_id"],
+            original_goal=data["original_goal"],
+            milestones=milestones,
+            completed_milestone_ids=completed_ids,
+            established_dependencies=list(data.get("established_dependencies", [])),
+            verification_commands=verification_commands,
+            established_file_context=dict(data.get("established_file_context", {})),
+            stale_milestone_ids=list(data.get("stale_milestone_ids", [])),
+            invalidation_evidence=list(data.get("invalidation_evidence", [])),
+            completion_proofs=dict(data.get("completion_proofs", {}) or {}),
+            commit_ledger=list(data.get("commit_ledger", []) or []),
+            last_reuse_assessment=data.get("last_reuse_assessment"),
+            completion_schema_version=data.get("milestone_completion_schema"),
+        )
+
+
+def _sidecar_path(workspace_path: str, group_id: str) -> str:
+    return os.path.join(workspace_path, MILESTONE_SIDECAR_RELATIVE_DIR, f"{group_id}.json")
+
+
+def save_milestone_run_state(workspace_path: str, run_state: MilestoneRunState) -> None:
+    path = _sidecar_path(workspace_path, run_state.group_id)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    payload = run_state.to_dict()
+    # Every save carries the proof-era schema: revalidation always runs
+    # before a save that could still hold legacy (proof-less) completions,
+    # and a fresh plan file (no schema key) must not read as legacy later.
+    payload["milestone_completion_schema"] = MILESTONE_COMPLETION_SCHEMA_VERSION
+    payload["_workspace"] = ownership_metadata(workspace_path)
+    write_control_file(
+        workspace_path, path, json.dumps(payload, indent=2, sort_keys=True), expected_revision=read_file_revision(path),
+    )
+
+
+def load_milestone_run_state(workspace_path: str, group_id: str) -> Optional[MilestoneRunState]:
+    path = _sidecar_path(workspace_path, group_id)
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as fh:
+        payload = json.load(fh)
+    validate_ownership(workspace_path, payload, path)
+    return MilestoneRunState.from_dict(payload)
+
+
+def load_or_resume_milestone_run_state(workspace_path: str, plan_data: Dict[str, Any]) -> MilestoneRunState:
+    """Builds the MilestoneRunState `kriya generate --from-milestones <file>`
+    actually executes: `milestones`/`original_goal` ALWAYS come from the
+    freshly-loaded plan file, never a stale sidecar - `kriya plan-milestones`
+    explicitly advertises "review and hand-edit" as the intended workflow, so
+    an edit made to the plan file after a first partial run must take effect,
+    not be silently discarded in favor of whatever was baked into the
+    sidecar the first time. Progress fields (completed_milestone_ids/
+    established_dependencies/verification_commands/established_file_context)
+    DO come from an existing same-group_id sidecar when one exists, so
+    re-running the same command still resumes rather than restarting the
+    whole sequence from scratch."""
+    fresh_state = MilestoneRunState.from_dict(plan_data)
+    sidecar_state = load_milestone_run_state(workspace_path, plan_data["group_id"])
+    if sidecar_state is not None:
+        fresh_state.completed_milestone_ids = sidecar_state.completed_milestone_ids
+        fresh_state.established_dependencies = sidecar_state.established_dependencies
+        fresh_state.verification_commands = sidecar_state.verification_commands
+        fresh_state.established_file_context = sidecar_state.established_file_context
+        fresh_state.stale_milestone_ids = sidecar_state.stale_milestone_ids
+        fresh_state.invalidation_evidence = sidecar_state.invalidation_evidence
+        fresh_state.completion_proofs = sidecar_state.completion_proofs
+        fresh_state.commit_ledger = sidecar_state.commit_ledger
+        fresh_state.last_reuse_assessment = sidecar_state.last_reuse_assessment
+        fresh_state.completion_schema_version = sidecar_state.completion_schema_version
+    return fresh_state
+
+
+def revalidate_completed_milestones(
+    workspace_path: str, run_state: MilestoneRunState, *, config: Any = None,
+) -> MilestoneReuseAssessment:
+    """PRD-008 S4b/S4c: decide, from durable evidence, which completed
+    milestones may still be skipped, and un-complete the rest before
+    anything reads completed_milestone_ids.
+
+    First, a milestone whose commit is durable but whose completion was
+    never saved (a crash in between) has its proof rebuilt from the
+    RunRecord + commit evidence when - and only when - that evidence proves
+    the exact committed output and the deterministic post-commit steps pass
+    again (S4c). Then every completion is assessed. A milestone that fails
+    the check reruns together with every milestone downstream of it (and any
+    unrelated milestone sharing its paths); independent milestones whose own
+    proof validates stay skipped. Decided once per run: a second call in the
+    same run returns the first decision."""
+    owned = owning_run_commits(workspace_path)
+    run_id = owned[0] if owned is not None else None
+    previous = run_state.last_reuse_assessment
+    if run_id is not None and isinstance(previous, dict) and previous.get("run_id") == run_id:
+        # Already decided in this run (execute_milestones, then run_milestones).
+        return MilestoneReuseAssessment.from_dict(previous)
+    events, refused = _reconstruct_completions(workspace_path, run_state, config=config)
+    if not run_state.completed_milestone_ids and not events:
+        return MilestoneReuseAssessment(run_id=run_id)
+    assessment = assess_completed_milestone_reuse(
+        workspace_path, run_state.milestones, run_state.completed_milestone_ids,
+        run_state.completion_proofs, run_state.commit_ledger,
+        legacy_state=run_state.completion_schema_version is None,
+        verification_policy=verification_policy_fingerprint(config),
+        autonomy_cfg=getattr(config, "autonomy", None),
+    )
+    assessment.run_id = run_id
+    assessment.events = events
+    assessment.decisions.extend(refused)
+    rerun = assessment.rerun_ids
+    for decision in assessment.decisions:
+        if decision.milestone_id in rerun:
+            logger.warning(
+                "Milestone '%s' is %s and will run: %s",
+                decision.milestone_id, decision.status.value, ", ".join(decision.reason_codes),
+            )
+        else:
+            logger.info("Milestone '%s' completion proof validated - it may be skipped.", decision.milestone_id)
+    if rerun:
+        rerun_paths = {
+            operation.get("path")
+            for entry in run_state.commit_ledger
+            if isinstance(entry, dict) and entry.get("milestone_id") in rerun
+            for operation in entry.get("operations", []) or []
+            if isinstance(operation, dict)
+        }
+        run_state.completed_milestone_ids = [
+            mid for mid in run_state.completed_milestone_ids if mid not in rerun
+        ]
+        run_state.stale_milestone_ids = sorted(set(run_state.stale_milestone_ids) | rerun)
+        for milestone_id in rerun:
+            run_state.completion_proofs.pop(milestone_id, None)
+            run_state.verification_commands.pop(milestone_id, None)
+        # Content captured from invalidated output must not be fed to the
+        # rerun (or its dependents) as "established". The rerun itself works
+        # on the CURRENT workspace bytes - never restored (see handover).
+        for path in rerun_paths:
+            run_state.established_file_context.pop(path, None)
+        _invalidate_milestone_checkpoints(
+            workspace_path, run_state.group_id, rerun, topological_order(run_state.milestones),
+        )
+    # From here on the sidecar carries proofs, whatever it was before.
+    run_state.completion_schema_version = MILESTONE_COMPLETION_SCHEMA_VERSION
+    _publish_reuse_assessment(workspace_path, run_state, assessment)
+    return assessment
+
+
+def _publish_reuse_assessment(
+    workspace_path: str, run_state: MilestoneRunState, assessment: MilestoneReuseAssessment,
+) -> None:
+    """One record of this run's reuse decisions, in the sidecar and on the
+    RunRecord (the result carries it too)."""
+    run_state.last_reuse_assessment = assessment.to_dict()
+    save_milestone_run_state(workspace_path, run_state)
+    annotation_error = annotate_run(workspace_path, milestone_reuse=assessment.to_dict())
+    if annotation_error:
+        logger.warning(f"Could not record the milestone reuse decision on the run record: {annotation_error}")
+
+
+def _reconstruct_completions(
+    workspace_path: str, run_state: MilestoneRunState, *, config: Any,
+) -> Tuple[List[Dict[str, Any]], List[MilestoneReuseDecision]]:
+    """S4c-2: close the commit -> completion-save crash window. Returns the
+    reconstruction events and an UNVERIFIED decision for each refusal."""
+    events: List[Dict[str, Any]] = []
+    refused: List[MilestoneReuseDecision] = []
+    artifact_registry = None
+    for milestone in topological_order(run_state.milestones):
+        if milestone.id in run_state.completed_milestone_ids:
+            continue
+        if any(dep not in run_state.completed_milestone_ids for dep in milestone.depends_on):
+            continue  # an unfinished upstream reruns first; nothing to rebuild on
+        try:
+            candidate = find_completion_to_reconstruct(
+                workspace_path, run_state.group_id, milestone, run_state.commit_ledger,
+            )
+        except Exception as error:
+            logger.warning(f"Could not look for a completion to reconstruct for '{milestone.id}': {error}")
+            continue
+        if candidate is None:
+            continue
+        if candidate.failure is None:
+            dropped = check_dependency_regression(workspace_path, run_state.established_dependencies)
+            if dropped:
+                candidate.failure = {
+                    "code": COMPLETION_RECONSTRUCTION_UNVERIFIED,
+                    "detail": f"dependency regression after the commit: {dropped}",
+                }
+        if candidate.entries_verified:
+            run_state.commit_ledger.extend(entry.to_dict() for entry in candidate.new_entries)
+        if candidate.failure is None:
+            if artifact_registry is None:
+                artifact_registry = load_artifact_registry(workspace_path)
+            error = _complete_milestone(
+                workspace_path, run_state, milestone, candidate.entries,
+                sorted({op.path for entry in candidate.entries for op in entry.operations if op.kind != "DELETE"}),
+                artifact_registry, config=config,
+                reconstructed_from={
+                    "run_id": candidate.run_id,
+                    "transaction_ids": [entry.transaction_id for entry in candidate.entries],
+                    "completion_origin": candidate.origin,
+                },
+                completion_origin=candidate.origin,
+            )
+            if error is not None:
+                candidate.failure = {"code": COMPLETION_RECONSTRUCTION_UNVERIFIED, "detail": error}
+        event = candidate.event()
+        events.append(event)
+        if candidate.failure is None:
+            logger.warning(
+                "Milestone '%s': completion reconstructed from durable commit evidence (run %s).",
+                milestone.id, candidate.run_id,
+            )
+        else:
+            logger.warning(
+                "Milestone '%s': completion NOT reconstructed (%s) - it will run.",
+                milestone.id, candidate.failure.get("code"),
+            )
+            refused.append(MilestoneReuseDecision(milestone.id, FingerprintStatus.UNVERIFIED, [{
+                "code": COMPLETION_RECONSTRUCTION_UNVERIFIED,
+                "detail": "durable evidence does not prove the milestone's committed output",
+                "cause": candidate.failure,
+            }]))
+    return events, refused
+
+
+def _complete_milestone(
+    workspace_path: str,
+    run_state: MilestoneRunState,
+    milestone: MilestoneV2,
+    entries: List[Any],
+    files: List[str],
+    artifact_registry: Any,
+    *,
+    result: Optional[Dict[str, Any]] = None,
+    config: Any = None,
+    reconstructed_from: Optional[Dict[str, Any]] = None,
+    completion_origin: str = ORIGIN_RUN,
+) -> Optional[str]:
+    """The deterministic post-success steps, shared by a normal completion
+    and a reconstructed one: refresh established dependencies and file
+    context, derive artifacts, then persist the completion proof. Returns an
+    error string (nothing persisted as complete) when a step fails."""
+    try:
+        from kriya.tools.validate import get_pom_dependencies
+        pom_path = os.path.join(workspace_path, "pom.xml")
+        if os.path.exists(pom_path):
+            run_state.established_dependencies = sorted(
+                set(run_state.established_dependencies) | set(get_pom_dependencies(pom_path))
+            )
+    except Exception as e:
+        logger.warning(f"Could not refresh established dependencies after milestone '{milestone.id}': {e}")
+
+    for path in files:
+        try:
+            with open(os.path.join(workspace_path, path), "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except OSError as e:
+            logger.warning(f"Could not capture established content for '{path}' after milestone '{milestone.id}': {e}")
+            continue
+        projection = project_implementation_source(
+            content, path, _ESTABLISHED_CONTEXT_MAX_CHARS_PER_FILE,
+            reason="established_by_earlier_milestone",
+        )
+        run_state.established_file_context[path] = projection.content
+
+    try:
+        derived = artifact_registry.derive_from_workspace(workspace_path, milestone.id)
+        for record in derived:
+            artifact_registry.record(record)
+        if derived:
+            save_artifact_registry(workspace_path, artifact_registry)
+    except Exception as e:
+        logger.error(f"Could not derive/persist real artifacts for milestone '{milestone.id}': {e}")
+        return f"artifact registry: {e}"
+
+    owned = owning_run_commits(workspace_path)
+    run_id = entries[0].run_id if entries else (owned[0] if owned is not None else None)
+    verification = refusal = None
+    if not entries and result is not None:
+        # S4c-1: a milestone that committed nothing is reusable only when
+        # deterministic evidence covers every acceptance criterion, never
+        # on a model's "no change" or a generic passing test.
+        verification, refusal = no_change_verification(
+            workspace_path, milestone, result, run_id=run_id, config=config,
+            proofs=run_state.completion_proofs, ledger_length=len(run_state.commit_ledger),
+        )
+    run_state.completion_proofs[milestone.id] = completion_proof_for(
+        milestone, entries, run_id, verification=verification, reconstructed_from=reconstructed_from,
+        completion_origin=completion_origin, no_change_refusal=refusal,
+    ).to_dict()
+    run_state.completed_milestone_ids.append(milestone.id)
+    if milestone.id in run_state.stale_milestone_ids:
+        run_state.stale_milestone_ids.remove(milestone.id)
+    save_milestone_run_state(workspace_path, run_state)
+    return None
+
+
+def _record_ledger(
+    workspace_path: str, run_state: MilestoneRunState, milestone_id: Optional[str], cycles_before: int,
+    *, loop_outcome: Optional[str] = None,
+) -> List[Any]:
+    entries = record_milestone_commits(workspace_path, milestone_id, cycles_before, loop_outcome=loop_outcome)
+    run_state.commit_ledger.extend(entry.to_dict() for entry in entries)
+    return entries
+
+
+def _plan_digest(milestones: List[MilestoneV2]) -> str:
+    return hashlib.sha256(json.dumps(
+        [milestone.model_dump(mode="json") for milestone in milestones], sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+
+def _record_selection(
+    workspace_path: str, run_state: MilestoneRunState, assessment: MilestoneReuseAssessment,
+    selection: Optional[Dict[str, Any]],
+) -> None:
+    if selection is None:
+        return
+    assessment.events.append(selection)
+    logger.info("Milestone checkpoint selection: %s", json.dumps(selection, sort_keys=True))
+    _publish_reuse_assessment(workspace_path, run_state, assessment)
+
+
+def _list_workspace_files(workspace_path: str, max_files: int = 200) -> List[str]:
+    """Cheap, dependency-free workspace snapshot for the Milestone Planner's
+    prompt - deliberately NOT RepositoryAnalyzer's full repo_model (that's
+    skills/Graph-RAG-oriented and considerably heavier, built for a stage
+    that designs file CONTENTS; the Milestone Planner slices GOAL TEXT by
+    behavior and doesn't need that depth). Just enough for the model to know
+    whether it's planning against a blank workspace or one that already has
+    an earlier milestone group's real output on disk."""
+    ignored_dirs = {".git", ".kriya", "__pycache__", "node_modules", "target", ".venv", "venv"}
+    files: List[str] = []
+    for root, dirs, filenames in os.walk(workspace_path):
+        dirs[:] = [d for d in dirs if d not in ignored_dirs]
+        for fn in filenames:
+            files.append(os.path.relpath(os.path.join(root, fn), workspace_path))
+            if len(files) >= max_files:
+                return sorted(files)
+    return sorted(files)
+
+
+def render_repository_topology_summary(topology: RepositoryTopology) -> str:
+    """MA3.5 evidence block for the Milestone Planner's prompt (see
+    plan_milestones() below) - deterministic facts about the REAL, on-disk
+    build topology, given as evidence rather than asked as a question ("is
+    this a multi-module repository?") the model would otherwise have to
+    guess at. This is advisory only: the AUTHORITATIVE gate is
+    MilestonePlanValidator's own physical-topology-preservation check
+    (kriya/workflow/milestone_validation.py, wired in MA3.6) - this summary
+    exists so a well-behaved model avoids that rejection in the first place,
+    not to replace it."""
+    if topology.build_system is None and not topology.build_roots:
+        return (
+            "Repository topology: no existing build artifacts detected - this "
+            "workspace is empty or new, so this plan establishes its own structure."
+        )
+    return "\n".join([
+        "Repository topology (detected from the existing workspace, not guessed):",
+        f"- Build system: {topology.build_system or 'unknown'}",
+        f"- Build roots: {', '.join(topology.build_roots) or 'none'}",
+        f"- Child modules: {', '.join(topology.modules) or 'none'}",
+        f"- Existing entrypoints: {', '.join(topology.entrypoints) or 'none detected'}",
+        f"- Multi-module project: {'yes' if topology.is_multi_module else 'no'}",
+    ])
+
+
+_MAX_MILESTONE_PLANNING_ATTEMPTS = 3
+
+
+def _build_plan_correction_feedback(result: MilestoneValidationResult) -> str:
+    """Section 21's "specific failure -> specific correction -> bounded
+    retry" shape (the same retry philosophy Kriya's own Quality Gates loop
+    already uses, one level up) rather than a generic "try again": each line
+    names the real reason code and milestone id MilestonePlanValidator found,
+    so a capable model has a concrete checklist of exactly what to fix, not
+    just a vague rejection."""
+    lines = [
+        "PLAN_VALIDATION_ERROR",
+        "",
+        "Your previous milestone plan was rejected for the following reason(s):",
+    ]
+    for issue in result.errors:
+        location = f" (milestone '{issue.milestone_id}')" if issue.milestone_id else ""
+        lines.append(f"- [{issue.code}]{location}: {issue.message}")
+    lines.append("")
+    lines.append(
+        "Required correction: revise your milestone list to fix ALL of the issues "
+        "above, then resubmit. Return ONLY the corrected milestones JSON block in "
+        "the exact same shape as before - do not add prose explaining the change."
+    )
+    return "\n".join(lines)
+
+
+def _log_milestone_plan_telemetry(
+    trace_db: Optional[str],
+    group_id: str,
+    status: str,
+    milestones: List[MilestoneV2],
+    validation_attempts: int,
+    validation_failures: List[str],
+    topology: RepositoryTopology,
+    *,
+    goal: str = "",
+    llm: Any = None,
+) -> None:
+    """MA3.9 - no-op when trace_db isn't supplied (kriya plan-milestones
+    passes the canonical trace database, kriya/core/state_paths.py; a caller that doesn't care about telemetry,
+    e.g. most of this module's own tests, gets zero I/O). Lazy import + a
+    fresh TraceLogger per call, same convention as every trace-logging call
+    site in kriya/workflow/workflow.py."""
+    if not trace_db:
+        return
+    from kriya.core.trace import TraceLogger
+
+    structure = plan_structure_telemetry(milestones)
+    trace_logger = TraceLogger(trace_db)
+    try:
+        trace_logger.log_milestone_plan(
+            group_id=group_id,
+            status=status,
+            schema_version=2,
+            milestone_count=structure["milestone_count"],
+            dependency_edges=structure["dependency_edges"],
+            extension_count=structure["extension_count"],
+            composition_count=structure["composition_count"],
+            validation_attempts=validation_attempts,
+            validation_failures=validation_failures,
+            repository_topology={
+                "build_system": topology.build_system,
+                "module_count": len(topology.build_roots),
+                "entrypoint_count": len(topology.entrypoints),
+            },
+        )
+    finally:
+        trace_logger.close()
+    # MODEL-EVIDENCE-HARDENING-001: the milestone Planner's calls reach the
+    # role metrics through a runs row of their own (plan-milestones is its
+    # own process; nothing else would ever report them), whatever the outcome.
+    from kriya.workflow.run_trace import write_outcome_trace
+
+    write_outcome_trace(
+        trace_db, run_id=f"{group_id}.milestone-plan", goal=goal, status=f"milestone_plan_{status}", llm=llm,
+        source="milestones.plan_milestones",
+        failure_category=None if status == "accepted" else f"milestone_plan_{status}",
+        milestone_group_id=group_id,
+    )
+
+
+async def plan_milestones(
+    milestone_planner: Any,
+    goal: str,
+    workspace_path: str,
+    stream_callback: Optional[Callable[[str], None]] = None,
+    max_planning_attempts: int = _MAX_MILESTONE_PLANNING_ATTEMPTS,
+    trace_db: Optional[str] = None,
+) -> Tuple[Optional[MilestoneRunState], Optional[str]]:
+    """Runs the Milestone Planner and returns a fresh, nothing-executed-yet
+    MilestoneRunState, or (None, error). Caller (kriya plan-milestones)
+    persists the result via save_milestone_run_state() so a human can
+    review/hand-edit the proposed slicing before `kriya generate
+    --from-milestones` ever executes a single real generate call against
+    their workspace - see the design doc's own note that this is a genuine
+    qualitative judgment call worth a human eyeballing, not just an assertion.
+
+    MA3.6: each attempt's output is validated through MilestonePlanValidator
+    (DAG/capability/extension/acceptance/physical-topology -
+    kriya/workflow/milestone_validation.py) BEFORE being accepted - an
+    invalid plan never reaches MilestoneRunState or a human's review. On
+    rejection, a specific, reason-coded correction request
+    (_build_plan_correction_feedback above) is appended to the prompt and the
+    planner is asked again, bounded by max_planning_attempts - never an
+    unbounded re-planning loop (the design doc's own explicit "Do not
+    introduce a generic infinite re-planning loop" rule). A response that
+    fails to produce any parseable milestone list at all (parse_milestone_list
+    returning None - a genuinely different, pre-existing failure mode; see
+    MilestonePlannerAgent.run_with_milestone_list's own docstring) is still an
+    IMMEDIATE failure, not retried here - that degrade-on-malformed-output
+    behavior is unchanged from before this milestone.
+
+    MA3.7: MilestonePlannerAgent.run_with_milestone_list now returns Schema
+    v2 (MilestoneV2) directly - either the model genuinely emitted v2 JSON,
+    or it reverted to the old v1 shape and that agent's own fallback already
+    normalized it (see that method's docstring). Either way, what arrives
+    here is already MilestoneV2, so it's validated as-is - no normalization
+    call on this live path any more. The MilestoneRunState this function
+    returns carries the VALIDATOR's own normalized milestones (extends
+    auto-merged into depends_on - see MilestonePlanValidator.validate()'s own
+    `.milestones` result), not the raw pre-validation list, so
+    run_milestones() sees the fully-correct dependency graph without
+    re-deriving it.
+
+    MA3.9: when trace_db is supplied (kriya plan-milestones passes
+    the canonical trace database), one milestone_plans row (kriya/core/trace.py) is
+    recorded for this call REGARDLESS of outcome - accepted, rejected after
+    exhausting max_planning_attempts, or malformed_output - keyed by the
+    SAME group_id a resulting MilestoneRunState would carry, so an accepted
+    plan's telemetry row and its later executed `runs` rows share one id."""
+    group_id = str(uuid.uuid4())
+    existing_files = _list_workspace_files(workspace_path)
+    workspace_note = (
+        "Workspace is currently empty (or new)."
+        if not existing_files
+        else "Workspace already contains these files:\n" + "\n".join(f"- {f}" for f in existing_files)
+    )
+    topology = detect_repository_topology(workspace_path)
+    base_prompt = f"Goal: {goal}\n\n{workspace_note}\n\n{render_repository_topology_summary(topology)}"
+
+    validator = MilestonePlanValidator()
+    correction_feedback = ""
+    last_error = ""
+    accumulated_failure_codes: List[str] = []
+    last_attempted_milestones: List[MilestoneV2] = []
+
+    for attempt in range(1, max(1, max_planning_attempts) + 1):
+        prompt = base_prompt if not correction_feedback else f"{base_prompt}\n\n{correction_feedback}"
+        _raw, milestones = await milestone_planner.run_with_milestone_list(prompt, stream_callback=stream_callback)
+        # MODEL-EVIDENCE-HARDENING-001: each milestone Planner response's
+        # typed outcome, charged to the model that answered.
+        from kriya.workflow.planner_repair import classify_planner_outcome, record_planner_outcome
+
+        if milestones is None:
+            record_planner_outcome(milestone_planner, classify_planner_outcome(["STRUCTURED_PLAN_PARSE_FAILED"],
+                                                                               valid=False))
+            _log_milestone_plan_telemetry(
+                trace_db, group_id, "malformed_output", [], attempt, accumulated_failure_codes, topology,
+                goal=goal, llm=getattr(milestone_planner, "llm", None),
+            )
+            return None, "Milestone Planner output did not produce a valid milestone list."
+
+        last_attempted_milestones = milestones
+        validation_result = validator.validate(milestones, repository_topology=topology, goal_text=goal)
+        record_planner_outcome(milestone_planner, classify_planner_outcome(
+            [e.code for e in validation_result.errors], valid=validation_result.valid))
+        if validation_result.valid:
+            _log_milestone_plan_telemetry(
+                trace_db, group_id, "accepted", validation_result.milestones,
+                attempt, accumulated_failure_codes, topology,
+                goal=goal, llm=getattr(milestone_planner, "llm", None),
+            )
+            return MilestoneRunState(
+                group_id=group_id, original_goal=goal, milestones=validation_result.milestones,
+            ), None
+
+        accumulated_failure_codes.extend(e.code for e in validation_result.errors)
+        last_error = (
+            f"Milestone Planner output failed validation after {attempt} attempt(s): "
+            + "; ".join(f"[{e.code}] {e.message}" for e in validation_result.errors)
+        )
+        correction_feedback = _build_plan_correction_feedback(validation_result)
+
+    _log_milestone_plan_telemetry(
+        trace_db, group_id, "rejected", last_attempted_milestones,
+        max(1, max_planning_attempts), accumulated_failure_codes, topology,
+        goal=goal, llm=getattr(milestone_planner, "llm", None),
+    )
+    return None, last_error
+
+
+def build_milestone_goal_text(
+    milestone: MilestoneV2, position: int, total: int, established_deps: List[str]
+) -> str:
+    """Deterministic string assembly, no extra LLM call. The header/footer are
+    the only genuinely new context a milestone's goal text needs -
+    run_generation_workflow's own repo-analysis stage already re-scans
+    workspace_path fresh on every call, so "what does milestone N see of
+    milestones 1..N-1" is otherwise already free (confirmed: it applies via
+    plain file copy, never a git commit, so the next call's repo scan sees
+    the real, current on-disk state).
+
+    MA3.7: header is now driven by milestone.depends_on being non-empty,
+    not index > 1 - a milestone whose EXPLICIT dependency list is empty
+    (a genuine DAG root, not just "happens to be first in the list")
+    structurally has no predecessor to warn about, matching
+    MilestonePlanValidator's own already-validated semantics rather than a
+    positional heuristic. `position`/`total` (this milestone's place in the
+    topological execution order - kriya/workflow/milestone_validation.py's
+    topological_order()) are still passed through for the human-readable
+    banner text only, never for dependency logic."""
+    header = ""
+    if milestone.depends_on:
+        dep_list = ", ".join(sorted(milestone.depends_on))
+        header = (
+            f"This is milestone '{milestone.id}' ({position} of {total}) in a "
+            f"larger effort, depending on: {dep_list}. Prior milestones have "
+            "already been applied to this project on disk - inspect the "
+            "existing code/build files in the Workspace Context below rather "
+            "than assuming a blank project, and do NOT recreate, restructure, "
+            "or rename anything that already exists and already works unless "
+            "this milestone's own goal below explicitly requires changing "
+            "it.\n\n"
+        )
+        if milestone.mode == MilestoneMode.EXTENSION and milestone.extends:
+            header += (
+                f"This milestone EXTENDS milestone '{milestone.extends}' - evolve "
+                "its existing entry point/build file, do not create a new "
+                "one.\n\n"
+            )
+    footer = ""
+    if established_deps:
+        footer = (
+            "\n\nDependencies established by earlier milestones that this "
+            "project already relies on (do not remove or replace, even if "
+            "this milestone doesn't need them itself):\n"
+            + "\n".join(f"- {d}" for d in sorted(established_deps))
+        )
+    acceptance_text = "; ".join(a.description for a in milestone.acceptance)
+    criterion = f"\n\nVerification: {acceptance_text}"
+    return header + milestone.goal + criterion + footer
+
+
+def build_integration_goal_text(original_goal: str, milestones: List[MilestoneV2]) -> str:
+    """Synthesized from the original goal + every milestone's own acceptance
+    criteria - deliberately NOT the original goal text re-submitted
+    verbatim, which would risk re-triggering the exact "build everything at
+    once" problem this whole feature exists to avoid."""
+    criteria_lines = "\n".join(
+        f"{m.id}: {a.description}" for m in milestones for a in m.acceptance
+    )
+    return (
+        "This is the final integration/verification pass over a project "
+        f"already built across {len(milestones)} milestones, in this "
+        "workspace. Do NOT rewrite, restructure, or regenerate working code. "
+        "Your job is to confirm the COMPLETE assembled system - all "
+        "milestones together - satisfies the original goal below, fix ONLY "
+        "what's broken, and verify EVERY milestone's own behavior still "
+        "holds, not just the final one.\n\n"
+        f"Original goal:\n{original_goal}\n\n"
+        "Milestones already applied, each with its own success criterion "
+        f"that must STILL hold after all later milestones:\n{criteria_lines}"
+    )
+
+
+def check_dependency_regression(
+    workspace_path: str, established_deps: List[str]
+) -> List[str]:
+    """Returns the (possibly empty) list of dependencies that existed in
+    established_deps but are missing from the CURRENT pom.xml - closes the
+    confirmed real "pom.xml tug-of-war" bug (docs/design.md section 2.3.4d:
+    by attempt 7 of one real sequential run, all 3 Ignite dependencies had
+    been silently dropped), as an independent, deterministic, code-level
+    check rather than relying solely on the existing reactive prompt-level
+    mitigation (kriya/workflow/workflow.py's required_dependencies_prompt_block,
+    which only ASKS the model not to drop anything and was documented as
+    insufficient on its own). Returns [] when there's nothing to check (no
+    established deps yet, or no pom.xml - a non-Java project isn't this bug)."""
+    from kriya.tools.validate import get_pom_dependencies
+
+    pom_path = os.path.join(workspace_path, "pom.xml")
+    if not established_deps or not os.path.exists(pom_path):
+        return []
+    current_deps = set(get_pom_dependencies(pom_path))
+    return sorted(set(established_deps) - current_deps)
+
+
+def replay_prior_milestone_verifications(
+    workspace_path: str, run_state: MilestoneRunState
+) -> List[Dict[str, Any]]:
+    """Re-executes every completed milestone's own persisted verification
+    command sequence against the CURRENT workspace state and re-checks the
+    [VERIFICATION] PASS/FAIL marker via the SAME extract_contract_verdict()
+    the normal pipeline already uses for a single goal - closing a gap
+    nothing else in Kriya covers today: the end-of-run full regression suite
+    (kriya/workflow/workflow.py) is framework-tests-only, and
+    RunVerifierAgent's own judge()/grade() never replays an EARLIER goal's
+    command sequence during a LATER one. Runs BEFORE the integration call
+    (not after) so a regression is attributable to milestone-to-milestone
+    drift specifically, not muddied by the integration call's own edits.
+
+    Returns a list of {"milestone_id", "reason"} dicts, one per regressed
+    milestone, empty if everything replayed still passes. A milestone with no
+    deterministic marker in its captured output is silently skipped (not
+    counted as a failure) - a false alarm here would be worse than staying
+    silent, and the integration call's own full regression suite still runs
+    regardless of what this function finds."""
+    from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.verification_authority import deterministic_sequence_kind
+
+    failures: List[Dict[str, Any]] = []
+    validator = PolymorphicValidator(workspace_path, original_workspace_path=workspace_path)
+    for milestone_id in sorted(run_state.verification_commands):
+        raw_commands = run_state.verification_commands[milestone_id]
+        if not raw_commands:
+            continue
+        resolved_commands = [_resolve_run_command(cmd, workspace_path) for cmd in raw_commands]
+        run_res = validator.run_app_sequence(resolved_commands)
+        if run_res["timed_out"]:
+            failures.append({
+                "milestone_id": milestone_id,
+                "reason": "replay timed out - possible resource-lifecycle regression",
+            })
+            continue
+        deterministic_kind = deterministic_sequence_kind(resolved_commands)
+        if deterministic_kind is not None:
+            if not run_res["success"]:
+                failures.append({
+                    "milestone_id": milestone_id,
+                    "reason": (
+                        f"replayed deterministic {deterministic_kind} verification "
+                        "returned a non-zero process status"
+                    ),
+                })
+            continue
+        verdict = extract_contract_verdict(run_res["output"])
+        if verdict is None:
+            continue
+        if not verdict.get("passed"):
+            failures.append({
+                "milestone_id": milestone_id,
+                "reason": verdict.get("reasoning") or "verification marker reported FAIL on replay",
+            })
+    return failures
+
+
+class _MilestonePlanDriver(PlanDriver):
+    """The milestone-specific part of running a milestone ExecutionPlan
+    (PRD-008A). Everything here is bookkeeping and goal/context assembly
+    that existed in run_milestones' own loop before PRD-008A, unchanged in
+    order and effect; ordering, lifecycle, the active work-unit record,
+    dependency blocking and the terminal decision belong to execute_plan()."""
+
+    def __init__(
+        self, *, we: Any, run_state: MilestoneRunState, workspace_path: str, ordered: List[MilestoneV2],
+        contract_registry: Any, artifact_registry: Any, reuse_assessment: MilestoneReuseAssessment,
+        engine_config: Any, authoritative: bool,
+        milestone_failure_callback: Optional[Callable[[int, int, MilestoneV2, Dict[str, Any]], str]],
+        generation_kwargs: Dict[str, Any],
+    ):
+        self.we = we
+        self.run_state = run_state
+        self.workspace_path = workspace_path
+        self.ordered = ordered
+        self.total = len(ordered)
+        # Position is the index in the FULL order, completed milestones
+        # included - it is embedded in the goal text, and so in every
+        # checkpoint's goal fingerprint.
+        self.position = {milestone.id: index for index, milestone in enumerate(ordered, start=1)}
+        self.by_id = {milestone.id: milestone for milestone in ordered}
+        self.contract_registry = contract_registry
+        self.artifact_registry = artifact_registry
+        self.reuse_assessment = reuse_assessment
+        self.engine_config = engine_config
+        self.authoritative = authoritative
+        self.milestone_failure_callback = milestone_failure_callback
+        self.generation_kwargs = generation_kwargs
+        self._goal: Dict[str, str] = {}
+        self._consumed_context: Dict[str, str] = {}
+        # Every commit a unit's loop makes (retries included) is attributed
+        # to it from the RunRecord, never from its reported files.
+        self._cycles_before: Dict[str, int] = {}
+
+    def _milestone(self, unit: WorkUnit) -> Optional[MilestoneV2]:
+        return self.by_id.get(unit.id) if unit.role is WorkUnitRole.PRIMARY else None
+
+    async def before_unit(self, plan: ExecutionPlan, unit: WorkUnit) -> Optional[Dict[str, Any]]:
+        milestone = self._milestone(unit)
+        if milestone is None:
+            _log_phase_banner("INTEGRATION")
+            self._cycles_before[unit.id] = owning_run_commit_count(self.workspace_path)
+            return None
+        position = self.position[milestone.id]
+        _update_milestone_control_state(
+            self.workspace_path,
+            self.run_state.group_id,
+            milestone.id,
+            "in_progress",
+            self.artifact_registry,
+            authoritative=self.authoritative,
+        )
+
+        _log_phase_banner(f"MILESTONE '{milestone.id}' ({position}/{self.total}): {milestone.goal[:40]}")
+        # A consumer may only execute against artifact coordinates that
+        # still match the provider's current build metadata. Providers with
+        # no recorded physical artifact remain valid logical contracts.
+        provider_ids = {
+            provider.id
+            for capability_name in milestone.consumes
+            for provider in self.run_state.milestones
+            if any(cap.name == capability_name for cap in provider.provides)
+        }
+        artifact_drift = [
+            validation
+            for provider_id in sorted(provider_ids)
+            for validation in self.artifact_registry.validate(self.workspace_path, provider_id)
+            if validation.drifted
+        ]
+        if artifact_drift:
+            return {
+                "status": "artifact_drift",
+                "group_id": self.run_state.group_id,
+                "milestone_id": milestone.id,
+                "quality_gates_passed": False,
+                "artifact_drift": [
+                    {
+                        "reason_code": item.reason_code,
+                        "recorded": item.recorded.to_dict(),
+                        "current": item.current.to_dict() if item.current else None,
+                    }
+                    for item in artifact_drift
+                ],
+            }
+        self._goal[unit.id] = build_milestone_goal_text(
+            milestone, position, self.total, self.run_state.established_dependencies
+        )
+        self.contract_registry = _live_contract_registry(self.workspace_path, milestone.id)
+        self._consumed_context[unit.id] = render_consumed_contract_context(milestone, self.contract_registry)
+        self._cycles_before[unit.id] = owning_run_commit_count(self.workspace_path)
+        return None
+
+    def on_checkpoint_selection(self, event: Dict[str, Any]) -> None:
+        # S4c-3: the executor offered only this unit's own newest checkpoint
+        # (the PRD-008 validator still decides whether it is reusable).
+        _record_selection(self.workspace_path, self.run_state, self.reuse_assessment, event)
+
+    async def run_unit(
+        self, plan: ExecutionPlan, unit: WorkUnit, invocation: WorkUnitInvocation,
+        *, resume: bool, resume_id: Optional[str],
+    ) -> Dict[str, Any]:
+        milestone = self._milestone(unit)
+        if milestone is None:
+            return await self.we.run_generation_workflow(
+                goal=unit.goal,
+                workspace_path=self.workspace_path,
+                **self.generation_kwargs,
+                milestone_group_id=self.run_state.group_id,
+                milestone_index=self.total + 1,
+                milestone_total=self.total + 1,
+                resume=resume,
+                resume_id=resume_id,
+                supplementary_context=render_established_file_context(self.run_state.established_file_context),
+                established_files=sorted(self.run_state.established_file_context.keys()),
+                work_unit=invocation,
+            )
+        return await self.we.run_generation_workflow(
+            goal=self._goal[unit.id],
+            workspace_path=self.workspace_path,
+            **self.generation_kwargs,
+            milestone_group_id=self.run_state.group_id,
+            milestone_index=self.position[milestone.id],
+            milestone_total=self.total,
+            resume=resume,
+            resume_id=resume_id,
+            supplementary_context="\n\n".join(filter(None, (
+                render_established_file_context(self.run_state.established_file_context),
+                self._consumed_context[unit.id],
+            ))),
+            established_files=sorted(self.run_state.established_file_context.keys()),
+            work_unit=invocation,
+        )
+
+    async def check_passed_unit(self, unit: WorkUnit, result: Dict[str, Any]) -> Dict[str, Any]:
+        milestone = self._milestone(unit)
+        if milestone is None:
+            return result
+        # A milestone's OWN Quality Gates can pass while still silently
+        # dropping an earlier milestone's dependency (the confirmed real
+        # pom.xml "tug-of-war" bug, docs/design.md section 2.3.4d) - by this
+        # point run_generation_workflow() has already applied the milestone's
+        # files to the real workspace, so this is treated as an ordinary
+        # milestone failure needing the SAME human decision point
+        # (milestone_failure_callback) as a Quality-Gates failure, not a
+        # separate exception path the callback never sees and that leaves no
+        # record behind for a later --from-milestones re-run to act on.
+        dropped = check_dependency_regression(self.workspace_path, self.run_state.established_dependencies)
+        if dropped:
+            result = dict(result)
+            result["quality_gates_passed"] = False
+            result["status"] = "dependency_regression"
+            result["dropped_dependencies"] = dropped
+            return result
+        if milestone.provides:
+            incomplete = self._unestablished_capabilities(unit, milestone)
+            if incomplete:
+                # PRD-029: the unit committed source but its capability
+                # transition is not in the registry - an incomplete
+                # transaction, never a successful milestone.
+                result = dict(result)
+                result["quality_gates_passed"] = False
+                result["status"] = "contract_registry_incomplete"
+                from kriya.workflow.contract_lifecycle import CONTRACT_REGISTRY_TRANSITION_INCOMPLETE
+                result["reason_codes"] = [CONTRACT_REGISTRY_TRANSITION_INCOMPLETE]
+                result["unestablished_capabilities"] = incomplete
+        return result
+
+    def _unestablished_capabilities(self, unit: WorkUnit, milestone: MilestoneV2) -> List[str]:
+        """PRD-029: a milestone's provided capabilities are established only
+        by the transaction that commits its source (the terminal commit
+        seam, WorkUnitInvocation.provided_capabilities) - never marked by
+        bookkeeping afterwards. Returns the registered capabilities that
+        are still not IMPLEMENTED although this unit committed source. A
+        unit that committed nothing establishes nothing (and is not failed
+        for it)."""
+        self.contract_registry = _live_contract_registry(self.workspace_path, milestone.id)
+        owned = owning_run_commits(self.workspace_path)
+        cycles = owned[1][self._cycles_before.get(unit.id, 0):] if owned is not None else []
+        if not any(cycle.get("result") == COMMIT_COMMITTED for cycle in cycles):
+            return []
+        return [
+            f"{milestone.id}:{capability.name}" for capability in milestone.provides
+            if (record := self.contract_registry.try_get(f"{milestone.id}:{capability.name}")) is not None
+            and record.state is not ContractState.IMPLEMENTED
+        ]
+
+    def retry_failed_unit(self, unit: WorkUnit, result: Dict[str, Any]) -> bool:
+        milestone = self._milestone(unit)
+        if milestone is None:
+            return False
+        position = self.position[milestone.id]
+        decision = "abandon"
+        if self.milestone_failure_callback:
+            decision = self.milestone_failure_callback(position, self.total, milestone, result)
+        if decision == "retry":
+            logger.info(
+                f"Retrying milestone '{milestone.id}' ({position}/{self.total}) per "
+                "milestone_failure_callback decision."
+            )
+            return True
+        return False
+
+    async def unit_failed(self, unit: WorkUnit, result: Dict[str, Any]) -> Dict[str, Any]:
+        milestone = self._milestone(unit)
+        if milestone is None:
+            # Integration commits change paths milestones own; without them
+            # in the ledger a clean rerun would read those paths as edited.
+            if _record_ledger(self.workspace_path, self.run_state, None, self._cycles_before[unit.id]):
+                save_milestone_run_state(self.workspace_path, self.run_state)
+            return {
+                "status": "integration_failed",
+                "group_id": self.run_state.group_id,
+                "milestone_total": self.total,
+                "integration_result": result,
+                "milestone_reuse": self.reuse_assessment.to_dict(),
+            }
+        if _record_ledger(
+            self.workspace_path, self.run_state, milestone.id, self._cycles_before[unit.id],
+            loop_outcome=LOOP_FAILED,
+        ):
+            save_milestone_run_state(self.workspace_path, self.run_state)
+        return {
+            "status": "milestone_failed",
+            "group_id": self.run_state.group_id,
+            "milestone_id": milestone.id,
+            "milestone_index": self.position[milestone.id],
+            "milestone_total": self.total,
+            "result": result,
+            "milestone_reuse": self.reuse_assessment.to_dict(),
+        }
+
+    async def complete_unit(self, unit: WorkUnit, result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        milestone = self._milestone(unit)
+        if milestone is None:
+            if _record_ledger(self.workspace_path, self.run_state, None, self._cycles_before[unit.id]):
+                save_milestone_run_state(self.workspace_path, self.run_state)
+            return None
+        # Persist the commits before any later step can fail and return:
+        # an unrecorded commit would make a clean rerun see edited paths.
+        milestone_entries = _record_ledger(
+            self.workspace_path, self.run_state, milestone.id, self._cycles_before[unit.id],
+            loop_outcome=LOOP_PASSED,
+        )
+        if milestone_entries:
+            save_milestone_run_state(self.workspace_path, self.run_state)
+
+        await self._capture_verification_commands(milestone, result)
+
+        completion_error = _complete_milestone(
+            self.workspace_path, self.run_state, milestone, milestone_entries, list(result.get("files", [])),
+            self.artifact_registry, result=result, config=self.engine_config,
+        )
+        if completion_error is not None:
+            return {
+                "status": "artifact_registry_failed",
+                "group_id": self.run_state.group_id,
+                "milestone_id": milestone.id,
+                "quality_gates_passed": False,
+                "artifact_error": completion_error,
+            }
+        _update_milestone_control_state(
+            self.workspace_path,
+            self.run_state.group_id,
+            milestone.id,
+            "done",
+            self.artifact_registry,
+            authoritative=self.authoritative,
+        )
+        return None
+
+    async def _capture_verification_commands(self, milestone: MilestoneV2, result: Dict[str, Any]) -> None:
+        milestone_goal = self._goal[milestone.id]
+        try:
+            # Read the CURRENT real pom.xml (post-apply, same convention as
+            # attempt.py's own judge() call site) - without it judge() reliably
+            # mis-infers exec:java for a pom actually shaped for exec:exec
+            # (confirmed real, repeated failure - see RunVerifierAgent.judge()'s
+            # own system prompt/docstring), exactly the goal shape (Ignite/Qpid,
+            # needing --add-opens) this feature was built for.
+            pom_content_for_judge = None
+            try:
+                with open(os.path.join(self.workspace_path, "pom.xml"), "r", encoding="utf-8") as f:
+                    pom_content_for_judge = f.read()
+            except Exception as e:
+                logger.debug(f"No pom.xml available for milestone '{milestone.id}'s run-verification judgment: {e}")
+            judgment = await self.we.run_verifier.judge(
+                goal=milestone_goal,
+                design=result.get("design", ""),
+                files_written=result.get("files", []),
+                build_file_content=pom_content_for_judge,
+            )
+            # VER-005 implementation (2026-09-13): this is a THIRD, previously
+            # ungrounded RunVerifierAgent.judge() call site - independent of
+            # both call sites kriya/workflow/attempt.py already grounds
+            # (_execute_runtime_verification_directly and the mutating-path
+            # inline block) - a raw judgment captured here for LATER REPLAY
+            # (replay_prior_milestone_verifications, below) would otherwise
+            # persist and re-execute an unvalidated Python target (e.g. a
+            # test file selected for a library milestone) on every later
+            # integration pass, exactly the E4 defect this risk closes.
+            # Python-only, matching this fix's own scope - this milestone-
+            # replay path has no live evidence of the equivalent Java defect,
+            # and _build_java_main_class_map's own signature is
+            # AttemptContext-coupled, not plumbed through here; disclosed as
+            # a known, narrower scope in the VER-005 evidence doc rather than
+            # silently expanded.
+            if judgment.get("should_run") and judgment.get("run_commands"):
+                milestone_known_files = result.get("files", [])
+                if any(f.endswith(".py") for f in milestone_known_files):
+                    all_python_files, package_dirs, entrypoint_files = _build_python_runtime_grounding(
+                        self.workspace_path
+                    )
+                    corrected_py_commands = ground_python_runtime_target(
+                        judgment["run_commands"], judgment["command_source"],
+                        all_python_files, package_dirs, entrypoint_files,
+                    )
+                    if corrected_py_commands is None:
+                        judgment = dict(judgment)
+                        judgment["should_run"] = False
+                        judgment["run_commands"] = None
+                    elif corrected_py_commands != judgment["run_commands"]:
+                        judgment = dict(judgment)
+                        judgment["run_commands"] = corrected_py_commands
+            if judgment.get("should_run") and judgment.get("run_commands"):
+                self.run_state.verification_commands[milestone.id] = judgment["run_commands"]
+        except Exception as e:
+            logger.warning(f"Could not capture milestone '{milestone.id}'s verification commands for later replay: {e}")
+
+    async def run_phase(self, phase: TerminalPhase) -> Optional[Dict[str, Any]]:
+        if phase is not TerminalPhase.REPLAY_PRIOR_VERIFICATIONS:
+            raise ValueError(f"milestone plans have no '{phase.value}' phase")
+        replay_failures = replay_prior_milestone_verifications(self.workspace_path, self.run_state)
+        if replay_failures:
+            return {
+                "status": "milestone_replay_failed",
+                "group_id": self.run_state.group_id,
+                "milestone_total": self.total,
+                "failures": replay_failures,
+            }
+        return None
+
+    def plan_result(self, plan: ExecutionPlan, last_result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        # Only reached with every unit VERIFIED, so the integration unit
+        # (always last) passed and last_result is its result.
+        return {
+            "status": "success",
+            "group_id": self.run_state.group_id,
+            "milestone_total": self.total,
+            "integration_result": last_result,
+            "milestone_reuse": self.reuse_assessment.to_dict(),
+        }
+
+
+@coordinated_mutation
+async def run_milestones(
+    we: Any,
+    run_state: MilestoneRunState,
+    workspace_path: str,
+    approval_callback: Optional[Callable[[List[Dict[str, str]], str], Any]] = None,
+    stream_callback: Optional[Callable[[str, str], None]] = None,
+    skill_gap_callback: Optional[Callable[[str, List[str]], Any]] = None,
+    skill_conflict_callback: Optional[Callable[[str, str, str, str, str], Any]] = None,
+    web_lookup_callback: Optional[Callable[[List[Dict[str, str]]], Any]] = None,
+    web_lookup_query_callback: Optional[Callable[[List[str], str], Any]] = None,
+    milestone_failure_callback: Optional[Callable[[int, int, MilestoneV2, Dict[str, Any]], str]] = None,
+    knowledge_risk_confirmed: bool = False,
+    resume: bool = False,
+    resume_id: Optional[str] = None,
+    authoritative: bool = False,
+    reference_context: str = "",
+) -> Dict[str, Any]:
+    """Executes a (possibly hand-edited) milestone plan: calls the EXISTING,
+    unmodified we.run_generation_workflow() once per milestone against the
+    SAME workspace_path, then the replay step, then one final integration
+    call. Intentionally a thin driver over the existing pipeline, not a
+    reimplementation of it - see this module's own top-of-file docstring for
+    why that's safe.
+
+    knowledge_risk_confirmed: threaded into EVERY run_generation_workflow()
+    call below (each milestone and the final integration pass alike) -
+    without this, a milestone whose goal mentions a post-cutoff library
+    version hits the same knowledge_gap status plain `kriya generate` can
+    resolve via --knowledge-policy/--ack-knowledge-gap/-y, but a milestone
+    sequence had no equivalent: under -y the run auto-abandoned, and
+    interactively, choosing "retry" via milestone_failure_callback just
+    re-issued the identical goal with the risk still unconfirmed, reproducing
+    the same knowledge_gap forever. The CLI decides this once, up front, for
+    the whole sequence (see kriya/cli.py's `generate --from-milestones`) -
+    unlike plain `generate`, this is not resolved per-gap interactively mid-
+    sequence, since that would require threading gap-detail UI through this
+    orchestrator's own retry loop.
+
+    milestone_failure_callback(failed_index, total, milestone, failure_result)
+    is consulted whenever a milestone exhausts its own retry budget; it must
+    return "abandon" or "retry" (mirroring the existing approval_callback
+    convention: present -> ask; absent -> the safe default, "abandon" - never
+    silently skip ahead, since a later milestone building on a known-broken
+    one directly contradicts the vertical-slice premise). "retry" simply
+    calls run_generation_workflow() again for the same milestone goal - a
+    fresh call already gets fresh retry budgets by construction, no new
+    retry infrastructure needed.
+
+    resume/resume_id: lets a sequence interrupted mid a single milestone's
+    own Plan/Design/Developer stage (a finer-grained checkpoint than the
+    completed_milestone_ids sidecar) pick back up inside that milestone. Each
+    unit is offered only its OWN newest checkpoint, by work-unit identity
+    (plan_executor.select_work_unit_checkpoint, PRD-008 S4c / PRD-008A), and
+    run_generation_workflow() still resumes it only if PRD-008's
+    validate_resume_against_reality() accepts it.
+
+    MA3.7: milestones execute in DETERMINISTIC TOPOLOGICAL order
+    (kriya/workflow/milestone_validation.py's topological_order()), not
+    necessarily plan-list order - a hand-edited plan file's own list
+    position is no longer trusted as execution order, only its `depends_on`
+    DAG is (MA3 section 23's own "no parallel execution yet, correct logical
+    order first" rule - still strictly sequential, one milestone at a time).
+    completed_milestone_ids tracks progress by id, not list position.
+
+    PRD-008A: the sequence runs as one ExecutionPlan (milestones + the
+    integration unit, replay as the plan-wide phase between them) through
+    kriya/workflow/plan_executor.py's execute_plan() - the same executor a
+    direct goal uses. What stays here is milestone-specific: plan
+    preparation below (completion revalidation, contract registration and
+    invalidation) and _MilestonePlanDriver's per-unit bookkeeping."""
+    from kriya.workflow.execution_plan import InvalidExecutionPlanError
+    from kriya.workflow.plan_adapters import milestone_execution_plan
+
+    try:
+        plan = milestone_execution_plan(run_state)
+    except InvalidExecutionPlanError as invalid:
+        # A hand-edited plan file with a dependency cycle or an unknown
+        # dependency: topological_order() would silently drop those
+        # milestones and the sequence could still report success.
+        return {
+            "status": "milestone_plan_invalid",
+            "group_id": run_state.group_id,
+            "quality_gates_passed": False,
+            "reason_codes": list(invalid.reason_codes),
+            "plan_issues": [issue.to_dict() for issue in invalid.issues],
+        }
+    # The milestones this run executes, in plan order. Built before any
+    # contract invalidation below may replace run_state.milestones, exactly
+    # as the pre-PRD-008A loop iterated its own up-front ordering.
+    by_id = {milestone.id: milestone for milestone in run_state.milestones}
+    ordered = [
+        by_id[unit.id] for unit in plan.execution_order() if unit.role is WorkUnitRole.PRIMARY
+    ]
+    # PRD-008 S4b: completed_milestone_ids is trusted only after each entry's
+    # completion proof validates against durable evidence and the workspace.
+    engine_config = getattr(getattr(we, "kernel", None), "config", None)
+    reuse_assessment = revalidate_completed_milestones(workspace_path, run_state, config=engine_config)
+
+    # MA5.2/5.7 (kriya/control/contracts.py) - the "one-way bridge" that
+    # module's own docstring promised since MA5.2 but was never built until
+    # 2026-08-24 (confirmed dead code - zero callers anywhere): every
+    # milestone's declared provides[] becomes a real, durable, lifecycle-
+    # tracked ContractRecord (previously this was planning-level intent
+    # only, real for reachability validation at plan-acceptance time via
+    # milestone_validation.py, but never persisted past that point).
+    # Registered PROPOSED for the WHOLE plan up front - matches
+    # ProvidedCapability's own "milestone M1 says it will provide X"
+    # planning-time framing - then advanced to IMPLEMENTED per milestone
+    # as each one genuinely completes, below. Best-effort/non-fatal
+    # throughout: a bookkeeping failure must never break a real milestone
+    # run, matching every other control-plane persistence call site.
+    try:
+        contract_registry = load_contract_registry(workspace_path)
+    except ContractRegistryCorruptError as exc:
+        # PRD-029: fail closed - never proceed (or later save) as though an
+        # unreadable registry were empty.
+        return MilestonePersistenceError(exc.reason_code, "contract_registry", str(exc)).to_result(run_state.group_id)
+    # MA7.10 gave WorkflowController's own enforce-mode subtask loop real
+    # ArtifactRegistry derivation (derive_from_workspace against the real,
+    # post-apply workspace, only once a unit of work genuinely completes) -
+    # this milestone path had zero equivalent wiring (confirmed by grep
+    # before this change: ArtifactRegistry never referenced anywhere in this
+    # module). Extended here, 2026-08-25 (external review P1, "ArtifactRegistry-
+    # for-milestones consolidation") - keyed by the milestone's OWN real id
+    # (a real MilestoneV2, unlike enforce mode's synthetic run_id-as-
+    # milestone_id fallback for a bare Subtask that carries no id in that
+    # namespace), derived and persisted incrementally per milestone as it
+    # completes, below - never batched to the end of the whole run, matching
+    # this function's own existing completed_milestone_ids/established_
+    # file_context per-milestone persistence convention rather than the
+    # once-at-the-end pattern enforce mode uses for its own different reason
+    # (a subtask plan's "success" is only meaningful once ALL subtasks pass).
+    artifact_registry = load_artifact_registry(workspace_path)
+    contract_changes: List[Any] = []
+    for m in run_state.milestones:
+        if m.provides:
+            _, changes = register_provided_capabilities(contract_registry, m)
+            contract_changes.extend(changes)
+    # 2026-08-25 external review, P0 finding: the bridge above only ever
+    # registered the PROVIDER side - ContractRecord.consumers was always
+    # empty, so ContractChange.affected_consumers (propose_change()'s own
+    # reason for existing) could never actually name anyone. Wired here,
+    # after every milestone's provides[] is registered and BEFORE the
+    # execution loop starts, using the plan's own already-validated
+    # provides[]/consumes[] - MilestonePlanValidator already confirmed
+    # every consumed name is reachable before run_milestones() ever runs.
+    #
+    # NOTE on ordering: this call happens AFTER the registration loop above
+    # (not before), so `affected_consumers` captured by register_provided_
+    # capabilities() during that loop reflects whatever consumers were
+    # ALREADY wired from a PRIOR run's persisted contracts.json (real for a
+    # resumed multi-milestone sequence), not this run's own not-yet-wired
+    # state - the invalidation check right below depends on exactly that.
+    wire_contract_consumers(contract_registry, run_state.milestones)
+
+    # MA7-C3 (2026-08-25 external review): real contract-change
+    # invalidation through the actual workflow, not just a unit-tested
+    # ContractChange object nobody acts on. The one scenario this
+    # architecture can genuinely produce: a hand-edited/re-planned
+    # milestone file (run_milestones()'s own docstring already documents
+    # "a possibly hand-edited milestone plan file") changes a provider
+    # milestone's declared capability shape between two separate
+    # plan-milestones/generate --from-milestones invocations for the SAME
+    # workspace, while a consumer milestone ALREADY completed - in an
+    # EARLIER partial run - against the now-stale shape. Milestones
+    # execute sequentially from a fixed, already-validated list (no
+    # separate per-milestone persisted "plan" the way MA6 subtasks have),
+    # so "invalidate M2's plan" concretely means: stop treating M2 as
+    # already done. Removing it from completed_milestone_ids is exactly
+    # the resume/skip lever this module already has and already trusts
+    # (the same field the ordinary `if milestone.id in
+    # completed_milestone_ids: skip` check reads) - reusing it here is
+    # honest re-use, not a new "stale plan" concept invented from nothing.
+    # Direct affected_consumers are expanded through the validated
+    # depends_on DAG so no downstream milestone can retain assumptions
+    # inherited from a stale consumer.
+    direct_invalidated_ids: set[str] = set()
+    for change in contract_changes:
+        stale_consumers = list(change.affected_consumers)
+        if stale_consumers:
+            logger.warning(
+                f"Contract '{change.contract_id}' changed shape ({change.reason}) - consumer "
+                f"milestone(s) {stale_consumers!r} already completed against the now-stale shape "
+                "in an earlier run and are invalidated: they will be re-executed, not skipped."
+            )
+            direct_invalidated_ids.update(stale_consumers)
+    invalidated_ids = _transitive_downstream_milestones(
+        run_state.milestones, direct_invalidated_ids,
+    )
+    if invalidated_ids:
+        replacement_validation = MilestonePlanValidator().validate(run_state.milestones)
+        if not replacement_validation.valid:
+            return {
+                "status": "milestone_plan_invalid",
+                "group_id": run_state.group_id,
+                "quality_gates_passed": False,
+                "validation": replacement_validation.to_dict(),
+                "reason_codes": ["REPLACEMENT_PLAN_INVALID"],
+            }
+        run_state.milestones = replacement_validation.milestones
+        replacement_plan_hash = hashlib.sha256(
+            json.dumps(
+                [milestone.model_dump(mode="json") for milestone in run_state.milestones],
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        invalidated_checkpoints = _invalidate_milestone_checkpoints(
+            workspace_path, run_state.group_id, invalidated_ids, ordered,
+        )
+        run_state.stale_milestone_ids = sorted(set(run_state.stale_milestone_ids) | invalidated_ids)
+        run_state.invalidation_evidence.extend(
+            {
+                "contract_id": change.contract_id,
+                "old_revision": change.old_revision,
+                "affected_consumers": list(change.affected_consumers),
+                "transitively_invalidated": sorted(invalidated_ids),
+                "invalidated_checkpoints": invalidated_checkpoints,
+                "reason": change.reason,
+                "requires_replan": True,
+                "requires_revalidation": True,
+                "replacement_plan_revalidated": True,
+                "replacement_plan_hash": replacement_plan_hash,
+                "invalidated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            for change in contract_changes
+            if set(change.affected_consumers) & invalidated_ids
+        )
+        run_state.completed_milestone_ids = [
+            mid for mid in run_state.completed_milestone_ids if mid not in invalidated_ids
+        ]
+        save_milestone_run_state(workspace_path, run_state)
+
+        control_state = load_control_state(workspace_path)
+        if control_state is not None and control_state.milestone_group_id == run_state.group_id:
+            control_state = control_state.with_updates(
+                milestone_states={
+                    **control_state.milestone_states,
+                    **{milestone_id: "stale" for milestone_id in invalidated_ids},
+                },
+                current_plan_hash=replacement_plan_hash,
+                last_verified_checkpoint=None,
+            )
+            _persist_milestone_control_state(
+                workspace_path, control_state, authoritative=authoritative,
+            )
+    # PRD-029: a completion reconstructed from durable evidence (S4c-2) gets
+    # no capability bookkeeping here - its capabilities were established by
+    # its own commit transaction, which `kriya runs recover` completes
+    # exactly when the run was interrupted. The planned (PROPOSED)
+    # registrations above are persisted before any unit runs.
+    _persist_contract_registry(
+        workspace_path, contract_registry, authoritative=authoritative,
+    )
+
+    driver = _MilestonePlanDriver(
+        we=we, run_state=run_state, workspace_path=workspace_path, ordered=ordered,
+        contract_registry=contract_registry, artifact_registry=artifact_registry,
+        reuse_assessment=reuse_assessment, engine_config=engine_config, authoritative=authoritative,
+        milestone_failure_callback=milestone_failure_callback,
+        generation_kwargs=dict(
+            approval_callback=approval_callback,
+            stream_callback=stream_callback,
+            skill_gap_callback=skill_gap_callback,
+            skill_conflict_callback=skill_conflict_callback,
+            web_lookup_callback=web_lookup_callback,
+            web_lookup_query_callback=web_lookup_query_callback,
+            knowledge_risk_confirmed=knowledge_risk_confirmed,
+            reference_context=reference_context,
+        ),
+    )
+    # completed_milestone_ids here is what PRD-008 S4b/S4c revalidation (and
+    # contract invalidation) left standing - the only completions reused.
+    return await execute_plan(
+        plan, driver, workspace_path, resume=resume, resume_id=resume_id,
+        reusable_unit_ids=[m.id for m in ordered if m.id in run_state.completed_milestone_ids],
+        stale_unit_ids=run_state.stale_milestone_ids,
+    )

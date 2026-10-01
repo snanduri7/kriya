@@ -1,0 +1,63 @@
+"""D1 (JDTLS isolation) + D2 (runtime Maven acquisition) mutation check."""
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(sys.argv[1])
+TESTS = ["tests/test_jdtls_candidate_isolation.py", "tests/test_lsp.py", "tests/test_runtime_maven_acquisition.py",
+         "tests/test_validate_maven_acquisition.py"]
+M = [
+    # --- D1 ---
+    ("D1-jdtls-rooted-at-candidate", "kriya/tools/lsp.py",
+     '        root_uri = "file://" + self._mirror', '        root_uri = "file://" + self.project_root'),
+    ("D1-queries-hit-candidate-paths", "kriya/tools/lsp.py",
+     "        return os.path.join(self._mirror, rel)", "        return file_path"),
+    ("D1-mirror-never-synced", "kriya/tools/lsp.py",
+     '        self._sync_mirror()\n        uri = "file://" + self._mirror_path(file_path)',
+     '        uri = "file://" + self._mirror_path(file_path)'),
+    ("D1-vcs-and-state-mirrored", "kriya/tools/lsp.py",
+     '_MIRROR_SKIP_DIRS = frozenset({".git", ".kriya", "target", "build", ".gradle", "node_modules", ".settings", ".idea"})',
+     '_MIRROR_SKIP_DIRS = frozenset()'),
+    # --- D2 ---
+    ("D2-runtime-acquisition-removed", "kriya/tools/validate.py",
+     '        if command and os.path.basename(command[0]) == "mvn":', "        if False:"),
+    ("D2-classifier-reverted", "kriya/tools/dependency_execution.py",
+     '    r"|No plugin found for prefix",', ""),
+    ("D2-incomplete-acquisition-is-app-failure", "kriya/workflow/acceptance.py",
+     '    if "MAVEN_ACQUISITION_INCOMPLETE:" in output:', "    if False:"),
+    ("D2-unresolved-prefix-is-app-failure", "kriya/workflow/acceptance.py",
+     "    if _MAVEN_PLUGIN_PREFIX_UNRESOLVED.search(output):", "    if False:"),
+    ("D2-multiple-acquisitions", "kriya/tools/validate.py",
+     "        _acquire_for_this_goal()\n        if _deadline_exhausted():",
+     "        _acquire_for_this_goal()\n        _acquire_for_this_goal()\n        if _deadline_exhausted():"),
+    ("D2-broader-network", "kriya/tools/validate.py",
+     "cwd=cwd, timeout=_bounded(timeout), network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,",
+     "cwd=cwd, timeout=_bounded(timeout), network=NetworkAuthority.UNRESTRICTED, acquisition=True,"),
+    ("D2-retry-after-deadline", "kriya/tools/validate.py",
+     "        if _deadline_exhausted():\n            # Never a retry once the deadline is gone",
+     "        if False:\n            # Never a retry once the deadline is gone"),
+    ("D2-deadline-not-capping", "kriya/tools/validate.py",
+     "            if deadline is None:\n                return seconds", "            if True:\n                return seconds"),
+    ("D2-runtime-ignores-run-deadline", "kriya/tools/validate.py",
+     "                                       stdin_payload=stdin_payload, deadline=self._run_deadline())",
+     "                                       stdin_payload=stdin_payload, deadline=None)"),
+]
+survivors = 0
+for label, rel, old, new in M:
+    path = ROOT / rel
+    text = path.read_text()
+    if text.count(old) != 1:
+        print(f"{label}: ANCHOR count {text.count(old)}")
+        survivors += 1
+        continue
+    path.write_text(text.replace(old, new))
+    try:
+        run = subprocess.run([str(ROOT / ".venv/bin/pytest"), "-q", "-x", "-p", "no:randomly", "-n", "4", *TESTS],
+                             cwd=ROOT, capture_output=True, text=True, timeout=1200)
+    finally:
+        path.write_text(text)
+    killed = run.returncode != 0
+    survivors += not killed
+    tail = [line for line in run.stdout.splitlines() if line.startswith("FAILED")][:1]
+    print(f"{label}: {'KILLED' if killed else 'SURVIVED'} {tail[0] if tail else ''}", flush=True)
+print(f"{len(M) - survivors}/{len(M)} killed")

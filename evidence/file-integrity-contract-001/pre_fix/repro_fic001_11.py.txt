@@ -1,0 +1,39 @@
+"""#11: verified bytes vs committed bytes, real WorkflowEngine (model responses mocked)."""
+import asyncio, hashlib, os, subprocess, sys, tempfile
+sys.path.insert(0, os.path.join(os.getcwd(), "tests")); sys.path.insert(0, os.getcwd())
+from unittest.mock import patch
+from _milestone_proof_harness import _config, _engine
+from kriya.tools.validate import PolymorphicValidator
+
+POM = """<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>g</groupId><artifactId>a</artifactId><version>1</version>
+</project>
+"""
+def sha(b): return hashlib.sha256(b).hexdigest()[:12]
+with tempfile.TemporaryDirectory() as td:
+    ws = os.path.realpath(td)
+    for a in (["init", "-q"], ["config", "user.email", "t@x"], ["config", "user.name", "t"]):
+        subprocess.run(["git", *a], cwd=ws, check=True)
+    open(os.path.join(ws, "pom.xml"), "w").write(POM)
+    os.makedirs(os.path.join(ws, "src/main/java"))
+    open(os.path.join(ws, "src/main/java/Old.java"), "w").write("package src.main.java;\npublic class Old {}\n")
+    subprocess.run(["git", "add", "-A"], cwd=ws, check=True); subprocess.run(["git", "commit", "-qm", "s"], cwd=ws, check=True)
+    seen = {}
+    def fake_compile(self, files=None, *a, **k):
+        for rel in ("pom.xml", "app/App.java"):
+            p = os.path.join(self.workspace_path, rel)
+            if os.path.exists(p): seen[rel] = open(p, "rb").read()
+        return {"success": True, "output": "ok"}
+    cfg = _config()
+    engine, _ = _engine(cfg, ["Step 1: add App", "Design: Write app/App.java",
+        '[{"filepath": "app/App.java", "content": "public class App { public static void main(String[] a) {} }\\n"}]',
+        "Review: Approved"])
+    with patch.object(PolymorphicValidator, "run_compile_check", fake_compile), \
+         patch.object(PolymorphicValidator, "run_tests", lambda self, *a, **k: {"success": True, "output": "ok"}):
+        res = asyncio.run(engine.run_generation_workflow("Add app/App.java", ws))
+    committed = open(os.path.join(ws, "pom.xml"), "rb").read()
+    print("status:", res.get("status"), "gates:", res.get("quality_gates_passed"), "files:", res.get("files"))
+    print("compile-gate saw pom sha", sha(seen.get("pom.xml", b"")), "committed pom sha", sha(committed))
+    print("#11 pom verified != committed:", "CORRUPTED(divergent)" if seen.get("pom.xml") != committed else "same")
+    print("verified pom widened:", b"sourceDirectory" in seen.get("pom.xml", b""), "committed widened:", b"sourceDirectory" in committed)

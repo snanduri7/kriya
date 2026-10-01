@@ -7,6 +7,8 @@ feasibility check, so the useful output is the distribution itself, not a
 pass/fail verdict on the harness.
 
 Usage:
+    .venv/bin/python spikes/eval_harness/report.py --state-dir spikes/eval_harness/runs/<batch>/state
+    # batches recorded before traces.db moved to the state directory:
     .venv/bin/python spikes/eval_harness/report.py --logs-dir spikes/eval_harness/runs/<batch>/logs
     # or let it find the most recent batch automatically:
     .venv/bin/python spikes/eval_harness/report.py
@@ -21,7 +23,13 @@ HARNESS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _find_latest_traces_db():
-    candidates = sorted(glob.glob(os.path.join(HARNESS_DIR, "runs", "*", "logs", "traces.db")))
+    # Newest batch first by batch directory name; state/ is current, logs/ is
+    # where batches recorded their traces.db before it moved.
+    candidates = sorted(
+        glob.glob(os.path.join(HARNESS_DIR, "runs", "*", "state", "traces.db"))
+        + glob.glob(os.path.join(HARNESS_DIR, "runs", "*", "logs", "traces.db")),
+        key=lambda path: (os.path.basename(os.path.dirname(os.path.dirname(path))), "state" in path),
+    )
     return candidates[-1] if candidates else None
 
 
@@ -35,12 +43,15 @@ def _load_rows(db_path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--logs-dir", default=None, help="Directory containing this batch's traces.db.")
+    parser.add_argument("--state-dir", default=None, help="This batch's state directory (holds traces.db).")
+    parser.add_argument("--logs-dir", default=None, help="An older batch's logs directory (traces.db before it moved).")
     parser.add_argument("--db-path", default=None, help="Direct path to a traces.db, overrides --logs-dir.")
     args = parser.parse_args()
 
     if args.db_path:
         db_path = args.db_path
+    elif args.state_dir:
+        db_path = os.path.join(args.state_dir, "traces.db")
     elif args.logs_dir:
         db_path = os.path.join(args.logs_dir, "traces.db")
     else:

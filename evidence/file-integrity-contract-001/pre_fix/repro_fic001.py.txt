@@ -1,0 +1,150 @@
+"""FILE-INTEGRITY-CONTRACT-001 pre-fix reproducers. Prints one MEASURED line per issue."""
+import os
+import subprocess
+import sys
+import tempfile
+
+sys.path.insert(0, os.getcwd())
+from kriya.agents.agent import DeveloperAgent as D  # noqa: E402
+from kriya.workflow.edit_safety import (  # noqa: E402
+    StagedFileWrite, apply_anchored_edits, commit_revision_grounded_batch, content_revision, read_file_revision,
+)
+
+out = []
+
+
+def rec(issue, corrupted, detail):
+    out.append((issue, "CORRUPTED" if corrupted else "intact", detail))
+
+
+# 1 largest fence
+readme = "# Title\n\nUse it like this:\n\n```python\nx = 1\n```\n\nMore prose.\n"
+r = D.sanitize_generated_content(readme, filepath="README.md")
+rec("#1 largest-fence README", r != readme, repr(r))
+py = 'def f():\n    """Example:\n\n    ```python\n    f()\n    ```\n    """\n    return 1\n'
+r = D.sanitize_generated_content(py, filepath="m.py")
+rec("#1 largest-fence py docstring", r != py, repr(r))
+
+# 2 gutter
+for name, text in [
+    ("yaml status keys", "responses:\n    200:\n      description: ok\n    404:\n      description: nf\n"),
+    ("python dict", "CODES = {\n    200: 'ok',\n    404: 'nf',\n}\n"),
+    ("doctest", 'def f():\n    """\n>>> f()\n1\n"""\n    return 1\n'),
+    ("bitshift", "x = (a\n>> 8)\n"),
+]:
+    r = D.sanitize_generated_content(text, filepath="f.yaml" if "yaml" in name else "f.py")
+    rec(f"#2 gutter {name}", r != text, repr(r))
+
+# 3 xml repair outside xml
+for fp, text in [("A.java", 'String s = "<!-- a -- b -->";\n'), ("a.py", 's = "<!-- x--y -->"\n'),
+                 ("a.properties", "k=<!-- a -- b -->\n")]:
+    r = D.sanitize_generated_content(text, filepath=fp)
+    rec(f"#3 xml-repair {fp}", r != text, repr(r))
+
+# 4 FILE CONTENT collision
+doc = "Reads a file.\n\nFile content: the raw bytes are returned.\nMore docs.\n"
+r = D.sanitize_generated_content(doc, filepath="doc.md")
+rec("#4 FILE CONTENT in payload (sanitize)", r != doc, repr(r))
+resp = "FIX ANALYSIS: fix\nFILE CONTENT:\ndef f():\n    '''\n    File content: bytes\n    '''\n    return 1\n"
+a, c = D._split_fix_analysis(resp)
+rec("#4 FILE CONTENT in payload (split)", c is None or "return 1" not in c, repr(c))
+
+# 5 NO CHANGE NEEDED collision
+resp = "FIX ANALYSIS: add guard\nFILE CONTENT:\n# no change needed for legacy callers\ndef f(x):\n    return max(x, 0)\n"
+a, c = D._split_fix_analysis(resp)
+rec("#5 NO CHANGE NEEDED in payload (full file)", c is None, f"content={c!r}")
+resp = "FIX ANALYSIS: x\nSEARCH:\ndef f(x):\n    return x\nREPLACE:\ndef f(x):\n    # No changes needed upstream\n    return max(x, 0)\n"
+a, e, c = D._split_fix_analysis_edit(resp)
+rec("#5 NO CHANGE NEEDED in payload (edit)", e is None, f"edits={e!r}")
+
+# 6 marker collision
+resp = "FIX ANALYSIS: x\nSEARCH:\nconfig:\n  mode: a\nREPLACE:\nconfig:\n  mode: b\n  search: enabled\n  replace: never\n"
+a, e, c = D._split_fix_analysis_edit(resp)
+rec("#6 marker in YAML replace", not e or "replace: never" not in e[0]["replace"], repr(e))
+resp = 'FIX ANALYSIS: x\nSEARCH:\ndef f():\n    return 1\nREPLACE:\ndef f():\n    """\n    Search: the index\n    """\n    return 2\n'
+a, e, c = D._split_fix_analysis_edit(resp)
+rec("#6 marker in docstring replace", not e or "return 2" not in e[0]["replace"], repr(e))
+
+# 7/10 encoding, newline, final newline, splitlines - through the real attempt read+apply+commit path
+with tempfile.TemporaryDirectory() as td:
+    cases = {
+        "crlf.py": b"a = 1\r\nb = 2\r\nc = 3\r\n",
+        "latin1.py": b"# caf\xe9\nx = 1\ny = 2\n",
+        "nofinal.py": b"x = 1\n  y = 2",
+        "ff.py": b's = "a\x0cb"\nx = 1\n  y = 2\n',
+        "u2028.py": 's = "a b"\nx = 1\n  y = 2\n'.encode(),
+    }
+    for name, raw in cases.items():
+        p = os.path.join(td, name)
+        with open(p, "wb") as fh:
+            fh.write(raw)
+        with open(p, "r", encoding="utf-8", errors="replace") as fh:  # attempt.py:7577
+            orig = fh.read()
+        search, repl = ("x = 1", "x = 10") if "x = 1" in orig else ("b = 2", "b = 20")
+        if name in ("nofinal.py", "ff.py", "u2028.py"):
+            search, repl = "x = 1\ny = 2", "x = 10\ny = 2"  # forces whitespace-tolerant fallback path
+        new = apply_anchored_edits(orig, [{"search": search, "replace": repl}], "")
+        commit_revision_grounded_batch([StagedFileWrite(target_path=p, content=new, base_path=p,
+                                                        expected_base_revision=content_revision(orig))])
+        with open(p, "rb") as fh:
+            after = fh.read()
+        expected = raw.replace(b"x = 1", b"x = 10") if b"x = 1" in raw else raw.replace(b"b = 2", b"b = 20")
+        rec(f"#7 bytes {name}", after != expected, f"expected={expected!r} got={after!r}")
+    # 10 revision identity
+    p1, p2 = os.path.join(td, "r1"), os.path.join(td, "r2")
+    for p, b in ((p1, b"x\xff\n"), (p2, b"x\xfe\n")):
+        with open(p, "wb") as fh:
+            fh.write(b)
+    rec("#10 revision invalid bytes", read_file_revision(p1) == read_file_revision(p2), "distinct raw bytes -> same revision")
+    with open(p1, "wb") as fh:
+        fh.write(b"a\r\nb\r\n")
+    with open(p2, "wb") as fh:
+        fh.write(b"a\nb\n")
+    rec("#10 revision CRLF vs LF", read_file_revision(p1) == read_file_revision(p2), "distinct raw bytes -> same revision")
+
+# 8 substring anchor
+src = "limit = 10\nprint(limit)\n"
+new = apply_anchored_edits(src, [{"search": "it = 1", "replace": "it = 2"}], "")
+rec("#8 substring anchor", new != src, repr(new))
+
+# 9 whitespace / blank lines / empty search
+src = "a = 1\n"
+new = apply_anchored_edits(src, [{"search": "", "replace": "b = 2"}], "")
+rec("#9 empty SEARCH silently skipped", new == src, "no error raised, edit dropped")
+src = "def f():\n    a = 1\n\n\n    b = 2\n    return a + b\n"
+new = apply_anchored_edits(src, [{"search": "a = 1\nb = 2", "replace": "a = 1\nb = 3"}], "")
+rec("#9 blank lines ignored in match / collapsed", "\n\n" not in new, repr(new))
+src = "def f():\n\tif True:\n\t\ta = 1\n\t\treturn a\n"
+new = apply_anchored_edits(src, [{"search": "    if True:\n        a = 1", "replace": "    if True:\n        a = 2"}], "")
+try:
+    compile(new, "t.py", "exec")
+    ok = True
+except (SyntaxError, TabError) as err:
+    ok = False
+    detail = f"{type(err).__name__}: {err}"
+rec("#9 tab-indented python reindent", not ok, repr(new) if ok else detail)
+
+# 12 worktree sync
+with tempfile.TemporaryDirectory() as td:
+    repo = os.path.join(td, "repo")
+    os.makedirs(repo)
+    g = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)  # noqa: E731
+    g("init", "-q")
+    names = ["café.txt", "tab\there.txt", "sp ace.txt"]
+    for n in names:
+        with open(os.path.join(repo, n), "w") as fh:
+            fh.write("v1\n")
+    g("add", "-A")
+    g("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
+    for n in names:
+        with open(os.path.join(repo, n), "w") as fh:
+            fh.write("v2-uncommitted\n")
+    from kriya.workflow.worktree import create_git_worktree
+    wt = create_git_worktree(repo)
+    for n in names:
+        with open(os.path.join(wt, n)) as fh:
+            got = fh.read()
+        rec(f"#12 worktree sync {n!r}", got != "v2-uncommitted\n", f"worktree has {got!r}")
+
+for issue, status, detail in out:
+    print(f"{status:10} {issue}: {detail}")

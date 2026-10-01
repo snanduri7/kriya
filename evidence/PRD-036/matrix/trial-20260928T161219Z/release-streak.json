@@ -1,0 +1,30 @@
+{
+  "status": "IN_PROGRESS",
+  "path": "/Users/sriramnanduri/.kriya/certifications/streaks/b8d3bc863f0685b3e28c4fc59de7af08d7338996f6678a06602e77256f2d789a.json",
+  "streak": 0,
+  "required": 3,
+  "trials": [
+    {
+      "trial": 1,
+      "outcome": "CERTIFIED",
+      "streak_after": 1,
+      "reasons": []
+    },
+    {
+      "trial": 2,
+      "outcome": "CERTIFIED",
+      "streak_after": 2,
+      "reasons": []
+    },
+    {
+      "trial": 3,
+      "outcome": "FAILED",
+      "streak_after": 0,
+      "reasons": [
+        "matrix_not_certified",
+        "case_C6_FAILED",
+        "fallback_identity_mismatch"
+      ]
+    }
+  ]
+}

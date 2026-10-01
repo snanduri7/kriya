@@ -1,0 +1,22 @@
+[
+ {
+  "case": "runtime-5 stack frame",
+  "excerpt_chars": 837,
+  "contains": {
+   "IgniteIllegalStateException": false,
+   "Ignite instance with provided name doesn't exist": false,
+   "IgniteDemoApp.java:19": true
+  },
+  "excerpt_first_line": "\tat com.example.IgniteDemoApp.main(IgniteDemoApp.java:19)"
+ },
+ {
+  "case": "runtime-3 resource",
+  "excerpt_chars": 2000,
+  "contains": {
+   "NotWritablePropertyException": true,
+   "ignite-config.xml": true,
+   "Invalid property 'gridStartTime'": true
+  },
+  "excerpt_first_line": "WARNING: Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.BeanCreationException: Error creati"
+ }
+]

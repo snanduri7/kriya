@@ -1,16 +1,7 @@
 """Untrusted, error-triggered live web lookup for skill-gap resolution (Stage 3 escalation) - a separate trust tier from the RAG index, see CLAUDE.md. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
-import asyncio
-import difflib
-import hashlib
 import logging
-import os
-import re
-import shutil
-import subprocess
-import sys
-import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +42,19 @@ async def _resolve_via_web_lookup(terms: List[str], search_base_url: str, top_k:
     per term is a real reliability risk, not just a latency cost."""
     from kriya.tools.search import search_web
     from kriya.tools.web import fetch_url_text
+    from kriya.workflow.outbound_lookup import OutboundLookupRequest, UnsafeLookupTerm
+    try:
+        request = OutboundLookupRequest.from_extracted_terms(
+            terms, origin="bounded_code_extraction",
+        )
+    except UnsafeLookupTerm as ex:
+        logger.warning(f"Blocked unsafe outward lookup request: {ex}")
+        return []
 
     resolved = []
-    for term in terms:
+    for term, query in zip(request.terms, request.queries(), strict=True):  # one query per term
         try:
-            results = await search_web(f"{term} example", search_base_url, top_k=top_k)
+            results = await search_web(query, search_base_url, top_k=top_k)
         except Exception as ex:
             logger.debug(f"Live lookup search failed for '{term}': {ex}")
             continue

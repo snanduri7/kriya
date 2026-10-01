@@ -1,0 +1,1 @@
+At base ebe4994, resume compared workspace/config/goal and selected control-plane hashes, but had no explicit fingerprint-to-stage invalidation matrix, no machine-readable resume decisions, and no check of RunRecord commit intent/result. A record stopped at COMMIT_ELIGIBLE could therefore be treated like an ordinary resumable interruption instead of requiring recovery.

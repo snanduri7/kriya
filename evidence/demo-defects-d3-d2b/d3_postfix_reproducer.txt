@@ -1,0 +1,26 @@
+# D3 reproducer, POST-FIX (working tree on d36e3eb + D3 change)
+{
+ "target_ignored": false,
+ "compile_success": true,
+ "class_after_compile": true,
+ "same_sandbox": true,
+ "class_after_reset": false,
+ "runtime_success": true,
+ "app_ran": true,
+ "class_not_found": false,
+ "classification": null,
+ "runtime_prerequisite": "mvn clean compile (current source): PASSED"
+}
+## with target/ git-ignored
+{
+ "target_ignored": true,
+ "compile_success": true,
+ "class_after_compile": true,
+ "same_sandbox": true,
+ "class_after_reset": true,
+ "runtime_success": true,
+ "app_ran": true,
+ "class_not_found": false,
+ "classification": null,
+ "runtime_prerequisite": "mvn clean compile (current source): PASSED"
+}

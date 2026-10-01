@@ -1,0 +1,5 @@
+P0-5 sdk max_retries: 2  timeout: Timeout(connect=5.0, read=600, write=600, pool=600)
+P0-6 httpx trust_env: True
+P0-5 one non-stream call -> 3 HTTP requests; error InternalServerError
+P0-7 one streaming call (SDK retries=0) -> 2 HTTP requests: [{'path': '/v1/chat/completions', 'stream': True, 'stream_options': {'include_usage': True}}, {'path': '/v1/chat/completions', 'stream': True, 'stream_options': None}] content 'hi'
+P0-6 with HTTP_PROXY set: proxy hits 1 direct server hits 0 InternalServerError

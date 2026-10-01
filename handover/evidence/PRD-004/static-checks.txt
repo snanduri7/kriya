@@ -1,0 +1,7 @@
+git diff --check: PASS
+python compile (production and test): PASS
+ruff base exit: 1
+[*] 4 fixable with the `--fix` option (3 hidden fixes can be enabled with the `--unsafe-fixes` option).
+ruff current exit: 1
+[*] 4 fixable with the `--fix` option (3 hidden fixes can be enabled with the `--unsafe-fixes` option).
+Ruff findings are unchanged from base: import ordering plus pre-existing F821/F401/F841/E402/F811 findings in these legacy files. No new finding points into the PRD-004 implementation or added tests.

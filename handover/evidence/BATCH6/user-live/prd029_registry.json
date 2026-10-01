@@ -1,0 +1,12 @@
+{
+  "contract_registry": null,
+  "quality_gates_passed": false,
+  "reason": "the enforce run did not reach a verified commit (model outcome, recorded as evidence)",
+  "registry": {
+    "contracts": {},
+    "revision": 0,
+    "schema_version": 2,
+    "source_revision": null
+  },
+  "status": "NOT_LIVE_EXERCISED"
+}

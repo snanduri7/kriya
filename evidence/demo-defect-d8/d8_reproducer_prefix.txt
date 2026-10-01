@@ -1,0 +1,16 @@
+[
+ {
+  "case": "no named tests (KNOW B shape)",
+  "plan_authority_passed": false,
+  "validators_constructed": 1,
+  "named_tests_run": [],
+  "raised": "ToolchainRequirementConflictError: TOOLCHAIN_REQUIREMENT_CONFLICT: the candidate changes the Java toolchain from 21 (default:standalone-java) to 17 (pom.xm"
+ },
+ {
+  "case": "one named test",
+  "plan_authority_passed": false,
+  "validators_constructed": 1,
+  "named_tests_run": [],
+  "raised": "ToolchainRequirementConflictError: TOOLCHAIN_REQUIREMENT_CONFLICT: the candidate changes the Java toolchain from 21 (default:standalone-java) to 17 (pom.xm"
+ }
+]

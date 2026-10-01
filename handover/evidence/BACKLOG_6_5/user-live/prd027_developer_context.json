@@ -1,0 +1,13 @@
+{
+  "goal": "Cap the discount returned by OrderService.computeDiscount at 50 percent of the order subtotal.",
+  "golden_present": {
+    "src/main/java/com/shop/order/DiscountPolicy.java": true,
+    "src/main/java/com/shop/order/OrderController.java": true,
+    "src/main/java/com/shop/order/OrderService.java": true,
+    "src/main/java/com/shop/order/SeasonalDiscountPolicy.java": true,
+    "src/main/java/com/shop/pricing/PriceCalculator.java": true,
+    "src/main/java/com/shop/pricing/TaxTable.java": true,
+    "src/test/java/com/shop/order/OrderServiceTest.java": true
+  },
+  "status": "LIVE_EXERCISED"
+}

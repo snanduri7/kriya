@@ -1,0 +1,83 @@
+"""FILE-INTEGRITY-CONTRACT-001 closure mutation run: the original 24 mutations plus the closure-pass ones.
+Each must make tests/test_file_integrity_contract_001.py fail; every file is restored from a backup."""
+import os
+import shutil
+import subprocess
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+base = open(os.path.join(HERE, "mutate.py")).read()
+namespace = {}
+exec(base[:base.index("\nresults = []")], namespace)  # the original M list
+M = namespace["M"]
+ROOT = os.getcwd()
+TESTS = ["tests/test_file_integrity_contract_001.py"]
+
+M += [
+    ("accept prose after the last structured block", "kriya/agents/response_protocol.py",
+     '            elif line.strip():\n                return _fail(INVALID_EDIT_PROTOCOL, "text after the last protocol block")',
+     '            elif False:\n                return _fail(INVALID_EDIT_PROTOCOL, "text after the last protocol block")'),
+    ("protocol identity omitted from qualification", "kriya/core/model_qualification.py",
+     "    return qualification_policy_digest(qualification_policy_of(config), response_protocol_identity(config))",
+     "    return qualification_policy_digest(qualification_policy_of(config))"),
+    ("/6 evidence reused under /7", "kriya/core/model_qualification.py",
+     'QUALIFICATION_POLICY_VERSION = "kriya-qualification/7"', 'QUALIFICATION_POLICY_VERSION = "kriya-qualification/6"'),
+    ("implicit final newline outside the grammar", "kriya/agents/response_protocol.py",
+     'content = "\\n".join(body) + ("\\n" if body and final_newline else "")',
+     'content = "\\n".join(body) + ("\\n" if body else "")'),
+    ("candidate-only post-gate check", "kriya/workflow/file_integrity.py",
+     "        for relpath in set(content_paths) | set(candidate_paths):",
+     "        for relpath in set(candidate_paths):"),
+    ("skipped post-compile tree check", "kriya/workflow/attempt.py",
+     '        tree_binding.check("pre_compile")\n        validator.tree_binding = tree_binding\n',
+     '        tree_binding.check("pre_compile")\n'),
+    ("skipped post-test tree check", "kriya/tools/validate.py",
+     "            if self.tree_binding is not None:\n                self.tree_binding.check(name)\n            return result",
+     '            if self.tree_binding is not None and name != "tests":\n                self.tree_binding.check(name)\n'
+     "            return result"),
+    ("path normalization permits escape", "kriya/agents/response_protocol.py",
+     'if normalized in (".", "..") or normalized.startswith("../") or normalized.startswith("/"):',
+     'if normalized in (".",) or normalized.startswith("/"):'),
+    ("automatic sentinel->legacy fallback", "kriya/agents/agent.py",
+     "                parsed = parse_structured(content, filepath, patch_allowed=prefer_anchored_edit)\n",
+     "                parsed = parse_structured(content, filepath, patch_allowed=prefer_anchored_edit)\n"
+     "                if parsed.kind == RESPONSE_INVALID:\n"
+     "                    parsed = parse_legacy_repair(content, filepath, patch_allowed=prefer_anchored_edit)\n"),
+    ("trim REPLACE blank edge lines", "kriya/agents/response_protocol.py",
+     '    pairs.append(("\\n".join(search), "\\n".join(replace)))\n    return pairs',
+     '    pairs.append(("\\n".join(search), "\\n".join(replace).strip("\\n")))\n    return pairs'),
+    ("F-3 direct: sync error becomes generic", "kriya/workflow/workflow.py",
+     "        except WorktreeSyncError as sync_error:", "        except ZeroDivisionError as sync_error:"),
+    ("F-3 enforce: sync error becomes a planning error", "kriya/workflow/workflow_controller.py",
+     "        except WorktreeSyncError:\n            # FILE-INTEGRITY", "        except ZeroDivisionError:\n            # FILE-INTEGRITY"),
+    ("no check before a gate (between-gate tamper runs a gate)", "kriya/tools/validate.py",
+     '                self.tree_binding.check(name, "before")', "                pass"),
+    ("no check on a gate's exception path", "kriya/tools/validate.py",
+     "            except BaseException:\n                if self.tree_binding is not None:\n                    self.tree_binding.check(name)\n                raise",
+     "            except BaseException:\n                raise"),
+    ("skipped terminal tree re-check", "kriya/workflow/workflow.py",
+     '                    state.verification_tree_binding.check("terminal_binding")',
+     "                    pass"),
+]
+
+results = []
+for name, rel, old, new in M:
+    path = os.path.join(ROOT, rel)
+    source = open(path).read()
+    if source.count(old) != 1:
+        results.append((name, "MUTATION NOT APPLICABLE", source.count(old)))
+        continue
+    backup = path + ".mutbak"
+    shutil.copy2(path, backup)
+    try:
+        open(path, "w").write(source.replace(old, new))
+        run = subprocess.run([sys.executable, "-m", "pytest", *TESTS, "-q", "-x", "-p", "no:cacheprovider"],
+                             capture_output=True, text=True, timeout=900)
+        tail = [line for line in run.stdout.splitlines() if line.startswith(("FAILED", "ERROR"))][:1]
+        results.append((name, "KILLED" if run.returncode != 0 else "SURVIVED",
+                        tail[0] if tail else run.stdout.splitlines()[-1]))
+    finally:
+        shutil.move(backup, path)
+for name, verdict, detail in results:
+    print(f"{verdict:24} {name}: {detail}")
+print("killed", sum(1 for r in results if r[1] == "KILLED"), "/", len(results))

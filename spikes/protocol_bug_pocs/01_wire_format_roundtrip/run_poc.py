@@ -185,10 +185,10 @@ async def run_trial(llm: LLMClient, width_bytes: int, workdir_base: Path, trial_
     if "[VERIFICATION] PASS" in output:
         return {"outcome": "PASS", "elapsed": elapsed, "detail": ""}
     if "[VERIFICATION] FAIL" in output:
-        fail_line = next((l for l in output.splitlines() if "[VERIFICATION] FAIL" in l), "")
+        fail_line = next((line for line in output.splitlines() if "[VERIFICATION] FAIL" in line), "")
         return {"outcome": "ROUNDTRIP_FAIL", "elapsed": elapsed, "detail": fail_line}
     if result.returncode != 0:
-        error_lines = [l for l in output.splitlines() if "[ERROR]" in l][:5]
+        error_lines = [line for line in output.splitlines() if "[ERROR]" in line][:5]
         return {"outcome": "COMPILE_OR_RUNTIME_ERROR", "elapsed": elapsed, "detail": "; ".join(error_lines) or output[-400:]}
     return {"outcome": "UNKNOWN", "elapsed": elapsed, "detail": output[-300:]}
 

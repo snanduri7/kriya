@@ -1,25 +1,33 @@
 import json
 import os
 import sqlite3
+from importlib import metadata
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _strict_doubles import strict_kernel
 from click.testing import CliRunner
+
+from kriya.cli import _mark_run_in_progress, main
 
 # Importing `main` alone reproduces the historical bug: kriya/cli.py used
 # List[...]/Dict[...] type annotations without importing them from `typing`,
 # which raised NameError at module-import time on every Python version except
 # 3.14 (where PEP 649 made annotation evaluation lazy by default).
-from kriya.cli import _mark_run_in_progress, main
+from kriya.core.state_paths import trace_db_path
 
 TOP_LEVEL_COMMANDS = [
     "version", "config", "doctor", "repl", "plugins", "analyze",
-    "generate", "review", "ask", "learn", "fix", "traces", "completion",
+    "generate", "plan-milestones", "review", "ask", "learn", "fix", "traces", "completion",
+    "proposal", "authority", "runs",
 ]
 SUBCOMMAND_GROUPS = {
     "prompt": ["render", "generate"],
     "tools": ["list", "execute"],
     "skills": ["list", "show", "create", "approve"],
+    "proposal": ["show", "approve", "reject", "execute"],
+    "authority": ["inspect", "approve", "revoke"],
+    "runs": ["status", "recover", "prune"],
 }
 
 
@@ -93,7 +101,8 @@ def test_subcommand_group_help(runner, group, subcommands):
 def test_version_command_runs_end_to_end(runner):
     result = runner.invoke(main, ["version"])
     assert result.exit_code == 0, result.output
-    assert "Kriya version" in result.output
+    # KRIYA-VERSION-001: the first line is the concise build identity.
+    assert result.output.splitlines()[0].startswith(f"Kriya {metadata.version('kriya')} (commit ")
 
 
 @pytest.mark.parametrize("shell,expected_snippet", [
@@ -122,8 +131,9 @@ def _mock_workflow_engine(fake_result):
     return mock_we
 
 
-def _mock_kernel():
-    mock_kernel = MagicMock()
+def _mock_kernel(config=None):
+    # Patched in as Kernel's side_effect, so Kernel(config=cfg).config is the CLI's own cfg.
+    mock_kernel = strict_kernel(config)
     mock_kernel.start = AsyncMock()
     mock_kernel.stop = AsyncMock()
     return mock_kernel
@@ -152,8 +162,8 @@ def test_generate_json_flag_prints_only_json_on_stdout(runner, tmp_path):
     print only the final structured result - for CI/scripting use."""
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(_FAKE_GENERATE_RESULT)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y", "--json"])
 
     assert result.exit_code == 0, result.output + result.stderr
@@ -171,8 +181,8 @@ def test_generate_json_flag_exit_code_reflects_quality_gates_failure(runner, tmp
     failing_result = dict(_FAKE_GENERATE_RESULT, quality_gates_passed=False)
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(failing_result)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y", "--json"])
 
     assert result.exit_code == 1
@@ -182,8 +192,8 @@ def test_generate_json_flag_exit_code_reflects_quality_gates_failure(runner, tmp
 def test_generate_without_json_flag_is_unchanged(runner, tmp_path):
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(_FAKE_GENERATE_RESULT)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
     assert result.exit_code == 0, result.output + result.stderr
@@ -193,25 +203,192 @@ def test_generate_without_json_flag_is_unchanged(runner, tmp_path):
     assert "looks good" in result.stdout
 
 
+def test_generate_without_json_returns_nonzero_when_quality_gates_fail(runner, tmp_path):
+    failing_result = dict(
+        _FAKE_GENERATE_RESULT,
+        quality_gates_passed=False,
+        candidate_gates_passed=True,
+        terminal_regression_passed=False,
+        overall_attempt_passed=False,
+    )
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(failing_result)), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert result.exit_code == 1
+    assert "Generation Workflow Completed" in result.output
+
+
+def test_generate_renders_streamed_reviewer_report_only_once(runner, tmp_path):
+    """Reviewer tokens are progress, while the final report owns presentation."""
+    mock_we = MagicMock()
+
+    async def run_with_review_stream(**kwargs):
+        kwargs["stream_callback"]("Review", "looks good")
+        return dict(_FAKE_GENERATE_RESULT)
+
+    mock_we.run_generation_workflow = AsyncMock(side_effect=run_with_review_stream)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert result.output.count("looks good") == 1
+    assert result.output.count("=== Reviewer Report & Run Instructions ===") == 1
+
+
+def test_generate_does_not_reprint_review_already_in_approval(runner, tmp_path):
+    report = "UNIQUE PRE-APPROVAL REVIEW"
+    mock_we = MagicMock()
+
+    async def run_with_preapproval_review(**kwargs):
+        reason = f"Human-in-the-loop review policy\n\n=== Automated Code Review ===\n{report}"
+        assert kwargs["approval_callback"](
+            [{"filepath": "a.py", "content": "+print('ok')"}], reason,
+        )
+        return dict(
+            _FAKE_GENERATE_RESULT,
+            review=report,
+            review_included_in_approval=True,
+        )
+
+    mock_we.run_generation_workflow = AsyncMock(side_effect=run_with_preapproval_review)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert result.output.count(report) == 1
+    assert "=== Reviewer Report & Run Instructions ===" not in result.output
+
+
 def test_fix_reprints_full_reviewer_report(runner, tmp_path):
-    """Stage 6 SME review, Finding 5 (2026-08-15): `fix`'s step_cb truncates every
-    step's content to 300 chars, including the Reviewer's full report - unlike
-    `generate`, which reprints res.get("review") in full at the end under its own
-    header, `fix` never did, so the mandatory "How to Run the Application" section
-    and most findings were lost after a 300-char preview scrolled by mid-run with
-    no second chance to see them."""
+    """The dedicated final surface preserves a complete non-approval review."""
     long_review = "## How to Run the Application\n" + ("Detailed instructions. " * 30)
     assert len(long_review) > 300  # must actually exceed step_cb's truncation length
     fake_result = dict(_FAKE_GENERATE_RESULT, review=long_review)
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(fake_result)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
 
     assert result.exit_code == 0, result.output
     assert "=== Reviewer Report & Run Instructions ===" in result.output
     assert long_review in result.output
+
+
+def test_generate_labels_rejected_candidate_review_distinctly(runner, tmp_path):
+    """Demo-01 Run A finding (2026-09-11): a real terminal Quality-Gates
+    FAILURE with nothing applied to the workspace was previously followed by
+    a Reviewer report under the SAME "Reviewer Report & Run Instructions"
+    header used for an accepted candidate - reading like delivery
+    instructions for code that was never applied. The header must now
+    reflect quality_gates_passed, not just whether a review exists."""
+    rejected_result = dict(
+        _FAKE_GENERATE_RESULT,
+        quality_gates_passed=False,
+        review="The application successfully starts and prints the expected value.",
+    )
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert "=== Rejected Candidate Review" in result.output
+    assert "NOT applied to workspace" in result.output
+    assert "=== Reviewer Report & Run Instructions ===" not in result.output
+
+
+def test_generate_accepted_candidate_still_gets_run_instructions_header(runner, tmp_path):
+    """Non-regression: the ordinary, accepted-candidate path (quality_gates_
+    passed=True, the _FAKE_GENERATE_RESULT default) must keep the original
+    header - this fix must not suppress legitimate run instructions."""
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(dict(_FAKE_GENERATE_RESULT))), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert "=== Reviewer Report & Run Instructions ===" in result.output
+    assert "Rejected Candidate Review" not in result.output
+
+
+def test_fix_labels_rejected_candidate_review_distinctly(runner, tmp_path):
+    """Same fix as `generate` above, for the `fix` command's own reprint."""
+    rejected_result = dict(
+        _FAKE_GENERATE_RESULT,
+        quality_gates_passed=False,
+        review="The fix works correctly and resolves the reported error.",
+    )
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
+            result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
+
+    assert "=== Rejected Candidate Review" in result.output
+    assert "=== Reviewer Report & Run Instructions ===" not in result.output
+
+
+# --- Demo-01 Finding 4 (2026-09-11): budget exhaustion is a terminal stop --
+# condition, not an environment/toolchain failure.
+
+def test_generate_budget_exhausted_shows_no_toolchain_advice(runner, tmp_path):
+    """Budget exhaustion must not trigger the generic [ENVIRONMENT/
+    TOOLCHAIN ISSUE]/`kriya doctor` advice - running `kriya doctor` cannot
+    help a run that simply ran out of configured time."""
+    rejected_result = dict(
+        _FAKE_GENERATE_RESULT,
+        quality_gates_passed=False,
+        failure_category="generation_budget_exhausted",
+        environment_failure=(
+            "GENERATION TIME BUDGET EXHAUSTED: refusing to start a 2-file generation pass "
+            "with 10.0s remaining; estimated generation plus gate reserve requires 258.6s."
+        ),
+        review="",
+    )
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert "[GENERATION BUDGET EXHAUSTED]" in result.output
+    assert "[ENVIRONMENT/TOOLCHAIN ISSUE]" not in result.output
+    # Not a bare "kriya doctor" substring check - the budget message itself
+    # legitimately says "`kriya doctor` will not help" as a clarification.
+    # The actual invariant is that it's never *recommended*.
+    assert "run `kriya doctor`" not in result.output
+
+
+def test_generate_genuine_environment_failure_still_shows_toolchain_advice(runner, tmp_path):
+    """Non-regression: a REAL toolchain/environment failure (any
+    failure_category other than the three now-excluded ones) must keep
+    its existing [ENVIRONMENT/TOOLCHAIN ISSUE]/`kriya doctor` advice."""
+    rejected_result = dict(
+        _FAKE_GENERATE_RESULT,
+        quality_gates_passed=False,
+        failure_category="environment_failure",
+        environment_failure="mvn: command not found",
+        review="",
+    )
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
+            result = runner.invoke(main, ["generate", "do a thing", "-y"])
+
+    assert "[ENVIRONMENT/TOOLCHAIN ISSUE]" in result.output
+    assert "kriya doctor" in result.output
+    assert "[GENERATION BUDGET EXHAUSTED]" not in result.output
 
 
 def test_fix_does_not_mislabel_a_human_rejection_as_a_reviewer_report(runner, tmp_path):
@@ -225,11 +402,39 @@ def test_fix_does_not_mislabel_a_human_rejection_as_a_reviewer_report(runner, tm
                             review="Rejected by user during approval gate review.")
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=_mock_workflow_engine(rejected_result)), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
-             patch("kriya.cli.LLMClient"):
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
             result = runner.invoke(main, ["fix", "--error", "some compile error", "-y"])
 
     assert result.exit_code == 0, result.output
+    assert "=== Reviewer Report & Run Instructions ===" not in result.output
+
+
+def test_fix_does_not_preview_or_reprint_review_already_in_approval(runner, tmp_path):
+    report = "UNIQUE FIX PRE-APPROVAL REVIEW"
+    mock_we = MagicMock()
+
+    async def run_with_preapproval_review(**kwargs):
+        reason = f"Human-in-the-loop review policy\n\n=== Automated Code Review ===\n{report}"
+        assert kwargs["approval_callback"](
+            [{"filepath": "a.py", "content": "+print('fixed')"}], reason,
+        )
+        kwargs["step_callback"]("Review", report)
+        return dict(
+            _FAKE_GENERATE_RESULT,
+            review=report,
+            review_included_in_approval=True,
+        )
+
+    mock_we.run_generation_workflow = AsyncMock(side_effect=run_with_preapproval_review)
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
+            result = runner.invoke(main, ["fix", "--error", "compile failed", "-y"])
+
+    assert result.exit_code == 0, result.output
+    assert result.output.count(report) == 1
     assert "=== Reviewer Report & Run Instructions ===" not in result.output
 
 
@@ -245,11 +450,10 @@ def test_mark_run_in_progress_writes_honest_status(tmp_path):
     from kriya.config import AppConfig
 
     cfg = AppConfig()
-    cfg.paths.logs = str(tmp_path / "logs")
 
     _mark_run_in_progress(cfg, "run-123", "some goal")
 
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
+    db_path = trace_db_path(cfg)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute("SELECT * FROM runs WHERE run_id = ?", ("run-123",)).fetchone()
@@ -264,12 +468,11 @@ def test_mark_run_in_progress_noop_when_run_id_missing(tmp_path):
     from kriya.config import AppConfig
 
     cfg = AppConfig()
-    cfg.paths.logs = str(tmp_path / "logs")
 
     _mark_run_in_progress(cfg, None, "some goal")
 
     # No traces.db should even be created - nothing to write without a run_id.
-    assert not os.path.exists(os.path.join(cfg.paths.logs, "traces.db"))
+    assert not os.path.exists(trace_db_path(cfg))
 
 
 def test_generate_marks_in_progress_before_knowledge_gap_retry_runs(runner, tmp_path):
@@ -291,8 +494,8 @@ def test_generate_marks_in_progress_before_knowledge_gap_retry_runs(runner, tmp_
 
     with runner.isolated_filesystem(temp_dir=tmp_path):
         with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
-             patch("kriya.cli.Kernel", return_value=_mock_kernel()), \
-             patch("kriya.cli.LLMClient"), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True), \
              patch("kriya.cli._mark_run_in_progress", side_effect=_record_mark):
             result = runner.invoke(main, ["generate", "do a thing", "-y"])
 
@@ -310,7 +513,10 @@ def test_tools_execute_shell_requires_confirmation_without_yes(runner):
     assert "Non-TTY" in result.output
 
 
-def test_tools_execute_shell_runs_with_yes_flag(runner):
+def test_tools_execute_shell_runs_with_yes_flag(runner, tmp_path, monkeypatch):
+    # A shell call is possibly-mutating, so it owns its working directory
+    # (PRD-006); keep that ownership record out of the repository checkout.
+    monkeypatch.chdir(tmp_path)
     result = runner.invoke(main, ["tools", "execute", "-y", "shell", '{"command": "echo hi"}'])
     assert result.exit_code == 0, result.output
     assert "hi" in result.output
@@ -419,3 +625,255 @@ def test_skills_list_marks_conflict_lines_distinctly(runner, tmp_path):
     # The plain staged line must NOT go through secho(fg="red") - it's rendered via
     # plain click.echo instead, so no secho call should mention it at all.
     assert not any("port 5672" in c.args[0] for c in mock_secho.call_args_list)
+
+
+def test_plan_milestones_bare_output_filename_does_not_crash(runner, tmp_path):
+    """Regression guard for a real finding: `--output plan.json` (no directory
+    component) made os.path.dirname(plan_path) return "", and
+    os.makedirs("", exist_ok=True) raised an unhandled FileNotFoundError
+    instead of the command's own clean error-handling pattern."""
+    from kriya.agents.contracts import AcceptanceCriterion, MilestoneV2
+
+    # MA3.7: MilestonePlannerAgent.run_with_milestone_list's real contract is
+    # now List[MilestoneV2] (schema v2), not the old v1 Milestone shape - the
+    # mock below must match what the REAL method actually returns.
+    fake_milestones = [MilestoneV2(id="M1", goal="g1", acceptance=[AcceptanceCriterion(id="M1-A1", description="c1")])]
+    with runner.isolated_filesystem(temp_dir=tmp_path) as cwd:
+        mock_we = MagicMock()
+        mock_we.milestone_planner = MagicMock()
+        mock_we.milestone_planner.run_with_milestone_list = AsyncMock(return_value=("raw", fake_milestones))
+        with patch("kriya.cli.WorkflowEngine", return_value=mock_we), \
+             patch("kriya.cli.Kernel", side_effect=_mock_kernel), \
+             patch("kriya.cli.LLMClient", autospec=True):
+            result = runner.invoke(main, ["plan-milestones", "a goal", "--output", "plan.json"])
+
+        assert result.exit_code == 0, result.output
+        assert os.path.exists(os.path.join(cwd, "plan.json"))
+
+
+# =====================================================================
+# A2: `kriya review <file> --propose <finding-id>` (advisory only, read-only)
+# =====================================================================
+
+_A2_TARGET_SRC = (
+    "public class Target implements TargetInterface {\n"
+    "    public Target(Collaborator c) {\n"
+    "    }\n"
+    "\n"
+    "    public void doWork() {\n"
+    "    }\n"
+    "}\n"
+)
+
+_A2_FAKE_RAW_RESPONSE = {
+    "summary": "ok",
+    "findings": [
+        {
+            "finding_id": "F1",
+            "title": "Constructor stores collaborator without null check",
+            "member_id": "M1",
+            "requested_confidence": "STRONG_STATIC_INDICATION",
+            "condition_evidence_ids": ["M1"],
+            "consequence_evidence_ids": [],
+            "runtime_dependency_declared": False,
+            "explanation": "No null guard on c.",
+            "recommendation": "Add a null check and throw IllegalArgumentException.",
+        }
+    ],
+    "member_reviews": [
+        {"member_id": "M1", "status": "finding", "note": "see F1"},
+        {"member_id": "M2", "status": "no_issue", "note": "fine"},
+    ],
+    "recommendations": [],
+    "run_guidance": [],
+}
+
+
+def _hash_dir(d):
+    import hashlib
+    h = hashlib.sha256()
+    for root, _dirs, files in sorted(os.walk(d)):
+        for fn in sorted(files):
+            p = os.path.join(root, fn)
+            h.update(p.encode())
+            with open(p, "rb") as fh:
+                h.update(fh.read())
+    return h.hexdigest()
+
+
+def _mock_reviewer_agent():
+    mock_reviewer = MagicMock()
+    mock_reviewer.run_structured_review = AsyncMock(return_value=_A2_FAKE_RAW_RESPONSE)
+    return mock_reviewer
+
+
+def test_review_propose_flag_absent_leaves_a1_report_unchanged(runner, tmp_path):
+    """Test 22/23: without --propose, output is exactly the pre-A2 A1 report -
+    no Proposed Modification section appears at all."""
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), \
+         patch("kriya.cli.LLMClient", autospec=True):
+        result = runner.invoke(main, ["review", str(java_file)])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert "### Findings" in result.output
+    assert "Proposed Modification" not in result.output
+
+
+def test_review_propose_valid_finding_renders_advisory_proposal(runner, tmp_path):
+    """Tests 1,9,21: --propose F1 renders a proposal grounded in the same
+    review's own findings, explicitly advisory/unapproved, and states
+    plainly that nothing was modified - alongside the unchanged A1 report."""
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+    before = _hash_dir(str(tmp_path))
+
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), \
+         patch("kriya.cli.LLMClient", autospec=True):
+        result = runner.invoke(main, ["review", str(java_file), "--propose", "F1"])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert "### Findings" in result.output  # A1 report still present, unchanged
+    assert "## Proposed Modification" in result.output
+    assert "Authority: ADVISORY_ONLY" in result.output
+    assert "Approval: NOT_APPROVED" in result.output
+    assert "has not been approved" in result.output
+    assert "no source files were modified" in result.output
+    assert before == _hash_dir(str(tmp_path))  # test 15: zero-write, byte-identical
+
+
+def test_review_propose_unknown_finding_id_is_rejected(runner, tmp_path):
+    """Test 16: an id not present in this review's own output is rejected
+    with a clear error and a nonzero exit code, not silently ignored."""
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), \
+         patch("kriya.cli.LLMClient", autospec=True):
+        result = runner.invoke(main, ["review", str(java_file), "--propose", "F999"])
+
+    assert result.exit_code != 0
+    assert "Unknown finding id" in result.output + result.stderr
+
+
+def test_review_propose_rejected_outright_for_non_structured_review_path(runner, tmp_path):
+    """--propose only applies to the single-Java-file repository-aware
+    review path - a non-Java file is rejected up front, before the model
+    is ever called at all (structurally: reviewer.run is never invoked)."""
+    py_file = tmp_path / "x.py"
+    py_file.write_text("def f():\n    pass\n")
+
+    mock_reviewer = MagicMock()
+    mock_reviewer.run = AsyncMock()
+    with patch("kriya.cli.ReviewerAgent", return_value=mock_reviewer), \
+         patch("kriya.cli.LLMClient", autospec=True):
+        result = runner.invoke(main, ["review", str(py_file), "--propose", "F1"])
+
+    assert result.exit_code != 0
+    assert not mock_reviewer.run.called
+    assert not mock_reviewer.run_structured_review.called
+
+
+def test_review_propose_never_invokes_write_capable_components(runner, tmp_path):
+    """Dynamic zero-write proof (tests 11,12,13,14): patches the real
+    write-capable entry points - AuthorizedFileWriter.commit_file,
+    DeveloperAgent.run_generation, WorkflowEngine.run_generation_workflow -
+    to raise if ever called. The --propose path completing without
+    exception is a real proof none of them were invoked, not just an
+    absence of their names from review_context.py's source text (see
+    test_review_context.py's AST-based structural companion proof)."""
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+
+    def _raise(*a, **k):
+        raise AssertionError("A2 zero-write violation: a write-capable component was invoked")
+
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), \
+         patch("kriya.cli.LLMClient", autospec=True), \
+         patch("kriya.policy.filesystem.AuthorizedFileWriter.commit_file", side_effect=_raise), \
+         patch("kriya.agents.agent.DeveloperAgent.run_generation", side_effect=_raise), \
+         patch("kriya.workflow.workflow.WorkflowEngine.run_generation_workflow", side_effect=_raise):
+        result = runner.invoke(main, ["review", str(java_file), "--propose", "F1"])
+
+    assert result.exit_code == 0, result.output + result.stderr
+    assert result.exception is None
+
+
+# =====================================================================
+# A3-P1: `kriya review --propose --save` + `kriya proposal show/approve/reject`
+# =====================================================================
+
+def test_review_propose_without_save_does_not_persist(runner, tmp_path):
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), patch("kriya.cli.LLMClient", autospec=True):
+        result = runner.invoke(main, ["review", str(java_file), "--propose", "F1"])
+    assert result.exit_code == 0, result.output + result.stderr
+    assert "Saved:" not in result.output
+    assert not os.path.isdir(os.path.join(str(tmp_path), ".kriya", "proposals"))
+
+
+def test_review_propose_save_persists_then_cli_approve_flow(runner, tmp_path):
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), patch("kriya.cli.LLMClient", autospec=True):
+        result = runner.invoke(main, ["review", str(java_file), "--propose", "F1", "--save"])
+    assert result.exit_code == 0, result.output + result.stderr
+    assert "Saved:" in result.output
+    proposal_path = os.path.join(str(tmp_path), ".kriya", "proposals", "P1.json")
+    assert os.path.isfile(proposal_path)
+
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        show1 = runner.invoke(main, ["proposal", "show", "P1"])
+        assert show1.exit_code == 0, show1.output
+        assert "PENDING_APPROVAL" in show1.output
+
+        approve = runner.invoke(main, ["proposal", "approve", "P1"])
+        assert approve.exit_code == 0, approve.output + approve.stderr
+        assert "Approved:" in approve.output
+
+        show2 = runner.invoke(main, ["proposal", "show", "P1"])
+        assert "APPROVED AND CURRENTLY VALID" in show2.output
+
+        # -y appears nowhere in this flow at all - approve has no such option
+        approve_help = runner.invoke(main, ["proposal", "approve", "--help"])
+        assert "-y" not in approve_help.output and "--yes" not in approve_help.output
+    finally:
+        os.chdir(old_cwd)
+
+    # source file untouched throughout
+    assert java_file.read_text() == _A2_TARGET_SRC
+
+
+def test_proposal_reject_cli_then_cannot_approve(runner, tmp_path):
+    java_file = tmp_path / "Target.java"
+    java_file.write_text(_A2_TARGET_SRC)
+    with patch("kriya.cli.ReviewerAgent", return_value=_mock_reviewer_agent()), patch("kriya.cli.LLMClient", autospec=True):
+        runner.invoke(main, ["review", str(java_file), "--propose", "F1", "--save"])
+
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        reject = runner.invoke(main, ["proposal", "reject", "P1"])
+        assert reject.exit_code == 0, reject.output
+        assert "Rejected:" in reject.output
+
+        approve_after_reject = runner.invoke(main, ["proposal", "approve", "P1"])
+        assert approve_after_reject.exit_code != 0
+    finally:
+        os.chdir(old_cwd)
+
+
+def test_proposal_show_unknown_id_fails_cleanly(runner, tmp_path):
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(str(tmp_path))
+        result = runner.invoke(main, ["proposal", "show", "NoSuchProposal"])
+        assert result.exit_code != 0
+        assert "PROPOSAL_NOT_FOUND" in result.output + result.stderr
+    finally:
+        os.chdir(old_cwd)

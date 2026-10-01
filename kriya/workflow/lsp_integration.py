@@ -1,16 +1,8 @@
 """Optional jdtls (Eclipse JDT Language Server) integration for deterministic Java diagnostics grounding in the retry loop. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
-import asyncio
-import difflib
-import hashlib
 import logging
 import os
-import re
-import shutil
-import subprocess
-import sys
-import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable
 
 logger = logging.getLogger(__name__)
 

@@ -1,24 +1,60 @@
 """Context budget allocation and skeletonization tiers for the Graph RAG code context assembled into each generation prompt. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
-import asyncio
-import difflib
-import hashlib
 import io
 import logging
 import os
 import re
-import shutil
-import subprocess
-import sys
 import tokenize
-import xml.etree.ElementTree as ET
+from dataclasses import dataclass, replace
 from functools import lru_cache
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
-from kriya.workflow.edit_safety import _strip_java_comments_and_strings
+
+# Annotation-only names, imported at runtime so typing.get_type_hints()
+# resolves (PRD-001); no cycle.
+from kriya.workflow.context_source import SourceDerivationCache
+from kriya.workflow.edit_safety import _strip_java_comments_and_strings, content_revision
+from kriya.workflow.process_profile import ContextDepth
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RetrievalLimits:
+    """MA2.6 (control-plane implementation plan) - how far Graph RAG
+    retrieval reaches (kriya/workflow/workflow.py's "1.5. Graph RAG Context
+    Retrieval" stage: vector_store.query_hybrid's top_k, graph.get_
+    neighborhood's max_hops/max_results), NOT how much of what it finds
+    survives into the prompt - that stays entirely governed by
+    _reserve_graph_context_budget/build_code_context's own token budget
+    below, unchanged by this. Widening these limits only means MORE
+    CANDIDATES get scored and considered; the token budget still trims to
+    fit exactly as it does today."""
+
+    top_k: int
+    max_hops: int
+    max_neighborhood_results: int
+
+
+# NARROW matches today's hardcoded values EXACTLY (query_hybrid's top_k=5,
+# get_neighborhood's default max_hops=2/max_results=30) - a LIGHT-profile
+# request gets IDENTICAL retrieval behavior to what every request gets
+# today, never less. DEPENDENCY_AWARE/IMPACT_WIDE only ever ADD reach on
+# top of that baseline, matching the same purely-additive posture MA2.5
+# already established for approval - nothing here can ever narrow
+# retrieval below what Kriya already does unconditionally today.
+_RETRIEVAL_LIMITS_BY_DEPTH: Dict[ContextDepth, RetrievalLimits] = {
+    ContextDepth.NARROW: RetrievalLimits(top_k=5, max_hops=2, max_neighborhood_results=30),
+    ContextDepth.DEPENDENCY_AWARE: RetrievalLimits(top_k=8, max_hops=2, max_neighborhood_results=40),
+    ContextDepth.IMPACT_WIDE: RetrievalLimits(top_k=10, max_hops=3, max_neighborhood_results=50),
+}
+
+
+def retrieval_limits_for(depth: ContextDepth) -> RetrievalLimits:
+    """Pure lookup, same contract as process_profile_for/determine_risk_class
+    - no config, no LLM, no filesystem."""
+    return _RETRIEVAL_LIMITS_BY_DEPTH[depth]
 
 
 def skeletonize_code(content: str, filepath: str, tier: str) -> str:
@@ -362,7 +398,7 @@ def skeletonize_braced_code(content: str, tier: str) -> str:
         # the raw content line: an example `import`/`package` statement
         # written inside a Javadoc/block comment would otherwise be emitted
         # as if it were real source (2026-08-18 review finding).
-        for line, structural_line in zip(content.splitlines(), structural.splitlines()):
+        for line, structural_line in zip(content.splitlines(), structural.splitlines(), strict=False):
             structural_strip = structural_line.strip()
             if structural_strip.startswith("import ") or structural_strip.startswith("package "):
                 result.append(line)
@@ -514,6 +550,641 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4) if text else 0
 
 
+# --- PRD-016 / CTX-001: allocation against the dispatch budget ---------------
+# The builders below size prompt sections in estimate_tokens() units (len//4).
+# The dispatch check (kriya/core/token_budget.py) counts the same text with a
+# conservative byte bound (2.5 bytes per token by default, the measured ratio
+# once the runtime is qualified) against the served window, keeping the
+# configured output budget free. Before this, every builder took a fraction
+# of the raw context_window in len//4 units, so a fully allocated Developer
+# prompt (graph 0.75 + siblings 0.15 + retry evidence 1.5 chars/token, before
+# task/design/system text) counted to more than the whole window: the
+# dispatch check refused it, and before that check existed the local server
+# silently dropped part of it.
+#
+# prompt_allocation_window() converts the dispatch room of a call - window
+# minus its output budget, framing and safety margin - into allocator units.
+# The builders share it: the graph pool (skills, learned knowledge, graph
+# context, known-target and member-hint source; each later section reserves
+# what the earlier ones already used) 0.60, retry evidence 0.15, already-
+# written siblings 0.15, leaving 0.10 for the system prompt, task and
+# directives (design and plan are reserved from the graph pool). Opt-in
+# investigation evidence (DEV-INV-001) is capped at 0.10 on top; the dispatch
+# check then trims max_tokens rather than refusing. Optional context is sized to the PREFERRED window only, so it
+# never causes the dispatch to select a larger context tier; the byte bound
+# covers ASCII text exactly and the dispatch check stays the backstop for
+# the rest.
+_ALLOCATOR_CHARS_PER_TOKEN = 4
+_GRAPH_CONTEXT_SHARE = 0.60
+_RETRY_EVIDENCE_SHARE = 0.15
+_INVESTIGATION_EVIDENCE_SHARE = 0.10
+
+
+def prompt_allocation_window(context_window: int, output_budget: int, *,
+                             bytes_per_token: Optional[float] = None) -> int:
+    """Allocator-unit tokens a two-message prompt may occupy in
+    ``context_window`` while ``output_budget`` (the call's own output and
+    reasoning reserve, PROVIDER-CONTRACT-001) stays free - at most half the
+    window: a configured output is a ceiling, and the dispatch check trims
+    it to the room left."""
+    from kriya.core.token_budget import (
+        DEFAULT_BYTES_PER_TOKEN,
+        DISPATCH_SAFETY_MARGIN_TOKENS,
+        TWO_MESSAGE_FRAMING_TOKENS,
+    )
+
+    reserve = min(max(0, int(output_budget)), int(context_window) // 2)
+    room = int(context_window) - reserve - TWO_MESSAGE_FRAMING_TOKENS - DISPATCH_SAFETY_MARGIN_TOKENS
+    ratio = bytes_per_token if bytes_per_token and bytes_per_token > 0 else DEFAULT_BYTES_PER_TOKEN
+    return max(0, int(room * ratio / _ALLOCATOR_CHARS_PER_TOKEN))
+
+
+@dataclass(frozen=True)
+class RequestCapacity:
+    """The prompt room of one request (PROMPT-BUDGET-FIT-001A/B), in the
+    dispatch check's own units: the served (else requested) window minus the
+    request's preferred output budget (at most half the window), message
+    framing and the dispatch safety margin. Text is counted with the same
+    counter LLMClient's dispatch check uses (exact tokenizer, else the
+    qualified or default byte ratios, non-ASCII included), so a request
+    sized here is never refused by that check for its prompt."""
+
+    tokens: int
+    bytes_per_token: Optional[float] = None
+    non_ascii_bytes_per_token: Optional[float] = None
+    tokenizer_digest: Optional[str] = None
+
+    def count(self, text: str) -> int:
+        from kriya.core.token_budget import count_tokens
+
+        if not text:
+            return 0
+        return count_tokens(
+            text, tokenizer_digest=self.tokenizer_digest, qualified_bytes_per_token=self.bytes_per_token,
+            qualified_non_ascii_bytes_per_token=self.non_ascii_bytes_per_token,
+        ).tokens
+
+    def room(self, *fixed_texts: str) -> int:
+        """Tokens left for the request's variable sections after its
+        mandatory fixed text (system prompt, headers, required blocks)."""
+        return max(0, self.tokens - sum(self.count(text) for text in fixed_texts if text))
+
+    def allocator_units(self, tokens: int) -> int:
+        """``tokens`` in the section builders' len//4 units (exact for ASCII
+        text; fit_variable_section re-measures the built text)."""
+        from kriya.core.token_budget import DEFAULT_BYTES_PER_TOKEN
+
+        ratio = self.bytes_per_token or DEFAULT_BYTES_PER_TOKEN
+        return max(0, int(tokens * ratio / _ALLOCATOR_CHARS_PER_TOKEN))
+
+
+def request_capacity(config: Any, binding: Any = None, *, role: str = "developer",
+                     output_tokens: Optional[int] = None) -> RequestCapacity:
+    """The RequestCapacity of a ``role`` request to ``binding`` (the primary
+    ``config.llm`` by default, or any chat binding) that asks for
+    ``output_tokens`` (default: the binding's own output budget), with the
+    reasoning floor LLMClient applies. The one source of a request's prompt
+    room: every prompt section sized from it budgets against the same
+    served window, output reserve and counting ratio the dispatch check uses
+    for that call (kriya/core/llm.py::complete_result)."""
+    from kriya.core.inference_runtime import runtime_for_binding
+    from kriya.core.llm import reasoning_max_tokens
+    from kriya.core.model_runtime import binding_output_tokens, requested_context_window
+    from kriya.core.provider_contract import budget_window
+    from kriya.core.token_budget import DISPATCH_SAFETY_MARGIN_TOKENS, TWO_MESSAGE_FRAMING_TOKENS
+
+    binding = binding if binding is not None else config.llm
+    # The window this binding's requests carry (FALLBACK-CONTEXT-WINDOW-001),
+    # bounded below by the window the runtime reports serving, when known
+    # (PROVIDER-CONTRACT-001: never enlarged to a larger served window).
+    window = requested_context_window(binding.extra_body, binding.context_window, runtime_for_binding(binding))
+    limits: Dict[str, Any] = {}
+    tokenizer = None
+    try:
+        from kriya.core.inference_settings import binding_inference_settings
+        from kriya.core.model_qualification import measured_limits_for
+        from kriya.core.model_runtime import resolve_configured_model_runtime
+
+        fingerprint = resolve_configured_model_runtime(
+            config, binding.model, base_url=binding.base_url, api_key=binding.api_key,
+            extra_body=binding.extra_body or {},
+        )
+        window = budget_window(window, fingerprint.effective_context_window)
+        limits = measured_limits_for(fingerprint, config, settings=binding_inference_settings(config, role, binding))
+        tokenizer = fingerprint.tokenizer_digest if fingerprint.tokenizer_digest != "unavailable" else None
+    except Exception as error:  # never blocks context assembly
+        logger.debug("Request capacity of %s uses the configured window: %s", binding.model, error)
+    output = output_tokens if output_tokens is not None else binding_output_tokens(config, binding)
+    if binding.reasoning:
+        output = reasoning_max_tokens(output, limits.get("reasoning_tokens_max"))
+    # PROVIDER-CONTRACT-001: the reserve is this request's own - its role's
+    # output budget plus, for a reasoning identity, the reasoning reserve its
+    # qualification measured - never one universal value for every role. A
+    # configured output is a ceiling, not the protocol's need, so it never
+    # takes more than half the window from the prompt; dispatch trims it to
+    # the room left and refuses a request whose grounded output need cannot
+    # fit (OUTPUT_BUDGET_UNSATISFIABLE / CONTEXT_BUDGET_UNSATISFIABLE).
+    reserve = min(max(0, int(output)), int(window) // 2)
+    return RequestCapacity(
+        tokens=max(0, int(window) - reserve - TWO_MESSAGE_FRAMING_TOKENS - DISPATCH_SAFETY_MARGIN_TOKENS),
+        bytes_per_token=limits.get("bytes_per_token_floor"),
+        non_ascii_bytes_per_token=limits.get("non_ascii_bytes_per_token_floor"),
+        tokenizer_digest=tokenizer,
+    )
+
+
+def allocation_window(config: Any, binding: Any = None) -> int:
+    """The prompt allocation window (allocator units) of a Developer-shaped
+    call to ``binding``: its RequestCapacity in the builders' units."""
+    capacity = request_capacity(config, binding)
+    return capacity.allocator_units(capacity.tokens)
+
+
+@dataclass(frozen=True)
+class SectionFit:
+    """How a variable prompt section was fitted into its request."""
+
+    value: Any
+    room_tokens: int
+    used_tokens: int
+    builds: int
+    omitted: bool
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"room_tokens": self.room_tokens, "used_tokens": self.used_tokens,
+                "builds": self.builds, "omitted": self.omitted}
+
+
+# How many times a section is rebuilt smaller before it is left out: the
+# first build uses the room in the builders' units, which is exact for
+# ASCII text; a rebuild corrects for non-ASCII text the builder undercounts.
+_MAX_SECTION_BUILDS = 3
+
+
+def fit_variable_section(
+    capacity: RequestCapacity, fixed_texts: Sequence[str], build: Callable[[int], Any],
+    *, measure: Optional[Callable[[Any], int]] = None, empty: Any = "",
+) -> SectionFit:
+    """The one fixed-overhead-aware sizing rule (PROMPT-BUDGET-FIT-001A/B):
+    a variable section gets ``capacity - mandatory fixed request cost``
+    (output reserve and safety margin are already out of ``capacity``), is
+    built at that room by its own ``build(allocator_budget)``, re-measured
+    with the dispatch counter, and rebuilt proportionally smaller while it
+    does not fit; when there is no room, or it still does not fit after
+    _MAX_SECTION_BUILDS builds, it is left out (``empty``), never forced in.
+    ``measure`` defaults to counting the built text; a caller whose build
+    returns several request bodies (review batches) measures the largest.
+    The fixed text is never trimmed: when it alone does not fit, the
+    dispatch check refuses the request (CONTEXT_BUDGET_UNSATISFIABLE)."""
+    measure = measure or capacity.count
+    room = capacity.room(*fixed_texts)
+    budget = capacity.allocator_units(room)
+    for builds in range(1, _MAX_SECTION_BUILDS + 1):
+        if budget <= 0:
+            return SectionFit(empty, room, 0, builds - 1, True)
+        value = build(budget)
+        used = measure(value)
+        if used <= room:
+            return SectionFit(value, room, used, builds, False)
+        budget = int(budget * room / used) - 1
+    return SectionFit(empty, room, 0, _MAX_SECTION_BUILDS, True)
+
+
+def trim_reference_text(text: str, budget: int) -> str:
+    """Untrusted reference text (learned knowledge) cut to ``budget``
+    allocator units at whole ``[Source: ...]`` entry boundaries: an entry is
+    shown whole or not at all, in retrieval order; text that fits is
+    returned byte-identical."""
+    kept, used = [], 0
+    for entry in _REFERENCE_ENTRY.split(text):
+        cost = estimate_tokens(entry)
+        if used + cost > budget:
+            break
+        kept.append(entry)
+        used += cost
+    return "".join(kept)
+
+
+_REFERENCE_ENTRY = re.compile(r"(?=\n\[Source: )")
+
+
+def fit_reference_section(capacity: RequestCapacity, fixed_texts: Sequence[str], reference: str) -> SectionFit:
+    """Fenced untrusted reference text fitted into the room its request has
+    left (fit_variable_section): the fence and warning always come whole,
+    the entries are trimmed first-kept; ``""`` when no entry fits."""
+    from kriya.workflow.untrusted_context import fence_untrusted_reference
+
+    fence_units = estimate_tokens(fence_untrusted_reference("x"))
+
+    def build(budget: int) -> str:
+        return fence_untrusted_reference(trim_reference_text(reference, budget - fence_units))
+
+    fit = fit_variable_section(capacity, fixed_texts, build)
+    # No whole entry fitting leaves the reference out, even though the
+    # (empty) section "fit".
+    return replace(fit, omitted=True) if reference.strip() and not fit.value else fit
+
+
+def fit_planner_request(
+    capacity: RequestCapacity, *, system_prompt: str, head: str, skills_prompt: str, graph_context: str,
+    reference: str, suffix: str, rebuild_graph: Callable[[int], Tuple[str, Any]], request: str = "planner",
+) -> Tuple[str, Dict[str, Any]]:
+    """The direct Planner request (PROMPT-BUDGET-FIT-001A): ``head`` (goal,
+    error, repository model) + skills + graph context + fenced reference +
+    ``suffix`` (owner, requirement, tool and grounding blocks). The graph
+    context, then the untrusted reference, get the room the system prompt
+    and every mandatory section leave (repository evidence outranks
+    untrusted reference text). The graph context is rebuilt at its room by
+    ``rebuild_graph(budget) -> (text, ContextPackage)`` only when it does not
+    fit. Returns the prompt and the fit details (empty when both sections
+    went in unchanged, so the prompt is byte-identical to the unfitted one)."""
+    from kriya.workflow.untrusted_context import fence_untrusted_reference
+
+    fixed = (system_prompt, head, skills_prompt, suffix)
+    omitted_files: List[str] = []
+
+    def build_graph(budget: int) -> str:
+        if estimate_tokens(graph_context) <= budget:
+            return graph_context
+        text, package = rebuild_graph(budget)
+        omitted_files[:] = [entry.get("path") for entry in getattr(package, "omitted", ()) if entry.get("path")]
+        return text
+
+    graph = fit_variable_section(capacity, fixed, build_graph) if graph_context else None
+    graph_text = graph.value if graph is not None else ""
+    fenced = fence_untrusted_reference(reference)
+    ref = fit_reference_section(capacity, fixed + (graph_text,), reference) if fenced else None
+    ref_text = ref.value if ref is not None else ""
+    details: Dict[str, Any] = {}
+    if graph_text != graph_context or ref_text != fenced:
+        details = {
+            "request": request,
+            "graph": graph.to_dict() if graph is not None else None,
+            "graph_omitted_files": omitted_files,
+            "reference": ref.to_dict() if ref is not None else None,
+        }
+    return head + skills_prompt + graph_text + ref_text + suffix, details
+
+
+def conversation_tokens(capacity: RequestCapacity, messages: Sequence[Dict[str, Any]],
+                        tools: Optional[Sequence[Dict[str, Any]]] = None) -> int:
+    """What the dispatch check counts for a multi-turn request, comparable to
+    ``capacity.tokens``: every message's content, tool calls and tool
+    results plus the tool schemas (token_budget.dispatch_text), and the
+    framing of each message beyond the two RequestCapacity already reserves
+    (DEVELOPER-AUX-LOOP-PROMPT-FIT-001)."""
+    from kriya.core.token_budget import PER_MESSAGE_OVERHEAD_TOKENS, dispatch_text
+
+    extra_messages = max(0, len(messages) - 2)
+    return capacity.count(dispatch_text(list(messages), list(tools) if tools else None)) + \
+        PER_MESSAGE_OVERHEAD_TOKENS * extra_messages
+
+
+@dataclass(frozen=True)
+class OptionalSection:
+    """An optional section a Developer request carries verbatim
+    (DEVELOPER-PROMPT-FIT-001): ``text`` exactly as placed in the request,
+    ``rebuild(budget)`` the same section rebuilt within ``budget`` allocator
+    units ("" leaves it out). ``kind`` is one of DEVELOPER_SECTION_ORDER."""
+
+    kind: str
+    text: str
+    rebuild: Callable[[int], str]
+
+
+# The order a Developer request keeps its optional sections in when it does
+# not fit (the first gets room first; the last gives way first): the
+# batch's already-written siblings (the direct source of cross-file
+# consistency), repository graph context, investigation evidence, and last
+# the untrusted learned reference. Everything else in the request - system
+# prompt, task and authoritative goal, design and plan, skill conventions,
+# required blocks, retry evidence, known-target source, directives - is
+# mandatory and never trimmed.
+# GRAPHIFY-OVERSIZE-REQUEST-001: the planned files' own current source is
+# the most relevant optional text a Developer request carries, so it is
+# given room first.
+DEVELOPER_SECTION_ORDER = ("planned_source", "siblings", "graph_context", "investigation", "learned_reference")
+
+
+def fit_developer_request(capacity: RequestCapacity, system_prompt: str, prompt: str,
+                          sections: Sequence[OptionalSection]) -> Tuple[str, Dict[str, Any]]:
+    """One Developer request fitted into its capacity (DEVELOPER-PROMPT-FIT-001).
+    A request that fits is returned byte-identical. Otherwise each optional
+    section found exactly once in ``prompt`` (by offset; overlapping, missing
+    or repeated sections are reported, never guessed at) is refitted with
+    fit_variable_section into the room the mandatory text - everything else,
+    system prompt included - and the sections kept before it leave, in
+    DEVELOPER_SECTION_ORDER; a section that fits its room is kept unchanged.
+    The mandatory text is never trimmed: if it alone does not fit, every
+    section is left out and the dispatch check refuses the request
+    (CONTEXT_BUDGET_UNSATISFIABLE). Returns the prompt and the fit details
+    ({} when unchanged)."""
+    if capacity.count(system_prompt) + capacity.count(prompt) <= capacity.tokens:
+        return prompt, {}
+    unlocated: List[str] = []
+    located: List[Tuple[int, int, OptionalSection]] = []
+    for section in sections:
+        if not section.text:
+            continue
+        if prompt.count(section.text) != 1:
+            unlocated.append(section.kind)
+            continue
+        start = prompt.index(section.text)
+        located.append((start, start + len(section.text), section))
+    located.sort(key=lambda item: item[0])
+    spans: List[Tuple[int, int, OptionalSection]] = []
+    for start, end, section in located:
+        if spans and start < spans[-1][1]:
+            unlocated.append(section.kind)
+            continue
+        spans.append((start, end, section))
+    if unlocated:
+        logger.warning("Developer request fit: optional section(s) %s not found exactly once; kept as mandatory text",
+                       unlocated)
+    mandatory, cursor = [], 0
+    for start, end, _section in spans:
+        mandatory.append(prompt[cursor:start])
+        cursor = end
+    mandatory.append(prompt[cursor:])
+    fixed: List[str] = [system_prompt, "".join(mandatory)]
+    fits: Dict[int, SectionFit] = {}
+
+    def order(index: int) -> int:
+        kind = spans[index][2].kind
+        return DEVELOPER_SECTION_ORDER.index(kind) if kind in DEVELOPER_SECTION_ORDER else len(DEVELOPER_SECTION_ORDER)
+
+    for index in sorted(range(len(spans)), key=order):
+        section = spans[index][2]
+
+        def build(budget: int, section: OptionalSection = section) -> str:
+            return section.text if estimate_tokens(section.text) <= budget else section.rebuild(budget)
+
+        fits[index] = fit_variable_section(capacity, fixed, build)
+        fixed.append(fits[index].value)
+    fitted, cursor = [], 0
+    for index, (start, end, _section) in enumerate(spans):
+        fitted.append(prompt[cursor:start])
+        fitted.append(fits[index].value)
+        cursor = end
+    fitted.append(prompt[cursor:])
+    return "".join(fitted), {
+        "request": "developer", "capacity_tokens": capacity.tokens,
+        "sections": {spans[index][2].kind: {**fit.to_dict(), "reduced": fit.value != spans[index][2].text}
+                     for index, fit in fits.items()},
+        "unlocated_sections": unlocated,
+    }
+
+
+class DeveloperRequestFit:
+    """What a Developer request needs to fit itself (DEVELOPER-PROMPT-FIT-001):
+    the binding it is sent to (None: the primary) and the optional sections
+    its caller placed in existing_code_context. Capacities are resolved once
+    per output budget."""
+
+    def __init__(self, config: Any, binding: Any, sections: Sequence[OptionalSection]) -> None:
+        self.config, self.binding, self.sections = config, binding, tuple(sections)
+        self._capacities: Dict[Optional[int], RequestCapacity] = {}
+
+    def with_section(self, section: OptionalSection) -> "DeveloperRequestFit":
+        return DeveloperRequestFit(self.config, self.binding, self.sections + (section,))
+
+    def capacity(self, output_tokens: Optional[int] = None) -> RequestCapacity:
+        """The request's capacity when it asks for the binding's own output
+        or, for a full-file answer grounded to need more, that much."""
+        from kriya.core.model_runtime import binding_output_tokens
+
+        output = max(binding_output_tokens(self.config, self.binding), output_tokens or 0)
+        key = output if output_tokens else None
+        if key not in self._capacities:
+            self._capacities[key] = request_capacity(self.config, self.binding, output_tokens=output)
+        return self._capacities[key]
+
+    def fit(self, system_prompt: str, prompt: str, *extra: OptionalSection,
+            output_tokens: Optional[int] = None) -> Tuple[str, Dict[str, Any]]:
+        return fit_developer_request(self.capacity(output_tokens), system_prompt, prompt, self.sections + extra)
+
+
+def fenced_reference_section(fenced_reference: str) -> Optional[OptionalSection]:
+    """The fenced learned reference as an optional Developer section: rebuilt
+    at whole entries with the fence kept (never cut), "" when none fits."""
+    from kriya.workflow.untrusted_context import fence_untrusted_reference, fenced_reference_body
+
+    if not fenced_reference:
+        return None
+    body = fenced_reference_body(fenced_reference)
+    fence_units = estimate_tokens(fence_untrusted_reference("x"))
+
+    def rebuild(budget: int) -> str:
+        kept = trim_reference_text(body, budget - fence_units)
+        return fence_untrusted_reference(kept) if kept else ""
+
+    return OptionalSection("learned_reference", fenced_reference, rebuild)
+
+
+def developer_reference(prompt_window: int, fenced_reference: str, *pool_texts: str) -> str:
+    """The fenced learned reference as a Developer request may carry it
+    (Fix of a314d45): never more than the PRD-016 graph pool leaves after
+    its fixed occupants (skills, design, plan) and the graph context's own
+    floor, trimmed at whole entries with the fence kept - optional untrusted
+    text is never the reason a Developer request is refused. Returned
+    unchanged when it fits (byte-identical prompts at production windows)."""
+    from kriya.workflow.untrusted_context import fence_untrusted_reference, fenced_reference_body
+
+    if not fenced_reference:
+        return ""
+    room = (int(prompt_window * _GRAPH_CONTEXT_SHARE)
+            - sum(estimate_tokens(text) for text in pool_texts if text)
+            - _proportional_floor(_MIN_GRAPH_CONTEXT_BUDGET, prompt_window))
+    if estimate_tokens(fenced_reference) <= room:
+        return fenced_reference
+    fence_units = estimate_tokens(fence_untrusted_reference("x"))
+    return fence_untrusted_reference(trim_reference_text(fenced_reference_body(fenced_reference), room - fence_units))
+
+
+def _fit_review_groups(capacity: RequestCapacity, files: List[Tuple[str, str]], *fixed_texts: str) -> SectionFit:
+    """fit_review_batches with each batch's relpaths
+    (review_context.build_review_batch_groups)."""
+    from kriya.workflow.review_context import build_review_batch_groups
+
+    def largest(built: Tuple[List[Tuple[str, List[str]]], List[str]]) -> int:
+        return max((capacity.count(text) for text, _paths in built[0]), default=0)
+
+    return fit_variable_section(
+        capacity, fixed_texts, lambda budget: build_review_batch_groups(files, budget),
+        measure=largest, empty=([], [path for path, _ in files]),
+    )
+
+
+def fit_review_batches(capacity: RequestCapacity, files: List[Tuple[str, str]], *fixed_texts: str) -> SectionFit:
+    """Review file batches (review_context.build_review_batches) sized so
+    every batch request - its fixed text plus the batch - fits. ``value`` is
+    build_review_batches' (batches, truncated_relpaths); no room at all
+    leaves every file out (no batches) and reports each as truncated."""
+    fit = _fit_review_groups(capacity, files, *fixed_texts)
+    groups, truncated = fit.value
+    return replace(fit, value=([text for text, _paths in groups], truncated))
+
+
+def candidate_request_capacity(config: Any, candidate: Any, role: str, *,
+                               max_tokens_override: Optional[int] = None) -> RequestCapacity:
+    """The RequestCapacity of the request call_with_escalation sends to one
+    role candidate (PROMPT-FIT-ROLE-CHAIN-001): ``candidate`` is a model
+    binding (the role's own llm or a role-chain model; anything else means
+    the primary), with the output that exact call asks for
+    (agent.candidate_output_tokens, the rule the call itself uses)."""
+    from pydantic import BaseModel
+
+    from kriya.agents.agent import candidate_output_tokens
+
+    binding = candidate if isinstance(candidate, BaseModel) else None
+    return request_capacity(config, binding, role=role,
+                            output_tokens=candidate_output_tokens(config, binding, max_tokens_override))
+
+
+def agent_request_capacity(config: Any, agent: Any, role: str, *,
+                           output_tokens: Optional[int] = None) -> RequestCapacity:
+    """The RequestCapacity of ``agent``'s request to its FIRST candidate: its
+    role binding (``role_llm``; the primary otherwise), asking for the
+    output ``output_tokens`` (else the agent's ``max_output_tokens``) makes
+    that call ask for. Every other candidate is sized by CandidatePrompts."""
+    from kriya.agents.agent import role_output_override
+
+    return candidate_request_capacity(config, getattr(agent, "role_llm", None), role,
+                                      max_tokens_override=role_output_override(agent, output_tokens))
+
+
+class CandidatePrompts:
+    """The prompts of ONE agent request, one per role candidate
+    (PROMPT-FIT-ROLE-CHAIN-001): ``build(capacity, candidate)`` makes the
+    prompt for that candidate's own RequestCapacity - its served window,
+    output budget and token counter - so a prompt fitted for one model is
+    never sent to another. Built lazily (a fallback's prompt only when the
+    escalation reaches it) and at most once per candidate. Pass ``first()``
+    as the agent's ``prompt`` and this object as ``candidate_prompt``."""
+
+    def __init__(self, config: Any, agent: Any, role: str,
+                 build: Callable[[RequestCapacity, Optional[Any]], str], *,
+                 max_tokens_override: Optional[int] = None) -> None:
+        from kriya.agents.agent import role_output_override
+
+        self._config, self._role, self._build = config, role, build
+        self._override = role_output_override(agent, max_tokens_override)
+        candidates = getattr(agent, "_candidates", None)
+        self._first = candidates()[0] if callable(candidates) else None
+        self._built: Dict[int, Tuple[Any, str]] = {}
+
+    def __call__(self, candidate: Optional[Any]) -> str:
+        key = id(candidate)
+        if key not in self._built:
+            capacity = candidate_request_capacity(self._config, candidate, self._role,
+                                                  max_tokens_override=self._override)
+            # The candidate is kept with its prompt, so its id is never reused.
+            self._built[key] = (candidate, self._build(capacity, candidate))
+        return self._built[key][1]
+
+    def first(self) -> str:
+        return self(self._first)
+
+
+def candidate_model(config: Any, candidate: Optional[Any]) -> str:
+    """The model a role candidate names (None: the primary)."""
+    model = getattr(candidate, "model", None)
+    return model if isinstance(model, str) else config.llm.model
+
+
+# The longest batch label a review request carries ("=== Batch i/n ===").
+REVIEW_BATCH_LABEL_BOUND = "\n=== Batch 9999/9999 ===\n"
+# Sent in place of file contents when the review request has no room for any.
+REVIEW_FILES_OMITTED_NOTE = (
+    "\n(File contents omitted: this review request has no room for them beside the "
+    "material above. Review from that material and say that the files themselves were not shown.)\n"
+)
+
+
+# Sent after the files a role-chain fallback's request could carry, naming
+# the rest of that batch (PROMPT-FIT-ROLE-CHAIN-001).
+REVIEW_FILES_NOT_SHOWN_NOTE = (
+    "\n(Not shown in this request - no room for them beside the material above: {paths}. "
+    "Say that these files were not reviewed.)\n"
+)
+
+
+def review_requests(config: Any, reviewer: Any, files: List[Tuple[str, str]], system_prompt: str, header: str,
+                    *, on_refit: Optional[Callable[[Optional[Any], int, Dict[str, Any]], None]] = None,
+                    ) -> Tuple[List[CandidatePrompts], List[str], SectionFit]:
+    """The requests of one review: ``system_prompt`` (the one actually sent)
+    and ``header`` (goal, candidate diff, evidence) are fixed text, the file
+    batches are fitted (fit_review_batches) for the reviewer's first
+    candidate (PROMPT-BUDGET-FIT-001B). Files with no room at all become one
+    request carrying REVIEW_FILES_OMITTED_NOTE: the fixed text is still
+    reviewed, and if even it does not fit the dispatch check refuses the
+    request (CONTEXT_BUDGET_UNSATISFIABLE).
+
+    Each request is a CandidatePrompts (PROMPT-FIT-ROLE-CHAIN-001): a
+    candidate whose own capacity holds the batch gets it unchanged
+    (re-measured for that candidate, never assumed); one that cannot gets
+    that batch's own files refitted into one request of its room - the
+    files that fit, in order, plus REVIEW_FILES_NOT_SHOWN_NOTE naming the
+    rest (REVIEW_FILES_OMITTED_NOTE when none fits) - reported through
+    ``on_refit(candidate, batch_number, details)``. The fixed text is never
+    trimmed for any candidate. Returns the requests, the first candidate's
+    truncated relpaths and its fit."""
+    capacity = agent_request_capacity(config, reviewer, "reviewer")
+    fixed = (system_prompt, header, REVIEW_BATCH_LABEL_BOUND)
+    fit = _fit_review_groups(capacity, files, *fixed)
+    groups, truncated = fit.value
+    if files and not groups:
+        groups = [(REVIEW_FILES_OMITTED_NOTE, [])]
+    contents = dict(files)
+
+    def request(number: int, batch: str, paths: List[str]) -> CandidatePrompts:
+        def build(candidate_capacity: RequestCapacity, candidate: Optional[Any]) -> str:
+            if not paths or candidate_capacity.count(batch) <= candidate_capacity.room(*fixed):
+                return header + batch
+            note_bound = REVIEW_FILES_NOT_SHOWN_NOTE.format(paths=", ".join(paths))
+            refit = _fit_review_groups(candidate_capacity, [(path, contents[path]) for path in paths],
+                                       *fixed, note_bound)
+            sub_groups, cut = refit.value
+            shown = sub_groups[0][1] if sub_groups else []
+            not_shown = [path for path in paths if path not in shown]
+            text = sub_groups[0][0] if sub_groups else REVIEW_FILES_OMITTED_NOTE
+            if sub_groups and not_shown:
+                text += REVIEW_FILES_NOT_SHOWN_NOTE.format(paths=", ".join(not_shown))
+            if on_refit is not None:
+                on_refit(candidate, number, {
+                    "files": list(paths), "shown_files": list(shown), "not_shown_files": not_shown,
+                    "truncated_files": [path for path in cut if path in shown], **refit.to_dict(),
+                })
+            return header + text
+
+        return CandidatePrompts(config, reviewer, "reviewer", build)
+
+    return [request(number, batch, paths) for number, (batch, paths) in enumerate(groups, 1)], list(truncated), fit
+
+
+def investigation_evidence_char_budget(prompt_window: int) -> int:
+    """Character budget of DEV-INV-001 investigation evidence appended to a
+    Developer prompt (it uses the fixed-text headroom of the window)."""
+    return int(prompt_window * _INVESTIGATION_EVIDENCE_SHARE * _ALLOCATOR_CHARS_PER_TOKEN)
+
+
+def retry_evidence_char_budget(prompt_window: int) -> int:
+    """Character budget of a retry package's source evidence."""
+    share = int(prompt_window * _RETRY_EVIDENCE_SHARE * _ALLOCATOR_CHARS_PER_TOKEN)
+    floor = _proportional_floor(1000, prompt_window) * _ALLOCATOR_CHARS_PER_TOKEN
+    return max(floor, min(48000, share))
+
+
+# A section floor keeps a small window's section useful, but never more than
+# this share of the prompt window: absolute floors in a small window added
+# up to more than the window itself, a prompt the dispatch check refuses.
+_FLOOR_SHARE_CAP = 0.15
+
+
+def _proportional_floor(floor: int, prompt_window: int) -> int:
+    return min(floor, int(prompt_window * _FLOOR_SHARE_CAP))
+
+
 # Floor for build_code_context()'s own budget after skills_prompt/learned_rag_context
 # are subtracted below - keeps the allocator functional (still returns SOME matched-file
 # context, just skeletonized more aggressively) rather than collapsing to 0 and silently
@@ -521,7 +1192,7 @@ def estimate_tokens(text: str) -> int:
 _MIN_GRAPH_CONTEXT_BUDGET = 1000
 
 
-def _reserve_graph_context_budget(model_context_window: int, *unbounded_texts: str) -> int:
+def _reserve_graph_context_budget(prompt_window: int, *unbounded_texts: str) -> int:
     """Every retry path computes build_code_context()'s token budget as a flat fraction of
     the ACTIVE model's context_window (0.75), then separately prepends skills_prompt and
     learned_rag_context to the result - both unbounded, un-budgeted strings that are
@@ -542,19 +1213,14 @@ def _reserve_graph_context_budget(model_context_window: int, *unbounded_texts: s
     instead of assuming graph-RAG context is the only occupant. Floored at
     _MIN_GRAPH_CONTEXT_BUDGET so a very large skills_prompt still leaves build_code_context()
     something to work with (already-aggressive skeletonization, not a hard zero) rather than
-    silently dropping all matched/related file context for the rest of this attempt."""
-    base_budget = int(model_context_window * 0.75)
-    reserved = sum(estimate_tokens(t) for t in unbounded_texts if t)
-    return max(_MIN_GRAPH_CONTEXT_BUDGET, base_budget - reserved)
+    silently dropping all matched/related file context for the rest of this attempt.
 
+    PRD-016: ``prompt_window`` is the call's prompt_allocation_window() (see
+    above), not the raw context_window, and the pool is its graph share."""
+    base_budget = int(prompt_window * _GRAPH_CONTEXT_SHARE)
+    reserved = sum(estimate_tokens(t) for t in unbounded_texts if t and isinstance(t, str))
+    return max(_proportional_floor(_MIN_GRAPH_CONTEXT_BUDGET, prompt_window), base_budget - reserved)
 
-# Floor for _reserve_sibling_content_budget() below, same role as
-# _MIN_GRAPH_CONTEXT_BUDGET above - even a small/fallback model's window still
-# leaves enough room to show at least one typically-sized sibling file's real
-# content, rather than collapsing to near-zero and defeating the cross-file
-# consistency fix this budget protects (see _reserve_sibling_content_budget's
-# own docstring).
-_MIN_SIBLING_CONTENT_BUDGET = 500
 
 # Sibling content (kriya/agents/agent.py's DeveloperAgent._fill_missing_content(),
 # the "Already-Written File This Batch" section) is reference-only material for
@@ -566,7 +1232,7 @@ _MIN_SIBLING_CONTENT_BUDGET = 500
 _SIBLING_CONTENT_BUDGET_FRACTION = 0.15
 
 
-def _reserve_sibling_content_budget(model_context_window: int) -> int:
+def _reserve_sibling_content_budget(prompt_window: int) -> int:
     """Token budget for the concatenated "already-written sibling" section of a
     per-file Developer completion prompt (2026-08-15 external review, Finding 8).
 
@@ -583,45 +1249,49 @@ def _reserve_sibling_content_budget(model_context_window: int) -> int:
     Scales with the ACTIVE model's context window (same convention as
     _reserve_graph_context_budget - a primary-model attempt and a fallback-model
     attempt get proportionally different budgets, not one hardcoded number that's
-    generous for one and starves the other), floored at
-    _MIN_SIBLING_CONTENT_BUDGET so even a small fallback model's window still
-    leaves room for at least one sibling's real content."""
-    return max(_MIN_SIBLING_CONTENT_BUDGET, int(model_context_window * _SIBLING_CONTENT_BUDGET_FRACTION))
+    generous for one and starves the other). ``prompt_window`` is the call's
+    prompt_allocation_window() (PRD-016); the former absolute 500-token floor
+    was removed with it - in a small window the floors of every section added
+    up to a prompt larger than the window."""
+    return int(prompt_window * _SIBLING_CONTENT_BUDGET_FRACTION)
 
 
 _TIER_STEPS = ("full", "skeleton", "signatures")
 
 
-def build_code_context(matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int, file_scores: Optional[Dict[str, float]] = None) -> str:
-    matched_contents = {}
-    for f in matched_files:
-        full_p = os.path.join(workspace_path, f)
-        if os.path.exists(full_p):
-            try:
-                with open(full_p, "r", encoding="utf-8", errors="replace") as fh:
-                    matched_contents[f] = fh.read()
-            except Exception as e:
-                logger.debug(f"Failed to read matched file '{full_p}' for RAG context: {e}")
+# --- CTX-001 P1 WP6: omission reason vocabulary -----------------------------
+# docs/assurance/CTX_001_P1_ARCHITECTURE.md section 8 - extends, never
+# replaces, today's implicit reasons. Every material degradation/omission
+# this module's shared allocator produces uses one of these, never a bare
+# unexplained drop.
+REASON_BUDGET_EXHAUSTED = "budget_exhausted"
+REASON_BODY_ELIDED = "body_elided"
+REASON_UNSUPPORTED_STRUCTURAL_EXTRACTION = "unsupported_structural_extraction"
+REASON_STALE_REVISION_REJECTED = "stale_revision_rejected"
+REASON_LOWER_RELEVANCE = "lower_relevance"
+REASON_SOURCE_UNAVAILABLE = "source_unavailable"
 
-    related_contents = {}
-    for f in related_files:
-        full_p = os.path.join(workspace_path, f)
-        if os.path.exists(full_p):
-            try:
-                with open(full_p, "r", encoding="utf-8", errors="replace") as fh:
-                    related_contents[f] = fh.read()
-            except Exception as e:
-                logger.debug(f"Failed to read related file '{full_p}' for RAG context: {e}")
+# CTX-001 P1 WP7/A5 (architecture doc section 10): a known-target file's
+# EFFECTIVE score is max(retrieval_score, KNOWN_TARGET_FLOOR) - high enough
+# that a known target degrades only after every non-target candidate has
+# already degraded to its own floor, but not so high that many known
+# targets can each claim the whole budget regardless of size. Matches the
+# upper end of DependencyGraph._RELATION_WEIGHTS' own hop-1 scale (graph.py)
+# - a real hop-1 "imports"/"inherits" hit scores exactly 1.0 there, so 0.75
+# stays a real, principled ceiling below the strongest possible organic
+# signal, not an arbitrary magic number.
+KNOWN_TARGET_FLOOR = 0.75
 
-    # Introduce cache for skeletonized content to optimize performance
-    skel_cache = {}
 
-    def get_skeletonized(content: str, filepath: str, tier: str) -> str:
-        key = (filepath, tier)
-        if key not in skel_cache:
-            skel_cache[key] = skeletonize_code(content, filepath, tier)
-        return skel_cache[key]
-
+def _build_file_tiers(
+    matched_contents: Dict[str, str], related_contents: Dict[str, str],
+    budget_limit: int, file_scores: Optional[Dict[str, float]],
+    get_skeletonized: Callable[[str, str, str], str],
+) -> Dict[str, str]:
+    """The exact tier-assignment algorithm build_code_context() has always
+    used (extracted verbatim, not rewritten) - the one place this decision
+    is made, shared by both the legacy string renderer and the WP6
+    ContextPackage-producing renderer below, so they can never drift apart."""
     if file_scores is None:
         # Original categorical degradation: every related file degrades one
         # tier before any matched file loses its own next tier - no signal
@@ -649,18 +1319,12 @@ def build_code_context(matched_files: List[str], related_files: List[str], works
             else:
                 break
 
-        graph_rag_context = "\n\n=== Codebase Semantic Reference Context ===\n"
-        for filepath, content in matched_contents.items():
-            skel = get_skeletonized(content, filepath, matched_tier)
-            graph_rag_context += f"\nFile: {filepath} (Tier: {matched_tier})\n{skel}\n"
-
-        if related_contents:
-            graph_rag_context += "\n\n=== Bounded Neighborhood Dependency Context ===\n"
-            for filepath, content in related_contents.items():
-                skel = get_skeletonized(content, filepath, related_tier)
-                graph_rag_context += f"\nFile: {filepath} (Tier: {related_tier})\n{skel}\n"
-
-        return graph_rag_context
+        file_tiers = {f: matched_tier for f in matched_contents}
+        file_tiers.update({f: related_tier for f in related_contents})
+        # Last related file first, then last matched file.
+        drop_order = list(reversed(list(related_contents))) + list(reversed(list(matched_contents)))
+        return _omit_over_budget(file_tiers, matched_contents, related_contents, budget_limit,
+                                 get_skeletonized, drop_order)
 
     # Score-aware degradation (2026-08-12 SME review, re-ranking retrieval):
     # each file (matched or related alike) has its own tier, degraded one
@@ -688,17 +1352,515 @@ def build_code_context(matched_files: List[str], related_files: List[str], works
         next_tier = _TIER_STEPS[_TIER_STEPS.index(file_tiers[lowest]) + 1]
         file_tiers[lowest] = next_tier
 
+    # Lowest score first (stable: earlier-listed files kept on ties).
+    drop_order = sorted(reversed(list(file_tiers)), key=lambda f: file_scores.get(f, 0.0))
+    return _omit_over_budget(file_tiers, matched_contents, related_contents, budget_limit,
+                             get_skeletonized, drop_order)
+
+
+# A file whose signatures still do not fit the budget is left out of the
+# prompt entirely (recorded as a budget_exhausted omission and named in the
+# rendered context). Before PRD-016 the tier search simply stopped at
+# "signatures" and rendered everything, so the budget was not a bound: a
+# dozen large classes rendered ~210K characters against a ~4.7K-token limit.
+_OMITTED_TIER = "omitted"
+
+
+def _omit_over_budget(
+    file_tiers: Dict[str, str], matched_contents: Dict[str, str], related_contents: Dict[str, str],
+    budget_limit: int, get_skeletonized: Callable[[str, str, str], str], drop_order: List[str],
+) -> Dict[str, str]:
+    contents = {**matched_contents, **related_contents}
+
+    def total() -> int:
+        return sum(
+            estimate_tokens(get_skeletonized(contents[f], f, tier))
+            for f, tier in file_tiers.items() if tier != _OMITTED_TIER
+        )
+
+    for filepath in drop_order:
+        if total() <= budget_limit:
+            break
+        file_tiers[filepath] = _OMITTED_TIER
+    return file_tiers
+
+
+def build_code_context_package(
+    matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int,
+    file_scores: Optional[Dict[str, float]] = None,
+    cache: "Optional[SourceDerivationCache]" = None,
+) -> Tuple[str, Any]:
+    """CTX-001 P1 WP6: the real implementation build_code_context() (below)
+    is now a thin wrapper around - becomes the one unit-producing AND
+    rendering path for the default pipeline's Graph RAG matched/related
+    context (architecture doc section 5a's own hard constraint). Internal
+    difference only: alongside the identical rendered string, this also
+    builds a real ContextPackage (relevant_files + an honest, reason-
+    labeled omitted[] list) - closing C6 (the default pipeline previously
+    had no structured provenance/omission tracking at all) without any
+    caller-visible signature/output change for build_code_context()'s own
+    existing callers.
+
+    Returns (rendered_string, ContextPackage) - rendered_string is
+    BYTE-IDENTICAL to what the pre-P1 build_code_context() produced for the
+    same inputs (see _build_file_tiers()'s own docstring: the tier-
+    assignment algorithm is reused verbatim, not reimplemented, and the
+    render loop below reproduces the exact same block format/order)."""
+    # Local imports: context_package.py has no dependency on this module
+    # today, and this keeps that direction one-way (avoids a new
+    # module-level import cycle risk for the common case where a caller
+    # only wants the plain-string build_code_context() below).
+    from kriya.policy.trust import TrustLevel
+    from kriya.workflow.context_package import build_context_package, make_context_item, make_omitted_entry
+
+    def _read(full_p: str, f: str) -> Optional[str]:
+        # CTX-001 P1 WP9: cache is None for every existing caller (default) -
+        # byte-identical fresh-read behavior, unchanged. A caller that wants
+        # attempt-lifetime reuse passes its own SourceDerivationCache
+        # (context_source.py) - shared with CurrentSourceResolver's own
+        # content_cache, so a file already read via either path this
+        # attempt is never re-read via the other.
+        if cache is not None:
+            read = cache.read(workspace_path, f)
+            return read[0] if read is not None else None
+        try:
+            with open(full_p, "r", encoding="utf-8", errors="replace") as fh:
+                return fh.read()
+        except Exception as e:
+            logger.debug(f"Failed to read '{full_p}' for RAG context: {e}")
+            return None
+
+    matched_contents = {}
+    for f in matched_files:
+        full_p = os.path.join(workspace_path, f)
+        if os.path.exists(full_p):
+            content = _read(full_p, f)
+            if content is not None:
+                matched_contents[f] = content
+
+    related_contents = {}
+    for f in related_files:
+        full_p = os.path.join(workspace_path, f)
+        if os.path.exists(full_p):
+            content = _read(full_p, f)
+            if content is not None:
+                related_contents[f] = content
+
+    # Per-call memo (unchanged from pre-WP9 behavior) PLUS, when `cache` is
+    # given, the attempt-lifetime SourceDerivationCache - the per-call dict
+    # still avoids a second dict lookup for the ~3-5 repeat calls each file
+    # gets within ONE _build_file_tiers() budget search; `cache` is what
+    # actually survives across separate build_code_context_package() calls
+    # (different retries in the same attempt).
+    skel_cache = {}
+
+    def get_skeletonized(content: str, filepath: str, tier: str) -> str:
+        key = (filepath, tier)
+        if key not in skel_cache:
+            if cache is not None:
+                revision = content_revision(content)
+                rendered, _tokens = cache.get_or_compute_derivation(
+                    filepath, None, tier, revision,
+                    lambda: skeletonize_code(content, filepath, tier),
+                )
+                skel_cache[key] = rendered
+            else:
+                skel_cache[key] = skeletonize_code(content, filepath, tier)
+        return skel_cache[key]
+
+    omitted: List[Dict[str, Any]] = []
+    # source_unavailable (P0's own finding: today this is a SILENT
+    # `except Exception: logger.debug(...)` swallow, context_budget.py's
+    # pre-P1 lines 642-643) - now also a real, recorded omission entry,
+    # alongside the unchanged debug log.
+    for f in matched_files:
+        if f not in matched_contents:
+            omitted.append(make_omitted_entry(path=f, rank=0, reason=REASON_SOURCE_UNAVAILABLE, estimated_tokens=0))
+    for f in related_files:
+        if f not in related_contents:
+            omitted.append(make_omitted_entry(path=f, rank=0, reason=REASON_SOURCE_UNAVAILABLE, estimated_tokens=0))
+
+    file_tiers = _build_file_tiers(matched_contents, related_contents, budget_limit, file_scores, get_skeletonized)
+
     graph_rag_context = "\n\n=== Codebase Semantic Reference Context ===\n"
+    items = []
+    budget_omitted: List[str] = []
+
+    def _record_budget_omission(filepath: str, content: str) -> None:
+        budget_omitted.append(filepath)
+        omitted.append(make_omitted_entry(
+            path=filepath, rank=0, reason=REASON_BUDGET_EXHAUSTED,
+            estimated_tokens=estimate_tokens(get_skeletonized(content, filepath, "signatures")),
+        ))
+
     for filepath, content in matched_contents.items():
         tier = file_tiers[filepath]
+        if tier == _OMITTED_TIER:
+            _record_budget_omission(filepath, content)
+            continue
         skel = get_skeletonized(content, filepath, tier)
         graph_rag_context += f"\nFile: {filepath} (Tier: {tier})\n{skel}\n"
+        items.append(make_context_item(
+            path=filepath, content=skel, reason="graph_rag_matched_file", source_type="semantic_hit",
+            trust_level=TrustLevel.REPOSITORY, score=(file_scores or {}).get(filepath),
+            tier=tier, is_exact=(tier == "full"), revision=content_revision(content),
+            omitted_regions=(tier != "full"),
+        ))
+        if tier != "full":
+            omitted.append(make_omitted_entry(
+                path=filepath, rank=0, reason=REASON_BODY_ELIDED, estimated_tokens=estimate_tokens(skel),
+            ))
 
     if related_contents:
         graph_rag_context += "\n\n=== Bounded Neighborhood Dependency Context ===\n"
         for filepath, content in related_contents.items():
             tier = file_tiers[filepath]
+            if tier == _OMITTED_TIER:
+                _record_budget_omission(filepath, content)
+                continue
             skel = get_skeletonized(content, filepath, tier)
             graph_rag_context += f"\nFile: {filepath} (Tier: {tier})\n{skel}\n"
+            items.append(make_context_item(
+                path=filepath, content=skel, reason="graph_rag_related_file", source_type="graph_dependency",
+                trust_level=TrustLevel.REPOSITORY, score=(file_scores or {}).get(filepath),
+                tier=tier, is_exact=(tier == "full"), revision=content_revision(content),
+                omitted_regions=(tier != "full"),
+            ))
+            if tier != "full":
+                omitted.append(make_omitted_entry(
+                    path=filepath, rank=0, reason=REASON_BODY_ELIDED, estimated_tokens=estimate_tokens(skel),
+                ))
 
-    return graph_rag_context
+    if budget_omitted:
+        graph_rag_context += (
+            f"\n(Left out for the context budget, not shown above: {', '.join(budget_omitted)})\n"
+        )
+    if not items and not budget_omitted:
+        # Nothing to show and nothing left out: no section at all. A bare
+        # header is text every caller's `if context:` guard treats as
+        # content, and an optional section that is only its header can occur
+        # twice in a request (DEVELOPER-PROMPT-FIT-001 then keeps it as
+        # mandatory text).
+        graph_rag_context = ""
+
+    package = build_context_package(
+        relevant_files=tuple(items),
+        omitted=tuple(omitted),
+        token_count=sum(estimate_tokens(item.content) for item in items),
+    )
+    return graph_rag_context, package
+
+
+def build_code_context(
+    matched_files: List[str], related_files: List[str], workspace_path: str, budget_limit: int,
+    file_scores: Optional[Dict[str, float]] = None, cache: "Optional[SourceDerivationCache]" = None,
+) -> str:
+    return build_code_context_package(matched_files, related_files, workspace_path, budget_limit, file_scores, cache)[0]
+
+
+def _fit_whole_file(content: str, remaining_tokens: int) -> Optional[Tuple[str, str, str, bool]]:
+    """Whole-file (no member hint, or member extraction unavailable/
+    over-budget) fallback for build_known_target_context() below. Unlike
+    build_code_context()'s own skeleton/signatures structural tiers, a
+    known-target file's worst case is a BOUNDED, revision-marked head+tail
+    EXCERPT of its real body (project_implementation_source, already used
+    by RetryPackage) - architecture doc section 9's own explicit "converges
+    onto RetryPackage's pattern rather than reinventing" instruction: for a
+    "repair this exact file" instruction, real (if truncated) implementation
+    beats a structural skeleton with every body already replaced by "...".
+
+    Returns (tier, rendered_content, reason, omitted_regions), or None only
+    when remaining_tokens <= 0 (nothing at all can fit - the caller must
+    record an explicit budget_exhausted omission instead; every other case
+    always returns real content, since project_implementation_source always
+    fits within the given character budget by construction).
+
+    CTX-001 P1 WP9 (deliberately NOT cache-routed): unlike skeletonize_code()/
+    extract_member_body() (pure functions of content+tier/line-range alone,
+    safe to cache by (path, tier-or-member_id, revision)), this function's
+    own bounded-excerpt output is a function of `remaining_tokens` too - the
+    SAME file's cached excerpt from an earlier call (when a different
+    amount of budget happened to be left) would be WRONG-SIZED for a later
+    call with a different remaining_tokens, silently violating cached-vs-
+    uncached semantic equivalence. Caching this would require folding the
+    budget into the cache key, defeating cross-call reuse for exactly the
+    case (budget genuinely differs run to run) real reuse would matter
+    least. Left uncached; the FULL-content branch just above needs no
+    caching benefit anyway (no real computation beyond estimate_tokens)."""
+    if remaining_tokens <= 0:
+        return None
+    full_cost = estimate_tokens(content)
+    if full_cost <= remaining_tokens:
+        return ("full", content, "known_target_full_source", False)
+    from kriya.workflow.context_projection import project_implementation_source
+
+    max_chars = remaining_tokens * 4  # inverse of estimate_tokens' own len//4 heuristic
+    projection = project_implementation_source(
+        content, "known_target", max_chars, reason="known_target_bounded_excerpt",
+    )
+    # CTX_001_P1_ARCHITECTURE.md section 4's own compatibility mapping:
+    # IMPLEMENTATION_EXCERPT -> tier "skeleton", omitted_regions=True -
+    # distinguishable from a real STRUCTURAL skeleton only via `reason`
+    # (free text), not a dedicated tier value.
+    return ("skeleton", projection.content, "known_target_bounded_excerpt", True)
+
+
+def _render_known_target_block(items: List[Any], omitted: List[Dict[str, Any]]) -> str:
+    """Mirrors RetryPackage.render_context()'s own established pattern
+    (retry_package.py's "=== Additional files omitted from retry evidence
+    budget ===" block) - generalized here rather than reinvented. Renders a
+    BOUNDED summary line for any omission, so "modification-critical exact
+    target evidence could not be represented" is never silent from the
+    model's own side (WP7's own critical invariant) - the full, reason-
+    labeled detail lives on the returned ContextPackage/run trace, never
+    dumped in full into the prompt itself (observability requirement: don't
+    flood the prompt with internal metadata)."""
+    if not items and not omitted:
+        return ""
+    blocks = []
+    for item in items:
+        label = f"member {item.member_id}" if item.member_id else "full source"
+        blocks.append(f"=== EXISTING OWNER ({label}, tier={item.tier}): {item.path} ===\n{item.content}")
+    if omitted:
+        omitted_paths = sorted({str(o["path"]) for o in omitted})
+        blocks.append(
+            "=== Additional known-target evidence omitted from this context budget "
+            "(see run trace for reason/path detail - do not assume it matches the code above) ===\n"
+            + ", ".join(omitted_paths)
+        )
+    return (
+        "\n\n=== AUTHORITATIVE BROWNFIELD OWNER CONTRACT: EXISTING SOURCE ===\n"
+        + "\n\n".join(blocks)
+    )
+
+
+def build_known_target_context(
+    known_target_files: List[str],
+    workspace_path: str,
+    worktree_path: Optional[str],
+    budget_limit: int,
+    *,
+    file_scores: Optional[Dict[str, float]] = None,
+    member_hints: Optional[Dict[str, Union[str, Sequence[str]]]] = None,
+    known_revisions: Optional[Dict[str, str]] = None,
+    exclude: Optional[Iterable[str]] = None,
+    cache: "Optional[SourceDerivationCache]" = None,
+) -> Tuple[str, Any]:
+    """CTX-001 P1 WP7 (A3+A5): replaces attempt.py's own
+    _brownfield_owner_contract_block()'s SOURCE-CONTENT responsibility (its
+    instruction-text responsibility is unchanged, stays in task_desc - see
+    that function's own updated docstring). Retires the naive 24,000-char
+    combined prefix cap entirely (never raised - architecture doc section 9's
+    explicit "do NOT solve by making the cap larger" instruction) in favor
+    of: current-source resolution (WP4, worktree-authoritative), member-aware
+    exact source where a caller supplies a member_hints entry and the
+    language supports it (WP5), a priority floor rather than unconditional/
+    unlimited inclusion (A5, KNOWN_TARGET_FLOOR above), and explicit,
+    reason-labeled omission for anything that genuinely cannot fit - never a
+    silent `break`.
+
+    `exclude` lets a caller skip paths already represented through a
+    DIFFERENT context producer (e.g. build_code_context_package()'s own
+    Graph-RAG matched/related output) - the DUPLICATE_SOURCE_CONTEXT_PATHS=0
+    requirement's own mechanism: known-target evidence always wins for
+    EXACTNESS over a possibly-degraded Graph-RAG hit for the same path, so
+    the correct precedence is "exclude a known-target path from the lower-
+    fidelity producer", never the reverse - callers are expected to already
+    apply that precedence before calling this function (see attempt.py's own
+    integration).
+
+    Returns (rendered_string, ContextPackage) - the rendered string is meant
+    to be appended to active_code_context (source content), never task_desc
+    (instructions) - see the module-level split this function implements."""
+    from kriya.policy.trust import TrustLevel
+    from kriya.workflow.context_package import build_context_package, make_context_item, make_omitted_entry
+    from kriya.workflow.context_source import (
+        CurrentSourceResolver,
+        boundaries_matching_member_id,
+        extract_member_body,
+        member_boundaries_for,
+    )
+
+    exclude_set = set(exclude or ())
+    # CTX-001 P1 WP9: cache is None for every existing caller (default) -
+    # a fresh, private content_cache dict, byte-identical to pre-WP9
+    # behavior. A caller wanting attempt-lifetime reuse passes its own
+    # SourceDerivationCache - shared with build_code_context_package()'s
+    # own reads, so no file is ever read twice via two different producers
+    # in the same attempt.
+    resolver = CurrentSourceResolver(
+        workspace_path, worktree_path, known_revisions,
+        content_cache=(cache.content_cache if cache is not None else None),
+    )
+
+    def effective_score(path: str) -> float:
+        return max((file_scores or {}).get(path, 0.0), KNOWN_TARGET_FLOOR)
+
+    # De-dup while preserving first-seen order (dict.fromkeys), then
+    # priority-floor-then-score sort (stable - ties keep that first-seen/
+    # Architect-list order, never an arbitrary one) - "allocation order
+    # becomes a function of (floor, score), never list position" (A5).
+    ordered_paths = [p for p in dict.fromkeys(known_target_files) if p not in exclude_set]
+    ordered_paths.sort(key=effective_score, reverse=True)
+
+    items: List[Any] = []
+    omitted: List[Dict[str, Any]] = []
+    consumed = 0
+
+    for rank, path in enumerate(ordered_paths, start=1):
+        resolved = resolver.resolve(path)
+        if not resolved.exists:
+            omitted.append(make_omitted_entry(path=path, rank=rank, reason=REASON_SOURCE_UNAVAILABLE, estimated_tokens=0))
+            continue
+        if resolved.stale_hint:
+            # Not fatal - resolved.content/revision are already the REAL,
+            # freshly-read values (the resolver never trusts a stale hint
+            # silently); recorded so a caller can see a supplied
+            # known_revisions hint didn't match reality.
+            omitted.append(make_omitted_entry(path=path, rank=rank, reason=REASON_STALE_REVISION_REJECTED, estimated_tokens=0))
+
+        remaining = budget_limit - consumed
+        if remaining <= 0:
+            omitted.append(make_omitted_entry(
+                path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
+                estimated_tokens=estimate_tokens(resolved.content),
+            ))
+            continue
+
+        # CTX-001 P1 C2 production integration: member_hints[path] may be a
+        # bare string (Package 2's original, single-member shape - still
+        # fully supported) or a list/tuple of member_ids (multiple grounded
+        # candidates for the same file - e.g. two Java overloads a bare
+        # name alone could not uniquely distinguish; see
+        # context_source.py::member_ids_matching_name's own docstring).
+        # Never a new type, never a redesign of the call boundary - just an
+        # additive Union on the existing dict's VALUE shape.
+        raw_hint = (member_hints or {}).get(path)
+        if isinstance(raw_hint, str):
+            member_id_candidates = [raw_hint]
+        elif raw_hint:
+            member_id_candidates = list(raw_hint)
+        else:
+            member_id_candidates = []
+
+        member_produced = False
+        if member_id_candidates:
+            boundaries = member_boundaries_for(path, resolved.content)
+            if boundaries is None:
+                for member_id in member_id_candidates:
+                    omitted.append(make_omitted_entry(
+                        path=path, rank=rank, reason=REASON_UNSUPPORTED_STRUCTURAL_EXTRACTION,
+                        estimated_tokens=0, member_id=member_id,
+                    ))
+            else:
+                for member_id in member_id_candidates:
+                    # An ambiguous (overloaded) member_id expands to EVERY
+                    # real boundary sharing it - never an arbitrary "first
+                    # match" pick (context_source.py::
+                    # boundaries_matching_member_id's own docstring).
+                    matching_boundaries = boundaries_matching_member_id(boundaries, member_id)
+                    if not matching_boundaries:
+                        omitted.append(make_omitted_entry(
+                            path=path, rank=rank, reason=REASON_UNSUPPORTED_STRUCTURAL_EXTRACTION,
+                            estimated_tokens=0, member_id=member_id,
+                        ))
+                        continue
+                    for boundary in matching_boundaries:
+                        member_remaining = budget_limit - consumed
+                        if member_remaining <= 0:
+                            omitted.append(make_omitted_entry(
+                                path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
+                                estimated_tokens=0, member_id=member_id,
+                            ))
+                            continue
+                        if cache is not None:
+                            # Cache-key discriminator includes the boundary's
+                            # own line range, not just member_id - an
+                            # ambiguous (overloaded) name can resolve to
+                            # SEVERAL distinct boundaries sharing one
+                            # member_id (see boundaries_matching_member_id's
+                            # own docstring); using member_id alone here
+                            # would collide two real, DIFFERENT bodies into
+                            # one cache entry. The ContextItem's own
+                            # member_id (below) stays the clean, real value -
+                            # this discriminator is a cache-key-only detail.
+                            cache_member_id = f"{member_id}:{boundary.start_line}-{boundary.end_line}"
+                            member_content, member_cost = cache.get_or_compute_derivation(
+                                path, cache_member_id, "member_exact", resolved.revision,
+                                lambda b=boundary, r=resolved: extract_member_body(r.content, b.start_line, b.end_line),
+                            )
+                        else:
+                            member_content = extract_member_body(resolved.content, boundary.start_line, boundary.end_line)
+                            member_cost = estimate_tokens(member_content)
+                        if member_cost <= member_remaining:
+                            items.append(make_context_item(
+                                path=path, content=member_content, reason="known_target_member_exact",
+                                source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
+                                score=effective_score(path), member_id=member_id,
+                                start_line=boundary.start_line, end_line=boundary.end_line,
+                                tier="member_exact", is_exact=True, revision=resolved.revision,
+                                omitted_regions=False,
+                            ))
+                            consumed += member_cost
+                            member_produced = True
+                        else:
+                            omitted.append(make_omitted_entry(
+                                path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=member_cost,
+                                member_id=member_id,
+                            ))
+
+            if member_produced:
+                sibling_remaining = budget_limit - consumed
+                if sibling_remaining > 0:
+                    if cache is not None:
+                        sibling_text, sib_cost = cache.get_or_compute_derivation(
+                            path, None, "signatures", resolved.revision,
+                            lambda r=resolved, p=path: skeletonize_code(r.content, p, "signatures"),
+                        )
+                    else:
+                        sibling_text = skeletonize_code(resolved.content, path, "signatures")
+                        sib_cost = estimate_tokens(sibling_text) if sibling_text else 0
+                    if sibling_text:
+                        if sib_cost <= sibling_remaining:
+                            items.append(make_context_item(
+                                path=path, content=sibling_text, reason="known_target_sibling_signatures",
+                                source_type="named_in_request", trust_level=TrustLevel.REPOSITORY,
+                                score=effective_score(path), tier="signatures", is_exact=False,
+                                revision=resolved.revision, omitted_regions=True,
+                            ))
+                            consumed += sib_cost
+                        else:
+                            omitted.append(make_omitted_entry(
+                                path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=sib_cost,
+                            ))
+
+        if member_produced:
+            continue
+
+        remaining = budget_limit - consumed
+        fit = _fit_whole_file(resolved.content, remaining)
+        if fit is None:
+            omitted.append(make_omitted_entry(
+                path=path, rank=rank, reason=REASON_BUDGET_EXHAUSTED,
+                estimated_tokens=estimate_tokens(resolved.content),
+            ))
+            continue
+        tier, rendered_content, reason, omitted_regions = fit
+        items.append(make_context_item(
+            path=path, content=rendered_content, reason=reason, source_type="named_in_request",
+            trust_level=TrustLevel.REPOSITORY, score=effective_score(path), tier=tier,
+            is_exact=(tier == "full"), revision=resolved.revision, omitted_regions=omitted_regions,
+        ))
+        consumed += estimate_tokens(rendered_content)
+        if omitted_regions:
+            omitted.append(make_omitted_entry(
+                path=path, rank=rank, reason=REASON_BODY_ELIDED, estimated_tokens=estimate_tokens(rendered_content),
+            ))
+
+    package = build_context_package(
+        relevant_files=tuple(items),
+        omitted=tuple(omitted),
+        token_count=sum(estimate_tokens(item.content) for item in items),
+    )
+    rendered = _render_known_target_block(items, omitted)
+    return rendered, package

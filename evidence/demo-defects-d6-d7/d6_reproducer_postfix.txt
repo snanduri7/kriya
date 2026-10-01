@@ -1,0 +1,10 @@
+{
+ "gate": "PASSED",
+ "success": true,
+ "verification_pass": true,
+ "ignite_started": true,
+ "runtime_artifacts": [
+  "ignite/README.txt"
+ ],
+ "left_in_workspace": []
+}

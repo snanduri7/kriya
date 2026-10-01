@@ -1,0 +1,229 @@
+"""PROVIDER-CONTRACT-001 live validation L1-L7 (Ollama 0.34.4, local).
+
+Run from the Kriya repo root with the venv python. Talks only to the local
+Ollama; every Kriya call goes through LLMClient. Prints one JSON line per
+check; never prints prompt text."""
+import asyncio
+import json
+import os
+import socketserver
+import sys
+import threading
+import time
+import urllib.request
+
+sys.path.insert(0, ".")
+from kriya.config import AppConfig, FallbackModelConfig  # noqa: E402
+from kriya.core import model_runtime  # noqa: E402
+from kriya.core.llm import LLMClient  # noqa: E402
+from kriya.core.provider_contract import check_prompt_consumption, consumption_bytes  # noqa: E402
+
+BASE = "http://localhost:11434/v1"
+CODER, CODER_PINNED = "qwen3-coder:30b", "qwen3-coder:30b-kriya-e52213655394"
+Q36_PINNED = "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"
+
+
+def emit(check, **fields):
+    print(json.dumps({"check": check, **fields}, default=str), flush=True)
+
+
+def api(path, payload=None):
+    data = json.dumps(payload).encode() if payload is not None else None
+    request = urllib.request.Request("http://localhost:11434" + path, data=data,
+                                     headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(request, timeout=600) as response:
+        return json.loads(response.read())
+
+
+def unload(model):
+    api("/api/generate", {"model": model, "keep_alive": 0})
+
+
+def served(model):
+    for item in api("/api/ps").get("models", []):
+        if item.get("name") == model or item.get("model") == model:
+            return item.get("context_length")
+    return None
+
+
+def config(model, *, runtime=None, extra_body=None, production=False, window=32768, reasoning=False):
+    cfg = AppConfig()
+    cfg.llm.base_url, cfg.llm.api_key, cfg.llm.model = BASE, "local-key", model
+    cfg.llm.context_window, cfg.llm.reasoning, cfg.llm.temperature = window, reasoning, 0.7
+    cfg.llm.inference_runtime = runtime
+    cfg.llm.extra_body = extra_body if extra_body is not None else {"options": {"top_p": 0.8, "top_k": 20}}
+    cfg.llm_chain = []
+    if production:
+        cfg.runtime_profile = "production"
+    return cfg
+
+
+class Wire:
+    """Records every HTTP request an LLMClient's transport sends."""
+
+    def __init__(self, llm):
+        self.requests = []
+        for client in [llm.client]:
+            client._client.event_hooks["request"].append(self._record)
+
+    async def _record(self, request):
+        body = request.content or b""
+        try:
+            parsed = json.loads(body) if body else None
+        except ValueError:
+            parsed = None
+        shown = {k: v for k, v in (parsed or {}).items() if k not in ("messages",)}
+        self.requests.append({"url": str(request.url), "body": shown})
+
+
+async def call(cfg, user="Reply with exactly one word: READY", system="You are terse.", **kwargs):
+    llm = LLMClient(cfg)
+    wire = Wire(llm)
+    try:
+        result = await llm.complete_result(system, user, **kwargs)
+    except Exception as error:  # a refusal before inference is a result here
+        result = error
+    finally:
+        await llm.aclose()
+    return result, wire.requests
+
+
+def summary(result):
+    if isinstance(result, Exception):
+        return {"raised": type(result).__name__, "reason_code": getattr(result, "reason_code", None),
+                "message": str(result)[:240]}
+    contract = result.protocol.get("provider_contract", {})
+    return {"status": result.status.value, "prompt_tokens": result.prompt_tokens,
+            "reasoning_chars": result.reasoning_chars, "budget_window": (result.budget or {}).get("context_window"),
+            "window_source": (result.budget or {}).get("window_source"),
+            "served_after_call": contract.get("served_context_window_after_call"),
+            "consumption": contract.get("prompt_consumption"), "violation": contract.get("violation")}
+
+
+async def main():
+    model_runtime.clear_model_runtime_cache()
+    # L1 - served context after a Kriya request.
+    unload(CODER_PINNED)
+    result, wire = await call(config(CODER_PINNED, production=True))
+    emit("L1_pinned_v1", **summary(result), api_ps=served(CODER_PINNED), http_requests=len(wire),
+         wire_has_options=any("options" in r["body"] for r in wire))
+    unload(CODER)
+    result, wire = await call(config(CODER, production=False))  # unpinned: the server env decides
+    emit("L1_unpinned_v1_nonproduction", **summary(result), api_ps=served(CODER), http_requests=len(wire))
+    model_runtime.clear_model_runtime_cache()
+    result, wire = await call(config(CODER, production=True))
+    emit("L1_unpinned_v1_production", **summary(result), api_ps=served(CODER), http_requests=len(wire))
+    unload(CODER)
+    result, wire = await call(config(CODER, runtime="ollama_native", production=True))
+    emit("L1_native", **summary(result), api_ps=served(CODER), http_requests=len(wire),
+         urls=sorted({r["url"] for r in wire}), num_ctx=[r["body"].get("options", {}).get("num_ctx") for r in wire])
+    unload(CODER)
+
+    # L2 - too-large prompt: prevented before dispatch, detected after it, refused natively.
+    big = ("def handler_%d(request):\n    return compute(request.payload, retries=3, timeout=30)\n\n" * 1) * 0
+    big = "".join(f"def handler_{i}(request):\n    return compute(request.payload, retries={i % 7}, timeout=30)\n\n"
+                  for i in range(5200))
+    result, wire = await call(config(CODER_PINNED), user=big)
+    emit("L2_v1_prevented", **summary(result), http_requests=len(wire), prompt_bytes=len(big.encode()))
+    # Bypass Kriya's dispatch check to show detection on the provider's own answer.
+    from kriya.core.inference_runtime import ChatRequest, runtime_adapter
+
+    llm = LLMClient(config(CODER_PINNED))
+    raw = await runtime_adapter().complete(llm.client, ChatRequest(
+        model=CODER_PINNED, messages=[{"role": "user", "content": big}], temperature=0.0, max_tokens=4,
+        extra_body={}))
+    await llm.aclose()
+    evidence = check_prompt_consumption(dispatched_bytes=consumption_bytes(big), reported_prompt_tokens=raw.prompt_tokens,
+                                        bytes_per_token_ceiling=None)
+    emit("L2_v1_detected", reported_prompt_tokens=raw.prompt_tokens, truncation_evidence=evidence)
+    result, wire = await call(config(CODER, runtime="ollama_native", window=8192), user=big[:60000])
+    emit("L2_native_small_window", **summary(result), http_requests=len(wire))
+    # Kriya's own dispatch refusal first; the provider refusal needs a request Kriya would size wrongly, so
+    # send one directly through the native adapter with a tiny window.
+    native = runtime_adapter("ollama_native")
+    llm = LLMClient(config(CODER, runtime="ollama_native"))
+    try:
+        await native.complete(llm.client, ChatRequest(
+            model=CODER, messages=[{"role": "user", "content": big[:60000]}], temperature=0.0, max_tokens=4,
+            extra_body=native.request_plan({}, temperature=None, reasoning_flag=False,
+                                           requested_context_window=4096).wire_body))
+        emit("L2_native_provider_refusal", refused=False)
+    except Exception as error:
+        emit("L2_native_provider_refusal", refused=True, type=type(error).__name__,
+             reason_code=getattr(error, "reason_code", None))
+    await llm.aclose()
+    unload(CODER)
+
+    # L3 - sampling on the wire; top_k determinism is supplementary.
+    result, wire = await call(config(CODER_PINNED, extra_body={"options": {"top_p": 0.8, "top_k": 20}, "seed": 7}))
+    emit("L3_v1_wire", bodies=[r["body"] for r in wire])
+    result, wire = await call(config(CODER, runtime="ollama_native",
+                                     extra_body={"options": {"top_p": 0.8, "top_k": 20, "seed": 7}}))
+    emit("L3_native_wire", bodies=[r["body"] for r in wire])
+    outs = []
+    for _ in range(4):
+        cfg = config(CODER, runtime="ollama_native", extra_body={"options": {"top_k": 1}})
+        cfg.llm.temperature = 1.5
+        result, _ = await call(cfg, user="Invent a random 6-word sentence.", max_tokens_override=24)
+        outs.append(getattr(result, "content", None))
+    emit("L3_native_top_k_1_identical", identical=len(set(outs)) == 1, distinct=len(set(outs)))
+    unload(CODER)
+
+    # L4 - reasoning=false disables qwen3.6 reasoning.
+    q36 = config(Q36_PINNED, extra_body={"options": {"top_p": 0.8, "top_k": 20}, "reasoning_effort": "none"})
+    result, wire = await call(q36, user="2+2?", max_tokens_override=400)
+    emit("L4_reasoning_off", **summary(result), wire_effort=[r["body"].get("reasoning_effort") for r in wire])
+    q36_on = config(Q36_PINNED, extra_body={"options": {"top_p": 0.8, "top_k": 20}}, reasoning=True)
+    result, wire = await call(q36_on, user="2+2?", max_tokens_override=400)
+    emit("L4_reasoning_default", **summary(result), wire_effort=[r["body"].get("reasoning_effort") for r in wire])
+    unload(Q36_PINNED)
+
+    # L5 - one Kriya call = one HTTP inference request on failure.
+    result, wire = await call(config("kriya-no-such-model:0"))
+    emit("L5_failing_request", **summary(result), http_requests=len(wire))
+    cfg = config(CODER_PINNED)
+    cfg.llm.transport.read_timeout_seconds = 0.05
+    result, wire = await call(cfg, user="Write a long story about a lighthouse.", max_tokens_override=512)
+    emit("L5_timeout", **summary(result), http_requests=len(wire))
+    result, wire = await call(config("kriya-no-such-model:0"), stream_callback=lambda token: None)
+    emit("L5_failing_stream", **summary(result), http_requests=len(wire))
+
+    # L6 - proxy variables never carry inference traffic.
+    class Proxy(socketserver.BaseRequestHandler):
+        hits = 0
+
+        def handle(self):
+            Proxy.hits += 1
+            self.request.recv(65536)
+            self.request.sendall(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+
+    proxy = socketserver.TCPServer(("127.0.0.1", 0), Proxy)
+    threading.Thread(target=proxy.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{proxy.server_address[1]}"
+    saved = {k: os.environ.get(k) for k in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy",
+                                              "all_proxy", "NO_PROXY", "no_proxy")}
+    for key in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        os.environ[key] = url
+    os.environ.pop("NO_PROXY", None)
+    os.environ.pop("no_proxy", None)
+    result, wire = await call(config(CODER_PINNED))
+    emit("L6_proxy_env", **summary(result), proxy_hits=Proxy.hits, http_requests=len(wire))
+    for key, value in saved.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    proxy.shutdown()
+    proxy.server_close()
+
+    # L7 - served identity in the runtime fingerprint (doctor/qualification evidence is separate).
+    model_runtime.clear_model_runtime_cache()
+    fingerprint = model_runtime.resolve_configured_model_runtime(config(CODER_PINNED), fresh=True)
+    emit("L7_fingerprint", digest=fingerprint.digest, exact=fingerprint.exact,
+         server_parameters=fingerprint.server_parameters, effective_context_window=fingerprint.effective_context_window,
+         adapter_version=fingerprint.adapter_version)
+
+
+started = time.time()
+asyncio.run(main())
+emit("done", seconds=round(time.time() - started, 1))

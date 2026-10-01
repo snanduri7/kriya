@@ -1,0 +1,61 @@
+{
+  "containers": [
+    "0664a98ffff4f9541b50c0c7a28ee3d38a206d9b49d40f3473b370f0b63e1407",
+    "0d8b03f8d5f2265ed2c8d205814d01d9feedbbb64420c968ca4d8d615e4bddf4",
+    "9d213076d7ca7e6487998046a3b3414db7f244ad02f8ef1d5ad4ece998c318f9",
+    "a680ff97f47872704d84b09cb3910c26e3fc83caf4bb8b9ca0c16c0b262ef514"
+  ],
+  "head": [
+    "0d7a09136cfec085156308d706d53b091ecd3cde"
+  ],
+  "lock_free": true,
+  "networks": [
+    "3c87bb58dc3a51bc8c591ff1ebf1c89d29a2426d802e26e2568a68f88ff85630",
+    "8145a30fcebb610f2922cfd243ce3f9586bd847e90a1240ea59e34c7027763db",
+    "ac269ca356edabd4744bd0ebbaa88836834cfa413ce8903803f1b166f1d75ead",
+    "f441ce3b89c37569febb9874a82d241415b3eff60b31e28b25ccb9794d3cc094"
+  ],
+  "processes": [],
+  "tracked_changes": [],
+  "worktrees": [
+    {
+      "flags": [
+        "branch"
+      ],
+      "head": "0d7a09136cfec085156308d706d53b091ecd3cde",
+      "path": "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo"
+    },
+    {
+      "flags": [
+        "detached"
+      ],
+      "head": "0d7a09136cfec085156308d706d53b091ecd3cde",
+      "inspection": {
+        "exists": true,
+        "ignored_top": [
+          "target/"
+        ],
+        "kriya_entries": [],
+        "tracked_changes": [],
+        "untracked": []
+      },
+      "path": "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktree"
+    },
+    {
+      "flags": [
+        "detached"
+      ],
+      "head": "0d7a09136cfec085156308d706d53b091ecd3cde",
+      "inspection": {
+        "exists": true,
+        "ignored_top": [
+          "target/"
+        ],
+        "kriya_entries": [],
+        "tracked_changes": [],
+        "untracked": []
+      },
+      "path": "/Users/sriramnanduri/.kriya/operator/prd036/canary/repo/.kriya/worktrees/candidate-kriya-worktree-c2a3db38"
+    }
+  ]
+}

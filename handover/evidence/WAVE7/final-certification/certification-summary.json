@@ -1,0 +1,88 @@
+{
+  "doctor": {
+    "failed_required": [
+      "context.recall_certification",
+      "model.qualification"
+    ],
+    "production_ready": false,
+    "statuses": {
+      "FAIL": 2,
+      "PASS": 24,
+      "WARN": 5
+    }
+  },
+  "environment": {
+    "docker_client": "27.5.1",
+    "docker_server": "27.5.1",
+    "git": "git version 2.54.0",
+    "git_revision": "220af75d18d1681914ec4361848f8b53c1c54a86",
+    "gradle": null,
+    "java": "openjdk version \"17.0.10\" 2024-01-16",
+    "machine": "arm64",
+    "maven": "Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)",
+    "os": "macOS-26.7-arm64-arm-64bit-Mach-O",
+    "pip_freeze_sha256": "81fd88c8f5bf52c6c15f57b8b93923850a6922bfdb0bcb5711eb2939129b5513",
+    "python": "3.14.6",
+    "python_executable": "/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/.venv/bin/python",
+    "semgrep": "1.178.0",
+    "uid_is_root": false
+  },
+  "problems": [],
+  "stages": {
+    "doctor": {
+      "detail": "production doctor JSON archived",
+      "stage": "doctor",
+      "status": "RECORDED"
+    },
+    "environment": {
+      "detail": "{  \"docker_client\": \"27.5.1\",  \"docker_server\": \"27.5.1\",  \"git\": \"git version 2.54.0\",  \"git_revision\": \"220af75d18d1681914ec4361848f8b53c1c54a86\",  \"gradle\": null,  \"java\": \"openjdk version \\\"17.0.1",
+      "stage": "environment",
+      "status": "RECORDED"
+    },
+    "pytest": {
+      "detail": "6832 passed, 72 deselected, 176 warnings in 1722.44s (0:28:42)",
+      "stage": "pytest",
+      "status": "PASS"
+    },
+    "release": {
+      "detail": "",
+      "stage": "release",
+      "status": "PASS"
+    },
+    "scanner": {
+      "detail": "27 passed, 6877 deselected, 2 warnings in 100.66s (0:01:40)",
+      "stage": "scanner",
+      "status": "PASS"
+    },
+    "static": {
+      "detail": "",
+      "stage": "static",
+      "status": "PASS"
+    }
+  },
+  "status": "CERTIFIED",
+  "tiers": {
+    "pytest": {
+      "junit": {
+        "errors": 0,
+        "failures": 0,
+        "passed": 6832,
+        "skipped": 0,
+        "tests": 6832
+      },
+      "skipped": 0,
+      "unexpected_skips": 0
+    },
+    "scanner": {
+      "junit": {
+        "errors": 0,
+        "failures": 0,
+        "passed": 27,
+        "skipped": 0,
+        "tests": 27
+      },
+      "skipped": 0,
+      "unexpected_skips": 0
+    }
+  }
+}

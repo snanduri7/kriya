@@ -28,13 +28,37 @@ _RELATION_WEIGHTS: Dict[str, float] = {
 }
 _DEFAULT_RELATION_WEIGHT = 0.5
 
+# Used by find_java_main_class() below - covers both the classic array
+# parameter and the varargs shorthand ("String... args"), which is equally
+# valid for a real entrypoint.
+_JAVA_MAIN_METHOD_RE = re.compile(r"public\s+static\s+void\s+main\s*\(\s*(?:final\s+)?String")
+# Deliberately the SAME granularity _parse_java()'s own class_regex already
+# uses elsewhere in this file (a flat, non-nesting-aware scan) - not
+# requiring `public` (see find_java_main_class()'s own docstring for why).
+_JAVA_TOP_LEVEL_CLASS_RE = re.compile(r"(?:public|final|abstract|\s)*\bclass\s+(\w+)")
+
 
 class DependencyGraph:
     """SQLite-backed AST dependency knowledge graph compiler for multi-language repositories."""
 
     def __init__(self, db_path: str) -> None:
-        self.db_path = os.path.abspath(db_path)
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        # PRV-11 (2026-08-31): ":memory:" is sqlite3's own special connection
+        # string for a private, ephemeral, in-process database - never a
+        # real filesystem path. os.path.abspath(":memory:") does NOT
+        # preserve it (it resolves to a literal path ending in "/:memory:"),
+        # and the os.makedirs() below would then create real directories
+        # and, on connect, a real on-disk file with that exact name - found
+        # live: a bounded, in-memory-only planning-evidence graph (kriya/
+        # workflow/workflow_controller.py's build_planning_structural_
+        # evidence()) ended up creating and committing a real ":memory:"
+        # file into the generated workspace. Preserved verbatim, never
+        # touched by abspath/makedirs, for this one literal value only -
+        # every real filesystem path is completely unaffected.
+        if db_path == ":memory:":
+            self.db_path = db_path
+        else:
+            self.db_path = os.path.abspath(db_path)
+            os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
 
     def _init_db(self) -> None:
@@ -97,8 +121,36 @@ class DependencyGraph:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_symbols_name ON symbols(name)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_target ON relations(target)")
-        
+        # CTX-001 P0 (S1/S5 probes) found clear_file()'s own
+        # "DELETE FROM relations WHERE source_file = ?" doing a full table
+        # scan on every single file re-index, because source_file (added
+        # above via ALTER TABLE, after the table already existed) never got
+        # an index of its own - superimposing an extra O(N) scan onto every
+        # file indexed, i.e. O(N^2) total for a full cold index. This is the
+        # single highest-leverage fix P0 identified (root-caused via
+        # EXPLAIN QUERY PLAN). CREATE INDEX IF NOT EXISTS is itself safe to
+        # run against a pre-existing database that already has rows (and
+        # possibly NULL source_file values from before the ALTER TABLE
+        # above) - SQLite indexes NULL values like any other value, and
+        # clear_file()'s own OR-fallback clause for NULL rows is unaffected
+        # by whether source_file is indexed.
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_relations_source_file ON relations(source_file)")
+
         self.conn.commit()
+
+    def has_indexed_files(self) -> bool:
+        """Cheap existence check (a single-row LIMIT 1, not a COUNT scan) - True
+        once index_repository() has recorded at least one file for this
+        workspace's dependency_graph.db, regardless of how many. Used by
+        run_generation_workflow()'s autonomy.auto_index_missing_dependency_graph
+        gate to decide whether a workspace has ever been indexed at all -
+        see that config field's own docstring (kriya/config/config.py) for
+        why this needs to be cheap: it runs on every call, including every
+        milestone in a decomposed sequence, and must stay a no-op once the
+        real one-time index has already happened."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT 1 FROM files LIMIT 1")
+        return cursor.fetchone() is not None
 
     def get_cached_mtime(self, filepath: str) -> Optional[float]:
         """Fetch cached mtime for incremental skip validation."""
@@ -214,6 +266,34 @@ class DependencyGraph:
         rows = cursor.fetchall()
         return [dict(r) for r in rows]
 
+    def find_symbol_locations(self, name: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """DEV-INV-001: exact, indexed point lookup on the `symbols` table's
+        own `idx_symbols_name` index - name -> every {filepath, type,
+        start_line, end_line} this repository's own parse produced for that
+        exact string. Backs the `find_symbol` investigation verb.
+
+        Deliberately an EXACT match only, never a LIKE/substring scan - a
+        symbol name search must stay a cheap, indexed point lookup regardless
+        of repository size (see this module's own performance discipline:
+        get_callers/get_callees already only ever do exact-match lookups
+        against idx_relations_source/idx_relations_target). _parse_java()
+        stores QUALIFIED names (package_prefix + class name) for class-level
+        symbols, so an exact match on a bare simple name will legitimately
+        find nothing for those - this is an honest MVP limitation (the
+        caller should be told to try the fully-qualified name), never
+        silently widened into a `LIKE '%.' || ? ` scan, which would defeat
+        the whole point of an indexed lookup."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT filepath, name, type, start_line, end_line FROM symbols "
+            "WHERE name = ? LIMIT ?",
+            (name, limit),
+        )
+        return [
+            {"filepath": r[0], "name": r[1], "type": r[2], "start_line": r[3], "end_line": r[4]}
+            for r in cursor.fetchall()
+        ]
+
     def get_imports(self, filepath: str) -> List[str]:
         """Fetch all dependency import files or packages for a specific file path."""
         cursor = self.conn.cursor()
@@ -235,6 +315,159 @@ class DependencyGraph:
         cursor = self.conn.cursor()
         cursor.execute("SELECT name FROM symbols WHERE filepath = ?", (filepath,))
         return [r[0] for r in cursor.fetchall()]
+
+    def get_class_symbol_locations(self) -> Dict[str, List[str]]:
+        """Workspace-wide index of "ext:simple_name" (extension-scoped,
+        unqualified class name) -> the distinct files that declare it, for
+        kriya/workflow/attempt.py's duplicate-type-across-files Quality Gate -
+        found live, 2026-08-21 (protocol_encoder_java): three separate,
+        incompatible `Protocol.java` files ended up coexisting in one
+        workspace (default package, `protocol`, `com.example.protocol`),
+        each missing different pieces of the intended API, because nothing
+        ever noticed a "new" file was actually redeclaring an existing type
+        under a different path.
+
+        Deliberately collapses on the SIMPLE name, not the qualified one
+        _parse_java() stores (`package_prefix + class_name`, e.g.
+        "com.example.protocol.Protocol") - a qualified-name lookup would
+        never have caught the incident above, since all three files produce
+        different qualified strings. The simple-name collision IS the
+        signal this exists to expose, not noise to filter out (contrast
+        get_symbols_for_file()'s own docstring, which wants qualified
+        precision for a different purpose - seeding Graph RAG traversal).
+
+        The key is prefixed with the declaring file's own extension
+        deliberately - found live while writing this method's own test: an
+        unscoped simple-name index treats Java's `Protocol` and an unrelated
+        Python `Protocol` (or a JS/TS/Go one, once those languages get
+        indexed) as the SAME collision, which is almost certainly wrong in
+        any polyglot repo (a frontend `User` and a backend `User` are
+        typically different concepts, not a duplicate). extract_class_names()
+        below produces keys in this same "ext:name" format so the two never
+        drift apart.
+
+        type IN ('class', 'interface') (2026-09-07, P7 preflight): an
+        interface declaration is exactly as real a type symbol for this
+        index's own purpose (a duplicate/collision hazard, and a resolvable
+        target for a cross-file reference) as a class - see _parse_java()'s
+        own docstring comment at its class_regex definition for the live
+        incident this closes."""
+        cursor = self.conn.cursor()
+        cursor.execute("SELECT DISTINCT name, filepath FROM symbols WHERE type IN ('class', 'interface')")
+        index: Dict[str, List[str]] = {}
+        for name, filepath in cursor.fetchall():
+            if not name:
+                continue
+            simple = name.rsplit(".", 1)[-1]
+            if not simple:
+                continue
+            ext = os.path.splitext(filepath)[1].lower()
+            key = f"{ext}:{simple}"
+            paths = index.setdefault(key, [])
+            if filepath not in paths:
+                paths.append(filepath)
+        return {key: sorted(paths) for key, paths in index.items()}
+
+    def extract_class_names(self, filepath: str, content: str) -> List[str]:
+        """Public, non-persisting wrapper around this class's own per-language
+        symbol parsers (the exact same dispatch index_file() uses), for a
+        candidate file's content BEFORE it's ever written to disk or indexed -
+        needed because RepositoryAnalyzer's re-index runs once, at the top of
+        each run_generation_workflow() call, so a file written earlier in the
+        SAME still-in-progress retry loop is invisible to
+        get_class_symbol_locations()'s persisted baseline until a future run
+        re-indexes it. Returns "ext:simple_name" keys, same extension-scoped
+        convention as get_class_symbol_locations() (see that method's own
+        docstring for why the extension prefix matters). Never raises - `[]`
+        for any extension index_file() doesn't parse a class out of (.xml has
+        no "class" concept; anything else isn't parsed at all yet) or on any
+        parse error (e.g. a Python file with invalid syntax) - a failed
+        extraction here must degrade to "nothing to check", never a false
+        rejection of an otherwise-fine write."""
+        _, ext = os.path.splitext(filepath)
+        ext = ext.lower()
+        try:
+            if ext == ".py":
+                symbols, _relations = self._parse_python(filepath, content)
+            elif ext == ".java":
+                symbols, _relations = self._parse_java(filepath, content)
+            elif ext == ".rb":
+                symbols, _relations = self._parse_ruby(filepath, content)
+            else:
+                return []
+        except Exception as e:
+            logger.debug(f"extract_class_names: could not parse {filepath}: {e}")
+            return []
+        names = {
+            sym["name"].rsplit(".", 1)[-1]
+            for sym in symbols
+            if sym.get("type") in ("class", "interface") and sym.get("name")
+        }
+        return sorted(f"{ext}:{n}" for n in names if n)
+
+    def find_java_main_class(self, filepath: str, content: str) -> Optional[str]:
+        """Deterministically detects a Java file's runnable entrypoint class -
+        one with a real `public static void main(String[]...)`/`String...
+        args` method - for constructing a `javac`/`java` invocation without
+        ever asking an LLM to guess it. Built for the exact gap found live,
+        2026-08-21 (ignite_qpid_protocol milestone 3/4): a Java project with
+        no pom.xml/build.gradle has zero deterministic compile/run capability
+        today (PolymorphicValidator's stack detection is Maven/Gradle-marker-
+        only), so "which files to compile, what the entrypoint is" was 100%
+        delegated to RunVerifierAgent.judge()'s free-form guess - three
+        consecutive same-day prompt patches (established_files visibility, an
+        explicit "no Maven" statement, a javac-prepend backstop) each fixed
+        exactly what they targeted and surfaced the next gap underneath. This
+        is the deterministic capability that removes the guess entirely for
+        the common, unambiguous case.
+
+        Deliberately conservative, matching extract_class_names()'s own
+        degrade-gracefully precedent - returns None (never a wrong guess) for
+        anything not confidently resolvable:
+        - No `.java` extension, no real main-method signature found, or any
+          parse error.
+        - MORE THAN ONE top-level `class` declaration in the file - a
+          multi-class file needs real scoping (which class does main()
+          actually belong to) that a flat regex scan can't safely resolve;
+          rather than risk attributing main() to the wrong class, this
+          degrades to "no confident answer" and the caller falls back to
+          today's existing (already-hardened) LLM-guess path.
+
+        The class's own visibility is NOT required to be `public` - Java only
+        requires a single top-level type per file to be public (and even
+        then, only for cross-package access), never for running it via
+        `java ClassName`; a package-private top-level class with a real
+        main() is exactly as runnable as a public one, so requiring `public`
+        here would silently miss legitimate entrypoints."""
+        if not filepath.endswith(".java"):
+            return None
+        try:
+            # Line-by-line with comment-skipping, deliberately mirroring
+            # _parse_java()'s own approach above rather than a raw whole-
+            # content regex scan - a bare `.search()`/`.findall()` over the
+            # full text would false-positive on a comment merely DESCRIBING
+            # a main method or class ("// public static void main(String[]
+            # args) is required here", "// see the Foo class below") as if
+            # it were real code.
+            has_main = False
+            class_names = []
+            for line in content.splitlines():
+                line_strip = line.strip()
+                if line_strip.startswith("//") or line_strip.startswith("/*") or line_strip.startswith("*"):
+                    continue
+                if not has_main and _JAVA_MAIN_METHOD_RE.search(line_strip):
+                    has_main = True
+                class_match = _JAVA_TOP_LEVEL_CLASS_RE.match(line_strip)
+                if class_match:
+                    class_names.append(class_match.group(1))
+            if not has_main or len(class_names) != 1:
+                return None
+            pkg_match = re.search(r"package\s+([\w.]+);", content)
+            package_prefix = pkg_match.group(1) + "." if pkg_match else ""
+            return package_prefix + class_names[0]
+        except Exception as e:
+            logger.debug(f"find_java_main_class: could not parse {filepath}: {e}")
+            return None
 
     def get_neighborhood(self, seed_symbols: List[str], max_hops: int = 2, max_results: int = 30) -> List[Dict[str, Any]]:
         """Perform bounded BFS traversal on the symbol relationship graph.
@@ -273,7 +506,7 @@ class DependencyGraph:
                 continue
                 
             cursor.execute("""
-                SELECT r.source, r.target, r.type, s.filepath, s.type as symbol_type
+                SELECT r.source, r.target, r.type, r.source_file, s.filepath, s.type as symbol_type
                 FROM relations r
                 LEFT JOIN symbols s ON (r.source = s.name OR r.target = s.name)
                 WHERE r.source = ? OR r.target = ?
@@ -286,6 +519,7 @@ class DependencyGraph:
                 rel_type = r["type"]
                 filepath = r["filepath"]
                 sym_type = r["symbol_type"]
+                weight = _RELATION_WEIGHTS.get(rel_type, _DEFAULT_RELATION_WEIGHT)
                 
                 neighbor = target if source == current else source
                 if neighbor not in visited:
@@ -293,7 +527,6 @@ class DependencyGraph:
                     queue.append((neighbor, hop + 1))
                     
                 if filepath:
-                    weight = _RELATION_WEIGHTS.get(rel_type, _DEFAULT_RELATION_WEIGHT)
                     results.append({
                         "name": neighbor,
                         "filepath": filepath,
@@ -302,14 +535,65 @@ class DependencyGraph:
                         "hop": hop + 1,
                         "score": weight / (hop + 1)
                     })
+                    # PRD-027: walk the defining file's own file-sourced
+                    # relations (its calls/imports) on the next hop - the
+                    # only way a two-hop dependency is ever reached.
+                    if filepath not in visited:
+                        visited.add(filepath)
+                        queue.append((filepath, hop + 1))
+                # PRD-027: calls/imports are recorded with the calling FILE as
+                # their source (both parsers), and the symbols join above can
+                # only ever report a DEFINER's file - so a caller was never a
+                # neighbor. The relation's own source file is that caller.
+                if r["source_file"] and neighbor == r["source_file"]:
+                    results.append({
+                        "name": neighbor,
+                        "filepath": neighbor,
+                        "relation_type": rel_type,
+                        "symbol_type": "file",
+                        "hop": hop + 1,
+                        "score": weight / (hop + 1)
+                    })
 
-        results.sort(key=lambda r: r["score"], reverse=True)
-        return results[:max_results]
+        # PRD-027: one entry per file (its best-scoring hit) BEFORE the cap.
+        # The symbol join emits a row per matching symbol, so capping the raw
+        # rows let duplicates of one file crowd distinct files out entirely
+        # (a real one-hop dependency was lost this way). Ties break on path
+        # for a deterministic order.
+        best_by_file: Dict[str, Dict[str, Any]] = {}
+        for hit in results:
+            known = best_by_file.get(hit["filepath"])
+            if known is None or hit["score"] > known["score"]:
+                best_by_file[hit["filepath"]] = hit
+        ranked = sorted(best_by_file.values(), key=lambda hit: (-hit["score"], hit["filepath"]))
+        return ranked[:max_results]
 
     def close(self) -> None:
         if hasattr(self, "conn") and self.conn:
             self.conn.close()
 
+
+    @staticmethod
+    def _python_base_name(node: ast.expr) -> Optional[str]:
+        """Best-effort deterministic dotted name for a class base expression,
+        for CTX-001 P1 WP2 (Python inheritance relations). Only resolves
+        statically nameable forms:
+          - `Base` (ast.Name)
+          - `pkg.Base` / `pkg.sub.Base` (ast.Attribute chain rooted in a Name)
+        Returns None for anything else (a call - `get_base()`, a subscript -
+        `Generic[T]`, a conditional expression, ...) - deliberately
+        conservative, mirroring extract_class_names()'s own established
+        "degrade gracefully, never fabricate" precedent: an unsupported/
+        dynamic base must never invent a relationship (CTX-001 P1 WP2
+        requirement)."""
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            prefix = DependencyGraph._python_base_name(node.value)
+            if prefix is None:
+                return None
+            return f"{prefix}.{node.attr}"
+        return None
 
     def _parse_python(self, filepath: str, content: str) -> tuple:
         # Deliberately does not catch parse errors here - let them propagate to
@@ -327,6 +611,26 @@ class DependencyGraph:
                     "start_line": node.lineno,
                     "end_line": getattr(node, "end_lineno", node.lineno)
                 })
+                # CTX-001 P1 WP2: inheritance relations, source-keyed by the
+                # class's own (bare) name - the same convention _parse_java()
+                # already established for its "inherits"/"implements"
+                # relations (source=class_name, target=base/interface name),
+                # so a class's base is a genuine Graph RAG neighbor exactly
+                # like a Java subclass's own superclass/interface already is.
+                # Only ast.ClassDef.bases is walked - metaclass=/keyword
+                # bases are never a base class and are correctly ignored by
+                # only iterating node.bases. No runtime import resolution,
+                # no general type inference: a base that isn't statically
+                # nameable (_python_base_name returns None) produces no
+                # relation at all, never a guessed one.
+                for base in node.bases:
+                    base_name = self._python_base_name(base)
+                    if base_name:
+                        relations.append({
+                            "source": node.name,
+                            "target": base_name,
+                            "type": "inherits",
+                        })
             # 2. Capture Functions
             elif isinstance(node, ast.FunctionDef):
                 symbols.append({
@@ -379,8 +683,23 @@ class DependencyGraph:
         package_prefix = pkg_match.group(1) + "." if pkg_match else ""
         
         # Regex mappings for Java classes, methods and fields
+        # Java symbol indexing (2026-09-07, P7 preflight): interface
+        # declarations were previously invisible to this parser entirely -
+        # `class_regex` matched only the literal `class` keyword, so
+        # get_class_symbol_locations()/extract_class_names() (both filter
+        # on type == "class") never saw a hexagonal-architecture "port"
+        # (interface UserService {...}) as a resolvable symbol at all, even
+        # though a real `implements`/`import` relation to it was correctly
+        # recorded - confirmed live: build_planning_structural_evidence()
+        # resolved every OTHER cross-module edge in a real multi-module
+        # repo except the one that WAS the module boundary, because it was
+        # interface-based. The keyword itself is now captured (group 1:
+        # "class" or "interface") so both symbol types share the exact same
+        # extends/implements handling below - existing class behavior is
+        # completely unchanged (same groups, same order, same relation
+        # types), interfaces are simply no longer skipped.
         class_regex = re.compile(
-            r"(?:public|protected|private|static|\s)*class\s+(\w+)"
+            r"(?:public|protected|private|static|\s)*(class|interface)\s+(\w+)"
             r"(?:\s+extends\s+(\w+))?"
             r"(?:\s+implements\s+([\w\s,]+))?"
         )
@@ -412,17 +731,18 @@ class DependencyGraph:
                 })
                 continue
                 
-            # Class definitions
+            # Class/interface definitions
             class_match = class_regex.match(line_strip)
             if class_match:
-                class_name = package_prefix + class_match.group(1)
+                keyword = class_match.group(1)
+                class_name = package_prefix + class_match.group(2)
                 symbols.append({
                     "name": class_name,
-                    "type": "class",
+                    "type": keyword,
                     "start_line": idx,
                     "end_line": idx + 5
                 })
-                
+
                 # Add class annotation relations
                 for anno in pending_annotations:
                     relations.append({
@@ -431,18 +751,18 @@ class DependencyGraph:
                         "type": "annotated_with"
                     })
                 pending_annotations = []
-                
+
                 # Handle extends
-                base_class = class_match.group(2)
+                base_class = class_match.group(3)
                 if base_class:
                     relations.append({
                         "source": class_name,
                         "target": base_class,
                         "type": "inherits"
                     })
-                    
+
                 # Handle implements
-                impl_interfaces = class_match.group(3)
+                impl_interfaces = class_match.group(4)
                 if impl_interfaces:
                     for interface in impl_interfaces.split(","):
                         interface = interface.strip()

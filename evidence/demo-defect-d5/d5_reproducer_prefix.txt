@@ -1,0 +1,74 @@
+[
+ {
+  "case": "live runtime-3 s4 (app-printed trace)",
+  "tier": "locator",
+  "grounded_files": [
+   "src/main/java/com/example/IgniteDemoApplication.java"
+  ],
+  "expected": [
+   "src/main/resources/ignite-config.xml"
+  ],
+  "grounded_as_expected": false,
+  "raw_evidence_chars": 2000,
+  "raw_evidence_names_grounded_file": false,
+  "raw_evidence_shows_exception": false
+ },
+ {
+  "case": "synthetic App.java loads bad-config.xml",
+  "tier": "locator",
+  "grounded_files": [
+   "src/main/java/demo/App.java"
+  ],
+  "expected": [
+   "src/main/resources/bad-config.xml"
+  ],
+  "grounded_as_expected": false,
+  "raw_evidence_chars": 737,
+  "raw_evidence_names_grounded_file": true,
+  "raw_evidence_shows_exception": true
+ },
+ {
+  "case": "real Spring: invalid property (mvn -e)",
+  "tier": "locator",
+  "grounded_files": [
+   "src/main/java/demo/App.java"
+  ],
+  "expected": [
+   "src/main/resources/bad-config.xml"
+  ],
+  "grounded_as_expected": false,
+  "raw_evidence_chars": 2000,
+  "raw_evidence_names_grounded_file": false,
+  "raw_evidence_shows_exception": true
+ },
+ {
+  "case": "real Spring: import of an invalid XML",
+  "tier": "locator",
+  "grounded_files": [
+   "src/main/java/demo/App.java"
+  ],
+  "expected": [
+   "src/main/resources/imported-bad.xml"
+  ],
+  "grounded_as_expected": false,
+  "raw_evidence_chars": 2000,
+  "raw_evidence_names_grounded_file": false,
+  "raw_evidence_shows_exception": true
+ },
+ {
+  "case": "real Spring: candidate bean constructor throws (control)",
+  "tier": "locator",
+  "grounded_files": [
+   "src/main/java/demo/App.java",
+   "src/main/java/demo/Widget.java"
+  ],
+  "expected": [
+   "src/main/java/demo/App.java",
+   "src/main/java/demo/Widget.java"
+  ],
+  "grounded_as_expected": true,
+  "raw_evidence_chars": 2000,
+  "raw_evidence_names_grounded_file": false,
+  "raw_evidence_shows_exception": true
+ }
+]

@@ -1,0 +1,126 @@
+I001 [*] Import block is un-sorted or un-formatted
+   --> kriya/cli.py:215:9
+    |
+213 |       workspace_path = os.getcwd()
+214 |       try:
+215 | /         from kriya.control.persistence import (
+216 | |             load_artifact_registry, load_contract_registry, load_control_state,
+217 | |         )
+218 | |         from kriya.control.workspace_identity import workspace_identity
+219 | |         from kriya.core.llm import is_local_url
+220 | |         from kriya.workflow.checkpoint import compute_base_commit, compute_tree_hash
+    | |____________________________________________________________________________________^
+221 |
+222 |           state = load_control_state(workspace_path)
+    |
+help: Organize imports
+    |
+215 |         from kriya.control.persistence import (
+    -             load_artifact_registry, load_contract_registry, load_control_state,
+216 +             load_artifact_registry,
+217 +             load_contract_registry,
+218 +             load_control_state,
+219 |         )
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> kriya/cli.py:762:5
+    |
+760 |           return
+761 |
+762 | /     from kriya.control.workspace_identity import workspace_identity
+763 | |     from kriya.mcp.invocation_approval import (
+764 | |         default_local_approval_path, is_tool_approved, load_approval_artifact,
+765 | |     )
+    | |_____^
+766 |
+767 |       workspace_root = _mcp_workspace_root()
+    |
+help: Organize imports
+    |
+763 |     from kriya.mcp.invocation_approval import (
+    -         default_local_approval_path, is_tool_approved, load_approval_artifact,
+764 +         default_local_approval_path,
+765 +         is_tool_approved,
+766 +         load_approval_artifact,
+767 |     )
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> kriya/cli.py:821:5
+    |
+819 |           return
+820 |
+821 | /     from kriya.control.workspace_identity import workspace_identity
+822 | |     from kriya.mcp.invocation_approval import (
+823 | |         add_approval, default_local_approval_path, empty_artifact, load_approval_artifact,
+824 | |         save_approval_artifact,
+825 | |     )
+    | |_____^
+826 |
+827 |       workspace_root = _mcp_workspace_root()
+    |
+help: Organize imports
+    |
+822 |     from kriya.mcp.invocation_approval import (
+    -         add_approval, default_local_approval_path, empty_artifact, load_approval_artifact,
+823 +         add_approval,
+824 +         default_local_approval_path,
+825 +         empty_artifact,
+826 +         load_approval_artifact,
+827 |         save_approval_artifact,
+    |
+
+I001 [*] Import block is un-sorted or un-formatted
+   --> kriya/cli.py:893:5
+    |
+891 |           return
+892 |
+893 | /     from kriya.mcp.invocation_approval import (
+894 | |         default_local_approval_path, load_approval_artifact, remove_approvals_for_identity,
+895 | |         save_approval_artifact,
+896 | |     )
+    | |_____^
+897 |
+898 |       workspace_root = _mcp_workspace_root()
+    |
+help: Organize imports
+    |
+893 |     from kriya.mcp.invocation_approval import (
+    -         default_local_approval_path, load_approval_artifact, remove_approvals_for_identity,
+894 +         default_local_approval_path,
+895 +         load_approval_artifact,
+896 +         remove_approvals_for_identity,
+897 |         save_approval_artifact,
+    |
+
+F823 Local variable `sys` referenced before assignment
+    --> kriya/cli.py:2441:13
+     |
+2439 |                 fg="red", err=True,
+2440 |             )
+2441 |             sys.exit(1)
+     |             ^^^
+2442 |
+2443 |         import sys
+     |
+
+F401 [*] `kriya.config.authority.compute_violations` imported but unused
+    --> kriya/cli.py:2556:40
+     |
+2554 |     value) and whether an existing local approval currently covers them.
+2555 |     Read-only - never writes anything, never itself approves."""
+2556 |     from kriya.config.authority import compute_violations
+     |                                        ^^^^^^^^^^^^^^^^^^
+2557 |     from kriya.config.authority_approval import (
+2558 |         default_local_approval_path,
+     |
+help: Remove unused import: `kriya.config.authority.compute_violations`
+     |
+2555 |     Read-only - never writes anything, never itself approves."""
+     -     from kriya.config.authority import compute_violations
+2556 |     from kriya.config.authority_approval import (
+     |
+
+Found 6 errors.
+[*] 5 fixable with the `--fix` option.

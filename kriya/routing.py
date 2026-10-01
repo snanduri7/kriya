@@ -34,6 +34,7 @@ from typing import Dict, List, Optional, Tuple
 
 from kriya.config import AppConfig
 from kriya.core.llm import LLMClient
+from kriya.memory.embedding import EmbeddingError
 from kriya.memory.vector import OllamaEmbeddingClient
 
 UNROUTABLE = "unroutable"
@@ -181,7 +182,8 @@ class Router:
     def __init__(self, cfg: AppConfig):
         self._cfg = cfg
         self._embed_client = OllamaEmbeddingClient(
-            base_url=cfg.embedding.base_url, model=cfg.routing.embed_model
+            base_url=cfg.embedding.base_url, model=cfg.routing.embed_model,
+            egress_policy=cfg.autonomy.egress_policy,
         )
         self._llm_client = LLMClient(cfg)
         self._centroids: Optional[Dict[str, List[float]]] = None
@@ -191,8 +193,16 @@ class Router:
             return
         centroids: Dict[str, List[float]] = {}
         for command, phrases in _EXEMPLARS.items():
-            embeddings = await self._embed_client.get_embeddings(phrases, is_query=False)
-            if not embeddings or not embeddings[0] or all(v == 0.0 for v in embeddings[0]):
+            try:
+                embeddings = await self._embed_client.get_embeddings(phrases, is_query=False)
+            except EmbeddingError as error:
+                raise RoutingModelUnavailable(
+                    f"Could not fetch embeddings from routing.embed_model="
+                    f"'{self._cfg.routing.embed_model}' at {self._cfg.embedding.base_url} ({error}). "
+                    f"Pull it first (e.g. `ollama pull {self._cfg.routing.embed_model}`) "
+                    "or set routing.enabled: false."
+                ) from error
+            if not embeddings or not embeddings[0]:
                 raise RoutingModelUnavailable(
                     f"Could not fetch embeddings from routing.embed_model="
                     f"'{self._cfg.routing.embed_model}' at {self._cfg.embedding.base_url}. "
@@ -205,7 +215,10 @@ class Router:
 
     async def _rank(self, text: str) -> List[Tuple[str, float]]:
         await self._ensure_fitted()
-        query_embedding = await self._embed_client.get_embedding(text, is_query=True)
+        try:
+            query_embedding = await self._embed_client.get_embedding(text, is_query=True)
+        except EmbeddingError as error:
+            raise RoutingModelUnavailable(f"routing query embedding unavailable ({error})") from error
         scored = [(command, _cosine(query_embedding, centroid)) for command, centroid in self._centroids.items()]
         scored.sort(key=lambda pair: pair[1], reverse=True)
         return scored

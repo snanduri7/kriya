@@ -1,0 +1,1 @@
+{"adapter": "v1", "model": "qwen3-coder:30b-kriya-e52213655394", "case": {"capability": "over_context_refusal", "status": "FAIL", "evidence": {"context_window": 32768, "target_prompt_tokens": 40960, "refused": false, "answered_from_reported_prompt_tokens": 16386, "finish_reason": "length"}, "measured": {}, "elapsed_seconds": 56.561}, "saved": false}

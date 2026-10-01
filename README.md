@@ -36,7 +36,8 @@ Kriya runs entirely on **local infrastructure** — local LLMs, local tools, loc
 - **LSP Grounding for Java retries** (automatic, no config): when `jdtls` (`brew install jdtls`) is on PATH, a Developer retry for a Java file gets checked against the project's real, resolved type graph — deterministic ground truth for import-path/symbol mistakes a model's own knowledge or a prose skill rule may not reliably apply, framed forcefully in the prompt as confirmed fact, not a suggestion. Entirely optional — not found, or fails to start, and generation proceeds exactly as before, zero errors. Never gates a Quality Gate on its own. `kriya doctor` reports whether it was found. See `docs/design.md` §2.3.4a.
 - **Per-Rule Verification Provenance**: a skill's `verified` flag is skill-level, but a passing run usually only exercises a handful of its actual rules. Kriya separately tracks each individual rule extracted from a skill gap or live lookup as unverified until it's specifically part of a passing run's context — `kriya skills show` flags them inline (`[unverified]`), and generation prompts show them in a distinct section so the model treats them with appropriate caution rather than as equally authoritative as long-standing, battle-tested rules. No `rules.txt` format change — pre-existing content is untouched.
 - **Per-Role Model Selection** (`agent_llms`, optional — every role defaults to your primary `llm`): Planner, Architect, Reviewer, RunVerifier, and SkillGapAgent can each be pointed at a different local model, each with its own independent escalation chain. **Only configure genuinely different models per role if your machine can keep all of them loaded simultaneously** — measured directly, alternating between different models on a machine that can't made a real run ~3.8x *slower*, not faster, because every switch pays Ollama's full model-reload cost. Leave this unset, or point every role at the same model, to guarantee zero reload overhead.
-- **Resumable Runs** (`generate --resume` / `fix --resume`): a checkpoint is saved after each stage (Plan, Design, Developer-passed-Quality-Gates) so a killed or crashed run doesn't force starting over — `--resume` picks up the latest checkpoint for the workspace, `--resume-id <id>` a specific one. Resume is opt-in only (never inferred from goal text) and strict: any drift in the workspace's git state, the resolved config, or the goal/error text since the checkpoint was saved invalidates it entirely, falling back to a fresh run with a warning rather than a partial resume. Checkpoints are deleted on normal completion and only ever survive a kill/crash. Requires the workspace to be a git repository.
+- **Resumable Runs** (`generate --resume` / `fix --resume`): a checkpoint is saved after each stage (Plan, Design, Developer-passed-Quality-Gates) so a killed or crashed run doesn't force starting over — `--resume` picks up the latest checkpoint for the workspace, `--resume-id <id>` a specific one. Resume is opt-in only (never inferred from goal text) and keeps only what nothing has invalidated: a workspace, config, goal, skill or Kriya-version change means a fresh run; a plan or authority change re-plans; a containment/toolchain/verification change keeps the candidate but reruns its gates; a change of model identity alone drops nothing; terminal regression always runs. Checkpoints are deleted on normal completion. Requires the workspace to be a git repository.
+- **Crash-Safe Commits and Recovery** (`kriya runs status|recover|prune`): every write into the workspace is recorded first as durable commit evidence (exact before/after bytes per file). After a crash mid-commit, every mutating command refuses to start until `kriya runs recover` settles what the evidence proves — `--complete-partial` finishes a half-applied, commit-eligible candidate; there is no guessed rollback, and a recovered run is never reported as a success.
 - **Autonomy Guardrails**:
   - Automatically flags modifications touching sensitive paths (e.g. `.env`, credentials, workflows).
   - Triggers interactive TTY-isolated `[y/n]` confirmation in the CLI if risk thresholds (line limits or sensitive paths) are hit, bypassing piped stream collisions.
@@ -45,6 +46,16 @@ Kriya runs entirely on **local infrastructure** — local LLMs, local tools, loc
 - **MCP Tool Server**: Integrates native tool sets into workspace workflows as a standardized MCP server (via the `mcp` SDK's `MCPServer`).
 - **Interactive Session** (`kriya repl`, or just bare `kriya`/`kriya -c kriya.yaml` on a real terminal): a persistent process for issuing several commands in a row instead of restarting the CLI each time — a boxed, multi-line-capable prompt (via `prompt_toolkit`), with `--config` applied automatically to every command. Bare invocation only starts the session on an actual interactive terminal (checked via `sys.stdin.isatty()`) — piped/non-TTY input (scripts, CI) falls back to today's help text instead, so nothing hangs waiting on stdin by accident. Deliberately thin: each typed line dispatches straight into the exact same command group the regular one-shot CLI uses, so there's no separate parser or duplicated logic to drift out of sync. Type `/` to see every command Kriya supports, filtered live as you keep typing.
   - **Natural-language routing** (`routing.enabled`, on by default): type plain English instead of an explicit command inside the session — Kriya routes it to the right command (`generate`/`ask`/`fix`/`review`/`analyze`/`skills`) via an embeddings classifier plus a narrow LLM in-scope gate, asking which you meant if it's not confident rather than guessing, and saying so plainly if it's not something Kriya does (installing packages, deploying, git operations, and similar stay explicitly out of scope). Explicit commands are unaffected either way - routing only activates when a typed line's first word isn't already a real command name. Needs `ollama pull embeddinggemma` — a separate, dedicated embedding model from whatever `embedding.model` you use for code search, since it measurably outperformed the packaged default at this specific short-phrase classification task; if it isn't pulled, routing fails loudly with the exact pull command needed and disables itself for the rest of the session (or set `routing.enabled: false` to opt out entirely). See `spikes/version_b_routing/README.md` for the feasibility investigation this was validated against.
+- **Milestone-Based Goal Decomposition** (`kriya plan-milestones` + `kriya generate --from-milestones`, opt-in): decomposes one large goal into an ordered sequence of small, independently executable and verifiable vertical slices — sliced by observable runtime behavior, never by code structure ("write these classes") or the goal's own numbered layers/phases. `plan-milestones` writes the proposed plan to a file for you to review/hand-edit first; nothing executes until you run `generate --from-milestones` against it. Each milestone runs through the existing, unmodified Quality Gates loop against the same growing workspace, with a dependency-drop guard (catches a later milestone silently regressing an earlier one's `pom.xml` dependencies) and a replay step that re-verifies every completed milestone's own runtime behavior before a final integration pass. See "Milestone-Based Goal Decomposition" in the Usage Guide below.
+- **Fail-Closed Repair Protocol**: a retry-mode Developer completion must return one of three explicit, structurally-required shapes — a `SEARCH:`/`REPLACE:` anchored patch, an explicit `FILE CONTENT:` block, or `NO CHANGE NEEDED` — or it's rejected as malformed before ever touching disk or a quality gate, instead of ambiguous prose being silently treated as source code. Backed by explicit `create_full_file`/`repair_with_patch`/`repair_with_full_file`/`no_change_assessment` response contracts checked before attribution or writes; a whole batch is committed atomically (revision-grounded, SHA-256-checked against the file it's patching) so a quality gate never sees a partially-applied response.
+- **Generation Manifest & Dependency-Aware Invalidation**: the Architect's design is converted into a stack-neutral manifest (build/model/source/configuration/entrypoint/test/documentation/asset roles, each with its own direct dependencies) so generation order is dependency-correct (build files before the source that needs them) instead of alphabetical. After a real compile succeeds, Kriya records exactly which file revisions were validated; a later edit invalidates only that file and its transitive dependents, so an unrelated already-validated file is never needlessly regenerated. When a narrow retry is exhausted, broadening goes to this dependency closure first, before paying for a full regeneration.
+- **Executable-Test Selection & Zero-Test Detection**: a "targeted test" must actually be a runnable test artifact (pytest/Maven/Gradle/RSpec/minitest file-naming conventions), not just any path under a test directory — a package `__init__.py`/`conftest.py` is never mistaken for the real test. A test run that deterministically reports zero tests executed is treated as a distinct `test_selection`/`test_acceptance` failure (with an immediate full-suite fallback, no extra LLM call), not silently accepted as passing just because nothing failed.
+- **Static Pre-Checks** (`kriya/workflow/static_checks.py`, always on, zero LLM calls): six deterministic, conservative scans of everything the Developer just wrote, run before the expensive compile gate — each added after a specific confirmed live failure, not speculatively. Catches: Apache Ignite's two startup mechanisms mixed in one app; the same `IgniteSpringBean` Spring XML resource loaded via `ClassPathXmlApplicationContext` more than once in one file (real XML parsing, not a text match — each load auto-starts the same Ignite node, so a second throws a deterministic "already been started" exception); an `Ignition.start()` left unclosed (hangs the JVM indefinitely); Kriya's own `[VERIFICATION]` marker text embedded unprinted; a generated test asserting empty stdout that structurally contradicts the same entrypoint's required verification marker; and a `.html`/`.htm` file with no actual HTML tag anywhere in it (catches a sibling file's content landing under the wrong filename during a repair).
+- **Model-Capability-Aware Generation** (`llm.capabilities`, auto-detected defaults): local-model protocol capabilities (native tool calls, JSON mode, streaming, reliable multiline JSON, preferred edit protocol) are explicit, measured configuration — never inferred from API response shape — so generation, JSON-mode requests, and patch-vs-full-file preference adapt to what a configured model can actually do instead of assuming every OpenAI-compatible endpoint behaves identically.
+- **Standalone Planner-Artifact Validation**: when the Planner's own draft is reused directly instead of a fresh Developer call, a conventional-artifact registry checks whether reused content is a genuinely complete standalone instance of an ecosystem file (e.g. a real Maven POM's root element must be `<project>`) — a plausible-looking XML fragment (like a bare `<dependencies>` block) is retained as prose but never accepted as a real `pom.xml`.
+- **Single-Presentation Reviewer**: exactly one Reviewer completion runs per human-approval decision point; the final report is reused (and explicitly logged as reused), never re-requested from the model or re-printed to the terminal/log a second time, so what looks like a duplicate review in your output is never actually a second LLM call.
+- **Control Plane & Structured Execution** (`runtime_profile`, opt-in — off by default): a second layer alongside the pipeline above that classifies how much process a request actually deserves (triage/risk), persists durable per-run state (contracts, artifacts, decisions), and — under `runtime_profile: hardened` — executes a validated plan as bounded, per-subtask work orders with a real per-subtask file-write allowlist and fail-closed verification, instead of one long undifferentiated run. `kriya doctor` reports the current workspace's control-plane state regardless of whether this is enabled. See `docs/design.md` §8 and `docs/user_guide.md` §2.2 for the full picture.
+- **Task Correctness Across Revisions** (no separate config — active automatically whenever `runtime_profile: hardened`/`workflow_controller.mode: enforce` runs): tracks whether a structural plan constraint or a dependency-migration's completion facts stay true across plan repairs and retries, not just within one isolated check. A repair that fixes one constraint while silently regressing an already-fixed one is now detected and fed back into the next repair attempt instead of oscillating; a stale or contradictory Goal Spec Compliance verdict can no longer override an already-confirmed deterministic fact for the same requirement; and a recurring invented parallel implementation of an existing file's responsibility is flagged rather than repeatedly re-patched. See `docs/design.md` §9.
 
 ---
 
@@ -114,6 +125,33 @@ Ensure local Ollama models and server links are connected:
 Exits non-zero if any check reports `[ERROR]` (e.g. LLM/embedding server unreachable), so it's safe to gate scripts on (`kriya doctor && kriya generate ...`). A `[WARNING]` (e.g. configured model not found in the server's list, or a Java/Maven toolchain version mismatch - see below) doesn't affect the exit code.
 
 If `java` and/or `mvn` are found on PATH, `doctor` also reports which JDK major version each will actually build/run against and warns if they differ - `mvn` can silently resolve a different JDK than plain `java` (e.g. a Homebrew Maven install defaulting `JAVA_HOME` to its own openjdk), which can make a JVM startup flag correct for one JDK a fatal error under the other. Skipped entirely (no warning) if neither tool is found - not every project is Java-based.
+
+Before a production mutation run, use the stricter deployment gate:
+
+```bash
+.venv/bin/kriya -c operator-production.yaml --trust-file /secure/kriya-trust.json doctor --production
+.venv/bin/kriya -c operator-production.yaml --trust-file /secure/kriya-trust.json doctor --production --json
+```
+
+Production mode emits stable check IDs with `PASS`, `WARN`, `FAIL`, or
+`UNAVAILABLE`, evidence, and remediation. Any required `FAIL` or `UNAVAILABLE`
+returns a nonzero exit status. It checks the sealed production profile, core
+plugins, the workspace lock (probed, never taken), checkpoint/trace store
+writability and capacity, Git worktrees and the real candidate-isolation
+mechanism (on a throwaway repository), the project toolchain as production
+containment runs it (the versioned OCI image, attested in place, never pulled),
+an OCI smoke command through the configured containment backend (no route off
+loopback, no capabilities, `no-new-privileges`, no leftover container), that
+required containment cannot fall back to the host, egress (policy, registry
+allowlist, and every model endpoint local), local-model connectivity, embeddings,
+optional LSP, role-model independence, the semantic-region precision boundary,
+and release integrity. The PRD-009 fixed guarantees are derived from the checks
+that verify them. The model checks require the exact runtime fingerprint of the
+served model (PRD-013) and a current qualification record for every model each
+production role can call (PRD-014, `kriya model qualify`): a model name is never
+a qualification. If the configuration cannot load, `--json` still emits a report
+(a single failing `config.load` check). The doctor never changes configuration,
+installs tools, pulls images, or creates workspace state.
 
 ### Inspect Resolved Configuration
 Print the fully-merged config (defaults + your `kriya.yaml`) as JSON - useful for confirming what a relative path or config layer actually resolved to:
@@ -188,6 +226,21 @@ Generate or refactor code autonomously based on a goal:
 ```
 Resume is opt-in only - never automatic - and strict: if the workspace's git state, the resolved config, or the goal/error text has changed at all since the checkpoint was saved, Kriya refuses to resume and starts a fresh run instead (with a warning), rather than attempting a partial or best-effort resume. A checkpoint is deleted the moment its run completes normally (success or an explicit rejection) - it only survives on disk after a kill or crash. Requires the workspace to be a git repository (needed to reliably detect whether anything changed).
 
+### Milestone-Based Goal Decomposition
+For a goal too large to reliably fit in one `generate` call - a fixed token budget forces reasoning and content to compete, and the highest-risk code (integration/wiring logic) is often the last thing written, so it's the first thing cut off when the budget runs out - decompose it into small, independently executable and verifiable vertical slices first:
+```bash
+# Step 1: propose a plan. Nothing executes - this only writes a plan file for you to review.
+.venv/bin/kriya plan-milestones "Build a Java app combining an embedded Ignite cache and a Qpid AMQP broker, wired together"
+```
+Kriya writes the proposed milestones to `.kriya/milestones/<group_id>.plan.json` and prints each one's goal and success criterion. Review it, hand-edit the file directly if a slice looks wrong (merge two milestones, reorder them, tighten a success criterion), then execute the (possibly edited) plan:
+```bash
+# Step 2: execute the plan - one real `generate` call per milestone against the same growing workspace.
+.venv/bin/kriya generate --from-milestones .kriya/milestones/<group_id>.plan.json -y
+```
+Each milestone runs through the exact same, unmodified Developer + Quality Gates loop as an ordinary `generate` call, applied to the same workspace so each milestone sees every prior one's real, already-applied output. Two extra checks run that a single-goal `generate` call doesn't need: a dependency-drop guard (fails a milestone outright if it silently drops a Maven dependency an earlier milestone established) and a replay step, before the final integration pass, that re-executes every completed milestone's own captured verification command and re-checks its `[VERIFICATION]` marker against the *current* workspace state - catching a later milestone that quietly broke an earlier one's behavior, which the end-of-run regression suite (framework tests only) doesn't cover. If a milestone exhausts its own retry budget, you're asked whether to abandon (keep what already applied) or retry it from scratch - a later milestone is never built on top of a known-broken one. The whole sequence is resumable: re-running the same `generate --from-milestones <file>` command picks up from the last completed milestone via a sidecar state file, rather than restarting the sequence.
+
+Deliberately opt-in, never automatic goal-size detection - the Milestone Planner's own slicing quality has to earn your trust goal by goal, and auto-triggering on every "large-looking" goal would silently change behavior for every existing user with no proven size heuristic behind it.
+
 ### Manage Engineering Skills
 List, inspect, and maintain the verification status of skills:
 ```bash
@@ -212,7 +265,7 @@ A separate, deliberately excluded tier (`tests/test_live_smoke.py`, marked `live
 ```bash
 .venv/bin/pytest -m live_model
 ```
-CI runs this tier in a separate, non-blocking job (`.github/workflows/ci.yml`'s `live-model-smoke`) that installs Ollama and pulls a small model fresh - it exists to catch integration/regression bugs in Kriya's own request/response handling that only a real model response can trigger, not to grade generation quality.
+CI runs the supported primary model in a blocking job and runs a scheduled three-model matrix (`.github/workflows/ci.yml`). These jobs catch integration/regression bugs in Kriya's request/response handling; they do not grade generated-code quality.
 
 ---
 
@@ -244,6 +297,13 @@ llm:
                                             # overrides temperature ONLY for a Developer completion directly
                                             # responding to a real prior Quality Gate failure.
   context_window: 32768                    # Used for context-budget allocation, not sent to the server
+  capabilities:                            # Measured local-model protocol capabilities, never inferred from API
+    native_tool_calls: true                # shape. Defaults shown are correct for most modern OpenAI-compatible
+    json_mode: true                        # local servers (Ollama, LM Studio) - override only for a model/server
+    reliable_multiline_json: false         # you've confirmed behaves differently (e.g. can't reliably emit JSON
+    streaming: true                        # with embedded newlines).
+    max_tool_argument_chars: 8192
+    preferred_edit_protocol: "small_native_tools"
 
 # Ordered fallback/escalation chain, tried after llm above on a Quality Gate failure.
 # reasoning: false here matters - escalating to a reasoning model was measured to cost
@@ -281,6 +341,9 @@ autonomy:
   self_correction_loop_enabled: false      # Opt-in: a bounded native-tool-calling micro-loop on a compile failure
   self_correction_loop_max_turns: 4
   best_of_n_first_attempt: 1               # >1 tries that many independent candidates for the very first attempt only
+  generation_time_budget_seconds: null     # Set in timeout-bounded harnesses; null keeps normal CLI runs unbounded
+  generation_gate_reserve_seconds: 120     # Time retained for compile/test/runtime gates
+  generation_seconds_per_file_estimate: 90 # Conservative until this run has measured local-model timings
 
 search:
   base_url: ""                             # e.g. "http://localhost:8080" for a self-hosted SearXNG instance
@@ -334,11 +397,30 @@ plugins:
 paths:
   skills: "./skills"
   memory: "./memory"
-  logs: "./logs"
+  state: null         # persistent state (traces.db): KRIYA_STATE_DIR > paths.state > ~/.kriya/state;
+                      # inside a repo it must be beneath .kriya/ (e.g. .kriya/state)
 
+# Set both false for a reproducible plain-Kriya run using only paths.skills above -
+# load_global also pulls in Kriya's own shared skill library, load_cwd pulls in any
+# skills directory sitting in your current working directory beyond paths.skills.
+skills:
+  load_global: true
+  load_cwd: true
+
+# kriya.log and run logs never land in the directory you run from. Log directory:
+# KRIYA_LOG_DIR env var > logging.directory (absolute path) > ~/.kriya/logs.
+# Application log: <dir>/kriya.log; each mutating run also gets
+# <dir>/runs/<run_id>/kriya.log.
+# Existing ./logs directories are left in place, never migrated or deleted.
+# Run history (traces.db, `kriya traces`) is state, not logs: it lives in the
+# state directory (paths.state above), independent of logging settings.
+# Workspace run control state (.kriya/: run lock, run records, checkpoints)
+# stays in the workspace - crash recovery depends on it.
 logging:
   level: "INFO"
-  file: "./logs/kriya.log"
+  directory: null
+  file_enabled: true
+  run_file_enabled: true
 
 # Stage 0 KnowledgeGuard - scans a goal for library/version mentions that postdate
 # training_cutoff before generation starts.
@@ -350,3 +432,50 @@ knowledge:
 # Per-project MCP servers - empty by default, e.g. {"my_server": {"command": "...", "args": [...]}}
 mcp: {}
 ```
+
+
+### Release integrity (PRD-002)
+
+The canonical core plugin remains at `plugins/core_tools`. Wheels include that
+namespace package and `kriya/config/default_config.yaml`; the existing loader and
+installation-relative default paths are unchanged. Source distributions also
+include the dependency lock, build manifest, CI workflow and release smoke setup,
+plus every git-tracked file under `plugins/core_tools`, `scripts`, `skills` and
+`tests` (`MANIFEST.in` grafts those trees whole). No Git metadata is required at
+runtime. The installed `plugins` directory is a namespace package in
+site-packages; another distribution shipping a top-level `plugins` package would
+share that directory - a known, accepted packaging limitation.
+
+Use Python 3.14 for the existing `requirements.txt` lock; the supported-version
+CI matrix continues to test declared dependency ranges. This change introduces
+no new dependency or parallel lock mechanism.
+
+The build backend (`setuptools`) is pinned inside `requirements.txt` itself
+(`pip-compile --allow-unsafe`). After installing `requirements.txt`, run:
+
+```bash
+python -m kriya.distribution .
+bash scripts/verify_release.sh
+```
+
+Set `KRIYA_PYTHON` to the desired interpreter if necessary. The script builds the
+wheel from the sdist, checks required contents, and via `--source-root` requires each
+artifact's release trees to hold exactly the git-tracked files (the sdist's
+`plugins/core_tools`, `scripts`, `skills`, `tests`; the wheel's `plugins/core_tools`
+and `skills`) - a missing file or an untracked one (a runtime-generated `auto-*` skill,
+`staged_rules.txt`, OS clutter) fails the release. It then creates a clean venv,
+installs locked dependencies and the wheel, checks dependencies, and runs version/
+config/plugins/doctor smoke checks outside the checkout, including loading the bundled
+skill library from the installed wheel.
+
+The bundled skill library (`skills/`: activemq-artemis, binary-wire-protocol,
+ignite-java17, qpid) installs to `site-packages/skills`, the installed Kriya's global
+skills location. Project-specific or auto-generated skills belong in a project's own
+`paths.skills`, never in this shared library. setuptools warns that skill folders whose
+names are valid Python identifiers (e.g. `qpid`, `examples`) are "absent from
+packages"; they are still packaged as data today, and the wheel check above fails the
+release if a future setuptools stops including them. Doctor network endpoints are
+mocked: this proves installation, not live-model readiness. Each run prints its
+disposable environment/evidence directory; retain its build and smoke logs for
+review. Dependency installation requires access to your configured package index.
+The `release-integrity` CI job executes the same command.

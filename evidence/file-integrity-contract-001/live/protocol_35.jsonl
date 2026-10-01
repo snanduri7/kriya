@@ -1,0 +1,24 @@
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 532, "payload_verbatim": true, "applied": true}
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "task": "edit", "kind": "no_change", "reason_code": null, "raw_len": 687}
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 532, "payload_verbatim": true, "applied": true}
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "task": "file", "kind": "file", "reason_code": null, "raw_len": 474, "payload_verbatim": true}
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "task": "file", "kind": "file", "reason_code": null, "raw_len": 463, "payload_verbatim": true}
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "task": "file", "kind": "file", "reason_code": null, "raw_len": 364, "payload_verbatim": true}
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 653, "payload_verbatim": true, "applied": true}
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 608, "payload_verbatim": true, "applied": true}
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 578, "payload_verbatim": true, "applied": true}
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "task": "file", "kind": "file", "reason_code": null, "raw_len": 439, "payload_verbatim": true}
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "task": "file", "kind": "file", "reason_code": null, "raw_len": 478, "payload_verbatim": true}
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "task": "file", "kind": "file", "reason_code": null, "raw_len": 490, "payload_verbatim": true}
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 354, "payload_verbatim": true, "applied": true}
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 333, "payload_verbatim": true, "applied": true}
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "task": "edit", "kind": "invalid", "reason_code": "INVALID_EDIT_PROTOCOL", "raw_len": 334, "raw_head": "FIX ANALYSIS: The current `total` function sums all elements in the `prices` list, including negative numbers. To fix this, we need to add a condition inside the loop to skip any price that is less than zero.\n\nREPLACE:\ndef total(prices):\n    result = 0\n    for p in prices:\n        if p >= 0:\n       "}
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "task": "file", "kind": "file", "reason_code": null, "raw_len": 355, "payload_verbatim": true}
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "task": "file", "kind": "file", "reason_code": null, "raw_len": 366, "payload_verbatim": true}
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "task": "file", "kind": "file", "reason_code": null, "raw_len": 359, "payload_verbatim": true}
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 387, "payload_verbatim": true, "applied": true}
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 395, "payload_verbatim": true, "applied": true}
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 410, "payload_verbatim": true, "applied": true}
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "task": "file", "kind": "file", "reason_code": null, "raw_len": 412, "payload_verbatim": true}
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "task": "file", "kind": "file", "reason_code": null, "raw_len": 375, "payload_verbatim": true}
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "task": "file", "kind": "file", "reason_code": null, "raw_len": 346, "payload_verbatim": true}

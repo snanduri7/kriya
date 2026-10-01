@@ -1,0 +1,25 @@
+KILLED                   restore largest-block selection: FAILED tests/test_file_integrity_contract_001.py::test_issue1_prose_around_a_fence_is_refused_not_guessed
+KILLED                   restore broad gutter regex: FAILED tests/test_file_integrity_contract_001.py::test_issue2_3_4_payload_that_resembles_gutters_xml_comments_or_markers_is_byte_identical[pkg/codes.py]
+KILLED                   restore XML payload rewrite: FAILED tests/test_file_integrity_contract_001.py::test_issue2_3_4_payload_that_resembles_gutters_xml_comments_or_markers_is_byte_identical[src/App.java]
+KILLED                   loosen FILE CONTENT: FAILED tests/test_file_integrity_contract_001.py::test_issue4_file_content_marker_must_be_an_exact_line
+KILLED                   loosen NO CHANGE NEEDED: FAILED tests/test_file_integrity_contract_001.py::test_issue5_no_change_phrase_in_source_keeps_the_mutation
+KILLED                   loosen marker regex: FAILED tests/test_file_integrity_contract_001.py::test_fuzz_legacy_payload_with_marker_words_that_are_not_exact_lines[0]
+KILLED                   reintroduce errors=replace: FAILED tests/test_file_integrity_contract_001.py::test_issue7_unrepresentable_files_are_refused_and_left_untouched[# caf\xe9\nx = 1\n-UNSUPPORTED_TEXT_ENCODING]
+KILLED                   use splitlines(): FAILED tests/test_file_integrity_contract_001.py::test_issue7_edits_preserve_encoding_newlines_and_final_newline[a = 1\r\nb = 2\r\nc = 3\r\n-b = 2-b = 20-a = 1\r\nb = 20\r\nc = 3\r\n]
+KILLED                   normalize CRLF: FAILED tests/test_file_integrity_contract_001.py::test_issue7_edits_preserve_encoding_newlines_and_final_newline[a = 1\r\nb = 2\r\nc = 3\r\n-b = 2-b = 20-a = 1\r\nb = 20\r\nc = 3\r\n]
+KILLED                   discard final newline: FAILED tests/test_file_integrity_contract_001.py::test_issue7_edits_preserve_encoding_newlines_and_final_newline[a = 1\r\nb = 2\r\nc = 3\r\n-b = 2-b = 20-a = 1\r\nb = 20\r\nc = 3\r\n]
+KILLED                   use substring anchor: FAILED tests/test_file_integrity_contract_001.py::test_issue8_9_anchor_failures_are_typed[limit = 10\nprint(limit)\n-it = 1-ANCHOR_NOT_FOUND]
+KILLED                   permit empty SEARCH: FAILED tests/test_file_integrity_contract_001.py::test_issue8_9_anchor_failures_are_typed[a = 1\n--EMPTY_SEARCH_BLOCK]
+KILLED                   permit duplicate match selection: FAILED tests/test_file_integrity_contract_001.py::test_issue8_9_anchor_failures_are_typed[x = 1\ny = 2\nx = 1\n-x = 1-ANCHOR_AMBIGUOUS]
+KILLED                   permit overlapping edits: FAILED tests/test_file_integrity_contract_001.py::test_issue9_overlapping_edits_are_refused
+KILLED                   drop indentation-style check: FAILED tests/test_file_integrity_contract_001.py::test_issue9_tolerant_match_reindents_deterministically_and_keeps_blank_lines
+KILLED                   bypass source digest check: FAILED tests/test_file_integrity_contract_001.py::test_issue10_a_source_changed_since_authorization_is_refused
+KILLED                   text-based (lossy) revision identity: FAILED tests/test_file_integrity_contract_001.py::test_issue7_edits_preserve_encoding_newlines_and_final_newline[a = 1\r\nb = 2\r\nc = 3\r\n-b = 2-b = 20-a = 1\r\nb = 20\r\nc = 3\r\n]
+KILLED                   allow direct pom.xml write: FAILED tests/test_file_integrity_contract_001.py::test_issue11_a_repository_pom_is_never_rewritten_behind_the_gates
+KILLED                   allow post-verification mutation: FAILED tests/test_file_integrity_contract_001.py::test_verified_bytes_equal_committed_bytes_or_the_commit_is_uncertain
+KILLED                   disable worktree/candidate equivalence: FAILED tests/test_file_integrity_contract_001.py::test_worktree_bytes_must_equal_the_staged_candidate_before_verification
+KILLED                   non-NUL git status parsing: FAILED tests/test_file_integrity_contract_001.py::test_issue12_sync_copies_every_uncommitted_change_exactly
+KILLED                   drop post-sync digest check: FAILED tests/test_file_integrity_contract_001.py::test_issue12_sync_content_mismatch_fails_closed
+KILLED                   sync failure non-fatal: FAILED tests/test_file_integrity_contract_001.py::test_issue12_sync_failure_fails_closed
+KILLED                   materialize a candidate symlink: FAILED tests/test_file_integrity_contract_001.py::test_a_candidate_symlink_is_never_materialized_as_a_file
+killed 24 / 24

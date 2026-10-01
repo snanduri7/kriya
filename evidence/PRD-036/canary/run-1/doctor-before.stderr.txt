@@ -1,0 +1,4 @@
+2026-09-29 02:54:33,392 INFO kriya.workflow.worktree: Workspace '/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/kriya-doctor-isolation-wfn4_pyn' is not a Git repository; initializing the greenfield repository before creating its isolated worktree.
+2026-09-29 02:54:35,934 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3-coder:30b, Source: explicit_primary, native_tool_calls=True, json_mode=True, reliable_multiline_json=False, preferred_edit_protocol=small_native_tools]
+2026-09-29 02:54:36,050 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3.6:35b-a3b-q4_K_M, Source: known_production_profile, native_tool_calls=True, json_mode=True, reliable_multiline_json=True, preferred_edit_protocol=small_native_tools]
+2026-09-29 02:54:36,379 INFO httpx: HTTP Request: POST http://localhost:11434/v1/embeddings "HTTP/1.1 200 OK"

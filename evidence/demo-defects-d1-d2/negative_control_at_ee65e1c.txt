@@ -1,0 +1,8 @@
+=========================== short test summary info ============================
+FAILED tests/test_jdtls_candidate_isolation.py::test_the_mirror_holds_the_candidates_source_and_never_writes_the_candidate
+FAILED tests/test_jdtls_candidate_isolation.py::test_candidate_paths_map_to_canonical_mirror_paths_and_nothing_outside
+FAILED tests/test_jdtls_candidate_isolation.py::test_jdtls_is_rooted_at_the_private_mirror_never_the_candidate
+FAILED tests/test_jdtls_candidate_isolation.py::test_the_real_jdtls_analyses_without_any_candidate_write
+4 failed in 5.48s
+ImportError while importing test module '/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/tests/test_runtime_maven_acquisition.py'.
+E   ImportError: cannot import name 'MAVEN_PLUGIN_UNAVAILABLE' from 'kriya.workflow.acceptance' (/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/acceptance.py)

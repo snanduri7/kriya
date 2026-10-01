@@ -1,0 +1,40 @@
+
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/attempt.py:3072: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    if grade.get("passed"):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/kriya/workflow/attempt.py:3097: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    f"{grade.get('reasoning', '')}"
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts
+tests/test_workflow.py::test_run_attempt_cleans_up_runtime_artifacts_between_attempts_without_git
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/.venv/lib/python3.14/site-packages/_pytest/stash.py:108: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    del self._storage[key]
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_targeted_byte_identical_edit_cannot_erase_authoritative_locator
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:2682: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    def __getattr__(self, attr):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_workflow.py::test_prd025_real_grader_receives_bounded_package_with_middle_marker
+  /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/tests/test_workflow.py:14607: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    await run_attempt(GenerationState(), ctx)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+7555 passed, 72 deselected, 162 warnings in 1754.40s (0:29:14)

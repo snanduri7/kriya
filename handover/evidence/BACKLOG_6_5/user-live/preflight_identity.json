@@ -1,0 +1,9 @@
+{
+  "effective_context_window": 32768,
+  "expected_context_window": 32768,
+  "model": "qwen3-coder:30b",
+  "problems": [],
+  "qualification": "QUALIFIED",
+  "runtime_digest": "ea90552d45f9c181a06512eb628adf89e138f25ce58b38ff54c0789e58264276",
+  "runtime_exact": true
+}

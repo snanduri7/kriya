@@ -3,6 +3,7 @@ import logging
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from _fake_embedding import native_embed_response
 from click.testing import CliRunner
 
 from kriya.analyzer.analyzer import RepositoryAnalyzer
@@ -46,8 +47,7 @@ def test_analyze_stdout_is_clean_json_with_no_progress_chrome(tmp_path):
          patch("kriya.core.llm.LLMClient.complete", new=AsyncMock(return_value="{}")):
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"data": [{"embedding": [0.1] * 384}]}
-        mock_post.return_value = mock_response
+        mock_post.side_effect = native_embed_response(384)
 
         cfg = AppConfig()
         cfg.paths.memory = str(tmp_path / "memory")
@@ -84,8 +84,7 @@ async def test_analyze_changed_on_non_git_dir_warns_and_indexes_everything(tmp_p
     with patch("httpx.AsyncClient.post") as mock_post:
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"data": [{"embedding": [0.1] * 384}]}
-        mock_post.return_value = mock_response
+        mock_post.side_effect = native_embed_response(384)
 
         indexed_files = []
 
@@ -93,7 +92,7 @@ async def test_analyze_changed_on_non_git_dir_warns_and_indexes_everything(tmp_p
             indexed_files.append(filepath)
 
         with caplog.at_level(logging.WARNING):
-            await analyzer.index_repository(cfg, changed=True, progress_callback=progress_cb)
+            await analyzer.index_repository(cfg, generate_conventions_skill=False, changed=True, progress_callback=progress_cb)
 
     assert any("requires a git repository" in r.message for r in caplog.records)
     assert any("main.py" in f for f in indexed_files)

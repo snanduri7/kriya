@@ -1,0 +1,2 @@
+variant=current before=[] new_state=[]
+diagnostics_returned=1 first=The method missing() is undefined for the type A

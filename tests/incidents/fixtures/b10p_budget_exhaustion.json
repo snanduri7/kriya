@@ -1,0 +1,1 @@
+{"incident":"b10p_budget_exhaustion","retry_count":4,"max_retries":4,"targeted_retry_count":3,"targeted_max_retries":3,"fallback_targeted_attempted":true,"expected_action":"stop_exhausted"}

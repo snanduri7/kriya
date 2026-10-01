@@ -1,0 +1,1674 @@
+"""PRD-014: exact local model runtime qualification.
+
+A qualification record is evidence that ONE exact runtime (a PRD-013
+``ModelRuntimeFingerprint`` digest), called with ONE set of inference
+settings (``kriya/core/inference_settings.py``: temperature, reasoning flag,
+reasoning_effort, sampling options and every other ``extra_body`` field
+except the per-call ``num_ctx``), passed the protocol cases Kriya uses with
+it, under one Kriya protocol-adapter version and one qualification policy
+version. It is never inferred from a model's name or benchmark reputation.
+Records are keyed by the qualification identity (runtime digest + settings
+digest, MODEL-QUAL-IDENTITY-001), so a record qualified with
+``reasoning_effort: none`` never qualifies the same runtime called without it.
+
+Functional evidence (every case but ``ENVIRONMENT_DEPENDENT_CAPABILITIES``)
+belongs to the runtime + settings. Capacity evidence (``context_capacity``)
+also depends on the machine serving the runtime, so a record keeps it per
+execution-environment digest (``environment_evidence``,
+kriya/core/execution_environment.py) and it counts only in that exact
+environment: a 64K FAIL on one machine never blocks, and a 64K PASS on
+another never qualifies, a different one. Re-qualifying in a new environment
+adds its evidence next to the others'.
+
+- Every case yields PASS, FAIL or UNAVAILABLE with its evidence. UNAVAILABLE
+  is never PASS.
+- A runtime that is not ``exact`` (artifact digest and provider version
+  known) cannot be qualified at all.
+- A record is STALE when the runtime fingerprint, the inference settings,
+  the protocol adapter version or the policy version differs from the
+  current one; a stale record qualifies nothing and its measured limits are
+  not used. A policy-/2 record (keyed by the runtime digest alone, from
+  before inference settings were part of the identity) is still found and
+  reported STALE, never MISSING, and is never silently reinterpreted.
+- Records live OUTSIDE any workspace (``~/.kriya/qualifications`` by
+  default, ``KRIYA_QUALIFICATION_HOME`` to override), like SEC-009 and
+  TOOL-002 approvals, so a repository can never ship its own qualification.
+- Production roles require the capabilities Kriya will actually use with
+  them (``required_capabilities``); ``kriya doctor --production`` blocks a
+  role whose exact runtime lacks a current PASS for any of them.
+
+- A larger context window (PRD-016 adaptive budget tier) is a different
+  runtime input, so a different fingerprint: ``kriya model qualify
+  --context-window N`` qualifies it, and it counts as a qualified tier only
+  when that record is current and passes ``context_capacity`` (a real
+  near-window request whose first and last markers both survive) plus
+  every case the model's roles require.
+
+Offline fixture conformance (``model_capabilities.validate_tool_call_sample``
+and the fixture tests of this module's evaluators) stays separate from live
+qualification, which only ``run_qualification`` against a real endpoint
+produces.
+"""
+from __future__ import annotations
+
+import ast
+import asyncio
+import hashlib
+import inspect
+import json
+import math
+import os
+import threading
+import time
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
+
+from kriya.config.config import ModelQualificationConfig
+from kriya.core.execution_environment import (
+    ENVIRONMENT_DEPENDENT_CAPABILITIES,
+    ExecutionEnvironment,
+    environment_for_fingerprint,
+)
+from kriya.core.file_stamp import FileStamp, file_stamp, unchanged_since
+from kriya.core.inference_runtime import ChatRequest, runtime_adapter, runtime_for_binding
+from kriya.core.inference_settings import InferenceSettings, qualification_identity
+from kriya.core.model_runtime import MODEL_PROTOCOL_ADAPTER_VERSION, ModelRuntimeFingerprint
+from kriya.core.provider_contract import (
+    DEFAULT_BYTES_PER_TOKEN_CEILING,
+    PROVIDER_PROMPT_TRUNCATED,
+    QUALIFICATION_IDENTITY_UNVERIFIED,
+    RUNTIME_CONTEXT_IDENTITY_MISMATCH,
+    SERVED_CONTEXT_BELOW_REQUESTED,
+    ProviderContractError,
+    budget_window,
+    consumption_bytes,
+)
+from kriya.platform.filesystem_semantics import PathRelation, path_relation
+
+# /3 (MODEL-QUAL-IDENTITY-001): records are keyed by runtime + inference
+# settings; every /2 record is STALE and must be re-qualified.
+# /4 (PROVIDER-CONTRACT-001): a record binds the EFFECTIVE inference
+# identity - qualification refuses a binding whose settings the provider
+# cannot be shown to apply (QUALIFICATION_IDENTITY_UNVERIFIED), the capacity
+# case goes through the adapter's request plan and checks the served window,
+# and the tokenizer case measures the prompt-consumption ceiling. Every /3
+# record is STALE (its identity was desired, not proven).
+# /5 (FILE-INTEGRITY-CONTRACT-001): the full_file_raw_content and
+# anchored_edit_protocol cases judge the response through the strict
+# protocol parser and the complete-line edit engine (no payload sanitizer,
+# no substring/whitespace-collapsing anchors). A /4 PASS was judged under the
+# old parsing, so every /4 record is STALE.
+# /6 (FILE-INTEGRITY-CONTRACT-001 closure): a record binds the model-facing
+# Developer response protocol identity (strict_legacy_v1 | kriya_sentinel_v1,
+# in the policy digest and the record), and both protocol cases run the
+# configured protocol (full-file content now carries a fenced docstring
+# example). Every /5 record is STALE.
+# /7 (FILE-INTEGRITY-CONTRACT-001 closure): full_file_raw_content measures
+# ONE capability - protocol/payload fidelity. The /6 case also required the
+# model to INVENT a fenced docstring example, confounding instruction-
+# following with fidelity (measured: both pinned models omit an invented
+# docstring fence under both protocols, 0/8, while supplied fence content is
+# preserved 8/8). The prompt now supplies the exact fence-bearing file and
+# the case requires it back byte for byte through the configured protocol.
+# /6 records stay as historical evidence (qwen3.6's /6 NOT_QUALIFIED
+# included) and are STALE under /7. A qualification case tests one named
+# capability; protocol fidelity never depends on model creativity.
+# /8 (PROVIDER-CONTRACT-001A): every role requires over_context_refusal -
+# a prompt larger than the served window must be REFUSED by the provider
+# with a typed PROVIDER_PROMPT_TRUNCATED (and its exact count, when it
+# reports one), never answered from a silently truncated prompt (measured on
+# Ollama 0.34.4 /v1: every over-window prompt is answered from window/2+2
+# tokens; the native API with truncate:false refuses). Every /7 record is
+# STALE; /7 records stay as historical evidence.
+QUALIFICATION_POLICY_VERSION = "kriya-qualification/8"
+QUALIFICATION_SCHEMA_VERSION = 2
+QUALIFICATION_HOME_ENV = "KRIYA_QUALIFICATION_HOME"
+
+PASS, FAIL, UNAVAILABLE = "PASS", "FAIL", "UNAVAILABLE"
+
+QUALIFIED = "QUALIFIED"
+NOT_QUALIFIED = "NOT_QUALIFIED"
+STALE = "STALE"
+MISSING = "MISSING"
+NOT_EXACT = "RUNTIME_NOT_EXACT"
+
+# QUAL-CONFIG-001: the qualification policy (per-case budgets, capacity
+# probe bounds, timing bounds, measurement margins) is configuration
+# (``model_qualification``, kriya/config/config.py); this module holds the
+# mechanics. A record carries the effective policy and its digest, and a
+# record made under another policy is STALE.
+QUALIFICATION_POLICY_SCHEMA = "kriya-qualification-policy/1"
+POLICY_DIGEST_FIELD = "qualification_policy_digest"
+# Records written before QUAL-CONFIG-001 carry no policy digest. Every
+# kriya-qualification/3 record was produced with the literals that are now
+# the defaults (unchanged in git from the /3 bump at 6c163f2 to the change
+# that externalized them), so such a record stands for exactly this digest,
+# pinned here and checked against an explicit table of those literals in
+# tests/test_qual_config_001.py. It never follows later default changes.
+LEGACY_V3_POLICY_DIGEST = "sha256:d9ba816202804271520609d7af0eecc30d9a987b99d8f76467830c7ae8ad5e09"
+
+
+def qualification_policy_of(config: Any) -> ModelQualificationConfig:
+    """The effective qualification policy of ``config`` (defaults when it has none)."""
+    policy = getattr(config, "model_qualification", None) if config is not None else None
+    return policy if isinstance(policy, ModelQualificationConfig) else ModelQualificationConfig()
+
+
+def qualification_policy_digest(policy: ModelQualificationConfig, response_protocol: Optional[str] = None) -> str:
+    """Digest of the values in effect. An unset optional knob (None) is left
+    out, so adding a new, off-by-default knob to the schema does not change
+    the identity of any existing policy (or stale its records).
+    ``response_protocol``: the Developer response protocol identity the
+    protocol cases ran (FILE-INTEGRITY-CONTRACT-001); a record under another
+    protocol is STALE."""
+    payload: Dict[str, Any] = {"schema": QUALIFICATION_POLICY_SCHEMA,
+                               "policy": policy.model_dump(mode="json", exclude_none=True)}
+    if response_protocol is not None:
+        payload["developer_response_protocol"] = response_protocol
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def policy_digest_for(config: Any) -> str:
+    """The digest a record must carry to count under ``config``: its
+    qualification policy and its Developer response protocol identity."""
+    from kriya.agents.response_protocol import response_protocol_identity
+
+    return qualification_policy_digest(qualification_policy_of(config), response_protocol_identity(config))
+
+
+def record_policy_digest(record: Dict[str, Any]) -> str:
+    return record.get(POLICY_DIGEST_FIELD) or LEGACY_V3_POLICY_DIGEST
+
+
+def _current_policy_digest(policy_digest: Optional[str]) -> str:
+    return policy_digest or policy_digest_for(None)
+
+CAPABILITIES: Tuple[str, ...] = (
+    "plain_completion",
+    "finish_reason_stop",
+    "structured_json",
+    "multiline_json",
+    "native_tool_calls",
+    "multiple_tool_calls",
+    "tool_argument_integrity",
+    "streaming_assembly",
+    "output_truncation",
+    "reasoning_behavior",
+    "full_file_raw_content",
+    "anchored_edit_protocol",
+    "malformed_output_recovery",
+    "timeout_semantics",
+    "cancellation_semantics",
+    "endpoint_error_semantics",
+    "endpoint_restart_semantics",
+    "tokenizer_measurement",
+    "context_capacity",
+    "over_context_refusal",
+)
+
+# A larger context tier additionally needs a passing near-window probe.
+CONTEXT_TIER_REQUIREMENTS: Tuple[str, ...] = ("context_capacity",)
+
+_BASE_REQUIREMENTS = ("plain_completion", "finish_reason_stop", "output_truncation", "reasoning_behavior",
+                      "endpoint_error_semantics", "over_context_refusal")
+_ROLE_REQUIREMENTS: Dict[str, Tuple[str, ...]] = {
+    "developer": ("full_file_raw_content", "anchored_edit_protocol", "malformed_output_recovery"),
+    "planner": ("malformed_output_recovery",),
+    "architect": (),
+    "reviewer": (),
+    "run_verifier": (),
+    "skill_gap": (),
+    "spec_compliance": (),
+}
+ROLES: Tuple[str, ...] = tuple(_ROLE_REQUIREMENTS)
+
+
+class QualificationError(RuntimeError):
+    pass
+
+
+class QualificationPathInsideWorkspaceError(QualificationError):
+    pass
+
+
+@dataclass
+class CaseResult:
+    capability: str
+    status: str
+    evidence: Dict[str, Any] = field(default_factory=dict)
+    measured: Dict[str, Any] = field(default_factory=dict)
+    elapsed_seconds: float = 0.0
+
+
+def required_capabilities(config: Any, role: str, model: str) -> Tuple[str, ...]:
+    """What Kriya will use with ``model`` in ``role``: the base protocol
+    cases, the role's own, and every protocol the resolved capability
+    profile enables (native tools, JSON mode, multi-line JSON, streaming)."""
+    from kriya.core.model_capabilities import capabilities_for_model
+
+    caps = capabilities_for_model(config, model)
+    required = list(_BASE_REQUIREMENTS) + list(_ROLE_REQUIREMENTS.get(role, ()))
+    if caps.native_tool_calls:
+        required += ["native_tool_calls", "multiple_tool_calls", "tool_argument_integrity"]
+    if caps.json_mode:
+        required.append("structured_json")
+    if caps.reliable_multiline_json:
+        required.append("multiline_json")
+    if caps.streaming:
+        required.append("streaming_assembly")
+    return tuple(dict.fromkeys(required))
+
+
+def role_models(config: Any) -> Dict[str, List[str]]:
+    """Every model a production role can call: its own binding (agent_llms
+    or the primary llm) and its escalation chain. The Developer uses the
+    primary llm and the top-level llm_chain."""
+    result: Dict[str, List[str]] = {"developer": [config.llm.model, *[c.model for c in config.llm_chain]]}
+    for role in ROLES:
+        if role == "developer":
+            continue
+        role_cfg = getattr(config.agent_llms, role, None)
+        primary = role_cfg.llm.model if role_cfg is not None and role_cfg.llm is not None else config.llm.model
+        chain = [c.model for c in role_cfg.llm_chain] if role_cfg is not None else []
+        result[role] = [primary, *chain]
+    return {role: list(dict.fromkeys(models)) for role, models in result.items()}
+
+
+def context_tier_requirements(config: Any, model: str) -> Tuple[str, ...]:
+    """What a larger context tier of ``model`` must pass: every case any role
+    that calls ``model`` requires, plus the near-window capacity probe."""
+    required: List[str] = []
+    for role, models in role_models(config).items():
+        if any(m.casefold() == model.casefold() for m in models):
+            required.extend(required_capabilities(config, role, model))
+    if not required:
+        required.extend(_BASE_REQUIREMENTS)
+    return tuple(dict.fromkeys([*required, *CONTEXT_TIER_REQUIREMENTS]))
+
+
+# INF-001: qualification is looked up on every model call (measured limits,
+# context tiers). A record file is re-read and re-parsed unless its stat
+# proves it unchanged (kriya/core/file_stamp.py: settled when cached, same
+# mtime/size/inode) - never stale, never parsed twice while unchanged.
+# Cached records are shared: callers treat them as read-only.
+_RECORD_CACHE: Dict[str, Tuple[FileStamp, Optional[Dict[str, Any]]]] = {}
+_RECORD_CACHE_LOCK = threading.Lock()
+
+
+def _cached_record_file(path: str) -> Optional[Dict[str, Any]]:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    with _RECORD_CACHE_LOCK:
+        hit = _RECORD_CACHE.get(path)
+    # FILE-STAMP-RACY-CACHE-001: trusted only if the record had settled
+    # when it was cached (a same-tick, same-size rewrite keeps the mtime).
+    if hit is not None and unchanged_since(hit[0], stat):
+        return hit[1]
+    stamp = file_stamp(stat)
+    try:
+        with open(path, encoding="utf-8") as stream:
+            record = json.load(stream)
+    except (OSError, ValueError):
+        record = None
+    record = record if isinstance(record, dict) else None
+    with _RECORD_CACHE_LOCK:
+        _RECORD_CACHE[path] = (stamp, record)
+    return record
+
+
+def _stored_records() -> Tuple[Dict[str, Any], ...]:
+    home = qualification_home()
+    try:
+        names = sorted(os.listdir(home))
+    except OSError:
+        return ()
+    return tuple(
+        record for name in names if name.endswith(".json")
+        and (record := _cached_record_file(os.path.join(home, name))) is not None
+    )
+
+
+def recorded_context_sizes(fingerprint: ModelRuntimeFingerprint, settings: InferenceSettings) -> List[int]:
+    """Context windows other than ``fingerprint``'s own that have a
+    qualification record for the same served artifact at the same endpoint
+    under the same inference settings (candidates only: each is re-verified
+    against its own current fingerprint before use)."""
+    sizes = set()
+    for record in _stored_records():
+        recorded = record.get("fingerprint") if isinstance(record.get("fingerprint"), dict) else {}
+        size = recorded.get("configured_context_window")
+        if (isinstance(size, int) and size != fingerprint.configured_context_window
+                and record.get("inference_settings_digest") == settings.digest
+                and recorded.get("artifact_digest") == fingerprint.artifact_digest
+                and recorded.get("endpoint") == fingerprint.endpoint
+                and str(recorded.get("alias", "")).casefold() == fingerprint.alias.casefold()):
+            sizes.add(size)
+    return sorted(sizes)
+
+
+def runtime_has_records(runtime_digest: str) -> bool:
+    """Whether any qualification record, under any inference settings or
+    policy version, exists for this exact runtime. An operator-declared tier
+    stands in for qualification only while there is no such data at all."""
+    return any(record.get("fingerprint_digest") == runtime_digest for record in _stored_records())
+
+
+@dataclass(frozen=True)
+class ContextTierOffer:
+    """PRD-016: the larger context windows a request to one runtime may be
+    sent with, the hard context ceiling, why anything was excluded, and the
+    evidence of each considered size (bound into the resume fingerprint)."""
+    tiers: Tuple[Any, ...]
+    ceiling: Optional[int]
+    note: str
+    evidence: Tuple[Dict[str, Any], ...] = ()
+
+
+def offered_context_tiers(config: Any, model: str, fingerprint: ModelRuntimeFingerprint, policy: Any, *,
+                          base_url: str, api_key: str, settings: InferenceSettings) -> ContextTierOffer:
+    """A tier is offered when this exact runtime at that num_ctx, called with
+    ``settings``, has a current qualification record passing every case the
+    model's roles need plus context_capacity, or - while no qualification
+    data exists for that runtime at all, under any settings or policy - when
+    the operator declared it safe; a NOT_QUALIFIED or STALE record, or a
+    record under other inference settings, overrides a declaration. Never above the policy ceiling or the model's
+    trained length. The window can only be chosen per request on an exact
+    runtime whose adapter takes it per request
+    (``model_runtime.supports_per_request_context_window``); anywhere else
+    the adaptive policy behaves like strict and says so."""
+    from kriya.core.inference_runtime import runtime_for_binding
+    from kriya.core.model_runtime import _binding_for, resolve_model_runtime, supports_per_request_context_window
+    from kriya.core.token_budget import (
+        POLICY_ADAPTIVE,
+        TIER_SOURCE_OPERATOR_DECLARED,
+        TIER_SOURCE_QUALIFICATION_RECORD,
+        ContextTier,
+    )
+
+    limits = [value for value in (policy.max_context_tokens, fingerprint.model_context_length) if value]
+    ceiling = min(limits) if limits else None
+    if policy.mode != POLICY_ADAPTIVE:
+        return ContextTierOffer((), ceiling, "strict policy: the preferred window is the limit")
+    declared = set(policy.declared_safe_context_tiers)
+    sizes = set(declared)
+    if fingerprint.exact:
+        sizes |= set(recorded_context_sizes(fingerprint, settings))
+    if not sizes:
+        return ContextTierOffer((), ceiling, "")
+    runtime = runtime_for_binding(_binding_for(config, model))
+    if not supports_per_request_context_window(fingerprint, runtime):
+        return ContextTierOffer((), ceiling, "no larger tier: the context window can only be chosen per request "
+                                             "on an exact runtime whose adapter takes it per request")
+    preferred = fingerprint.effective_context_window or 0
+    tiers, notes, evidence = [], [], []
+    for size in sorted(sizes):
+        if size <= preferred:
+            continue
+        if ceiling is not None and size > ceiling:
+            notes.append(f"{size}: above the ceiling {ceiling}")
+            evidence.append({"tokens": size, "status": "above_ceiling"})
+            continue
+        tier_runtime = resolve_model_runtime(
+            base_url=base_url, model=model, api_key=api_key, egress_policy=config.autonomy.egress_policy,
+            configured_context=size, kriya_protocol=fingerprint.kriya_protocol, config=config, runtime=runtime,
+        )
+        assessment = assess(tier_runtime, context_tier_requirements(config, model), settings=settings,
+                            policy_digest=policy_digest_for(config))
+        source = None
+        if assessment.status == QUALIFIED:
+            source = TIER_SOURCE_QUALIFICATION_RECORD
+        elif assessment.status == MISSING and size in declared and not runtime_has_records(tier_runtime.digest):
+            source = TIER_SOURCE_OPERATOR_DECLARED
+        elif assessment.status == MISSING and size in declared:
+            notes.append(f"{size}: {MISSING} for these inference settings (qualified under other settings)")
+        else:
+            notes.append(f"{size}: {assessment.status}")
+        if source:
+            tiers.append(ContextTier(size, source))
+        evidence.append({"tokens": size, "status": assessment.status, "source": source,
+                         "runtime_fingerprint": tier_runtime.digest if tier_runtime.exact else None})
+    return ContextTierOffer(tuple(tiers), ceiling, "; ".join(notes), tuple(evidence))
+
+
+# --------------------------------------------------------------------------
+# Store
+# --------------------------------------------------------------------------
+
+def qualification_home() -> str:
+    configured = os.environ.get(QUALIFICATION_HOME_ENV)
+    home = os.path.expanduser(configured) if configured else os.path.join(os.path.expanduser("~"), ".kriya", "qualifications")
+    return os.path.realpath(home)
+
+
+def _refuse_inside_workspace(path: str, workspace_root: Optional[str]) -> None:
+    if not workspace_root:
+        return
+    # PLAT-002: filesystem identity, fail closed (see authority_approval).
+    if path_relation(workspace_root, path) is not PathRelation.OUTSIDE:
+        raise QualificationPathInsideWorkspaceError(
+            f"qualification store {path!r} resolves inside the workspace {workspace_root!r}; a qualification "
+            "must live outside anything a repository can populate."
+        )
+
+
+def record_path(record_key: str, workspace_root: Optional[str] = None) -> str:
+    """``<home>/<key>.json``; the key is a qualification identity (or, for a
+    policy-/2 record, the runtime digest it was keyed by)."""
+    home = qualification_home()
+    _refuse_inside_workspace(home, workspace_root)
+    return os.path.join(home, f"{record_key}.json")
+
+
+def _same_qualified_identity(a: Dict[str, Any], b: Dict[str, Any]) -> bool:
+    return record_policy_digest(a) == record_policy_digest(b) and all(a.get(key) == b.get(key) for key in (
+        "qualification_identity", "fingerprint_digest", "inference_settings_digest", "adapter_version",
+        "policy_version", "schema_version"))
+
+
+def save_record(record: Dict[str, Any], workspace_root: Optional[str] = None) -> str:
+    """Save ``record``. Capacity evidence other execution environments
+    recorded for the same identity (and policy) is kept alongside it."""
+    path = record_path(record["qualification_identity"], workspace_root)
+    existing = _read_record(record["qualification_identity"], workspace_root)
+    if existing is not None and _same_qualified_identity(existing, record):
+        merged = dict(existing.get("environment_evidence") or {})
+        merged.update(record.get("environment_evidence") or {})
+        record = {**record, "environment_evidence": merged}
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w", encoding="utf-8") as stream:
+        json.dump(record, stream, indent=2, sort_keys=True)
+    os.replace(tmp, path)
+    return path
+
+
+def _read_record(record_key: str, workspace_root: Optional[str]) -> Optional[Dict[str, Any]]:
+    try:
+        path = record_path(record_key, workspace_root)
+    except QualificationPathInsideWorkspaceError:
+        return None
+    return _cached_record_file(path)
+
+
+def load_record(runtime_digest: str, settings: InferenceSettings,
+                workspace_root: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """The record for this runtime under these inference settings; else a
+    policy-/2 record keyed by the runtime digest alone (which is STALE)."""
+    return (_read_record(qualification_identity(runtime_digest, settings), workspace_root)
+            or _read_record(runtime_digest, workspace_root))
+
+
+# --------------------------------------------------------------------------
+# Assessment
+# --------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class QualificationAssessment:
+    status: str
+    fingerprint_digest: Optional[str]
+    missing: Tuple[str, ...] = ()
+    failed: Tuple[str, ...] = ()
+    reasons: Tuple[str, ...] = ()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+
+def record_is_current(record: Optional[Dict[str, Any]], fingerprint: ModelRuntimeFingerprint,
+                      settings: InferenceSettings, *, policy_digest: Optional[str] = None) -> Tuple[bool, List[str]]:
+    """``policy_digest``: the effective qualification policy's
+    (``policy_digest_for(config)``); None is the default policy."""
+    if record is None:
+        return False, ["no qualification record for this exact runtime and inference settings"]
+    reasons = []
+    if record.get("fingerprint_digest") != fingerprint.digest:
+        reasons.append("the runtime fingerprint changed since qualification")
+    if record.get("inference_settings_digest") != settings.digest:
+        reasons.append(
+            "the inference settings differ from the qualified ones"
+            if record.get("inference_settings_digest")
+            else "the record predates inference-settings identity (re-qualify)"
+        )
+    if record.get("adapter_version") != MODEL_PROTOCOL_ADAPTER_VERSION:
+        reasons.append(
+            f"the Kriya protocol adapter changed ({record.get('adapter_version')} -> {MODEL_PROTOCOL_ADAPTER_VERSION})"
+        )
+    if record.get("policy_version") != QUALIFICATION_POLICY_VERSION:
+        reasons.append(
+            f"the qualification policy changed ({record.get('policy_version')} -> {QUALIFICATION_POLICY_VERSION})"
+        )
+    if record.get("schema_version") != QUALIFICATION_SCHEMA_VERSION:
+        reasons.append("the qualification record schema changed")
+    wanted = _current_policy_digest(policy_digest)
+    if record_policy_digest(record) != wanted:
+        reasons.append(
+            f"the qualification policy settings changed (model_qualification {record_policy_digest(record)[:19]} "
+            f"-> {wanted[:19]})"
+        )
+    return not reasons, reasons
+
+
+def environment_case_statuses(record: Dict[str, Any], environment: ExecutionEnvironment) -> Dict[str, Any]:
+    """The environment-dependent case statuses ``record`` holds for exactly
+    ``environment`` ({} unless it is exact and was evaluated there)."""
+    if not environment.exact:
+        return {}
+    entry = (record.get("environment_evidence") or {}).get(environment.digest) or {}
+    return {case.get("capability"): case.get("status") for case in entry.get("cases", [])
+            if case.get("capability") in ENVIRONMENT_DEPENDENT_CAPABILITIES}
+
+
+def assess(fingerprint: ModelRuntimeFingerprint, required: Iterable[str], *, settings: InferenceSettings,
+           record: Optional[Dict[str, Any]] = None, workspace_root: Optional[str] = None,
+           environment: Optional[ExecutionEnvironment] = None,
+           policy_digest: Optional[str] = None) -> QualificationAssessment:
+    """``policy_digest``: the effective qualification policy's
+    (``policy_digest_for(config)``; every production caller passes it,
+    tests/test_qual_config_001.py); a record made under another policy is
+    STALE. ``settings``: what the role sends this runtime
+    (``inference_settings.role_inference_settings``); a record qualified
+    under other settings does not count. ``environment`` (default: the one
+    serving the runtime's endpoint) selects the capacity evidence that
+    counts; evidence from any other environment never does."""
+    required = tuple(required)
+    if not fingerprint.exact:
+        return QualificationAssessment(
+            NOT_EXACT, None, required, (),
+            (f"runtime identity is not exact (missing {', '.join(fingerprint.missing_components) or 'components'})",),
+        )
+    if record is None:
+        record = load_record(fingerprint.digest, settings, workspace_root)
+    if record is None:
+        return QualificationAssessment(MISSING, fingerprint.digest, required, (),
+                                       ("no qualification record for this exact runtime and inference settings",))
+    current, reasons = record_is_current(record, fingerprint, settings, policy_digest=policy_digest)
+    if not current:
+        return QualificationAssessment(STALE, fingerprint.digest, required, (), tuple(reasons))
+    statuses = {case.get("capability"): case.get("status") for case in record.get("cases", [])
+                if case.get("capability") not in ENVIRONMENT_DEPENDENT_CAPABILITIES}
+    environment = environment if environment is not None else environment_for_fingerprint(fingerprint)
+    statuses.update(environment_case_statuses(record, environment))
+    failed = tuple(cap for cap in required if statuses.get(cap) == FAIL)
+    missing = tuple(cap for cap in required if statuses.get(cap) not in (PASS, FAIL))
+
+    def missing_reason(cap: str) -> str:
+        if statuses.get(cap):
+            return f"{cap}: {statuses[cap]}"
+        if cap in ENVIRONMENT_DEPENDENT_CAPABILITIES:
+            where = ("the execution environment is not observable" if not environment.exact
+                     else f"not evaluated in this execution environment ({environment.digest[:19]})")
+            return f"{cap}: {where}"
+        return f"{cap}: not run"
+
+    if failed or missing:
+        return QualificationAssessment(
+            NOT_QUALIFIED, fingerprint.digest, missing, failed,
+            tuple([f"{cap}: FAIL" for cap in failed] + [missing_reason(cap) for cap in missing]),
+        )
+    return QualificationAssessment(QUALIFIED, fingerprint.digest)
+
+
+# Measured limits that describe the runtime's tokenizer, not its sampling:
+# the same for every inference identity of one runtime.
+RUNTIME_SCOPED_LIMITS = ("bytes_per_token_floor", "non_ascii_bytes_per_token_floor", "bytes_per_token_ceiling")
+# Runtime-scoped limits whose conservative value is the largest, not the smallest.
+_RUNTIME_SCOPED_CEILINGS = frozenset({"bytes_per_token_ceiling"})
+
+
+def _runtime_current(record: Dict[str, Any], fingerprint: ModelRuntimeFingerprint, policy_digest: str) -> bool:
+    """Current for this runtime under the current policy, whatever its settings."""
+    return (record.get("fingerprint_digest") == fingerprint.digest
+            and record_policy_digest(record) == policy_digest
+            and record.get("adapter_version") == MODEL_PROTOCOL_ADAPTER_VERSION
+            and record.get("policy_version") == QUALIFICATION_POLICY_VERSION
+            and record.get("schema_version") == QUALIFICATION_SCHEMA_VERSION
+            and bool(record.get("inference_settings_digest")))
+
+
+def measured_limits_for(fingerprint: ModelRuntimeFingerprint, config: Any = None, *,
+                        settings: InferenceSettings) -> Dict[str, Any]:
+    """Measured limits for this exact runtime. Identity-scoped limits (e.g.
+    reasoning_tokens_max) come only from a CURRENT record under these
+    inference settings. Tokenizer floors (RUNTIME_SCOPED_LIMITS) are a
+    property of the runtime: the most conservative value over every current
+    record of the runtime, whatever its settings, so a prompt sized under
+    one identity (allocation, the Developer's) is counted the same way when
+    it is dispatched under another (a retry_temperature retry, a Reviewer
+    temperature). A policy-/2 record never contributes, nor does one made
+    under another qualification policy (``config``'s, defaults if None)."""
+    if not fingerprint.exact:
+        return {}
+    policy_digest = policy_digest_for(config)
+    record = load_record(fingerprint.digest, settings)
+    current, _ = record_is_current(record, fingerprint, settings, policy_digest=policy_digest)
+    limits = dict(record.get("measured_limits") or {}) if current and record else {}
+    for key in RUNTIME_SCOPED_LIMITS:
+        limits.pop(key, None)
+        values = [
+            stored["measured_limits"][key] for stored in _stored_records()
+            if _runtime_current(stored, fingerprint, policy_digest)
+            and isinstance((stored.get("measured_limits") or {}).get(key), (int, float))
+        ]
+        if values:
+            limits[key] = max(values) if key in _RUNTIME_SCOPED_CEILINGS else min(values)
+    return limits
+
+
+# --------------------------------------------------------------------------
+# Cases
+# --------------------------------------------------------------------------
+
+CaseFn = Callable[[Any, str, Dict[str, Any]], Awaitable[CaseResult]]
+
+_WEATHER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_weather",
+        "description": "Get the current weather for a city.",
+        "parameters": {
+            "type": "object",
+            "properties": {"city": {"type": "string", "description": "City name"}},
+            "required": ["city"],
+        },
+    },
+}
+_NOTE_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "save_note",
+        "description": "Save a note exactly as given.",
+        "parameters": {
+            "type": "object",
+            "properties": {"text": {"type": "string", "description": "The exact note text"}},
+            "required": ["text"],
+        },
+    },
+}
+NOTE_TEXT = 'Line one "quoted" \\ backslash\nLine two: tab\tand unicode café – 東京 ✓ {braces} [brackets]'
+
+TOKENIZER_CORPORA: Dict[str, str] = {
+    "java": (
+        "package com.example.orders;\n\nimport java.util.List;\nimport java.util.stream.Collectors;\n\n"
+        "public final class OrderService {\n    private final OrderRepository repository;\n\n"
+        "    public OrderService(OrderRepository repository) { this.repository = repository; }\n\n"
+        "    public List<OrderDto> openOrders(long customerId) {\n"
+        "        return repository.findByCustomerId(customerId).stream()\n"
+        "            .filter(o -> o.getStatus() == Status.OPEN)\n"
+        "            .map(OrderDto::from)\n            .collect(Collectors.toList());\n    }\n}\n"
+    ),
+    "python": (
+        "from __future__ import annotations\n\nimport dataclasses\nfrom typing import Iterable\n\n\n"
+        "@dataclasses.dataclass(frozen=True)\nclass Invoice:\n    number: str\n    lines: tuple[float, ...]\n\n"
+        "    def total(self) -> float:\n        return round(sum(self.lines), 2)\n\n\n"
+        "def overdue(invoices: Iterable[Invoice], limit: float = 1e3) -> list[str]:\n"
+        "    return [i.number for i in invoices if i.total() > limit]\n"
+    ),
+    "xml": (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<project xmlns="http://maven.apache.org/POM/4.0.0">\n'
+        "  <modelVersion>4.0.0</modelVersion>\n  <groupId>com.example</groupId>\n"
+        "  <artifactId>orders</artifactId>\n  <version>1.2.3-SNAPSHOT</version>\n  <dependencies>\n"
+        "    <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId>"
+        "<version>5.10.2</version><scope>test</scope></dependency>\n  </dependencies>\n</project>\n"
+    ),
+    "json": json.dumps({
+        "files": [{"filepath": "src/app.py", "content": "print('hi')\n", "edits": []}],
+        "meta": {"ids": [101, 202, 303], "ok": True, "ratio": 0.125, "tags": ["a-b", "c_d", "e.f"]},
+    }, indent=2),
+    "unicode": (
+        "Grüße aus Köln – naïve café. Привет, мир! 你好，世界。こんにちは世界。안녕하세요. "
+        "مرحبا بالعالم. שלום עולם. Γειά σου Κόσμε. ✓ ★ → ∑ ∞ ≠ 😀 🚀 🎉\n"
+    ),
+    # Whitespace-dense (deep indentation): the most compressible real text,
+    # which bounds the prompt-consumption ceiling (PROVIDER-CONTRACT-001).
+    "indented": "".join(f"{' ' * (4 * depth)}if level_{depth}:\n" for depth in range(1, 13)) + " " * 52 + "pass\n",
+    "stacktrace": (
+        'Exception in thread "main" java.lang.IllegalStateException: order 42 is closed\n'
+        "\tat com.example.orders.OrderService.close(OrderService.java:88)\n"
+        "\tat com.example.orders.OrderController.lambda$close$3(OrderController.java:41)\n"
+        "Traceback (most recent call last):\n  File \"/srv/app/main.py\", line 12, in <module>\n"
+        "    main()\n  File \"/srv/app/main.py\", line 9, in main\n    raise KeyError('customer_id')\n"
+        "KeyError: 'customer_id'\n"
+    ),
+}
+
+
+def _policy(ctx: Dict[str, Any]) -> ModelQualificationConfig:
+    policy = ctx.get("policy")
+    return policy if isinstance(policy, ModelQualificationConfig) else ModelQualificationConfig()
+
+
+def _note_policy(ctx: Dict[str, Any], capability: str, **values: Any) -> None:
+    ctx.setdefault("_policy_used", {}).setdefault(capability, {}).update(values)
+
+
+def _case_budget(ctx: Dict[str, Any], capability: str) -> int:
+    """The output budget ``capability`` is sent with: its configured
+    ``max_tokens``, or ``reasoning_max_tokens`` when set and the identity
+    qualified sends ``reasoning: true`` (ctx["reasoning"]). Recorded, with
+    its configuration path, in the case evidence."""
+    entry = getattr(_policy(ctx).cases, capability)
+    reasoning = bool(ctx.get("reasoning")) and entry.reasoning_max_tokens is not None
+    name = "reasoning_max_tokens" if reasoning else "max_tokens"
+    tokens = entry.reasoning_max_tokens if reasoning else entry.max_tokens
+    _note_policy(ctx, capability, max_tokens=tokens, source=f"model_qualification.cases.{capability}.{name}")
+    return tokens
+
+
+def _case(capability: str) -> Callable[[CaseFn], CaseFn]:
+    def wrap(fn: CaseFn) -> CaseFn:
+        async def run(llm: Any, model: str, ctx: Dict[str, Any]) -> CaseResult:
+            started = time.monotonic()
+            try:
+                result = await fn(llm, model, ctx)
+            except Exception as error:  # a crashing case is a FAIL with its evidence, never a PASS
+                result = CaseResult(capability, FAIL, {"error": f"{type(error).__name__}: {error}"[:500]})
+            used = ctx.get("_policy_used", {}).pop(capability, None)
+            if used:
+                # The policy that controlled the verdict, next to the result.
+                result.evidence = {"policy": used, **result.evidence}
+            result.capability = capability
+            result.elapsed_seconds = round(time.monotonic() - started, 3)
+            return result
+        run.capability = capability  # type: ignore[attr-defined]
+        return run
+    return wrap
+
+
+def _completion_evidence(result: Any) -> Dict[str, Any]:
+    return result.to_telemetry() if hasattr(result, "to_telemetry") else {}
+
+
+@_case("plain_completion")
+async def case_plain_completion(llm, model, ctx):
+    r = await llm.complete_result("You are a terse assistant.", "Reply with exactly one word: READY",
+                                  model_override=model, max_tokens_override=_case_budget(ctx, "plain_completion"))
+    ok = r.status.value == "OK" and "".join(ch for ch in r.content if ch.isalpha()).upper() == "READY"
+    return CaseResult("", PASS if ok else FAIL, {"content": r.content[:200], **_completion_evidence(r)})
+
+
+@_case("finish_reason_stop")
+async def case_finish_reason_stop(llm, model, ctx):
+    r = await llm.complete_result("You are a terse assistant.", "Say hello in one short sentence.",
+                                  model_override=model, max_tokens_override=_case_budget(ctx, "finish_reason_stop"))
+    ok = r.status.value == "OK" and r.finish_reason == "stop"
+    return CaseResult("", PASS if ok else FAIL, {"finish_reason": r.finish_reason, **_completion_evidence(r)})
+
+
+@_case("structured_json")
+async def case_structured_json(llm, model, ctx):
+    r = await llm.complete_result(
+        "You output JSON only.",
+        'Return a JSON object with exactly these keys and values: "status" set to "ok", "count" set to 3.',
+        json_mode=True, model_override=model, max_tokens_override=_case_budget(ctx, "structured_json"),
+    )
+    try:
+        parsed = json.loads(r.content)
+    except (ValueError, TypeError):
+        parsed = None
+    ok = r.status.value == "OK" and isinstance(parsed, dict) and parsed.get("status") == "ok" and parsed.get("count") == 3
+    return CaseResult("", PASS if ok else FAIL, {"parsed": parsed, **_completion_evidence(r)})
+
+
+_MULTILINE_EXPECTED = 'def greet(name):\n    message = f"Hello, {name}!"\n    return message\n'
+
+
+@_case("multiline_json")
+async def case_multiline_json(llm, model, ctx):
+    r = await llm.complete_result(
+        "You output JSON only.",
+        "Return a JSON object with key \"filepath\" set to \"greet.py\" and key \"content\" set to this exact "
+        "three-line Python file (keep the newlines, indentation and quotes exactly):\n\n" + _MULTILINE_EXPECTED,
+        json_mode=True, model_override=model, max_tokens_override=_case_budget(ctx, "multiline_json"),
+    )
+    try:
+        parsed = json.loads(r.content)
+    except (ValueError, TypeError):
+        parsed = None
+    content = parsed.get("content") if isinstance(parsed, dict) else None
+    ok = r.status.value == "OK" and isinstance(content, str) and content.strip() == _MULTILINE_EXPECTED.strip()
+    return CaseResult("", PASS if ok else FAIL, {"content": content, **_completion_evidence(r)})
+
+
+def _tools_disabled(ctx: Dict[str, Any]) -> Optional[CaseResult]:
+    if not ctx.get("native_tool_calls_enabled", True):
+        return CaseResult("", UNAVAILABLE, {"reason": "the capability profile disables native tool calls; not measured"})
+    return None
+
+
+@_case("native_tool_calls")
+async def case_native_tool_calls(llm, model, ctx):
+    if (skip := _tools_disabled(ctx)) is not None:
+        return skip
+    r = await llm.complete_with_tools_result(
+        [{"role": "user", "content": "What is the weather in Paris? Use the tool."}], [_WEATHER_TOOL],
+        model_override=model, max_tokens_override=_case_budget(ctx, "native_tool_calls"),
+    )
+    calls = [c for c in r.tool_calls if c.get("name") == "get_weather"]
+    ok = (r.status.value == "OK" and len(calls) == 1 and calls[0].get("source") == "native"
+          and str(calls[0].get("arguments", {}).get("city", "")).lower() == "paris")
+    return CaseResult("", PASS if ok else FAIL, {"tool_calls": r.tool_calls, **_completion_evidence(r)})
+
+
+@_case("multiple_tool_calls")
+async def case_multiple_tool_calls(llm, model, ctx):
+    if (skip := _tools_disabled(ctx)) is not None:
+        return skip
+    r = await llm.complete_with_tools_result(
+        [{"role": "user", "content": "Get the weather for Paris and for Tokyo. Call the tool once per city, "
+                                     "both in this single reply."}],
+        [_WEATHER_TOOL], model_override=model, max_tokens_override=_case_budget(ctx, "multiple_tool_calls"),
+    )
+    cities = sorted(str(c.get("arguments", {}).get("city", "")).lower() for c in r.tool_calls
+                    if c.get("name") == "get_weather")
+    ok = r.status.value == "OK" and cities == ["paris", "tokyo"]
+    return CaseResult("", PASS if ok else FAIL, {"cities": cities, **_completion_evidence(r)})
+
+
+@_case("tool_argument_integrity")
+async def case_tool_argument_integrity(llm, model, ctx):
+    if (skip := _tools_disabled(ctx)) is not None:
+        return skip
+    r = await llm.complete_with_tools_result(
+        [{"role": "user", "content": "Save this note with the save_note tool, character for character:\n"
+                                     + NOTE_TEXT}],
+        [_NOTE_TOOL], model_override=model, max_tokens_override=_case_budget(ctx, "tool_argument_integrity"),
+    )
+    texts = [c.get("arguments", {}).get("text") for c in r.tool_calls if c.get("name") == "save_note"]
+    ok = r.status.value == "OK" and len(texts) == 1 and texts[0] == NOTE_TEXT
+    return CaseResult("", PASS if ok else FAIL,
+                      {"received": texts, "expected": NOTE_TEXT, **_completion_evidence(r)},
+                      {"verified_tool_argument_chars": len(NOTE_TEXT)} if ok else {})
+
+
+@_case("streaming_assembly")
+async def case_streaming_assembly(llm, model, ctx):
+    deltas: List[str] = []
+    r = await llm.complete_result("You are a terse assistant.",
+                                  "Write the numbers 1 to 20 separated by single spaces and nothing else.",
+                                  stream_callback=deltas.append, model_override=model, max_tokens_override=_case_budget(ctx, "streaming_assembly"))
+    from kriya.core.completion import split_reasoning
+
+    assembled, _ = split_reasoning("".join(deltas), anywhere=True)
+    expected = " ".join(str(n) for n in range(1, 21))
+    ok = (r.status.value == "OK" and len(deltas) > 1 and assembled == r.content
+          and " ".join(r.content.split()) == expected)
+    return CaseResult("", PASS if ok else FAIL,
+                      {"delta_count": len(deltas), "assembled_matches_result": assembled == r.content,
+                       **_completion_evidence(r)})
+
+
+@_case("output_truncation")
+async def case_output_truncation(llm, model, ctx):
+    # Not policy: the 16-token budget far below the requested output, without
+    # the reasoning floor, is what makes this a truncation test.
+    r = await llm.complete_result("You are a helpful assistant.",
+                                  "Count from 1 to 400, one number per line.",
+                                  model_override=model, max_tokens_override=16, reasoning_override=False)
+    ok = r.status.value == "OUTPUT_TRUNCATED" and r.finish_reason == "length"
+    return CaseResult("", PASS if ok else FAIL, {"finish_reason": r.finish_reason, **_completion_evidence(r)})
+
+
+@_case("reasoning_behavior")
+async def case_reasoning_behavior(llm, model, ctx):
+    r = await llm.complete_result("You are a careful assistant.",
+                                  "A train leaves at 09:40 and arrives at 11:05. How many minutes is the trip? "
+                                  "Answer with the number only.",
+                                  model_override=model, max_tokens_override=_case_budget(ctx, "reasoning_behavior"))
+    visible_clean = "<think>" not in r.content and "</think>" not in r.content
+    ok = r.status.value == "OK" and visible_clean and "85" in r.content
+    measured = {"reasoning_observed": r.reasoning_present}
+    if r.reasoning_present and r.completion_tokens:
+        measured["reasoning_tokens_observed"] = r.completion_tokens
+    return CaseResult("", PASS if ok else FAIL,
+                      {"content": r.content[:200], "visible_content_has_think_tags": not visible_clean,
+                       **_completion_evidence(r)}, measured)
+
+
+# The exact file the full_file_raw_content case supplies and requires back:
+# a fence-bearing docstring (fence-like payload) plus the function the case
+# checks. The fence is indented inside the docstring, so both protocols can
+# carry it; the structured protocol would carry a column-0 fence as well.
+FULL_FILE_SOURCE = (
+    '"""Slug helpers.\n'
+    "\n"
+    "Example:\n"
+    "\n"
+    "    ```python\n"
+    '    slugify("Hello, World!")  # -> "hello-world"\n'
+    "    ```\n"
+    '"""\n'
+    "import re\n"
+    "\n"
+    "\n"
+    "def slugify(text: str) -> str:\n"
+    '    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")\n'
+)
+
+
+@_case("full_file_raw_content")
+async def case_full_file_raw_content(llm, model, ctx):
+    """ONE capability: whole-file payload fidelity through the configured
+    Developer response protocol. The prompt supplies the exact file (with a
+    fenced docstring example - fence-like payload) and the model must return
+    it unchanged; the case requires the parsed payload to equal it byte for
+    byte (the legacy raw protocol's trailing newline is framing), the
+    protocol to be well formed (for the structured protocol: explicit
+    termination, nothing after the block, the declared final newline), and
+    the file to parse and define slugify. Nothing asks the model to invent
+    content (FILE-INTEGRITY-CONTRACT-001, /7)."""
+    from kriya.agents.agent import DeveloperAgent
+    from kriya.agents.response_protocol import STRUCTURED, parse_structured, structured_contract
+
+    protocol = ctx.get("response_protocol")
+    supplied = f"=== slug.py (return this exact file) ===\n{FULL_FILE_SOURCE}=== end of slug.py ===\n"
+    if protocol == STRUCTURED:
+        system = ("You are a senior software engineer. You write complete, correct source files.\n"
+                  + structured_contract("slug.py", analysis_required=False, allow_edit=False, allow_file=True,
+                                        allow_no_change=False))
+        prompt = (f"{supplied}Return the complete file 'slug.py' exactly as shown above - every character "
+                  "unchanged - using the RESPONSE PROTOCOL.")
+    else:
+        system = "You are a senior software engineer. You write complete, correct source files."
+        prompt = (f"{supplied}Return the complete content of 'slug.py' exactly as shown above - every character "
+                  "unchanged. Return ONLY the content of 'slug.py' - nothing before it, nothing after it.")
+    r = await llm.complete_result(system, prompt, model_override=model,
+                                  max_tokens_override=_case_budget(ctx, "full_file_raw_content"))
+    raw = r.content or ""
+    parsed = (parse_structured(raw, "slug.py", patch_allowed=False) if protocol == STRUCTURED
+              else DeveloperAgent.parse_file_payload(raw, "slug.py"))
+    content = (parsed.content or "") if parsed.kind == "file" else ""
+    # Model output is never executed on the host: the check is structural.
+    defines = False
+    try:
+        tree = ast.parse(content)
+        parses = True
+        defines = any(isinstance(node, ast.FunctionDef) and node.name == "slugify" for node in ast.walk(tree))
+    except SyntaxError:
+        parses = False
+    if protocol == STRUCTURED:
+        # The grammar decides the final newline: a payload declared
+        # no_final_newline cannot equal the supplied file (which ends with one).
+        payload_exact = parsed.kind == "file" and content == FULL_FILE_SOURCE
+    else:
+        payload_exact = parsed.kind == "file" and content.rstrip("\n") == FULL_FILE_SOURCE.rstrip("\n")
+    ok = r.status.value == "OK" and payload_exact and parses and defines
+    return CaseResult("", PASS if ok else FAIL,
+                      {"parses": parses, "defines_slugify": defines, "payload_exact": payload_exact,
+                       "fence_preserved": "```python" in content, "response_protocol": protocol,
+                       "raw_had_fence": raw.lstrip().startswith("```"),
+                       "protocol_reason_code": parsed.reason_code, **_completion_evidence(r)})
+
+
+_EDIT_SOURCE = "def total(prices):\n    result = 0\n    for p in prices:\n        result += p\n    return result\n"
+_EDIT_PATH = "src/calc.py"
+
+
+@_case("anchored_edit_protocol")
+async def case_anchored_edit_protocol(llm, model, ctx):
+    """An anchored edit through the configured Developer response protocol,
+    applied by the one edit engine to the source in both LF and CRLF form:
+    the anchor must match exactly once and the result must keep each file's
+    own line-ending convention."""
+    import tempfile
+
+    from kriya.agents.response_protocol import STRUCTURED, parse_legacy_repair, parse_structured, structured_contract
+    from kriya.workflow.file_integrity import FileIntegrityError, load_snapshot, mutate_snapshot, newline_style
+
+    protocol = ctx.get("response_protocol")
+    task = f"=== {_EDIT_PATH} ===\n{_EDIT_SOURCE}\nTask: total() must ignore negative prices.\n"
+    if protocol == STRUCTURED:
+        system = ("You are a senior software engineer.\n"
+                  + structured_contract(_EDIT_PATH, analysis_required=True, allow_edit=True, allow_file=False,
+                                        allow_no_change=False))
+        prompt = (task + "Write one sentence of analysis, then an EDIT block whose SEARCH copies the exact lines "
+                  "that change - only those lines plus the minimum context, not the whole file.")
+    else:
+        system = "You are a senior software engineer."
+        prompt = (task + "Before writing any code, write a line \"FIX ANALYSIS:\" with one sentence. Then write the "
+                  "line \"SEARCH:\" followed by the exact original code (copied verbatim from the file above) that "
+                  "needs to change, then the line \"REPLACE:\" followed by the corrected code - include only the "
+                  "lines that need to change plus the minimum context to identify them, not the whole file.")
+    r = await llm.complete_result(system, prompt, model_override=model,
+                                  max_tokens_override=_case_budget(ctx, "anchored_edit_protocol"))
+    raw = r.content or ""
+    parsed = (parse_structured(raw, _EDIT_PATH, file_allowed=False) if protocol == STRUCTURED
+              else parse_legacy_repair(raw, _EDIT_PATH, patch_allowed=True))
+    edits = parsed.edit_dicts() if parsed.kind == "edits" else None
+    applied: Optional[str] = None
+    conventions: List[bool] = []
+    if edits:
+        with tempfile.TemporaryDirectory() as scratch:
+            try:
+                for name, data in (("lf.py", _EDIT_SOURCE.encode()),
+                                   ("crlf.py", _EDIT_SOURCE.replace("\n", "\r\n").encode())):
+                    path = os.path.join(scratch, name)
+                    with open(path, "wb") as handle:
+                        handle.write(data)
+                    text, new_bytes = mutate_snapshot(load_snapshot(path), edits)
+                    applied = applied or text
+                    conventions.append(newline_style(new_bytes) == newline_style(data))
+            except FileIntegrityError as error:
+                applied = None
+                ctx.setdefault("notes", []).append(str(error))
+    # Structural check only (model output is never executed on the host):
+    # the edit applied exactly once, the result parses, still defines
+    # total(), and changed the loop.
+    changed = False
+    if applied:
+        try:
+            tree = ast.parse(applied)
+            changed = applied != _EDIT_SOURCE and any(
+                isinstance(node, ast.FunctionDef) and node.name == "total" for node in ast.walk(tree)
+            )
+        except SyntaxError:
+            changed = False
+    convention_kept = len(conventions) == 2 and all(conventions)
+    ok = r.status.value == "OK" and bool(parsed.analysis) and bool(edits) and changed and convention_kept
+    return CaseResult("", PASS if ok else FAIL,
+                      {"analysis": bool(parsed.analysis), "edit_count": len(edits or []), "applied": applied is not None,
+                       "response_protocol": protocol, "protocol_reason_code": parsed.reason_code,
+                       "convention_kept": convention_kept,
+                       "applied_parses_and_changed": changed, **_completion_evidence(r)})
+
+
+@_case("malformed_output_recovery")
+async def case_malformed_output_recovery(llm, model, ctx):
+    """Without JSON mode, models often wrap JSON in prose or fences; Kriya's
+    extraction must recover the value, and the normalized status must not
+    call the wrapped answer valid structured output."""
+    from kriya.agents.agent import DeveloperAgent
+
+    r = await llm.complete_result(
+        "You are a helpful assistant.",
+        "First write one sentence of explanation, then a JSON array of the three strings \"a.py\", \"b.py\" "
+        "and \"c.py\" inside a ```json fenced block.",
+        model_override=model, max_tokens_override=_case_budget(ctx, "malformed_output_recovery"),
+    )
+    try:
+        value = DeveloperAgent._extract_json_value(r.content)
+    except Exception:
+        value = None
+    ok = r.status.value == "OK" and value == ["a.py", "b.py", "c.py"]
+    return CaseResult("", PASS if ok else FAIL, {"recovered": value, **_completion_evidence(r)})
+
+
+@_case("timeout_semantics")
+async def case_timeout_semantics(llm, model, ctx):
+    # Not policy: the 1 ms client timeout forces the timeout under test; the
+    # request never completes, so its output budget is irrelevant.
+    probe = ctx["client_factory"](timeout=0.001)
+    try:
+        r = await probe.complete_result("You are a helpful assistant.", "Write a long story about a lighthouse.",
+                                        model_override=model, max_tokens_override=512)
+    finally:
+        await _close_probe(probe)
+    ok = r.status.value == "TIMEOUT" and r.error is not None
+    return CaseResult("", PASS if ok else FAIL, {"status": r.status.value, "backend_error": r.backend_error})
+
+
+@_case("cancellation_semantics")
+async def case_cancellation_semantics(llm, model, ctx):
+    first_delta = asyncio.Event()
+
+    def on_delta(_text: str) -> None:
+        first_delta.set()
+
+    policy = _policy(ctx).cases.cancellation_semantics
+    _note_policy(ctx, "cancellation_semantics", health_check_max_tokens=policy.health_check_max_tokens,
+                 first_delta_timeout_seconds=policy.first_delta_timeout_seconds,
+                 max_settle_seconds=policy.max_settle_seconds)
+    task = asyncio.ensure_future(llm.complete_result(
+        "You are a helpful assistant.", "Write a 600-word story about a lighthouse keeper.",
+        stream_callback=on_delta, model_override=model,
+        max_tokens_override=_case_budget(ctx, "cancellation_semantics"),
+    ))
+    try:
+        await asyncio.wait_for(first_delta.wait(), timeout=policy.first_delta_timeout_seconds)
+    except asyncio.TimeoutError:
+        task.cancel()
+        return CaseResult("", FAIL, {"reason": "no streamed output before cancelling"})
+    task.cancel()
+    cancelled_raised = False
+    started = time.monotonic()
+    try:
+        await task
+    except asyncio.CancelledError:
+        cancelled_raised = True
+    settle_seconds = round(time.monotonic() - started, 3)
+    recorded = getattr(llm.last_completion, "status", None)
+    healthy = await llm.complete_result("You are a terse assistant.", "Reply with exactly one word: READY",
+                                        model_override=model, max_tokens_override=policy.health_check_max_tokens)
+    ok = (cancelled_raised and getattr(recorded, "value", None) == "CANCELLED"
+          and settle_seconds < policy.max_settle_seconds
+          and healthy.status.value == "OK")
+    return CaseResult("", PASS if ok else FAIL,
+                      {"cancelled_raised": cancelled_raised, "recorded_status": getattr(recorded, "value", None),
+                       "settle_seconds": settle_seconds, "endpoint_healthy_after": healthy.status.value})
+
+
+@_case("endpoint_error_semantics")
+async def case_endpoint_error_semantics(llm, model, ctx):
+    # Not policy: the model does not exist, so nothing is generated.
+    r = await llm.complete_result("You are a helpful assistant.", "Hello",
+                                  model_override="kriya-qualification-no-such-model:0", max_tokens_override=16)
+    ok = r.status.value == "BACKEND_ERROR" and r.error is not None and r.content == ""
+    return CaseResult("", PASS if ok else FAIL, {"status": r.status.value, "backend_error": r.backend_error})
+
+
+@_case("endpoint_restart_semantics")
+async def case_endpoint_restart_semantics(llm, model, ctx):
+    return CaseResult("", UNAVAILABLE, {
+        "reason": "not exercised live: restarting the operator's model server is out of scope for an automatic "
+                  "qualification; connection-refused classification is covered by fixture tests",
+    })
+
+
+@_case("tokenizer_measurement")
+async def case_tokenizer_measurement(llm, model, ctx):
+    """Real prompt-token usage per content class. ASCII bytes per token comes
+    from the ASCII probes; non-ASCII bytes per token from the Unicode probe
+    after its ASCII part is charged at the ASCII rate. Both are floors (the
+    template's own tokens are included, which only makes them smaller),
+    lowered by ``model_qualification.measurement.bytes_per_token_margin``.
+    The 1-token budget is not policy: only prompt usage is measured."""
+    margin = _policy(ctx).measurement.bytes_per_token_margin
+    _note_policy(ctx, "tokenizer_measurement", bytes_per_token_margin=margin,
+                 source="model_qualification.measurement.bytes_per_token_margin")
+    reported: Dict[str, Any] = {}
+    ascii_ratios: Dict[str, float] = {}
+    for name, text in TOKENIZER_CORPORA.items():
+        r = await llm.complete_result("", text, model_override=model, max_tokens_override=1, reasoning_override=False)
+        tokens = r.prompt_tokens if not r.tokens_estimated else None
+        reported[name] = tokens
+        if tokens and name != "unicode":
+            ascii_ratios[name] = len(text.encode("utf-8")) / tokens
+    if any(value is None for value in reported.values()):
+        return CaseResult("", UNAVAILABLE, {"reason": "the endpoint did not report prompt token usage",
+                                            "reported_prompt_tokens": reported})
+    ascii_floor = min(ascii_ratios.values())
+    # The prompt-consumption ceiling (whitespace runs counted once, as the
+    # dispatch-side check counts them): the most compressible class, widened
+    # by the margin; never tighter than the calibrated default.
+    consumption_ratios = {name: consumption_bytes(TOKENIZER_CORPORA[name]) / reported[name]
+                          for name in ascii_ratios}
+    ceiling = max(DEFAULT_BYTES_PER_TOKEN_CEILING, max(consumption_ratios.values()) / margin)
+    unicode_text = TOKENIZER_CORPORA["unicode"]
+    ascii_part = sum(1 for ch in unicode_text if ord(ch) < 128)
+    non_ascii_bytes = len(unicode_text.encode("utf-8")) - ascii_part
+    non_ascii_tokens = max(1.0, reported["unicode"] - ascii_part / ascii_floor)
+    non_ascii_ratio = non_ascii_bytes / non_ascii_tokens
+    return CaseResult("", PASS, {
+        "ascii_bytes_per_token": {k: round(v, 4) for k, v in ascii_ratios.items()},
+        "non_ascii_bytes_per_token": round(non_ascii_ratio, 4),
+        "consumption_bytes_per_token": {k: round(v, 4) for k, v in consumption_ratios.items()},
+        "reported_prompt_tokens": reported,
+    }, {
+        "bytes_per_token_floor": round(ascii_floor * margin, 4),
+        "non_ascii_bytes_per_token_floor": round(non_ascii_ratio * margin, 4),
+        "bytes_per_token_ceiling": round(ceiling, 4),
+    })
+
+
+_CAPACITY_UNIT = "alpha beta gamma delta epsilon zeta eta theta iota kappa. "
+
+
+async def _close_probe(probe: Any) -> None:
+    """Release a probe client's transport (a timed-out request can leave its
+    connection open)."""
+    closer = getattr(probe, "aclose", None)
+    if closer is not None and inspect.iscoroutinefunction(closer):
+        await closer()
+
+
+@_case("context_capacity")
+async def case_context_capacity(llm, model, ctx):
+    """See _context_capacity; every probe client it opens is closed."""
+    opened: List[Any] = []
+    try:
+        return await _context_capacity(llm, model, ctx, opened)
+    finally:
+        for probe in opened:
+            await _close_probe(probe)
+
+
+async def _context_capacity(llm, model, ctx, opened: List[Any]):
+    """A near-window request actually fits the served window: the filler's
+    real token rate is measured on two small probes, a prompt of about
+    (window - headroom) real tokens is sent with a marker in the system
+    message and another at the end, and both must come back. A server that
+    silently drops the front of an over-long prompt loses the first marker.
+    The request goes straight to the endpoint (this probes the server, not
+    Kriya's own dispatch estimate) with the qualification binding's num_ctx."""
+    import secrets
+
+    from kriya.core.llm import is_local_url
+
+    window = ctx.get("context_window")
+    if not window:
+        return CaseResult("", UNAVAILABLE, {"reason": "the served context window (num_ctx) is not known"})
+    base_url = ctx.get("base_url")
+    if base_url and not is_local_url(base_url):
+        # This case talks to the endpoint directly (not through LLMClient's
+        # egress check), so it refuses a non-local endpoint itself.
+        return CaseResult("", UNAVAILABLE, {"reason": "context capacity is only probed on a local endpoint",
+                                            "endpoint": base_url})
+    # The model's own endpoint and key (the timeout case's client factory),
+    # not necessarily the primary binding's.
+    policy = _policy(ctx).cases.context_capacity
+    answer_tokens = _case_budget(ctx, "context_capacity")
+    # A reasoning identity's answer budget needs its own room below the
+    # window (same capability rule as the budget itself).
+    reasoning_headroom = bool(ctx.get("reasoning")) and policy.reasoning_headroom_tokens is not None
+    headroom = policy.reasoning_headroom_tokens if reasoning_headroom else policy.headroom_tokens
+    _note_policy(ctx, "context_capacity", headroom_tokens=headroom,
+                 headroom_source=("model_qualification.cases.context_capacity."
+                                  + ("reasoning_headroom_tokens" if reasoning_headroom else "headroom_tokens")),
+                 min_fill_ratio=policy.min_fill_ratio, request_timeout_seconds=policy.request_timeout_seconds)
+    factory = ctx.get("client_factory")
+    if factory is not None:
+        opened.append(factory(policy.request_timeout_seconds))
+    client = opened[-1].client if opened else llm.client
+    runtime = ctx.get("runtime") or runtime_adapter()
+    # PROVIDER-CONTRACT-001: exactly what a production request carries (the
+    # adapter's wire body), never provider options it would ignore.
+    extra_body = runtime.request_plan(ctx.get("extra_body") or None, temperature=None,
+                                      reasoning_flag=bool(ctx.get("reasoning")),
+                                      requested_context_window=int(window)).wire_body or None
+    if runtime.capabilities.per_request_context_window:
+        extra_body = runtime.with_context_window(extra_body, int(window))
+
+    async def send(messages, max_tokens):
+        # Through the model's runtime adapter (INF-001), straight to the
+        # endpoint - never LLMClient's own budget, which would refuse it.
+        return await runtime.complete(client, ChatRequest(
+            model=model, messages=messages, temperature=0.0, max_tokens=max_tokens, extra_body=extra_body,
+        ))
+
+    def prompt_tokens(response) -> Optional[int]:
+        return response.prompt_tokens or None
+
+    # Not policy: the two token-rate probes (40 and 80 filler units, 1 output
+    # token) only measure prompt usage; temperature 0.0 because this measures
+    # the server, not sampling.
+    small = prompt_tokens(await send([{"role": "user", "content": _CAPACITY_UNIT * 40}], 1))
+    large = prompt_tokens(await send([{"role": "user", "content": _CAPACITY_UNIT * 80}], 1))
+    if not small or not large or large <= small:
+        return CaseResult("", UNAVAILABLE, {"reason": "the endpoint did not report prompt token usage",
+                                            "probe_prompt_tokens": [small, large]})
+    per_unit = (large - small) / 40
+    fixed = small - 40 * per_unit
+    target = int(window) - headroom
+    units = max(1, int((target - fixed) / per_unit))
+    head, tail = secrets.token_hex(4), secrets.token_hex(4)
+    response = await send([
+        {"role": "system", "content": f"The first code is {head}. Remember it."},
+        {"role": "user", "content": _CAPACITY_UNIT * units
+         + f"\nThe second code is {tail}. Reply with the first code, then the second code, separated by one "
+           "space, and nothing else."},
+    ], answer_tokens)
+    reported = prompt_tokens(response)
+    content = response.content
+    # The window the capacity was measured in must be the one qualified.
+    served = runtime.observe_served_context(base_url=base_url or "", model=model, api_key=ctx.get("api_key") or "")
+    evidence = {
+        # This probe measures the server's window, so it is sent at
+        # temperature 0.0 whatever the qualified inference settings say.
+        "temperature": 0.0,
+        "context_window": int(window), "target_prompt_tokens": target, "reported_prompt_tokens": reported,
+        "fill_ratio": round(reported / int(window), 4) if reported else None,
+        "first_marker_recalled": head in content, "last_marker_recalled": tail in content,
+        "finish_reason": response.finish_reason,
+        "served_context_window": served,
+    }
+    if served is not None and served != int(window):
+        evidence["reason_code"] = (SERVED_CONTEXT_BELOW_REQUESTED if served < int(window)
+                                   else RUNTIME_CONTEXT_IDENTITY_MISMATCH)
+        return CaseResult("", FAIL, evidence)
+    if reported is None:
+        return CaseResult("", UNAVAILABLE, {"reason": "the endpoint did not report prompt token usage", **evidence})
+    ok = (head in content and tail in content and reported >= int(policy.min_fill_ratio * target)
+          and reported <= int(window))
+    return CaseResult("", PASS if ok else FAIL, evidence)
+
+
+@_case("over_context_refusal")
+async def case_over_context_refusal(llm, model, ctx):
+    """See _over_context_refusal; every probe client it opens is closed."""
+    opened: List[Any] = []
+    try:
+        return await _over_context_refusal(llm, model, ctx, opened)
+    finally:
+        for probe in opened:
+            await _close_probe(probe)
+
+
+# Not policy: how far over the window the probe goes is the test itself (a
+# prompt clearly larger than the served window, beyond any token-rate error).
+_OVER_CONTEXT_FACTOR = 1.25
+
+
+async def _over_context_refusal(llm, model, ctx, opened: List[Any]):
+    """PROVIDER-CONTRACT-001A: a prompt larger than the served window is
+    refused by the provider, typed, never answered from a truncated prompt.
+    Like context_capacity it goes straight to the endpoint through the
+    model's runtime adapter with the production wire body (Kriya's own
+    admission would refuse it first); the filler's real token rate is
+    measured on two small probes so the prompt really exceeds the window."""
+    from kriya.core.llm import is_local_url
+
+    window = ctx.get("context_window")
+    if not window:
+        return CaseResult("", UNAVAILABLE, {"reason": "the served context window (num_ctx) is not known"})
+    base_url = ctx.get("base_url")
+    if base_url and not is_local_url(base_url):
+        return CaseResult("", UNAVAILABLE, {"reason": "over-context refusal is only probed on a local endpoint",
+                                            "endpoint": base_url})
+    factory = ctx.get("client_factory")
+    if factory is not None:
+        opened.append(factory(_policy(ctx).cases.context_capacity.request_timeout_seconds))
+    client = opened[-1].client if opened else llm.client
+    runtime = ctx.get("runtime") or runtime_adapter()
+    extra_body = runtime.request_plan(ctx.get("extra_body") or None, temperature=None,
+                                      reasoning_flag=bool(ctx.get("reasoning")),
+                                      requested_context_window=int(window)).wire_body or None
+    if runtime.capabilities.per_request_context_window:
+        extra_body = runtime.with_context_window(extra_body, int(window))
+
+    async def send(messages):
+        return await runtime.complete(client, ChatRequest(
+            model=model, messages=messages, temperature=0.0, max_tokens=1, extra_body=extra_body,
+        ))
+
+    # Not policy: the token-rate probes (40 and 80 filler units) only measure
+    # prompt usage, as in context_capacity.
+    small = (await send([{"role": "user", "content": _CAPACITY_UNIT * 40}])).prompt_tokens or None
+    large = (await send([{"role": "user", "content": _CAPACITY_UNIT * 80}])).prompt_tokens or None
+    if not small or not large or large <= small:
+        return CaseResult("", UNAVAILABLE, {"reason": "the endpoint did not report prompt token usage",
+                                            "probe_prompt_tokens": [small, large]})
+    per_unit = (large - small) / 40
+    target = int(_OVER_CONTEXT_FACTOR * int(window))
+    units = int((target - (small - 40 * per_unit)) / per_unit) + 1
+    evidence: Dict[str, Any] = {"context_window": int(window), "target_prompt_tokens": target}
+    try:
+        response = await send([{"role": "user", "content": _CAPACITY_UNIT * units + "\nReply with yes."}])
+    except ProviderContractError as refusal:
+        exact = refusal.details.get("provider_prompt_tokens")
+        evidence.update({"refused": True, "reason_code": refusal.reason_code, "provider_prompt_tokens": exact,
+                         "provider_context_window": refusal.details.get("provider_context_window")})
+        ok = refusal.reason_code == PROVIDER_PROMPT_TRUNCATED and (exact is None or exact > int(window))
+        return CaseResult("", PASS if ok else FAIL, evidence)
+    # Answered: the provider evaluated something smaller than the prompt sent.
+    evidence.update({"refused": False, "answered_from_reported_prompt_tokens": response.prompt_tokens or None,
+                     "finish_reason": response.finish_reason})
+    return CaseResult("", FAIL, evidence)
+
+
+ALL_CASES: Tuple[CaseFn, ...] = (
+    case_plain_completion, case_finish_reason_stop, case_structured_json, case_multiline_json,
+    case_native_tool_calls, case_multiple_tool_calls, case_tool_argument_integrity, case_streaming_assembly,
+    case_output_truncation, case_reasoning_behavior, case_full_file_raw_content, case_anchored_edit_protocol,
+    case_malformed_output_recovery, case_timeout_semantics, case_cancellation_semantics,
+    case_endpoint_error_semantics, case_endpoint_restart_semantics, case_tokenizer_measurement,
+    case_context_capacity, case_over_context_refusal,
+)
+assert tuple(case.capability for case in ALL_CASES) == CAPABILITIES  # type: ignore[attr-defined]
+
+
+def measured_limits(cases: List[CaseResult], policy: Optional[ModelQualificationConfig] = None) -> Dict[str, Any]:
+    headroom = (policy or ModelQualificationConfig()).measurement.reasoning_tokens_headroom
+    limits: Dict[str, Any] = {}
+    for case in cases:
+        if case.status != PASS:
+            continue
+        for key, value in case.measured.items():
+            limits[key] = value
+    if "reasoning_tokens_observed" in limits:
+        limits["reasoning_tokens_max"] = int(math.ceil(limits.pop("reasoning_tokens_observed") * headroom))
+    return limits
+
+
+async def run_qualification(
+    config: Any,
+    model: Optional[str] = None,
+    *,
+    llm: Any = None,
+    client_factory: Optional[Callable[..., Any]] = None,
+    fingerprint: Optional[ModelRuntimeFingerprint] = None,
+    only: Optional[Iterable[str]] = None,
+    progress: Optional[Callable[[CaseResult], None]] = None,
+    context_window: Optional[int] = None,
+    settings: Optional[InferenceSettings] = None,
+) -> Dict[str, Any]:
+    """Run the protocol cases against the configured endpoint for one exact
+    runtime and return the record (the caller saves it).
+
+    ``settings`` are the inference settings qualified (default: what the
+    Developer sends ``model`` with, ``role_inference_settings``); every case
+    is sent with them (temperature, reasoning flag and extra_body) and the
+    record is keyed by them. ``context_window`` qualifies the model at that
+    num_ctx instead of its configured one (a PRD-016 context tier). Every
+    case is sent with a strict budget policy, so a case is never itself sent
+    with a different window."""
+    from kriya.core.inference_settings import role_inference_settings
+    from kriya.core.llm import LLMClient
+    from kriya.core.model_capabilities import capabilities_for_model
+    from kriya.core.model_runtime import (
+        _binding_for,
+        requested_context_window,
+        resolve_configured_model_runtime,
+    )
+
+    model = model or config.llm.model
+    settings = settings or role_inference_settings(config, "developer", model)
+    config = qualification_config(config, model, context_window, settings=settings)
+    fingerprint = fingerprint or resolve_configured_model_runtime(config, model, fresh=True)
+    if not fingerprint.exact:
+        raise QualificationError(
+            f"{NOT_EXACT}: {model!r} cannot be qualified: the runtime does not report "
+            f"{', '.join(c for c in ('artifact_digest', 'provider_version') if c in fingerprint.missing_components)} "
+            f"({'; '.join(fingerprint.probe_errors) or 'no native metadata'})"
+        )
+    runtime = runtime_for_binding(_binding_for(config, model))
+    require_verified_identity(config, model, fingerprint, settings, runtime)
+    llm = llm or LLMClient(config)
+
+    default_factory = qualification_client_factory(config, model)
+
+    from kriya.agents.response_protocol import developer_response_protocol, response_protocol_identity
+
+    policy = qualification_policy_of(config)
+    ctx: Dict[str, Any] = {
+        "policy": policy,
+        # The protocol cases speak the configured Developer response protocol.
+        "response_protocol": developer_response_protocol(config),
+        # Capability-aware budgets follow the identity qualified, never a name.
+        "reasoning": bool(settings.reasoning),
+        "runtime": runtime,
+        "native_tool_calls_enabled": capabilities_for_model(config, model).native_tool_calls,
+        "client_factory": client_factory or default_factory,
+        # qualification_config put the requested window into extra_body.
+        "extra_body": config.llm.extra_body,
+        "base_url": (_binding_for(config, model).get("base_url") or config.llm.base_url),
+        "api_key": (_binding_for(config, model).get("api_key") or config.llm.api_key),
+        "context_window": budget_window(
+            requested_context_window(config.llm.extra_body, config.llm.context_window, runtime),
+            fingerprint.effective_context_window),
+    }
+    wanted = set(only) if only else None
+    results: List[CaseResult] = []
+    for case in ALL_CASES:
+        if wanted is not None and case.capability not in wanted:  # type: ignore[attr-defined]
+            continue
+        result = await case(llm, model, ctx)
+        results.append(result)
+        if progress is not None:
+            progress(result)
+    return build_record(fingerprint, results, settings=settings,
+                        environment=environment_for_fingerprint(fingerprint), policy=policy,
+                        response_protocol=response_protocol_identity(config))
+
+
+def qualification_client_factory(config: Any, model: str) -> Callable[[float], Any]:
+    """A factory of probe clients for ``model``'s own endpoint and key with
+    a given timeout (the timeout and capacity cases). The timeout is the
+    probe's ``llm.transport`` policy - the one owner of every request's
+    timeout (LLMClient sends it per request, which overrides any timeout set
+    on the SDK client) - and the client is Kriya's own (direct transport, no
+    SDK retry)."""
+    from kriya.core.llm import LLMClient
+    from kriya.core.model_runtime import _binding_for
+
+    binding = _binding_for(config, model)
+
+    def factory(timeout: float) -> Any:
+        probe_config = config.model_copy(deep=True)
+        probe_config.llm.base_url = binding.get("base_url") or config.llm.base_url
+        probe_config.llm.api_key = binding.get("api_key") or config.llm.api_key
+        transport = probe_config.llm.transport
+        transport.connect_timeout_seconds = transport.read_timeout_seconds = timeout
+        transport.write_timeout_seconds = transport.pool_timeout_seconds = timeout
+        return LLMClient(probe_config)
+
+    return factory
+
+
+def require_verified_identity(config: Any, model: str, fingerprint: ModelRuntimeFingerprint,
+                              settings: InferenceSettings, runtime: Any) -> Any:
+    """PROVIDER-CONTRACT-001: the identity a record would certify is the
+    one the provider verifiably applies - every setting the binding relies on
+    is carried by the request or equals the served model's own configuration
+    (requested window included). Returns the request plan; raises
+    QualificationError(QUALIFICATION_IDENTITY_UNVERIFIED) otherwise, before
+    any case runs."""
+    from kriya.core.model_runtime import binding_object, requested_context_window
+
+    binding = binding_object(config, model) or config.llm
+    extra_body = getattr(binding, "extra_body", None) or None
+    plan = runtime.request_plan(
+        extra_body, temperature=settings.temperature, reasoning_flag=settings.reasoning,
+        requested_context_window=requested_context_window(extra_body, getattr(binding, "context_window", None),
+                                                          runtime),
+        fingerprint=fingerprint)
+    problems = [f"conflict: {c}" for c in plan.conflicts] + [f"unknown request field {u}" for u in plan.unknown]
+    problems += [f"{s.name}: requested {s.requested!r}, served {s.effective!r}" for s in plan.not_effective()]
+    problems += [f"{s.name}: requested {s.requested!r}, not verifiable on this runtime" for s in plan.unverified()]
+    if problems:
+        raise QualificationError(
+            f"{QUALIFICATION_IDENTITY_UNVERIFIED}: {model!r} cannot be qualified - the inference identity the "
+            f"provider applies is not the one configured ({'; '.join(problems)}). Pin the served model's "
+            "configuration (kriya model pin) and bind the pinned model.")
+    return plan
+
+
+def qualification_config(config: Any, model: str, context_window: Optional[int] = None, *,
+                         settings: Optional[InferenceSettings] = None) -> Any:
+    """A copy of ``config`` for qualifying ``model``: optionally at another
+    num_ctx (set on the model's own binding, which is what its fingerprint
+    is built from), every request carrying ``settings`` (the temperature,
+    reasoning flag and extra_body qualified; LLMClient otherwise sends the
+    primary binding's), and a strict budget policy so no case is itself sent
+    with a different window."""
+    from kriya.core.inference_runtime import runtime_for_binding
+    from kriya.core.inference_settings import request_settings
+    from kriya.core.model_runtime import binding_object, requested_context_window
+
+    copy = config.model_copy(deep=True)
+    binding = binding_object(copy, model) or copy.llm
+    if settings is not None:
+        # Keep the binding's own context window: it is the runtime input, not a setting.
+        runtime = runtime_for_binding(binding)
+        window = requested_context_window(getattr(binding, "extra_body", None), getattr(binding, "context_window", None),
+                                          runtime)
+        # The binding's own extra_body when it expresses exactly these settings
+        # (it also carries the server-only settings, which the wire body does
+        # not); otherwise the qualified wire body.
+        own = getattr(binding, "extra_body", None)
+        own_settings = request_settings(temperature=settings.temperature, reasoning=settings.reasoning,
+                                        extra_body=own, runtime=runtime)
+        extra_body = own if own_settings.digest == settings.digest else settings.extra_body
+        binding.extra_body = (runtime.with_context_window(extra_body, window) if window is not None
+                              else extra_body)
+        binding.reasoning = settings.reasoning
+        if settings.temperature is not None and hasattr(binding, "temperature"):
+            binding.temperature = settings.temperature
+        copy.llm.temperature = settings.temperature if settings.temperature is not None else copy.llm.temperature
+        copy.llm.reasoning = settings.reasoning
+    if context_window is not None:
+        binding.extra_body = runtime_for_binding(binding).with_context_window(
+            getattr(binding, "extra_body", None), context_window)
+        binding.context_window = int(context_window)
+    if binding is not copy.llm:
+        copy.llm.extra_body = dict(getattr(binding, "extra_body", None) or {})
+    for policy_owner in (binding, copy.llm):
+        policy = getattr(policy_owner, "context_policy", None)
+        if policy is not None:
+            policy.mode = "strict"
+    return copy
+
+
+def build_record(fingerprint: ModelRuntimeFingerprint, results: List[CaseResult], *,
+                 settings: InferenceSettings, environment: Optional[ExecutionEnvironment] = None,
+                 policy: Optional[ModelQualificationConfig] = None,
+                 response_protocol: Optional[str] = None) -> Dict[str, Any]:
+    """The record of one qualification run, bound to the effective
+    qualification ``policy`` (defaults when None). Functional cases go to
+    ``cases``; environment-dependent ones to ``environment_evidence`` under
+    the digest of the environment that ran them (``environment``, default
+    the one serving the fingerprint's endpoint)."""
+    from kriya import __version__ as kriya_version
+
+    environment = environment if environment is not None else environment_for_fingerprint(fingerprint)
+    counts = {status: sum(1 for r in results if r.status == status) for status in (PASS, FAIL, UNAVAILABLE)}
+    functional = [r for r in results if r.capability not in ENVIRONMENT_DEPENDENT_CAPABILITIES]
+    dependent = [r for r in results if r.capability in ENVIRONMENT_DEPENDENT_CAPABILITIES]
+    qualified_at = datetime.now(timezone.utc).isoformat()
+    policy = policy if policy is not None else ModelQualificationConfig()
+    if response_protocol is None:
+        from kriya.agents.response_protocol import response_protocol_identity
+
+        response_protocol = response_protocol_identity(None)
+    evidence = ({environment.digest: {"environment": environment.to_dict(), "qualified_at": qualified_at,
+                                      "cases": [asdict(r) for r in dependent]}} if dependent else {})
+    return {
+        "schema_version": QUALIFICATION_SCHEMA_VERSION,
+        "policy_version": QUALIFICATION_POLICY_VERSION,
+        "adapter_version": MODEL_PROTOCOL_ADAPTER_VERSION,
+        "kriya_version": kriya_version,
+        "qualification_identity": qualification_identity(fingerprint.digest, settings),
+        "fingerprint_digest": fingerprint.digest,
+        "fingerprint": fingerprint.to_dict(),
+        "inference_settings_digest": settings.digest,
+        # output_ceiling inside is metadata (the configured max_tokens), never identity.
+        "inference_settings": settings.to_dict(),
+        # QUAL-CONFIG-001: the policy the verdicts were reached under.
+        POLICY_DIGEST_FIELD: qualification_policy_digest(policy, response_protocol),
+        "qualification_policy": policy.model_dump(mode="json"),
+        "developer_response_protocol": response_protocol,
+        "qualified_at": qualified_at,
+        # The environment this run was served from (capacity evidence below
+        # is keyed by its digest; functional cases hold in any environment).
+        "environment": environment.to_dict(),
+        "cases": [asdict(r) for r in functional],
+        "environment_evidence": evidence,
+        "measured_limits": measured_limits(results, policy),
+        "summary": counts,
+    }
+
+
+__all__ = [
+    "ALL_CASES", "CAPABILITIES", "CaseResult", "FAIL", "MISSING", "NOT_EXACT", "NOT_QUALIFIED", "PASS",
+    "LEGACY_V3_POLICY_DIGEST", "POLICY_DIGEST_FIELD", "QUALIFICATION_HOME_ENV", "QUALIFICATION_POLICY_VERSION",
+    "QUALIFIED", "QualificationAssessment", "policy_digest_for", "qualification_policy_digest",
+    "qualification_policy_of", "record_policy_digest",
+    "QualificationError", "QualificationPathInsideWorkspaceError", "ROLES", "STALE", "TOKENIZER_CORPORA",
+    "CONTEXT_TIER_REQUIREMENTS", "ContextTierOffer", "UNAVAILABLE", "offered_context_tiers", "assess", "build_record", "context_tier_requirements",
+    "load_record", "measured_limits", "measured_limits_for", "qualification_config", "qualification_home",
+    "record_is_current", "record_path", "recorded_context_sizes", "required_capabilities", "role_models",
+    "runtime_has_records", "environment_case_statuses",
+    "run_qualification", "save_record",
+]

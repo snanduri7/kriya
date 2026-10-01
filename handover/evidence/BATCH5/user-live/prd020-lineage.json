@@ -1,0 +1,107 @@
+{
+  "design": "{\n  \"files\": [\n    \"inventory.py\"\n  ]\n}",
+  "lineage": [
+    {
+      "cited": [
+        "REQ-1",
+        "REQ-2",
+        "REQ-3",
+        "REQ-4"
+      ],
+      "omitted": [],
+      "requirement_set_digest": "3d5b161e268c8253419022239d33e371a63fc482d09603aa22929fc0f361a0cf",
+      "stage": "plan"
+    },
+    {
+      "cited": [],
+      "omitted": [
+        "REQ-1",
+        "REQ-2",
+        "REQ-3",
+        "REQ-4"
+      ],
+      "requirement_set_digest": "3d5b161e268c8253419022239d33e371a63fc482d09603aa22929fc0f361a0cf",
+      "stage": "design"
+    }
+  ],
+  "plan": "# Inventory.py Creation Plan\n\n## Step-by-Step Implementation\n\n1. **Create inventory.py file** (REQ-1)\n   - Create a new Python file named `inventory.py`\n   - Add the constant MAX_STOCK set to 500 (REQ-2)\n   - Add the restock function that takes current stock and amount parameters (REQ-3)\n   - Implement logic to ensure restock never returns more than MAX_STOCK (REQ-4)\n\n## File Creation Details\n\n```markdown\n## Files to Create/Modify\n\n### inventory.py\n- Create new file with Python code implementing:\n  - Constant MAX_STOCK = 500 (REQ-2)\n  - Function restock(current, amount) that returns new stock level (REQ-3)\n  - Logic ensuring result never exceeds MAX_STOCK (REQ-4)\n```\n\n```json\n{\n  \"global_invariants\": [\n    {\n      \"id\": \"gi1\",\n      \"statement\": \"The inventory.py file must be a standalone Python module following standard Python conventions\"\n    }\n  ],\n  \"subtasks\": [\n    {\n      \"id\": \"s1\",\n      \"description\": \"Create inventory.py file with MAX_STOCK constant and restock function\",\n      \"execution_method\": \"model\",\n      \"execution_role\": \"implementation\",\n      \"depends_on\": [],\n      \"planned_files\": [\n        {\n          \"path\": \"inventory.py\",\n          \"action\": \"create\",\n          \"environment_requirements\": [\n            \"python\"\n          ],\n          \"requires_capabilities\": []\n        }\n      ],\n      \"provides\": [\n        \"inventory.module.stable\"\n      ],\n      \"requires\": [],\n      \"relevant_global_invariant_ids\": [\n        \"gi1\"\n      ],\n      \"acceptance_criteria_ids\": [\n        \"ac1\"\n      ],\n      \"verification\": []\n    }\n  ],\n  \"acceptance_criteria\": [\n    {\n      \"id\": \"ac1\",\n      \"description\": \"inventory.py file contains MAX_STOCK constant set to 500 and restock function that never returns more than 500\",\n      \"method\": \"judgment\"\n    }\n  ],\n  \"extension_points\": [],\n  \"refactor_baseline\": null\n}\n```",
+  "quality_gates_passed": true,
+  "requirements": {
+    "digest": "3d5b161e268c8253419022239d33e371a63fc482d09603aa22929fc0f361a0cf",
+    "evidence": {},
+    "goal_digest": "72c0c08a2b593cee84b06be5927e6f1da33e89681ebf2fcc8b3e56e7f953aec5",
+    "outcomes": {
+      "REQ-1": "satisfied",
+      "REQ-2": "satisfied",
+      "REQ-3": "satisfied",
+      "REQ-4": "satisfied"
+    },
+    "requirements": [
+      {
+        "id": "REQ-1",
+        "kind": "requirement",
+        "ordinal": 1,
+        "source": "goal",
+        "text": "Create inventory.py for a small stock tracker."
+      },
+      {
+        "id": "REQ-2",
+        "kind": "requirement",
+        "ordinal": 2,
+        "source": "goal",
+        "text": "Add a constant MAX_STOCK set to 500"
+      },
+      {
+        "id": "REQ-3",
+        "kind": "requirement",
+        "ordinal": 3,
+        "source": "goal",
+        "text": "Add a function restock(current, amount) that returns the new stock level"
+      },
+      {
+        "id": "REQ-4",
+        "kind": "constraint",
+        "ordinal": 4,
+        "source": "goal",
+        "text": "restock must never return more than MAX_STOCK"
+      }
+    ],
+    "version": 1
+  },
+  "verdicts": [
+    {
+      "evidence": {
+        "REQ-1": "The requirement is about creating a file, which is not a concrete identifier or value that can be checked in source code.",
+        "REQ-2": "MAX_STOCK constant is not present in the inventory.py file.",
+        "REQ-3": "restock function is not present in the inventory.py file.",
+        "REQ-4": "The restriction that restock must never return more than MAX_STOCK cannot be verified because the function restock is missing from the code."
+      },
+      "evidence_id": "0f0deaa1c7d4d40b6a11a197e793117f15d30d0e4d212de78f51e449311cdc74",
+      "findings": [],
+      "outcomes": {
+        "REQ-1": "unverified",
+        "REQ-2": "violated",
+        "REQ-3": "violated",
+        "REQ-4": "violated"
+      },
+      "requirement_set_digest": "3d5b161e268c8253419022239d33e371a63fc482d09603aa22929fc0f361a0cf"
+    },
+    {
+      "evidence": {
+        "REQ-1": "inventory.py file created",
+        "REQ-2": "MAX_STOCK = 500 in inventory.py",
+        "REQ-3": "restock(current, amount) function defined in inventory.py",
+        "REQ-4": "restock function uses min(current + amount, MAX_STOCK) to ensure max value is never exceeded"
+      },
+      "evidence_id": "a149e21c8fd1438107ee947efc9dae6398038e1ec83eb88f49f3d989bedc0c25",
+      "findings": [],
+      "outcomes": {
+        "REQ-1": "satisfied",
+        "REQ-2": "satisfied",
+        "REQ-3": "satisfied",
+        "REQ-4": "satisfied"
+      },
+      "requirement_set_digest": "3d5b161e268c8253419022239d33e371a63fc482d09603aa22929fc0f361a0cf"
+    }
+  ]
+}

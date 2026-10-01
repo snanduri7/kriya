@@ -5,9 +5,12 @@ import json
 import logging
 import os
 import re
-from typing import Any, Callable, Dict, List, Optional
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 from pydantic import BaseModel, Field
+
+from kriya.platform.filesystem_semantics import identity_key
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,15 @@ EXTENSION_MAP = {
     ".kt": "Kotlin",
     ".swift": "Swift"
 }
+
+# PRD-027: text configuration and build descriptors are indexed (generic
+# chunking) so Graph RAG can retrieve them - the context-recall
+# certification found every configuration file and every non-Maven build
+# descriptor unretrievable. JSON is deliberately excluded (lock files and
+# generated data would flood the index).
+CONFIGURATION_INDEX_EXTENSIONS = frozenset({
+    ".properties", ".yaml", ".yml", ".toml", ".gradle", ".kts", ".cfg", ".ini",
+})
 
 # Shared core of a Java method signature (modifiers, return type, captured
 # method name, parameter list) - independently duplicated three times before
@@ -303,12 +315,18 @@ def parse_gitignore(root_path: str) -> List[str]:
             logger.debug(f"Failed to read '.gitignore' at '{gitignore_path}': {e}")
     return patterns
 
+# Directory names the repository model treats as generated output / tooling
+# state, never source (PRD-008 S4c's milestone workspace evidence reuses it).
+GENERATED_OUTPUT_DIRS = frozenset({
+    "target", "build", "node_modules", "dist", ".git", ".venv", "venv", "__pycache__", "obj", "bin",
+})
+
+
 def is_ignored(filepath: str, root_path: str, gitignore_patterns: List[str]) -> bool:
     rel_path = os.path.relpath(filepath, root_path)
     parts = rel_path.split(os.sep)
-    system_ignores = {"target", "build", "node_modules", "dist", ".git", ".venv", "venv", "__pycache__", "obj", "bin"}
     for p in parts:
-        if p in system_ignores or p.startswith("."):
+        if p in GENERATED_OUTPUT_DIRS or p.startswith("."):
             return True
     for pat in gitignore_patterns:
         if pat.endswith("/"):
@@ -317,6 +335,107 @@ def is_ignored(filepath: str, root_path: str, gitignore_patterns: List[str]) -> 
             return True
     return False
 
+
+def nested_gitignore_patterns_for(
+    root: str, repo_root: str, gitignore_cache: Dict[str, List[str]],
+) -> List[str]:
+    """CTX-001 P1 WP8: the ONE shared nested-.gitignore-accumulation step -
+    extracted verbatim from index_repository()'s own pre-existing walk
+    (which RepositoryAnalyzer.analyze() below now also calls, instead of
+    maintaining its own, entirely separate, non-.gitignore-aware notion of
+    'which directories are part of this repository') so both discovery
+    paths mean the same thing by 'the repository' rather than two
+    independently-evolved, silently-diverging answers.
+
+    `root` is the CURRENT os.walk() directory being visited; `gitignore_cache`
+    is mutated in place (root -> the accumulated pattern list applicable at
+    that directory, inherited from its parent plus any local .gitignore of
+    its own) - the caller is expected to pass the SAME dict across an
+    entire os.walk() so a subdirectory correctly inherits its ancestors'
+    patterns, exactly as real nested .gitignore resolution requires.
+    Callers must seed gitignore_cache with
+    `{repo_root: parse_gitignore(repo_root)}` before the walk begins."""
+    parent = os.path.dirname(root)
+    current_patterns = list(gitignore_cache.get(parent, gitignore_cache[repo_root]))
+
+    local_gitignore = os.path.join(root, ".gitignore")
+    if os.path.exists(local_gitignore) and root != repo_root:
+        try:
+            with open(local_gitignore, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        rel_dir = os.path.relpath(root, repo_root)
+                        if rel_dir != ".":
+                            current_patterns.append(os.path.join(rel_dir, line))
+                        else:
+                            current_patterns.append(line)
+        except Exception as e:
+            logger.debug(f"Failed to read '.gitignore' at '{local_gitignore}': {e}")
+    gitignore_cache[root] = current_patterns
+    return current_patterns
+
+
+# CTX-001 P1 WP8: a small, IN-PROCESS-ONLY cache - the workspace root's
+# filesystem identity -> (compute_workspace_content_hash(), the
+# RepositoryModel computed for that content). Deliberately module-level (not a
+# general caching framework, not a new persistent store): RepositoryAnalyzer
+# itself is constructed fresh on every real call site (kriya/workflow/
+# workflow.py), so a per-instance cache would be useless; a module-level
+# dict gives this the ONE lifetime that's actually useful - surviving
+# across REPEATED analyze() calls within one long-running process (a
+# milestone-decomposed run's own multiple run_generation_workflow() calls,
+# or a `kriya repl` session's multiple `generate`s) - while still
+# guaranteeing zero cross-process persistence (a fresh `kriya` CLI
+# invocation starts with an empty dict, by construction - nothing is ever
+# written to disk). _ANALYZE_CACHE_HITS/_MISSES are one-element lists (not
+# bare module ints) purely so they can be reset from a test without a
+# `global` statement leaking into this module's own runtime code path.
+# LEAK-ANALYZE-CACHE-001: at most ONE entry per workspace root (keyed by
+# filesystem_semantics.identity_key, so every alias of a root shares it).
+# A new content revision replaces the root's entry, it never accumulates
+# beside it: keying on (root, hash) kept one full RepositoryModel per
+# historical revision for the whole life of a repl/milestone process. The
+# replacement is built first and stored with ONE dict assignment of an
+# immutable entry, so a failed build leaves the prior entry (still bound to
+# its own hash, so never served for other content) and a concurrent reader
+# sees either the old or the new (hash, model) pair, never a mix.
+class _AnalyzeCacheEntry(NamedTuple):
+    content_hash: str
+    model: "RepositoryModel"
+
+
+_ANALYZE_CACHE: Dict[Tuple[int, int], _AnalyzeCacheEntry] = {}
+_ANALYZE_CACHE_HITS = [0]
+_ANALYZE_CACHE_MISSES = [0]
+
+
+def _prune_departed_roots() -> None:
+    """Drop entries whose root no longer exists or is now a different
+    directory (removed and recreated): such an entry can never be hit again.
+    Run before every store, so the cache holds only roots that are still on
+    disk - without it every removed candidate worktree (.kriya/worktrees/*,
+    one per enforce run) kept its model for the rest of a repl/milestone
+    process. One stat per cached root, on a miss only. A concurrent store
+    for the same key may be dropped by this; that only costs a recompute."""
+    for key, entry in list(_ANALYZE_CACHE.items()):
+        if identity_key(entry.model.root_path) != key:
+            _ANALYZE_CACHE.pop(key, None)
+
+
+@dataclass
+class IndexReport:
+    """EMBEDDING-CONTRACT-001: what an index_repository() pass did. A file in
+    ``failed`` (path -> reason code) has no current vectors for its present
+    revision; ``analyze`` exits non-zero when any did."""
+
+    fingerprint: str
+    indexed: int = 0
+    failed: Dict[str, str] = field(default_factory=dict)
+    segmented_chunks: int = 0
+    admission_misses: int = 0
+
+
 class RepositoryAnalyzer:
     """Analyzes workspace directory to extract language, frameworks, architecture and dependencies."""
 
@@ -324,12 +443,69 @@ class RepositoryAnalyzer:
         self.root_path = os.path.abspath(root_path)
 
     def analyze(self) -> RepositoryModel:
-        """Run analysis on the repository and return a RepositoryModel."""
+        """Run analysis on the repository and return a RepositoryModel.
+
+        CTX-001 P1 WP8: transparently reuses a prior result for THIS
+        process's lifetime when the workspace's real content identity
+        (compute_workspace_content_hash(), STATE-001's own git-tree-based
+        primitive - reused, not reinvented) hasn't changed since the last
+        analyze() call for this exact root_path - see _analyze_cache_key()'s
+        own docstring for why this key is now safe to use (the discovery-
+        semantics alignment below closes the gap the original WP8 attempt
+        found unsafe). A non-git workspace (cache_key is None) always
+        recomputes, unchanged from pre-WP8 behavior - this cache never
+        makes a supported non-git workspace unanalyzable."""
         if not os.path.exists(self.root_path):
             raise FileNotFoundError(f"Root path '{self.root_path}' does not exist.")
 
+        cache_key = self._analyze_cache_key()
+        if cache_key is not None:
+            root_key, content_hash = cache_key
+            cached = _ANALYZE_CACHE.get(root_key)
+            # The model embeds the root_path string it was built for, so an
+            # alias spelling of the same root recomputes (and takes over the
+            # root's single entry) rather than being served another spelling.
+            if (cached is not None and cached.content_hash == content_hash
+                    and cached.model.root_path == self.root_path):
+                _ANALYZE_CACHE_HITS[0] += 1
+                # Never return the SAME shared instance a second caller
+                # could mutate (RepositoryModel/pydantic BaseModel is
+                # mutable by default) - deep-copy on every cache hit, cheap
+                # relative to a full re-walk+re-parse.
+                return cached.model.model_copy(deep=True)
+
+        _ANALYZE_CACHE_MISSES[0] += 1
+        model = self._analyze_uncached()
+        if cache_key is not None:
+            _prune_departed_roots()
+            _ANALYZE_CACHE[root_key] = _AnalyzeCacheEntry(content_hash, model)
+            return model.model_copy(deep=True)
+        return model
+
+    def _analyze_cache_key(self) -> Optional[Tuple[Tuple[int, int], str]]:
+        """(root filesystem identity, workspace_content_hash) - None for a
+        non-git workspace, a root whose identity can't be established, or
+        any other reason the hash can't be computed
+        (compute_workspace_content_hash() already fails closed to None for
+        exactly these cases - see its own docstring) - analyze() always
+        recomputes fresh when this is None, identical to every pre-WP8
+        call. Local import: kriya.workflow.checkpoint is a much heavier
+        module (git subprocess helpers, checkpoint I/O) that kriya/analyzer/
+        itself has no other reason to depend on at import time - deferred
+        to first actual use, mirroring this module's own existing deferred-
+        import convention (e.g. _parse_java's edit_safety import)."""
+        from kriya.workflow.checkpoint import compute_workspace_content_hash
+        root_key = identity_key(self.root_path)
+        if root_key is None:
+            return None
+        workspace_hash = compute_workspace_content_hash(self.root_path)
+        if workspace_hash is None:
+            return None
+        return (root_key, workspace_hash)
+
+    def _analyze_uncached(self) -> RepositoryModel:
         model = RepositoryModel(root_path=self.root_path)
-        
+
         # 1. Walk repository and count files/extensions
         file_counts = {}
         total_files = 0
@@ -355,9 +531,28 @@ class RepositoryAnalyzer:
             "skills", "memory", "logs",
         }
 
+        # CTX-001 P1 WP8: the SAME nested-.gitignore-aware primitive
+        # index_repository() already uses (nested_gitignore_patterns_for/
+        # is_ignored, module-level above) - ADDITIVE to, never a
+        # replacement for, the ignore_dirs/dot-prefix checks already
+        # established above (both existing exclusions still apply
+        # unconditionally - this only makes analyze() ALSO honor a real
+        # project .gitignore, closing the gap where a project-specific
+        # ignored directory neither hardcoded set knows about was still
+        # walked, counted, and sampled while compute_workspace_content_
+        # hash() (which DOES honor .gitignore) stayed unchanged - the
+        # exact WP8 unsafe-cache finding this closes).
+        gitignore_cache = {self.root_path: parse_gitignore(self.root_path)}
+
         for root, dirs, files in os.walk(self.root_path):
+            current_patterns = nested_gitignore_patterns_for(root, self.root_path, gitignore_cache)
+
             # Modify dirs in-place to skip ignored directories
-            dirs[:] = [d for d in dirs if d not in ignore_dirs and not d.startswith(".")]
+            dirs[:] = [
+                d for d in dirs
+                if d not in ignore_dirs and not d.startswith(".")
+                and not is_ignored(os.path.join(root, d), self.root_path, current_patterns)
+            ]
 
             rel_path = os.path.relpath(root, self.root_path)
             # Only report a top-level folder as real project structure if it
@@ -366,21 +561,22 @@ class RepositoryAnalyzer:
             # it as an existing "top_level_folder" regardless of whether
             # anything was ever in it, which is exactly the false signal
             # that caused the skills/manage.py hallucination above.
-            real_files_here = [f for f in files if not f.startswith(".")]
+            real_files_here = [
+                f for f in files
+                if not f.startswith(".") and not is_ignored(os.path.join(root, f), self.root_path, current_patterns)
+            ]
             if rel_path != "." and real_files_here:
                 directories.add(rel_path.split(os.sep)[0])
 
-            for file in files:
-                if file.startswith("."):
-                    continue
+            for file in real_files_here:
                 _, ext = os.path.splitext(file)
                 ext = ext.lower()
-                
+
                 lang = EXTENSION_MAP.get(ext)
                 if lang:
                     file_counts[lang] = file_counts.get(lang, 0) + 1
                     total_files += 1
-                
+
                 file_list.append(os.path.join(root, file))
 
         # Calculate language percentages
@@ -626,41 +822,56 @@ class RepositoryAnalyzer:
         cfg: Any, 
         changed: bool = False,
         force: bool = False,
-        progress_callback: Optional[Callable[[str, int, int], None]] = None
+        progress_callback: Optional[Callable[[str, int, int], None]] = None,
+        embedding_client: Any = None,
+        generate_conventions_skill: bool = True,
     ) -> None:
-        """Walks the repository, chunks code files, generates semantic embeddings, and stores them in LocalVectorStore."""
+        """Walks the repository, chunks code files, generates semantic embeddings, and stores them in LocalVectorStore.
+
+        ``embedding_client`` (PRD-027) replaces the configured Ollama client -
+        the context-recall certification suite's deterministic CI embedder.
+        None (every production caller) builds the configured client.
+        ``generate_conventions_skill=False`` skips step 5 (an LLM call that
+        writes an auto-conventions skill); certification indexes fixtures
+        without calling any model."""
         from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
         
         # 1. Resolve storage paths
         vector_index_path = os.path.join(cfg.paths.memory, "vector_index.db")
         store = LocalVectorStore(vector_index_path)
-        client = OllamaEmbeddingClient(base_url=cfg.embedding.base_url, model=cfg.embedding.model)
+        client = embedding_client if embedding_client is not None else OllamaEmbeddingClient(
+            base_url=cfg.embedding.base_url, model=cfg.embedding.model,
+            egress_policy=cfg.autonomy.egress_policy,
+        )
         
         from kriya.analyzer.graph import DependencyGraph
         db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")
         graph = DependencyGraph(db_path)
 
-        # Probe model dimensions dynamically and verify
-        test_emb = await client.get_embedding("test")
-        detected_dim = len(test_emb)
-        
+        # EMBEDDING-CONTRACT-001: the served model's identity is measured (a
+        # real probe embedding, digest, served context) before anything is
+        # indexed - a failed probe stops indexing; the dimension is never
+        # assumed. Vectors of another identity are never mixed with these.
+        from kriya.memory.embedding import EmbeddingError, EmbeddingIdentityChangedError, embed_chunks
+
         try:
-            store.verify_model(cfg.embedding.model, detected_dim)
-        except ValueError as e:
-            if force:
-                logger.info("Forcing re-index due to model/dimension mismatch. Wiping existing vector index...")
-                cursor = store.conn.cursor()
-                cursor.execute("DELETE FROM vector_chunks")
-                if store.use_fts:
-                    cursor.execute("DELETE FROM fts_chunks")
-                else:
-                    cursor.execute("DELETE FROM fts_chunks_fallback")
-                cursor.execute("DELETE FROM file_metadata")
-                store.conn.commit()
-            else:
-                store.close()
-                graph.close()
-                raise e
+            fingerprint = await client.fingerprint()
+            active = store.active_fingerprint()
+            if active is None or force:
+                # A first index, a pre-contract index (rows without any
+                # identity: re-embedded in full), or an explicit --force.
+                store.reset_index(fingerprint)
+            elif active != fingerprint.digest:
+                raise EmbeddingIdentityChangedError(
+                    f"the vector index was built under embedding identity {active[:12]}, the served model is "
+                    f"{fingerprint.digest[:12]} ({fingerprint.model}); re-index with 'kriya analyze --force'",
+                    details={"index": active, "served": fingerprint.to_dict()},
+                )
+        except Exception:
+            store.close()
+            graph.close()
+            raise
+        report = IndexReport(fingerprint=fingerprint.digest)
         
         # 2. Find target files (respecting nested gitignores and system ignore filters)
         # RepositoryAnalyzer.analyze() already detects far more languages via
@@ -677,30 +888,17 @@ class RepositoryAnalyzer:
         # is unioned in separately since chunk_file_with_metadata_headers()
         # has dedicated Spring-bean-aware handling for it but EXTENSION_MAP
         # itself doesn't track XML as a "language" at all.
-        target_extensions = set(EXTENSION_MAP.keys()) | {".xml"}
+        target_extensions = set(EXTENSION_MAP.keys()) | {".xml"} | CONFIGURATION_INDEX_EXTENSIONS
         
         files_to_index = []
         gitignore_cache = {self.root_path: parse_gitignore(self.root_path)}
 
         for root, dirs, files in os.walk(self.root_path):
-            parent = os.path.dirname(root)
-            current_patterns = list(gitignore_cache.get(parent, gitignore_cache[self.root_path]))
-            
-            local_gitignore = os.path.join(root, ".gitignore")
-            if os.path.exists(local_gitignore) and root != self.root_path:
-                try:
-                    with open(local_gitignore, "r", encoding="utf-8") as f:
-                        for line in f:
-                            line = line.strip()
-                            if line and not line.startswith("#"):
-                                rel_dir = os.path.relpath(root, self.root_path)
-                                if rel_dir != ".":
-                                    current_patterns.append(os.path.join(rel_dir, line))
-                                else:
-                                    current_patterns.append(line)
-                except Exception as e:
-                    logger.debug(f"Failed to read '.gitignore' at '{local_gitignore}': {e}")
-            gitignore_cache[root] = current_patterns
+            # CTX-001 P1 WP8: the shared nested-.gitignore primitive
+            # (nested_gitignore_patterns_for, above) - RepositoryAnalyzer.
+            # analyze() now walks against this SAME function, rather than
+            # this method's own logic being the only real implementation.
+            current_patterns = nested_gitignore_patterns_for(root, self.root_path, gitignore_cache)
 
             dirs[:] = [d for d in dirs if not is_ignored(os.path.join(root, d), self.root_path, current_patterns)]
             for file in files:
@@ -807,68 +1005,31 @@ class RepositoryAnalyzer:
                 # unset on any failure path (see below), so a later
                 # non-`--force` run naturally retries this exact file.
                 # Clear old chunks first to support re-indexing clean
-                store.remove_file(rel_path)
-
-                # Index in dependency graph
                 graph.index_file(rel_path, content, mtime, file_hash)
 
-                # Chunk file with metadata headers
-                chunks = chunk_file_with_metadata_headers(content, rel_path)
-
-                chunk_texts = [c["text"] for c in chunks if c["text"].strip()]
-                embedding_failed = False
-                if chunk_texts:
-                    # Generate all embeddings concurrently
-                    embs = await client.get_embeddings(chunk_texts)
-
-                    for chunk_idx, (chunk_text, emb) in enumerate(zip(chunk_texts, embs, strict=True)):
-                        # get_embeddings() silently substitutes an all-zero
-                        # "dummy" vector on any failure (embedding server
-                        # unreachable, malformed response) to degrade
-                        # gracefully - reasonable for a query-time caller,
-                        # where a dummy query vector naturally scores
-                        # near-zero and gets filtered out, but not here: a
-                        # zero-vector chunk is genuinely unsearchable
-                        # forever once written.
-                        if not any(v != 0.0 for v in emb):
-                            embedding_failed = True
-                        store.add_document(
-                            filepath=rel_path,
-                            text=chunk_text,
-                            embedding=emb,
-                            chunk_index=chunk_idx,
-                            model_name=cfg.embedding.model,
-                            dimensions=len(emb)
-                        )
-                # Store new cache metadata (including hash and mtime) -
-                # but NOT when any chunk's embedding silently degraded to
-                # a zero-vector above. Found live, 2026-08-12 (SME
-                # architecture review): a transient embedding-API failure
-                # during indexing previously got cached as a normal
-                # successful mtime/hash match, so a later non-`--force`
-                # `kriya analyze` would see the file as already
-                # up-to-date (per the fast-path skip check above) and
-                # never retry it - permanent, silent corruption of that
-                # file's RAG entries, recoverable only via `--force`.
-                # Deliberately leaving file_metadata unset here (the
-                # dependency graph's own cached mtime/hash, written
-                # above via graph.index_file, is NOT similarly gated -
-                # graph indexing has no embedding step to fail) means
-                # the fast-path skip's `cached_mtime == mtime` check
-                # will not match on the next run, so it naturally
-                # retries this file instead of skipping it forever.
-                if embedding_failed:
-                    logger.warning(
-                        f"Embedding generation failed for one or more chunks of '{rel_path}' "
-                        "(embedding server unreachable or returned an error) - indexed with a "
-                        "placeholder vector for those chunks, which will NOT be findable via "
-                        "similarity search. This file's cache metadata was deliberately not "
-                        "updated, so the next 'kriya analyze' run will retry it automatically."
-                    )
-                else:
-                    store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
+                chunks = [c for c in chunk_file_with_metadata_headers(content, rel_path) if c["text"].strip()]
+                with open(filepath, "rb") as raw:
+                    source_digest = hashlib.sha256(raw.read()).hexdigest()
+                try:
+                    segments = await embed_chunks(client, chunks, fingerprint.served_context)
+                except EmbeddingError as embedding_error:
+                    # E1: this revision is not current until every vector of
+                    # it exists; the previous vectors stay stored but stale,
+                    # and the cache entry is cleared so the next run retries.
+                    store.mark_stale(rel_path)
+                    if rel_path in store.file_metadata:
+                        del store.file_metadata[rel_path]
+                    report.failed[rel_path] = embedding_error.reason_code
+                    logger.warning(f"Embedding failed for '{rel_path}' ({embedding_error}); its previous "
+                                   "vectors are no longer current and it will be retried next run.")
+                    continue
+                store.publish_file(rel_path, segments, source_digest=source_digest, fingerprint=fingerprint.digest)
+                store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
+                report.indexed += 1
+                report.segmented_chunks += sum(1 for seg in segments if seg.segment_index > 0)
             except Exception as e:
                 logger.error(f"Failed to index file {rel_path}: {e}")
+                report.failed[rel_path] = type(e).__name__
                 
         # Remove deleted files from cached index
         cached_files = list(store.file_metadata.keys())
@@ -880,12 +1041,16 @@ class RepositoryAnalyzer:
                     graph.clear_file(cached_file)
                 
         # 4. Save persistent cache index
+        report.admission_misses = getattr(client, "admission_misses", 0)
         store.save()
-        logger.info("Semantic repository indexing completed.")
+        logger.info("Semantic repository indexing completed: %d indexed, %d failed.",
+                    report.indexed, len(report.failed))
         store.close()
         graph.close()
-        
+
         # 5. Auto-Generate Codebase Conventions Skill
+        if not generate_conventions_skill:
+            return report
         repo_slug = os.path.basename(self.root_path).lower().strip(".")
         if not repo_slug:
             repo_slug = "root"
@@ -974,3 +1139,4 @@ class RepositoryAnalyzer:
             except Exception as ex:
                 logger.error(f"Failed to auto-generate skill conventions: {ex}", exc_info=True)
                 click.secho(f"Failed to auto-generate skill conventions: {ex}", fg="red", err=True)
+        return report

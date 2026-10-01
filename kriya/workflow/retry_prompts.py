@@ -1,16 +1,11 @@
 """Standing invariant checklists (ecosystem preservation, resource lifecycle) and the three retry-prompt builders (targeted, full-set, missing-files) for the Developer retry loop. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
-import asyncio
-import difflib
-import hashlib
 import logging
 import os
-import re
-import shutil
-import subprocess
-import sys
-import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from kriya.workflow.context_budget import estimate_tokens
+from kriya.workflow.retry_package import RetryPackage
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +116,8 @@ def _build_targeted_retry_prompt(
     ecosystem_invariant_block: str = "",
     resource_lifecycle_block: str = "",
     verification_contract_block: str = "",
+    retry_package: Optional[RetryPackage] = None,
+    recovery_contract_block: str = "",
 ) -> Tuple[str, str]:
     """Builds the task description and code context for a targeted (single/few-
     file) retry: the target file(s) are framed as the fix, every other already-
@@ -133,22 +130,28 @@ def _build_targeted_retry_prompt(
     target_set = set(target_files)
     target_section = ""
     reference_section = ""
-    for filepath in sorted(all_files_written):
-        try:
-            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
-                current_content = fh.read()
-        except Exception as ex:
-            logger.debug(f"Failed to read '{filepath}' from worktree for targeted retry context: {ex}")
-            continue
-        if filepath in target_set:
-            target_section += f"=== File to fix: {filepath} ===\n{current_content}\n\n"
-        else:
-            reference_section += (
-                f"=== Existing file (already correct, reference only - regenerate ONLY if your fix "
-                f"genuinely requires changing it too): {filepath} ===\n{current_content}\n\n"
-            )
+    if retry_package is not None:
+        target_section = retry_package.render_context()
+        error_context = retry_package.render_error()
+    else:
+        for filepath in sorted(all_files_written):
+            try:
+                with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                    current_content = fh.read()
+            except Exception as ex:
+                logger.debug(f"Failed to read '{filepath}' from worktree for targeted retry context: {ex}")
+                continue
+            if filepath in target_set:
+                target_section += f"=== File to fix: {filepath} ===\n{current_content}\n\n"
+            else:
+                reference_section += (
+                    f"=== Existing file (already correct, reference only - regenerate ONLY if your fix "
+                    f"genuinely requires changing it too): {filepath} ===\n{current_content}\n\n"
+                )
 
-    task_desc = f"Goal: {goal}\nPlan: {plan}"
+    task_desc = _prepend_recovery_contract_block(
+        f"Goal: {goal}\nPlan: {plan}", recovery_contract_block,
+    )
     task_desc += ecosystem_invariant_block
     task_desc += resource_lifecycle_block
     task_desc += verification_contract_block
@@ -163,6 +166,184 @@ def _build_targeted_retry_prompt(
     return task_desc, targeted_context
 
 
+def _build_coordinated_retry_prompt(
+    goal: str, plan: str, error_context: str, contract: Any, generation_target: str,
+    all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
+    candidate_view: Optional[Dict[str, str]] = None,
+    ecosystem_invariant_block: str = "",
+    resource_lifecycle_block: str = "",
+    verification_contract_block: str = "",
+    participant_content_budget: Optional[int] = None,
+) -> Tuple[str, str]:
+    """MA9 (2026-08-29): coordinated-repair variant of
+    _build_targeted_retry_prompt for an ACTIVE RepairContract (kriya/
+    workflow/repair_contract.py) - see that module's own docstring for the
+    PRV-06 Bucket A forensic finding this exists to close. The ordinary
+    targeted-retry framing ("the following file(s) are most likely
+    responsible... the rest of the codebase is already correct") is exactly
+    what drives a coordinated structural repair into permanent single-file
+    oscillation - this framing instead names every participating artifact as
+    part of ONE coherent transformation, explicitly permits (never requires)
+    any participant to answer NO CHANGE NEEDED, and never claims the rest of
+    the codebase excludes its own coordinated siblings.
+
+    candidate_view: filepath -> content already generated for another
+    participant EARLIER in this SAME coordinated attempt (staged, not yet
+    committed to the worktree or the authoritative workspace) - shown
+    instead of that file's stale worktree copy so a later participant call
+    reasons against what the earlier one actually just produced, not what it
+    still contains on disk (see repair_contract.py's RepairContract
+    docstring, "Rule 2A": candidate state must accumulate during coordinated
+    generation while the real worktree stays untouched until the whole
+    batch is atomically accepted by the existing staged-write pipeline
+    further down run_attempt()).
+
+    participant_content_budget (2026-08-29 v2 design review, §14 - "for 6-10
+    affected files, do not place all full file contents in every prompt"):
+    None (the default) preserves the original unbounded behavior exactly -
+    every participant/reference file gets its full content, correct and
+    harmless for the 2-participant case this is proven against today. When
+    set, full content is ALWAYS shown for generation_target and every other
+    member of its own active repair group (the group currently being
+    synthesized needs full mutual visibility - never hidden, matching this
+    module's own "do not hide a participant whose current candidate API is
+    required" rule); participants in OTHER groups and plain reference files
+    then compete for the remaining budget on a first-fit basis (stable
+    iteration order, not size-sorted), falling back to a filename+role-only
+    mention - never silently omitted - once it runs out. Reuses
+    estimate_tokens() (kriya/workflow/context_budget.py), the same token-
+    counting primitive _fill_missing_content's own sibling-content budget
+    already uses for an analogous problem, not a new estimator."""
+    candidate_view = candidate_view or {}
+    participants = set(contract.participating_artifacts)
+    active_group_artifacts = set(contract.participating_artifacts)
+    for group in getattr(contract, "repair_groups", ()) or ():
+        if generation_target in group.artifacts:
+            active_group_artifacts = set(group.artifacts)
+            break
+
+    target_section = ""
+    reference_section = ""
+    omitted_participants: List[str] = []
+    running_tokens = 0
+    for filepath in sorted(set(all_files_written) | participants):
+        current_content = candidate_view.get(filepath)
+        if current_content is None:
+            try:
+                with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                    current_content = fh.read()
+            except Exception as ex:
+                logger.debug(f"Failed to read '{filepath}' from worktree for coordinated retry context: {ex}")
+                continue
+        candidate_label = (
+            " (candidate generated earlier in this same coordinated repair - not yet committed)"
+            if filepath in candidate_view else ""
+        )
+        always_full = (
+            participant_content_budget is None
+            or filepath == generation_target
+            or filepath in active_group_artifacts
+            or filepath not in participants
+        )
+        if not always_full:
+            block_tokens = estimate_tokens(current_content)
+            if running_tokens + block_tokens > participant_content_budget:
+                omitted_participants.append(filepath)
+                continue
+            running_tokens += block_tokens
+
+        if filepath == generation_target:
+            target_section += f"=== File to generate now: {filepath}{candidate_label} ===\n{current_content}\n\n"
+        elif filepath in participants:
+            role = contract.participant_roles.get(filepath, "participant")
+            target_section += (
+                f"=== Coordinated repair participant ({role}) - reference only, generated "
+                f"separately (before or after this call) as part of this SAME coordinated repair, "
+                f"do not return its content here: {filepath}{candidate_label} ===\n{current_content}\n\n"
+            )
+        else:
+            reference_section += (
+                f"=== Existing file (already correct, reference only - regenerate ONLY if your fix "
+                f"genuinely cannot be made without it): {filepath}{candidate_label} ===\n{current_content}\n\n"
+            )
+    if omitted_participants:
+        target_section += (
+            "=== Additional coordinated repair participant(s) (content omitted - context budget "
+            "reached; still part of this SAME repair, not excluded from it): "
+            + ", ".join(
+                f"{p} [{contract.participant_roles.get(p, 'participant')}]" for p in omitted_participants
+            ) + " ===\n\n"
+        )
+
+    participant_list = ", ".join(contract.generation_order)
+    must_fix = "; ".join(contract.must_fix) or "resolve the coordinated repair intent below"
+    must_preserve = "; ".join(contract.must_preserve) or "none declared"
+    immediate_targets = sorted(set(contract.immediate_correction_targets) & participants)
+    immediate_line = (
+        f"\nThe most recent failure specifically implicates: {', '.join(immediate_targets)}. "
+        "That does not mean other participant(s) are exempt from this repair - only that this "
+        "is where the current error text points."
+        if immediate_targets and set(immediate_targets) != participants
+        else ""
+    )
+    active_group_id = getattr(contract, "active_group_id", None)
+    active_group_line = (
+        f"\nActive repair group: {active_group_id} ({', '.join(sorted(active_group_artifacts))})."
+        if active_group_id and len(getattr(contract, "repair_groups", ()) or ()) > 1
+        else ""
+    )
+
+    task_desc = f"Goal: {goal}\nPlan: {plan}"
+    task_desc += ecosystem_invariant_block
+    task_desc += resource_lifecycle_block
+    task_desc += verification_contract_block
+    task_desc += (
+        f"\n\n=== Previous Error to Fix ===\n{error_context}\n\n"
+        "=== ACTIVE COORDINATED REPAIR ===\n"
+        f"Repair intent: {contract.repair_intent}\n"
+        f"Participating artifacts (ALL are part of ONE coherent transformation, generated one at "
+        f"a time across separate calls that share this same contract): {participant_list}.\n"
+        f"MUST FIX: {must_fix}\n"
+        f"MUST PRESERVE: {must_preserve}"
+        f"{active_group_line}"
+        f"{immediate_line}\n\n"
+        f"You are generating exactly one file right now: {generation_target}. The other "
+        "participant(s), shown above for reference, are generated separately as part of this "
+        "SAME coordinated repair - do not include their content in your response. If, after "
+        "considering the whole coordinated repair, this specific file genuinely needs no change, "
+        "say so via NO CHANGE NEEDED rather than inventing an edit just to have one. Do not "
+        "resolve this by toggling the same call on and off between attempts - the fix must hold "
+        "for every participant together, not one file at a time."
+    )
+    coordinated_context = active_code_context + "\n\n" + reference_section + target_section
+    return task_desc, coordinated_context
+
+
+def _prepend_recovery_contract_block(task_desc: str, recovery_contract_block: str) -> str:
+    """Recovery Execution Contract (PRV-06, 2026-08-29). A live incident
+    traced the previous mechanism precisely: MA8.1 owner-recovery's own
+    MUST_FIX/MUST_PRESERVE/EVIDENCE/ACCEPTANCE text used to reach the
+    Developer only via skills_prompt -> active_code_context ->
+    existing_code_context - a channel this codebase's own docstrings
+    already, correctly, describe as passive reference material (see
+    run_generation_workflow's own supplementary_context docstring). The
+    owner's full-set generation regenerated byte-identical, still-broken
+    content THREE separate times because the requirement that reopened it
+    was never actually part of what it was asked to do.
+
+    Prepended AHEAD of the ordinary goal/plan text (not appended after),
+    matching the design review's own explicit authority ordering: ACTIVE
+    RECOVERY CONTRACT outranks the original subtask goal for the scope of
+    this repair (the original goal is preserved as MUST_PRESERVE inside
+    the recovery contract text itself, never discarded - see
+    _build_owner_recovery_context's own docstring, workflow_controller.py).
+    Empty string (the default, every non-recovery invocation) is a
+    complete no-op."""
+    if not recovery_contract_block:
+        return task_desc
+    return f"{recovery_contract_block}\n\n{task_desc}"
+
+
 def _build_full_set_retry_prompt(
     goal: str, plan: str, error_context: str, required_files_prompt_block: str,
     all_files_written: Iterable[str], worktree_path: str, active_code_context: str,
@@ -170,6 +351,8 @@ def _build_full_set_retry_prompt(
     ecosystem_invariant_block: str = "",
     resource_lifecycle_block: str = "",
     verification_contract_block: str = "",
+    retry_package: Optional[RetryPackage] = None,
+    recovery_contract_block: str = "",
 ) -> Tuple[str, str]:
     """Full-set retries previously never showed the model its own prior attempt's
     content at all, only the abstract error text describing what went wrong -
@@ -194,19 +377,25 @@ def _build_full_set_retry_prompt(
     these" checklist mirrors the required_files_prompt_block pattern that
     already proved effective for the analogous missing-file problem."""
     reference_section = ""
-    for filepath in sorted(all_files_written):
-        try:
-            with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
-                current_content = fh.read()
-        except Exception as ex:
-            logger.debug(f"Failed to read '{filepath}' from worktree for full-set retry context: {ex}")
-            continue
-        reference_section += (
-            f"=== Your previous attempt's content for {filepath} (fix/rewrite as needed for the "
-            f"goal and error above, but don't silently drop anything still needed) ===\n{current_content}\n\n"
-        )
+    if retry_package is not None:
+        reference_section = retry_package.render_context()
+        error_context = retry_package.render_error()
+    else:
+        for filepath in sorted(all_files_written):
+            try:
+                with open(os.path.join(worktree_path, filepath), "r", encoding="utf-8", errors="replace") as fh:
+                    current_content = fh.read()
+            except Exception as ex:
+                logger.debug(f"Failed to read '{filepath}' from worktree for full-set retry context: {ex}")
+                continue
+            reference_section += (
+                f"=== Your previous attempt's content for {filepath} (fix/rewrite as needed for the "
+                f"goal and error above, but don't silently drop anything still needed) ===\n{current_content}\n\n"
+            )
 
-    task_desc = f"Goal: {goal}\nPlan: {plan}"
+    task_desc = _prepend_recovery_contract_block(
+        f"Goal: {goal}\nPlan: {plan}", recovery_contract_block,
+    )
     task_desc += ecosystem_invariant_block
     task_desc += resource_lifecycle_block
     task_desc += verification_contract_block

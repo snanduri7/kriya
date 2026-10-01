@@ -1,0 +1,45 @@
+"""PROVIDER-CONTRACT-001A: /8 qualification of the pinned production models
+on the native adapter, BEFORE any production config changes (section 10).
+
+The production config is loaded as approved (provider-contract-v3) and only
+the adapter is switched in memory (llm.inference_runtime and every llm_chain
+binding -> ollama_native); pinned tags and settings are unchanged. The loop is
+`kriya model qualify`'s own (kriya/cli.py::model_qualify): every distinct
+role inference identity of the model, run_qualification, save_record.
+Run from the approved workspace:  python qualify_native.py <config> <model>"""
+import asyncio, json, os, sys
+
+from kriya.config.config import load_config
+from kriya.core.inference_settings import role_inference_identities
+from kriya.core.model_qualification import record_policy_digest, role_models, run_qualification, save_record
+
+cfg = load_config(sys.argv[1])
+cfg.llm.inference_runtime = "ollama_native"
+for fallback in cfg.llm_chain:
+    fallback.inference_runtime = "ollama_native"
+target = sys.argv[2]
+identities = {}
+users = [role for role, models in role_models(cfg).items()
+         if any(m.casefold() == target.casefold() for m in models)] or ["developer"]
+for role in users:
+    for label, settings in role_inference_identities(cfg, role, target):
+        identities.setdefault(settings.digest, (settings, []))[1].append(
+            role if label == "normal" else f"{role} ({label})")
+
+
+def progress(result):
+    print(f"  {result.capability:<28} {result.status:<11} {result.elapsed_seconds:>7.2f}s", flush=True)
+
+
+for settings, roles in identities.values():
+    print(f"Qualifying {target} for {', '.join(roles)} (settings {settings.digest}, "
+          f"extra_body={settings.extra_body_json})", flush=True)
+    record = asyncio.run(run_qualification(cfg, target, progress=progress, settings=settings))
+    record["roles"] = roles
+    path = save_record(record, workspace_root=os.path.realpath(os.getcwd()))
+    print(json.dumps({"model": target, "roles": roles, "summary": record["summary"],
+                      "policy_version": record["policy_version"], "policy_digest": record_policy_digest(record),
+                      "fingerprint_digest": record["fingerprint_digest"],
+                      "qualification_identity": record["qualification_identity"],
+                      "inference_settings_digest": record["inference_settings_digest"],
+                      "measured_limits": record["measured_limits"], "record": path}), flush=True)

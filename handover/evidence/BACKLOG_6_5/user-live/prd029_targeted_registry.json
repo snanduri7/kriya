@@ -1,0 +1,164 @@
+{
+  "commit_cycle": {
+    "candidate_hash": "025a0a1f0971ce97d85418b89201aae2496c35011566a9eeb416afcc2af93a85",
+    "contract_registry": {
+      "after_digest": "3fb52cdedef71b3a31df16e2dae3251ce07eb55d288df8dbca297a12e4adda00",
+      "before_digest": "fc2f1418cc17a4ba850c4b13362f714abb804c01755489f67372bf310797e589",
+      "changed": [],
+      "created": [
+        "api:pricing.py"
+      ],
+      "downstream_verification": {
+        "required": true,
+        "satisfied": true,
+        "satisfied_by": "terminal_full_regression"
+      },
+      "established_capabilities": [],
+      "invalidated_consumers": [
+        {
+          "consumer": "checkout.py",
+          "contract": "api:pricing.py",
+          "reason": "CONTRACT_REVISION_CHANGED",
+          "symbols": [
+            "total"
+          ]
+        },
+        {
+          "consumer": "tests/test_pricing.py",
+          "contract": "api:pricing.py",
+          "reason": "CONTRACT_REVISION_CHANGED",
+          "symbols": [
+            "total"
+          ]
+        }
+      ],
+      "revision": 1,
+      "source_revision": "20260927T113353-6b062565-1c008d8132b5:025a0a1f0971ce97d85418b89201aae2496c35011566a9eeb416afcc2af93a85",
+      "stale": []
+    },
+    "intent": "APPLY_VERIFIED_CANDIDATE",
+    "result": "COMMITTED",
+    "transaction_id": "20260927T113353-6b062565-1c008d8132b5"
+  },
+  "contract_registry": {
+    "after_digest": "3fb52cdedef71b3a31df16e2dae3251ce07eb55d288df8dbca297a12e4adda00",
+    "before_digest": "fc2f1418cc17a4ba850c4b13362f714abb804c01755489f67372bf310797e589",
+    "changed": [],
+    "created": [
+      "api:pricing.py"
+    ],
+    "downstream_verification": {
+      "required": true,
+      "satisfied": true,
+      "satisfied_by": "terminal_full_regression"
+    },
+    "established_capabilities": [],
+    "invalidated_consumers": [
+      {
+        "consumer": "checkout.py",
+        "contract": "api:pricing.py",
+        "reason": "CONTRACT_REVISION_CHANGED",
+        "symbols": [
+          "total"
+        ]
+      },
+      {
+        "consumer": "tests/test_pricing.py",
+        "contract": "api:pricing.py",
+        "reason": "CONTRACT_REVISION_CHANGED",
+        "symbols": [
+          "total"
+        ]
+      }
+    ],
+    "revision": 1,
+    "source_revision": "20260927T113353-6b062565-1c008d8132b5:025a0a1f0971ce97d85418b89201aae2496c35011566a9eeb416afcc2af93a85",
+    "stale": []
+  },
+  "git": {
+    "base": "34539dfb8464b9c06a3a300aada197ae125407d1",
+    "head": "34539dfb8464b9c06a3a300aada197ae125407d1"
+  },
+  "goal": "In pricing, change the method named total to take a second parameter tax_rate with default 0.0 and return the sum multiplied by (1 + tax_rate). The tests under tests/ define the expected behaviour.",
+  "quality_gates_passed": true,
+  "registry": {
+    "contracts": {
+      "api:pricing.py": [
+        {
+          "authorization": {
+            "authorizations": [
+              {
+                "authorization_id": "grounding_goal::pricing.py::total::modify",
+                "change_category": "modify",
+                "owner": "pricing.py",
+                "provenance": "direct",
+                "symbol": "total"
+              }
+            ],
+            "changed_symbols": [
+              "total"
+            ]
+          },
+          "consumer_provenance": [
+            {
+              "consumer": "checkout.py",
+              "provenance": "name_reference_scan",
+              "symbols": [
+                "total"
+              ]
+            },
+            {
+              "consumer": "tests/test_pricing.py",
+              "provenance": "name_reference_scan",
+              "symbols": [
+                "total"
+              ]
+            }
+          ],
+          "consumers": [
+            "checkout.py",
+            "tests/test_pricing.py"
+          ],
+          "consumers_complete": false,
+          "content_hash": "de9fcd088fbcba9689e57fbdf90ac5be314509e01d71f11df44a4c5ef671cb6f",
+          "created_at": "2026-09-27T06:04:28.302190+00:00",
+          "id": "api:pricing.py",
+          "invalidated_consumers": [
+            {
+              "consumer": "checkout.py",
+              "contract": "api:pricing.py",
+              "reason": "CONTRACT_REVISION_CHANGED",
+              "symbols": [
+                "total"
+              ]
+            },
+            {
+              "consumer": "tests/test_pricing.py",
+              "contract": "api:pricing.py",
+              "reason": "CONTRACT_REVISION_CHANGED",
+              "symbols": [
+                "total"
+              ]
+            }
+          ],
+          "kind": "public_api",
+          "name": "pricing.py",
+          "owner": "pricing.py",
+          "provider_milestone_id": "",
+          "revision": "v1",
+          "shape": [
+            "total(items, tax_rate=0.0)"
+          ],
+          "source_revision": "20260927T113353-6b062565-1c008d8132b5:025a0a1f0971ce97d85418b89201aae2496c35011566a9eeb416afcc2af93a85",
+          "stale_reason": null,
+          "state": "implemented",
+          "updated_at": "2026-09-27T06:04:28.302252+00:00"
+        }
+      ]
+    },
+    "revision": 1,
+    "schema_version": 2,
+    "source_revision": "20260927T113353-6b062565-1c008d8132b5:025a0a1f0971ce97d85418b89201aae2496c35011566a9eeb416afcc2af93a85"
+  },
+  "status": "LIVE_EXERCISED"
+}

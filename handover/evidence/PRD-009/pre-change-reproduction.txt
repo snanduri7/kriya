@@ -1,0 +1,9 @@
+Base revision: 2508ad1
+_VALID_RUNTIME_PROFILES = (None, "legacy", "validated", "hardened")
+    Deliberately does NOT touch execution_policy.mode - that field's own
+    execution_policy: ExecutionPolicyConfig = Field(default_factory=ExecutionPolicyConfig)
+        if v not in _VALID_RUNTIME_PROFILES:
+            raise ValueError(f"runtime_profile must be one of {_VALID_RUNTIME_PROFILES!r}, got {v!r}")
+    if profile == "legacy":
+    if profile == "validated":
+    if profile == "hardened":

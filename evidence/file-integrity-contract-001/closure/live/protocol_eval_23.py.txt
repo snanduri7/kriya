@@ -1,0 +1,152 @@
+"""FILE-INTEGRITY-CONTRACT-001 closure §23: generic (non-Graphify) protocol reliability.
+
+Seven generic tasks through the REAL Developer prompt path (DeveloperAgent.run_generation, the
+production prompts and parsers), both response protocols, both pinned models, 2 trials per cell.
+No benchmark ground truth: the measurement is protocol reliability, not code quality.
+
+Per response it records: valid protocol, typed refusal code, full-file vs anchored-edit outcome,
+engine application result (ANCHOR_NOT_FOUND / ANCHOR_AMBIGUOUS ...), SEARCH blocks with a blank
+leading / trailing edge line (S-1) and whether the edit would apply with those edges trimmed,
+and payload-byte fidelity (every payload line appears verbatim in the raw response).
+"""
+import asyncio
+import json
+import os
+import sys
+
+from kriya.agents.agent import DeveloperAgent
+from kriya.agents.response_protocol import STRUCTURED, parse_legacy_repair, parse_structured
+from kriya.config import load_config
+from kriya.core import LLMClient
+from kriya.workflow.file_integrity import FileIntegrityError, anchored_replaces, apply_line_block_edits
+from kriya.workflow.operations import CodeOperation
+
+MODELS = ["qwen3-coder:30b-kriya-e52213655394", "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a"]
+TRIALS = 2
+TASKS = [
+    ("java_edit", "src/main/java/app/Pricing.java",
+     "package app;\n\npublic class Pricing {\n    public int total(int[] prices) {\n        int sum = 0;\n"
+     "        for (int p : prices) {\n            sum += p;\n        }\n        return sum;\n    }\n}\n",
+     "total() must ignore negative prices.", "PricingTest.totalIgnoresNegatives: expected 5 but was 3"),
+    ("python_edit", "calc/stats.py",
+     "def mean(values):\n    return sum(values) / len(values)\n\n\ndef spread(values):\n    return max(values) - min(values)\n",
+     "mean() must return 0.0 for an empty list instead of raising.", "ZeroDivisionError: division by zero in mean"),
+    ("properties_edit", "src/main/resources/application.properties",
+     "spring.application.name=orders\nserver.port=8080\nmanagement.server.port=8080\nlogging.level.root=INFO\n",
+     "The management port must no longer clash with the service port; move management to 8081.",
+     "Port 8080 already in use by management endpoint"),
+    ("yaml_edit", "deploy/service.yaml",
+     "service:\n  name: orders\n  replicas: 1\n  resources:\n    cpu: 250m\n    memory: 256Mi\n",
+     "Run 3 replicas.", "capacity check failed: replicas=1, required>=3"),
+    ("xml_edit", "pom.xml",
+     "<project>\n  <modelVersion>4.0.0</modelVersion>\n  <dependencies>\n    <dependency>\n"
+     "      <groupId>junit</groupId>\n      <artifactId>junit</artifactId>\n      <version>4.12</version>\n"
+     "      <scope>test</scope>\n    </dependency>\n  </dependencies>\n</project>\n",
+     "Upgrade junit to 4.13.2.", "vulnerability scan: junit 4.12 CVE-2020-15250"),
+    ("markdown_new", "docs/USAGE.md", None,
+     "Write a short usage guide with a ```bash install example and a ```python usage example.", None),
+    ("python_new", "tools/slug.py", None,
+     "Write slugify(text) that lowercases and joins words with '-'; its module docstring must contain a "
+     "```python usage example.", None),
+]
+
+
+def _blank_edges(search: str):
+    lines = search.split("\n")
+    return bool(lines) and not lines[0].strip(), bool(lines) and not lines[-1].strip()
+
+
+def _apply(source, edits):
+    try:
+        return apply_line_block_edits(source, anchored_replaces(edits)).text, None
+    except FileIntegrityError as error:
+        return None, error.reason_code
+
+
+def _trimmed(edits):
+    out = []
+    for edit in edits:
+        lines = edit["search"].split("\n")
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+        out.append({"search": "\n".join(lines), "replace": edit["replace"]})
+    return out
+
+
+async def run_task(cfg, model, protocol, task):
+    name, path, source, goal, error = task
+    cfg = cfg.model_copy(deep=True)
+    cfg.autonomy.developer_response_protocol = protocol
+    llm = LLMClient(cfg)
+    raw = {}
+    real_complete = llm.complete
+
+    async def capture(system_prompt, user_prompt, *args, **kwargs):
+        text = await real_complete(system_prompt, user_prompt, *args, **kwargs)
+        raw["system"], raw["text"] = system_prompt, text
+        return text
+
+    llm.complete = capture
+    agent = DeveloperAgent("developer", llm)
+    kwargs = {"known_target_files": [path], "model_override": model}
+    if source is not None:
+        kwargs.update(prior_error_context=error, files_with_current_content={path},
+                      operation_by_file={path: CodeOperation.REPAIR_WITH_PATCH},
+                      edit_operations={path: ["anchored_edit"]})
+        context = f"=== {path} ===\n{source}"
+    else:
+        kwargs.update(operation_by_file={path: CodeOperation.CREATE_FULL_FILE})
+        context = "(new file)"
+    try:
+        await agent.run_generation(goal, f"Design: {goal}", context, **kwargs)
+    finally:
+        await llm.aclose() if hasattr(llm, "aclose") else None
+    text = raw.get("text") or ""
+    if protocol == STRUCTURED:
+        parsed = parse_structured(text, path, patch_allowed=source is not None)
+    elif source is not None:
+        parsed = parse_legacy_repair(text, path, patch_allowed=True)
+    else:
+        parsed = DeveloperAgent.parse_file_payload(text, path)
+    row = {"task": name, "model": model, "protocol": protocol, "kind": parsed.kind,
+           "reason_code": parsed.reason_code, "edit_offered": "<<<KRIYA:EDIT" in raw.get("system", "")
+           or "SEARCH:" in raw.get("system", "")}
+    if parsed.kind == "edits":
+        edits = parsed.edit_dicts()
+        row["search_blocks"] = len(edits)
+        edges = [_blank_edges(e["search"]) for e in edits]
+        row["search_leading_blank"] = sum(1 for lead, _ in edges if lead)
+        row["search_trailing_blank"] = sum(1 for _, trail in edges if trail)
+        applied, code = _apply(source, edits)
+        row["apply_code"] = code
+        if code:
+            row["applies_with_edges_trimmed"] = _apply(source, _trimmed(edits))[1] is None
+        row["payload_verbatim"] = all(all(line in text for line in (e["search"] + "\n" + e["replace"]).split("\n"))
+                                      for e in edits)
+    elif parsed.kind == "file":
+        row["payload_verbatim"] = all(line in text for line in (parsed.content or "").split("\n"))
+        row["fence_in_payload"] = "```" in (parsed.content or "")
+    if parsed.kind == "invalid":
+        row["raw_head"] = text[:400]
+        row["raw_tail"] = text[-200:]
+    return row
+
+
+async def main(out_path):
+    cfg = load_config(os.environ["KRIYA_CONFIG"])
+    with open(out_path, "w") as out:
+        for model in MODELS:
+            for task in TASKS:
+                for protocol in ("structured", "legacy_strict"):
+                    for _ in range(TRIALS):
+                        row = await run_task(cfg, model, protocol, task)
+                        out.write(json.dumps(row) + "\n")
+                        out.flush()
+                        print(json.dumps({k: row[k] for k in ("task", "model", "protocol", "kind", "reason_code")}),
+                              flush=True)
+
+
+if __name__ == "__main__":
+    asyncio.run(main(sys.argv[1]))

@@ -32,14 +32,36 @@ generated app worked correctly when run manually; the retry loop spent its
 entire budget chasing a test whose own assertion contradicted a requirement
 the same completion had already (correctly) satisfied elsewhere.
 
+A fifth check (MismatchedFileTypeContentCheck, added 2026-08-19) catches a
+different failure mode entirely: not a defect IN a file's own logic, but a
+file getting the WRONG file's content altogether. Found live on a plain
+static HTML/CSS/JS goal - the one class of project where NOTHING else in the
+pipeline validates content by language at all, since PolymorphicValidator has
+no compile/parse step for an "unknown" stack. A retry asked the Developer to
+repair one file in response to an error that actually implicated a sibling;
+instead of using the REPAIR-mode prompt's "NO CHANGE NEEDED" escape hatch,
+the model wrote the sibling's own content under the wrong filename, and it
+shipped as-is - a `.html` file with no HTML in it.
+
 Best-effort by design, matching this project's own established philosophy for
 this class of check (see kriya/workflow/failure_grounding.py's
 extract_implicated_files() docstring): a false positive is low-cost since it's
 just one more retry cycle, not a hard block.
 """
+import ast
+import io
+import json
+import logging
 import os
 import re
-from typing import Dict, Iterable, Optional
+import tokenize
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from typing import Dict, Iterable, List, Optional, Set, Tuple
+
+from kriya.workflow.edit_safety import _strip_java_comments_and_strings
+
+logger = logging.getLogger(__name__)
 
 
 class StaticCheck:
@@ -71,6 +93,91 @@ class IgniteMethodMixingCheck(StaticCheck):
                 "ClassPathXmlApplicationContext and retrieve the already-started instance with "
                 "context.getBean(...) - never call Ignition.start() at all under that approach."
             )
+        return None
+
+
+class IgniteDuplicateSpringContextCheck(StaticCheck):
+    """Rejects loading the same IgniteSpringBean XML more than once.
+
+    ``IgniteSpringBean`` starts during Spring context initialization. Creating
+    a second context for the same resource therefore starts the same named node
+    again even when the helper only wanted an unrelated bean from that XML.
+    This is an ecosystem lifecycle invariant, not an application-name rule.
+    """
+
+    name = "ignite_duplicate_spring_context"
+    _CONTEXT_LOAD_RE = re.compile(
+        r"new\s+ClassPathXmlApplicationContext\s*\(\s*[\"']([^\"']+)[\"']\s*\)"
+    )
+
+    @staticmethod
+    def _defines_ignite_spring_bean(content: str) -> bool:
+        try:
+            root = ET.fromstring(content)
+        except ET.ParseError:
+            # A malformed XML document is handled by the ordinary XML/build
+            # gate. Raw substring fallback would turn comments or partial text
+            # into false lifecycle evidence.
+            return False
+        return any(
+            element.attrib.get("class", "").rsplit(".", 1)[-1] == "IgniteSpringBean"
+            for element in root.iter()
+        )
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        spring_resources = {
+            filepath: content
+            for filepath, content in files.items()
+            if filepath.endswith(".xml") and self._defines_ignite_spring_bean(content)
+        }
+        if not spring_resources:
+            return None
+
+        loads: Dict[str, Dict[str, int]] = {}
+        for filepath, content in sorted(files.items()):
+            if not filepath.endswith(".java"):
+                continue
+            structural = _strip_java_comments_and_strings(content)
+            for match in self._CONTEXT_LOAD_RE.finditer(content):
+                # The structural mirror preserves offsets but blanks comments
+                # and strings. The constructor token must still be present at
+                # this raw match's offset; examples inside comments/string data
+                # therefore cannot become false violations.
+                if structural[match.start():match.start() + 3] != "new":
+                    continue
+                resource = match.group(1).lstrip("/")
+                matching_xml = next(
+                    (
+                        xml_path for xml_path in spring_resources
+                        if (
+                            xml_path.replace("\\", "/").lstrip("/") == resource
+                            or xml_path.replace("\\", "/").lstrip("/").endswith("/" + resource)
+                            or os.path.basename(xml_path) == os.path.basename(resource)
+                        )
+                    ),
+                    None,
+                )
+                if matching_xml:
+                    per_file = loads.setdefault(matching_xml, {})
+                    per_file[filepath] = per_file.get(filepath, 0) + 1
+
+        for _xml_path, per_file_counts in sorted(loads.items()):
+            for java_file, load_count in sorted(per_file_counts.items()):
+                if load_count <= 1:
+                    continue
+                # Cross-file loads are not rejected without call-graph evidence:
+                # a test and an entrypoint can legitimately initialize the same
+                # resource in separate processes. Multiple loads in one source
+                # file are the bounded, deterministic incident shape.
+                return (
+                    f"{java_file} constructs ClassPathXmlApplicationContext for the "
+                    f"same Spring XML resource {load_count} times, and that resource "
+                    "defines IgniteSpringBean. Each context load auto-starts the "
+                    "Ignite node, so the second load fails with 'Ignite instance with this "
+                    "name has already been started'. Construct the context exactly once, "
+                    "keep it open for the application lifetime, and pass that same context "
+                    "to every helper that needs any bean from the XML."
+                )
         return None
 
 
@@ -224,11 +331,717 @@ class TestContradictsVerificationMarkerCheck(StaticCheck):
         return None
 
 
+class MismatchedFileTypeContentCheck(StaticCheck):
+    """Catches a file whose content doesn't match its own extension at all -
+    e.g. a `.html` file containing plain JavaScript, with zero HTML markup.
+
+    Found live, 2026-08-19 (a plain static HTML/CSS/JS calculator goal - no
+    pom.xml/Gemfile/requirements.txt, so PolymorphicValidator classifies it
+    as the "unknown" stack and never actually parses or compiles anything;
+    see its own docstring for why that's a deliberate, honest degrade rather
+    than a silent Python fallback - it just means NOTHING else in the
+    pipeline validates file content by language for this stack). During a
+    retry, the Developer agent was asked to repair `calculator/index.html`
+    in response to an error that actually implicated a SIBLING file
+    (`calculator/script.js`). The REPAIR-mode prompt (DeveloperAgent) gives
+    the model an explicit escape hatch for exactly this situation -
+    "NO CHANGE NEEDED: <reason>" when the reported error doesn't implicate
+    the file being repaired - but the model didn't take it: it wrote
+    script.js's own content (the whole Calculator class, verbatim) into
+    index.html's FILE CONTENT: block instead. That got applied to the
+    workspace as-is; the shipped "webpage" had no HTML in it at all.
+
+    Deliberately narrow and conservative, matching this module's established
+    practice (see BareVerificationMarkerCheck's own docstring): only fires
+    on `.html`/`.htm` files with no actual tag-shaped pattern anywhere in
+    their content (`<` immediately followed by a letter, `/`, or `!` - an
+    opening tag, closing tag, or `<!DOCTYPE`/comment). A real HTML document
+    - even a bare fragment - always has at least one such tag. Matching on a
+    bare `<` alone was tried first and found live to under-fire: real
+    JavaScript routinely contains a bare `<` as the less-than operator (e.g.
+    `if (x < 0.000001)`, present in the exact incident's own script.js), so
+    that naive version missed the very file it was built to catch. The
+    tag-shaped pattern has no equivalent false-negative path in ordinary
+    JS/CSS, and no realistic false-positive path for real HTML (even a bare
+    fragment always has a tag). Not extended to `.css`/`.js`/etc. yet - the
+    HTML case is the one with a confirmed live incident and an unambiguous
+    signal; any other extension would need its own confirmed incident before
+    guessing at a detection shape for it."""
+
+    name = "mismatched_file_type_content"
+
+    _HTML_TAG_RE = re.compile(r"<[a-zA-Z!/]")
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        for filepath, content in sorted(files.items()):
+            if not filepath.lower().endswith((".html", ".htm")):
+                continue
+            if not self._HTML_TAG_RE.search(content):
+                return (
+                    f"{filepath} is an HTML file but contains no actual HTML tag anywhere "
+                    "(no '<tagname', '</tagname', or '<!DOCTYPE'/comment pattern) - its content "
+                    "is almost certainly a different file's content (e.g. a sibling .js/.css "
+                    "file) written under this filename by mistake, not a real (even minimal) "
+                    "HTML document. Regenerate this file with actual HTML markup."
+                )
+        return None
+
+
+# Extensions where a literal backtick can NEVER be legitimate source syntax
+# - deliberately excludes Ruby (a real command-execution operator,
+# `` `ls` ``) and JS/TS (a real template-literal delimiter). Every other
+# language here treats a bare backtick as a hard syntax error.
+_BACKTICK_ILLEGAL_EXTENSIONS = {
+    ".py", ".java", ".kt", ".kts", ".groovy", ".go", ".rs", ".cs",
+    ".c", ".cc", ".cpp", ".h", ".hpp",
+}
+
+
+class MarkdownInlineCodeLeakCheck(StaticCheck):
+    """Catches a literal backtick character - Markdown's inline-code
+    delimiter, e.g. the backticks around `displayName()` in a model's own
+    prose - ending up as literal file content in a language where a bare
+    backtick is never valid source syntax at all. Not a wording pattern
+    (see find_explanatory_prose_contamination in file_resolution.py for
+    that, which matches a small set of anchored sentence-starter phrases) -
+    a purely structural signal: this character simply cannot appear outside
+    a comment/string in these languages' real grammar, regardless of what
+    the leaked prose actually says.
+
+    Found live, PRV-03 hardened (2026-08-27): a targeted repair's FULL FILE
+    CONTENT response for Customer.java began with the model's own inline-
+    code-formatted analysis text instead of real Java - javac failed at
+    line 1 with "class, interface, enum, or record expected" plus two
+    "illegal character: '`'" errors on that same line. The existing
+    find_explanatory_prose_contamination check didn't fire: this
+    incident's actual wording didn't match any of its anchored sentence-
+    starter patterns, so a full compile-retry cycle was burned on content
+    that could never have been valid source. This check doesn't try to
+    guess the model's phrasing - it catches the structural impossibility
+    instead, which generalizes across whatever prose wraps the backtick.
+
+    Deliberately excludes Ruby and JS/TS - the two mainstream languages
+    where this character is legitimate source syntax (see
+    _BACKTICK_ILLEGAL_EXTENSIONS above)."""
+
+    name = "markdown_inline_code_leak"
+
+    # Python 3.12+'s PEP 701 tokenizer emits FSTRING_START/MIDDLE/END for an
+    # f-string's own literal text instead of a single STRING token - without
+    # these, an f-string's literal content (which can legitimately contain a
+    # backtick-like substring) is never blanked and falsely trips this check
+    # on valid Python source. getattr() with a None default keeps this
+    # working on Python 3.10/3.11, where these constants don't exist.
+    _BLANKABLE_TOKEN_TYPES = tuple(
+        token_type for token_type in (
+            tokenize.STRING, tokenize.COMMENT,
+            getattr(tokenize, "FSTRING_START", None),
+            getattr(tokenize, "FSTRING_MIDDLE", None),
+            getattr(tokenize, "FSTRING_END", None),
+        ) if token_type is not None
+    )
+
+    @staticmethod
+    def _python_executable_regions(content: str) -> Optional[str]:
+        """Return Python with strings/comments blanked, or None if invalid.
+
+        Token positions are preserved closely enough for the textual leak
+        diagnostic while valid docstrings, ordinary strings, and comments
+        are excluded from consideration deterministically.
+        """
+        try:
+            ast.parse(content)
+            tokens = tokenize.generate_tokens(io.StringIO(content).readline)
+            lines = content.splitlines(keepends=True)
+            for token in tokens:
+                if token.type not in MarkdownInlineCodeLeakCheck._BLANKABLE_TOKEN_TYPES:
+                    continue
+                (start_line, start_col), (end_line, end_col) = token.start, token.end
+                for line_index in range(start_line - 1, end_line):
+                    line = lines[line_index]
+                    left = start_col if line_index == start_line - 1 else 0
+                    right = end_col if line_index == end_line - 1 else len(line.rstrip("\r\n"))
+                    lines[line_index] = line[:left] + (" " * max(0, right - left)) + line[right:]
+            return "".join(lines)
+        except (SyntaxError, tokenize.TokenError, IndentationError):
+            return None
+
+    @staticmethod
+    def _python_rejected_line(content: str) -> Optional[int]:
+        """The line Python's own parser rejects (None when it parses)."""
+        try:
+            ast.parse(content)
+        except (SyntaxError, ValueError) as error:
+            return getattr(error, "lineno", None)
+        return None
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        for filepath, content in sorted(files.items()):
+            extension = os.path.splitext(filepath)[1].lower()
+            if extension not in _BACKTICK_ILLEGAL_EXTENSIONS:
+                continue
+            scan_content = content or ""
+            only_line: Optional[int] = None
+            if extension == ".py":
+                tokenized = self._python_executable_regions(scan_content)
+                if tokenized is not None:
+                    scan_content = tokenized
+                else:
+                    # STATIC-LEAK-UNPARSABLE-PY-001: strings and comments can
+                    # only be told apart in source that parses. In source
+                    # that does not, a backtick is a leak only on the line
+                    # Python itself rejects; anywhere else it may sit in a
+                    # valid docstring (engine.py: 437 such lines), and
+                    # naming it would hide the real syntax error, which the
+                    # compile gate then reports instead.
+                    only_line = self._python_rejected_line(scan_content)
+                    if only_line is None:
+                        continue
+            for line_number, line in enumerate(scan_content.splitlines(), start=1):
+                if only_line is not None and line_number != only_line:
+                    continue
+                stripped = line.lstrip()
+                if not stripped or stripped.startswith(("//", "#", "/*", "*", "--")):
+                    continue
+                if "`" in line:
+                    return (
+                        f"{filepath} line {line_number} contains a literal backtick character - "
+                        "Markdown's inline-code delimiter, never valid source syntax in this "
+                        "language - almost always a sign the model's own prose/analysis text (or "
+                        "a Markdown-formatted explanation) leaked into the file's actual content "
+                        "instead of real code: "
+                        f"{stripped[:160]!r}. Regenerate this file's content as plain source, with "
+                        "no inline-code formatting or explanatory text embedded in it."
+                    )
+        return None
+
+
+def _extract_balanced_block(content: str, open_brace_index: int) -> Optional[str]:
+    """content[open_brace_index] must be '{'. Returns the substring from
+    that brace through its matching close brace (inclusive), tracking depth
+    naively (no string/comment awareness - callers that need exact statement
+    counts should re-run _strip_java_comments_and_strings on the result
+    first, matching this module's existing convention). None if the braces
+    never balance (truncated/malformed content)."""
+    depth = 0
+    for i in range(open_brace_index, len(content)):
+        if content[i] == "{":
+            depth += 1
+        elif content[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return content[open_brace_index:i + 1]
+    return None
+
+
+# Test-file detection by filename convention only (cheap, matches this
+# module's existing marker-file-existence philosophy) - real test-runner
+# frameworks for each ecosystem already enforce this same naming, so it's
+# not a guess: JUnit/Maven Surefire only picks up *Test.java/*Tests.java/
+# *IT.java by default, pytest only collects test_*.py/*_test.py, RSpec only
+# collects *_spec.rb.
+_TEST_FILE_RE = re.compile(
+    r"(^|/)(test_[^/]+\.py|[^/]+_test\.py|[^/]+_spec\.rb|[^/]+Test\.java|[^/]+Tests\.java|[^/]+IT\.java)$"
+)
+
+
+class VacuousTestAssertionCheck(StaticCheck):
+    """Catches a generated/modified test whose only "check" is a
+    constant-truth assertion - assertTrue(true)/assertFalse(false) (JUnit),
+    assertTrue(True)/assertFalse(False) (Python unittest), or a bare
+    `assert True` (pytest) - which passes unconditionally regardless of
+    whatever production behavior the test method's name claims to verify.
+    This is test-evasion, not prose contamination: Maven/pytest and Kriya's
+    own compile+test Quality Gate both report PASSED with zero actual
+    coverage of the intended behavior.
+
+    Found live, PRV-03 legacy (2026-08-27): CustomerControllerTest.java's
+    testDetailsWithMiddleName/testDetailsWithOnlyFirstNameAndLastName/
+    testDetailsWithOnlyFirstName/testDetailsWithEmptyStrings each construct
+    a mock CustomerService and a CustomerController, then never call the
+    controller at all - just `assertTrue(true); // Placeholder - actual
+    implementation would require controller refactor`. A production coding
+    agent must not ship a test that passes independent of whether the
+    feature it claims to verify exists.
+
+    Deliberately scoped to test files only (_TEST_FILE_RE, by filename
+    convention) so a legitimate assertTrue(true)-shaped expression appearing
+    anywhere in ordinary application code never false-positives."""
+
+    name = "vacuous_test_assertion"
+
+    _VACUOUS_PATTERNS = (
+        re.compile(r"\bassert(?:True)?\s*\(\s*true\s*\)", re.IGNORECASE),   # JUnit assertTrue(true)/assert(true)
+        re.compile(r"\bassertFalse\s*\(\s*false\s*\)", re.IGNORECASE),      # JUnit assertFalse(false)
+        re.compile(r"\bassertTrue\s*\(\s*True\s*\)"),                       # Python unittest
+        re.compile(r"\bassertFalse\s*\(\s*False\s*\)"),                     # Python unittest
+        re.compile(r"(?m)^\s*assert\s+True\s*(?:,.*)?$"),                   # bare pytest
+    )
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        for filepath, content in sorted(files.items()):
+            if not _TEST_FILE_RE.search(filepath):
+                continue
+            for pattern in self._VACUOUS_PATTERNS:
+                m = pattern.search(content)
+                if m:
+                    return (
+                        f"{filepath} contains a constant-truth assertion ({m.group(0).strip()!r}) "
+                        "that passes unconditionally regardless of the actual production behavior "
+                        "being tested. A generated test must fail when the intended production "
+                        "behavior is absent or incorrect - replace this with a real assertion "
+                        "against the actual method/component under test, or remove the test if it "
+                        "cannot be written yet rather than faking a pass."
+                    )
+        return None
+
+
+class TestMethodLacksVerificationCheck(StaticCheck):
+    """Catches a @Test method whose body contains NO assertion/verification
+    call at all - not even a vacuous constant-truth one (see
+    VacuousTestAssertionCheck above for that narrower, stronger signal) - so
+    it passes unconditionally regardless of the code under test. The same
+    underlying test-evasion failure mode found live in PRV-03 legacy
+    (2026-08-27): several test methods there construct a mock service and
+    controller, comment that testing "would require a controller refactor",
+    and (in the vacuous-assertion cases) fall back to assertTrue(true) - but
+    the general shape (a @Test method that never calls any assertion at
+    all) is broader than that one confirmed line and worth its own gate.
+
+    A method carrying `@Test(expected = ...)` or containing
+    `assertThrows(`/`fail(`/`verify(` counts as verifying (exception-based
+    and Mockito-style checks legitimately don't need a bare assert* call).
+    Java/JUnit-specific, matching this module's established scope - a
+    pytest/RSpec equivalent would need its own detection shape, not guessed
+    at here."""
+
+    name = "test_method_lacks_verification"
+
+    _JAVA_TEST_METHOD_RE = re.compile(
+        r"@Test\b([^\n]*)\n\s*(?:public|protected|private)?\s*[\w<>\[\],\.\s]+\s+(\w+)\s*"
+        r"\([^)]*\)\s*(?:throws[^{]+)?\{"
+    )
+    _VERIFIES_RE = re.compile(
+        r"\bassert\w*\s*\(|\bAssertions\.|\bfail\s*\(|\bverify\s*\(|\bassertThrows\b|\bexpectThrows\b",
+        re.IGNORECASE,
+    )
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        for filepath, content in sorted(files.items()):
+            if not filepath.endswith(".java") or not _TEST_FILE_RE.search(filepath):
+                continue
+            for m in self._JAVA_TEST_METHOD_RE.finditer(content):
+                annotation_args, method_name = m.group(1), m.group(2)
+                if "expected" in annotation_args:
+                    continue
+                body = _extract_balanced_block(content, m.end() - 1)
+                if body is None:
+                    continue
+                if not self._VERIFIES_RE.search(_strip_java_comments_and_strings(body)):
+                    return (
+                        f"{filepath}'s {method_name}() is a @Test method with no assertion or "
+                        "verification call anywhere in its body - it passes unconditionally "
+                        "regardless of whether the intended production behavior exists or is "
+                        "correct. A generated test must fail when the behavior it claims to test "
+                        "is absent or incorrect; add a real assertion or remove the test."
+                    )
+        return None
+
+
+class TestOverridesSubjectUnderTestCheck(StaticCheck):
+    """Catches a test that creates an ANONYMOUS SUBCLASS of the class it
+    claims to be testing and overrides the very method under test with a
+    reimplementation of that method's own logic, instead of exercising the
+    real production method. A test built this way can pass even when the
+    real production method is completely broken, since the override never
+    calls into it - the test only proves the test's OWN duplicate logic is
+    self-consistent.
+
+    Found live, PRV-03 hardened (2026-08-27): several tests in
+    CustomerServiceTest.java override CustomerController.details(...) with
+    a copy of the same response-building logic
+    (`m.put("displayName", c.displayName())`, ...) instead of calling the
+    real CustomerController the way that same file's own first test
+    correctly does. Distinct from mocking a genuine COLLABORATOR (the same
+    file legitimately overrides CustomerService.find(...) to return fixed
+    test data - a normal, one-line test double) - this fires only on an
+    override of a class the SAME FILE ALSO instantiates plainly elsewhere
+    (proof, from the file's own content, that the class is being directly
+    tested here, not merely used as a collaborator), and only when the
+    override body is non-trivial (3+ statements) rather than a one-line
+    delegate/stub - matching the real incident's shape (a multi-statement
+    reconstruction of the production method), not penalizing every override
+    indiscriminately. Deliberately NOT keyed off the test file's own name
+    (e.g. assuming "FooTest.java" tests "Foo") - the real PRV-03 incident's
+    file is misleadingly named CustomerServiceTest.java while its first,
+    correct test actually instantiates CustomerController plainly; a
+    filename-derived subject would have missed exactly the file that
+    proves this check is needed.
+
+    Java/JUnit-specific (the confirmed incident's own shape) - a Python/
+    Ruby equivalent (monkey-patching or subclassing the subject under test
+    in a mock) would need its own detection, not guessed at here."""
+
+    name = "test_overrides_subject_under_test"
+
+    _NEW_INSTANCE_RE = re.compile(r"new\s+(\w+)\s*\([^()]*\)\s*(\{|;)")
+    _OVERRIDE_METHOD_RE = re.compile(
+        r"@Override\s*(?:public|protected)?\s*[\w<>\[\],\.\s]+\s+(\w+)\s*\([^)]*\)\s*(?:throws[^{]+)?\{"
+    )
+
+    def check(self, files: Dict[str, str]) -> Optional[str]:
+        for filepath, content in sorted(files.items()):
+            if not filepath.endswith(".java") or not _TEST_FILE_RE.search(filepath):
+                continue
+            plainly_instantiated = set()
+            anon_subclasses = []
+            for m in self._NEW_INSTANCE_RE.finditer(content):
+                class_name, delimiter = m.group(1), m.group(2)
+                if delimiter == ";":
+                    plainly_instantiated.add(class_name)
+                else:
+                    anon_subclasses.append((class_name, m.end() - 1))
+            for class_name, brace_index in anon_subclasses:
+                if class_name not in plainly_instantiated:
+                    continue
+                block = _extract_balanced_block(content, brace_index)
+                if not block:
+                    continue
+                for override_match in self._OVERRIDE_METHOD_RE.finditer(block):
+                    method_name = override_match.group(1)
+                    body = _extract_balanced_block(block, override_match.end() - 1)
+                    if not body:
+                        continue
+                    statement_count = _strip_java_comments_and_strings(body).count(";")
+                    if statement_count >= 3:
+                        return (
+                            f"{filepath} creates an anonymous subclass of {class_name} - a class "
+                            f"this same file also instantiates PLAINLY elsewhere, proving it's the "
+                            f"real subject under test here, not just a collaborator - and "
+                            f"overrides its own {method_name}(...) method with a "
+                            f"{statement_count}-statement reimplementation instead of exercising "
+                            f"the real {class_name}.{method_name}(...). This test can pass even if "
+                            f"the real {class_name} is broken. Instantiate the real {class_name} "
+                            "directly (as this file's own other test(s) do) and mock only genuine "
+                            "collaborators, not the class under test itself."
+                        )
+        return None
+
+
+# MA7.5 - real markers for each ecosystem PolymorphicValidator itself
+# already recognizes (kriya/tools/validate.py::_detect_stack, java/ruby/
+# python) plus npm/go - deliberately the SAME marker-file-existence
+# approach, not content parsing, so this stays cheap and has the same
+# false-positive profile as the compile-gate's own stack detection.
+# Ecosystem NAME here is purely a label for the violation message - the
+# check itself never branches on which two ecosystems are involved (no
+# "Django vs Spring"/"Python vs Maven" pairwise logic - MA6 spec section
+# 72's own two named examples are just instances of one general rule:
+# an ALREADY-ESTABLISHED build ecosystem shouldn't get a competing one
+# silently introduced).
+_ECOSYSTEM_MARKERS: Dict[str, Tuple[str, ...]] = {
+    "java (maven)": ("pom.xml",),
+    "java (gradle)": ("build.gradle", "build.gradle.kts"),
+    "ruby": ("Gemfile", "Rakefile"),
+    "python": ("requirements.txt", "pyproject.toml", "setup.py", "setup.cfg", "Pipfile"),
+    "npm": ("package.json",),
+    "go": ("go.mod",),
+}
+
+
+def _ecosystem_for_marker(filepath: str) -> Optional[str]:
+    basename = os.path.basename(filepath)
+    for ecosystem, markers in _ECOSYSTEM_MARKERS.items():
+        if basename in markers:
+            return ecosystem
+    return None
+
+
+# MA7.5's own honest scope note (find_established_stack_drift's docstring,
+# 2026-08-24): "a first-milestone goal-text-vs-generated-language mismatch
+# ... intentionally out of scope". Closed 2026-08-25 (external review, P1) -
+# _MARKER_ECOSYSTEM_FAMILY groups the marker-file ecosystems above (which
+# distinguish maven/gradle - a real distinction for FILE drift) into the
+# coarser LANGUAGE family a human names in a goal ("Java" doesn't imply
+# maven vs gradle; the goal-text side can't know that distinction, only the
+# broader family). _GOAL_FAMILY_KEYWORDS is deliberately narrow and
+# high-precision-only, framework names and unambiguous language names ONLY -
+# no bare, common-English-collidable words (e.g. "go" alone is excluded;
+# "golang" is not, matching this session's own hard-won lesson from
+# _EXPLICIT_TEST_REQUEST_RE's three real false-positive incidents - a
+# missed catch here is only as bad as before this fix; a false positive
+# would burn an entire retry budget on a goal that never asked for this
+# check to fire at all, the exact failure mode already paid for once today).
+_MARKER_ECOSYSTEM_FAMILY: Dict[str, str] = {
+    "java (maven)": "java",
+    "java (gradle)": "java",
+    "ruby": "ruby",
+    "python": "python",
+    "npm": "node",
+    "go": "go",
+}
+
+_GOAL_FAMILY_KEYWORDS: Dict[str, Tuple[str, ...]] = {
+    "java": ("java", "spring", "springboot", "spring boot", "maven", "gradle"),
+    "python": ("python", "django", "flask", "fastapi"),
+    "ruby": ("ruby", "rails", "sinatra"),
+    "node": ("node\\.js", "nodejs", "express\\.js", "npm"),
+    "go": ("golang",),
+}
+_GOAL_FAMILY_PATTERNS: Dict[str, "re.Pattern"] = {
+    family: re.compile(r"\b(?:" + "|".join(keywords) + r")\b", re.IGNORECASE)
+    for family, keywords in _GOAL_FAMILY_KEYWORDS.items()
+}
+
+
+@dataclass(frozen=True)
+class StackContract:
+    languages: Tuple[str, ...]
+    frameworks: Tuple[str, ...]
+    substitution_policy: str = "FORBID"
+    authority: str = "USER_GOAL"
+
+
+# PRV-17 (2026-09-03): the family/framework detection above used to be
+# negation-blind - a goal like "Use Python/Django. Do not use Java, Spring,
+# Maven, Gradle, Node.js." matched THREE families (python, java, node) with
+# equal weight, so _goal_declared_family's own "two-plus families = genuinely
+# ambiguous" rule fired on a goal that was never actually ambiguous - it
+# POSITIVELY requested exactly one stack and explicitly PROHIBITED several
+# competing ones, which is the opposite of ambiguity. Fixed at clause
+# granularity rather than a whole-goal negation flag, since a goal can
+# legitimately mix a positive requirement and a prohibition in the same
+# text (as this exact scenario does) - a single global "is this goal
+# negated" bit can't represent that. Small, closed-vocabulary cue set,
+# deliberately NOT a general negation/NLP detector - the same posture
+# kriya/workflow/attribution.py's own _REMOVAL_PHRASE_RE documents for its
+# analogous "problem being moved away from, not the fix" goal parse, here
+# applied to goal text's own "requested vs. prohibited technology" shape.
+_NEGATION_CUE_RE = re.compile(
+    r"\b(?:do not|don't|does not|doesn't|never|avoid|must not|should not|no longer)\s+use\b",
+    re.IGNORECASE,
+)
+
+
+def _goal_clauses(goal: str) -> List[str]:
+    """Splits goal text into sentence/line-level clauses - the granularity
+    a negation cue's scope stays bounded to (a period, newline, or
+    exclamation/question mark ends it; a comma-separated technology list
+    inside ONE clause, e.g. "Do not use Java, Spring, Maven", stays
+    together, which is exactly the shape real goal text uses)."""
+    return re.split(r"[.\n!?]+", goal or "")
+
+
+def _classify_goal_families(goal: str) -> Tuple[Set[str], Set[str]]:
+    """Returns (positively_requested_families, explicitly_prohibited_families) -
+    each family classified per the CLAUSE it appears in, not the whole goal,
+    so a goal that both positively requests one stack and explicitly
+    prohibits others in separate clauses/sentences classifies each correctly
+    instead of registering every mention as one undifferentiated pile of
+    "families this goal talks about"."""
+    positive: Set[str] = set()
+    prohibited: Set[str] = set()
+    for clause in _goal_clauses(goal):
+        if not clause.strip():
+            continue
+        bucket = prohibited if _NEGATION_CUE_RE.search(clause) else positive
+        for family, pattern in _GOAL_FAMILY_PATTERNS.items():
+            if pattern.search(clause):
+                bucket.add(family)
+    return positive, prohibited
+
+
+def _goal_declared_family(goal: str) -> Optional[str]:
+    """The single, unambiguous language family the goal text POSITIVELY
+    requests - None if the goal positively requests zero families (nothing
+    to check against) OR two-plus DIFFERENT families (a genuinely mixed-
+    stack goal, e.g. "a Python service called from a Java client" -
+    ambiguous on purpose, not this check's business to referee). A family
+    named only inside an explicitly prohibited/negated clause never counts
+    toward this ambiguity check - see _classify_goal_families above."""
+    positive, _prohibited = _classify_goal_families(goal)
+    return next(iter(positive)) if len(positive) == 1 else None
+
+
+def _positively_requested_frameworks(goal: str, names: Tuple[str, ...]) -> Tuple[str, ...]:
+    """Same positive/prohibited clause split as _classify_goal_families,
+    applied to framework NAMES rather than family keywords - a framework
+    named only in a prohibition clause (e.g. "Spring" in "Do not use ...
+    Spring ...") must not be reported as part of the requested contract."""
+    positive_text = " ".join(
+        clause for clause in _goal_clauses(goal)
+        if clause.strip() and not _NEGATION_CUE_RE.search(clause)
+    ).lower()
+    return tuple(name for name in names if name in positive_text)
+
+
+def derive_stack_contract(goal: str) -> Optional[StackContract]:
+    family = _goal_declared_family(goal)
+    if family is None:
+        return None
+    frameworks = _positively_requested_frameworks(goal, ("django", "spring"))
+    return StackContract(languages=(family,), frameworks=frameworks)
+
+
+def log_stack_contract_boundary(
+    boundary: str, contract: Optional[StackContract], violation: Optional[str],
+) -> None:
+    """Structured STACK_CONTRACT_BOUNDARY log line, shared by every call site
+    that runs validate_stack_contract_artifacts (candidate/plan/terminal
+    boundaries) - was duplicated verbatim at each site, risking drift
+    between them on a future schema change."""
+    logger.info(
+        "STACK_CONTRACT_BOUNDARY %s",
+        json.dumps({
+            "boundary": boundary,
+            "languages": list(getattr(contract, "languages", ())),
+            "frameworks": list(getattr(contract, "frameworks", ())),
+            "decision": "REJECT" if violation else "PASS",
+        }, sort_keys=True),
+    )
+
+
+def validate_stack_contract_artifacts(
+    contract: Optional[StackContract], artifact_paths: Iterable[str],
+) -> Optional[str]:
+    """Validate only artifacts inside the requested change boundary."""
+    if contract is None or contract.substitution_policy != "FORBID":
+        return None
+    requested = contract.languages[0]
+    for filepath in sorted(artifact_paths):
+        ecosystem = _ecosystem_for_marker(filepath)
+        family = _MARKER_ECOSYSTEM_FAMILY.get(ecosystem) if ecosystem else None
+        normalized = filepath.replace("\\", "/").lower()
+        if family is None and normalized.endswith((".java", ".kt", ".kts")):
+            family = "java"
+        elif family is None and normalized.endswith(".py"):
+            family = "python"
+        if family is not None and family != requested:
+            return (
+                f"STACK_CONTRACT_VIOLATION: {filepath} belongs to {family!r}, but the "
+                f"authoritative USER_GOAL requests {requested!r}; substitution_policy=FORBID"
+            )
+    return None
+
+
+def find_goal_stack_mismatch(goal: str, all_files_written: Iterable[str]) -> Optional[str]:
+    """The first-milestone counterpart to find_established_stack_drift
+    above: that check compares NEW writes against an ALREADY-ESTABLISHED
+    marker, so it structurally cannot fire on a genuinely first-ever
+    milestone/goal (nothing established yet to contradict). This compares
+    the GOAL TEXT's own declared language family against whatever
+    ecosystem marker THIS SAME attempt's writes establish - "goal said
+    Django, generated architecture wrote pom.xml" is now catchable even
+    with zero established history. A weaker, keyword-based signal than the
+    established-marker check (goal text is natural language, not a real
+    file on disk) - see _goal_declared_family's own docstring for why it's
+    deliberately conservative (fires on unambiguous single-family goals
+    only). Only ONE mismatch is ever reported (first found, sorted
+    iteration), matching this module's own "first violation wins"
+    convention."""
+    contract = derive_stack_contract(goal)
+    declared_family = contract.languages[0] if contract else None
+    if declared_family is None:
+        return None
+
+    artifacts = tuple(all_files_written)
+    contract_violation = validate_stack_contract_artifacts(
+        contract, (path for path in artifacts if _ecosystem_for_marker(path) is None),
+    )
+    if contract_violation:
+        return contract_violation
+
+    for filepath in sorted(artifacts):
+        ecosystem = _ecosystem_for_marker(filepath)
+        if ecosystem is None:
+            continue
+        written_family = _MARKER_ECOSYSTEM_FAMILY[ecosystem]
+        if written_family != declared_family:
+            return (
+                f"the goal explicitly names '{declared_family}', but {filepath} establishes "
+                f"a '{written_family}' ({ecosystem}) project instead. Generated architecture "
+                "must match the ecosystem the goal actually asked for - if this goal genuinely "
+                "requires a different or additional ecosystem, say so explicitly rather than "
+                "silently substituting one."
+            )
+    return None
+
+
+def find_established_stack_drift(worktree_path: str, all_files_written: Iterable[str]) -> Optional[str]:
+    """MA7.5 (MA6 spec section 72's "Django doesn't drift to Spring, Python
+    doesn't invent Maven layout" regression category) - generic, marker-
+    based, no per-framework-pair logic. Fires when this attempt's own
+    writes (`all_files_written`) introduce a NEW build-ecosystem marker
+    file (a fresh pom.xml, package.json, ...) into a worktree that ALREADY
+    has a DIFFERENT ecosystem's marker established from BEFORE this
+    attempt - the generated content has silently switched the project's
+    real build identity, not merely added files within it.
+
+    Deliberately does not look at goal text at all: for a workspace with
+    NOTHING established yet (a brand-new first milestone), there is no
+    established marker to contradict, so this check correctly never fires -
+    matching every other deterministic check in this module (best-effort,
+    real-evidence-only, never a guess). Catching a first-milestone
+    goal-vs-generated-language mismatch would need goal-text analysis,
+    which is a materially different, weaker signal (keyword-based, not
+    file-existence-based) - intentionally out of scope here rather than
+    forcing a fit; see this function's own caller for how that gap is
+    tracked.
+
+    Only ONE established/newly-written ecosystem pair is ever reported (the
+    first mismatch found, deterministically via sorted iteration) - matching
+    this module's "first violation wins" convention, not an exhaustive
+    report of every marker present."""
+    written = set(all_files_written)
+
+    # "Established" = a real top-level marker file physically on disk in
+    # the worktree that this attempt did NOT itself write - i.e. genuinely
+    # pre-existing, from an earlier milestone/attempt or the real workspace
+    # this worktree was synced from. Excluding `written` here is the whole
+    # point: without it, this attempt's OWN new marker would immediately
+    # count as "established" against itself the instant run_static_checks
+    # reads it back (this check runs AFTER all files are written).
+    established: Dict[str, str] = {}
+    for entry in sorted(os.listdir(worktree_path)) if os.path.isdir(worktree_path) else []:
+        if entry in written:
+            continue
+        full_path = os.path.join(worktree_path, entry)
+        if not os.path.isfile(full_path):
+            continue
+        ecosystem = _ecosystem_for_marker(entry)
+        if ecosystem:
+            established[ecosystem] = entry
+
+    if not established:
+        return None
+
+    for filepath in sorted(written):
+        new_ecosystem = _ecosystem_for_marker(filepath)
+        if new_ecosystem is None or new_ecosystem in established:
+            continue
+        existing_ecosystem, existing_marker = next(iter(established.items()))
+        return (
+            f"{filepath} introduces a new '{new_ecosystem}' build marker, but this "
+            f"workspace already has an established '{existing_ecosystem}' project "
+            f"({existing_marker} exists from before this attempt). Generated content "
+            "must not silently switch the project's real build ecosystem - if this "
+            "goal genuinely requires adding a second, different-ecosystem component, "
+            "say so explicitly rather than introducing it as an apparent replacement."
+        )
+    return None
+
+
 STATIC_CHECKS = [
     IgniteMethodMixingCheck(),
+    IgniteDuplicateSpringContextCheck(),
     IgniteUnclosedResourceCheck(),
     BareVerificationMarkerCheck(),
     TestContradictsVerificationMarkerCheck(),
+    MismatchedFileTypeContentCheck(),
+    VacuousTestAssertionCheck(),
+    TestMethodLacksVerificationCheck(),
+    TestOverridesSubjectUnderTestCheck(),
+    MarkdownInlineCodeLeakCheck(),
 ]
 
 

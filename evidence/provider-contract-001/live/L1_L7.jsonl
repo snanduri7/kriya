@@ -1,0 +1,44 @@
+
+[Usage: 24 input tokens, 2 output tokens | Time: 9.05s | Finish: stop]
+{"check": "L1_pinned_v1", "status": "OK", "prompt_tokens": 24, "reasoning_chars": 0, "budget_window": 32768, "window_source": "server_model_config", "served_after_call": 32768, "consumption": "consistent", "violation": null, "api_ps": 32768, "http_requests": 1, "wire_has_options": false}
+
+[Usage: 24 input tokens, 2 output tokens | Time: 2.50s | Finish: stop]
+{"check": "L1_unpinned_v1_nonproduction", "status": "OK", "prompt_tokens": 24, "reasoning_chars": 0, "budget_window": 32768, "window_source": "requested_unverified", "served_after_call": 65536, "consumption": "consistent", "violation": null, "api_ps": 65536, "http_requests": 1}
+{"check": "L1_unpinned_v1_production", "raised": "ProviderContractError", "reason_code": "RUNTIME_CONTEXT_IDENTITY_MISMATCH", "message": "RUNTIME_CONTEXT_IDENTITY_MISMATCH: the provider serves a 65536-token context window; the runtime identity requires exactly 32768. Pin the served window in the model's server configuration (kriya model pin)", "api_ps": 65536, "http_requests": 0}
+
+[Usage: 24 input tokens, 2 output tokens | Time: 1.95s | Finish: stop]
+{"check": "L1_native", "status": "OK", "prompt_tokens": 24, "reasoning_chars": 0, "budget_window": 32768, "window_source": "server_model_config", "served_after_call": 32768, "consumption": "consistent", "violation": null, "api_ps": 32768, "http_requests": 1, "urls": ["http://localhost:11434/api/chat"], "num_ctx": [32768]}
+{"check": "L2_v1_prevented", "raised": "ContextBudgetUnsatisfiableError", "reason_code": "CONTEXT_BUDGET_UNSATISFIABLE", "message": "CONTEXT_BUDGET_UNSATISFIABLE: the request needs about 180554 prompt tokens (default_byte_bound) plus at least 1024 output tokens, but the served context window is 32768 (server_model_config). Nothing was sent to the model.", "http_requests": 0, "prompt_bytes": 451290}
+{"check": "L2_v1_detected", "reported_prompt_tokens": 16386, "truncation_evidence": {"dispatched_bytes": 425290, "reported_prompt_tokens": 16386, "minimum_expected_tokens": 53161, "bytes_per_token_ceiling": 8.0}}
+{"check": "L2_native_small_window", "raised": "ContextBudgetUnsatisfiableError", "reason_code": "CONTEXT_BUDGET_UNSATISFIABLE", "message": "CONTEXT_BUDGET_UNSATISFIABLE: the request needs about 24038 prompt tokens (default_byte_bound) plus at least 1024 output tokens, but the served context window is 8192 (server_model_config). Nothing was sent to the model.", "http_requests": 0}
+{"check": "L2_native_provider_refusal", "refused": true, "type": "ProviderContractError", "reason_code": "PROVIDER_PROMPT_TRUNCATED"}
+
+[Usage: 24 input tokens, 2 output tokens | Time: 1.98s | Finish: stop]
+{"check": "L3_v1_wire", "bodies": [{"model": "qwen3-coder:30b-kriya-e52213655394", "max_tokens": 4096, "response_format": null, "temperature": 0.7, "reasoning_effort": "none", "seed": 7, "top_p": 0.8}]}
+
+[Usage: 24 input tokens, 2 output tokens | Time: 0.05s | Finish: stop]
+{"check": "L3_native_wire", "bodies": [{"model": "qwen3-coder:30b", "stream": false, "options": {"num_ctx": 32768, "seed": 7, "top_k": 20, "top_p": 0.8, "temperature": 0.7, "num_predict": 4096}, "truncate": false, "think": false}]}
+
+[Usage: 26 input tokens, 18 output tokens | Time: 0.33s | Finish: stop]
+
+[Usage: 26 input tokens, 18 output tokens | Time: 0.24s | Finish: stop]
+
+[Usage: 26 input tokens, 18 output tokens | Time: 0.24s | Finish: stop]
+
+[Usage: 26 input tokens, 18 output tokens | Time: 0.24s | Finish: stop]
+{"check": "L3_native_top_k_1_identical", "identical": true, "distinct": 1}
+
+[Usage: 25 input tokens, 2 output tokens | Time: 8.03s | Finish: stop]
+{"check": "L4_reasoning_off", "status": "OK", "prompt_tokens": 25, "reasoning_chars": 0, "budget_window": 32768, "window_source": "server_model_config", "served_after_call": 32768, "consumption": "consistent", "violation": null, "wire_effort": ["none"]}
+
+[Usage: 23 input tokens, 141 output tokens | Time: 2.01s | Finish: stop]
+{"check": "L4_reasoning_default", "status": "OK", "prompt_tokens": 23, "reasoning_chars": 455, "budget_window": 32768, "window_source": "served_observed", "served_after_call": 32768, "consumption": "consistent", "violation": null, "wire_effort": [null]}
+{"check": "L5_failing_request", "status": "BACKEND_ERROR", "prompt_tokens": null, "reasoning_chars": 0, "budget_window": 32768, "window_source": "requested_unverified", "served_after_call": null, "consumption": null, "violation": null, "http_requests": 1}
+{"check": "L5_timeout", "status": "TIMEOUT", "prompt_tokens": null, "reasoning_chars": 0, "budget_window": 32768, "window_source": "server_model_config", "served_after_call": null, "consumption": null, "violation": null, "http_requests": 1}
+{"check": "L5_failing_stream", "status": "BACKEND_ERROR", "prompt_tokens": null, "reasoning_chars": 0, "budget_window": 32768, "window_source": "requested_unverified", "served_after_call": null, "consumption": null, "violation": null, "http_requests": 1}
+
+[Usage: 24 input tokens, 2 output tokens | Time: 7.19s | Finish: stop]
+{"check": "L6_proxy_env", "status": "OK", "prompt_tokens": 24, "reasoning_chars": 0, "budget_window": 32768, "window_source": "server_model_config", "served_after_call": 32768, "consumption": "consistent", "violation": null, "proxy_hits": 0, "http_requests": 1}
+{"check": "L7_fingerprint", "digest": "45bf9d3f09f1a759d3fcf27f1384c3c24b237d015058cced2bb91ad24e6ac14c", "exact": true, "server_parameters": ["num_ctx 32768", "repeat_penalty 1.05", "stop \"<|endoftext|>\"", "stop \"<|im_end|>\"", "stop \"<|im_start|>\"", "temperature 0.7", "top_k 20", "top_p 0.8"], "effective_context_window": 32768, "adapter_version": "kriya-openai-compat/3"}
+{"check": "done", "seconds": 77.2}
+exit 0

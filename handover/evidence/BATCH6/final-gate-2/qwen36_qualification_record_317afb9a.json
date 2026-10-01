@@ -1,0 +1,1289 @@
+{
+  "adapter_version": "kriya-openai-compat/2",
+  "cases": [
+    {
+      "capability": "plain_completion",
+      "elapsed_seconds": 10.253,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32444,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 64,
+          "min_output_tokens": 64,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 64,
+          "prompt_tokens": 68,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 28,
+          "requested_max_tokens": 64,
+          "required_tokens": 388,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 64,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "config_declared"
+        },
+        "completion_tokens": 64,
+        "content": "",
+        "content_chars": 0,
+        "elapsed_seconds": 10.242,
+        "finish_reason": "length",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 64,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": true,
+        "parser_status": "not_applicable",
+        "prompt_tokens": 28,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-50",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "reasoning_chars": 253,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OUTPUT_TRUNCATED",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "FAIL"
+    },
+    {
+      "capability": "finish_reason_stop",
+      "elapsed_seconds": 4.233,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32445,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 256,
+          "min_output_tokens": 256,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 256,
+          "prompt_tokens": 67,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 28,
+          "requested_max_tokens": 256,
+          "required_tokens": 579,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 256,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "config_declared"
+        },
+        "completion_tokens": 256,
+        "content_chars": 0,
+        "elapsed_seconds": 4.221,
+        "finish_reason": "length",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 256,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": true,
+        "parser_status": "not_applicable",
+        "prompt_tokens": 28,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-325",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "reasoning_chars": 923,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OUTPUT_TRUNCATED",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "FAIL"
+    },
+    {
+      "capability": "structured_json",
+      "elapsed_seconds": 3.391,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32410,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 256,
+          "min_output_tokens": 256,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 256,
+          "prompt_tokens": 102,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 47,
+          "requested_max_tokens": 256,
+          "required_tokens": 614,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 256,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "config_declared"
+        },
+        "completion_tokens": 183,
+        "content_chars": 34,
+        "elapsed_seconds": 3.381,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 256,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": false,
+        "parsed": {
+          "count": 3,
+          "status": "ok"
+        },
+        "parser_status": "ok",
+        "prompt_tokens": 47,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": true,
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-836",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "reasoning_chars": 621,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "multiline_json",
+      "elapsed_seconds": 33.422,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32326,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 512,
+          "min_output_tokens": 512,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 512,
+          "prompt_tokens": 186,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 81,
+          "requested_max_tokens": 512,
+          "required_tokens": 954,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 512,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "config_declared"
+        },
+        "completion_tokens": 1501,
+        "content": "def greet(name):\n    message = f\"Hello, {name}!\"\n    return message",
+        "content_chars": 116,
+        "elapsed_seconds": 33.414,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 12288,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": false,
+        "parser_status": "ok",
+        "prompt_tokens": 81,
+        "protocol": {
+          "empty_content_floor_retry": true,
+          "json_mode": true,
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-546",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "reasoning_chars": 5414,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "native_tool_calls",
+      "elapsed_seconds": 2.682,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32321,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 256,
+          "min_output_tokens": 256,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 256,
+          "prompt_tokens": 191,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 286,
+          "requested_max_tokens": 256,
+          "required_tokens": 703,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 256,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": true,
+          "window_source": "config_declared"
+        },
+        "completion_tokens": 144,
+        "content_chars": 0,
+        "elapsed_seconds": 2.677,
+        "finish_reason": "tool_calls",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 256,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": false,
+        "parser_status": "ok",
+        "prompt_tokens": 286,
+        "protocol": {
+          "json_mode": false,
+          "streaming": false,
+          "tool_count": 1,
+          "tools": true
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-244",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "reasoning_chars": 435,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 1,
+        "tool_call_sources": [
+          "native"
+        ],
+        "tool_calls": [
+          {
+            "arguments": {
+              "city": "Paris"
+            },
+            "id": "call_icfoxj0a",
+            "name": "get_weather",
+            "source": "native"
+          }
+        ]
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "multiple_tool_calls",
+      "elapsed_seconds": 4.705,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32290,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 512,
+          "min_output_tokens": 512,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 512,
+          "prompt_tokens": 222,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 297,
+          "requested_max_tokens": 512,
+          "required_tokens": 990,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 512,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": true,
+          "window_source": "config_declared"
+        },
+        "cities": [
+          "paris",
+          "tokyo"
+        ],
+        "completion_tokens": 273,
+        "content_chars": 0,
+        "elapsed_seconds": 4.699,
+        "finish_reason": "tool_calls",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 512,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": false,
+        "parser_status": "ok",
+        "prompt_tokens": 297,
+        "protocol": {
+          "json_mode": false,
+          "streaming": false,
+          "tool_count": 1,
+          "tools": true
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-213",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "reasoning_chars": 824,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 2,
+        "tool_call_sources": [
+          "native"
+        ]
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "tool_argument_integrity",
+      "elapsed_seconds": 2.715,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32254,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 512,
+          "min_output_tokens": 512,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 512,
+          "prompt_tokens": 258,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 318,
+          "requested_max_tokens": 512,
+          "required_tokens": 1026,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 512,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": true,
+          "window_source": "config_declared"
+        },
+        "completion_tokens": 144,
+        "content_chars": 0,
+        "elapsed_seconds": 2.708,
+        "expected": "Line one \"quoted\" \\ backslash\nLine two: tab\tand unicode caf\u00e9 \u2013 \u6771\u4eac \u2713 {braces} [brackets]",
+        "finish_reason": "tool_calls",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 512,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": false,
+        "parser_status": "ok",
+        "prompt_tokens": 318,
+        "protocol": {
+          "json_mode": false,
+          "streaming": false,
+          "tool_count": 1,
+          "tools": true
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-498",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "reasoning_chars": 324,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "received": [
+          "Line one \"quoted\" \\ backslash\nLine two: tab\tand unicode caf\u00e9 \u2013 \u6771\u4eac \u2713 {braces} [brackets]"
+        ],
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 1,
+        "tool_call_sources": [
+          "native"
+        ]
+      },
+      "measured": {
+        "verified_tool_argument_chars": 87
+      },
+      "status": "PASS"
+    },
+    {
+      "capability": "streaming_assembly",
+      "elapsed_seconds": 4.173,
+      "evidence": {
+        "assembled_matches_result": true,
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32423,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 256,
+          "min_output_tokens": 256,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 256,
+          "prompt_tokens": 89,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 38,
+          "requested_max_tokens": 256,
+          "required_tokens": 601,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 256,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "config_declared"
+        },
+        "completion_tokens": 256,
+        "content_chars": 0,
+        "delta_count": 0,
+        "elapsed_seconds": 4.164,
+        "finish_reason": "length",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 256,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": true,
+        "parser_status": "not_applicable",
+        "prompt_tokens": 38,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": true,
+          "tools": false
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-173",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "reasoning_chars": 745,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OUTPUT_TRUNCATED",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "FAIL"
+    },
+    {
+      "capability": "output_truncation",
+      "elapsed_seconds": 0.451,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32439,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 16,
+          "min_output_tokens": 16,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 16,
+          "prompt_tokens": 73,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 36,
+          "requested_max_tokens": 16,
+          "required_tokens": 345,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 16,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "config_declared"
+        },
+        "completion_tokens": 16,
+        "content_chars": 0,
+        "elapsed_seconds": 0.437,
+        "finish_reason": "length",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 16,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": true,
+        "parser_status": "not_applicable",
+        "prompt_tokens": 36,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-692",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "reasoning_chars": 55,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OUTPUT_TRUNCATED",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "reasoning_behavior",
+      "elapsed_seconds": 9.649,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32402,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 2048,
+          "min_output_tokens": 1024,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 2048,
+          "prompt_tokens": 110,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 54,
+          "requested_max_tokens": 2048,
+          "required_tokens": 1390,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 2048,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "config_declared"
+        },
+        "completion_tokens": 599,
+        "content": "85",
+        "content_chars": 2,
+        "elapsed_seconds": 9.642,
+        "finish_reason": "stop",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 2048,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": false,
+        "parser_status": "not_applicable",
+        "prompt_tokens": 54,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-704",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "reasoning_chars": 1548,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OK",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": [],
+        "visible_content_has_think_tags": false
+      },
+      "measured": {
+        "reasoning_observed": true,
+        "reasoning_tokens_observed": 599
+      },
+      "status": "PASS"
+    },
+    {
+      "capability": "full_file_raw_content",
+      "elapsed_seconds": 16.261,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32249,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 1024,
+          "min_output_tokens": 1024,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 1024,
+          "prompt_tokens": 263,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 102,
+          "requested_max_tokens": 1024,
+          "required_tokens": 1543,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 1024,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "config_declared"
+        },
+        "completion_tokens": 1024,
+        "content_chars": 0,
+        "defines_slugify": false,
+        "elapsed_seconds": 16.253,
+        "finish_reason": "length",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 1024,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": true,
+        "parser_status": "not_applicable",
+        "parses": true,
+        "prompt_tokens": 102,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-110",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "raw_had_fence": false,
+        "reasoning_chars": 3654,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OUTPUT_TRUNCATED",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "FAIL"
+    },
+    {
+      "capability": "anchored_edit_protocol",
+      "elapsed_seconds": 16.832,
+      "evidence": {
+        "analysis": false,
+        "applied": false,
+        "applied_parses_and_changed": false,
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32158,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 1024,
+          "min_output_tokens": 1024,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 1024,
+          "prompt_tokens": 354,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 144,
+          "requested_max_tokens": 1024,
+          "required_tokens": 1634,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 1024,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "config_declared"
+        },
+        "completion_tokens": 1024,
+        "content_chars": 0,
+        "edit_count": 0,
+        "elapsed_seconds": 16.824,
+        "finish_reason": "length",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 1024,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": true,
+        "parser_status": "not_applicable",
+        "prompt_tokens": 144,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-817",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "reasoning_chars": 3990,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OUTPUT_TRUNCATED",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "FAIL"
+    },
+    {
+      "capability": "malformed_output_recovery",
+      "elapsed_seconds": 8.264,
+      "evidence": {
+        "backend_error": null,
+        "backend_status": "ok",
+        "budget": {
+          "approximate": true,
+          "considered_tiers": [
+            {
+              "fits": true,
+              "room": 32383,
+              "source": "preferred",
+              "tokens": 32768
+            }
+          ],
+          "context_expanded": false,
+          "context_window": 32768,
+          "counting_method": "qualified_byte_bound",
+          "exact": false,
+          "expected_output_tokens": null,
+          "hard_context_ceiling": 262144,
+          "hard_output_ceiling": null,
+          "max_tokens": 512,
+          "min_output_tokens": 512,
+          "output_expanded": false,
+          "output_grounding": null,
+          "output_reduced": false,
+          "policy_mode": "strict",
+          "preferred_context_window": 32768,
+          "preferred_output_tokens": 512,
+          "prompt_tokens": 129,
+          "qualification_source": "preferred",
+          "reasoning_allowance": 0,
+          "reported_prompt_tokens": 56,
+          "requested_max_tokens": 512,
+          "required_tokens": 897,
+          "safety_margin": 256,
+          "satisfiable": true,
+          "selected_context_window": 32768,
+          "selected_output_tokens": 512,
+          "selection_reason": "fits_preferred",
+          "tier_note": "strict policy: the preferred window is the limit",
+          "under_predicted": false,
+          "window_source": "config_declared"
+        },
+        "completion_tokens": 512,
+        "content_chars": 0,
+        "elapsed_seconds": 8.237,
+        "finish_reason": "length",
+        "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+        "max_tokens": 512,
+        "model": "qwen3.6:35b-a3b-q4_K_M",
+        "output_truncated": true,
+        "parser_status": "not_applicable",
+        "prompt_tokens": 56,
+        "protocol": {
+          "empty_content_floor_retry": false,
+          "json_mode": false,
+          "reasoning_model": false,
+          "response_format_dropped": false,
+          "streaming": false,
+          "tools": false
+        },
+        "provider_metadata": {
+          "id": "chatcmpl-430",
+          "model": "qwen3.6:35b-a3b-q4_K_M",
+          "system_fingerprint": "fp_ollama"
+        },
+        "reasoning_chars": 2004,
+        "reasoning_present": true,
+        "reasoning_source": "reasoning_field",
+        "recovered": null,
+        "runtime_fingerprint": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+        "runtime_fingerprint_exact": true,
+        "status": "OUTPUT_TRUNCATED",
+        "tokens_estimated": false,
+        "tool_call_count": 0,
+        "tool_call_sources": []
+      },
+      "measured": {},
+      "status": "FAIL"
+    },
+    {
+      "capability": "timeout_semantics",
+      "elapsed_seconds": 0.026,
+      "evidence": {
+        "backend_error": "APITimeoutError: Request timed out.",
+        "status": "TIMEOUT"
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "cancellation_semantics",
+      "elapsed_seconds": 120.003,
+      "evidence": {
+        "reason": "no streamed output before cancelling"
+      },
+      "measured": {},
+      "status": "FAIL"
+    },
+    {
+      "capability": "endpoint_error_semantics",
+      "elapsed_seconds": 0.052,
+      "evidence": {
+        "backend_error": "NotFoundError: Error code: 404 - {'error': {'message': \"model 'kriya-qualification-no-such-model:0' not found\", 'type': 'not_found_error', 'param': None, 'code': None}}",
+        "status": "BACKEND_ERROR"
+      },
+      "measured": {},
+      "status": "PASS"
+    },
+    {
+      "capability": "endpoint_restart_semantics",
+      "elapsed_seconds": 0.0,
+      "evidence": {
+        "reason": "not exercised live: restarting the operator's model server is out of scope for an automatic qualification; connection-refused classification is covered by fixture tests"
+      },
+      "measured": {},
+      "status": "UNAVAILABLE"
+    },
+    {
+      "capability": "tokenizer_measurement",
+      "elapsed_seconds": 1.796,
+      "evidence": {
+        "ascii_bytes_per_token": {
+          "java": 4.2295,
+          "json": 1.898,
+          "python": 3.3136,
+          "stacktrace": 3.2326,
+          "xml": 2.6899
+        },
+        "non_ascii_bytes_per_token": 3.6613,
+        "reported_prompt_tokens": {
+          "java": 122,
+          "json": 147,
+          "python": 118,
+          "stacktrace": 129,
+          "unicode": 75,
+          "xml": 158
+        }
+      },
+      "measured": {
+        "bytes_per_token_floor": 1.7082,
+        "non_ascii_bytes_per_token_floor": 3.2951
+      },
+      "status": "PASS"
+    }
+  ],
+  "environment": {
+    "accelerator_backend": "metal",
+    "accelerator_count": 1,
+    "accelerator_memory_class_gib": 64,
+    "accelerator_model": "Apple M1 Max",
+    "architecture": "arm64",
+    "digest": "sha256:7b3ce83bce654d1b29a5ccacb9d262ed668196baae3a301d71430b2a3ec93559",
+    "exact": true,
+    "inference_runtime": "ollama/0.34.2",
+    "os": "darwin",
+    "runtime_parallelism": "unavailable",
+    "schema_version": 1,
+    "system_memory_class_gib": 64,
+    "unified_memory": true
+  },
+  "environment_evidence": {
+    "sha256:7b3ce83bce654d1b29a5ccacb9d262ed668196baae3a301d71430b2a3ec93559": {
+      "cases": [
+        {
+          "capability": "context_capacity",
+          "elapsed_seconds": 0.0,
+          "evidence": {
+            "reason": "the served context window (num_ctx) is not known"
+          },
+          "measured": {},
+          "status": "UNAVAILABLE"
+        }
+      ],
+      "environment": {
+        "accelerator_backend": "metal",
+        "accelerator_count": 1,
+        "accelerator_memory_class_gib": 64,
+        "accelerator_model": "Apple M1 Max",
+        "architecture": "arm64",
+        "digest": "sha256:7b3ce83bce654d1b29a5ccacb9d262ed668196baae3a301d71430b2a3ec93559",
+        "exact": true,
+        "inference_runtime": "ollama/0.34.2",
+        "os": "darwin",
+        "runtime_parallelism": "unavailable",
+        "schema_version": 1,
+        "system_memory_class_gib": 64,
+        "unified_memory": true
+      },
+      "qualified_at": "2026-09-27T01:56:43.705594+00:00"
+    }
+  },
+  "fingerprint": {
+    "adapter_version": "kriya-openai-compat/2",
+    "alias": "qwen3.6:35b-a3b-q4_K_M",
+    "artifact_digest": "sha256:07d35212591fc27746f0a317c975a6d68754fb38e9053d82e25f06057af28522",
+    "chat_template": "renderer:qwen3.5",
+    "configured_context_window": null,
+    "digest": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+    "effective_context_window": null,
+    "endpoint": "http://localhost:11434/v1",
+    "exact": true,
+    "family": "qwen35moe",
+    "kriya_protocol": "capabilities-sha256:15361471c56f2dd67805fd781e32ef4ea477eb335f38c2c3f82959a0d265b714",
+    "missing_components": [
+      "configured_context_window",
+      "effective_context_window"
+    ],
+    "model_context_length": 262144,
+    "model_format": "gguf",
+    "parameter_size": "36.0B",
+    "probe_errors": [],
+    "provider": "ollama",
+    "provider_version": "0.34.2",
+    "quantization": "Q4_K_M",
+    "runtime_parameters_digest": "sha256:37dea17ab78ebcc88569a0239d1a99fd692ca68297c6555cd985ee8d2fcbba72",
+    "schema_version": 1,
+    "served_capabilities": [
+      "completion",
+      "thinking",
+      "tools",
+      "vision"
+    ],
+    "tokenizer_digest": "sha256:3f1a2932b98cd5a39553f0336164ef55c8a6333722c1a6058735b3fdabd795d9",
+    "tokenizer_identity": "gpt2/qwen35",
+    "tool_call_parser": "parser:qwen3.5",
+    "weights_digest": "sha256:f5ee307a2982106a6eb82b62b2c00b575c9072145a759ae4660378acda8dcf2d"
+  },
+  "fingerprint_digest": "48e3ddd2f5b45c5aefa338381093a89a1265ac8b53e2a7ec3016f95756756866",
+  "inference_settings": {
+    "digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+    "extra_body": {},
+    "output_ceiling": 16384,
+    "reasoning": false,
+    "temperature": 0.2,
+    "version": 1
+  },
+  "inference_settings_digest": "sha256:65e5b10cdad9e2b28c9309bfc5ba28e1c0dbdd9fabf4e38a0afa80a43524db5c",
+  "kriya_version": "0.1.0",
+  "measured_limits": {
+    "bytes_per_token_floor": 1.7082,
+    "non_ascii_bytes_per_token_floor": 3.2951,
+    "reasoning_observed": true,
+    "reasoning_tokens_max": 899,
+    "verified_tool_argument_chars": 87
+  },
+  "policy_version": "kriya-qualification/3",
+  "qualification_identity": "317afb9a81bdb536a4d6bb708e21f14b27128eddb400dfa8b3d5eb2bbbbc7091",
+  "qualified_at": "2026-09-27T01:56:43.705594+00:00",
+  "roles": [
+    "developer"
+  ],
+  "schema_version": 2,
+  "summary": {
+    "FAIL": 7,
+    "PASS": 10,
+    "UNAVAILABLE": 2
+  }
+}

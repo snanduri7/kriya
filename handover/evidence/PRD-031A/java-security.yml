@@ -1,0 +1,13 @@
+rules:
+- id: java-runtime-exec
+  languages: [java]
+  severity: ERROR
+  message: Runtime.exec runs an external process; validate every argument.
+  pattern: Runtime.getRuntime().exec(...)
+  metadata: {category: security, cwe: ["CWE-78"]}
+- id: java-printstacktrace
+  languages: [java]
+  severity: INFO
+  message: printStackTrace() in production code.
+  pattern: $E.printStackTrace()
+  metadata: {category: maintainability}

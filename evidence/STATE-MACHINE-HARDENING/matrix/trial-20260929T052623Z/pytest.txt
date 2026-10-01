@@ -1,0 +1,12 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 11 items
+
+tests/test_live_prd035_certification.py ...........                      [100%]
+
+- generated xml file: /private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/773b5689-1152-49ed-8446-dd3fb6632e6d/scratchpad/final_matrix/trial-20260929T052623Z/junit.xml -
+======================== 11 passed in 582.56s (0:09:42) ========================

@@ -1,0 +1,106 @@
+{
+  "ground_truth": {
+    "must_change": [
+      "core/billing/invoice_impl.py"
+    ],
+    "must_preserve": [
+      "core/billing/invoice_interface.py",
+      "core/billing/caller.py"
+    ],
+    "relevant_members": [
+      [
+        "core/billing/invoice_interface.py",
+        "InvoiceCalculator.calculate_total"
+      ],
+      [
+        "core/billing/invoice_impl.py",
+        "StandardInvoiceCalculator.calculate_total"
+      ]
+    ],
+    "required_relationships": [
+      [
+        "core/billing/caller.py",
+        "core/billing/invoice_impl.py",
+        "imports+calls"
+      ],
+      [
+        "core/billing/invoice_impl.py",
+        "core/billing/invoice_interface.py",
+        "imports+implements"
+      ],
+      [
+        "core/billing/test_invoice.py",
+        "core/billing/caller.py",
+        "imports+calls"
+      ]
+    ],
+    "goal": "Apply a 7% regional surcharge on top of the existing base tax inside StandardInvoiceCalculator's total computation, without changing the InvoiceCalculator interface or any caller."
+  },
+  "total_files": 260,
+  "relationship_checks": [
+    {
+      "source_file": "core/billing/caller.py",
+      "target_file": "core/billing/invoice_impl.py",
+      "kind": "imports+calls",
+      "source_symbol_count": 3,
+      "target_symbol_count": 2,
+      "relation_row_found": true,
+      "raw_relation_targets_from_source": [
+        "StandardInvoiceCalculator",
+        "calculate_total",
+        "core.billing.invoice_impl",
+        "core.billing.invoice_interface",
+        "typing"
+      ]
+    },
+    {
+      "source_file": "core/billing/invoice_impl.py",
+      "target_file": "core/billing/invoice_interface.py",
+      "kind": "imports+implements",
+      "source_symbol_count": 2,
+      "target_symbol_count": 4,
+      "relation_row_found": false,
+      "raw_relation_targets_from_source": [
+        "core.billing.invoice_interface",
+        "round",
+        "sum",
+        "typing"
+      ]
+    },
+    {
+      "source_file": "core/billing/test_invoice.py",
+      "target_file": "core/billing/caller.py",
+      "kind": "imports+calls",
+      "source_symbol_count": 1,
+      "target_symbol_count": 3,
+      "relation_row_found": true,
+      "raw_relation_targets_from_source": [
+        "CheckoutService",
+        "LineItem",
+        "checkout",
+        "core.billing.caller",
+        "core.billing.invoice_interface"
+      ]
+    }
+  ],
+  "lexical_retrieval_checks": [
+    {
+      "query": "StandardInvoiceCalculator calculate_total",
+      "total_hits": 0,
+      "billing_hits": [],
+      "filler_hits_count": 0
+    },
+    {
+      "query": "InvoiceCalculator abstract method",
+      "total_hits": 0,
+      "billing_hits": [],
+      "filler_hits_count": 0
+    },
+    {
+      "query": "CheckoutService checkout",
+      "total_hits": 0,
+      "billing_hits": [],
+      "filler_hits_count": 0
+    }
+  ]
+}

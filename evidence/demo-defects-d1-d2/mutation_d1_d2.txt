@@ -1,0 +1,14 @@
+D1-jdtls-rooted-at-candidate: KILLED FAILED tests/test_jdtls_candidate_isolation.py::test_jdtls_is_rooted_at_the_private_mirror_never_the_candidate
+D1-queries-hit-candidate-paths: KILLED FAILED tests/test_jdtls_candidate_isolation.py::test_candidate_paths_map_to_canonical_mirror_paths_and_nothing_outside
+D1-mirror-never-synced: KILLED FAILED tests/test_jdtls_candidate_isolation.py::test_every_query_resyncs_the_mirror_so_jdtls_never_sees_stale_siblings
+D1-vcs-and-state-mirrored: KILLED FAILED tests/test_jdtls_candidate_isolation.py::test_the_mirror_holds_the_candidates_source_and_never_writes_the_candidate
+D2-runtime-acquisition-removed: KILLED FAILED tests/test_runtime_maven_acquisition.py::test_a_missing_plugin_gets_exactly_one_registry_scoped_acquisition_then_the_exact_retry
+D2-classifier-reverted: KILLED 
+D2-incomplete-acquisition-is-app-failure: KILLED FAILED tests/test_runtime_maven_acquisition.py::test_a_plugin_still_missing_after_acquisition_is_a_typed_verification_dependency_stop
+D2-unresolved-prefix-is-app-failure: KILLED FAILED tests/test_runtime_maven_acquisition.py::test_an_unavailable_runtime_dependency_never_reaches_the_developer[[ERROR] No plugin found for prefix 'exec' in the current project and in the plugin groups [org.apache.maven.plugins, org.codehaus.mojo] available from the repositories [local (/kriya/m2)]-MAVEN_PLUGIN_UNAVAILABLE]
+D2-multiple-acquisitions: KILLED FAILED tests/test_runtime_maven_acquisition.py::test_a_missing_plugin_gets_exactly_one_registry_scoped_acquisition_then_the_exact_retry
+D2-broader-network: KILLED FAILED tests/test_runtime_maven_acquisition.py::test_a_missing_plugin_gets_exactly_one_registry_scoped_acquisition_then_the_exact_retry
+D2-retry-after-deadline: KILLED FAILED tests/test_runtime_maven_acquisition.py::test_a_deadline_that_runs_out_during_acquisition_gets_no_retry
+D2-deadline-not-capping: KILLED FAILED tests/test_runtime_maven_acquisition.py::test_a_deadline_that_runs_out_during_acquisition_gets_no_retry
+D2-runtime-ignores-run-deadline: KILLED FAILED tests/test_runtime_maven_acquisition.py::test_an_exhausted_root_deadline_skips_acquisition_and_never_retries
+13/13 killed

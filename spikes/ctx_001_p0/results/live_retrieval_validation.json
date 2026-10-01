@@ -1,0 +1,240 @@
+{
+  "query": "Apply a 7% regional surcharge on top of the existing base tax inside StandardInvoiceCalculator's total computation, without changing the InvoiceCalculator interface or any caller.",
+  "ground_truth_file": "core/billing/invoice_impl.py",
+  "bands": [
+    {
+      "band": "small",
+      "total_repository_files": 60,
+      "indexed_vector_chunks": 295,
+      "embedding_model": "nomic-embed-text:latest",
+      "embedding_base_url": "http://localhost:11434/v1",
+      "index_elapsed_s": 4.425179499998194,
+      "retrieval_elapsed_s": 0.03825541699916357,
+      "relevant_file_rank": 1,
+      "relevant_file_score": 0.01639344262295082,
+      "top5": true,
+      "top10": true,
+      "top10_matches": [
+        {
+          "filepath": "core/billing/invoice_impl.py",
+          "score": 0.01639344262295082
+        },
+        {
+          "filepath": "core/billing/invoice_impl.py",
+          "score": 0.016129032258064516
+        },
+        {
+          "filepath": "core/billing/caller.py",
+          "score": 0.015873015873015872
+        },
+        {
+          "filepath": "core/billing/invoice_impl.py",
+          "score": 0.015625
+        },
+        {
+          "filepath": "core/billing/invoice_interface.py",
+          "score": 0.015384615384615385
+        },
+        {
+          "filepath": "core/billing/invoice_interface.py",
+          "score": 0.015151515151515152
+        },
+        {
+          "filepath": "core/billing/test_invoice.py",
+          "score": 0.014925373134328358
+        },
+        {
+          "filepath": "core/billing/test_invoice.py",
+          "score": 0.014705882352941176
+        },
+        {
+          "filepath": "core/billing/caller.py",
+          "score": 0.014492753623188406
+        },
+        {
+          "filepath": "core/billing/invoice_interface.py",
+          "score": 0.014285714285714285
+        }
+      ]
+    },
+    {
+      "band": "medium",
+      "total_repository_files": 260,
+      "indexed_vector_chunks": 1495,
+      "embedding_model": "nomic-embed-text:latest",
+      "embedding_base_url": "http://localhost:11434/v1",
+      "index_elapsed_s": 22.522659209000267,
+      "retrieval_elapsed_s": 0.07750483299969346,
+      "relevant_file_rank": 1,
+      "relevant_file_score": 0.01639344262295082,
+      "top5": true,
+      "top10": true,
+      "top10_matches": [
+        {
+          "filepath": "core/billing/invoice_impl.py",
+          "score": 0.01639344262295082
+        },
+        {
+          "filepath": "core/billing/invoice_impl.py",
+          "score": 0.016129032258064516
+        },
+        {
+          "filepath": "core/billing/caller.py",
+          "score": 0.015873015873015872
+        },
+        {
+          "filepath": "core/billing/invoice_impl.py",
+          "score": 0.015625
+        },
+        {
+          "filepath": "core/billing/invoice_interface.py",
+          "score": 0.015384615384615385
+        },
+        {
+          "filepath": "core/billing/invoice_interface.py",
+          "score": 0.015151515151515152
+        },
+        {
+          "filepath": "core/billing/test_invoice.py",
+          "score": 0.014925373134328358
+        },
+        {
+          "filepath": "core/billing/test_invoice.py",
+          "score": 0.014705882352941176
+        },
+        {
+          "filepath": "core/billing/caller.py",
+          "score": 0.014492753623188406
+        },
+        {
+          "filepath": "core/billing/invoice_interface.py",
+          "score": 0.014285714285714285
+        }
+      ]
+    },
+    {
+      "band": "large",
+      "total_repository_files": 760,
+      "indexed_vector_chunks": 4495,
+      "embedding_model": "nomic-embed-text:latest",
+      "embedding_base_url": "http://localhost:11434/v1",
+      "index_elapsed_s": 70.474165833999,
+      "retrieval_elapsed_s": 0.18572512500031735,
+      "relevant_file_rank": 1,
+      "relevant_file_score": 0.01639344262295082,
+      "top5": true,
+      "top10": true,
+      "top10_matches": [
+        {
+          "filepath": "core/billing/invoice_impl.py",
+          "score": 0.01639344262295082
+        },
+        {
+          "filepath": "core/billing/invoice_impl.py",
+          "score": 0.016129032258064516
+        },
+        {
+          "filepath": "core/billing/caller.py",
+          "score": 0.015873015873015872
+        },
+        {
+          "filepath": "core/billing/invoice_impl.py",
+          "score": 0.015625
+        },
+        {
+          "filepath": "core/billing/invoice_interface.py",
+          "score": 0.015384615384615385
+        },
+        {
+          "filepath": "core/billing/invoice_interface.py",
+          "score": 0.015151515151515152
+        },
+        {
+          "filepath": "core/billing/test_invoice.py",
+          "score": 0.014925373134328358
+        },
+        {
+          "filepath": "core/billing/test_invoice.py",
+          "score": 0.014705882352941176
+        },
+        {
+          "filepath": "core/billing/caller.py",
+          "score": 0.014492753623188406
+        },
+        {
+          "filepath": "core/billing/invoice_interface.py",
+          "score": 0.014285714285714285
+        }
+      ]
+    },
+    {
+      "band": "very_large",
+      "total_repository_files": 1510,
+      "indexed_vector_chunks": 8995,
+      "embedding_model": "nomic-embed-text:latest",
+      "embedding_base_url": "http://localhost:11434/v1",
+      "index_elapsed_s": 167.72286891699696,
+      "retrieval_elapsed_s": 0.33816466700227465,
+      "relevant_file_rank": 1,
+      "relevant_file_score": 0.01639344262295082,
+      "top5": true,
+      "top10": true,
+      "top10_matches": [
+        {
+          "filepath": "core/billing/invoice_impl.py",
+          "score": 0.01639344262295082
+        },
+        {
+          "filepath": "core/billing/invoice_impl.py",
+          "score": 0.016129032258064516
+        },
+        {
+          "filepath": "core/billing/caller.py",
+          "score": 0.015873015873015872
+        },
+        {
+          "filepath": "core/billing/invoice_impl.py",
+          "score": 0.015625
+        },
+        {
+          "filepath": "core/billing/invoice_interface.py",
+          "score": 0.015384615384615385
+        },
+        {
+          "filepath": "core/billing/invoice_interface.py",
+          "score": 0.015151515151515152
+        },
+        {
+          "filepath": "core/billing/test_invoice.py",
+          "score": 0.014925373134328358
+        },
+        {
+          "filepath": "core/billing/test_invoice.py",
+          "score": 0.014705882352941176
+        },
+        {
+          "filepath": "core/billing/caller.py",
+          "score": 0.014492753623188406
+        },
+        {
+          "filepath": "core/billing/invoice_interface.py",
+          "score": 0.014285714285714285
+        }
+      ]
+    }
+  ],
+  "rank_stability": {
+    "small": 1,
+    "medium": 1,
+    "large": 1,
+    "very_large": 1
+  },
+  "retrieval_precision_degradation": false,
+  "degradation_basis": {
+    "lost_top5_between_consecutive_bands": false,
+    "lost_top10_between_consecutive_bands": false,
+    "never_found_in_top10_any_band": false,
+    "rank_range_spread_ge_5": false
+  },
+  "scope_note": "This validates real embedding retrieval ranking only. It does NOT validate Developer coding quality, F8 model behavior, MODEL-001, end-to-end CTX correctness, or context-budget correctness."
+}

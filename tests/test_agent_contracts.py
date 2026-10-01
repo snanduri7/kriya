@@ -383,13 +383,17 @@ async def test_developer_step1_falls_through_and_keeps_overdelivered_content():
     assert llm.complete.await_count == 1
 
 @pytest.mark.asyncio
-async def test_developer_step1_unsafe_path_in_new_shape_falls_through_not_used_raw():
+@pytest.mark.parametrize("protocol", ["legacy_strict", "structured"])
+async def test_developer_step1_unsafe_path_in_new_shape_falls_through_not_used_raw(protocol):
     """A path-traversal entry in the new {"files": [...]} shape must fail
     contract validation (same safety check as the Architect side) rather
     than being accepted as-is - falls through to the older extraction, which
     has no path-safety validation of its own, exactly matching pre-existing
-    behavior for this response shape."""
+    behavior for this response shape. Under the structured protocol (the
+    production default) the per-file answer's block path is normalized
+    (FILE-INTEGRITY-CONTRACT-001 S-2), so the unsafe path is refused there."""
     cfg = AppConfig()
+    cfg.autonomy.developer_response_protocol = protocol
     llm = LLMClient(cfg)
     llm.complete = AsyncMock(side_effect=[
         '{"files": ["../outside.py"]}',
@@ -399,10 +403,17 @@ async def test_developer_step1_unsafe_path_in_new_shape_falls_through_not_used_r
 
     files = await dev.run_generation("Task", "Design", "Existing code")
 
-    # The older extraction still accepts it (no safety validation there,
-    # same as before this change) - the point of this test is that the new
-    # contract path did NOT silently pass the unsafe path through unchecked.
-    assert files == [{"filepath": "../outside.py", "content": "outside content"}]
+    # The point of this test is that the new contract path did NOT silently
+    # pass the unsafe path through unchecked.
+    if protocol == "legacy_strict":
+        # The older extraction still accepts it (no safety validation there,
+        # same as before this change).
+        assert files == [{"filepath": "../outside.py", "content": "outside content"}]
+    else:
+        [entry] = files
+        assert entry["filepath"] == "../outside.py" and entry["content"] is None
+        assert entry["protocol_reason_code"] == "INVALID_EDIT_PROTOCOL"
+        assert "not a safe repository-relative path" in entry["protocol_error"]
 
 
 # ---------------------------------------------------------------------------

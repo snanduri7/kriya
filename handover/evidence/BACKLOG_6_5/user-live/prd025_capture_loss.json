@@ -1,0 +1,36 @@
+{
+  "evidence_packages": [
+    {
+      "answered": true,
+      "budget_bytes": 29504,
+      "capture_truncation": [
+        {
+          "lost_chars": 1888959,
+          "step": 1,
+          "stream": "stdout"
+        }
+      ],
+      "decisive_windows_omitted": false,
+      "distinct_signature_overflow": 0,
+      "extraction_version": "verifier-evidence/1",
+      "head_tail": [],
+      "included_windows": [],
+      "model": "qwen3-coder:30b",
+      "omitted_ranges": [],
+      "omitted_windows": [],
+      "package_truncated": false,
+      "rendered_bytes": 20287,
+      "rendered_chars": 20287,
+      "rendered_sha256": "8622a8efecf32d5c167dc17b2c9c673f23be542d17035c88464fb2dfcd5f2da2",
+      "truncation": [
+        "CAPTURE_TRUNCATION"
+      ]
+    }
+  ],
+  "likely_files": [],
+  "passed": false,
+  "reason_code": "CAPTURE_LOSS_UNRESOLVED",
+  "reasoning": "CAPTURE_LOSS_UNRESOLVED: the grader reported PASS without seeing all decisive evidence (evidence it did not see cannot support a PASS). Grader's own reasoning: The output ends with 'finished all records' as required, showing that all records were processed and the final message was printed.",
+  "status": "LIVE_EXERCISED",
+  "verdict": "UNKNOWN"
+}

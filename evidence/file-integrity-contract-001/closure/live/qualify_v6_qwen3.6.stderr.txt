@@ -1,0 +1,47 @@
+2026-09-30 21:32:03,711 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Source: unverified_conservative_default, native_tool_calls=False, json_mode=False, reliable_multiline_json=False, preferred_edit_protocol=full_file]
+2026-09-30 21:32:03,993 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:12,683 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:12,698 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:12,913 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:12,923 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: True, Reasoning: False]
+2026-09-30 21:32:13,401 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:13,412 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: True, Reasoning: False]
+2026-09-30 21:32:14,236 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:14,246 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: True, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:14,439 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:15,136 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:15,533 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:15,545 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:15,779 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:15,790 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:19,971 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:19,983 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:21,950 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:21,961 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:22,735 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:22,749 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:22,754 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: True, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:22,941 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:22,950 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:23,134 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:23,141 INFO kriya.core.model_capabilities: Model capability profile resolved [Model: kriya-qualification-no-such-model:0, Source: unverified_conservative_default, native_tool_calls=False, json_mode=False, reliable_multiline_json=False, preferred_edit_protocol=full_file]
+2026-09-30 21:32:23,176 INFO kriya.core.llm: Sending completion request to local LLM [Model: kriya-qualification-no-such-model:0, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:23,188 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 404 Not Found"
+2026-09-30 21:32:23,192 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:23,469 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:23,476 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:23,758 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:23,767 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:24,088 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:24,095 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:24,409 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:24,419 WARNING kriya.core.token_budget: Token budget under-predicted for qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a: predicted 144 prompt tokens (default_byte_bound), provider reported 149. Qualify this runtime (kriya model qualify) to measure its tokenizer.
+2026-09-30 21:32:24,422 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:24,662 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:24,671 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:24,933 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:24,941 INFO kriya.core.llm: Sending completion request to local LLM [Model: qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a, Stream: False, JSON Mode: False, Reasoning: False]
+2026-09-30 21:32:25,230 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:25,849 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:32:26,979 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"
+2026-09-30 21:33:19,285 INFO httpx: HTTP Request: POST http://localhost:11434/v1/chat/completions "HTTP/1.1 200 OK"

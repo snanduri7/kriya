@@ -1,0 +1,141 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.6, pytest-9.1.1, pluggy-1.6.0
+rootdir: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, anyio-4.14.2
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 11 items
+
+tests/test_live_prd035_certification.py .....F.....                      [100%]
+
+=================================== FAILURES ===================================
+____________________ test_c6_configured_fallback_transition ____________________
+
+case = <test_live_prd035_certification.Case object at 0x10dee5c70>
+
+    @certification_case("C6", "fallback_transition")
+    def test_c6_configured_fallback_transition(case):
+        case.config.llm_chain = [RELEASE_FALLBACK or FallbackModelConfig(
+            model=FALLBACK_MODEL, base_url=case.config.llm.base_url, api_key=case.config.llm.api_key,
+            context_window=32768, temperature=0.7,
+            extra_body={"reasoning_effort": "none", "options": {"num_ctx": 32768, "top_p": 0.8, "top_k": 20}},
+        )]
+        ws = git_workspace(case.tmp_path, {
+            "calc.py": "def add(a, b):\n    return a + b\n",
+            "test_calc.py": "from calc import add\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+        })
+        spy = _DeveloperModelSpy()
+        packaged = runtime_adapter("ollama")
+        register_runtime_adapter(spy)
+        clear_model_runtime_cache()
+        try:
+            # The primary's candidates fail the compile gate until the attempt goes to the fallback.
+            with _fail_first_compiles(lambda: not spy.developer_models or spy.developer_models[-1] != FALLBACK_MODEL):
+                result = case.run(ws, "Add a function sub(a, b) returning a - b to calc.py.")
+        finally:
+            register_runtime_adapter(packaged)
+            clear_model_runtime_cache()
+        passed = case.hidden_tests(ws, "from calc import sub\ndef test_sub():\n    assert sub(5, 3) == 2\n")
+>       case.finish(result, ws, hidden_acceptance_passed=passed, developer_models=sorted(set(spy.developer_models)))
+
+tests/test_live_prd035_certification.py:325: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <test_live_prd035_certification.Case object at 0x10dee5c70>
+result = {'plan': '```markdown\n### Step-by-Step Implementation Plan\n\n1. **Verify that `calc.py` exists in the workspace** (R...n}\n```', 'design': '{\n  "files": [\n    "calc.py"\n  ]\n}', 'files': ['calc.py'], 'quality_gates_passed': False, ...}
+workspace = PosixPath('/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-1942/test_c6_configured_fallback_tr0/ws')
+required = True
+evidence = {'hidden_acceptance_passed': False, 'developer_models': ['qwen3-coder:30b']}
+
+    def finish(self, result, workspace, *, required=True, **evidence):
+        """Record the case (always, pass or fail) and assert success."""
+        metrics = derive_metrics(load_trace_runs(trace_db_path(self.config)))
+        generation = metrics["outcomes"]["generation"]
+        roles = {}
+        for row in metrics["model_protocol"]:
+            entry = roles.setdefault(row["role"], {"runtime_digests": set(), "settings_digests": set(),
+                                                   "models": set(), "prompt_tokens": 0, "completion_tokens": 0,
+                                                   "calls": 0})
+            entry["runtime_digests"].add(row["runtime_digest"])
+            entry["settings_digests"].add(row["inference_settings_digest"])
+            entry["models"].update(row["models"])
+            for key in ("prompt_tokens", "completion_tokens", "calls"):
+                entry[key] += row[key]
+        records = scan_run_records(str(workspace)).records
+        self.record.update({
+            "final_success": result.get("quality_gates_passed") is True,
+            "failure_category": result.get("failure_category") or result.get("status"),
+            "first_pass_compile": generation["first_pass_compile"],
+            "retries": {k: v.get("value") for k, v in generation["retries"].items()},
+            "fallback_transitions": generation["fallback_transitions"].get("value"),
+            "roles": {role: {k: sorted(v) if isinstance(v, set) else v for k, v in entry.items()}
+                      for role, entry in sorted(roles.items())},
+            "tokens": {"input": sum(r["prompt_tokens"] for r in roles.values()),
+                       "output": sum(r["completion_tokens"] for r in roles.values())},
+            "context_window": self.config.llm.context_window, "max_tokens": self.config.llm.max_tokens,
+            "static_analysis": (result.get("static_analysis") or {}).get("outcome"),
+            "commit_results": [c.get("result") for r in records for c in r.commits],
+            "lifecycles": [r.lifecycle_state.value for r in records],
+            **evidence,
+        })
+        self.request.node.user_properties.append(("model_certification_case", self.record))
+        if required:
+>           assert self.record["final_success"], f"{self.case_id} did not succeed: {self.record['failure_category']}"
+E           AssertionError: C6 did not succeed: quality_gates_exhausted
+E           assert False
+
+tests/test_live_prd035_certification.py:120: AssertionError
+----------------------------- Captured stdout call -----------------------------
+
+[Usage: 2748 input tokens, 925 output tokens | Time: 22.06s | Finish: stop]
+
+[Usage: 1668 input tokens, 15 output tokens | Time: 2.83s | Finish: stop]
+
+[Usage: 1874 input tokens, 26 output tokens | Time: 4.13s | Finish: stop]
+
+[Usage: 883 input tokens, 108 output tokens | Time: 2.06s | Finish: stop]
+
+[Usage: 883 input tokens, 109 output tokens | Time: 2.47s | Finish: stop]
+
+[Usage: 1946 input tokens, 414 output tokens | Time: 11.36s | Finish: stop]
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 1: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 0/4 + targeted 0/3: BROWNFIELD PUBLIC API REJECTED BEFORE WRITE: the candidate would replace or remove an established public signature. Restore the existing owner contract before behavioral repair.
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 1: FAILED                  
+----------------------------------------------------------------------
+full-set, full-set 0/4 + targeted 0/3: BROWNFIELD PUBLIC API REJECTED BEFORE WRITE: the candidate would replace or remove an established public signature. Restore the existing owner contract before behavioral repair.
+WARNING  kriya.workflow.retry_strategy:retry_strategy.py:422 Entering API_CONTRACT_RECOVERY: authoritative signatures=['calc.py::add(a, b)'] protected_evidence=['test_calc.py']
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 3: FAILED                  
+----------------------------------------------------------------------
+api_contract_recovery, full-set 1/4 + targeted 0/3: COMPILATION FAILURE:
+calc.py:1: error: injected compile failure (certification C5/C6)
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 3: FAILED                  
+----------------------------------------------------------------------
+api_contract_recovery, full-set 1/4 + targeted 0/3: COMPILATION FAILURE:
+calc.py:1: error: injected compile failure (certification C5/C6)
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 CANDIDATE GATES - Attempt 4: FAILED                  
+----------------------------------------------------------------------
+api_contract_recovery, full-set 1/4 + targeted 0/3: COMPILATION FAILURE:
+calc.py:1: error: injected compile failure (certification C5/C6)
+WARNING  kriya.workflow.banners:banners.py:68 
+----------------------------------------------------------------------
+                 OVERALL ATTEMPT - Attempt 4: FAILED                  
+----------------------------------------------------------------------
+api_contract_recovery, full-set 1/4 + targeted 0/3: COMPILATION FAILURE:
+calc.py:1: error: injected compile failure (certification C5/C6)
+ERROR    kriya.workflow.recovery_coordinator:recovery_coordinator.py:227 Quality Gates exceeded maximum debug retries (full-set and targeted). Continuing to review with errors.
+- generated xml file: /Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/evidence/PRD-036/matrix/trial-20260928T161219Z/junit.xml -
+=========================== short test summary info ============================
+FAILED tests/test_live_prd035_certification.py::test_c6_configured_fallback_transition
+=================== 1 failed, 10 passed in 578.88s (0:09:38) ===================

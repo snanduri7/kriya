@@ -4,7 +4,7 @@
 these to disk lives in kriya/knowledge/staging.py.
 """
 from datetime import date
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel, Field, field_validator
 

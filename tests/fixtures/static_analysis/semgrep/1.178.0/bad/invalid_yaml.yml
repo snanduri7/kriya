@@ -1,0 +1,6 @@
+rules:
+  - id: bad-yaml
+    languages: [java
+    severity: ERROR
+    message: "x: y: z"
+     pattern: foo

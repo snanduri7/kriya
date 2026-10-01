@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "17 2 * * *"
 
 jobs:
   test:
@@ -28,6 +30,32 @@ jobs:
       - name: Run test suite
         run: pytest -q
 
+  platform-windows:
+    # ARCH-PLATFORM-001 / PLAT-003: Kriya core imports on a real Windows host
+    # and the platform architecture guard holds there. Windows RUNTIME is not
+    # supported (PORTABILITY_ARCHITECTURE_DEFINED / RUNTIME_NOT_SUPPORTED);
+    # this job proves only that no core module needs a POSIX-only import and
+    # that missing Windows providers report typed UNAVAILABLE. Blocking since
+    # its first green run (run 36406170586 at 960b5f9), which closed PLAT-003.
+    name: Platform import and architecture guard (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Kriya (declared dependency ranges; the lock file is POSIX-resolved, PLAT-036)
+        run: pip install -e ".[dev]"
+
+      - name: Import Kriya core natively
+        run: python -c "import kriya.cli, kriya.workflow.workflow, kriya.control.recovery, kriya.tools.validate, kriya.mcp.mcp, kriya.production_doctor, plugins.core_tools; from kriya.platform.services import platform_services; print(platform_services().identity())"
+
+      - name: Platform architecture guard and lock contract
+        run: python -m pytest -q -p no:cacheprovider tests/test_platform_architecture_guard.py tests/test_platform_workspace_lock_contract.py
+
   lint:
     name: Lint (ruff)
     runs-on: ubuntu-latest
@@ -45,11 +73,39 @@ jobs:
           # noisy). This job does one pip install; caching isn't worth the
           # collision. Only the 5-way test matrix actually benefits.
 
-      - name: Install Kriya (declared dependency ranges)
-        run: pip install -e ".[dev]"
+      # CI-RUFF-001: the exact ruff the lock file pins (requirements.txt is
+      # the single source of the version). A floating `ruff>=0.6.0` would let
+      # a new ruff release add rules to the selected groups and turn this
+      # zero-finding gate red with no code change.
+      - name: Install ruff (lock-file version)
+        run: pip install "$(grep '^ruff==' requirements.txt)"
 
-      - name: Run ruff
+      - name: Run ruff (zero findings; any new finding fails)
         run: ruff check .
+
+  static-check:
+    # Its own job, not a step after ruff: a ruff failure must not hide it.
+    # Narrow pylint gate (unbound/undefined names); rules in pyproject.toml's
+    # [tool.pylint], rationale in CLAUDE.md's "Mandatory quality bar".
+    name: Static check (pylint, unbound/undefined names)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          # No cache: pip - see the lint job's comment.
+
+      # pylint and astroid at the lock-file versions, for the same reason as
+      # the ruff pin above. Kriya is installed so imports resolve.
+      - name: Install Kriya and the lock-file pylint/astroid
+        run: |
+          pip install -e ".[dev]"
+          pip install "$(grep '^pylint==' requirements.txt)" "$(grep '^astroid==' requirements.txt)"
+
+      - name: Run pylint gate
+        run: pylint kriya plugins/core_tools tests
 
   lock-file:
     name: Verify dependency lock file
@@ -74,19 +130,94 @@ jobs:
       - name: Run test suite against pinned versions
         run: pytest -q
 
+  release-integrity:
+    name: Source distribution and clean wheel install
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install existing locked build and test dependencies
+        # setuptools (the sdist/wheel build backend) is pinned in the lock
+        # itself (--allow-unsafe), never installed unpinned alongside it.
+        run: pip install -r requirements.txt
+      - name: Verify source, sdist, wheel and clean installed CLI
+        run: |
+          python -m kriya.distribution .
+          bash scripts/verify_release.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-integrity-evidence
+          path: |
+            /tmp/kriya-release.*/dist/*
+            /tmp/kriya-release.*/*.txt
+            /tmp/kriya-release.*/*.jsonl
+          retention-days: 7
+
+  production-certification:
+    # PRD-034: the canonical production certification (scripts/certify.sh,
+    # the same procedure the target machine runs). Non-root runner user;
+    # explicit JDK/Maven/Semgrep versions; Docker-dependent tests must
+    # execute (an unexpected skip fails); the pinned static-analysis tier runs
+    # (STATIC-ANALYSIS-CI-LIVE-JOB-001); junit, skip audits, exact tool
+    # versions and the production doctor JSON are archived.
+    name: Production certification
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          # No cache: pip - see the lint job's comment.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install pinned Maven
+        run: |
+          curl -fsSL https://archive.apache.org/dist/maven/maven-3/3.9.9/binaries/apache-maven-3.9.9-bin.tar.gz \
+            | tar xz -C "$HOME"
+          echo "$HOME/apache-maven-3.9.9/bin" >> "$GITHUB_PATH"
+      - name: Refuse to certify as root
+        run: test "$(id -u)" != "0"
+      - name: Create the certification venv (lock-file versions)
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+          .venv/bin/pip install -e . --no-deps
+      - name: Install the pinned scanner
+        run: pipx install semgrep==1.178.0
+      - name: Pull and verify every pinned image by digest
+        # tests/certification/pinned_images.txt; certify.sh re-verifies and
+        # fails (never skips) on a missing or re-pointed image.
+        run: .venv/bin/python scripts/pinned_images.py --pull
+      - name: Certify
+        run: scripts/certify.sh certification-out/ci
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-certification
+          path: certification-out/ci
+          retention-days: 30
+
   live-model-smoke:
-    name: Live model smoke test (non-blocking)
+    name: Primary live model regression (blocking)
     runs-on: ubuntu-latest
     # Every other job here runs entirely against mocks - zero live LLM calls.
-    # This job is deliberately separate and non-blocking: it installs Ollama
-    # fresh and pulls a small model, so it's slower and has more moving parts
+    # This job is deliberately separate and blocking for the supported
+    # primary model. It installs pinned Ollama and pulls a small model, so it
+    # is slower and has more moving parts
     # (network, model pull, a real inference server) than the rest of CI. Its
     # job is catching integration/regression bugs in Kriya's own code (a
     # prompt/response contract change, a JSON-parsing edge case) that only a
     # real model response can trigger - not grading code-generation quality,
     # which a small CI-pulled model isn't representative of. See
     # tests/test_live_smoke.py for what's actually asserted.
-    continue-on-error: true
+    env:
+      OLLAMA_VERSION: "0.11.4"
     steps:
       - uses: actions/checkout@v4
 
@@ -116,5 +247,40 @@ jobs:
           ollama pull qwen2.5-coder:1.5b
           ollama pull all-minilm
 
+      # PRD-034: wiring smoke on the CI model only. Tests marked live_target
+      # need the qualified target identity and run on the target machine.
       - name: Run live-model smoke tests
-        run: pytest -q -m live_model
+        env:
+          KRIYA_LIVE_LLM_MODEL: qwen2.5-coder:1.5b
+        run: pytest -q -m "live_model and not live_target"
+
+  nightly-live-model-matrix:
+    name: Nightly live model (${{ matrix.model }})
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ["qwen2.5-coder:1.5b", "qwen2.5-coder:3b", "llama3.2:3b"]
+    env:
+      OLLAMA_VERSION: "0.11.4"
+      KRIYA_LIVE_LLM_MODEL: ${{ matrix.model }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Kriya
+        run: pip install -e ".[dev]"
+      - name: Install and start pinned Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:11434/api/tags >/dev/null && break
+            sleep 1
+          done
+          ollama pull "${KRIYA_LIVE_LLM_MODEL}"
+          ollama pull all-minilm
+      - name: Run live-model regression
+        run: pytest -q -m "live_model and not live_target"

@@ -1,0 +1,32 @@
+{
+  "java": {
+    "estimated": 239,
+    "len_div_4": 129,
+    "reported": 103
+  },
+  "json": {
+    "estimated": 144,
+    "len_div_4": 69,
+    "reported": 119
+  },
+  "python": {
+    "estimated": 189,
+    "len_div_4": 97,
+    "reported": 105
+  },
+  "stacktrace": {
+    "estimated": 200,
+    "len_div_4": 104,
+    "reported": 116
+  },
+  "unicode": {
+    "estimated": 173,
+    "len_div_4": 30,
+    "reported": 76
+  },
+  "xml": {
+    "estimated": 203,
+    "len_div_4": 106,
+    "reported": 141
+  }
+}

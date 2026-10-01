@@ -1,0 +1,26 @@
+{
+  "deltas": [
+    {
+      "aggregate_drop_detected": false,
+      "blocking": false,
+      "blocking_reasons": [],
+      "level1_classification": "PRE_EXISTING_FAILURE",
+      "level2": {
+        "tests/test_legacy.py::test_known_broken": "PRE_EXISTING_FAILURE"
+      },
+      "level2_available": true,
+      "level2_unavailable_reason": null,
+      "post_environment": "{\"basis\": \"host toolchain has no attested identity (containment not required)\", \"execution\": \"sandbox\", \"toolchain\": null, \"verification_policy\": {\"comparison_version\": 1, \"contained_execution_required\": false, \"containment_backend\": \"none\", \"egress_policy\": \"local_only\", \"sandbox_cpu_seconds\": 240, \"sandbox_env_allowlist\": [\"HOME\", \"LANG\", \"LC_ALL\", \"USER\", \"SHELL\", \"TMPDIR\", \"TEMP\", \"TMP\", \"JAVA_HOME\", \"M2_HOME\", \"GRADLE_HOME\", \"VIRTUAL_ENV\", \"PYTHONPATH\"], \"sandbox_execution\": true, \"sandbox_memory_mb\": 4096}}",
+      "pre_environment": "{\"basis\": \"host toolchain has no attested identity (containment not required)\", \"execution\": \"sandbox\", \"toolchain\": null, \"verification_policy\": {\"comparison_version\": 1, \"contained_execution_required\": false, \"containment_backend\": \"none\", \"egress_policy\": \"local_only\", \"sandbox_cpu_seconds\": 240, \"sandbox_env_allowlist\": [\"HOME\", \"LANG\", \"LC_ALL\", \"USER\", \"SHELL\", \"TMPDIR\", \"TEMP\", \"TMP\", \"JAVA_HOME\", \"M2_HOME\", \"GRADLE_HOME\", \"VIRTUAL_ENV\", \"PYTHONPATH\"], \"sandbox_execution\": true, \"sandbox_memory_mb\": 4096}}"
+    }
+  ],
+  "failure_category": null,
+  "policy": [
+    {
+      "auto_decision": null,
+      "configured": "required",
+      "effective": "required"
+    }
+  ],
+  "quality_gates_passed": true
+}

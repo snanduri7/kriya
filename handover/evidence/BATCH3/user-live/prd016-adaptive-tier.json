@@ -1,0 +1,67 @@
+{
+  "budget": {
+    "approximate": true,
+    "considered_tiers": [
+      {
+        "fits": false,
+        "room": -4022,
+        "source": "preferred",
+        "tokens": 8192
+      },
+      {
+        "fits": true,
+        "room": 4170,
+        "source": "operator_declared",
+        "tokens": 16384
+      }
+    ],
+    "context_expanded": true,
+    "context_window": 16384,
+    "counting_method": "default_byte_bound",
+    "exact": false,
+    "expected_output_tokens": null,
+    "hard_context_ceiling": 262144,
+    "hard_output_ceiling": null,
+    "max_tokens": 256,
+    "min_output_tokens": 256,
+    "output_expanded": false,
+    "output_grounding": null,
+    "output_reduced": false,
+    "policy_mode": "adaptive",
+    "preferred_context_window": 8192,
+    "preferred_output_tokens": 256,
+    "prompt_tokens": 11958,
+    "qualification_source": "operator_declared",
+    "reasoning_allowance": 0,
+    "reported_prompt_tokens": 10852,
+    "requested_max_tokens": 256,
+    "required_tokens": 12470,
+    "safety_margin": 256,
+    "satisfiable": true,
+    "selected_context_window": 16384,
+    "selected_output_tokens": 256,
+    "selection_reason": "prompt_exceeds_preferred_window",
+    "tier_note": "",
+    "under_predicted": false,
+    "window_source": "served_num_ctx"
+  },
+  "event": {
+    "elapsed_seconds": 12.143,
+    "expected_output_tokens": null,
+    "hard_context_ceiling": 262144,
+    "hard_output_ceiling": null,
+    "model": "qwen3-coder:30b",
+    "output_grounding": null,
+    "policy_mode": "adaptive",
+    "preferred_context_window": 8192,
+    "preferred_output_tokens": 256,
+    "qualification_source": "operator_declared",
+    "reason": "prompt_exceeds_preferred_window",
+    "required_prompt_tokens": 11958,
+    "runtime_fingerprint": "b299407cb31498268faa0cccbc27aee2feeb45837f57f2c21143bf88a2d82d5d",
+    "selected_context_window": 16384,
+    "selected_output_tokens": 256,
+    "status": "OK"
+  },
+  "prompt_tokens": 10852
+}

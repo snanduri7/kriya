@@ -1,0 +1,1 @@
+{"incident":"demo1_runtime_hang","source":"class Application { void run() throws Exception { Thread.currentThread().join(); } }","max_chars":500,"required_evidence":"Thread.currentThread().join()"}

@@ -1,0 +1,60 @@
+Qualifying qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a for developer (settings sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15, extra_body={"options":{"num_ctx":32768,"top_k":20,"top_p":0.8},"think":false,"truncate":false})
+
+[Usage: 30 input tokens, 2 output tokens | Time: 8.30s | Finish: stop]
+  plain_completion             PASS           8.32s
+
+[Usage: 30 input tokens, 3 output tokens | Time: 0.21s | Finish: stop]
+  finish_reason_stop           PASS           0.22s
+
+[Usage: 49 input tokens, 19 output tokens | Time: 0.47s | Finish: stop]
+  structured_json              PASS           0.47s
+
+[Usage: 83 input tokens, 43 output tokens | Time: 0.83s | Finish: stop]
+  multiline_json               PASS           0.83s
+  native_tool_calls            UNAVAILABLE    0.00s
+  multiple_tool_calls          UNAVAILABLE    0.00s
+  tool_argument_integrity      UNAVAILABLE    0.00s
+
+[Usage: 40 input tokens, 51 output tokens | Time: 0.89s | Finish: stop]
+  streaming_assembly           PASS           0.89s
+
+[Usage: 38 input tokens, 16 output tokens | Time: 0.40s | Finish: length | OUTPUT_TRUNCATED]
+  output_truncation            PASS           0.41s
+
+[Usage: 56 input tokens, 3 output tokens | Time: 0.23s | Finish: stop]
+  reasoning_behavior           PASS           0.24s
+
+[Usage: 249 input tokens, 91 output tokens | Time: 1.65s | Finish: stop]
+  full_file_raw_content        PASS           1.65s
+
+[Usage: 269 input tokens, 111 output tokens | Time: 1.97s | Finish: stop]
+  anchored_edit_protocol       PASS           1.97s
+
+[Usage: 58 input tokens, 41 output tokens | Time: 0.79s | Finish: stop]
+  malformed_output_recovery    PASS           0.79s
+  timeout_semantics            PASS           0.01s
+
+[Usage: None input tokens, None output tokens | Time: 0.19s | Finish: unreported | CANCELLED]
+
+[Usage: 30 input tokens, 2 output tokens | Time: 0.21s | Finish: stop]
+  cancellation_semantics       PASS           0.40s
+  endpoint_error_semantics     PASS           0.04s
+  endpoint_restart_semantics   UNAVAILABLE    0.00s
+
+[Usage: 124 input tokens, 1 output tokens | Time: 0.30s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 120 input tokens, 1 output tokens | Time: 0.30s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 160 input tokens, 1 output tokens | Time: 0.35s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 149 input tokens, 1 output tokens | Time: 0.34s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 77 input tokens, 1 output tokens | Time: 0.26s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 105 input tokens, 1 output tokens | Time: 0.29s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 131 input tokens, 1 output tokens | Time: 0.31s | Finish: length | OUTPUT_TRUNCATED]
+  tokenizer_measurement        PASS           2.17s
+  context_capacity             PASS          57.81s
+  over_context_refusal         PASS           1.93s
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "roles": ["developer"], "summary": {"PASS": 16, "FAIL": 0, "UNAVAILABLE": 4}, "policy_version": "kriya-qualification/8", "policy_digest": "sha256:d34ab460fd768fb238717081c95f571dacc214c0d64d9c78dd3a4b2f0e549fff", "fingerprint_digest": "26cb2deb79ae43141f637b99510d292002f4174558d5a2b20d09c2d0a94bdfd3", "qualification_identity": "b0ed2c615189aaa7490c96f45672fff68392af0053e2f948eb661e8365a4d010", "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15", "measured_limits": {"reasoning_observed": false, "bytes_per_token_floor": 1.6852, "non_ascii_bytes_per_token_floor": 3.1889, "bytes_per_token_ceiling": 8.0}, "record": "/Users/sriramnanduri/.kriya/qualifications/b0ed2c615189aaa7490c96f45672fff68392af0053e2f948eb661e8365a4d010.json"}

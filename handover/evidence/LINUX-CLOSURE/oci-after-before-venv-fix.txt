@@ -1,0 +1,36 @@
+kriya from /home/runner/after/kriya/__init__.py
+......F.......                                                           [100%]
+=================================== FAILURES ===================================
+_ test_contained_python_validation_uses_container_interpreter_never_host_executable _
+
+tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-1/test_contained_python_validati0')
+
+    def test_contained_python_validation_uses_container_interpreter_never_host_executable(tmp_path):
+        """A representative Python repo (requirements.txt declaring a real,
+        tiny PyPI package + a test that imports it) through the ACTUAL
+        run_tests() entry point - proves the venv-creation/interpreter-
+        resolution fix works through the real validation path, not just its
+        own unit-level pieces."""
+        (tmp_path / "requirements.txt").write_text("six==1.16.0\n")
+        (tmp_path / "test_uses_six.py").write_text(
+            "import six\n\ndef test_six_is_importable():\n    assert six.__version__ == '1.16.0'\n"
+        )
+    
+        validator = PolymorphicValidator(str(tmp_path), autonomy_cfg=_contained_cfg())
+        assert validator.stack == "python"
+    
+        result = validator.run_tests()
+>       assert result["success"] is True, result["output"]
+E       AssertionError: 
+E         Traceback (most recent call last):
+E           File "<string>", line 1, in <module>
+E         ModuleNotFoundError: No module named 'pytest'
+E         
+E       assert False is True
+
+tests/test_validate_oci.py:53: AssertionError
+------------------------------ Captured log call -------------------------------
+WARNING  kriya.tools.validate:validate.py:440 Failed to create project-local venv at /tmp/pytest-of-runner/pytest-1/test_contained_python_validati0/.kriya/venv - falling back to the default interpreter for this test run:
+=========================== short test summary info ============================
+FAILED tests/test_validate_oci.py::test_contained_python_validation_uses_container_interpreter_never_host_executable
+1 failed, 13 passed in 78.32s (0:01:18)

@@ -11,32 +11,2535 @@ to-workspace, lesson extraction, the full regression suite) deliberately
 stays in workflow.py - out of scope for this slice.
 """
 import asyncio
+import hashlib
+import json
 import logging
 import os
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+import re
+import statistics
+import time
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Optional, Tuple
 
 from kriya.agents.agent import DeveloperAgent
+from kriya.agents.contracts import (
+    AUTHORITATIVE_GOAL_SECTION_HEADER,
+    PLANNED_IMPLEMENTATION_SECTION_HEADER,
+)
+from kriya.core.inference_settings import role_binding_for_model
 from kriya.core.kernel import Kernel
-from kriya.workflow.edit_safety import apply_anchored_edits, atomic_write_file, find_structural_corruption
-from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
-from kriya.workflow.failure_grounding import _build_quality_gate_failure
-from kriya.workflow.file_resolution import IncompleteGenerationError, _resolve_run_command, downgrade_ungrounded_goal_explicit_commands, extract_planner_code_blocks, extract_target_test, find_missing_expected_files, normalize_written_filepath
+from kriya.core.token_budget import OutputBudgetUnsatisfiableError
+from kriya.policy.errors import PolicyDeniedError
+from kriya.policy.filesystem import (
+    AuthorizedFileWriter,
+    WriteScopeMode,
+    is_trusted_control_path,
+    is_within_scope,
+    make_workspace_scope,
+    normalize_workspace_relpath,
+    trusted_control_path_denial,
+)
+from kriya.policy.model import ActionRequest, ActionType, PolicyDecision, PolicyResult
+from kriya.tools.process import ProcessController
+from kriya.tools.service_runtime import (
+    ManagedServiceVerificationSpec,
+    ProbeSpec,
+    ReadinessSpec,
+    ServiceVerificationOutcomeKind,
+    _prepare_required_artifact,
+    run_managed_service_verification,
+)
+
+# PolymorphicValidator, ContextItem and EngineeringPlan are annotation-only
+# names here, imported at runtime so typing.get_type_hints() on this module's
+# dataclasses and functions resolves (PRD-001; none of these modules imports
+# attempt.py, so there is no cycle).
+from kriya.tools.validate import PolymorphicValidator, execution_evidence, get_pom_dependencies
+from kriya.workflow.acceptance import (
+    CANDIDATE_RUNTIME_ENTRYPOINT_INVALID,
+    classify_runtime_entrypoint,
+    output_confirms_nonzero_test_execution,
+    runtime_verification_infrastructure_reason,
+    subtask_owns_test_obligation,
+)
+from kriya.workflow.attribution import (
+    extract_self_diagnosed_files,
+    find_edits_ignoring_own_diagnosis,
+    find_edits_ignoring_reported_line,
+    find_misdirected_edit_target,
+    find_whole_response_no_op,
+    resolve_fallback_model,
+)
+from kriya.workflow.authority_escalation import grant_member_hints
+from kriya.workflow.banners import log_gate_banner
 from kriya.workflow.context_budget import (
+    DeveloperRequestFit,
+    OptionalSection,
     _reserve_graph_context_budget,
     _reserve_sibling_content_budget,
+    allocation_window,
     build_code_context,
+    build_known_target_context,
+    developer_reference,
+    fenced_reference_section,
+    investigation_evidence_char_budget,
+    request_capacity,
+    retry_evidence_char_budget,
 )
-from kriya.workflow.retry_prompts import _build_full_set_retry_prompt, _build_missing_files_retry_prompt, _build_targeted_retry_prompt
+from kriya.workflow.context_package import ContextItem, make_context_item
+from kriya.workflow.context_source import (
+    CurrentSourceResolver,
+    SourceDerivationCache,
+    evaluate_member_hints_from_search_evidence,
+    member_boundaries_for,
+    member_ids_matching_name,
+    resolve_member_hints_from_failure_location,
+)
+from kriya.workflow.contract_authority import derive_direct_contract_authorizations
+from kriya.workflow.dependency_invalidation import (
+    dependent_closure,
+    invalidate_validated_revisions,
+)
+from kriya.workflow.deterministic_failure_diagnostic import DeterministicFailureDiagnosticStore
+from kriya.workflow.edit_capability import exact_window_reserve
+from kriya.workflow.edit_safety import (
+    StagedFileWrite,
+    apply_anchored_edits,
+    content_revision,
+    find_cross_file_type_conflict,
+    find_structural_corruption,
+    read_file_revision,
+)
+from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
+from kriya.workflow.failure_grounding import (
+    _build_quality_gate_failure,
+    _build_test_quality_gate_failure,
+    _capture_failed_content,
+    build_cross_package_mismatch_message,
+    classify_environment_failure,
+    extract_missing_project_local_python_module,
+    find_cross_package_symbol_mismatch,
+    find_locator_files_outside_known_scope,
+    resolve_repository_locator_files,
+)
+from kriya.workflow.file_integrity import (
+    DETERMINISTIC_FILE_INTEGRITY_STOPS,
+    WORKTREE_CONTENT_MISMATCH,
+    FileIntegrityError,
+    VerificationTreeBinding,
+    display_text,
+    file_raw_digest,
+    keep_final_newline_state,
+    load_snapshot,
+    raw_digest,
+    read_shown_text,
+)
+from kriya.workflow.file_resolution import (
+    IncompleteGenerationError,
+    _resolve_run_command,
+    build_grounded_java_launch_command,
+    correct_exec_main_class_property,
+    discover_response_construction_owners,
+    downgrade_ungrounded_goal_explicit_commands,
+    ensure_maven_covers_nonconventional_java_files,
+    extract_jvm_module_flags,
+    extract_target_test,
+    find_brownfield_public_api_changes,
+    find_explanatory_prose_contamination,
+    find_missing_expected_files,
+    find_protected_api_reference_changes,
+    find_runnable_test_files,
+    find_unpreserved_test_obligation,
+    find_unrequested_architectural_surfaces,
+    find_unrestored_public_api_contracts,
+    ground_java_entrypoint_in_no_build_file_projects,
+    ground_python_runtime_target,
+    is_runnable_test_file,
+    normalize_written_filepath,
+    prefer_existing_artifact_owners,
+    python_command_targets_test_path,
+    python_file_is_runnable_script,
+    python_target_path_is_test_shaped,
+)
+from kriya.workflow.migration import (
+    MigrationResolution,
+    MigrationResolutionStatus,
+    MigrationValidationScope,
+    find_migration_incomplete,
+)
+from kriya.workflow.obligations import (
+    ObligationAuthority,
+    ObligationKind,
+    ObligationLedger,
+    ObligationRecord,
+    ObligationStatus,
+)
+from kriya.workflow.operations import (
+    CodeOperation,
+    all_results_are_no_change,
+    operation_for_attempt,
+    operation_for_file,
+    validate_operation_result,
+)
+from kriya.workflow.plan_schema import EngineeringPlan, RequirementOwnershipRelation
+from kriya.workflow.repair_contract import (
+    RepairContractStatus,
+    build_repair_contract,
+    derive_process_boundary_participants,
+)
+from kriya.workflow.requirements import (
+    CLAIM_CONTRADICTS_STRONGER_AUTHORITY,
+    RequirementOutcome,
+    RequirementSet,
+    record_requirement_closure,
+    record_requirement_verdicts,
+    requirement_obligation_id,
+    requirement_outcomes,
+    requirement_verdict_details,
+    verifier_result_verdicts,
+)
+from kriya.workflow.resume_fingerprints import ResumePlan
+from kriya.workflow.retry_package import RetryPackage, build_retry_package
+from kriya.workflow.retry_policy import (
+    API_CONTRACT_RECOVERY_MAX_ATTEMPTS,
+    RESERVED_FALLBACK_ALLOWANCE,
+    RetryAction,
+    decide_attempt_mode,
+)
+from kriya.workflow.retry_progress import SAMPLING_NOT_PERMITTED, SAMPLING_RESAMPLE, sampling_resample_permitted
+from kriya.workflow.retry_prompts import (
+    _build_coordinated_retry_prompt,
+    _build_full_set_retry_prompt,
+    _build_missing_files_retry_prompt,
+    _build_targeted_retry_prompt,
+)
+from kriya.workflow.run_events import EventAuthority, RunEvent
+from kriya.workflow.semantic_region_authority import AuthorizedSemanticRegion, find_unauthorized_semantic_changes
 from kriya.workflow.skill_extraction import _skill_verification_context
-from kriya.workflow.state import GenerationState
-from kriya.workflow.static_checks import run_static_checks
-from kriya.workflow.attribution import extract_self_diagnosed_files, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line, find_misdirected_edit_target, find_whole_response_no_op, resolve_fallback_model
-from kriya.workflow.toolchain import _check_java_toolchain_mismatch, _pin_exec_plugin_executable_to_resolved_jdk, _resolve_java_home_override, _strip_jdk_incompatible_jvm_flags
-from kriya.workflow.verification_contract import extract_contract_verdict, pass_verdict_is_grounded
-from kriya.workflow.worktree import clean_untracked_files_since, snapshot_untracked_files
+from kriya.workflow.state import (
+    APIContractRecovery,
+    APIContractRecoveryPhase,
+    GenerationState,
+    RecoveryPhaseAdvanced,
+)
+from kriya.workflow.static_checks import (
+    derive_stack_contract,
+    find_established_stack_drift,
+    find_goal_stack_mismatch,
+    log_stack_contract_boundary,
+    run_static_checks,
+    validate_stack_contract_artifacts,
+)
+from kriya.workflow.toolchain import (
+    _check_java_toolchain_mismatch,
+    _pin_exec_plugin_executable_to_resolved_jdk,
+    _resolve_java_home_override,
+    _strip_jdk_incompatible_jvm_flags,
+    toolchain_declaration_mutable,
+)
+from kriya.workflow.verification_authority import deterministic_sequence_kind, deterministic_verification_kind
+from kriya.workflow.verification_contract import ContractVerdictState, classify_contract_verdict
+from kriya.workflow.verification_coordinator import (
+    VerificationCoordinator,
+    VerificationRequest,
+    _directly_executable_runtime_verifiers,
+    _directly_executable_verifiers,
+)
+from kriya.workflow.verifier_evidence import (
+    RetainedRuntimeEvidence,
+    apply_runtime_disposition,
+    runtime_evidence_outcome_fields,
+)
+from kriya.workflow.worktree import clean_untracked_files_since, repository_content_paths, snapshot_untracked_files
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_candidate_pom_corrections(
+    state: GenerationState, ctx: "AttemptContext", compile_known_files: List[str],
+) -> None:
+    """Deterministic pom.xml corrections (Maven source-root coverage and
+    exec.mainClass), as ordinary candidate mutations (FILE-INTEGRITY-
+    CONTRACT-001): only when this candidate itself wrote pom.xml, through the
+    authorized staged writer against the pom's raw revision, recorded as a
+    run event with both digests - so the change is in the candidate's diff,
+    its commit batch and its verification. A pom the candidate did not write
+    (the repository's own) is never rewritten behind the gates; the compile
+    gate then reports the real layout problem instead."""
+    pom_path = os.path.join(ctx.worktree_path, "pom.xml")
+    if not os.path.exists(pom_path):
+        return
+    if "pom.xml" not in state.all_files_written:
+        return
+    snapshot = load_snapshot(pom_path)
+    try:
+        pom_content = snapshot.text
+    except FileIntegrityError:
+        return
+    corrected = pom_content
+    skills_relpath = os.path.relpath(ctx.kernel.config.paths.skills, ctx.workspace_path)
+    corrections = []
+    widened = ensure_maven_covers_nonconventional_java_files(corrected, compile_known_files, skills_relpath)
+    if widened is not None:
+        corrected = widened
+        corrections.append("maven_source_root_coverage")
+    compile_java_files = [f for f in compile_known_files if f.endswith(".java")]
+    main_class = correct_exec_main_class_property(corrected, _build_java_main_class_map(compile_java_files, ctx))
+    if main_class is not None:
+        corrected = main_class
+        corrections.append("exec_main_class")
+    notes = []
+    for name, transform in (("jdk_incompatible_jvm_flags", _strip_jdk_incompatible_jvm_flags),
+                            ("exec_executable_pinned_to_resolved_jdk", _pin_exec_plugin_executable_to_resolved_jdk)):
+        transformed, note = transform(corrected, state.java_home_override)
+        if transformed is not None:
+            corrected = transformed
+            corrections.append(name)
+            notes.append(note)
+    if notes:
+        joined = " ".join(notes)
+        logger.warning(f"JVM preflight: {joined}")
+        state.toolchain_warning = f"{state.toolchain_warning} {joined}" if state.toolchain_warning else joined
+    if not corrections:
+        return
+    data = snapshot.encode(corrected)
+    AuthorizedFileWriter(
+        ctx.worktree_path,
+        protected_relpaths=(ctx.protected_relpath,) if ctx.protected_relpath else (),
+        allowed_relpaths=ctx.allowed_write_relpaths,
+        write_scope_mode=ctx.write_scope_mode,
+    ).commit_batch([StagedFileWrite(
+        target_path=pom_path, content=corrected, base_path=pom_path,
+        expected_base_revision=snapshot.raw_sha256, content_bytes=data, mode=snapshot.file_mode,
+    )])
+    state.candidate_digests["pom.xml"] = raw_digest(data)
+    if state.verification_tree_binding is not None:
+        state.verification_tree_binding.authorize("pom.xml")
+    state.record_event(RunEvent(
+        kind="candidate.deterministic_transformation", attempt=state.attempt_number,
+        source="attempt.pom_corrections", authority=EventAuthority.ADVISORY,
+        message=f"pom.xml corrected in the candidate ({', '.join(corrections)}) before verification",
+        details={"path": "pom.xml", "corrections": corrections,
+                 "before_sha256": snapshot.raw_sha256, "after_sha256": raw_digest(data)},
+    ))
+
+
+def _bind_verification_tree(state: GenerationState, ctx: "AttemptContext") -> VerificationTreeBinding:
+    """FILE-INTEGRITY-CONTRACT-001, before the first gate of an attempt:
+    prove the sandbox holds the staged candidate, then bind the whole tree
+    the gates will verify (repository content + candidate). Every validator
+    of this attempt checks it after each command it runs."""
+    _require_worktree_matches_candidate(state, ctx)
+    binding = VerificationTreeBinding(
+        ctx.worktree_path, repository_content_paths(ctx.workspace_path), state.candidate_digests,
+    )
+    state.verification_tree_binding = binding
+    return binding
+
+
+def _require_worktree_matches_candidate(state: GenerationState, ctx: "AttemptContext") -> None:
+    """FILE-INTEGRITY-CONTRACT-001, before any verification gate: every
+    candidate file in the sandbox holds exactly the bytes the authorized
+    writer staged for it (``state.candidate_digests``). A difference means
+    something wrote the candidate outside the staged writer; verification
+    never runs on bytes the commit batch would not carry."""
+    mismatches = []
+    for relpath, expected in sorted(state.candidate_digests.items()):
+        path = os.path.join(ctx.worktree_path, relpath)
+        actual = file_raw_digest(path) if os.path.lexists(path) else None
+        if actual != expected:
+            mismatches.append(relpath)
+    if not mismatches:
+        return
+    message = (f"{WORKTREE_CONTENT_MISMATCH}: candidate file(s) {', '.join(mismatches[:10])} no longer hold the "
+               "bytes the authorized writer staged; verification is not run on them")
+    failure = Failure(
+        type="internal_framework_error", message=message, raw_output=message, source="orchestrator",
+        authority="deterministic", attempt=state.attempt_number,
+        diagnostics={"reason_code": WORKTREE_CONTENT_MISMATCH, "paths": mismatches[:50]},
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def _capture_original(state: GenerationState, ctx: "AttemptContext", relpath: str) -> None:
+    """Record, once per run, the exact workspace bytes of ``relpath`` (None
+    when absent) and their display text. The bytes are the commit base
+    revision (FILE-INTEGRITY-CONTRACT-001) and what a restoration writes back."""
+    if relpath in state.all_original_raw:
+        return
+    try:
+        with open(os.path.join(ctx.workspace_path, relpath), "rb") as handle:
+            data: Optional[bytes] = handle.read()
+    except (FileNotFoundError, IsADirectoryError):
+        data = None
+    except OSError:
+        return
+    state.all_original_raw[relpath] = data
+    state.all_original_contents.setdefault(relpath, "" if data is None else display_text(data))
+
+
+def _baseline_restoration_write(state: GenerationState, target_path: str, relpath: str) -> StagedFileWrite:
+    """Restore ``relpath`` to its exact original bytes, based on the target's
+    current raw revision (re-checked by the batch commit)."""
+    original = state.all_original_raw.get(relpath)
+    data = original if original is not None else state.all_original_contents[relpath].encode("utf-8")
+    return StagedFileWrite(
+        target_path=target_path, content=display_text(data), base_path=target_path,
+        expected_base_revision=file_raw_digest(target_path), content_bytes=data,
+    )
+
+
+def _file_integrity_stop(state: GenerationState, filepath: str, error: Any) -> "QualityGateFailure":
+    """FILE-INTEGRITY-CONTRACT-001: a file the edit engine cannot mutate
+    byte-exactly (not UTF-8, mixed line endings, a symbolic link). No
+    Developer retry can change the file itself, so this is a deterministic
+    stop (retry_strategy: ``file_integrity_unsupported``), never a retry."""
+    message = str(error)
+    failure = Failure(
+        type="file_integrity_unsupported", message=message, raw_output=message,
+        source="orchestrator", authority="deterministic", attempt=state.attempt_number,
+        file_locations=[FileLocation(filepath=filepath)], likely_files=[filepath],
+        diagnostics={"reason_code": getattr(error, "reason_code", None)},
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    return QualityGateFailure(failure)
+
+
+def _target_exists(ctx: "AttemptContext", filepath: str) -> bool:
+    return os.path.exists(os.path.join(ctx.worktree_path, filepath)) or os.path.exists(
+        os.path.join(ctx.workspace_path, filepath)
+    )
+
+
+def _brownfield_owner_contract_block(ctx: "AttemptContext", target_files: Optional[List[str]]) -> str:
+    """CTX-001 P1 WP7 (A3): INSTRUCTION TEXT ONLY now - this function's own
+    source-content responsibility (a naive 24,000-combined-char prefix cap,
+    Architect-list order, silent drop of later files past the cap - CTX-001-
+    P0's C1/F1/F2 finding) is RETIRED, not enlarged. Source content for
+    known-target files now flows through build_known_target_context()
+    (kriya/workflow/context_budget.py) instead - member-aware where
+    possible, current-source-resolved (worktree-authoritative), priority-
+    floored rather than unconditionally included, explicitly omitted rather
+    than silently truncated. See run_attempt()'s own call site for how the
+    two are combined: this instruction text always lands in task_desc
+    unconditionally (its own token cost is negligible and constant, not
+    budget-managed - architecture doc section 9), while the source content
+    is budget-allocated separately and appended to active_code_context.
+
+    A file that doesn't actually exist yet (a genuinely NEW file Architect
+    listed as a "known target") produces no instruction text here - this
+    contract is about PRESERVING an existing owner's identity, which has no
+    meaning for a file with no existing owner yet."""
+    existing = [
+        filepath for filepath in target_files or []
+        if os.path.isfile(os.path.join(ctx.worktree_path, filepath))
+        or os.path.isfile(os.path.join(ctx.workspace_path, filepath))
+    ]
+    if not existing:
+        return ""
+    return (
+        "\n\n=== AUTHORITATIVE BROWNFIELD OWNER CONTRACT ===\n"
+        "The following existing file(s) are in-place repair targets: "
+        + ", ".join(sorted(existing)) + ". Preserve their "
+        "package/module identity, existing public type names, constructors, and public "
+        "method signatures. Do not paste a planned replacement class into a resolved "
+        "owner path. Existing tests and callers are contract evidence. Repair behavior "
+        "behind the existing API, preferring private/internal changes. Their real current "
+        "source, exactly as it exists now, is provided separately in the code context below."
+    )
+
+
+def _graph_context_exclusion_set(
+    state: GenerationState, ctx: "AttemptContext", known_target_files: Optional[List[str]] = None,
+) -> set:
+    """CTX-001 P1 WP7 (DUPLICATE_SOURCE_CONTEXT_PATHS=0): a path already
+    represented through a MORE authoritative, current-source producer
+    (retry-time all_files_written content via retry_prompts.py's own
+    renderers, or attempt-1's known-target/owner-contract evidence via
+    build_known_target_context()) must be EXCLUDED from
+    build_code_context()'s own matched/related candidate lists before
+    they're rendered - never shown twice in the same prompt. Found live
+    while implementing this package: retry_prompts.py's own
+    _build_targeted_retry_prompt/_build_full_set_retry_prompt/
+    _build_missing_files_retry_prompt all append every state.all_files_
+    written path's FULL current content on top of active_code_context,
+    which already contains build_code_context()'s own (possibly
+    skeletonized) rendering of the SAME path whenever it also happens to be
+    Graph-RAG matched/related - a real, pre-existing duplication this
+    package closes as part of its own required no-duplicate-representation
+    guarantee, not a new one it introduces.
+
+    known_target_files is only non-empty for the attempt-1 owner-contract
+    call site - excluded there for the same reason, in the OPPOSITE
+    direction: a known-target path is excluded from the (possibly
+    degraded) Graph-RAG rendering so build_known_target_context()'s own
+    EXACT/priority-floored representation is the one that wins, never a
+    silently-lower-fidelity duplicate alongside it."""
+    exclusion = set(state.all_files_written) | set(ctx.established_files)
+    if known_target_files:
+        exclusion |= set(known_target_files)
+    return exclusion
+
+
+def _filtered_candidates(paths: Any, exclude: set) -> List[str]:
+    return [p for p in (paths or []) if p not in exclude]
+
+
+def _resolve_known_target_member_hints(
+    ctx: "AttemptContext", known_target_files: List[str],
+) -> Dict[str, List[str]]:
+    """CTX-001 P1 C2 production integration (docs/assurance/
+    CTX_001_P1_ARCHITECTURE.md section 25): correlates THIS run's own
+    attempt-1 Graph-RAG vector-hit candidate names
+    (ctx.retrieval_member_hints, populated in workflow.py's retrieval stage)
+    with known_target_files - a known-target file's member is NEVER
+    invented merely because it's a target (CTX001-P1's own explicit
+    constraint); a hint only exists here when an INDEPENDENT, already-
+    grounded retrieval signal named a candidate for that exact path.
+
+    Every candidate is validated against member_boundaries_for() on
+    CURRENT (CurrentSourceResolver-resolved, worktree-authoritative)
+    content before being returned - a name that no longer resolves to any
+    real boundary (renamed/removed/stale since indexing) is silently
+    dropped here, never fabricated. Reuses CurrentSourceResolver as-is;
+    this function makes no root-selection decision of its own."""
+    candidates_by_path = {
+        path: names for path, names in ctx.retrieval_member_hints.items()
+        if path in known_target_files and names
+    }
+    if not candidates_by_path:
+        return {}
+    resolver = CurrentSourceResolver(ctx.workspace_path, ctx.worktree_path, content_cache=ctx.source_cache.content_cache)
+    member_hints: Dict[str, List[str]] = {}
+    for path, names in candidates_by_path.items():
+        resolved = resolver.resolve(path)
+        if not resolved.exists:
+            continue
+        boundaries = member_boundaries_for(path, resolved.content)
+        if boundaries is None:
+            continue
+        matched_ids: List[str] = []
+        for name in names:
+            for member_id in member_ids_matching_name(boundaries, name):
+                if member_id not in matched_ids:
+                    matched_ids.append(member_id)
+        if matched_ids:
+            member_hints[path] = matched_ids
+    return member_hints
+
+
+def _resolve_retry_member_hints(
+    ctx: "AttemptContext", state: GenerationState, target_files: List[str],
+) -> Dict[str, List[str]]:
+    """CTX-001 P1 C2 production integration: correlates state.last_failure.
+    file_locations (already-structured compiler/test evidence) with
+    target_files - the retry's OWN, already-authorized target set. A
+    failure_location's filepath is used ONLY to pick which already-
+    authorized target's member to resolve, NEVER to widen the target set
+    itself (a stack frame naming a different, untargeted file is simply
+    ignored here - "failure location must not authorize a new file").
+
+    Deduplicates across multiple file_locations deterministically (a set
+    per path, rendered back to a sorted list) - the same member reported
+    by two different locations produces one hint, not two.
+
+    CTX-001-P1-C3 (2026-09-18): a SECOND, additive evidence source - a
+    rejected anchored-edit's own SEARCH text (state.last_failure.
+    attempted_edits) - runs AFTER the file-location pass above and ONLY
+    ever fills in a path that pass left with no hint (line-grounded
+    evidence, when it exists at all, is never overridden by the weaker,
+    model-generated SEARCH-text evidence). Gated on every one of: the path
+    is still an authorized target (never widens scope, same invariant as
+    the file-location pass); at least one REAL anchored-edit failure has
+    already occurred for this exact path (state.budgets.
+    anchor_failure_counts) - never triggers on a full-file rejection that
+    produced no anchor failure at all; this run's known-target context for
+    the path is not POSITIVELY known to already be full/exact (an absent
+    entry is evidence of nothing, not of exactness - see the gate's own
+    2026-09-19 comment below; only a recorded, non-omitted "shown in full"
+    entry means there is genuinely nothing left to escalate to). See
+    VAL-001 G1 rerun forensics (run d756a833) for why this
+    source exists: SOURCE 1/2 above were BOTH structurally silent for an
+    entire 8-attempt run despite the model's own rejected SEARCH blocks
+    already containing real, current-file vocabulary that nothing
+    consumed."""
+    if state.last_failure is None or not target_files:
+        return {}
+    target_set = set(target_files)
+    resolver = CurrentSourceResolver(ctx.workspace_path, ctx.worktree_path, content_cache=ctx.source_cache.content_cache)
+    member_hints: Dict[str, set] = {}
+    for location in state.last_failure.file_locations:
+        if location.filepath not in target_set or location.line is None:
+            continue
+        resolved = resolver.resolve(location.filepath)
+        if not resolved.exists:
+            continue
+        for candidate in resolve_member_hints_from_failure_location(
+            location.filepath, resolved.content, location.line,
+        ):
+            member_hints.setdefault(location.filepath, set()).add(candidate.member_id)
+
+    if state.last_failure.attempted_edits:
+        failure_filepaths = {
+            location.filepath for location in state.last_failure.file_locations
+        } or set(state.last_failure.likely_files)
+        for filepath in failure_filepaths:
+            if filepath not in target_set or filepath in member_hints:
+                continue
+            if state.budgets.anchor_failure_counts.get(filepath, 0) < 1:
+                continue
+            # PERF/SOURCE-2 residual (2026-09-19): `known_item is None` -
+            # NO recorded evidence of what the Developer was shown for this
+            # path - was previously treated identically to "shown in full"
+            # (skip, nothing left to escalate). That's backwards: this
+            # function's own D1 sibling (_has_authoritative_full_source)
+            # already establishes "absence of a recorded ContextItem is NOT
+            # evidence of exactness - it is evidence of nothing" - applied
+            # here too, an unknown view is exactly the case SOURCE 3 exists
+            # to help ground, not one to skip. Confirmed empirically
+            # (2026-09-19): the prior condition silently blocked SOURCE 3
+            # grounding on the realistic "no known_target_context_items
+            # entry yet for this path" shape, even though the identical
+            # search text grounds correctly via evaluate_member_hints_from_
+            # search_evidence() in isolation.
+            #
+            # MUTATION_RELEVANCE_GATE residual (2026-09-19, VAL-001 G1
+            # DEV-INV rerun): a recorded tier="member_exact" item only
+            # means ONE member of this path was shown in full - it does
+            # NOT mean "nothing left to escalate to" the way a genuine
+            # tier="full" (whole file) record does. The prior condition
+            # treated `omitted_regions is False` alone (true for BOTH
+            # tiers) as that terminal signal, so once ANY member_exact was
+            # recorded for a path - even a provably WRONG one, whose own
+            # anchored edit keeps failing - SOURCE 3 was permanently
+            # suppressed for every LATER, possibly differently-relevant
+            # failing edit against that same path for the rest of the run.
+            # That is "merely any member_exact from the same file"
+            # authorizing escalation silence for an unrelated member - the
+            # exact gap this residual closes. Only tier="full" is treated
+            # as genuinely terminal now; a tier="member_exact" record lets
+            # this loop re-run below, which will correctly re-derive the
+            # SAME member again when it is still the relevant one (a
+            # harmless, idempotent re-confirmation - see test_K's own
+            # updated assertion), or correctly escalate to a DIFFERENT
+            # member when the currently-failing search text actually
+            # grounds there instead.
+            known_item = state.known_target_context_items.get(filepath)
+            if known_item is not None and not known_item.omitted_regions and known_item.tier == "full":
+                continue
+            resolved = resolver.resolve(filepath)
+            if not resolved.exists:
+                continue
+            search_grounded_ids: set = set()
+            for edit_index, edit in enumerate(state.last_failure.attempted_edits):
+                search_text = edit.get("search") or ""
+                result = evaluate_member_hints_from_search_evidence(
+                    filepath, resolved.content, search_text,
+                )
+                for candidate in result.candidates:
+                    search_grounded_ids.add(candidate.member_id)
+                # CTX-001-P1-C3 observability (2026-09-18, VAL-001 G1-R2 post-mortem):
+                # structured evidence, not human-readable text, is the authoritative
+                # record of this evaluation - the search TEXT itself is never
+                # persisted here (untrusted, model-generated, and potentially large),
+                # only a bounded content_revision() hash and its length, matching
+                # this module's own established "hash, never raw content" pattern
+                # for anything derived from untrusted model output. `outcome` and
+                # `candidates` are read directly off the SAME evaluate_member_hints_
+                # from_search_evidence() call whose result feeds search_grounded_ids
+                # above - this event can never disagree with the real decision,
+                # because it is not a second, independently-derived classification
+                # of it.
+                state.record_event(RunEvent(
+                    kind="context.search_evidence_grounding",
+                    attempt=state.attempt_number,
+                    source="attempt._resolve_retry_member_hints",
+                    authority=EventAuthority.ADVISORY,
+                    message=(
+                        f"CTX-001-P1-C3 SOURCE 3 evaluation for {filepath} "
+                        f"(edit #{edit_index + 1}): {result.outcome}."
+                    ),
+                    details={
+                        "source": "failure_search_evidence",
+                        "filepath": filepath,
+                        "edit_index": edit_index,
+                        "search_text_present": bool(search_text.strip()) if search_text else False,
+                        "search_text_hash": content_revision(search_text) if search_text else None,
+                        "search_text_length": len(search_text) if search_text else 0,
+                        "distinctive_token_count": result.distinctive_token_count,
+                        "outcome": result.outcome,
+                        "grounded": bool(result.candidates),
+                        "candidate_member_ids": [c.member_id for c in result.candidates],
+                        "candidate_provenance": [c.provenance for c in result.candidates],
+                        "current_revision": resolved.revision,
+                    },
+                ))
+            if len(search_grounded_ids) == 1:
+                member_hints[filepath] = search_grounded_ids
+
+    return {path: sorted(ids) for path, ids in member_hints.items()}
+
+
+def _record_retry_projection_context_items(
+    state: GenerationState, retry_package: Optional["RetryPackage"],
+) -> None:
+    """VAL-001 G1 D1 (2026-09-18): a targeted retry's own content-supply
+    mechanism (RetryPackage/FileProjection, kriya/workflow/retry_package.py
+    + context_projection.py) is a SEPARATE producer from build_known_target_
+    context()'s ContextItem/ContextPackage, but carries the exact same real
+    signal (path/revision/level/omitted_regions) - confirmed live: the
+    existing test `test_first_anchor_failure_switches_next_protocol_
+    without_widening_scope` demonstrates a targeted retry legitimately
+    falling back to REPAIR_WITH_FULL_FILE after an anchor-match failure, and
+    that fallback IS safe exactly when the retry's own projection for that
+    file was ProjectionLevel.FULL (no omission) - so this function converts
+    each FileProjection into the same ContextItem shape _completeness_
+    gated_operation() already reads, rather than either re-deriving a
+    second signal or exempting the targeted-retry path from the invariant
+    outright (which would silently reopen it for a genuinely-projected/
+    truncated target file, not just the always-safe case).
+
+    Found via the real focused-suite regression after 7bc52b5 (2026-09-18,
+    test_workflow_checks_toolchain_only_once_across_retries): a full-set
+    retry with no grounded implicated files (`target_files=[]`) produces a
+    non-None RetryPackage whose `target_projections` is empty - every
+    already-written file lands in `reference_projections` instead
+    (kriya/workflow/retry_package.py's own `targets`/`references` split,
+    reason="dependency_reference"). Originally this function only read
+    `target_projections`, so a file shown ONLY as reference content (exactly
+    this test's pom.xml) was recorded nowhere, and _completeness_gated_
+    operation() correctly-but-wrongly treated real, shown content as unknown.
+    `reference_projections` uses the exact same budgeted `project_
+    implementation_source()` mechanism as targets (a real `reference_budget`,
+    not an unbounded read) - it can legitimately be partial, so it gets the
+    identical tier/is_exact/omitted_regions handling, not a blanket "always
+    exact" shortcut."""
+    if retry_package is None:
+        return
+    for projection in (*retry_package.target_projections, *retry_package.reference_projections):
+        new_item = make_context_item(
+            path=projection.path, content=projection.content,
+            reason=f"retry_package:{projection.reason}",
+            source_type="named_in_request", trust_level="repository",
+            tier=projection.level.value, is_exact=not projection.omitted_regions,
+            revision=projection.revision, omitted_regions=projection.omitted_regions,
+        )
+        state.known_target_context_items[projection.path] = _preserve_member_exact_precision(
+            state, projection.path, new_item,
+        )
+
+
+def _preserve_member_exact_precision(
+    state: GenerationState, path: str, new_item: "ContextItem",
+) -> "ContextItem":
+    """VAL-001 G1-R3 (test-discovered while building this pass's own
+    adversarial coverage for "stronger member_exact hint overwritten by
+    weaker fallback" - the investigation task's own named hypothesis):
+    once SOURCE 3 grounds a member_exact rendering (omitted_regions=False),
+    it correctly never re-fires on a later attempt for the same revision
+    (_resolve_retry_member_hints' own "nothing left to escalate" gate) - so
+    that later attempt's general retry package legitimately re-includes the
+    SAME path (nothing excluded it this time) and would otherwise silently
+    overwrite the precise member_exact record with a coarser, non-exact
+    excerpt/skeleton/signatures one, discarding real, still-current
+    evidence for no reason.
+
+    Deliberately narrow: only ever preserves a member_exact record (is_exact
+    AND member_id is not None) against a same-revision, less-exact
+    replacement - NEVER a "full" (whole-file) record, whose cross-attempt
+    preservation would be a materially different, more sensitive claim (D1
+    authorizes REPAIR_WITH_FULL_FILE off "full", never off "member_exact" -
+    see _completeness_gated_operation's own docstring; member_exact and
+    every coarser tier already force REPAIR_WITH_PATCH identically, so
+    preserving member_exact here changes zero authorized operations, only
+    precision/diagnostic value). A revision CHANGE always wins regardless -
+    stale evidence, exact or not, must never be preferred over fresh."""
+    existing = state.known_target_context_items.get(path)
+    if (
+        existing is not None
+        and existing.is_exact and existing.member_id is not None
+        and existing.revision == new_item.revision
+        and not (new_item.is_exact and new_item.member_id is not None)
+    ):
+        return existing
+    return new_item
+
+
+def _classify_retry_target_source_origin(
+    state: GenerationState, ctx: "AttemptContext", path: str,
+) -> str:
+    """VAL-001 G1-R3 observability (item 6): which universe a retry target's
+    real content actually came from, reconstructable from trace alone.
+    "current_worktree" covers exactly the case this pass's target-
+    reachability fix newly reaches - a path present in target_files but in
+    neither all_files_written nor established_files."""
+    if path in state.all_files_written:
+        return "already_written"
+    if path in ctx.established_files:
+        return "established"
+    return "current_worktree"
+
+
+def _target_source_record(
+    state: GenerationState, ctx: "AttemptContext", path: str,
+) -> Dict[str, Any]:
+    item = state.known_target_context_items.get(path)
+    return {
+        "path": path,
+        "source_origin": _classify_retry_target_source_origin(state, ctx, path),
+        "tier": item.tier if item else None,
+        "is_exact": item.is_exact if item else None,
+        "member_id": item.member_id if item else None,
+        "omitted_regions": item.omitted_regions if item else None,
+        "known": item is not None,
+    }
+
+
+# VAL-001 G1-R3 no-progress gate: the ONLY verdicts where repeating
+# unchanged evidence can never possibly produce a different outcome, because
+# the verdict is Kriya's OWN deterministic gate reading known_target_context_
+# items, not the model's own (temperature-sampled) output.
+#
+# Deliberately keyed on Failure.diagnostics["reason_code"], never on
+# Failure.type alone: type="operation_contract" is shared by TWO structurally
+# different raise sites in this module - _validate_actual_mutation_
+# authority()'s own fixed, content-independent D1 rejection string (real
+# reason_code="ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED", exactly the real
+# G1-R3 incident's own attempts-7-vs-8 shape - resampling cannot change
+# whether the SAME recorded context authorizes a full-file replacement) and
+# validate_operation_result()'s own contract_error (protocol_error/shape-
+# mismatch classification of what the MODEL actually wrote - genuinely
+# content-dependent/probabilistic, no reason_code set at all, found during a
+# 2026-09-19 review of this exact gate's own scope). Matching on the bare
+# type string would have silently swept the second, probabilistic case into
+# zero-tolerance blocking too.
+#
+# Deliberately NOT "anchored_edit" (the model's own SEARCH text is genuinely
+# resampled and could ground differently even against unchanged context) or
+# any compile/test/diagnosis failure (real, CANDIDATE-CONTENT-dependent
+# outcomes - confirmed live: an earlier, unscoped version of this gate broke
+# test_workflow_fallback_chain, which explicitly validates that Kriya spends
+# its full configured targeted_max_retries budget - at a real, non-zero
+# retry_temperature - even against byte-identical compile-failure evidence,
+# precisely BECAUSE resampling a probabilistic failure genuinely can
+# succeed). Never widen this set to a verdict whose outcome depends on model
+# output without the same analysis this comment documents.
+_DETERMINISTIC_VERDICT_REASON_CODES = frozenset({"ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED"})
+
+
+def _compute_retry_evidence_fingerprint(
+    state: GenerationState, target_files: Optional[List[str]], mode: Optional[str],
+    model_identity: str, member_hints: Dict[str, List[str]],
+) -> Tuple[Any, ...]:
+    """VAL-001 G1-R3 no-progress gate: what Kriya is ABOUT TO SHOW the
+    Developer this attempt, reduced to exactly the fields that matter for
+    detecting a genuine repeat - deliberately NOT just (revision, tier,
+    failure_type) (too coarse: that can't distinguish "no new evidence at
+    all" from "new evidence that still didn't resolve to a member", and
+    can't tell a real strategy transition from a same-mode repeat). Per
+    implicated path: current known_target_context_items provenance
+    (revision/tier/is_exact/member_id/omitted_regions - the exact real
+    state _completeness_gated_operation() itself authorizes off) plus any
+    NEWLY grounded member hint for that path. mode/model_identity are
+    included so a genuine strategy transition (different mode, or a
+    fallback-model swap within the same mode) is - by construction - never
+    mistaken for a repeat, without this function special-casing
+    "transition" itself; retry_strategy.py's own last_failure_signature is
+    reused as the normalized failure signature (never re-derived here) -
+    already excludes attempt-specific raw text (see build_failure_signature).
+
+    Never reads raw model/candidate output: state.last_failure.
+    attempted_edits' own SEARCH text feeds member-hint GROUNDING (see
+    _resolve_retry_member_hints), but only the deterministic, worktree-
+    derived OUTCOME of that grounding (member_hints) is part of this
+    fingerprint - fabricated SEARCH text can never itself become part of
+    what this gate treats as "evidence"."""
+    per_path = tuple(
+        (
+            path,
+            item.revision if item else None,
+            item.tier if item else None,
+            item.is_exact if item else None,
+            item.member_id if item else None,
+            item.omitted_regions if item else None,
+            tuple(sorted(member_hints.get(path, ()))),
+            # CONTEXT-EDIT-PROTOCOL-001: the exact-window escalation inputs
+            # (anchor failures widen the window; an anchor found outside the
+            # authoritative context becomes a locus) - new evidence the next
+            # invocation will show.
+            state.budgets.anchor_failure_counts.get(path, 0),
+            tuple(state.edit_anchor_loci.get(path, ())),
+        )
+        for path, item in (
+            (path, state.known_target_context_items.get(path))
+            for path in sorted(set(target_files or ()))
+        )
+    )
+    return (mode, model_identity, per_path, state.budgets.last_failure_signature)
+
+
+def exit_authority_text(ctx: "AttemptContext") -> str:
+    """PRD-025: the text an expected nonzero exit may be declared in - the
+    user's own request (exit_authority_goal, else grounding_goal, else the
+    goal of a plain top-level run, which IS the user's). A milestone or
+    subtask goal, a plan, a judge's criteria or a grader's reasoning is
+    never consulted."""
+    return ctx.exit_authority_goal or ctx.grounding_goal or ctx.goal
+
+
+def _escalation_authorized_paths(ctx: "AttemptContext", target_files: Iterable[str]) -> Tuple[str, ...]:
+    """PRD-028: the write scope a member-authority expansion must already
+    sit inside - never widened by it. DENY_ALL authorizes nothing; an
+    ALLOWLIST authorizes only its listed targets; UNRESTRICTED top-level
+    generation authorizes the retry's own grounded targets."""
+    targets = tuple(dict.fromkeys(target_files or ()))
+    if ctx.write_scope_mode is WriteScopeMode.DENY_ALL:
+        return ()
+    if ctx.write_scope_mode is WriteScopeMode.ALLOWLIST:
+        allowed = set(ctx.allowed_write_relpaths)
+        return tuple(path for path in targets if path in allowed)
+    return targets
+
+
+def _record_authority_expansions(state: GenerationState, expansions: Iterable[Any]) -> None:
+    for expansion in expansions:
+        state.authority_expansions.append(expansion)
+        state.record_event(RunEvent(
+            kind="authority.expansion",
+            attempt=state.attempt_number,
+            source="authority_escalation",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                f"Member authority {expansion.outcome} for {expansion.path}::{expansion.member_id} "
+                f"({expansion.reason_code}, origin {expansion.source_origin})."
+            ),
+            details=expansion.to_dict(),
+        ))
+
+
+def _effective_retry_temperature(ctx: "AttemptContext", model_identity: str) -> Optional[float]:
+    """The sampling temperature a Developer retry on ``model_identity`` is
+    sent with: ``llm.retry_temperature`` when configured, otherwise the
+    called binding's own temperature (PRD-014: a fallback never inherits
+    the primary's sampling)."""
+    config = ctx.kernel.config
+    if config.llm.retry_temperature is not None:
+        return config.llm.retry_temperature
+    binding = role_binding_for_model(config, "developer", model_identity)
+    own = getattr(binding, "temperature", None)
+    return own if own is not None else config.llm.temperature
+
+
+@dataclass
+class RetryContextPreparation:
+    """Bundles everything a targeted/fallback_targeted/full_set retry needs
+    from centralized retry-context preparation - see _prepare_retry_context's
+    own docstring for why generation strategy must never gate whether any of
+    this runs, only what it runs WITH."""
+
+    retry_package: Optional["RetryPackage"]
+    retry_error_context: str
+    member_hints: Dict[str, List[str]]
+    member_hint_rendered: str
+
+
+def _prepare_retry_context(
+    state: GenerationState, ctx: "AttemptContext", *,
+    target_files: List[str], prompt_window: int, model_identity: str,
+    base_code_context: str = "", enable_no_progress_gate: bool = True,
+) -> RetryContextPreparation:
+    """VAL-001 G1-R3 (run 0c18ac70, 2026-09-18/19): the single, centralized
+    retry-time source/member-hint preparation step for every ordinary retry
+    mode (targeted, fallback_targeted, full_set). Generation strategy must
+    never determine whether authoritative context recovery is available -
+    before this function existed, `fallback_targeted` never called
+    _resolve_retry_member_hints() at all (a confirmed, real branch-coverage
+    gap in the G1-R3 investigation); centralizing here closes that by
+    construction rather than copying the same three calls into a third
+    branch.
+
+    Order matters, unchanged from the pre-centralization targeted-retry
+    branch this replaces: member hints are resolved FIRST so their paths
+    can be excluded from the general retry package (avoiding
+    DUPLICATE_SOURCE_CONTEXT_PATHS - a member-exact rendering already
+    covers that path at higher fidelity than the general excerpt would).
+
+    Raises QualityGateFailure (failure.type="no_progress_retry") BEFORE
+    returning - i.e. before the caller ever reaches its own Developer call -
+    when this attempt's freshly-computed RetryEvidenceFingerprint
+    (_compute_retry_evidence_fingerprint) exactly matches the immediately
+    preceding real attempt's. This is not a second, competing retry-budget
+    mechanism: the Failure it raises flows through retry_strategy.py's own
+    existing handle_attempt_failure()/record_workspace_progress() pipeline
+    exactly like any other Quality Gate failure, so the EXISTING
+    consecutive-no-progress counter, forced-strategy-transition (after 2
+    consecutive), and no_progress_terminated fail-closed termination (after
+    the configured limit) all apply unchanged - "enter existing legal
+    recovery if one remains, otherwise fail closed" is true by construction,
+    not a second policy this function re-implements. It only ever prevents
+    ONE avoidable Developer call from being spent to (re)discover, at model
+    cost, a "no new evidence" conclusion Kriya can already reach
+    deterministically and for free from state it already holds."""
+    retry_member_hints = _resolve_retry_member_hints(ctx, state, target_files)
+    # PRD-028: every hinted member is a read-only authority expansion the
+    # control plane decides (in write scope, supported language, exactly one
+    # member in the current source) - recorded with its source revision and
+    # pristine/candidate origin. Only GRANTED members become context.
+    retry_member_hints, expansions = grant_member_hints(
+        retry_member_hints, workspace_path=ctx.workspace_path, worktree_path=ctx.worktree_path,
+        authorized_paths=_escalation_authorized_paths(ctx, target_files),
+        evidence={
+            "source": "retry_member_hints", "attempt": state.attempt_number,
+            "failure_type": state.last_failure.type if state.last_failure is not None else None,
+        },
+    )
+    _record_authority_expansions(state, expansions)
+    retry_package = _retry_package_for_attempt(
+        state, ctx, target_files=target_files, prompt_window=prompt_window,
+        exclude=retry_member_hints.keys(),
+    )
+    retry_error_context = (
+        retry_package.authoritative_error if retry_package else state.error_context
+    )
+    _record_retry_projection_context_items(state, retry_package)
+
+    member_hint_rendered = ""
+    if retry_member_hints:
+        retry_member_limit = _reserve_graph_context_budget(
+            prompt_window, ctx.skills_prompt,
+            developer_reference(prompt_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan),
+            ctx.design, ctx.plan, base_code_context,
+        )
+        retry_member_rendered, retry_member_package = _target_package_with_window_reserve(
+            ctx, list(retry_member_hints.keys()), retry_member_limit, prompt_window, retry_member_hints,
+        )
+        if retry_member_rendered:
+            member_hint_rendered = retry_member_rendered
+        # VAL-001 G1 D1: record real provenance for _completeness_gated_operation()'s
+        # own authorization check - never inferred from file size.
+        #
+        # VAL-001 G1-R3 (found while writing this pass's own adversarial
+        # coverage): build_known_target_context() can legitimately return
+        # MORE than one relevant_files entry for the SAME path when a
+        # member hint grounds - the member_exact slice itself, plus a
+        # broader signatures-level overview of the rest of the file for
+        # surrounding context. A plain dict-comprehension update() applies
+        # list order, so the LAST entry silently wins regardless of
+        # precision, discarding the very member_exact record C3 escalation
+        # exists to produce. Apply member-scoped (more precise) entries
+        # LAST so they are never overwritten by a broader same-path
+        # overview - never the reverse.
+        state.known_target_context_items.update({
+            item.path: item
+            for item in sorted(
+                retry_member_package.relevant_files,
+                key=lambda item: item.member_id is not None,
+            )
+        })
+        state.record_event(RunEvent(
+            kind="context.retry_member_hint_package",
+            attempt=state.attempt_number,
+            source="attempt._prepare_retry_context",
+            authority=EventAuthority.ADVISORY,
+            message="Retry member-hint context package built from Failure evidence.",
+            details={
+                "target_files": sorted(retry_member_hints.keys()),
+                "unit_count": len(retry_member_package.relevant_files),
+                "tiers": [
+                    {"path": item.path, "member_id": item.member_id, "tier": item.tier}
+                    for item in retry_member_package.relevant_files
+                ],
+                "omitted": list(retry_member_package.omitted),
+                "package_hash": retry_member_package.package_hash,
+            },
+        ))
+
+    # VAL-001 G1-R3 observability (item 6): reconstructable from trace alone
+    # what each requested target's own real source actually was this
+    # attempt - structural provenance only, never the raw source text.
+    state.record_event(RunEvent(
+        kind="context.retry_target_source",
+        attempt=state.attempt_number,
+        source="attempt._prepare_retry_context",
+        authority=EventAuthority.ADVISORY,
+        message="Retry-time source provenance resolved for this attempt's implicated target(s).",
+        details={
+            "mode": state.last_attempt_mode,
+            "targets": [
+                _target_source_record(state, ctx, path)
+                for path in sorted(set(target_files or ()))
+            ],
+        },
+    ))
+
+    # Scoped to targeted/fallback_targeted/full_set only (the task's own
+    # explicit scope) - never API_CONTRACT_RECOVERY, which is a separate,
+    # already-deterministic state machine with its own
+    # API_CONTRACT_RECOVERY_MAX_ATTEMPTS budget; this centralization still
+    # gives it the target-reachability fix and C3 member-hint resolution
+    # (a strict improvement), just not the new no-progress termination path.
+    if enable_no_progress_gate:
+        # PRD-017: keyed on the model's whole request profile (runtime,
+        # capabilities, edit protocol, windows, output budget), not its alias,
+        # so a fallback hop that changes any of them is new progress
+        # opportunity by construction.
+        request_profile = _developer_request_profile(
+            ctx, None if model_identity == ctx.kernel.config.llm.model else model_identity,
+        )
+        fingerprint = _compute_retry_evidence_fingerprint(
+            state, target_files, state.last_attempt_mode,
+            f"{model_identity}@{request_profile.digest}", retry_member_hints,
+        )
+        # Only a deterministic-verdict failure (see _DETERMINISTIC_VERDICT_
+        # FAILURE_TYPES' own docstring) with at least one real, grounded
+        # target is eligible to block at all - a fingerprint over an empty
+        # target_files carries no per-path evidence worth acting on, and a
+        # probabilistic (model-output-dependent) failure type genuinely can
+        # resolve differently on an identically-evidenced resample.
+        eligible = (
+            bool(target_files)
+            and state.last_failure is not None
+            and (state.last_failure.diagnostics or {}).get("reason_code")
+            in _DETERMINISTIC_VERDICT_REASON_CODES
+        )
+        # PRD-026: identical evidence shown on ANY earlier attempt (not only
+        # the previous one) is a repeat - an A -> B -> A evidence cycle
+        # presents nothing new either.
+        fingerprint_hash = content_revision(repr(fingerprint))
+        repeated_evidence = fingerprint_hash in state.retry_evidence_seen
+        no_progress = eligible and repeated_evidence
+        sampling_resample = False
+        if repeated_evidence and not no_progress:
+            # A probabilistic failure may be resampled on identical evidence
+            # only when the model actually samples; it is budgeted as a
+            # typed SAMPLING_RESAMPLE, never as material progress.
+            effective_temperature = _effective_retry_temperature(ctx, model_identity)
+            if sampling_resample_permitted(state.last_attempt_mode, effective_temperature):
+                sampling_resample = True
+                state.sampling_resamples += 1
+                state.record_event(RunEvent(
+                    kind="retry.sampling_resample",
+                    attempt=state.attempt_number,
+                    source="attempt._prepare_retry_context",
+                    authority=EventAuthority.ADVISORY,
+                    message=(
+                        f"{SAMPLING_RESAMPLE}: identical retry evidence resampled at temperature "
+                        f"{effective_temperature} - budgeted, not counted as progress."
+                    ),
+                    details={
+                        "reason_code": SAMPLING_RESAMPLE,
+                        "mode": state.last_attempt_mode,
+                        "model": model_identity,
+                        "effective_temperature": effective_temperature,
+                        "first_seen_attempt": state.retry_evidence_seen[fingerprint_hash],
+                        "fingerprint_hash": fingerprint_hash,
+                        "sampling_resamples": state.sampling_resamples,
+                    },
+                ))
+            else:
+                no_progress = True
+        state.record_event(RunEvent(
+            kind="retry.progress_decision",
+            attempt=state.attempt_number,
+            source="attempt._prepare_retry_context",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                "No new retry evidence since the last attempt - skipping this Developer call."
+                if no_progress else "Retry evidence progressed since the last attempt."
+            ),
+            details={
+                "mode": state.last_attempt_mode,
+                "model": model_identity,
+                "request_profile": request_profile.digest,
+                "target_files": sorted(set(target_files or ())),
+                "no_progress": no_progress,
+                "sampling_resample": sampling_resample,
+                "fingerprint_hash": fingerprint_hash,
+            },
+        ))
+        if no_progress:
+            reason_code = (
+                "NO_PROGRESS_RETRY_EXHAUSTED" if eligible else SAMPLING_NOT_PERMITTED
+            )
+            raise QualityGateFailure(Failure(
+                type="no_progress_retry",
+                message=(
+                    "NO_PROGRESS_RETRY_EXHAUSTED: this attempt's retry evidence "
+                    f"(mode={state.last_attempt_mode}, model={model_identity}, "
+                    f"targets={sorted(set(target_files or ()))}) is materially identical to "
+                    "the immediately preceding attempt's - context tier/exactness/member "
+                    "grounding and the normalized failure signature are all unchanged. "
+                    "Spending another Developer call would present the exact same evidence "
+                    "again; deferring to the existing retry-strategy/no-progress machinery "
+                    "instead of spending it."
+                ),
+                raw_output=f"retry_evidence_fingerprint_hash={fingerprint_hash}",
+                source="orchestrator",
+                attempt=state.attempt_number,
+                mode=state.last_attempt_mode,
+                likely_files=sorted(set(target_files or ())),
+                diagnostics={"reason_code": reason_code},
+            ))
+        state.budgets.last_retry_evidence_fingerprint = fingerprint
+        state.retry_evidence_seen.setdefault(fingerprint_hash, state.attempt_number)
+
+    return RetryContextPreparation(
+        retry_package=retry_package,
+        retry_error_context=retry_error_context,
+        member_hints=retry_member_hints,
+        member_hint_rendered=member_hint_rendered,
+    )
+
+
+def _record_all_files_written_as_exact_context(
+    state: GenerationState, ctx: "AttemptContext", filepaths: Iterable[str],
+) -> None:
+    """VAL-001 G1 D1 (found via the real focused-suite regression after
+    7bc52b5, 2026-09-18): a full-set retry (state.attempt_number > 1) and a
+    missing-files retry do NOT go through build_known_target_context() at
+    all - that call is gated on `state.attempt_number == 1` (see the
+    known_target_files block above). Their own content-supply functions
+    (_build_full_set_retry_prompt/_build_missing_files_retry_prompt,
+    kriya/workflow/retry_prompts.py) instead read every file in
+    all_files_written FRESH from ctx.worktree_path via a plain, unbounded
+    `fh.read()` - real, complete, current content, exactly the same
+    "files_with_current_content" guarantee _completeness_gated_operation()
+    already trusts elsewhere (see kriya/agents/agent.py's own
+    prefer_anchored_edit reasoning) - whenever `retry_package` is None (the
+    branch _build_full_set_retry_prompt itself takes for this exact case).
+    This function makes that same, already-real guarantee visible to
+    _completeness_gated_operation(), mirroring _build_full_set_retry_prompt's
+    OWN read (same path, same files, same error-tolerant skip) so the two
+    can never disagree about what was actually shown.
+
+    Only ever records tier="full"/is_exact=True/member_id=None - never a
+    fabricated exactness claim: if the read fails, that path is silently
+    skipped here exactly as it is in the prompt-builder itself (no entry
+    recorded, so _completeness_gated_operation() correctly falls back to its
+    own fail-closed default for that path)."""
+    for filepath in filepaths:
+        full_path = os.path.join(ctx.worktree_path, filepath)
+        try:
+            current_content, current_revision = read_shown_text(full_path)
+        except OSError:
+            continue
+        state.known_target_context_items[filepath] = make_context_item(
+            path=filepath, content=current_content, reason="all_files_written_current_source",
+            source_type="named_in_request", trust_level="repository",
+            tier="full", is_exact=True, revision=current_revision,
+        )
+
+
+def _completeness_gated_operation(
+    filepath: str, base_operation: CodeOperation, *,
+    file_exists: bool, ctx: "AttemptContext", state: Optional[GenerationState],
+) -> Tuple[CodeOperation, bool]:
+    """VAL-001 G1 D1 (2026-09-18): `permitted mutation precision <=
+    authoritative current-source precision available to the Developer`, for
+    an EXISTING file. Whole-file replacement (CREATE_FULL_FILE/
+    REPAIR_WITH_FULL_FILE - never anything else; a new file, a targeted
+    patch, or a no-change assessment carry no such risk and pass through
+    unchanged) is authorized only when the model was actually shown a
+    ContextItem for this exact path that is tier="full" (never a member
+    slice - `member_id is None` - "member_exact" is real, exact evidence
+    for the MEMBER it covers, never authority to rewrite the surrounding
+    file), is_exact=True, and whose recorded revision still matches the
+    file's real current content.
+
+    Absence of a recorded ContextItem is NOT evidence of exactness - it is
+    evidence of nothing, and the invariant reads "requires authoritative
+    complete exact current source", not "requires proof of its absence" -
+    so a file with no known_target_context_items entry fails closed to
+    REPAIR_WITH_PATCH exactly like a recorded skeleton/signatures/
+    member_exact/stale entry does. REPAIR_WITH_PATCH is not a workaround:
+    apply_anchored_edits (kriya/workflow/attempt.py's own edit-application
+    path) already refuses a SEARCH: block that doesn't match the real
+    current content exactly once, so downgrading to it never authorizes an
+    ungrounded mutation - it either succeeds against real content or fails
+    closed on its own, through the exact same failure-handling path any
+    other Quality Gate rejection already uses.
+
+    Returns (operation, mandatory). `mandatory=True` means this downgrade is
+    the invariant speaking, not an ordinary retry preference - a caller MUST
+    additionally reject (not merely allow validate_operation_result's own,
+    intentionally more permissive, patch-may-fall-back-to-full-file
+    transition) a result that still resolves to a full-file shape for this
+    file. See run_attempt()'s own operation-contract enforcement block,
+    which applies that additional check using this same function's output.
+
+    EXEMPTION (found while implementing this design, against the real
+    existing test suite - not merely theorized): RESTORE_PUBLIC_CONTRACT is
+    deterministic, never a Developer/LLM call at all -
+    _restore_api_contract_owners_deterministically() writes
+    state.all_original_contents[owner] (the exact, already-known baseline)
+    verbatim, and its own docstring is explicit that its output is shaped
+    identically to real Developer output specifically so downstream
+    consumers "are completely unaware this attempt never called the
+    Developer at all." This invariant is about the risk of PROBABILISTIC
+    generation from incomplete context - a risk that provably does not
+    exist for a deterministic byte-for-byte restoration of content Kriya
+    itself already held before the risky candidate was even sandboxed. Gating
+    it here would have rejected Kriya's own correct, hard-won PRV-11 fix
+    (state.py's own restoration mechanism, 2026-08-30) as if it were an
+    unsafe model response.
+    """
+    if not file_exists or base_operation not in (
+        CodeOperation.CREATE_FULL_FILE, CodeOperation.REPAIR_WITH_FULL_FILE,
+    ):
+        return base_operation, False
+
+    if _is_restore_public_contract_phase(state):
+        return base_operation, False
+
+    if _has_authoritative_full_source(filepath, ctx, state):
+        return base_operation, False
+
+    return CodeOperation.REPAIR_WITH_PATCH, True
+
+
+def _is_restore_public_contract_phase(state: Optional[GenerationState]) -> bool:
+    """D2's own deterministic-restoration exemption (see _completeness_
+    gated_operation's own docstring for the full rationale) - extracted so
+    _validate_actual_mutation_authority() below can share the EXACT same
+    exemption, never a second, independently-maintained copy of it."""
+    return bool(
+        state is not None
+        and state.api_contract_recovery is not None
+        and state.api_contract_recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT
+    )
+
+
+def _has_authoritative_full_source(
+    filepath: str, ctx: "AttemptContext", state: Optional[GenerationState],
+) -> bool:
+    """VAL-001 G1 D1 (2026-09-18, extracted from _completeness_gated_
+    operation's own original body - identical logic, now shared with
+    _validate_actual_mutation_authority() below so REQUESTED-operation
+    gating and ACTUAL-returned-shape gating can never independently drift
+    on what "authoritative" means). True only when state.known_target_
+    context_items records a ContextItem for this exact path that is
+    tier="full" (never a member slice - member_id is None), is_exact=True,
+    and whose recorded revision still matches the file's real CURRENT
+    content (read fresh, worktree first, workspace fallback - never
+    trusted from a stale in-memory copy). CONTENT EXACTNESS (is_exact=True
+    for whatever the item represents) is deliberately a narrower claim
+    than SOURCE AUTHORITY (safe to authorize a WHOLE-FILE mutation from) -
+    this function is the one place that gap is closed, by additionally
+    requiring tier=="full" and a live revision match; a member_exact item,
+    or a full/exact item recorded under a since-changed revision, both
+    correctly return False here despite each having is_exact=True on its
+    own ContextItem."""
+    item = state.known_target_context_items.get(filepath) if state is not None else None
+    if item is None or item.tier != "full" or not item.is_exact or item.member_id is not None:
+        return False
+    full_path = os.path.join(ctx.worktree_path, filepath)
+    if not os.path.exists(full_path):
+        full_path = os.path.join(ctx.workspace_path, filepath)
+    try:
+        current_revision = read_shown_text(full_path)[1]
+    except OSError:
+        current_revision = None
+    # An item with no recorded revision at all predates CTX-001 P1 WP3
+    # (LEGACY_COMPATIBILITY default, see ContextItem.from_dict) - treated
+    # as current rather than stale, matching that field's own documented
+    # additive/optional contract; every real construction site
+    # (build_known_target_context()) always sets a real revision.
+    return not item.revision or current_revision == item.revision
+
+
+def _current_revision(filepath: str, ctx: "AttemptContext") -> Optional[str]:
+    full_path = os.path.join(ctx.worktree_path, filepath)
+    if not os.path.exists(full_path):
+        full_path = os.path.join(ctx.workspace_path, filepath)
+    try:
+        return read_shown_text(full_path)[1]
+    except OSError:
+        return None
+
+
+def _validate_actual_mutation_authority(
+    filepath: str, actual_operation: CodeOperation, *,
+    file_exists: bool, ctx: "AttemptContext", state: Optional[GenerationState],
+) -> Optional[str]:
+    """VAL-001 G1 D1-A (2026-09-18, closing the run d756a833/8cc2018a G1-R2
+    incident): the authority decision for a whole-file mutation must be
+    keyed on the operation the model ACTUALLY RETURNED (`actual_operation`,
+    from validate_operation_result() - already parsed/interpreted), never
+    on which operation was originally REQUESTED. "Requested operation
+    cannot grant authority" - _completeness_gated_operation()'s own
+    `mandatory_patch` output is about what SHOULD have been asked for, and
+    is only ever True when the ATTEMPT's own base operation (attempt_
+    operation, mode-derived) already happened to be full-file-shaped
+    (CREATE_FULL_FILE/REPAIR_WITH_FULL_FILE) - a targeted/fallback_
+    targeted-mode attempt's own base operation is UNCONDITIONALLY
+    REPAIR_WITH_PATCH (operations.py::operation_for_attempt), so
+    mandatory_patch is structurally always False for those modes,
+    regardless of actual context completeness. The proven G1-R2 gap: a
+    model in fallback_targeted mode that simply ignores the patch
+    instruction and returns full file content anyway was NEVER checked
+    against this invariant at all - mandatory_patch's own False value
+    (about the REQUEST) was silently treated as license for the RESPONSE.
+
+    This function is the independent, unconditional check on the RESPONSE
+    itself - called for EVERY attempt, every mode, right after actual_
+    operation is known, regardless of what mandatory_patch said. Shares
+    the exact same _has_authoritative_full_source()/_is_restore_public_
+    contract_phase() primitives _completeness_gated_operation() itself
+    uses, so the two can never disagree about what "authoritative" means -
+    only about WHEN they get to ask the question (request-time vs
+    response-time).
+
+    Returns None when authorized (not full-file-shaped at all; a genuinely
+    new file with no existing source to be incomplete about; the
+    deterministic RESTORE_PUBLIC_CONTRACT phase; or real, current,
+    authoritative full source IS on record) - otherwise a rejection
+    reason string, never raises itself (the caller decides how to turn
+    this into a QualityGateFailure, matching every other gate in this
+    module)."""
+    if actual_operation not in (CodeOperation.CREATE_FULL_FILE, CodeOperation.REPAIR_WITH_FULL_FILE):
+        return None
+    if not file_exists:
+        return None
+    # CONTEXT-EDIT-PROTOCOL-001: the capability this invocation's contract
+    # was built from decides, never a second evaluation - bound to the
+    # revision it was decided for.
+    capability = _current_edit_capability(state, filepath)
+    if capability is not None:
+        if capability.full_file and _current_revision(filepath, ctx) == capability.revision:
+            return None
+    elif _is_restore_public_contract_phase(state) or _has_authoritative_full_source(filepath, ctx, state):
+        return None
+    return (
+        "a full-file replacement was returned, but this file's context this attempt was not "
+        "authoritative, complete, exact current source (skeleton/signatures/member-only/stale "
+        "revision/candidate-derived) - whole-file replacement requires authoritative pristine "
+        "current source regardless of which operation was originally requested. Return an "
+        "anchored SEARCH/REPLACE edit instead."
+    )
+
+
+def _operation_map(
+    ctx: "AttemptContext", filepaths: List[str], attempt_operation: CodeOperation,
+    state: Optional[GenerationState] = None,
+) -> Dict[str, CodeOperation]:
+    operations = {
+        filepath: operation_for_file(
+            attempt_operation, file_exists=_target_exists(ctx, filepath),
+        )
+        for filepath in filepaths
+    }
+    if state is not None:
+        for filepath in filepaths:
+            if (
+                state.budgets.anchor_failure_counts.get(filepath, 0) >= 1
+                and _target_exists(ctx, filepath)
+            ):
+                operations[filepath] = CodeOperation.REPAIR_WITH_FULL_FILE
+    for filepath in filepaths:
+        operations[filepath], _mandatory = _completeness_gated_operation(
+            filepath, operations[filepath],
+            file_exists=_target_exists(ctx, filepath), ctx=ctx, state=state,
+        )
+    return operations
+
+
+def _preserved_authoritative_locator_files(
+    state: GenerationState, target_files: List[str], self_diagnosed: List[str],
+) -> List[str]:
+    """Return current targets backed by the preceding authoritative locator.
+
+    Developer analysis is advisory and cannot erase deterministic evidence.
+    A different file explicitly named by current-turn analysis is allowed to
+    redirect (root cause and surfacing location may differ), so preservation
+    applies only when there is no such alternate.  Intersecting with this
+    attempt's actual targets prevents stale locator evidence from widening or
+    redirecting a later, unrelated repair.
+    """
+    prior_attribution = state.last_attribution
+    prior_failure = state.last_failure
+    if (
+        self_diagnosed
+        or state.last_attempt_mode not in ("targeted", "fallback_targeted")
+        or prior_attribution is None
+        or getattr(prior_attribution, "tier", None) != "locator"
+        or prior_failure is None
+        or getattr(prior_failure, "authority", None) != "authoritative"
+    ):
+        return []
+    return [
+        filepath for filepath in getattr(prior_attribution, "files", [])
+        if filepath in target_files
+    ]
+
+
+def _request_fallback_for_rejected_authoritative_target(
+    state: GenerationState, ctx: "AttemptContext", preserved_files: List[str],
+) -> None:
+    if (
+        preserved_files
+        and state.last_attempt_mode == "targeted"
+        and ctx.chain
+        and not state.budgets.fallback_targeted_attempted
+    ):
+        state.budgets.fallback_targeted_requested = True
+
+
+def _reject_explanatory_prose(
+    state: GenerationState, filepath: str, content: str,
+) -> None:
+    contamination = find_explanatory_prose_contamination(filepath, content)
+    if not contamination:
+        return
+    failure = Failure(
+        type="prose_contamination",
+        message=(
+            f"SOURCE PROSE CONTAMINATION in {filepath}: obvious explanatory text "
+            "was emitted as executable source; return code only or use the "
+            "language's comment syntax for genuine documentation."
+        ),
+        raw_output=contamination,
+        file_locations=[FileLocation(filepath=filepath)],
+        likely_files=[filepath], failed_content={filepath: content},
+        attempt=state.attempt_number,
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def _preserved_attribution_diagnostics(preserved_files: List[str]) -> Optional[dict]:
+    if not preserved_files:
+        return None
+    return {
+        "preserved_prior_attribution": {
+            "tier": "locator",
+            "files": list(preserved_files),
+        }
+    }
+
+
+def _retry_package_for_attempt(
+    state: GenerationState,
+    ctx: "AttemptContext",
+    *,
+    target_files: Optional[List[str]],
+    prompt_window: int,
+    exclude: Optional[Iterable[str]] = None,
+) -> Optional[RetryPackage]:
+    if state.last_failure is None:
+        return None
+    # Retry source evidence gets its share of the call's prompt allocation
+    # window (PRD-016, context_budget.retry_evidence_char_budget), so the
+    # full retry prompt still fits beside the output budget.
+    max_chars = retry_evidence_char_budget(prompt_window)
+    # CTX-001 P1 C2: `exclude` (deliberately applied only to all_files, NOT
+    # to target_files) skips a path already given its own, higher-fidelity
+    # member-exact rendering (build_known_target_context(), called just
+    # before this in the targeted-retry branch) - avoids the exact
+    # DUPLICATE_SOURCE_CONTEXT_PATHS class of bug Package 2 already fixed
+    # once. Filtering all_files (not target_files) is deliberate:
+    # build_retry_package()'s own targets/references lists are BOTH derived
+    # from `sorted(set(all_files))`, so an excluded path is naturally
+    # dropped from both without risking target_files falling back to
+    # failure.likely_files (which build_retry_package does whenever
+    # target_files is falsy - filtering target_files itself down to []
+    # would silently re-trigger that fallback and undo the exclusion).
+    exclude_set = set(exclude or ())
+    # VAL-001 G1-R3 (run 0c18ac70, 2026-09-18): a pre-existing brownfield
+    # repair target that fails BEFORE its first successful write belongs to
+    # neither all_files_written (only populated post-AuthorizedFileWriter.
+    # commit_batch - see that call site's own comment further down this
+    # file) nor established_files (prior-MILESTONE paths only - see that
+    # field's own docstring in workflow.py's run_generation_workflow()).
+    # Every retry for such a target previously built its source universe
+    # with the target itself absent, so build_retry_package()'s own
+    # `targets = [p for p in ordered_files if p in target_set]` silently
+    # produced ZERO projections for a path target_files explicitly named -
+    # confirmed by direct, offline reproduction against run 0c18ac70's real
+    # evidence: build_retry_package(all_files=[], target_files=[
+    # 'graphify/extractors/engine.py'], ...) returns target_projections=()
+    # and doesn't even record the path in omitted_files, so 7 of that run's
+    # 8 attempts reasoned about a 331KB file using only attempt 1's own
+    # skeleton rendering. Unioning the requested targets into the universe
+    # HERE - not widening build_retry_package()'s own filtering semantics -
+    # keeps that function exactly as generic as its other callers already
+    # rely on; a named target that doesn't actually exist on disk still
+    # resolves through this same union into build_retry_package()'s own
+    # pre-existing OSError->omitted_files handling, never a new failure
+    # mode. Real worktree content only (the same open()/read() every other
+    # entry in this universe already goes through) - never model/candidate
+    # output, so this can never let generated text become source authority.
+    requested_target_files = set(target_files or ())
+    all_files = (
+        set(state.all_files_written) | set(ctx.established_files) | requested_target_files
+    ) - exclude_set
+    return build_retry_package(
+        failure=state.last_failure,
+        worktree_path=ctx.worktree_path,
+        # Unioned with ctx.established_files (see that field's own docstring) -
+        # a retry package's content candidates should include files earlier
+        # milestones wrote too, not just this attempt's own writes.
+        all_files=sorted(all_files),
+        target_files=target_files,
+        source_context=state.last_error_source_context,
+        max_chars=max_chars,
+        # A file's entry here is only trustworthy while unchanged since the
+        # post-compile snapshot that produced it - true here, since nothing
+        # between that snapshot and a later gate's failure writes to the
+        # worktree. Files outside that snapshot (e.g. genuinely still-missing
+        # ones) simply fall back to a fresh hash inside project_implementation_source.
+        known_revisions=state.validated_file_revisions,
+        advisory_context=(
+            state.error_context[
+                state.error_context.index("=== Reference material found"):
+            ]
+            if "\n\n=== Reference material found" in state.error_context
+            else ""
+        ),
+    )
+
+
+def _estimated_generation_seconds(
+    state: GenerationState, *, file_count: int, configured_per_file: int,
+    active_model: Optional[str] = None,
+) -> float:
+    observed = [
+        timing["duration_seconds"] / max(1, timing["file_count"])
+        for timing in state.generation_timings
+        if timing.get("duration_seconds", 0) > 0 and timing.get("file_count", 0) > 0
+        and (active_model is None or timing.get("model") == active_model)
+    ]
+    per_file = statistics.median(observed) if observed else configured_per_file
+    return per_file * max(1, file_count)
+
+
+def _ensure_generation_time_budget(
+    state: GenerationState, ctx: "AttemptContext", *, file_count: int,
+    active_model: Optional[str] = None,
+) -> None:
+    autonomy = ctx.kernel.config.autonomy
+    budget = autonomy.generation_time_budget_seconds
+    if budget is None:
+        return
+    elapsed = time.monotonic() - state.budget_started_monotonic
+    remaining = max(0.0, budget - elapsed)
+    estimate = _estimated_generation_seconds(
+        state,
+        file_count=file_count,
+        configured_per_file=autonomy.generation_seconds_per_file_estimate,
+        active_model=active_model,
+    )
+    required = estimate + autonomy.generation_gate_reserve_seconds
+    if remaining < required:
+        failure = Failure(
+            type="time_budget_exhausted",
+            source="orchestrator",
+            message=(
+                "GENERATION TIME BUDGET EXHAUSTED: refusing to start a "
+                f"{file_count}-file generation pass with {remaining:.1f}s remaining; "
+                f"estimated generation plus gate reserve requires {required:.1f}s."
+            ),
+            raw_output=(
+                f"remaining_seconds={remaining:.1f}; estimated_generation_seconds="
+                f"{estimate:.1f}; gate_reserve_seconds="
+                f"{autonomy.generation_gate_reserve_seconds}"
+            ),
+            attempt=state.attempt_number,
+        )
+        raise QualityGateFailure(failure)
+
+
+async def _maybe_run_developer_investigation(
+    state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any], active_model: str,
+) -> None:
+    """DEV-INV-001 (2026-09-19): opt-in (default OFF via autonomy.
+    developer_investigation_enabled) bounded, read-only pre-pass that lets
+    the Developer request additional repository evidence BEFORE this
+    attempt's real generation call - see kriya/workflow/investigation.py for
+    the full turn-loop/protocol/governance machinery this only wires up.
+
+    Mutates only kwargs["existing_code_context"] (appending rendered
+    evidence text, the same way retrieval-sourced Graph RAG context is
+    already appended in workflow.py) and, for a genuinely member-exact
+    result only, state.known_target_context_items (via the SAME
+    _preserve_member_exact_precision() merge D1's own retry-projection path
+    already uses below - never a second, independently-invented merge rule)
+    - never touches kwargs otherwise, never calls ctx.developer.run_generation
+    itself, never writes to disk. Flag OFF (the default): returns
+    immediately before any of this, byte-identical to pre-DEV-INV-001
+    behavior.
+
+    Available for every brownfield attempt (every call through
+    _run_developer_generation, every attempt/retry) when enabled - the one
+    exception is a workspace with no dependency-graph index at all yet
+    (this module's own `_dependency_graph_db_path` existence check, the
+    same operational "has this workspace ever been indexed" signal
+    workflow.py's own auto_index_missing_dependency_graph gate already
+    uses): with no index, find_symbol/find_callers/search_code can only
+    ever report "nothing found," so running the loop at all would just
+    burn turns for no benefit - retains existing (no-investigation) flow
+    for that case rather than activating on tier/is_exact signals, per the
+    task's own explicit instruction not to gate on those.
+
+    Also computes known_target_member_hints (2026-09-19) - which member_id
+    is CURRENTLY believed relevant, per declared target path - and passes
+    it to run_investigation_loop so its own mutation-readiness check can
+    require member-level relevance, not merely "some exact member in the
+    right file" (see that function's own docstring)."""
+    autonomy_cfg = ctx.kernel.config.autonomy
+    if not autonomy_cfg.developer_investigation_enabled:
+        return
+    db_path = _dependency_graph_db_path(ctx)
+    if not os.path.exists(db_path):
+        return
+    configured_max = max(0, autonomy_cfg.developer_investigation_max_turns)
+    used_so_far = state.investigation_turns_used_by_attempt.get(state.attempt_number, 0)
+    remaining = configured_max - used_so_far
+    if remaining <= 0:
+        return
+
+    from kriya.core.model_capabilities import resolve_model_capability_profile
+    from kriya.workflow.investigation import (
+        InvestigationDependencies,
+        render_investigation_evidence,
+        run_investigation_loop,
+    )
+
+    capability_profile = resolve_model_capability_profile(ctx.kernel.config, active_model)
+
+    async def _search_code(query: str) -> List[Dict[str, Any]]:
+        vector_index_path = os.path.join(ctx.kernel.config.paths.memory, "vector_index.db")
+        if not os.path.exists(vector_index_path):
+            return []
+        from types import SimpleNamespace
+
+        from kriya.memory.embedding import configured_client, run_deadline
+        from kriya.memory.vector import LocalVectorStore
+        from kriya.workflow.graph_retrieval import semantic_query_embedding
+
+        store = LocalVectorStore(vector_index_path)
+        try:
+            # EMBEDDING-CONTRACT-001: an unavailable semantic leg is recorded,
+            # and only the lexical leg answers - never a zero-vector search.
+            availability = SimpleNamespace(semantic_unavailable=None)
+            query_emb, fingerprint = await semantic_query_embedding(
+                configured_client(ctx.kernel.config), store, query, availability,
+                run_deadline(ctx.kernel.config),
+            )
+            if availability.semantic_unavailable:
+                state.record_event(RunEvent(
+                    kind="retrieval.semantic_unavailable", attempt=state.attempt_number,
+                    source="investigation.search_code", authority=EventAuthority.ADVISORY,
+                    message=f"semantic search unavailable ({availability.semantic_unavailable}); lexical only",
+                    details={"reason_code": availability.semantic_unavailable},
+                ))
+            return store.query_hybrid(
+                query, query_emb, top_k=5, model_name=ctx.kernel.config.embedding.model,
+                dimensions=len(query_emb) if query_emb else 0, fingerprint=fingerprint,
+            )
+        finally:
+            store.close()
+
+    deps = InvestigationDependencies(
+        workspace_path=ctx.workspace_path, worktree_path=ctx.worktree_path,
+        dependency_graph_db_path=db_path, search_code=_search_code,
+        source_cache=ctx.source_cache,
+    )
+    # MUTATION_RELEVANCE_GATE for readiness (2026-09-19, VAL-001 G1 follow-
+    # up): "an exact member exists in the right file" is NOT the same claim
+    # as "an exact member exists for the region this attempt actually
+    # cares about" - G1's own add_node/walk_calls shape proved that
+    # distinction matters. run_investigation_loop's own mutation-readiness
+    # check needs to know which member_id(s), if any, are CURRENTLY
+    # believed relevant for each declared target - reuses the SAME two
+    # already-proven resolvers this module's own retry-context preparation
+    # already calls (_resolve_known_target_member_hints for SOURCE 1/
+    # Graph-RAG grounding, _resolve_retry_member_hints for SOURCE 2/3
+    # failure-grounded escalation), never a new resolver or data model.
+    # Both are safe to call unconditionally: _resolve_retry_member_hints
+    # itself returns {} with no state.last_failure yet (attempt 1).
+    known_target_files_list = list(kwargs.get("known_target_files") or [])
+    known_target_member_hints: Dict[str, List[str]] = {}
+    for hints_source in (
+        _resolve_known_target_member_hints(ctx, known_target_files_list),
+        _resolve_retry_member_hints(ctx, state, known_target_files_list),
+    ):
+        for path, member_ids in hints_source.items():
+            existing = known_target_member_hints.setdefault(path, [])
+            for member_id in member_ids:
+                if member_id not in existing:
+                    existing.append(member_id)
+    result = await run_investigation_loop(
+        llm=ctx.developer.llm, capabilities=capability_profile.capabilities, deps=deps,
+        task_description=str(kwargs.get("task_description") or ""),
+        design_context=str(kwargs.get("design_context") or ""),
+        existing_code_context=str(kwargs.get("existing_code_context") or ""),
+        max_turns=remaining,
+        known_target_files=kwargs.get("known_target_files"),
+        known_target_member_hints=known_target_member_hints,
+        model_override=kwargs.get("model_override"),
+        base_url_override=kwargs.get("base_url_override"),
+        api_key_override=kwargs.get("api_key_override"),
+        extra_body_override=kwargs.get("extra_body_override"),
+        attempt_number=state.attempt_number,
+        # DEVELOPER-AUX-LOOP-PROMPT-FIT-001: the same fit the Developer
+        # request gets - the binding it goes to and the optional sections
+        # placed in existing_code_context.
+        request_fit=DeveloperRequestFit(
+            ctx.kernel.config, _chain_binding(ctx, kwargs.get("model_override")),
+            kwargs.get("optional_sections") or (),
+        ),
+    )
+    state.investigation_turns_used_by_attempt[state.attempt_number] = used_so_far + result.turns_used
+    for event in result.events:
+        state.record_event(event)
+    if not result.evidence:
+        return
+    # PRD-028: investigation evidence is always shown (read-only context),
+    # but a member becomes edit authority only through a GRANTED expansion.
+    member_items = {item.path: item for item in result.evidence if item.tier == "member_exact" and item.member_id}
+    _granted, expansions = grant_member_hints(
+        {path: [item.member_id] for path, item in member_items.items()},
+        workspace_path=ctx.workspace_path, worktree_path=ctx.worktree_path,
+        authorized_paths=_escalation_authorized_paths(ctx, list(kwargs.get("known_target_files") or [])),
+        evidence={"source": "developer_investigation", "attempt": state.attempt_number},
+    )
+    _record_authority_expansions(state, expansions)
+    for path in _granted:
+        state.known_target_context_items[path] = _preserve_member_exact_precision(
+            state, path, member_items[path],
+        )
+    rendered = render_investigation_evidence(
+        result.evidence,
+        char_budget=investigation_evidence_char_budget(
+            allocation_window(ctx.kernel.config, _chain_binding(ctx, kwargs.get("model_override"))),
+        ),
+    )
+    if rendered:
+        kwargs["existing_code_context"] = str(kwargs.get("existing_code_context") or "") + rendered
+        # DEVELOPER-PROMPT-FIT-001: optional evidence, re-rendered smaller
+        # when the request does not fit.
+        kwargs["optional_sections"] = tuple(kwargs.get("optional_sections") or ()) + (OptionalSection(
+            "investigation", rendered,
+            lambda budget: render_investigation_evidence(result.evidence, char_budget=budget * 4),
+        ),)
+
+
+# A full-file answer is expected to be about the current file's size plus
+# room for the change itself.
+_FULL_FILE_OUTPUT_GROWTH = 1.1
+_FULL_FILE_OUTPUT_SLACK_TOKENS = 256
+
+
+def _grounded_output_expectations(ctx: "AttemptContext", paths: Optional[Iterable[str]],
+                                  binding: Any = None) -> Dict[str, Any]:
+    """PRD-016: the output a full-file rewrite of each EXISTING target is
+    expected to need, grounded in the file's current size (counted like the
+    dispatch check counts, with the runtime's qualified ratio when known).
+    New files have no grounding and get none. The Developer applies an
+    expectation only to a full-file request, never to an anchored patch."""
+    from kriya.core.token_budget import OutputExpectation, count_tokens
+
+    ratio = None
+    try:
+        from kriya.core.inference_settings import binding_inference_settings
+        from kriya.core.model_qualification import measured_limits_for
+        from kriya.core.model_runtime import resolve_configured_model_runtime
+
+        target = binding if binding is not None else ctx.kernel.config.llm
+        fingerprint = resolve_configured_model_runtime(
+            ctx.kernel.config, target.model, base_url=target.base_url, api_key=target.api_key,
+            extra_body=target.extra_body or {},
+        )
+        ratio = measured_limits_for(
+            fingerprint, ctx.kernel.config,
+            settings=binding_inference_settings(ctx.kernel.config, "developer", target),
+        ).get("bytes_per_token_floor")
+    except Exception as error:  # the default bound is the conservative fallback
+        logger.debug("Output expectations use the default token bound: %s", error)
+    expectations: Dict[str, Any] = {}
+    for path in paths or ():
+        for root in (ctx.worktree_path, ctx.workspace_path):
+            full = os.path.join(root, path) if root else None
+            if full and os.path.isfile(full):
+                break
+        else:
+            continue
+        try:
+            with open(full, "r", encoding="utf-8", errors="replace") as stream:
+                current = count_tokens(stream.read(), qualified_bytes_per_token=ratio).tokens
+        except OSError:
+            continue
+        expected = int(current * _FULL_FILE_OUTPUT_GROWTH) + _FULL_FILE_OUTPUT_SLACK_TOKENS
+        expectations[path] = OutputExpectation(
+            expected, f"full-file rewrite of {path} (~{current} tokens now)",
+        )
+    return expectations
+
+
+def _lower_output_protocol_retry(
+    state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any], refusal: Exception,
+    active_model: str,
+) -> Optional[Dict[str, Any]]:
+    """PRD-016 fallback when a full-file answer cannot fit any allowed output
+    budget: ask for an anchored patch of that file instead (the existing
+    D1 repair_with_patch operation), once. Only for an existing file and a
+    model whose capability profile accepts patches; otherwise None (the
+    typed OUTPUT_BUDGET_UNSATISFIABLE failure stands)."""
+    from kriya.core.model_capabilities import capabilities_for_model
+
+    path = getattr(refusal, "filepath", None)
+    if not path or getattr(refusal, "anchored_edit", False) or not _target_exists(ctx, path):
+        return None
+    protocol = capabilities_for_model(ctx.kernel.config, active_model).preferred_edit_protocol
+    if protocol in {"full_file", "full_file_text"}:
+        return None
+    operations = dict(kwargs.get("operation_by_file") or {})
+    operations[path] = CodeOperation.REPAIR_WITH_PATCH
+    expectations = dict(kwargs.get("expected_output_by_file") or {})
+    expectations.pop(path, None)
+    decision = getattr(refusal, "decision", None)
+    state.record_event(RunEvent(
+        kind="model.output_budget_protocol_fallback",
+        attempt=state.attempt_number,
+        source="attempt._run_developer_generation",
+        authority=EventAuthority.ADVISORY,
+        message=f"{path}: the full-file answer does not fit any allowed output budget; requesting an anchored patch.",
+        details={"file": path, "reason_code": getattr(refusal, "reason_code", None),
+                 "budget": decision.to_dict() if decision is not None else None},
+    ))
+    logger.warning("Developer: %s cannot be rewritten whole within the output budget; asking for an anchored patch.",
+                   path)
+    return {**kwargs, "operation_by_file": operations, "expected_output_by_file": expectations}
+
+
+async def _as_developer(awaitable: Any) -> Any:
+    """Await ``awaitable`` with its model calls attributed to the developer
+    role (PRD-018): the compile/test self-correction loop is the Developer's
+    repair, run outside _run_developer_generation."""
+    from kriya.core.role_metrics import model_role
+
+    with model_role("developer"):
+        return await awaitable
+
+
+def _developer_request_profile(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
+    """PRD-017: the request profile of a Developer call with ``model_override``
+    (None = the primary)."""
+    from kriya.workflow.model_transition import resolve_request_profile
+
+    binding = _chain_binding(ctx, model_override) or ctx.kernel.config.llm
+    return resolve_request_profile(ctx.kernel.config, binding)
+
+
+def _patch_required_files(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> List[str]:
+    """Existing files this Developer call may only patch: the completeness
+    gate (D1) downgraded their whole-file operation because no complete,
+    exact current source was shown, so a whole-file answer would be rejected
+    after the call."""
+    required = []
+    for path, operation in (kwargs.get("operation_by_file") or {}).items():
+        if operation != CodeOperation.REPAIR_WITH_PATCH or not _target_exists(ctx, path):
+            continue
+        gated, mandatory = _completeness_gated_operation(
+            path, CodeOperation.REPAIR_WITH_FULL_FILE, file_exists=True, ctx=ctx, state=state,
+        )
+        if mandatory and gated == CodeOperation.REPAIR_WITH_PATCH:
+            required.append(path)
+    return required
+
+
+def _fallback_rejection(profile: Any, reasons: List[str]) -> Dict[str, Any]:
+    return {"model": profile.model, "reasons": list(reasons), "profile_digest": profile.digest}
+
+
+def _record_fallback_selection(state: GenerationState, *, phase: str, requested: str, selected: Optional[str],
+                               rejected: List[Dict[str, Any]]) -> None:
+    """PRD-017: why configured fallbacks were skipped and which one serves
+    the attempt (the model.fallback_selection run event)."""
+    from kriya.workflow.model_transition import FALLBACK_MODEL_INCOMPATIBLE
+
+    state.record_event(RunEvent(
+        kind="model.fallback_selection",
+        attempt=state.attempt_number,
+        source="attempt.fallback_selection",
+        authority=EventAuthority.ADVISORY,
+        message=(
+            f"Fallback {requested} skipped ({', '.join(r['model'] for r in rejected)} incompatible); "
+            + (f"{selected} selected" if selected else "no configured fallback remains")
+        ),
+        details={"phase": phase, "requested": requested, "selected": selected, "rejected": rejected,
+                 "reason_code": FALLBACK_MODEL_INCOMPATIBLE},
+    ))
+
+
+def _raise_fallback_incompatible(state: GenerationState, requested: str, rejected: List[Dict[str, Any]]) -> None:
+    """The terminal typed failure: no remaining configured fallback can
+    serve this attempt; every skipped fallback's reasons are carried."""
+    from kriya.workflow.model_transition import FALLBACK_MODEL_INCOMPATIBLE
+
+    detail = "; ".join(f"{r['model']}: {'; '.join(r['reasons'])}" for r in rejected)
+    message = (f"{FALLBACK_MODEL_INCOMPATIBLE}: no remaining configured fallback from {requested} can serve "
+               f"this attempt - {detail}")
+    reasons = [reason for r in rejected for reason in r["reasons"]]
+    state.record_event(RunEvent(
+        kind="model.fallback_incompatible",
+        attempt=state.attempt_number,
+        source="attempt.fallback_selection",
+        authority=EventAuthority.ADVISORY,
+        message=message,
+        details={"reason_code": FALLBACK_MODEL_INCOMPATIBLE, "model": requested, "reasons": reasons,
+                 "rejected": rejected},
+    ))
+    logger.error(message)
+    raise QualityGateFailure(Failure(
+        type="fallback_incompatible",
+        message=message,
+        raw_output=message,
+        source="orchestrator",
+        attempt=state.attempt_number,
+        diagnostics={"reason_code": FALLBACK_MODEL_INCOMPATIBLE, "model": requested, "reasons": reasons,
+                     "rejected": rejected},
+    ))
+
+
+def _select_developer_fallback(state: GenerationState, ctx: "AttemptContext", retry_count: int) -> Any:
+    """PRD-017: the llm_chain fallback this attempt escalates to, chosen
+    before its prompt is built (the prompt is sized for the chosen model's
+    window). The configured order is kept (resolve_fallback_model); a
+    fallback proven unable to serve the run - a failed Developer
+    qualification case, the production profile without QUALIFIED, no
+    prompt room - is skipped with its reasons (never re-evaluated or sent a
+    request), and the next configured one is taken. None for the primary;
+    the typed terminal failure when no configured fallback remains."""
+    from kriya.workflow.model_transition import fallback_incompatibilities
+
+    if retry_count <= 0 or not ctx.chain:
+        return None
+    start = min(retry_count - 1, len(ctx.chain) - 1)
+    requested = ctx.chain[start]
+    newly_rejected: List[Dict[str, Any]] = []
+    for binding in ctx.chain[start:]:
+        if binding.model in state.incompatible_fallbacks:
+            continue
+        profile = _developer_request_profile(ctx, binding.model)
+        reasons = fallback_incompatibilities(ctx.kernel.config, profile)
+        if not reasons:
+            break
+        state.incompatible_fallbacks[binding.model] = reasons
+        newly_rejected.append(_fallback_rejection(profile, reasons))
+    selected = resolve_fallback_model(retry_count, ctx.chain, state.incompatible_fallbacks)
+    if selected is requested:
+        return selected
+    evaluated_now = {item["model"]: item for item in newly_rejected}
+    rejected: Dict[str, Dict[str, Any]] = {}
+    for binding in ctx.chain[start:]:
+        if binding.model in state.incompatible_fallbacks and binding.model not in rejected:
+            rejected[binding.model] = evaluated_now.get(binding.model) or {
+                "model": binding.model, "reasons": list(state.incompatible_fallbacks[binding.model]),
+            }
+    rejected = list(rejected.values())
+    _record_fallback_selection(state, phase="escalation", requested=requested.model,
+                               selected=selected.model if selected is not None else None, rejected=rejected)
+    if selected is None:
+        _raise_fallback_incompatible(state, requested.model, rejected)
+    return selected
+
+
+def _substitute_for_required_patch(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any],
+                                   profile: Any, reasons: List[str]) -> Tuple[Dict[str, Any], Any]:
+    """PRD-017: the fallback this call goes to cannot return what the
+    attempt may write (an anchored patch the completeness gate requires, a
+    fact of the prompt already built). The next configured fallback after
+    it that can (skipping those already proven incompatible) serves the
+    call instead - no request is sent to the incompatible one; the typed
+    terminal failure when none remains. The prompt was sized for the
+    requested fallback's window; PRD-016's dispatch check still refuses it
+    before inference if it does not fit the substitute's."""
+    from kriya.workflow.model_transition import fallback_incompatibilities
+
+    current = _chain_binding(ctx, kwargs.get("model_override"))
+    patch_files = _patch_required_files(state, ctx, kwargs)
+    rejected = [_fallback_rejection(profile, reasons)]
+    index = next(i for i, binding in enumerate(ctx.chain) if binding is current)
+    for binding in ctx.chain[index + 1:]:
+        if binding.model in state.incompatible_fallbacks:
+            rejected.append({"model": binding.model, "reasons": list(state.incompatible_fallbacks[binding.model])})
+            continue
+        candidate = _developer_request_profile(ctx, binding.model)
+        candidate_reasons = fallback_incompatibilities(ctx.kernel.config, candidate, patch_required_files=patch_files)
+        if candidate_reasons:
+            rejected.append(_fallback_rejection(candidate, candidate_reasons))
+            continue
+        _record_fallback_selection(state, phase="call", requested=current.model, selected=binding.model,
+                                   rejected=rejected)
+        if state.model_hops and state.model_hops[-1] == current.model:
+            state.model_hops[-1] = binding.model
+        substituted = {**kwargs, "model_override": binding.model, "base_url_override": binding.base_url,
+                       "api_key_override": binding.api_key, "extra_body_override": binding.extra_body}
+        return substituted, candidate
+    _record_fallback_selection(state, phase="call", requested=current.model, selected=None, rejected=rejected)
+    _raise_fallback_incompatible(state, current.model, rejected)
+    raise AssertionError("unreachable")
+
+
+def _enter_developer_model(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """PRD-017: resolve the request profile of the model this Developer call
+    goes to and return the call's kwargs. A fallback that cannot serve this
+    call is replaced by the next configured one that can
+    (_substitute_for_required_patch), or the attempt ends with the typed
+    FALLBACK_MODEL_INCOMPATIBLE failure before any request (terminal). A
+    change of profile from the previous call is recorded field by field
+    (the model.transition run event)."""
+    from kriya.workflow.model_transition import fallback_incompatibilities, profile_changes
+
+    model_override = kwargs.get("model_override")
+    profile = _developer_request_profile(ctx, model_override)
+    is_fallback = _chain_binding(ctx, model_override) is not None
+    reasons = fallback_incompatibilities(
+        ctx.kernel.config, profile, patch_required_files=_patch_required_files(state, ctx, kwargs),
+    ) if is_fallback else []
+    if reasons:
+        kwargs, profile = _substitute_for_required_patch(state, ctx, kwargs, profile, reasons)
+    previous = state.last_developer_request_profile
+    if previous is None or previous.digest != profile.digest:
+        changes = profile_changes(previous, profile)
+        state.record_event(RunEvent(
+            kind="model.transition",
+            attempt=state.attempt_number,
+            source="attempt._run_developer_generation",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                f"Developer request profile for {profile.model}"
+                + ("" if previous is None else f" (was {previous.model}): {', '.join(sorted(changes))} changed")
+            ),
+            details={
+                "initial": previous is None,
+                "fallback": is_fallback,
+                "from": previous.to_dict() if previous is not None else None,
+                "to": profile.to_dict(),
+                "changes": changes,
+            },
+        ))
+    state.last_developer_request_profile = profile
+    state.last_developer_call_attempt = state.attempt_number
+    # The model this attempt's generation actually went to (read by the
+    # attempt's own bookkeeping and the next attempt's triage).
+    state.last_model_override = kwargs.get("model_override")
+    state.last_base_url_override = kwargs.get("base_url_override")
+    state.last_api_key_override = kwargs.get("api_key_override")
+    state.last_extra_body_override = kwargs.get("extra_body_override")
+    return kwargs
+
+
+def _require_qualified_retry_identity(state: GenerationState, ctx: "AttemptContext",
+                                      kwargs: Dict[str, Any]) -> None:
+    """MODEL-EVIDENCE-HARDENING-001: a Developer retry carrying a
+    retry_temperature that differs from the called model's own temperature
+    executes a distinct inference identity. Under the production runtime
+    profile that exact identity must be QUALIFIED; otherwise the attempt ends
+    with the typed terminal RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED before any
+    request - it never runs under the normal identity's qualification.
+    Outside production it is recorded (the profile), never refused."""
+    from kriya.core.model_qualification import QUALIFIED
+    from kriya.workflow.model_transition import RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED
+
+    profile = state.last_developer_request_profile
+    config = ctx.kernel.config
+    if (kwargs.get("retry_temperature") is None or profile is None or profile.retry_qualification is None
+            or profile.retry_qualification == QUALIFIED or getattr(config, "runtime_profile", None) != "production"):
+        return
+    message = (f"{RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED}: the production runtime profile requires the Developer "
+               f"retry identity of {profile.model} (retry_temperature {config.llm.retry_temperature}, inference "
+               f"settings {profile.retry_inference_settings_digest}) to be QUALIFIED; it is "
+               f"{profile.retry_qualification}. Qualify it with `kriya model qualify --model {profile.model}`; "
+               "nothing was sent to the model.")
+    details = {"reason_code": RETRY_INFERENCE_IDENTITY_NOT_QUALIFIED, "model": profile.model,
+               "retry_temperature": config.llm.retry_temperature,
+               "retry_inference_settings_digest": profile.retry_inference_settings_digest,
+               "retry_qualification": profile.retry_qualification}
+    state.record_event(RunEvent(
+        kind="model.retry_identity_not_qualified", attempt=state.attempt_number,
+        source="attempt._run_developer_generation", authority=EventAuthority.ADVISORY,
+        message=message, details=details,
+    ))
+    logger.error(message)
+    raise QualityGateFailure(Failure(
+        type="retry_identity_not_qualified", message=message, raw_output=message, source="orchestrator",
+        attempt=state.attempt_number, diagnostics=details,
+    ))
+
+
+def _chain_binding(ctx: "AttemptContext", model_override: Optional[str]) -> Any:
+    """The llm_chain entry a Developer call with ``model_override`` goes to,
+    or None for the primary model."""
+    if not model_override:
+        return None
+    return next((fallback for fallback in ctx.chain if fallback.model == model_override), None)
+
+
+PLANNED_SOURCE_HEADER = "=== Planned File Current Source (this subtask's approved files) ==="
+# The initial rendering keeps every planned file whole whenever it can; the
+# request fit (DEVELOPER-PROMPT-FIT-001) is what decides the real room.
+_PLANNED_SOURCE_UNBOUNDED_TOKENS = 1 << 40
+
+
+def _planned_source_context(
+    ctx: "AttemptContext", exclude: Any, budget: int = _PLANNED_SOURCE_UNBOUNDED_TOKENS,
+) -> str:
+    """GRAPHIFY-OVERSIZE-REQUEST-001: the current source of a bounded enforce
+    subtask's planned files (ctx.planned_source_files), through
+    build_code_context's own tiers (full -> skeleton -> signatures, anything
+    left over named as omitted) instead of verbatim mandatory text. A path
+    the attempt already represents through a more authoritative producer
+    (``exclude``: attempt-1 known targets, files written this run) is left
+    out, never shown twice. Registered first among the optional Developer
+    sections, so it stays whole whenever the request fits and degrades
+    rather than making the request unsendable."""
+    paths = _filtered_candidates(ctx.planned_source_files, exclude)
+    if not paths:
+        return ""
+    body = build_code_context(paths, [], ctx.worktree_path, budget, cache=ctx.source_cache)
+    return f"\n\n{PLANNED_SOURCE_HEADER}\n{body}" if body else ""
+
+
+def _developer_optional_sections(
+    ctx: "AttemptContext", graph_context: str, graph_exclude: Any, learned_reference: str,
+    planned_source: str = "",
+) -> Tuple[OptionalSection, ...]:
+    """The optional sections an attempt branch placed in its Developer
+    context (DEVELOPER-PROMPT-FIT-001): the planned files' current source
+    and the graph context, each rebuilt smaller from the same candidates when
+    the request does not fit, and the fenced learned reference, trimmed at
+    whole entries."""
+    sections: List[OptionalSection] = []
+    if planned_source:
+        sections.append(OptionalSection(
+            "planned_source", planned_source, lambda budget: _planned_source_context(ctx, graph_exclude, budget)))
+    if graph_context:
+        sections.append(OptionalSection("graph_context", graph_context, lambda budget: build_code_context(
+            _filtered_candidates(ctx.matched_files, graph_exclude),
+            _filtered_candidates(ctx.related_files, graph_exclude),
+            ctx.worktree_path, budget, cache=ctx.source_cache,
+        )))
+    reference = fenced_reference_section(learned_reference)
+    if reference is not None:
+        sections.append(reference)
+    return tuple(sections)
+
+
+def _target_package_with_window_reserve(
+    ctx: "AttemptContext", paths: List[str], limit: int, prompt_window: int, member_hints: Dict[str, List[str]],
+) -> Tuple[str, Any]:
+    """build_known_target_context at its full budget; when a target is not
+    shown whole and exact there, exact windows may be added to the request
+    (CONTEXT-EDIT-PROTOCOL-001), so it is rebuilt with their reserve held
+    back and the windows never push the request past its capacity."""
+    rendered, package = build_known_target_context(
+        paths, ctx.workspace_path, ctx.worktree_path, limit, member_hints=member_hints, cache=ctx.source_cache,
+    )
+    shown_whole = {item.path for item in package.relevant_files if item.tier == "full" and item.is_exact}
+    if set(paths) <= shown_whole:
+        return rendered, package
+    return build_known_target_context(
+        paths, ctx.workspace_path, ctx.worktree_path, max(0, limit - exact_window_reserve(prompt_window)),
+        member_hints=member_hints, cache=ctx.source_cache,
+    )
+
+
+def _edit_capability_loci(state: GenerationState, ctx: "AttemptContext", path: str, lines: List[str]) -> List[int]:
+    """Deterministic edit loci for ``path``: code the user's goal quotes,
+    the lines the last failure names, and where every rejected SEARCH block
+    pointed in the real source (_remember_anchor_loci)."""
+    from kriya.workflow.edit_capability import goal_code_fragments, locate_fragments
+
+    loci = locate_fragments(lines, goal_code_fragments(ctx.goal))
+    failure = state.last_failure
+    if failure is not None:
+        loci.extend(loc.line for loc in failure.file_locations if loc.filepath == path and loc.line)
+    loci.extend(state.edit_anchor_loci.get(path, ()))
+    return loci
+
+
+def _remember_anchor_loci(state: GenerationState, path: str, edits: List[Dict[str, str]], current: str) -> None:
+    """Where a rejected SEARCH block points in the real source, kept for
+    every later invocation (an intervening stop must not forget it, or the
+    capability could fall back to one already tried)."""
+    from kriya.workflow.edit_capability import locate_search_text
+
+    lines = current.splitlines()
+    located = {locus for edit in edits for locus in locate_search_text(lines, edit.get("search", ""))}
+    if located:
+        state.edit_anchor_loci[path] = sorted(set(state.edit_anchor_loci.get(path, [])) | located)
+
+
+def _decide_edit_capabilities(state: GenerationState, ctx: "AttemptContext", kwargs: Dict[str, Any]) -> Dict[str, Any]:
+    """CONTEXT-EDIT-PROTOCOL-001: one EditCapability per existing target of
+    this Developer invocation (kriya/workflow/edit_capability.py), decided
+    before inference. Its exact windows join the mandatory context, the
+    feasible operations go to the Developer contract, and the response
+    validators read the same record. No feasible operation is a typed stop
+    before inference; an edit-protocol failure that meets an unchanged
+    capability is no progress."""
+    from kriya.workflow.context_budget import allocation_window
+    from kriya.workflow.edit_capability import (
+        ANCHOR_CONTEXT_NOT_ESCALATED,
+        CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE,
+        build_edit_capability,
+        exact_window_reserve,
+        render_exact_spans,
+        shown_exact_texts,
+    )
+
+    candidates = kwargs.get("known_target_files") or ctx.expected_files_upfront or []
+    targets = []
+    for path in dict.fromkeys(candidates):
+        for root in (ctx.worktree_path, ctx.workspace_path):
+            full = os.path.join(root, path) if root else None
+            if full and os.path.isfile(full):
+                targets.append((path, full))
+                break
+    if not targets:
+        return {}
+    binding = _chain_binding(ctx, kwargs.get("model_override"))
+    model = kwargs.get("model_override") or ctx.kernel.config.llm.model
+    # Only mandatory text is certain to be sent: an optional section may be
+    # trimmed or dropped by the request fit, so it never makes source shown.
+    mandatory_context = kwargs.get("existing_code_context") or ""
+    for section in kwargs.get("optional_sections") or ():
+        if section.text:
+            mandatory_context = mandatory_context.replace(section.text, "", 1)
+    budget_chars = exact_window_reserve(allocation_window(ctx.kernel.config, binding)) * 4 // len(targets)
+    capabilities: Dict[str, Any] = {}
+    for path, full in targets:
+        content, content_shown_revision = read_shown_text(full)
+        # Pieces already shown count only when Kriya's producer vouches for
+        # their bytes (a member_exact slice; an implementation excerpt's head
+        # and tail, exact by construction) and they are of the current revision.
+        item = state.known_target_context_items.get(path)
+        shown = (
+            shown_exact_texts(item.tier, item.content)
+            if item is not None and (item.is_exact or item.tier == "implementation_excerpt")
+            and (not item.revision or item.revision == content_shown_revision) else []
+        )
+        # Whatever renderer put it there (a retry prompt's current content),
+        # the whole current file present verbatim in this request's mandatory
+        # text is exact anchor source - checked on the bytes, not on a label.
+        # Whole-file replacement authority stays D1's alone.
+        if content.strip() and content in mandatory_context:
+            shown = [("shown_full", content)]
+        capabilities[path] = build_edit_capability(
+            path, content,
+            full_file=_is_restore_public_contract_phase(state) or _has_authoritative_full_source(path, ctx, state),
+            loci=_edit_capability_loci(state, ctx, path, content.splitlines()),
+            budget_chars=budget_chars,
+            level=state.budgets.anchor_failure_counts.get(path, 0),
+            shown=shown,
+        )
+    if state.edit_capabilities_attempt != state.attempt_number:
+        state.edit_capabilities = {}
+        state.edit_capabilities_attempt = state.attempt_number
+    state.edit_capabilities.update(capabilities)
+    requested = {path: _requested_operation(kwargs, path) for path in capabilities}
+    state.edit_capability_models.update({path: (model, requested[path]) for path in capabilities})
+    state.record_event(RunEvent(
+        kind="context.edit_capability",
+        attempt=state.attempt_number,
+        source="attempt._decide_edit_capabilities",
+        authority=EventAuthority.ADVISORY,
+        message="Mutation operations decided from this invocation's authoritative context.",
+        details={"model": model, "budget_chars": budget_chars,
+                 "targets": [capability.summary() for capability in capabilities.values()]},
+    ))
+
+    infeasible = [path for path, capability in capabilities.items() if not capability.feasible]
+    if infeasible:
+        detail = "; ".join(
+            f"{path}: no authoritative full source, and no exact source for "
+            + (f"located line(s) {list(capabilities[path].uncovered_loci)} within the window budget"
+               if capabilities[path].uncovered_loci else "any located edit region")
+            for path in infeasible
+        )
+        message = (f"{CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE}: no mutation operation is feasible under the "
+                   f"authoritative context of this Developer invocation - {detail}. Nothing was sent to the model.")
+        logger.error(message)
+        raise QualityGateFailure(Failure(
+            type="context_edit_protocol_unsatisfiable", message=message, raw_output=message,
+            source="orchestrator", attempt=state.attempt_number, likely_files=infeasible,
+            diagnostics={"reason_code": CONTEXT_EDIT_PROTOCOL_UNSATISFIABLE,
+                         "capabilities": [capabilities[path].summary() for path in infeasible]},
+        ))
+
+    model = kwargs.get("model_override") or ctx.kernel.config.llm.model
+    for path, capability in capabilities.items():
+        previous = state.edit_failure_capability.get(path)
+        if previous is not None and previous[1:] == (capability.digest, (model, requested[path])):
+            message = (f"{ANCHOR_CONTEXT_NOT_ESCALATED}: the last {previous[0]} failure in {path} would be "
+                       f"retried on {model} with the same authoritative context, the same feasible operations "
+                       f"({', '.join(capability.operations)}) and the same requested operation "
+                       f"({requested[path]}); nothing new can be shown within the budget.")
+            raise QualityGateFailure(Failure(
+                type="no_progress_retry", message=message, raw_output=f"edit_capability={capability.digest}",
+                source="orchestrator", attempt=state.attempt_number, mode=state.last_attempt_mode,
+                likely_files=[path], diagnostics={"reason_code": ANCHOR_CONTEXT_NOT_ESCALATED},
+            ))
+
+    windows = "".join(render_exact_spans(capability) for capability in capabilities.values())
+    if windows:
+        kwargs["existing_code_context"] = (kwargs.get("existing_code_context") or "") + windows
+    kwargs["edit_operations"] = {path: capability.operations for path, capability in capabilities.items()}
+    return capabilities
+
+
+def _requested_operation(kwargs: Dict[str, Any], path: str) -> Optional[str]:
+    """The operation this invocation's contract requests for ``path``."""
+    operation = (kwargs.get("operation_by_file") or {}).get(path, kwargs.get("default_operation"))
+    return getattr(operation, "value", operation)
+
+
+def _current_edit_capability(state: Optional[GenerationState], path: str) -> Any:
+    """The EditCapability this attempt's Developer invocation decided for
+    ``path``, or None (no invocation decided one this attempt)."""
+    if state is None or state.edit_capabilities_attempt != state.attempt_number:
+        return None
+    return state.edit_capabilities.get(path)
+
+
+def _record_edit_protocol_failure(state: GenerationState, path: str, family: str) -> None:
+    """Remember the capability, model and requested operation an
+    edit-protocol failure happened under; it stands until an edit to
+    ``path`` is accepted."""
+    capability = _current_edit_capability(state, path)
+    if capability is not None:
+        state.edit_failure_capability[path] = (family, capability.digest, state.edit_capability_models.get(path))
+
+
+def _authorize_anchors(state: GenerationState, path: str, edits: List[Dict[str, str]], current: str) -> None:
+    """The response side of the same capability: every SEARCH block must lie
+    in the exact source this invocation was authorized to rely on. An anchor
+    that is real but was never shown records its lines as loci for the next
+    window; one that is not in the file at all is fabricated or stale."""
+    from kriya.workflow.edit_capability import ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT
+
+    capability = _current_edit_capability(state, path)
+    if capability is None:
+        return
+    for index, edit in enumerate(edits, 1):
+        status = capability.anchor_status(edit.get("search", ""), current)
+        if status is None:
+            continue
+        if status == ANCHOR_OUTSIDE_AUTHORITATIVE_CONTEXT:
+            raise ValueError(
+                f"{status}: Anchor matching failed for edit #{index}: the search block is real source, but not "
+                "source this attempt was authorized to rely on (it was not in the exact current source shown). "
+                "Its location is now shown as exact source."
+            )
+        raise ValueError(
+            f"{status}: Anchor matching failed for edit #{index}: the search block does not occur in the "
+            "current file (fabricated or stale). Copy SEARCH text only from the EXACT CURRENT SOURCE shown."
+        )
+
+
+async def _run_developer_generation(
+    state: GenerationState, ctx: "AttemptContext", **kwargs,
+) -> List[Dict[str, str]]:
+    """Every Developer generation goes through here; its model calls are
+    attributed to the developer role (PRD-018)."""
+    from kriya.core.role_metrics import model_role
+
+    with model_role("developer"):
+        return await _run_developer_generation_as_developer(state, ctx, **kwargs)
+
+
+async def _run_developer_generation_as_developer(
+    state: GenerationState, ctx: "AttemptContext", **kwargs,
+) -> List[Dict[str, str]]:
+    targets = kwargs.get("known_target_files")
+    file_count = len(targets or ctx.expected_files_upfront or state.all_files_written or [None])
+    kwargs = _enter_developer_model(state, ctx, kwargs)
+    _require_qualified_retry_identity(state, ctx, kwargs)
+    active_model = kwargs.get("model_override") or ctx.kernel.config.llm.model
+    _ensure_generation_time_budget(
+        state, ctx, file_count=file_count, active_model=active_model,
+    )
+    await _maybe_run_developer_investigation(state, ctx, kwargs, active_model)
+    _decide_edit_capabilities(state, ctx, kwargs)
+    # DEVELOPER-PROMPT-FIT-001: every request is fitted into the capacity of
+    # the binding it is sent to, its optional sections shrinking first.
+    kwargs["request_fit"] = DeveloperRequestFit(
+        ctx.kernel.config, _chain_binding(ctx, kwargs.get("model_override")),
+        kwargs.pop("optional_sections", None) or (),
+    )
+    if "expected_output_by_file" not in kwargs:
+        # A target whose capability excludes the full file is always asked
+        # for an anchored patch, to which the Developer applies no
+        # expectation (CONTEXT-EDIT-PROTOCOL-001).
+        kwargs["expected_output_by_file"] = _grounded_output_expectations(
+            ctx, kwargs.get("known_target_files"), _chain_binding(ctx, kwargs.get("model_override")),
+        )
+    started = time.monotonic()
+    succeeded = False
+    try:
+        try:
+            result = await ctx.developer.run_generation(**kwargs)
+        except OutputBudgetUnsatisfiableError as refusal:
+            retry_kwargs = _lower_output_protocol_retry(state, ctx, kwargs, refusal, active_model)
+            if retry_kwargs is None:
+                raise
+            result = await ctx.developer.run_generation(**retry_kwargs)
+        succeeded = True
+        return result
+    finally:
+        state.drain_budget_expansions(getattr(ctx.developer, "llm", None))
+        duration = time.monotonic() - started
+        # R1 Deliverable 5 (2026-09-08) - observational only, read AFTER the
+        # await above already returned/raised; never influences kwargs,
+        # result, or control flow. ctx.developer.llm.last_call_metrics
+        # reflects the LAST underlying LLMClient.complete() call
+        # run_generation() made - for the common single-shot batch-JSON
+        # path this is the whole attempt's real usage; for the iterative
+        # per-file fallback path (kriya/agents/agent.py, one completion per
+        # filepath) it is only the FINAL file's usage, not a sum across all
+        # of them - documented as a known undercount in
+        # docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md rather than silently
+        # presented as exact.
+        call_metrics = getattr(ctx.developer, "llm", None)
+        last_call_metrics = getattr(call_metrics, "last_call_metrics", None) if call_metrics else None
+        state.generation_timings.append({
+            "duration_seconds": duration,
+            "file_count": file_count,
+            "succeeded": succeeded,
+            "model": active_model,
+            "prompt_tokens": (last_call_metrics or {}).get("prompt_tokens"),
+            "completion_tokens": (last_call_metrics or {}).get("completion_tokens"),
+            "tokens_estimated": (last_call_metrics or {}).get("tokens_estimated"),
+            # VAL-001 G1-R3 (2026-09-18): same observational-only posture as
+            # every other field here - None whenever the provider/SDK never
+            # reported one (LLMClient.complete()'s own last_call_metrics
+            # already carries that same honest None, never a fabricated
+            # "stop").
+            "finish_reason": (last_call_metrics or {}).get("finish_reason"),
+            # PRD-013/015: the exact runtime the call went to and its
+            # normalized protocol outcome (secret-free).
+            "runtime_fingerprint": (last_call_metrics or {}).get("runtime_fingerprint"),
+            "protocol_status": (last_call_metrics or {}).get("protocol_status"),
+        })
+        state.record_event(RunEvent(
+            kind="generation.completed" if succeeded else "generation.failed",
+            attempt=state.attempt_number,
+            source="developer",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                f"Developer generation {'completed' if succeeded else 'failed'} "
+                f"for {file_count} file(s) in {duration:.2f}s."
+            ),
+            details={
+                "duration_seconds": duration,
+                "file_count": file_count,
+                "model": active_model,
+                "model_use": (last_call_metrics or {}).get("completion"),
+            },
+        ))
 
 
 @dataclass
@@ -64,6 +2567,16 @@ class AttemptContext:
     ecosystem_invariant_block: str
     resource_lifecycle_block: str
     verification_contract_block: str
+    # Recovery Execution Contract (PRV-06, 2026-08-29) - the MA8.1 owner-
+    # recovery MUST_FIX/MUST_PRESERVE/EVIDENCE/ACCEPTANCE text (or the
+    # simpler consumer_retry "upstream recovery completed" note), threaded
+    # here as its OWN field rather than folded into skills_prompt/
+    # supplementary_context - see run_generation_workflow's own
+    # recovery_contract_block docstring (workflow.py) for the live incident
+    # this closes: that shared accumulator is documented, deliberately, as
+    # passive cross-agent reference material, exactly what a recovery
+    # requirement is NOT. Empty string for every non-recovery invocation.
+    recovery_contract_block: str
     required_files_prompt_block: str
     required_dependencies_prompt_block: str
     expected_files_upfront: List[str]
@@ -76,35 +2589,533 @@ class AttemptContext:
     active_skill_rules_snapshot: Dict[str, Any]
     developer: DeveloperAgent
     run_verifier: Any
+    spec_compliance: Any
     skill_engine: Any
     kernel: Kernel
-    # The next three fields are only read by handle_attempt_failure(), not
-    # run_attempt() itself - kept on the same context object anyway (see the
-    # class docstring) rather than a second, mostly-overlapping dataclass.
+    # web_lookup_query_callback/approve_web_lookup are only read by
+    # handle_attempt_failure(), not run_attempt() itself; max_retries is read
+    # by both (run_attempt()'s own decide_retry_action() mode-selection call,
+    # and handle_attempt_failure()'s decide_for_state() continue/stop check) -
+    # kept on the same context object anyway (see the class docstring) rather
+    # than a second, mostly-overlapping dataclass.
     max_retries: int
     web_lookup_query_callback: Optional[Callable[[List[str], str], Any]]
     # A bound method (WorkflowEngine._approve_web_lookup), not a free
     # function - already carries its own `self` reference, so it's just
     # another callable from this module's perspective.
     approve_web_lookup: Callable[..., Any]
+    # CORR-018-P1 (A3-bound slice, 2026-09-09): explicit, deterministic
+    # semantic-region authority for Java files (kriya/workflow/
+    # semantic_region_authority.py) - empty for every existing/non-A3
+    # caller (default), which is a full no-op for that guard, byte-for-byte
+    # identical to pre-CORR-018 behavior. Not yet populated by any real
+    # caller (A3 promotion doesn't exist yet) - present so the guard is
+    # wired and testable ahead of that wiring, per explicit instruction.
+    authorized_semantic_regions: List[AuthorizedSemanticRegion] = field(default_factory=list)
+    # path -> direct manifest dependencies, in generation order. Default keeps
+    # isolated tests and old checkpoints backward compatible.
+    generation_dependencies: Dict[str, List[str]] = field(default_factory=dict)
+    # CTX-001 P1 C2 production integration: path -> candidate (unvalidated)
+    # member/class NAMES parsed from this attempt's own attempt-1 Graph-RAG
+    # vector hits (workflow.py's retrieval stage, via context_source.py::
+    # parse_controlled_chunk_header_name - the controlled "Method: X"/
+    # "Class: X" header chunk_file_with_metadata_headers() already writes
+    # into every indexed chunk, previously discarded at the retrieval call
+    # site). Deliberately CANDIDATES ONLY - run_attempt() is the one place
+    # that validates a name against member_boundaries_for() on CURRENT
+    # (CurrentSourceResolver-resolved) content before it is ever trusted as
+    # a real member_hints entry (see docs/assurance/CTX_001_P1_ARCHITECTURE.
+    # md section 25). Default empty dict keeps every existing test/caller
+    # that doesn't know about this field unaffected.
+    retrieval_member_hints: Dict[str, List[str]] = field(default_factory=dict)
+    # CTX-001 P1 WP9: one small AttemptContext-lifetime cache for
+    # deterministic source-derived artifacts (skeleton/signatures/member-
+    # exact rendering + their own token estimates), keyed by
+    # (path, member_id, tier, revision) - see context_source.py::
+    # SourceDerivationCache's own docstring. Built fresh per AttemptContext
+    # (default_factory, one instance per real run - never shared across
+    # separate `generate` invocations, never persisted). Every context-
+    # building call site in this module passes it through so unchanged
+    # source units are reused across retries within the SAME attempt;
+    # nothing about a cache hit vs. miss ever changes what content is
+    # produced, only how much work it costs to produce it.
+    source_cache: "SourceDerivationCache" = field(default_factory=SourceDerivationCache)
+    # GRAPHIFY-OVERSIZE-REQUEST-001: a bounded enforce subtask's planned
+    # files that exist on disk. Their current source reaches the Developer
+    # only through _planned_source_context (budgeted, optional), never as
+    # verbatim mandatory text. Empty for every other run.
+    planned_source_files: Tuple[str, ...] = ()
+    # Files known to exist from OUTSIDE this attempt's own generation - for a
+    # milestone run, every file an earlier, already-completed milestone wrote
+    # (kriya/workflow/milestones.py's MilestoneRunState.established_file_context
+    # keys). Deliberately NOT merged into state.all_files_written itself - that
+    # field is read by ~30 call sites across this module/workflow.py (compile/
+    # test scope, file-count budgeting, final "files written" reporting,
+    # missing-files detection...) where "written by THIS attempt" is the
+    # correct, load-bearing meaning; widening it would be wrong for most of
+    # those. This field exists ONLY to widen the "known files" candidate set
+    # self-diagnosis/attribution matching uses (see its two read sites: this
+    # module's extract_self_diagnosed_files() call, and retry_strategy.py's
+    # attribute_failure() call) - found live, 2026-08-21 (ignite_qpid_protocol,
+    # milestone 2/4): the Developer's own FIX ANALYSIS correctly, repeatedly
+    # said "the fix requires adding public getter methods to the Protocol
+    # class" (milestone 1's file), but Protocol.java was never a candidate for
+    # redirect at all, since milestone 2's OWN state.all_files_written only
+    # ever contains files ITS OWN attempts wrote (ProtocolParser.java) - a
+    # correct diagnosis had structurally nowhere to go, and the retry loop
+    # burned its full budget regenerating only ProtocolParser.java, 8 attempts
+    # straight. Default empty list keeps plain (non-milestone) generate/fix
+    # calls, and any old checkpoint, unaffected.
+    established_files: List[str] = field(default_factory=list)
+    # Workspace-relative path of the goal-source file supplied via `kriya
+    # generate --file <path>` for this run, if any - see AuthorizedFileWriter's
+    # own protected_relpaths docstring (kriya/policy/filesystem.py) for the
+    # real live incident this exists to prevent. None (the default) means no
+    # goal file was supplied this run (goal came from a positional arg,
+    # stdin, or a milestone/subtask's own synthesized text) - nothing to
+    # protect, matches every existing call site's behavior unchanged.
+    protected_relpath: Optional[str] = None
+    allowed_write_relpaths: List[str] = field(default_factory=list)
+    # Explicit write-scope policy (kriya/policy/filesystem.py::WriteScopeMode)
+    # - resolved ONCE, by run_generation_workflow(), before AttemptContext is
+    # built, so every write-gate call site in this module reads the SAME
+    # unambiguous value instead of each re-inferring its own meaning from
+    # allowed_write_relpaths' truthiness (the exact ambiguity that let a
+    # verification-only subtask's intended DENY_ALL silently degrade to
+    # "no restriction" - found live, PRV-05, 2026-08-28). Defaults to
+    # UNRESTRICTED, matching every plain (non-bounded-subtask) generate call
+    # and every existing test's own expectations unchanged.
+    write_scope_mode: WriteScopeMode = WriteScopeMode.UNRESTRICTED
+    # The subtask's own declared verifiers (VerificationMethod.model_dump()
+    # dicts) - only consulted when write_scope_mode == DENY_ALL, to execute
+    # them directly instead of entering ordinary Developer generation (see
+    # run_attempt()'s own verification-only branch, and _run_verification_
+    # only_attempt's docstring, for the PRV-05, 2026-08-28 incident this
+    # closes: a verification-only subtask used to still enter the Developer
+    # mutation/retry pipeline, burning several attempts discovering it had
+    # nothing to write before its own required verification ever ran).
+    required_verification: List[Dict[str, Any]] = field(default_factory=list)
+    runtime_verification_required: bool = False
+    strict_spec_compliance: bool = False
+    # Human-readable identity for nested structured executions. Attempt
+    # numbers are local to each bounded run and otherwise collide in logs.
+    execution_scope: str = ""
+    # Original/global goal used only for deterministic architectural owner
+    # discovery when a bounded subtask's local wording omits that context.
+    grounding_goal: str = ""
+    # PRD-025: the user's own request text - the ONLY text that may declare
+    # an expected nonzero exit (see exit_authority_text). Set by
+    # run_generation_workflow from the unit invocation; never Planner or
+    # MilestonePlanner restatement.
+    exit_authority_goal: str = ""
+    # The run's ONE, already-resolved MigrationObligation (or explicit
+    # NOT_APPLICABLE/INDETERMINATE), resolved ONCE by the top-level caller
+    # (run_generation_workflow for a plain/Legacy run, WorkflowController for
+    # a Hardened enforce run - both against the immutable PRE-mutation
+    # baseline workspace) and threaded through unchanged to every attempt -
+    # never re-resolved here. See kriya/workflow/migration.py's own
+    # docstring (PRV-05 run 6, 2026-08-28) for why re-deriving source/target
+    # identity from whatever state the repository happens to be in at each
+    # call site is itself the defect this field exists to close. None means
+    # no caller has resolved anything yet (matches every existing test's/
+    # checkpoint's default, same as required_verification's own default).
+    migration_resolution: Optional["MigrationResolution"] = None
+    # PRV-05 run 7 (2026-08-28) - the validated EngineeringPlan and the id of
+    # the subtask THIS call is executing, threaded through unchanged from
+    # WorkflowController's bounded-subtask execution (kriya/workflow/
+    # workflow_controller.py's _invoke_bounded_subtask) so migration
+    # validation (find_migration_incomplete's validation_scope=
+    # CURRENT_SUBTASK) and retry attribution can both ask "who owns this
+    # file, and are we there yet" via EngineeringPlan.classify_file_
+    # ownership() - the same helper, one answer. Both None for every
+    # non-MA6-structured caller (a plain Legacy run, or any pre-existing
+    # test) - migration validation then degrades to its original
+    # always-TERMINAL behavior, never silently permissive.
+    structured_plan: Optional["EngineeringPlan"] = None
+    current_subtask_id: Optional[str] = None
+    # MA8 (PRV-05 run #8, 2026-08-28) - kriya/workflow/obligations.py. One
+    # per-run ObligationLedger, threaded through unchanged from workflow.py's
+    # run_generation_workflow() (which always resolves a real instance -
+    # either the caller's shared one, or a fresh one for a plain Legacy
+    # call - see that method's own "resolved_obligation_ledger" comment).
+    # Optional/None here only so ad hoc AttemptContext construction in
+    # existing tests (predating MA8) keeps working unchanged - every real
+    # call site always supplies one.
+    obligation_ledger: Optional["ObligationLedger"] = None
+    completed_subtask_ids: FrozenSet[str] = frozenset()
+    # PRV-17 (2026-09-08, P7 efficiency finding) - kriya/workflow/
+    # deterministic_failure_diagnostic.py. One per-run store, threaded
+    # through unchanged from workflow.py's run_generation_workflow() the
+    # same way obligation_ledger already is above - deliberately a SEPARATE
+    # object from obligation_ledger, not a new ObligationKind, so this
+    # mechanism carries zero coupling to MA8's own regression-detection
+    # semantics. None here only so ad hoc AttemptContext construction in
+    # existing tests keeps working unchanged; every real call site supplies
+    # one. See that module's own docstring for the incident this closes.
+    deterministic_failure_diagnostics: Optional["DeterministicFailureDiagnosticStore"] = None
+    # PRD-008: what this run reuses from a resumed checkpoint
+    # (resume_fingerprints.ResumePlan). The only source of the candidate
+    # reuse and gate-skip decisions: resume_state is checkpoint data and can
+    # never grant either. None for every non-resumed run.
+    resume_plan: Optional["ResumePlan"] = None
+    # PRD-020 (kriya/workflow/requirements.py): the user's original
+    # requirements when this attempt's spec-compliance check is their
+    # verifier (a direct goal, a milestone plan's integration unit). None
+    # for units that verify something narrower (a milestone, a subtask).
+    requirement_set: Optional["RequirementSet"] = None
 
 
-def _extract_grounded_contract_verdict(
+def _process_boundary_obligation_id(subtask_id: str) -> str:
+    return f"attempt.subtask.{subtask_id}.process_boundary_compatibility"
+
+
+_PROCESS_BOUNDARY_RECURRENCE_ESCALATION = (
+    "\n\nRECURRING FAILURE: this exact process-boundary obligation was already recorded "
+    "VIOLATED on an earlier attempt for this subtask and is still unresolved. Toggling the "
+    "same call between two states again (e.g. undoing a previous attempt's fix) will not "
+    "resolve it - propose the structural separation (or out-of-process verification) "
+    "described above instead of repeating a change already tried."
+)
+
+
+def _record_process_boundary_obligation(
+    ctx: "AttemptContext", state: "GenerationState", *, violated: bool, evidence: Dict[str, Any],
+) -> bool:
+    """PRV-06 (2026-08-28): records ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY
+    when a test_process_terminated failure fires (violated=True), and clears
+    it back to SATISFIED the next time this subtask's test gate passes
+    (violated=False) - the same VIOLATED->SATISFIED tracking shape already
+    established for PLAN_STRUCTURAL_VALIDITY, giving this failure class real
+    cross-attempt identity instead of looking like a fresh, unrelated defect
+    every retry.
+
+    Returns True when violated=True and this exact obligation was ALREADY on
+    record as VIOLATED before this call - i.e. the SAME process-boundary
+    conflict recurring on a later attempt for the SAME subtask, never a
+    different subtask or an earlier-but-since-SATISFIED occurrence (prior
+    must itself be VIOLATED, not merely "violated at some point in this
+    obligation's history" - a subtask that fixed this and later broke it a
+    different way starts a fresh, non-recurrent record; recurrence means
+    "still unresolved between two consecutive checks," not "has a violated
+    entry somewhere in its past"). Callers use this to escalate the next
+    repair message with _PROCESS_BOUNDARY_RECURRENCE_ESCALATION instead of
+    silently repeating the same generic guidance every attempt - this is
+    what actually closes the oscillation PRV-06 hit live (the Developer
+    flipped System.exit <-> return for 11 attempts because nothing
+    distinguished "first occurrence" from "still unresolved"; recording the
+    obligation alone would only have made that observable in the ledger, not
+    prevented it). Recurrence is also written into the RECORD's own
+    `evidence` (recurrence/prior_violation_attempt/current_attempt) - a
+    durable control-plane fact inspectable from the ledger itself, not just
+    baked into a transient message string; the escalation text is only how
+    that fact gets exposed to the Developer, not the fact's only home.
+
+    Deliberately scoped to a structured/enforce subtask only
+    (ctx.current_subtask_id is the natural revision-tracked owner here, same
+    reasoning as every other owner_subtask_id in this module family) - a
+    plain Legacy run has no subtask id to anchor cross-attempt identity on
+    and doesn't consume obligation tracking today either. A SATISFIED record
+    is only written when this exact obligation was already VIOLATED for this
+    subtask, so an ordinary subtask that never hit this failure never
+    accumulates a needless record. Different subtasks get different
+    obligation ids (the subtask id is baked into the id itself) and one
+    ObligationLedger is scoped to one workflow run (see its own class
+    docstring) - recurrence can never fire across an unrelated subtask or an
+    unrelated run."""
+    if ctx.obligation_ledger is None or not ctx.current_subtask_id:
+        return False
+    obligation_id = _process_boundary_obligation_id(ctx.current_subtask_id)
+    prior = ctx.obligation_ledger.current(obligation_id)
+    if not violated and prior is None:
+        return False
+    is_recurrence = violated and prior is not None and prior.status == ObligationStatus.VIOLATED
+    record_evidence = dict(evidence)
+    if violated:
+        record_evidence["recurrence"] = is_recurrence
+        record_evidence["current_attempt"] = state.attempt_number
+        if is_recurrence:
+            record_evidence["prior_violation_attempt"] = prior.revision
+    record = ObligationRecord(
+        id=obligation_id, kind=ObligationKind.PROCESS_BOUNDARY_COMPATIBILITY,
+        status=ObligationStatus.VIOLATED if violated else ObligationStatus.SATISFIED,
+        authority=ObligationAuthority.DETERMINISTIC,
+        description="subtask's test execution must not trigger process/fork termination "
+                    "in already-written production code invoked in-process by a test",
+        source="attempt.run_attempt", revision=state.attempt_number,
+        evidence=record_evidence, owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
+    )
+    ctx.obligation_ledger.record(record)
+    # MA9 (2026-08-29): a VIOLATED record is the trigger to (re)derive a
+    # coordinated RepairContract; a SATISFIED record closes whichever
+    # contract this exact obligation opened, if any - see
+    # kriya/workflow/repair_contract.py's own module docstring. Neither
+    # branch does anything when build_repair_contract()/evidence extraction
+    # can't unambiguously classify this - state.repair_contract simply stays
+    # whatever it already was (None for every run that never hits this).
+    if violated:
+        _sync_active_repair_contract(ctx, state, record)
+    elif state.repair_contract is not None and obligation_id in state.repair_contract.source_obligation_ids:
+        state.repair_contract.status = RepairContractStatus.SATISFIED
+        state.record_event(RunEvent(
+            kind="repair_contract_satisfied", attempt=state.attempt_number, source="attempt.run_attempt",
+            authority=EventAuthority.ADVISORY,
+            message=f"RepairContract '{state.repair_contract.id}' satisfied - originating obligation resolved.",
+            details={"repair_contract_id": state.repair_contract.id, "obligation_id": obligation_id},
+        ))
+    return is_recurrence
+
+
+def _sync_active_repair_contract(
+    ctx: "AttemptContext", state: "GenerationState", obligation_record: ObligationRecord,
+) -> None:
+    """Called only on a VIOLATED process-boundary record (see
+    _record_process_boundary_obligation above). Sticky: if a RepairContract
+    is already ACTIVE for this EXACT obligation id, leaves it untouched
+    (never rebuilds/replaces an in-progress coordinated repair just because
+    the same conflict recurred again - see RepairContract's own docstring,
+    "sticky across attempts"). Otherwise attempts to derive one from this
+    attempt's raw failure output; on ambiguous/insufficient evidence,
+    build_repair_contract() returns None and state.repair_contract is left
+    exactly as it was (None on a first occurrence - ordinary LOCAL targeted
+    retry continues unchanged)."""
+    existing = state.repair_contract
+    if (
+        existing is not None
+        and obligation_record.id in existing.source_obligation_ids
+        and existing.status == RepairContractStatus.ACTIVE
+    ):
+        return
+    raw_output = obligation_record.evidence.get("raw_output", "")
+    if not raw_output:
+        return
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    evidence = derive_process_boundary_participants(raw_output, ctx.worktree_path, known_files)
+    contract = build_repair_contract(
+        obligation_record, evidence, created_attempt=state.attempt_number,
+        authorized_write_scope=tuple(sorted(getattr(ctx, "allowed_write_relpaths", None) or ())),
+    )
+    if contract is None:
+        return
+    state.repair_contract = contract
+    logger.info(
+        "MA9: unambiguous evidence found - opening a COORDINATED RepairContract '%s' "
+        "(participants: %s; groups: %s).", contract.id,
+        ", ".join(contract.participating_artifacts),
+        ", ".join(g.id for g in contract.repair_groups),
+    )
+    state.record_event(RunEvent(
+        kind="repair_contract_created", attempt=state.attempt_number, source="attempt.run_attempt",
+        authority=EventAuthority.ADVISORY,
+        message=f"RepairContract '{contract.id}' opened ({contract.kind.value}).",
+        details={
+            "repair_contract_id": contract.id,
+            "repair_kind": contract.kind.value,
+            "source_obligation_ids": list(contract.source_obligation_ids),
+            "participating_artifacts": list(contract.participating_artifacts),
+            "authorized_write_scope": list(contract.authorized_write_scope),
+            "repair_group_ids": [g.id for g in contract.repair_groups],
+        },
+    ))
+
+
+def _materialize_candidate_content(
+    ctx: "AttemptContext", filepath: str, file_obj: Dict[str, Any],
+) -> Optional[str]:
+    """Best-effort materialization of one Developer response's real resulting
+    content, for the coordinated candidate-view (see
+    _run_coordinated_repair_generation's "Rule 2A" note below) - NOT the
+    authoritative write path (that's the existing staged_writes loop further
+    down run_attempt(), which re-applies these same edits independently and
+    remains the only place that can raise on a genuine anchor mismatch).
+    Returns None (candidate view falls back to that file's prior/baseline
+    content for the next participant) whenever there is nothing to
+    materialize - a NO CHANGE NEEDED response (no content, no edits) or an
+    edit whose SEARCH block doesn't match; a real anchor-mismatch failure
+    still surfaces correctly, just later, through the authoritative staging
+    loop's own error handling, not duplicated here."""
+    content = file_obj.get("content")
+    if content:
+        return content
+    edits = file_obj.get("edits") or []
+    if not edits:
+        return None
+    current_file_path = os.path.join(ctx.worktree_path, filepath)
+    if not os.path.exists(current_file_path):
+        current_file_path = os.path.join(ctx.workspace_path, filepath)
+    try:
+        return apply_anchored_edits(load_snapshot(current_file_path).text, edits, "")
+    except (ValueError, OSError):
+        return None
+
+
+async def _run_coordinated_repair_generation(
+    state: "GenerationState", ctx: "AttemptContext", contract: Any,
+    base_code_context: str, stream_callback: Optional[Callable[[str], None]],
+    attempt_operation: Any, optional_sections: Tuple[OptionalSection, ...] = (),
+) -> Tuple[List[Dict[str, str]], Dict[str, str]]:
+    """MA9 (2026-08-29): the coordinated counterpart to a single
+    _run_developer_generation(known_target_files=state.last_implicated_files)
+    call - one sequential Developer call per contract.generation_order entry,
+    every call sharing the SAME RepairContract framing (via
+    _build_coordinated_retry_prompt) instead of _build_targeted_retry_prompt's
+    single-file "focus your fix there" wording. See repair_contract.py's own
+    module docstring for why this exists (PRV-06 Bucket A).
+
+    Deliberately NOT a single known_target_files=[A, B] call: DeveloperAgent.
+    _fill_missing_content's own within-batch sibling section only shows an
+    earlier participant's content when that participant returned FULL file
+    content (entry["content"]), never when it returned an anchored edit
+    (entry["edits"], content left None) - so a batch call would silently fail
+    "Rule 2A" (below) exactly whenever the model preferred a small patch over
+    a full rewrite for the first participant, which this codebase's own
+    REPAIR mode prompt explicitly asks it to prefer. Sequential calls, each
+    orchestrated here, close that gap by materializing every participant's
+    real resulting content (via _materialize_candidate_content, applying
+    anchored edits the same way the authoritative staging loop does) into an
+    explicit `candidate_view` dict BEFORE building the next participant's
+    prompt.
+
+    Rule 2A (2026-08-29 design review - "probably the single most load-bearing
+    implementation rule in MA9"): candidate_view accumulates in memory only;
+    nothing here writes to ctx.worktree_path or ctx.workspace_path. The
+    authoritative worktree stays exactly as it was before this attempt began
+    until the existing staged_writes/AuthorizedFileWriter pipeline further
+    down run_attempt() atomically accepts (or, on any gate failure, discards)
+    the WHOLE returned list - every participant, across every group, lands
+    together or none does, the same all-or-nothing behavior that pipeline
+    already gives any multi-file `files` list, coordinated or not.
+
+    Group-aware (2026-08-29 v2 design review, §11/§19): walks
+    contract.repair_groups in order (never a flat generation_order directly -
+    that field is only the flattening of every group's own order, kept on
+    the contract for convenience/backward-compat), setting
+    contract.active_group_id per group purely for observability
+    (developer_repair_call/repair_group_started events below) - it plays no
+    role in candidate-view visibility, which already spans every group
+    generated so far regardless of which one is "active." No per-group
+    lightweight validation is run here (§19 explicitly calls that optional -
+    "acceptable," not required); the correctness invariant this module
+    guarantees is the harder one anyway: no PARTIAL commit ever happens,
+    since nothing here writes to the worktree at all until the full,
+    all-groups candidate passes every existing gate further down
+    run_attempt().
+
+    Returns (results, candidate_view) - PRV-06 completion (2026-08-29, "MA8.1
+    <-> MA9 composition and AttemptContext correctness"): the caller's own
+    shared post-generation pipeline (anchored-edit application further down
+    run_attempt()) needs a `shown_context` for its own grounding check
+    (edit_safety.py::apply_anchored_edits's third argument) that reflects
+    this SAME coordinated candidate state - not the authoritative baseline
+    workspace, which Rule 2A above guarantees is still stale at this point.
+    Previously this function returned only `results`, silently discarding
+    the very candidate_view its own docstring calls "probably the single
+    most load-bearing implementation rule in MA9" the moment control
+    returned to the caller - the caller then had nothing but an unassigned
+    local variable (see run_attempt's own `active_code_context`), a real,
+    live-reproduced UnboundLocalError."""
+    candidate_view: Dict[str, str] = {}
+    results: List[Dict[str, str]] = []
+    for group in contract.repair_groups:
+        contract.active_group_id = group.id
+        state.record_event(RunEvent(
+            kind="repair_group_started", attempt=state.attempt_number, source="attempt.run_attempt",
+            authority=EventAuthority.ADVISORY,
+            message=f"RepairContract '{contract.id}' entering group '{group.id}'.",
+            details={
+                "repair_contract_id": contract.id, "group_id": group.id,
+                "artifacts": list(group.artifacts), "depends_on_group_ids": list(group.depends_on_group_ids),
+            },
+        ))
+        for filepath in group.generation_order:
+            task_desc, active_code_context = _build_coordinated_retry_prompt(
+                ctx.goal, ctx.plan, state.error_context, contract, filepath,
+                state.all_files_written, ctx.worktree_path, base_code_context,
+                candidate_view=candidate_view,
+                ecosystem_invariant_block=ctx.ecosystem_invariant_block,
+                resource_lifecycle_block=ctx.resource_lifecycle_block,
+                verification_contract_block=ctx.verification_contract_block,
+                # Only the currently-active group's own members are exempt
+                # from this budget (see _build_coordinated_retry_prompt's own
+                # docstring) - harmless/inert for today's 2-participant case
+                # (both nearly always land in the same or immediately
+                # adjacent group, well under budget), load-bearing for a
+                # future 6-10 participant repair.
+                participant_content_budget=_reserve_sibling_content_budget(allocation_window(ctx.kernel.config)),
+            )
+            state.record_event(RunEvent(
+                kind="developer_repair_call", attempt=state.attempt_number, source="attempt.run_attempt",
+                authority=EventAuthority.ADVISORY,
+                message=f"Coordinated Developer call for '{filepath}' (group '{group.id}').",
+                details={
+                    "repair_contract_id": contract.id, "active_group": group.id,
+                    "immediate_target": filepath, "participant_count": len(contract.participating_artifacts),
+                    "candidate_revision": len(candidate_view),
+                },
+            ))
+            file_results = await _run_developer_generation(
+                state, ctx,
+                optional_sections=optional_sections,
+                task_description=task_desc,
+                design_context=ctx.design,
+                existing_code_context=active_code_context,
+                stream_callback=stream_callback,
+                model_override=None, base_url_override=None, api_key_override=None, extra_body_override=None,
+                known_target_files=[filepath],
+                prior_error_context=state.error_context or None,
+                # Every participant, always - never narrowed to just this call's
+                # own filepath. See RepairContract's own docstring: an active
+                # coordinated contract must never let single-file attribution
+                # collapse it back to narrow targeting; implicated_files=[filepath]
+                # here would also silently disable the NO CHANGE NEEDED option
+                # for every participant the CURRENT failure doesn't specifically
+                # name (_fill_missing_content only offers it when
+                # apply_fix_analysis is True, which requires filepath to be IN
+                # implicated_files).
+                implicated_files=list(contract.participating_artifacts),
+                error_source_context=state.last_error_source_context or None,
+                retry_temperature=ctx.kernel.config.llm.retry_temperature,
+                extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+                files_with_current_content=state.all_files_written,
+                sibling_content_budget=_reserve_sibling_content_budget(allocation_window(ctx.kernel.config)),
+                operation_by_file=_operation_map(ctx, [filepath], attempt_operation, state),
+                default_operation=attempt_operation,
+            )
+            for entry in file_results:
+                if entry.get("filepath") == filepath:
+                    materialized = _materialize_candidate_content(ctx, filepath, entry)
+                    if materialized is not None:
+                        candidate_view[filepath] = materialized
+                        state.record_event(RunEvent(
+                            kind="candidate_edit_staged", attempt=state.attempt_number,
+                            source="attempt.run_attempt", authority=EventAuthority.ADVISORY,
+                            message=f"Candidate staged for '{filepath}' (group '{group.id}').",
+                            details={"repair_contract_id": contract.id, "artifact": filepath},
+                        ))
+                results.append(entry)
+    return results, candidate_view
+
+
+def _classify_grounded_contract_verdict(
     output: str, worktree_path: str, files_written: List[str]
-) -> Optional[Dict[str, Any]]:
-    """Wraps extract_contract_verdict() with the independent grounding check
-    from verification_contract.py::pass_verdict_is_grounded() - see that
-    function's own docstring for the full reasoning (independent brutal
-    review finding #4, 2026-08-15: a PASS marker is self-reported by the
-    same model that wrote the implementation, with nothing else checking it
-    really branches on anything). A single shared helper, not three copies
-    of the same logic - used identically at all three of run_attempt()'s
-    run_res-outcome branches (clean run / timed out / plain nonzero exit) so
-    a PASS verdict's trust is checked consistently everywhere, not just
-    wherever someone happened to add it first."""
-    verdict = extract_contract_verdict(output)
-    if verdict is None or not verdict["passed"]:
-        return verdict
+) -> Tuple[ContractVerdictState, Optional[Dict[str, Any]]]:
+    """IO wrapper around verification_contract.classify_contract_verdict()
+    (which stays pure/file-content-free, matching its own established
+    convention) - reads the written files from worktree_path, then
+    classifies. VER-006 (2026-09-10): this used to be
+    _extract_grounded_contract_verdict(), returning a bare Optional[Dict]
+    that collapsed two structurally different situations into the same
+    `None` - "no marker exists at all" (ABSENT) and "a marker exists and was
+    deterministically rejected as ungrounded" (INDETERMINATE_DISTRUSTED) -
+    both of which then received identical, fully-trusted LLM grading. See
+    ContractVerdictState's own docstring for the live incident (run
+    `bpwsqscrg`) that exploited exactly this collapse. A single shared
+    helper, not seven copies of the same logic - used identically at every
+    run_res-outcome branch in both run_attempt() and
+    _execute_runtime_verification_directly() (clean run / timed out / plain
+    nonzero exit / post-self-correction re-verification) via
+    _resolve_runtime_verification_grade() below, so classification is
+    consistent everywhere, not just wherever someone happened to add it
+    first."""
     files_content = []
     for filepath in files_written:
         full_path = os.path.join(worktree_path, filepath)
@@ -113,15 +3124,878 @@ def _extract_grounded_contract_verdict(
                 files_content.append(f.read())
         except Exception:
             continue
-    if not pass_verdict_is_grounded(files_content):
+    state, verdict = classify_contract_verdict(output, files_content)
+    if state is ContractVerdictState.INDETERMINATE_DISTRUSTED:
         logger.info(
             "Runtime verification: a deterministic '[VERIFICATION] PASS' marker was found, but "
             "none of the written files contain a '[VERIFICATION] FAIL' string anywhere - the "
             "check doesn't look like it actually branches on anything. Not trusting it; falling "
-            "back to LLM grading instead."
+            "back to LLM grading instead, disclosed as distrusted (VER-006) - it cannot become "
+            "a terminal PASS on that evidence alone."
         )
-        return None
-    return verdict
+    return state, verdict
+
+
+_DISTRUST_DISCLOSURE_NOTE = (
+    "A deterministic check already inspected the captured output above and found a "
+    "self-reported '[VERIFICATION] PASS' marker, but rejected it as ungrounded: none of the "
+    "written files contain a '[VERIFICATION] FAIL' string anywhere, meaning this marker does "
+    "not appear to be gated behind any real comparison and could have been printed "
+    "unconditionally regardless of outcome. Do not cite this marker, by itself, as evidence "
+    "the goal was achieved. Evaluate only evidence independent of that marker. If no such "
+    "independent evidence exists in the captured output, you must return passed: false and "
+    "say so explicitly - a distrusted marker does not become trustworthy because it is "
+    "reinterpreted."
+)
+
+
+async def _resolve_runtime_verification_grade(
+    ctx: "AttemptContext", state: ContractVerdictState,
+    contract_verdict: Optional[Dict[str, Any]], grade_kwargs: Dict[str, Any],
+    *, run_result: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], str]:
+    """VER-006 containment (2026-09-10) - the single place every run_res-
+    outcome branch (clean run / timed out / plain nonzero exit / post-self-
+    correction re-verification, in both run_attempt() and
+    _execute_runtime_verification_directly()) must route through once
+    _classify_grounded_contract_verdict() has produced a state, so
+    'deterministically distrusted evidence cannot become terminal PASS via
+    LLM judgment over that same evidence' is enforced identically
+    everywhere rather than in seven hand-rolled copies that could drift out
+    of sync. Returns (grade, verification_authority) - grade is always a
+    {"passed", "reasoning", "likely_files"}-shaped dict, matching every
+    existing call site's expectations exactly.
+
+    PASS/FAIL: today's existing fast path, completely unchanged - the
+    grounded deterministic verdict IS the grade, grade() is never called.
+
+    ABSENT: today's existing LLM-fallback behavior, completely unchanged -
+    no deterministic contract evidence exists at all, so nothing here
+    should (or safely can) second-guess ctx.run_verifier.grade()'s own
+    authority over the raw captured output.
+
+    INDETERMINATE_DISTRUSTED: grade() may still be called - its reasoning/
+    likely_files remain useful diagnostic value for the retry loop, and
+    Invariant 5 (LLM grading may remain advisory where no stronger
+    contradictory/distrust evidence exists) does not forbid an advisory
+    call, only an AUTHORITATIVE one - but it is called with the distrust
+    disclosed as a separate, trusted (non-fenced) prompt section, never
+    folded into the untrusted captured-output text. Whatever it returns,
+    `passed` is force-set to False before it ever reaches a caller: this
+    verification path's only evidence channel is the same captured stdout/
+    stderr the deterministic check already distrusted (run_app_sequence()
+    captures nothing else), so there is no existing independent
+    corroboration source this function could check instead (VER-006 Task 2
+    explicitly forbids inventing one) - prompt wording alone is
+    acknowledged as insufficient enforcement (a grader could still ignore
+    the notice and hallucinate a PASS anyway), so the override here is
+    unconditional on the returned `passed` value, not merely a check that
+    the notice was heeded."""
+    if state in (ContractVerdictState.PASS, ContractVerdictState.FAIL):
+        return contract_verdict, "contract"
+
+    # PRD-025: the grader gets a bounded package built from the per-step
+    # retained capture, scanned once here - only when a grader call happens.
+    if run_result is not None:
+        grade_kwargs = {**grade_kwargs, "evidence": RetainedRuntimeEvidence.from_run_result(run_result)}
+    if state is ContractVerdictState.ABSENT:
+        grade = await ctx.run_verifier.grade(**grade_kwargs)
+        return grade, "llm"
+
+    # INDETERMINATE_DISTRUSTED.
+    disclosed_kwargs = dict(grade_kwargs)
+    disclosed_kwargs["distrust_notice"] = _DISTRUST_DISCLOSURE_NOTE
+    try:
+        grade = await ctx.run_verifier.grade(**disclosed_kwargs)
+    except Exception as e:
+        logger.warning(f"Run Verifier grade() call failed during distrusted-evidence disclosure: {e}")
+        grade = {"passed": False, "reasoning": f"Grader call failed: {e}", "likely_files": []}
+    if grade.get("passed"):
+        logger.info(
+            "VER-006: LLM grader returned passed=true over deterministically distrusted "
+            "evidence with no independent corroboration available on this verification path - "
+            "overriding to non-PASS regardless. Grader's own (overridden) reasoning: %s",
+            grade.get("reasoning", ""),
+        )
+    # Mutate in place, matching every other branch in this module (e.g. the
+    # timed-out branch's own grade["reasoning"]=.../grade["passed"]=False
+    # above). ctx.run_verifier.grade() always returns a freshly-constructed
+    # dict in production (RunVerifierAgent.grade()'s own implementation), so
+    # there is no shared-mutable-state risk to guard against by copying. Test
+    # doubles must return a real dict too: on a bare AsyncMock this
+    # assignment is only recorded, and the truthy grade.get("passed") read
+    # later turned this forced non-PASS into a PASS (two cleanup tests passed
+    # that way until their doubles were made strict).
+    grade["reasoning"] = (
+        "A deterministic check found a self-reported verification marker but rejected it as "
+        "ungrounded (present but never demonstrated to gate on anything). No independent "
+        "corroborating evidence exists on this verification path, so this cannot pass on LLM "
+        f"judgment over that same distrusted evidence alone. Grader's own verdict: "
+        f"{grade.get('reasoning', '')}"
+    )
+    grade["passed"] = False
+    return grade, "llm_over_distrusted_evidence"
+
+
+def _deterministic_result_provenance_field(verification_authority: str) -> Optional[str]:
+    """VER-006 provenance (Task 4): before this, gate_outcome's own
+    `deterministic_result` field was `"PASS"` for `verification_authority ==
+    "process_exit"` and `None` for EVERY other authority - including both
+    genuine ABSENT (no marker ever existed, ordinary LLM grading) and
+    INDETERMINATE_DISTRUSTED (a marker existed and was explicitly rejected,
+    then force-overridden to non-PASS) alike, destroying the distinction a
+    second time even after _classify_grounded_contract_verdict() itself
+    stopped collapsing it. `"llm_over_distrusted_evidence"` (this module's
+    own new verification_authority value) now maps to its own distinct
+    `"DISTRUSTED"` value instead; ordinary `"llm"` (ABSENT) and `"contract"`
+    stay exactly as before - unchanged legacy behavior for both."""
+    if verification_authority == "process_exit":
+        return "PASS"
+    if verification_authority == "llm_over_distrusted_evidence":
+        return "DISTRUSTED"
+    return None
+
+
+def _record_self_correction_scope_conflict(
+    state: GenerationState, ctx: "AttemptContext", result: Any, failure_type: str,
+) -> None:
+    required = sorted(set(getattr(result, "scope_conflict_files", []) or []))
+    if not required:
+        return
+    state.plan_scope_conflict = {
+        "classification": "PLAN_SCOPE_DEFECT",
+        "reason_code": "PLAN_SCOPE_REVISION_REQUIRED",
+        "failure_type": failure_type,
+        "required_files": required,
+        "allowed_files": sorted(ctx.allowed_write_relpaths),
+        "reason": "self-correction diagnosis requires a readable file outside approved write scope",
+        "attribution_tier": "self_correction",
+        "grounded_owner_files": [],
+    }
+
+
+_RUNTIME_VERIFICATION_SYNTHETIC_INPUT = "kriya-verification-input"
+
+_NONZERO_PROCESS_EXIT_RE = re.compile(
+    r"(?:non[ -]?zero(?:\s+[a-z]+){0,3}\s+exit|(?:process\s+)?exits?(?:\s+code)?\s+(?:is\s+|must\s+be\s+)?non[ -]?zero)",
+    re.IGNORECASE,
+)
+
+_INITIAL_TEST_PROCESS_BOUNDARY_CONSTRAINT = (
+    "\n\n=== Process-boundary test constraint ===\n"
+    "The structured runtime/process-boundary contract explicitly requires a non-zero process exit. "
+    "Tests must not invoke a process-terminating application path in the test runner's own process. "
+    "Do not use SecurityManager or System.setSecurityManager to intercept termination. Preserve the "
+    "required System.exit behavior. Verify exit code/stdout/stderr through a child process or leave "
+    "that obligation to the declared application_runtime verifier. This constraint changes only the "
+    "verification strategy; do not invent additional product behavior or edge cases (for example, "
+    "overflow handling) that are absent from the authoritative goal."
+)
+
+
+def _initial_test_process_boundary_constraint(
+    required_verification: List[Dict[str, Any]], target_files: Optional[List[str]],
+) -> str:
+    """Return a test-generation constraint only for an explicit runtime fact."""
+    if not any(is_runnable_test_file(path) for path in (target_files or [])):
+        return ""
+    return (
+        _INITIAL_TEST_PROCESS_BOUNDARY_CONSTRAINT
+        if _required_process_terminating_cases(required_verification)
+        else ""
+    )
+
+
+def _runtime_contract_requirements(ctx: "AttemptContext") -> List[Dict[str, Any]]:
+    """Collect runtime/process-boundary facts available to this subtask."""
+    requirements = list(ctx.required_verification)
+    if ctx.structured_plan is not None:
+        for subtask in ctx.structured_plan.subtasks:
+            requirements.extend(
+                verification.model_dump(mode="json")
+                for verification in subtask.verification
+            )
+        current = ctx.structured_plan.subtask_by_id(ctx.current_subtask_id or "")
+        relevant_ids = set(current.relevant_global_invariant_ids if current else [])
+        for invariant in ctx.structured_plan.global_invariants:
+            if invariant.id in relevant_ids:
+                requirements.append({
+                    "description": invariant.statement,
+                    "process_boundary_authority": "relevant_global_invariant",
+                    "invariant_id": invariant.id,
+                })
+    deduplicated: Dict[str, Dict[str, Any]] = {}
+    for requirement in requirements:
+        key = repr(sorted(requirement.items()))
+        deduplicated[key] = requirement
+    return list(deduplicated.values())
+
+
+_TERMINATING_CASE_MARKERS = {
+    "invalid": ("invalid input", "invalid value", "malformed input", "non-numeric input"),
+    "missing": ("missing input", "no input", "missing argument", "no argument"),
+}
+
+
+def _required_process_terminating_cases(
+    required_verification: List[Dict[str, Any]],
+) -> List[str]:
+    """Extract only case labels explicitly grounded by the runtime contract."""
+    cases = set()
+    for requirement in required_verification:
+        runtime_verifier = (
+            requirement.get("verifier_kind") == "application_runtime"
+            and requirement.get("requires_runtime_execution") is True
+        )
+        relevant_global_invariant = (
+            requirement.get("process_boundary_authority") == "relevant_global_invariant"
+        )
+        if not (runtime_verifier or relevant_global_invariant):
+            continue
+        description = str(requirement.get("description") or "")
+        if not _NONZERO_PROCESS_EXIT_RE.search(description):
+            continue
+        lowered = description.lower()
+        for case, phrases in _TERMINATING_CASE_MARKERS.items():
+            if any(phrase in lowered for phrase in phrases):
+                cases.add(case)
+    return sorted(cases)
+
+
+def _enclosing_test_method(source: str, offset: int) -> Optional[str]:
+    prefix = source[:offset]
+    matches = list(re.finditer(
+        r"(?m)^\s*(?:public\s+|protected\s+|private\s+)?(?:static\s+)?"
+        r"(?:void|[A-Za-z_$][\w.$<>\[\], ?]*)\s+([A-Za-z_$][\w$]*)\s*\([^;{}]*\)\s*\{",
+        prefix,
+    ))
+    return matches[-1].group(1) if matches else None
+
+
+def _enclosing_test_method_source(source: str, offset: int) -> str:
+    """Return the enclosing Java-like method body using bounded brace matching.
+
+    This is deliberately a small source-shape helper, not a Java parser.  It is
+    used only to resolve a local argv variable feeding a grounded main(...) call.
+    """
+    prefix = source[:offset]
+    matches = list(re.finditer(
+        r"(?m)^\s*(?:public\s+|protected\s+|private\s+)?(?:static\s+)?"
+        r"(?:void|[A-Za-z_$][\w.$<>\[\], ?]*)\s+[A-Za-z_$][\w$]*\s*\([^;{}]*\)\s*\{",
+        prefix,
+    ))
+    if not matches:
+        return source
+    start = matches[-1].start()
+    open_brace = source.find("{", matches[-1].start(), offset + 1)
+    if open_brace < 0:
+        return source[start:]
+    depth = 0
+    for index in range(open_brace, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:index + 1]
+    return source[start:]
+
+
+def _resolve_java_main_argv_expression(method_source: str, call_expression: str) -> str:
+    """Resolve a direct main(...) argument or a simple local String[] variable.
+
+    Generated tests commonly use:
+      String[] value = {"not-a-number"};
+      App.main(value);
+    The old gate inspected the method name, so this neutral-name form escaped.
+    Resolve the local initializer instead; unresolved expressions remain as-is.
+    """
+    expression = call_expression.strip()
+    if not re.fullmatch(r"[A-Za-z_$][\w$]*", expression):
+        return expression
+    variable = re.escape(expression)
+    assignments = list(re.finditer(
+        rf"(?:String\s*\[\s*\]|String\s+\[\s*\])\s*{variable}\s*=\s*"
+        r"(?P<value>new\s+String\s*\[\s*\]\s*\{[^;]*\}|\{[^;]*\})\s*;",
+        method_source,
+        re.DOTALL,
+    ))
+    return assignments[-1].group("value").strip() if assignments else expression
+
+
+def _runtime_contract_expects_numeric_input(
+    required_verification: List[Dict[str, Any]],
+) -> bool:
+    """Whether authoritative runtime text explicitly identifies numeric input."""
+    for requirement in required_verification:
+        runtime_verifier = (
+            requirement.get("verifier_kind") == "application_runtime"
+            and requirement.get("requires_runtime_execution") is True
+        )
+        relevant_global_invariant = (
+            requirement.get("process_boundary_authority") == "relevant_global_invariant"
+        )
+        if not (runtime_verifier or relevant_global_invariant):
+            continue
+        description = str(requirement.get("description") or "").lower()
+        if re.search(r"\b(?:integer|numeric|number)\b", description):
+            return True
+    return False
+
+
+def _terminating_case_from_argv_expression(
+    cases: List[str], argv_expression: str, *, numeric_input: bool,
+) -> Optional[str]:
+    """Classify only from the actual argv expression, never the test method name."""
+    compact = re.sub(r"\s+", "", argv_expression)
+    if "missing" in cases and (
+        re.fullmatch(r"newString\[0\]", compact)
+        or re.fullmatch(r"newString\[\]\{\}", compact)
+        or re.fullmatch(r"\{\}", compact)
+    ):
+        return "missing input"
+
+    string_literals = re.findall(r'"((?:\\.|[^"\\])*)"', argv_expression)
+    if "invalid" in cases and string_literals:
+        lowered_literals = [literal.lower() for literal in string_literals]
+        if any(
+            marker in literal
+            for literal in lowered_literals
+            for marker in ("invalid", "malformed", "not-a-number", "not_a_number", "nonnumeric", "non-numeric")
+        ):
+            return "invalid input"
+        if numeric_input:
+            for literal in string_literals:
+                try:
+                    int(literal, 10)
+                except ValueError:
+                    return "invalid input"
+    return None
+
+
+def find_in_process_terminating_test_invocations(
+    required_verification: List[Dict[str, Any]],
+    worktree_path: str,
+    test_files: List[str],
+    application_entrypoints: List[str],
+) -> List[Dict[str, Any]]:
+    """Find test calls that contradict an explicit process-boundary contract.
+
+    Source text never establishes that a path terminates. The structured
+    application_runtime requirement establishes that fact and names its case;
+    source inspection only connects that known case to an in-process call of a
+    grounded entrypoint. Child-process tests contain no such direct call and
+    therefore remain admissible.
+    """
+    cases = _required_process_terminating_cases(required_verification)
+    if not cases or not application_entrypoints:
+        return []
+    entrypoint_names = sorted({
+        name for fqcn in application_entrypoints
+        for name in (fqcn, fqcn.rsplit(".", 1)[-1])
+    }, key=len, reverse=True)
+    call_re = re.compile(
+        r"\b(?:" + "|".join(re.escape(name) for name in entrypoint_names)
+        + r")\s*\.\s*main\s*\((?P<argv>[^;\n]*)\)",
+    )
+    numeric_input = _runtime_contract_expects_numeric_input(required_verification)
+    findings: List[Dict[str, Any]] = []
+    for filepath in sorted(test_files):
+        full_path = os.path.join(worktree_path, filepath)
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as handle:
+                source = handle.read()
+        except OSError:
+            continue
+        for match in call_re.finditer(source):
+            method = _enclosing_test_method(source, match.start())
+            method_source = _enclosing_test_method_source(source, match.start())
+            argv_expression = _resolve_java_main_argv_expression(
+                method_source, match.group("argv"),
+            )
+            matched_case = _terminating_case_from_argv_expression(
+                cases, argv_expression, numeric_input=numeric_input,
+            )
+            if matched_case is None:
+                continue
+            findings.append({
+                "test_file": filepath,
+                "test_method": method,
+                "line": source.count("\n", 0, match.start()) + 1,
+                "entrypoint_call": match.group(0),
+                "terminating_case": matched_case,
+            })
+    return findings
+
+
+def _raise_unsafe_process_boundary_test_candidate(
+    state: GenerationState, ctx: "AttemptContext", test_files: List[str],
+) -> None:
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    java_files = [path for path in known_files if path.endswith(".java")]
+    entrypoints = sorted(set(_build_java_main_class_map(java_files, ctx).values()))
+    findings = find_in_process_terminating_test_invocations(
+        _runtime_contract_requirements(ctx), ctx.worktree_path, test_files, entrypoints,
+    )
+    if not findings:
+        return
+    offending_files = sorted({item["test_file"] for item in findings})
+    detail_lines = [
+        f"- {item['test_file']}:{item['line']}"
+        + (f" method={item['test_method']}" if item.get("test_method") else "")
+        + f" invokes {item['entrypoint_call']} for {item['terminating_case']}"
+        for item in findings
+    ]
+    message = (
+        "PROCESS_TERMINATING_BEHAVIOR_TESTED_IN_PROCESS: generated test code invokes an "
+        "application entrypoint in the test runner process for behavior the structured "
+        "runtime/process-boundary contract requires to terminate with a non-zero exit.\n"
+        + "\n".join(detail_lines)
+        + "\nPreserve the product's required process-terminating behavior. Repair the TEST only: "
+        "remove the in-process case or execute it through a child process and assert exit "
+        "code/stdout/stderr. The application_runtime verifier remains responsible for the "
+        "required exit-code behavior."
+    )
+    failure = Failure(
+        type="process_terminating_behavior_tested_in_process",
+        message=message,
+        raw_output=message,
+        file_locations=[
+            FileLocation(filepath=item["test_file"], line=item["line"])
+            for item in findings
+        ],
+        likely_files=offending_files,
+        failed_content=_capture_failed_content(ctx.worktree_path, offending_files),
+        diagnostics={
+            "reason_code": "PROCESS_TERMINATING_BEHAVIOR_TESTED_IN_PROCESS",
+            "repair_owner": "test",
+            "findings": findings,
+        },
+        attempt=state.attempt_number,
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def find_ungrounded_java_child_process_tests(
+    required_verification: List[Dict[str, Any]],
+    worktree_path: str,
+    test_files: List[str],
+    java_main_classes: Dict[str, str],
+    known_files: List[str],
+) -> List[Dict[str, Any]]:
+    """Find invented Java child launch mechanics for a process-exit contract.
+
+    This does not duplicate the in-process safety gate above: that gate decides
+    whether a test crossed a process boundary at all.  This check verifies that
+    an elected boundary uses the entrypoint and classpath Kriya can ground.
+    """
+    if not _required_process_terminating_cases(required_verification):
+        return []
+    if len(java_main_classes) != 1:
+        return []
+    entrypoint = next(iter(java_main_classes.values()))
+    simple_name = entrypoint.rsplit(".", 1)[-1]
+    if "pom.xml" in known_files:
+        classes_dir = "target/classes"
+    elif any(path.endswith(("build.gradle", "build.gradle.kts")) for path in known_files):
+        classes_dir = "build/classes/java/main"
+    else:
+        classes_dir = ".kriya/runtime-verification/classes"
+    expected = build_grounded_java_launch_command(entrypoint, ["<args>"], classes_dir)
+    findings: List[Dict[str, Any]] = []
+    for filepath in sorted(test_files):
+        try:
+            with open(
+                os.path.join(worktree_path, filepath),
+                encoding="utf-8", errors="replace",
+            ) as handle:
+                source = handle.read()
+        except OSError:
+            continue
+        if "ProcessBuilder" not in source or ".start()" not in source:
+            continue
+        mentions_entrypoint = (
+            f'"{entrypoint}"' in source or f'"{simple_name}"' in source
+        )
+        reasons = []
+        if not mentions_entrypoint:
+            reasons.append(f"does not launch grounded main class {entrypoint}")
+        if 'System.getProperty("java.class.path")' in source:
+            reasons.append("reuses the test-runner/Surefire classpath")
+        if classes_dir not in source:
+            reasons.append(f"does not use grounded application classpath {classes_dir}")
+        if "waitFor()" not in source:
+            reasons.append("does not capture the child exit code")
+        if "getInputStream()" not in source and "getErrorStream()" not in source:
+            reasons.append("does not capture child stdout/stderr")
+        if reasons:
+            findings.append({
+                "test_file": filepath,
+                "reasons": reasons,
+                "entrypoint": entrypoint,
+                "classes_dir": classes_dir,
+                "expected_command": expected,
+            })
+    return findings
+
+
+def _raise_ungrounded_child_process_test_candidate(
+    state: GenerationState, ctx: "AttemptContext", test_files: List[str],
+) -> None:
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    java_files = [path for path in known_files if path.endswith(".java")]
+    findings = find_ungrounded_java_child_process_tests(
+        _runtime_contract_requirements(ctx), ctx.worktree_path, test_files,
+        _build_java_main_class_map(java_files, ctx), known_files,
+    )
+    if not findings:
+        return
+    offending = sorted({item["test_file"] for item in findings})
+    details = "\n".join(
+        f"- {item['test_file']}: " + "; ".join(item["reasons"])
+        for item in findings
+    )
+    exemplar = findings[0]
+    message = (
+        "VERIFICATION_INFRASTRUCTURE_FAILURE: generated child-process verification "
+        "does not use Kriya's grounded application launch.\n" + details
+        + "\nRepair the TEST/verification mechanism only; preserve application behavior. "
+        f"Use main class {exemplar['entrypoint']} with classpath "
+        f"{exemplar['classes_dir']}, launch a distinct child, wait for it, and capture "
+        "stdout/stderr/exit code. A child launch/setup failure is not evidence against "
+        "the application source."
+    )
+    failure = Failure(
+        type="test_verification_infrastructure_failure",
+        message=message, raw_output=message,
+        likely_files=offending, attempt=state.attempt_number,
+        diagnostics={
+            "reason_code": "UNGROUNDED_CHILD_PROCESS_LAUNCH",
+            "grounded_entrypoint": exemplar["entrypoint"],
+            "grounded_classpath": exemplar["classes_dir"],
+        },
+    )
+    state.gate_outcomes.append(failure.to_gate_outcome())
+    raise QualityGateFailure(failure)
+
+
+def _prepare_finite_command_runtime_artifacts(
+    resolved_run_commands: List[List[str]],
+    validator: "PolymorphicValidator",
+    ctx: "AttemptContext",
+    state: GenerationState,
+) -> None:
+    """finite_command artifact preparation (2026-09-11) - the finite_command
+    counterpart to Managed Runtime Verification's own P6 fix
+    (kriya/tools/service_runtime.py's _prepare_required_artifact). Real live
+    incident this closes: a `java -jar target/artemis-demo-1.0-SNAPSHOT.jar`
+    finite_command failed with "Unable to access jarfile" on every attempt,
+    because neither run_compile_check() (`mvn clean compile`) nor run_tests()
+    (`mvn test`) ever reaches Maven's `package` phase - only managed_service
+    verification had ever run `mvn package` before this. Reuses the EXACT
+    SAME detection/staleness/build primitive managed_service already uses
+    (never a second Maven-specific implementation) - only the caller and the
+    failure-shape mapping below are new.
+
+    Called for every command in the sequence, not just the last - REQUIRED
+    BEHAVIOR 3/4: `_prepare_required_artifact` is itself a fast no-op for any
+    command that doesn't reference a `-jar`/single-jar `-cp` artifact, or
+    whose artifact already exists and is current relative to pom.xml/src -
+    this function never runs `mvn package` unconditionally.
+
+    Threads the validator's own JAVA_HOME/sandbox policy
+    (build_subprocess_env_and_preexec()) into the SAME preparation call, so
+    `mvn package` never silently runs under a different JDK than the one
+    the compile gate already validated against.
+
+    Failure-shape mapping (REQUIRED BEHAVIOR 5/6): a build command that
+    actually ran and failed (non-zero exit/timeout) - real evidence about
+    THIS project's own pom.xml/content - is raised as an ordinary,
+    repair-eligible "compile" Quality Gate failure, exactly like any other
+    compile failure; a build that reported success but still didn't produce
+    the expected artifact gets its own distinct, also repair-eligible
+    "package_preparation_failed" type (neither of these ever sets
+    state.environment_failure - see retry_strategy.py's STOP_ENVIRONMENT
+    type-set, which deliberately does not include either). Only a genuine
+    inability to even ATTEMPT a build - no pom.xml, or the build command
+    itself could not be invoked (e.g. 'mvn' missing from PATH) - remains
+    "verification_infrastructure_failure", the existing, correct
+    environment/toolchain-eligible classification."""
+    env, preexec_fn = validator.build_subprocess_env_and_preexec()
+    controller = ProcessController()
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    for command in resolved_run_commands:
+        outcome = _prepare_required_artifact(
+            command, ctx.worktree_path, controller=controller, env=env, preexec_fn=preexec_fn,
+        )
+        if outcome.outcome is None:
+            continue
+        output = f"stdout:\n{outcome.stdout}\n\nstderr:\n{outcome.stderr}"
+        build_command_desc = " ".join(outcome.command) if outcome.command else "(none invoked)"
+
+        if outcome.outcome == ServiceVerificationOutcomeKind.ARTIFACT_MATERIALIZATION_FAILED:
+            message = (
+                f"PACKAGE_PREPARATION_FAILED: {outcome.reasoning} This means either the "
+                "run command's artifact path/name doesn't match what this project's "
+                "pom.xml (artifactId/version/finalName) actually produces, or a "
+                "packaging plugin configuration issue silently produced no output there "
+                "- not an environment/toolchain problem (the build itself exited "
+                f"successfully).\n\nBuild command: {build_command_desc}\n\n{output}"
+            )
+            failure = _build_quality_gate_failure(
+                type_="package_preparation_failed", message=message, raw_output=output,
+                worktree_path=ctx.worktree_path, known_files=known_files,
+                attempt=state.attempt_number, extra_likely_files=["pom.xml"],
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+        # PREPARATION_FAILED - distinguish "the build command actually ran
+        # and failed" (command+returncode both set - ProcessController.run()
+        # never leaves returncode as None, see its own RunResult) from
+        # "never got that far" (no pom.xml, or the invocation itself raised
+        # before producing any process result - command may be set but
+        # returncode stays the dataclass default None either way).
+        if outcome.command is not None and outcome.returncode is not None:
+            message = (
+                f"PACKAGE_PREPARATION_FAILED: {outcome.reasoning}\n\n"
+                f"Build command: {build_command_desc}\n\n{output}"
+            )
+            failure = _build_quality_gate_failure(
+                type_="compile", message=message, raw_output=output,
+                worktree_path=ctx.worktree_path, known_files=known_files,
+                attempt=state.attempt_number, extra_likely_files=["pom.xml"],
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+        message = (
+            "VERIFICATION_INFRASTRUCTURE_FAILURE: runtime behavior was not observed "
+            f"because Kriya's own artifact-preparation step failed: {outcome.reasoning}."
+        )
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=outcome.stderr or outcome.reasoning, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+
+
+def _raise_runtime_verification_infrastructure_failure(
+    state: GenerationState,
+    run_result: Dict[str, Any],
+    commands: List[List[str]],
+) -> None:
+    """Stop application-launch failures before grading/source repair.
+
+    Build/test runners are process-based too, but their process status is
+    already the deterministic verdict.  Entrypoint-shaped text in their
+    output therefore belongs to test/build execution and must never be
+    reinterpreted by application-runtime infrastructure handling.
+    """
+    if deterministic_sequence_kind(commands) is not None:
+        return
+    # D4: a missing entrypoint is owned by whoever chose it (the validator's
+    # deterministic diagnosis of the fresh build), not infrastructure by default.
+    entrypoint = run_result.get("entrypoint_diagnosis")
+    ownership = classify_runtime_entrypoint(entrypoint, run_result.get("output", ""))
+    if ownership == CANDIDATE_RUNTIME_ENTRYPOINT_INVALID:
+        _raise_candidate_runtime_entrypoint_failure(state, run_result, commands, entrypoint)
+    reason = runtime_verification_infrastructure_reason(run_result)
+    if reason is None:
+        return
+    if ownership is not None:
+        reason = (f"{ownership}: the runtime entrypoint {entrypoint['effective_entrypoint']} "
+                  f"(chosen by {entrypoint['effective_entrypoint_provenance']}; declared in source: "
+                  f"{entrypoint['source_declares_entrypoint']}; compiled: {entrypoint['compiled_artifact_exists']}) "
+                  "could not be loaded")
+    state.cached_run_verification_judgment = None
+    message = (
+        "VERIFICATION_INFRASTRUCTURE_FAILURE: runtime behavior was not observed because "
+        f"the verifier infrastructure failed: {reason}.\n\nCaptured output:\n"
+        f"{run_result.get('output', '')}"
+    )
+    code = reason.split(":", 1)[0]
+    failure = Failure(
+        type="verification_infrastructure_failure", message=message,
+        raw_output=run_result.get("output", ""), attempt=state.attempt_number,
+        diagnostics={"reason_code": code} if code.isupper() and "_" in code else None,
+    )
+    outcome = failure.to_gate_outcome()
+    outcome.update({"commands": commands, "steps": run_result.get("steps", [])})
+    state.gate_outcomes.append(outcome)
+    raise QualityGateFailure(failure)
+
+
+def _raise_candidate_runtime_entrypoint_failure(
+    state: GenerationState, run_result: Dict[str, Any], commands: List[List[str]], entrypoint: Dict[str, Any],
+) -> None:
+    """D4 case A: the candidate's own build configuration selects a main class
+    that no current source declares and the fresh build did not produce. A
+    candidate defect implicating that configuration file - routed through the
+    ordinary repair path (the file's own work unit, or, from a unit that owns
+    no files, the existing grounded cross-owner recovery). The evidence names
+    the defect; Kriya never rewrites the configuration itself."""
+    config = entrypoint["candidate_config_source"]
+    message = (
+        f"{CANDIDATE_RUNTIME_ENTRYPOINT_INVALID}: the candidate's {config} selects the runtime main class "
+        f"{entrypoint['effective_entrypoint']} ({entrypoint['candidate_config_key']}), but no source in the "
+        "project declares it and the fresh build did not produce it. Maven uses this configuration over the run "
+        f"command's -Dexec.mainClass={entrypoint['requested_entrypoint']}, so the application cannot start.\n\n"
+        f"Captured output:\n{run_result.get('output', '')}"
+    )
+    failure = Failure(
+        type="candidate_runtime_entrypoint_invalid", message=message,
+        raw_output=run_result.get("output", ""), attempt=state.attempt_number, likely_files=[config],
+        diagnostics={"reason_code": CANDIDATE_RUNTIME_ENTRYPOINT_INVALID, "entrypoint_diagnosis": entrypoint},
+    )
+    outcome = failure.to_gate_outcome()
+    outcome.update({"commands": commands, "steps": run_result.get("steps", [])})
+    state.gate_outcomes.append(outcome)
+    raise QualityGateFailure(failure)
+
+
+def _apply_runtime_verification_contract(
+    commands: List[List[str]], input_channel: str,
+) -> Tuple[List[List[str]], Optional[str], Optional[str]]:
+    """Runtime Verification Contract (PRV-06, 2026-08-29). RunVerifierAgent.
+    judge() now states input_channel ("argv"/"stdin"/"none") as an explicit
+    fact about what the goal requires, independent of whatever literal
+    command it happened to return - this is the deterministic enforcement
+    layer that makes that fact actually reach the real invocation, closing
+    a live incident where the judge's own success_criteria correctly named
+    "the command line argument" but its own run_commands never supplied
+    one, and the app's own correct "no input provided" response was then
+    misdiagnosed as an application defect for 9 wasted attempts.
+
+    Returns (corrected_commands, stdin_payload, incomplete_reason).
+    incomplete_reason is None whenever the contract was successfully
+    satisfied (including "none", and "argv"/"stdin" already supplied) -
+    non-None means the caller must raise RUNTIME_VERIFICATION_CONTRACT_
+    INCOMPLETE and never launch the process (see this module's own call
+    sites). The synthetic value is a single, stable, Kriya-owned constant
+    (never asked of an LLM, matching the same discipline as every other
+    typed value this codebase generates deterministically) - it is not
+    goal-specific text, so it carries no proprietary/external data and is
+    safe to record verbatim in verification evidence.
+
+    Deliberately narrow, evidence-bounded shape detection - three proven-live
+    invocation forms get real flag-aware handling, everything else falls
+    back to a plain two-token heuristic rather than being guessed at: a
+    Maven exec:java invocation (recognized by an "exec:java" token or an
+    already-present "-Dexec.mainClass=" token - exec:exec is deliberately
+    NOT matched here, since its own argument-passing mechanism is
+    pom.xml-configured, not a "-Dexec.args=" command-line property) gets
+    "-Dexec.args=<value>" appended; any other "mvn"/"gradle"/"./gradlew"
+    invocation is left unrecognized rather than guessed at - a bare
+    trailing token there is parsed as an additional lifecycle phase/goal,
+    not a program argument, and would fail the build outright. A `java`
+    launch is parsed through its own known JVM/classpath flags-with-values
+    (-cp/-classpath/--module-path/...) to find the entrypoint token, so a
+    missing application argument is appended after the class rather than
+    confused with a JVM option's value - this flag-aware handling is
+    Java-specific, not a general per-runtime mechanism; a different
+    runtime with its own flag-with-value syntax (e.g. `dotnet run
+    --project X`, `node --experimental-modules app.js`) does NOT get the
+    same treatment and instead falls through to the plain two-token
+    fallback below. Any other exactly-two-token command (["java","Main"],
+    ["python","app.py"], ["node","app.js"], ...) gets the value appended as
+    a third, positional token. Other commands already carrying more than
+    two tokens (a non-Java command with its own extra argv), or an
+    exec:java command that already sets "-Dexec.args=", are assumed to
+    already supply their own value and are left untouched - a pre-existing
+    boundary, not new here. Only applied to the LAST command in the
+    sequence - the one that actually exercises the application's behavior
+    in every real sequence this codebase produces (see run_app_sequence's own docstring
+    for the multi-invocation case, e.g. "add an item, then list items",
+    where every earlier step is its own already-fully-specified
+    invocation, not something this function is meant to touch)."""
+    if not commands or input_channel not in ("argv", "stdin"):
+        return commands, None, None
+    if input_channel == "stdin":
+        return commands, _RUNTIME_VERIFICATION_SYNTHETIC_INPUT, None
+    *prefix, last = commands
+    # Build/test commands report their own authoritative process verdict and
+    # are not application invocations. An application argv contract is simply
+    # inapplicable to them; never turn the input value into a lifecycle goal,
+    # test selector, or package-manager argument.
+    if deterministic_verification_kind(last) is not None:
+        return commands, None, None
+    if last and os.path.basename(last[0]).lower() == "java":
+        options_with_values = {
+            "-cp", "-classpath", "--class-path", "-p", "--module-path",
+            "--upgrade-module-path", "--add-modules", "--limit-modules",
+            "--add-reads", "--add-exports", "--add-opens", "--patch-module",
+        }
+        target_index: Optional[int] = None
+        skip_next = False
+        for index, token in enumerate(last[1:], start=1):
+            if skip_next:
+                skip_next = False
+                continue
+            if token in options_with_values:
+                skip_next = True
+                continue
+            if token.startswith("-"):
+                continue
+            target_index = index
+            break
+        if target_index is not None and target_index == len(last) - 1:
+            return prefix + [last + [_RUNTIME_VERIFICATION_SYNTHETIC_INPUT]], None, None
+        if target_index is not None:
+            return commands, None, None
+    is_maven_exec_java = "exec:java" in last or any(
+        tok.startswith("-Dexec.mainClass=") for tok in last
+    )
+    if is_maven_exec_java:
+        if any(tok.startswith("-Dexec.args=") for tok in last):
+            return commands, None, None
+        return prefix + [last + [f"-Dexec.args={_RUNTIME_VERIFICATION_SYNTHETIC_INPUT}"]], None, None
+    # A bare trailing token is a valid program argument for a plain
+    # interpreter invocation (java/python/node/...), but NOT for "mvn"/
+    # "gradle" (a bare token there is parsed as an additional lifecycle
+    # phase/goal to run, e.g. "mvn exec:exec kriya-verification-input"
+    # would fail Maven outright with an unknown-phase error) - any other
+    # mvn/gradle shape besides the exec:java one already handled above is
+    # left unrecognized rather than guessed at.
+    if last and last[0] in ("mvn", "gradle", "./gradlew", "gradlew"):
+        return commands, None, (
+            f"input_channel=argv but the final command ({last!r}) is a build-tool "
+            "invocation this deterministic injector doesn't know how to pass an "
+            "argument to safely (only mvn exec:java's -Dexec.args= is supported)."
+        )
+    if len(last) == 2:
+        return prefix + [last + [_RUNTIME_VERIFICATION_SYNTHETIC_INPUT]], None, None
+    if len(last) > 2:
+        return commands, None, None
+    return commands, None, (
+        f"input_channel=argv but the final command's shape ({last!r}) isn't one this "
+        "deterministic injector recognizes - refusing to guess where to place a "
+        "command-line argument rather than silently running an under-specified invocation."
+    )
+
+
+def _run_verification_basis_hash(ctx: "AttemptContext", state: GenerationState) -> str:
+    """Fingerprint the real invocation-affecting basis for cached judgment."""
+    digest = hashlib.sha256()
+    digest.update(ctx.goal.encode("utf-8", errors="replace"))
+    digest.update(ctx.design.encode("utf-8", errors="replace"))
+    for filepath in sorted(set(state.all_files_written) | set(ctx.established_files)):
+        digest.update(filepath.encode("utf-8", errors="replace"))
+        full_path = os.path.join(ctx.worktree_path, filepath)
+        try:
+            with open(full_path, "rb") as fh:
+                # Repair-envelope parsing may add or remove only terminal
+                # whitespace while preserving the executable file.  Do not
+                # spend another judgment call for that serialization detail;
+                # substantive source/config changes still alter this basis.
+                content = fh.read().replace(b"\r\n", b"\n").rstrip()
+                digest.update(content)
+        except OSError:
+            digest.update(b"<missing>")
+    return digest.hexdigest()
 
 
 def _diagnosis_mismatch_bypass_reason(
@@ -191,6 +4065,16 @@ def _diagnosis_mismatch_bypass_reason(
     diagnosis text stays useful there, just never a blocking gate for these
     two cases) if the check should be skipped for this edit; None if the
     existing diagnosis-mismatch check should run and decide as before."""
+    # During owner restoration, prose-analysis agreement is advisory.  The
+    # exact baseline signature inspection below is the sole authority; this
+    # fuzzy heuristic must not veto a candidate before that inspection.
+    recovery = state.api_contract_recovery or {}
+    if recovery and recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT:
+        return (
+            "RESTORE_PUBLIC_CONTRACT is decided by deterministic exact-signature "
+            "inspection; diagnosis prose cannot veto owner restoration"
+        )
+
     # Bounded-veto policy, checked before anything else and independent of
     # fail_type: this check can reject a given FILE'S edit at most once per
     # run. Found live, 2026-08-17 (ignite_qpid_person, run b-10o): the
@@ -246,12 +4130,1983 @@ def _diagnosis_mismatch_bypass_reason(
         return "this retry responds to a compile/POM-validation/targeted-test failure - deferring to the real gate instead of prose-matching"
     if fail_type == "static_rule_violation":
         from kriya.workflow.static_checks import run_static_checks
+        # Unioned with ctx.established_files (see that field's own docstring) -
+        # a static rule can span an established file plus the one just edited.
         still_violates = run_static_checks(
-            ctx.worktree_path, state.all_files_written, overrides={filepath: candidate_content},
+            ctx.worktree_path, sorted(set(state.all_files_written) | set(ctx.established_files)),
+            overrides={filepath: candidate_content},
         )
         if not still_violates:
             return "the static check that originally flagged this file no longer flags the proposed content"
     return None
+
+
+def _dependency_graph_db_path(ctx: "AttemptContext") -> str:
+    return os.path.join(ctx.kernel.config.paths.memory, "dependency_graph.db")
+
+
+def _extract_class_names_best_effort(db_path: str, filepath: str, content: str) -> List[str]:
+    """Short-lived DependencyGraph open/query/close for one file - cheap
+    (existing WAL-mode SQLite file, a handful of milliseconds) and avoids
+    threading a long-lived connection through the entire per-file write loop
+    below just to reuse extract_class_names(), which is an instance method,
+    not static. Best-effort: any error (including a missing db_path, checked
+    by the caller) degrades to no names extracted, never a false rejection."""
+    try:
+        from kriya.analyzer.graph import DependencyGraph
+        graph = DependencyGraph(db_path)
+        try:
+            return graph.extract_class_names(filepath, content)
+        finally:
+            graph.close()
+    except Exception as e:
+        logger.debug(f"Skipping duplicate-type check for {filepath}: {e}")
+        return []
+
+
+def _find_java_main_class_best_effort(db_path: str, filepath: str, content: str) -> Optional[str]:
+    """Same short-lived DependencyGraph open/query/close shape as
+    _extract_class_names_best_effort() above, for
+    DependencyGraph.find_java_main_class() instead - see that method's own
+    docstring for what it detects and why (deterministic Java entrypoint
+    resolution for a no-pom.xml project, ground_java_entrypoint_in_no_build_
+    file_projects()'s call site below)."""
+    try:
+        from kriya.analyzer.graph import DependencyGraph
+        graph = DependencyGraph(db_path)
+        try:
+            return graph.find_java_main_class(filepath, content)
+        finally:
+            graph.close()
+    except Exception as e:
+        logger.debug(f"Skipping Java entrypoint detection for {filepath}: {e}")
+        return None
+
+
+def _build_java_main_class_map(java_files: List[str], ctx: "AttemptContext") -> Dict[str, str]:
+    """{filepath: entrypoint_class} for every .java file (already the
+    established_files-inclusive union the caller passes in) that has a real
+    `public static void main` - see find_java_main_class()'s own docstring.
+    Reads each file's CURRENT content fresh (worktree first, workspace
+    fallback - same lookup order used throughout this module), never cached
+    across attempts unlike judge()'s own judgment: a retry can edit a file's
+    content, and this determination must reflect what's actually on disk
+    right now, not a stale snapshot from an earlier attempt."""
+    db_path = _dependency_graph_db_path(ctx)
+    result: Dict[str, str] = {}
+    for filepath in java_files:
+        full_path = os.path.join(ctx.worktree_path, filepath)
+        if not os.path.exists(full_path):
+            full_path = os.path.join(ctx.workspace_path, filepath)
+        if not os.path.exists(full_path):
+            continue
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except Exception as e:
+            logger.debug(f"Java entrypoint detection: couldn't read {filepath}, skipping it: {e}")
+            continue
+        entrypoint_class = _find_java_main_class_best_effort(db_path, filepath, content)
+        if entrypoint_class:
+            result[filepath] = entrypoint_class
+    return result
+
+
+# VER-005 implementation (2026-09-13): noise directories skipped while
+# discovering real Python repository facts (see
+# _build_python_runtime_grounding below) - dependency/build/cache
+# artifacts, never a repository's own source, that a naive full-tree walk
+# would otherwise scan (and could misidentify a vendored third-party
+# script's own __main__ guard as a real repository entrypoint).
+_PYTHON_RUNTIME_GROUNDING_EXCLUDED_DIRS = {
+    ".git", ".kriya", "__pycache__", ".venv", "venv", "env", "node_modules",
+    ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build",
+    ".eggs", "site-packages",
+}
+
+
+def _collect_python_runtime_grounding_facts(root: str) -> Tuple[FrozenSet[str], FrozenSet[str]]:
+    """Bounded, single-pass walk of `root` collecting every real, in-scope
+    `.py` file's workspace-relative path, plus the set of real Python
+    package directories (those containing __init__.py) - the two
+    repository-wide facts ground_python_runtime_target() (kriya/workflow/
+    file_resolution.py) needs to validate an LLM-proposed runtime target
+    against real evidence instead of trusting it. followlinks=False plus a
+    per-entry is_within_scope() check (the same symlink-safe containment
+    idiom PolymorphicValidator.run_app_sequence()'s own javac -d directory
+    creation already uses, kriya/tools/validate.py) - a malicious symlink
+    inside the repository can never smuggle an outside path into either
+    returned set."""
+    scope = make_workspace_scope(root)
+    all_py: set = set()
+    package_dirs: set = set()
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = [
+            d for d in dirnames
+            if d not in _PYTHON_RUNTIME_GROUNDING_EXCLUDED_DIRS and not d.startswith(".")
+        ]
+        rel_dir = os.path.relpath(dirpath, root)
+        if "__init__.py" in filenames:
+            norm_dir = "" if rel_dir == "." else rel_dir.replace(os.sep, "/")
+            package_dirs.add(norm_dir)
+        for fname in filenames:
+            if not fname.endswith(".py"):
+                continue
+            full = os.path.join(dirpath, fname)
+            if not is_within_scope(scope, full):
+                continue
+            rel = os.path.relpath(full, root).replace(os.sep, "/")
+            all_py.add(rel)
+    return frozenset(all_py), frozenset(package_dirs)
+
+
+def _build_python_runtime_grounding(root: str) -> Tuple[FrozenSet[str], FrozenSet[str], List[str]]:
+    """(all_python_files, package_dirs, entrypoint_files) - the real,
+    repository-wide facts ground_python_runtime_target() validates an
+    LLM-proposed Python runtime-verification target against (VER-005
+    implementation, 2026-09-13). Deliberately walks the real filesystem
+    from `root` rather than being scoped to this run's own
+    state.all_files_written the way Java's _build_java_main_class_map is:
+    Python entrypoint/package structure routinely PREDATES the current
+    attempt entirely in a brownfield repository (a pre-existing top-level
+    main.py never touched this run, a pre-existing validation/__init__.py
+    from before Kriya ever ran) - scoping to run-local writes would
+    silently reintroduce a false-negative version of the exact defect this
+    fixes (a genuinely valid, untouched entrypoint rejected as
+    "nonexistent"). Recomputed fresh every attempt, never cached alongside
+    RunVerifierAgent.judge()'s own judgment - same "a retry can edit file
+    content between attempts, so this must reflect what's actually on disk
+    right now" reasoning ground_java_entrypoint_in_no_build_file_projects's
+    own call sites already apply.
+
+    entrypoint_files is every real, non-test, non-__init__.py `.py` file
+    under root with REAL, observable top-level behavior when run directly -
+    the Python sibling of _build_java_main_class_map's real-main()-method
+    detection, but grounded in Python's own semantics (see python_file_
+    is_runnable_script()'s own docstring for why a required `__main__`
+    guard is the wrong transliteration of Java's requirement)."""
+    all_py, package_dirs = _collect_python_runtime_grounding_facts(root)
+    entrypoints: List[str] = []
+    for rel in sorted(all_py):
+        if python_target_path_is_test_shaped(rel) or os.path.basename(rel) == "__init__.py":
+            continue
+        full = os.path.join(root, rel)
+        try:
+            with open(full, "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except Exception as e:
+            logger.debug(f"Python entrypoint detection: couldn't read {rel}, skipping it: {e}")
+            continue
+        if python_file_is_runnable_script(content):
+            entrypoints.append(rel)
+    return all_py, package_dirs, entrypoints
+
+
+_JAVA_PACKAGE_DECL_RE = re.compile(r"^\s*package\s+([\w.]+)\s*;", re.MULTILINE)
+
+
+def _build_java_package_map(java_files: List[str], ctx: "AttemptContext") -> Dict[str, Optional[str]]:
+    """{filepath: package_or_None} for every .java file given, read fresh
+    (worktree first, workspace fallback, same lookup order as
+    _build_java_main_class_map() above) - the I/O half of
+    find_cross_package_symbol_mismatch()'s own deliberately pure/testable
+    design (kriya/workflow/failure_grounding.py). None means the file has no
+    package declaration (Java's default/unnamed package), which is a real,
+    meaningful value here, not "unknown" - a file that can't be read at all
+    is simply omitted from the returned dict rather than guessed at."""
+    result: Dict[str, Optional[str]] = {}
+    for filepath in java_files:
+        full_path = os.path.join(ctx.worktree_path, filepath)
+        if not os.path.exists(full_path):
+            full_path = os.path.join(ctx.workspace_path, filepath)
+        if not os.path.exists(full_path):
+            continue
+        try:
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except Exception as e:
+            logger.debug(f"Java package detection: couldn't read {filepath}, skipping it: {e}")
+            continue
+        pkg_match = _JAVA_PACKAGE_DECL_RE.search(content)
+        result[filepath] = pkg_match.group(1) if pkg_match else None
+    return result
+
+
+def _build_workspace_type_index(state: GenerationState, ctx: "AttemptContext") -> Dict[str, List[str]]:
+    """Workspace-wide simple-class-name -> [filepaths] index for the
+    duplicate-type-across-files pre-flight check below and
+    find_cross_package_symbol_mismatch() (see their own docstrings for the
+    live incidents this exists to prevent). Two layers:
+
+    1. DependencyGraph.get_class_symbol_locations() - the persisted baseline,
+       covering pre-existing repo content and every earlier-completed
+       milestone's already-applied output, PROVIDED `kriya analyze` has ever
+       actually been run against this workspace. Found live, 2026-08-22
+       (ignite_qpid_protocol): this baseline is NOT populated automatically
+       by run_generation_workflow() at all - index_repository() (the only
+       thing that ever writes real rows into dependency_graph.db's symbols
+       table) is called exclusively from the explicit `kriya analyze`/
+       `kriya analyze --vectors` CLI path (kriya/cli.py) - a milestone-
+       decomposition project that never had that command run against it has
+       a genuinely EMPTY persisted baseline for its entire lifetime, however
+       many milestones have completed. Best-effort by construction regardless
+       (no dependency_graph.db yet, or any DB error, degrades to an empty
+       baseline for this layer) - this is exactly why layer 2 below is not
+       optional supplementary coverage, it is THE primary coverage for any
+       project that has never been explicitly `kriya analyze`-d.
+    2. Every file in state.all_files_written UNION ctx.established_files,
+       read fresh (worktree first, workspace fallback - same lookup order
+       used throughout this module) and parsed via
+       DependencyGraph.extract_class_names() (no DB write). Found live,
+       2026-08-22, the SAME "established_files blind spot" class of bug
+       already fixed three times this session at other call sites
+       (RunVerifierAgent.judge()'s files_written, self-diagnosis
+       attribution): this layer previously covered ONLY state.
+       all_files_written (files THIS attempt itself wrote), so an earlier,
+       already-completed milestone's file was invisible to both the
+       duplicate-type gate and find_cross_package_symbol_mismatch() unless
+       `kriya analyze` happened to have indexed it into layer 1 - for a
+       project that never had that command run, EVERY earlier milestone's
+       file was invisible to this whole index, silently, for this session's
+       entire live-validation effort."""
+    db_path = _dependency_graph_db_path(ctx)
+    try:
+        from kriya.analyzer.graph import DependencyGraph
+        graph = DependencyGraph(db_path)
+        try:
+            index = graph.get_class_symbol_locations()
+        finally:
+            graph.close()
+        for written_path in sorted(set(state.all_files_written) | set(ctx.established_files)):
+            full_path = os.path.join(ctx.worktree_path, written_path)
+            if not os.path.exists(full_path):
+                full_path = os.path.join(ctx.workspace_path, written_path)
+            if not os.path.exists(full_path):
+                continue
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                written_content = fh.read()
+            for name in _extract_class_names_best_effort(db_path, written_path, written_content):
+                paths = index.setdefault(name, [])
+                if written_path not in paths:
+                    paths.append(written_path)
+        return index
+    except Exception as e:
+        logger.debug(f"_build_workspace_type_index: skipping duplicate-type check for this attempt: {e}")
+        return {}
+
+
+def _runtime_verification_is_advisory_only(ctx: "AttemptContext", judgment: Dict[str, Any]) -> bool:
+    """The ONE authority for "is this subtask allowed to actually execute
+    the run-verification judge's inferred command right now" - PRV-17
+    (2026-09-03). ctx.goal for a bounded MA6 subtask always includes the
+    full, unmediated "Authoritative Goal" section (build_subtask_goal_
+    text(), the PRV-11 authority-isolation fix) - deliberately, so judge()
+    can still recognize a goal-explicit run command - but judge() itself
+    has no per-subtask stage-scoping equivalent to SpecComplianceAgent's
+    own _stage_scoped_spec_compliance_goal() (that fix's own docstring:
+    "this gate's own prompt below is the other half of that fix" - judge()
+    was never given the other half). ctx.runtime_verification_required IS
+    already computed correctly per-subtask (workflow_controller.py, from
+    THIS subtask's own target.verification) - an inferred should_run=True
+    from a subtask whose own approved plan declares no runtime obligation
+    is judge()'s best-effort guess against the full goal text, not
+    evidence this specific, bounded subtask must satisfy runtime behavior
+    right now. A later subtask whose plan DOES declare the obligation
+    still runs this exact check for real - this only ever suppresses an
+    UNDECLARED inference, never a declared requirement (a no-op whenever
+    ctx.runtime_verification_required is True).
+
+    A live incident found TWO separate call sites independently re-
+    implementing "call judge(), maybe execute, maybe grade()"
+    (_execute_runtime_verification_directly for a DENY_ALL verification-
+    only subtask, and run_attempt()'s own much larger inline block for an
+    ordinary ALLOWLIST implementation subtask) - an earlier fix patched
+    only the first, so an ordinary scaffold subtask (ALLOWLIST, not
+    DENY_ALL - the common case) still executed a FUTURE-owned endpoint's
+    inferred `manage.py runserver` command. Both call sites now consult
+    this ONE function instead of each re-deriving the same decision - the
+    "second authority" is closed by construction, not by finding and
+    patching every copy by hand. Unstructured/legacy callers (ctx.
+    structured_plan is None) are completely unaffected - runtime_
+    verification_required there is already derived from the WHOLE goal,
+    matching pre-existing behavior exactly."""
+    return bool(
+        ctx.structured_plan is not None and ctx.current_subtask_id
+        and not ctx.runtime_verification_required
+        and judgment.get("should_run")
+    )
+
+
+def _required_runtime_verification_missing_message(judgment: Dict[str, Any]) -> str:
+    """PRV-06 (2026-08-28): observability fix, not a behavioral one - the
+    judge's own stated reasoning (RunVerifierAgent.judge()'s `reasoning`
+    field) is never consulted by any should_run/run_commands decision
+    anywhere in this codebase, only surfaced here so a
+    REQUIRED_RUNTIME_VERIFICATION_MISSING failure's persisted gate_outcome/
+    traces.db record carries the judge's own explanation instead of a bare
+    boolean with no way to tell a genuine "no runtime behavior to check"
+    call apart from a judgment mistake. Found live, PRV-06 (2026-08-28):
+    a Legacy run hit this exact failure after 8 prior compile/test-gate
+    failures (the judge is called at most once per subtask, only once
+    compile+test finally pass), and there was no way to tell whether the
+    single should_run=False verdict was a genuine call or a mistake -
+    `reasoning` may still be empty (the model can omit it despite the
+    prompt asking for it; never fabricated here), but when present this
+    closes that exact gap."""
+    reasoning = judgment.get("reasoning") or "(no reasoning field returned by the judge)"
+    return (
+        "REQUIRED_RUNTIME_VERIFICATION_MISSING: the declared verification contract requires "
+        "observable runtime behavior, but no executable verification sequence was produced.\n"
+        f"Judge's own reasoning: {reasoning}"
+    )
+
+
+async def _run_verification_only_attempt(state: GenerationState, ctx: AttemptContext) -> None:
+    """First-class execution path for a verification-only subtask
+    (ctx.write_scope_mode == WriteScopeMode.DENY_ALL): executes its own
+    declared deterministic verifier(s) directly against the existing
+    worktree content - no Developer invocation, no candidate write attempt,
+    no retry loop of its own. Raises QualityGateFailure (the same typed
+    shape an ordinary compile/test failure already raises) the moment any
+    verifier fails, so the EXISTING failure-attribution/recovery machinery
+    handles it exactly as it would any other subtask failure - this
+    function does not invent a new recovery path.
+
+    Found live, PRV-05 (2026-08-28): before this existed, a verification-
+    only subtask (files=[], DENY_ALL) still entered the ordinary Developer
+    mutation/retry pipeline. Every attempt's Developer response inevitably
+    tried to write SOMETHING (it has no other protocol), DENY_ALL correctly
+    rejected each one, and the loop burned 6 attempts (escalating to the
+    fallback model) before a runtime-verification side effect happened to
+    produce the exact evidence a direct verifier call would have produced
+    on attempt 1. Confirmed live evidence, same run: real `mvn -e test`
+    exit-0 evidence WAS produced, but under gate_outcome type="run_verification"
+    (the runtime-verification path's own type) while the plan's declared
+    requirement was type=tool/tool_name=test - workflow.py's
+    _build_required_verification_evidence() only matches a tool/test
+    requirement against type in {"test","targeted_test","regression_test"}
+    outcomes, so the real evidence was never connected to the obligation.
+    Running the DECLARED verifier directly here (via the same
+    PolymorphicValidator.run_tests()/run_compile_check() every ordinary
+    attempt already uses) records the gate_outcome under the SAME type the
+    requirement itself expects, closing that mismatch as a side effect of
+    fixing the real problem (verification-only subtasks running the wrong
+    execution path) rather than patching the symptom (evidence-matching
+    logic) directly."""
+    from kriya.tools.validate import PolymorphicValidator
+
+    state.attempt_number += 1
+    state.candidate_gates_succeeded = False
+    validator = PolymorphicValidator(
+        ctx.worktree_path, original_workspace_path=ctx.workspace_path,
+        autonomy_cfg=ctx.kernel.config.autonomy,
+        toolchain_declaration_mutable=_ctx_toolchain_declaration_mutable(ctx),
+    )
+    # PRD-031: the declared verifiers are sequenced by VerificationCoordinator.
+    await VerificationCoordinator(
+        validator, record_gate_outcome=lambda outcome: state.gate_outcomes.append(outcome),
+        run_runtime_verification=lambda: _execute_runtime_verification_directly(state, ctx, validator),
+    ).verify(VerificationRequest(
+        required_verification=ctx.required_verification,
+        known_files=sorted(set(ctx.established_files)), attempt_number=state.attempt_number,
+    ))
+
+    state.candidate_gates_succeeded = True
+    state.record_event(RunEvent(
+        kind="candidate_gates.passed",
+        attempt=state.attempt_number,
+        source="workflow",
+        authority=EventAuthority.AUTHORITATIVE,
+        details={"passed": True, "terminal": False, "verification_only": True},
+    ))
+    log_gate_banner(
+        "CANDIDATE GATES", "PASSED", state.attempt_number,
+        scope=ctx.execution_scope,
+    )
+
+
+_SUPPORTED_RUNTIME_EXECUTION_MODES = frozenset({"finite_command", "managed_service"})
+
+_MANAGED_SERVICE_SHELL_MARKERS = frozenset({"&&", "||", ";", "&"})
+_MANAGED_SERVICE_FORBIDDEN_LEADING_EXECUTABLES = frozenset({"nohup", "sleep"})
+_SHELL_INTERPRETER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
+
+_MANAGED_SERVICE_INFRASTRUCTURE_OUTCOMES = frozenset({
+    # Artifact Preparation (P6 production-validation, 2026-09-07): a
+    # missing/unbuildable runnable artifact is exactly as much an
+    # infrastructure condition as a service that never started - the
+    # application itself was never even launched, so PROBE_FAILED-style
+    # "eligible for normal Developer repair" treatment would be wrong here
+    # too, same reasoning as every other member of this set.
+    ServiceVerificationOutcomeKind.PREPARATION_FAILED,
+    ServiceVerificationOutcomeKind.ARTIFACT_MATERIALIZATION_FAILED,
+    ServiceVerificationOutcomeKind.SERVICE_START_FAILED,
+    ServiceVerificationOutcomeKind.READINESS_TIMEOUT,
+    ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY,
+    ServiceVerificationOutcomeKind.CLEANUP_FAILED,
+    ServiceVerificationOutcomeKind.VERIFICATION_INTERNAL_ERROR,
+})
+
+# Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04): the subset of
+# _MANAGED_SERVICE_INFRASTRUCTURE_OUTCOMES above whose `output` is the
+# TARGET APPLICATION's own captured stdout/stderr - real text worth running
+# through classify_environment_failure(), the same classifier compile/test
+# failures already consult. CLEANUP_FAILED and VERIFICATION_INTERNAL_ERROR
+# are deliberately excluded: both are Kriya's OWN process-management code
+# failing (or an exception raised inside kriya.tools.service_runtime
+# itself), never the target application's text - classifying an internal
+# Kriya traceback via a heuristic built to read a DIFFERENT application's
+# output would be exactly the "never designed to recognize an arbitrary
+# internal traceback" mistake this module's own PRV-06 precedent (see
+# retry_strategy.py's environment_failure bypass-set comment) already
+# rejected once. SERVICE_START_FAILED is included even though it can also
+# legitimately mean "no captured output at all" (e.g. the interpreter
+# itself was never found) - classify_environment_failure/extract_missing_
+# project_local_python_module both fail closed (return None) on text that
+# doesn't match their own patterns, so an empty/unrelated `output` here
+# simply falls through to the unchanged STOP_ENVIRONMENT path below, no
+# special-casing required.
+_MANAGED_SERVICE_OUTCOMES_WITH_CAPTURED_APPLICATION_OUTPUT = frozenset({
+    # PREPARATION_FAILED's own `output` is the build tool's real stdout/
+    # stderr (e.g. a genuine `mvn package` compile error) - real,
+    # classifiable project text, same category as a compile-check failure
+    # already routed through this classifier. ARTIFACT_MATERIALIZATION_
+    # FAILED is deliberately excluded: that outcome's own stdout/stderr is
+    # a build command that reported SUCCESS - nothing in it indicates a
+    # code defect to classify, same reasoning CLEANUP_FAILED/VERIFICATION_
+    # INTERNAL_ERROR already use to stay out of this set.
+    ServiceVerificationOutcomeKind.PREPARATION_FAILED,
+    ServiceVerificationOutcomeKind.SERVICE_START_FAILED,
+    ServiceVerificationOutcomeKind.READINESS_TIMEOUT,
+    ServiceVerificationOutcomeKind.SERVICE_EXITED_BEFORE_READY,
+})
+
+_MANAGED_SERVICE_READINESS_KINDS = frozenset({"tcp", "http"})
+_MANAGED_SERVICE_PROBE_KINDS = frozenset({"http"})
+
+
+def _resolve_execution_mode(judgment: Dict[str, Any]) -> Tuple[Any, Optional[str]]:
+    """Managed Runtime Verification (2026-09-03): (mode, error). error is
+    None for either of the two supported modes; anything else is itself a
+    verification-infrastructure defect, not a silent fallback to
+    finite_command - a caller passing an unsupported execution_mode is
+    exactly as unexecutable as a missing service_command, and must be
+    rejected the same way. RunVerifierAgent.judge() only backward-
+    compatibly defaults a genuinely ABSENT execution_mode to
+    "finite_command" - an explicitly-present, unrecognized value now
+    survives unchanged so this check (the single source of truth both
+    runtime-verification call sites consult, exactly like _runtime_
+    verification_is_advisory_only above) can actually reject it, rather
+    than the agent layer silently rewriting it into something that always
+    passed. isinstance-guarded (not a bare `in _SUPPORTED_RUNTIME_
+    EXECUTION_MODES` membership test) so a malformed non-string value (a
+    list, a dict) is reported as unsupported instead of crashing on an
+    unhashable-type lookup - a JSON response neither this function nor
+    judge() controls the exact shape of."""
+    execution_mode = judgment.get("execution_mode")
+    if execution_mode is None:
+        execution_mode = "finite_command"
+    if not isinstance(execution_mode, str) or execution_mode not in _SUPPORTED_RUNTIME_EXECUTION_MODES:
+        return execution_mode, f"unsupported execution_mode {execution_mode!r}"
+    return execution_mode, None
+
+
+def _looks_like_shell_compound_command(command: Any) -> bool:
+    """Managed Runtime Verification (2026-09-03): the one thing a managed-
+    service judgment must never be allowed to smuggle through - a service-
+    start-then-probe intent re-encoded as a single shell-compound command
+    (`runserver && curl`, `runserver ; curl`, `nohup runserver &`, a
+    `sh -c "..."` wrapper) instead of the structured service_command/
+    readiness/probe fields MANAGED_SERVICE exists specifically to carry.
+    Deliberately narrow: `["bash", "start_server.sh"]` (a real launcher
+    script as an ordinary argument, no `-c`) is NOT flagged - only the
+    shapes that are actually shell orchestration are."""
+    if not isinstance(command, list) or not command or not all(isinstance(tok, str) for tok in command):
+        return False
+    executable = os.path.basename(command[0]).lower()
+    if executable in _MANAGED_SERVICE_FORBIDDEN_LEADING_EXECUTABLES:
+        return True
+    if executable in _SHELL_INTERPRETER_EXECUTABLES and "-c" in command:
+        return True
+    return any(tok in _MANAGED_SERVICE_SHELL_MARKERS for tok in command)
+
+
+def _reject_non_local_managed_service_host(field_name: str, host: str) -> Optional[str]:
+    """External review, 2026-09-03 (P0): a managed-service readiness/probe
+    target is a real outbound network connection kriya/tools/service_
+    runtime.py will actually make (socket.create_connection/urllib.request.
+    urlopen), completely bypassing kriya/core/llm.py's egress boundary -
+    that boundary only ever guards LLM completion calls, and MA4.6's
+    ExecutionPolicy network-egress check (kriya/policy/execution.py) only
+    ever guards NETWORK_ACCESS/LLM_NETWORK_ACCESS action requests routed
+    through the policy engine, neither of which this new code path is. An
+    LLM judgment naming host="example.com" would otherwise connect
+    externally with zero enforcement - exactly the local-only boundary
+    CLAUDE.md's "Egress control" section says every LLM call site must
+    respect, now extended to this one. Deliberately reuses is_local_url
+    itself (function-local import, mirroring kriya/policy/execution.py's
+    own _check_network_egress precedent and its own documented reasoning)
+    rather than writing a second, independently-maintained local/private-
+    address heuristic that could quietly drift from the real boundary's
+    definition of "local"."""
+    from kriya.core.llm import is_local_url
+
+    if not is_local_url(f"http://{host}"):
+        return (
+            f"managed_service.{field_name} host {host!r} is not a local/private address - "
+            "managed-service verification may only target the local workspace, matching "
+            "Kriya's local-only egress boundary (kriya/core/llm.py::is_local_url)"
+        )
+    return None
+
+
+def _validate_and_convert_readiness(raw: Any) -> Tuple[Optional[ReadinessSpec], Optional[str]]:
+    if not isinstance(raw, dict):
+        return None, "managed_service.readiness is missing or not a JSON object"
+    kind = raw.get("kind")
+    if kind not in _MANAGED_SERVICE_READINESS_KINDS:
+        return None, f"managed_service.readiness.kind must be one of {sorted(_MANAGED_SERVICE_READINESS_KINDS)}, got {kind!r}"
+    host = raw.get("host", "127.0.0.1")
+    if not isinstance(host, str) or not host:
+        return None, f"managed_service.readiness.host must be a non-empty string, got {host!r}"
+    egress_error = _reject_non_local_managed_service_host("readiness", host)
+    if egress_error:
+        return None, egress_error
+    port = raw.get("port")
+    if not isinstance(port, int) or isinstance(port, bool) or not (1 <= port <= 65535):
+        return None, f"managed_service.readiness.port must be an integer 1-65535, got {port!r}"
+    path = raw.get("path", "/")
+    if not isinstance(path, str) or (kind == "http" and not path.startswith("/")):
+        return None, f"managed_service.readiness.path must be a string starting with '/', got {path!r}"
+    return ReadinessSpec(kind=kind, host=host, port=port, path=path), None
+
+
+def _validate_and_convert_probe(raw: Any) -> Tuple[Optional[ProbeSpec], Optional[str]]:
+    if not isinstance(raw, dict):
+        return None, "managed_service.probe is missing or not a JSON object"
+    kind = raw.get("kind", "http")
+    if kind not in _MANAGED_SERVICE_PROBE_KINDS:
+        return None, f"managed_service.probe.kind must be one of {sorted(_MANAGED_SERVICE_PROBE_KINDS)}, got {kind!r}"
+    host = raw.get("host", "127.0.0.1")
+    if not isinstance(host, str) or not host:
+        return None, f"managed_service.probe.host must be a non-empty string, got {host!r}"
+    egress_error = _reject_non_local_managed_service_host("probe", host)
+    if egress_error:
+        return None, egress_error
+    port = raw.get("port")
+    if not isinstance(port, int) or isinstance(port, bool) or not (1 <= port <= 65535):
+        return None, f"managed_service.probe.port must be an integer 1-65535, got {port!r}"
+    path = raw.get("path", "/")
+    if not isinstance(path, str) or not path.startswith("/"):
+        return None, f"managed_service.probe.path must be a string starting with '/', got {path!r}"
+    expected_status = raw.get("expected_status", 200)
+    if not isinstance(expected_status, int) or isinstance(expected_status, bool) or not (100 <= expected_status <= 599):
+        return None, f"managed_service.probe.expected_status must be an HTTP status integer, got {expected_status!r}"
+    method = raw.get("method", "GET")
+    if not isinstance(method, str) or not method:
+        return None, f"managed_service.probe.method must be a non-empty string, got {method!r}"
+    expected_body_contains = raw.get("expected_body_contains")
+    if expected_body_contains is not None and not isinstance(expected_body_contains, str):
+        return None, f"managed_service.probe.expected_body_contains must be a string or null, got {expected_body_contains!r}"
+    return ProbeSpec(
+        kind=kind, method=method, host=host, port=port, path=path,
+        expected_status=expected_status, expected_body_contains=expected_body_contains,
+    ), None
+
+
+def _validate_and_convert_managed_service_contract(
+    managed_service: Any, worktree_path: str, validator: "PolymorphicValidator",
+) -> Tuple[Optional[ManagedServiceVerificationSpec], Optional[str]]:
+    """Managed Runtime Verification (2026-09-03) - the deterministic
+    admission check a MANAGED_SERVICE judgment must pass BEFORE any
+    process starts. Mirrors _apply_runtime_verification_contract's own
+    (spec_or_none, reason_or_none) shape exactly: a non-None reason means
+    the caller raises VERIFICATION_INFRASTRUCTURE_FAILURE and calls
+    neither run_managed_service_verification() nor the Developer, the same
+    RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE precedent the finite-command
+    path already uses. Pure validation/conversion - no process is started,
+    no I/O happens here, nothing in this function can itself fail non-
+    deterministically. This is the one place a kriya.tools.service_runtime
+    type gets constructed from agent/workflow-facing data - the dependency
+    direction stays agent/workflow representation -> this conversion ->
+    kriya.tools.service_runtime's own execution spec, never the reverse
+    (kriya/tools/service_runtime.py imports nothing from kriya.workflow or
+    kriya.agents, and stays completely unaware of interpreter/dependency
+    resolution - that grounding happens here, once, before the spec is
+    ever built).
+
+    Environment-grounding fix (2026-09-03, external review): a live PRV-17
+    run proved this service_command reached ProcessController.start_managed()
+    completely ungrounded - a bare "python" token resolves via whatever
+    PATH/environment Kriya's own process happens to inherit, which is NOT
+    the project-local, dependency-installed interpreter run_tests()/
+    run_app_sequence() already resolve for this same workspace
+    (PolymorphicValidator._resolve_python_interpreter()/_substitute_python_
+    interpreter()) - a Django app's managed-service verification failed
+    with ModuleNotFoundError even though the identical dependency had
+    already been correctly installed for the test gate one step earlier.
+    Reuses that EXISTING primitive (the same one run_app()/run_app_sequence()
+    already call) rather than inventing a second resolver - a no-op for
+    every non-Python stack or a Python workspace with no real dependency
+    manifest, exactly like its two existing call sites."""
+    if not isinstance(managed_service, dict):
+        return None, "managed_service object is missing or not a JSON object"
+
+    service_command = managed_service.get("service_command")
+    if (
+        not isinstance(service_command, list) or not service_command
+        or not all(isinstance(tok, str) and tok for tok in service_command)
+    ):
+        return None, "managed_service.service_command is missing, empty, or not a list of non-empty strings"
+    if _looks_like_shell_compound_command(service_command):
+        return None, (
+            f"managed_service.service_command {service_command!r} looks like a shell-compound "
+            "invocation (&&, ;, &, nohup, sleep, or a shell -c wrapper) - the service and its "
+            "probe must be represented as separate structured fields, not one shell command"
+        )
+
+    grounded_commands, install_error = validator._substitute_python_interpreter([service_command])
+    if install_error:
+        return None, f"managed_service.service_command dependency resolution failed: {install_error}"
+    service_command = grounded_commands[0]
+
+    # VER-005 implementation (2026-09-13): a MANAGED_SERVICE target has no
+    # safe deterministic substitute the way a FINITE_COMMAND target does
+    # (ground_python_runtime_target() above) - there is no principled way
+    # to guess which OTHER command should start a long-running service
+    # instead. The one thing this can and must still refuse deterministically,
+    # at this same pre-process-launch admission boundary every other
+    # managed_service field is already validated at: a test file/module is
+    # never a valid service entrypoint, regardless of what RunVerifierAgent.
+    # judge() returned. Structural-only (python_command_targets_test_path
+    # needs no repository-wide grounding facts) - fails closed here rather
+    # than ever reaching ProcessController.start_managed().
+    if python_command_targets_test_path(service_command):
+        return None, (
+            f"managed_service.service_command {service_command!r} targets a test file/module - "
+            "a test artifact is never a valid long-running service entrypoint"
+        )
+
+    readiness, readiness_error = _validate_and_convert_readiness(managed_service.get("readiness"))
+    if readiness_error:
+        return None, readiness_error
+    probe, probe_error = _validate_and_convert_probe(managed_service.get("probe"))
+    if probe_error:
+        return None, probe_error
+
+    timeout_fields = {}
+    for field_name, default in (
+        ("startup_timeout_seconds", 20.0),
+        ("probe_timeout_seconds", 10.0),
+        ("shutdown_timeout_seconds", 10.0),
+    ):
+        raw_value = managed_service.get(field_name, default)
+        if not isinstance(raw_value, (int, float)) or isinstance(raw_value, bool) or raw_value <= 0:
+            return None, f"managed_service.{field_name} must be a positive number, got {raw_value!r}"
+        timeout_fields[field_name] = float(raw_value)
+
+    return ManagedServiceVerificationSpec(
+        service_command=service_command, cwd=worktree_path,
+        readiness=readiness, probe=probe, **timeout_fields,
+    ), None
+
+
+async def _execute_managed_service_verification(
+    state: GenerationState, ctx: "AttemptContext", judgment: Dict[str, Any], known_files: List[str],
+    validator: "PolymorphicValidator",
+) -> None:
+    """Managed Runtime Verification (2026-09-03) - the ONE place both
+    runtime-verification call sites route a MANAGED_SERVICE judgment
+    through, matching _runtime_verification_is_advisory_only's own "one
+    shared authority, not two independently-patched copies" precedent from
+    the previous PRV-17 round. Validates the judgment's managed_service
+    object deterministically before starting any process, converts it to
+    kriya.tools.service_runtime's own execution-layer spec type, runs it
+    (a plain blocking call - run_app_sequence() is called exactly the same
+    way a few lines away in the finite-command path, no new async pattern
+    introduced here), and maps the result onto the SAME Failure/
+    gate_outcome shapes the finite-command path already produces: no new
+    recovery system, no new ownership decision - WHETHER this subtask owns
+    the obligation was already decided above (advisory-only suppression,
+    ctx.runtime_verification_required) before this function is ever
+    called."""
+    spec, invalid_reason = _validate_and_convert_managed_service_contract(
+        judgment.get("managed_service"), ctx.worktree_path, validator,
+    )
+    if invalid_reason:
+        message = f"MANAGED_SERVICE_CONTRACT_INVALID: {invalid_reason}"
+        logger.warning(message)
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+
+    logger.info(
+        "Quality Gates: Running managed_service verification: service=%s probe=%s %s:%d%s",
+        " ".join(spec.service_command), spec.probe.method, spec.probe.host, spec.probe.port, spec.probe.path,
+    )
+    pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
+    _managed_service_started = time.monotonic()
+    # SEC-001-P6: the SAME containment profile/backend PolymorphicValidator's
+    # own compile/test commands would get (gated by autonomy_cfg.
+    # contained_execution_required, default False/unchanged) - applies only
+    # to the artifact-preparation build step inside
+    # run_managed_service_verification, not the launched service itself
+    # (see service_runtime.py's own docstring on that residual limitation).
+    containment_profile, containment_backend = validator.build_containment_profile_and_backend()
+    result = run_managed_service_verification(
+        spec, containment_profile=containment_profile, containment_backend=containment_backend,
+    )
+    # R1 Deliverable 5 - observational only, coarse phase only: prepare/
+    # launch/readiness/probe/shutdown are not separately timed here because
+    # they are not separable from OUTSIDE run_managed_service_verification()
+    # without modifying kriya/tools/service_runtime.py's own internals - an
+    # architecture change this instrumentation-only task deliberately does
+    # not make (see docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md's own
+    # documented limitation).
+    state.validator_timings.append({
+        "kind": "managed_service_verification",
+        "duration_seconds": time.monotonic() - _managed_service_started,
+        "success": bool(getattr(result, "passed", False)),
+    })
+    clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
+
+    output = f"stdout:\n{result.stdout}\n\nstderr:\n{result.stderr}"
+    if result.probe_status is not None:
+        output += f"\n\nprobe_status: {result.probe_status}\nprobe_body: {result.probe_body}"
+
+    if result.outcome in _MANAGED_SERVICE_INFRASTRUCTURE_OUTCOMES:
+        # Runtime-Evidence Plan Repair (PRV-17 Run 13, 2026-09-04): before
+        # unconditionally treating this as environment-only (as every one
+        # of these outcomes used to be, unconditionally), give the SAME
+        # classify_environment_failure() compile/test failures already
+        # consult a chance to read the target application's own captured
+        # output - see _MANAGED_SERVICE_OUTCOMES_WITH_CAPTURED_APPLICATION_
+        # OUTPUT's own docstring for exactly which outcomes qualify and why.
+        if result.outcome in _MANAGED_SERVICE_OUTCOMES_WITH_CAPTURED_APPLICATION_OUTPUT:
+            environment_verdict = classify_environment_failure(
+                output, worktree_path=ctx.worktree_path, known_files=known_files,
+            )
+            if environment_verdict is None:
+                missing_module = extract_missing_project_local_python_module(
+                    output, known_files=known_files,
+                )
+                if missing_module is not None:
+                    # Deterministic evidence that a project-local Python
+                    # module the running application imports is missing -
+                    # NOT an environment failure (classify_environment_
+                    # failure already ruled that out) and NOT ordinary
+                    # Developer retry evidence either: this subtask may own
+                    # no write scope at all (a managed-service verification
+                    # subtask is frequently DENY_ALL by construction), and
+                    # even when it does, the missing module may belong to a
+                    # DIFFERENT subtask entirely. Surfaced as its own typed
+                    # Failure so retry_strategy.py can route it through
+                    # plan-scope-conflict evidence rather than either the
+                    # STOP_ENVIRONMENT bypass or the ordinary attribution/
+                    # retry pipeline - see ObligationKind.RUNTIME_PLAN_GAP's
+                    # own docstring for the live incident this closes and
+                    # the invariant it preserves: execution evidence may
+                    # prove the plan is incomplete, but only a validated
+                    # plan revision (kriya/workflow/workflow_controller.py)
+                    # may convert that evidence into new write authority -
+                    # never this function, never the Developer.
+                    message = (
+                        f"MANAGED_SERVICE_RUNTIME_PLAN_GAP: managed-service verification "
+                        f"failed ({result.outcome.value}) importing project-local Python "
+                        f"module {missing_module!r}, which no subtask in the approved plan "
+                        f"currently owns.\n\nCaptured output:\n{output}"
+                    )
+                    failure = Failure(
+                        type="managed_service_runtime_plan_gap", message=message,
+                        raw_output=output, attempt=state.attempt_number,
+                        diagnostics={
+                            "missing_python_module": missing_module,
+                            "managed_service_outcome": result.outcome.value,
+                        },
+                    )
+                    outcome_dict = failure.to_gate_outcome()
+                    outcome_dict.update({
+                        "commands": [spec.service_command], "managed_service_outcome": result.outcome.value,
+                    })
+                    state.gate_outcomes.append(outcome_dict)
+                    raise QualityGateFailure(failure)
+                # Neither an environment gap nor a missing-module shape -
+                # classify_environment_failure found nothing conclusive
+                # either way. Deliberately falls through to the UNCHANGED
+                # verification_infrastructure_failure/STOP_ENVIRONMENT path
+                # below rather than guessing this is ordinary Developer-
+                # retryable evidence: Runtime-Evidence Plan Repair (PRV-17
+                # Run 13, 2026-09-04) is scoped narrowly to the one grounded
+                # case classify_environment_failure/extract_missing_
+                # project_local_python_module can actually prove - widening
+                # the classification of every OTHER captured-output shape is
+                # a separate, unauthorized behavior change (and would
+                # silently break test_infrastructure_outcomes_map_to_
+                # verification_infrastructure_failure's own, deliberately
+                # unconditional, coverage of this exact case).
+        message = (
+            f"VERIFICATION_INFRASTRUCTURE_FAILURE: managed-service verification could not "
+            f"produce behavioral evidence ({result.outcome.value}): {result.reasoning}\n\n"
+            f"Captured output:\n{output}"
+        )
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=output, attempt=state.attempt_number,
+        )
+        outcome_dict = failure.to_gate_outcome()
+        outcome_dict.update({
+            "commands": [spec.service_command], "managed_service_outcome": result.outcome.value,
+        })
+        state.gate_outcomes.append(outcome_dict)
+        raise QualityGateFailure(failure)
+
+    if result.outcome == ServiceVerificationOutcomeKind.PROBE_FAILED:
+        message = (
+            f"RUNTIME VERIFICATION FAILURE (managed service): {result.reasoning}"
+            f"\n\nCaptured output:\n{output}"
+        )
+        failure = _build_quality_gate_failure(
+            "run_verification", message, output, ctx.worktree_path, known_files, state.attempt_number,
+        )
+        failure_outcome = failure.to_gate_outcome()
+        failure_outcome.update({
+            "graded_by": "managed_service_probe", "commands": [spec.service_command],
+            "managed_service_outcome": result.outcome.value,
+        })
+        state.gate_outcomes.append(failure_outcome)
+        raise QualityGateFailure(failure)
+
+    # PROBE_PASSED - successful runtime evidence, deterministic (the probe's
+    # own status/body match IS the verdict, no LLM grade() call needed -
+    # same "process exit is already the authoritative verdict" precedent
+    # deterministic_sequence_kind's test/compile commands already use.
+    state.gate_outcomes.append({
+        "attempt": state.attempt_number, "type": "run_verification", "success": True,
+        "output": output + f"\n\n[Managed service probe]: {result.reasoning}",
+        "graded_by": "managed_service_probe", "commands": [spec.service_command],
+        "managed_service_outcome": result.outcome.value, "deterministic_result": "PASS",
+        **execution_evidence(result.to_dict()),
+    })
+
+
+async def _execute_runtime_verification_directly(
+    state: GenerationState, ctx: "AttemptContext", validator: "PolymorphicValidator",
+) -> None:
+    """PRV-06 (2026-08-28): the application_runtime half of
+    _run_verification_only_attempt's direct-execution path - judge, correct,
+    (approve), execute, grade, raise-or-return, with NO Developer
+    invocation anywhere in this function. Deliberately reuses every
+    existing sub-helper by reference (RunVerifierAgent.judge()/grade(),
+    _resolve_run_command, ground_java_entrypoint_in_no_build_file_projects,
+    the JDK/JVM-flag preflight corrections, run_app_sequence,
+    deterministic_sequence_kind, _classify_grounded_contract_verdict, _resolve_runtime_verification_grade,
+    _build_quality_gate_failure) - none of their own internal logic is
+    reimplemented here, only the SEQUENCE in which a verification-only
+    subtask needs to call them is new.
+
+    Deliberately narrower than the mutating path's inline runtime-
+    verification block (kriya/workflow/attempt.py's own "Quality Gates:
+    Runtime Verification" section) in two respects, both intentional:
+    - No self-correction micro-loop. That loop exists to patch
+      infrastructure/classpath issues in code a Developer just wrote in
+      THIS attempt - a verification-only subtask writes nothing, so
+      self_correction_loop's own writable_files would already collapse to
+      [] under DENY_ALL, making it a pure no-op burn of one extra LLM call.
+      "Verification does not generate code. Failure recovery may generate
+      code" (this fix's own design principle) - on failure, this function
+      raises the same typed Failure the mutating path already raises, and
+      the EXISTING outer retry/recovery machinery (which CAN re-enter a
+      mutating context for a different subtask/attempt) takes over from
+      there, unchanged.
+    - No SpecCompliance goal-check. That check verifies concrete literal
+      requirements (exact field/method/class names) in code just written -
+      irrelevant for a subtask that writes no new code; whatever
+      established files it's verifying already passed that check when an
+      earlier, mutating subtask wrote them.
+
+    Judgment caching (state.cached_run_verification_judgment) is preserved
+    across this subtask's own retry attempts, exactly like the mutating
+    path - a repeat attempt after a transient failure re-judges only when
+    the workspace's invocation-affecting content actually changed."""
+    autonomy_cfg_rv = ctx.kernel.config.autonomy
+    if ctx.runtime_verification_required and not autonomy_cfg_rv.run_verification_enabled:
+        message = (
+            "REQUIRED_RUNTIME_VERIFICATION_DISABLED: the declared verification contract "
+            "requires observable execution, but runtime verification is disabled."
+        )
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+    if ctx.runtime_verification_required and state.run_verification_declined:
+        message = (
+            "REQUIRED_RUNTIME_VERIFICATION_DECLINED: the declared runtime check was not "
+            "authorized, so correctness remains unverified."
+        )
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+    if not autonomy_cfg_rv.run_verification_enabled or state.run_verification_declined:
+        return
+
+    if not state.toolchain_checked:
+        state.toolchain_checked = True
+        state.toolchain_warning = _check_java_toolchain_mismatch(validator.stack)
+        if state.toolchain_warning:
+            logger.warning(f"Toolchain preflight: {state.toolchain_warning}")
+        if validator.stack == "java":
+            state.java_home_override = _resolve_java_home_override(ctx.goal)
+            if state.java_home_override:
+                logger.warning(
+                    "JVM toolchain enforcement: forcing Maven subprocess calls to "
+                    f"run under JAVA_HOME={state.java_home_override} - the goal-stated Java "
+                    "version doesn't match what 'mvn' resolves to by default here."
+                )
+    validator.java_home_override = state.java_home_override
+
+    known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+    current_judgment_basis = _run_verification_basis_hash(ctx, state)
+    if (
+        state.cached_run_verification_judgment is not None
+        and state.cached_run_verification_basis_hash != current_judgment_basis
+    ):
+        logger.info(
+            "Invocation-affecting workspace content changed - invalidating cached "
+            "runtime-verification judgment."
+        )
+        state.cached_run_verification_judgment = None
+    if state.cached_run_verification_judgment is None:
+        pom_content_for_judge = None
+        try:
+            with open(os.path.join(ctx.worktree_path, "pom.xml"), "r", encoding="utf-8") as f:
+                pom_content_for_judge = f.read()
+        except Exception as e:
+            logger.debug(f"No pom.xml available for run-verification judgment: {e}")
+        raw_judgment = await ctx.run_verifier.judge(
+            goal=ctx.goal, design=ctx.design,
+            files_written=known_files, build_file_content=pom_content_for_judge,
+        )
+        if raw_judgment.get("infrastructure_error") and ctx.runtime_verification_required:
+            message = (
+                "VERIFICATION INFRASTRUCTURE FAILURE: runtime behavior is required, but "
+                f"the runtime-verification judge was unavailable: {raw_judgment['infrastructure_error']}"
+            )
+            failure = Failure(
+                type="verification_infrastructure_failure", message=message,
+                raw_output=message, attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        state.cached_run_verification_judgment = downgrade_ungrounded_goal_explicit_commands(
+            raw_judgment, ctx.goal
+        )
+        state.cached_run_verification_basis_hash = current_judgment_basis
+    else:
+        logger.debug("Reusing cached run-verification judgment from an earlier attempt in this run.")
+    judgment = state.cached_run_verification_judgment
+
+    if ctx.runtime_verification_required and not judgment.get("should_run"):
+        message = _required_runtime_verification_missing_message(judgment)
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+    if _runtime_verification_is_advisory_only(ctx, judgment):
+        logger.info(
+            "Run-verification judge inferred should_run=True, but this subtask's own "
+            "approved plan declares no runtime-verification obligation - treating as "
+            "advisory only, not executing (a later subtask that DOES own this "
+            "obligation still runs it for real)."
+        )
+        return
+    if not judgment.get("should_run"):
+        return
+    execution_mode, execution_mode_error = _resolve_execution_mode(judgment)
+    if execution_mode_error:
+        message = f"MANAGED_SERVICE_CONTRACT_INVALID: {execution_mode_error}"
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+    if execution_mode == "managed_service":
+        await _execute_managed_service_verification(state, ctx, judgment, known_files, validator)
+        return
+    if deterministic_sequence_kind(judgment.get("run_commands") or []) == "build":
+        message = (
+            "BEHAVIORAL_GOAL_WITH_BUILD_ONLY_VERIFICATION: observable runtime behavior "
+            "is required, but the inferred sequence contains only build commands."
+        )
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+
+    if judgment.get("run_commands"):
+        pom_path_for_correction = os.path.join(ctx.worktree_path, "pom.xml")
+        pom_content_for_correction = None
+        try:
+            with open(pom_path_for_correction, "r", encoding="utf-8") as f:
+                pom_content_for_correction = f.read()
+        except Exception:
+            pass
+        java_files = [f for f in known_files if f.endswith(".java")]
+        if java_files:
+            # A pom.xml with real <dependency> entries needs Maven's own
+            # classpath resolution - the direct-javac grounded route below
+            # has no mechanism to resolve third-party jars and would compile
+            # with a bare classpath, breaking any dependency import. Only
+            # prefer the grounded route when there's no pom, or the pom has
+            # no dependencies to lose (a bare pom.xml with no libraries is
+            # exactly as safe as no build file at all).
+            pom_declares_dependencies = bool(
+                pom_content_for_correction and get_pom_dependencies(pom_path_for_correction)
+            )
+            corrected_commands = ground_java_entrypoint_in_no_build_file_projects(
+                judgment["run_commands"], judgment["command_source"], known_files,
+                _build_java_main_class_map(java_files, ctx),
+                extract_jvm_module_flags(ctx.skills_prompt), pom_content_for_correction,
+                prefer_grounded_runtime=not pom_declares_dependencies,
+            )
+            if corrected_commands is None:
+                logger.info(
+                    "Deterministic Java entrypoint resolution: no pom.xml/build.gradle found "
+                    "and no known .java file has a main() method - overriding should_run to "
+                    "False instead of executing a command that targets a nonexistent entrypoint class."
+                )
+                judgment = dict(judgment)
+                judgment["should_run"] = False
+                judgment["run_commands"] = None
+            elif corrected_commands != judgment["run_commands"]:
+                judgment = dict(judgment)
+                judgment["run_commands"] = corrected_commands
+
+        # VER-005 implementation (2026-09-13): the Python sibling of the
+        # Java entrypoint grounding just above - see ground_python_runtime_
+        # target()'s own docstring (kriya/workflow/file_resolution.py) for
+        # the live E4 defect this closes and why Python facts are resolved
+        # repository-wide rather than scoped to known_files. Independent of
+        # the Java branch above (different commands, never both touched by
+        # the same corrected_commands variable), so no interaction with it.
+        if any(f.endswith(".py") for f in known_files) or validator.stack == "python":
+            all_python_files, package_dirs, entrypoint_files = _build_python_runtime_grounding(
+                validator.workspace_path
+            )
+            corrected_py_commands = ground_python_runtime_target(
+                judgment["run_commands"], judgment["command_source"],
+                all_python_files, package_dirs, entrypoint_files,
+            )
+            if corrected_py_commands is None:
+                logger.info(
+                    "Deterministic Python runtime-target grounding: the run-verification "
+                    "judge's proposed target is not a valid application runtime target "
+                    "(test-shaped, nonexistent, or unguarded), and no unambiguous real "
+                    "entrypoint exists elsewhere in the repository to substitute - overriding "
+                    "should_run to False instead of executing an invalid target."
+                )
+                judgment = dict(judgment)
+                judgment["should_run"] = False
+                judgment["run_commands"] = None
+            elif corrected_py_commands != judgment["run_commands"]:
+                logger.info(
+                    "Deterministic Python runtime-target grounding: the run-verification "
+                    "judge's proposed target was not a valid application runtime target - "
+                    f"substituting {corrected_py_commands} instead of trusting the model's "
+                    "own guess."
+                )
+                judgment = dict(judgment)
+                judgment["run_commands"] = corrected_py_commands
+
+    if not judgment.get("should_run"):
+        return
+
+    proceed_with_run = True
+    if judgment["command_source"] == "inferred" and not state.run_verification_confirmed:
+        if autonomy_cfg_rv.mode == "human-in-the-loop":
+            commands_desc = "\n".join(
+                f"    {i}. {' '.join(cmd)}" for i, cmd in enumerate(judgment["run_commands"], 1)
+            )
+            confirm_reason = (
+                "Kriya judged that this goal describes runtime behavior compile/test checks "
+                "can't verify, and wants to actually run the generated app (verification-only "
+                "subtask):\n"
+                f"  Command(s):\n{commands_desc}\n"
+                f"  Looking for: {judgment['success_criteria']}\n"
+                "Allow Kriya to execute these command(s) inside the sandboxed worktree?"
+            )
+            if ctx.approval_callback:
+                approved = ctx.approval_callback([], confirm_reason)
+                if asyncio.iscoroutine(approved):
+                    approved = await approved
+                proceed_with_run = bool(approved)
+            else:
+                # Fail-closed (2026-09-20) - mirrors workflow.py's own
+                # code-application approval gate fix for the IDENTICAL
+                # shape (2026-08-16 adversarial review Finding 2: "this
+                # gate used to fail OPEN... execution silently fell
+                # through... with no approval ever having been
+                # requested"). human-in-the-loop mode's entire purpose is
+                # preventing exactly this - a real command executing
+                # inside the sandboxed worktree with zero human
+                # involvement because no approval_callback happened to be
+                # wired for this call, previously treated as "proceed
+                # under default policy" (fail open).
+                logger.warning(
+                    "Runtime verification warrants human approval but no approval_callback "
+                    "is available - refusing to execute unreviewed rather than proceeding "
+                    "under default policy."
+                )
+                proceed_with_run = False
+        if not proceed_with_run:
+            state.run_verification_declined = True
+    if not proceed_with_run:
+        return
+
+    state.run_verification_confirmed = True
+    resolved_run_commands = [_resolve_run_command(cmd, ctx.worktree_path) for cmd in judgment["run_commands"]]
+    input_channel = judgment.get("input_channel") or "none"
+    resolved_run_commands, stdin_payload, contract_incomplete_reason = _apply_runtime_verification_contract(
+        resolved_run_commands, input_channel,
+    )
+    logger.info(
+        "RUNTIME_VERIFICATION_CONTRACT input_channel=%s argument_count=%d stdin_present=%s",
+        input_channel, len(resolved_run_commands[-1]) if resolved_run_commands else 0,
+        bool(stdin_payload),
+    )
+    if contract_incomplete_reason:
+        message = f"RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE: {contract_incomplete_reason}"
+        logger.warning(message)
+        failure = Failure(
+            type="verification_infrastructure_failure", message=message,
+            raw_output=message, attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
+    # FILE-INTEGRITY-CONTRACT-001: pom corrections are candidate mutations,
+    # applied before the first gate of this attempt, never between gates.
+    _apply_candidate_pom_corrections(state, ctx, sorted(state.all_files_written | set(ctx.established_files)))
+    validator.tree_binding = _bind_verification_tree(state, ctx)
+    command_verification_kind = deterministic_sequence_kind(resolved_run_commands)
+    logger.info(
+        "Quality Gates: Running %s verification (verification-only subtask): "
+        % (command_verification_kind or "application_runtime")
+        + " && ".join(" ".join(cmd) for cmd in resolved_run_commands)
+    )
+    _prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
+    pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
+    _run_app_sequence_started = time.monotonic()
+    run_res = validator.run_app_sequence(
+        resolved_run_commands, timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+        stdin_payload=stdin_payload,
+    )
+    # R1 Deliverable 5 - observational only. kind reflects the deterministic
+    # command classification already computed above (command_verification_
+    # kind), matching gate_type's own "test" vs "run_verification" split
+    # elsewhere in this function - so this coarse timing bucket lines up
+    # with the same distinction INV-RUNTIME-002's own evidence-matching
+    # fix relies on, not a new taxonomy.
+    state.validator_timings.append({
+        "kind": command_verification_kind or "run_verification",
+        "duration_seconds": time.monotonic() - _run_app_sequence_started,
+        "success": not bool(run_res.get("timed_out")),
+    })
+    clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
+    _raise_runtime_verification_infrastructure_failure(
+        state, run_res, resolved_run_commands,
+    )
+
+    gate_type = "test" if command_verification_kind == "test" else "run_verification"
+    verification_authority = "llm"
+    if run_res["timed_out"]:
+        state_, contract_verdict = _classify_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
+        grade, verification_authority = await _resolve_runtime_verification_grade(
+            ctx, state_, contract_verdict,
+            {
+                "goal": ctx.goal, "success_criteria": judgment["success_criteria"],
+                "output": run_res["output"], "returncode": run_res["returncode"],
+                "files_written": known_files, "timed_out": True,
+            },
+            run_result=run_res,
+        )
+        timeout_s = autonomy_cfg_rv.run_verification_timeout_seconds
+        if grade["passed"]:
+            gate_type = "run_verification_hung"
+            grade["reasoning"] = (
+                f"The goal's described output WAS produced correctly, but the process never "
+                f"exited on its own and had to be killed after {timeout_s}s. This is still a "
+                "real defect - almost always an unclosed resource keeping the process alive "
+                f"after all application logic already finished. Grader's evidence: {grade['reasoning']}"
+            )
+        else:
+            grade["reasoning"] = (
+                f"Run timed out after {timeout_s}s, and the output captured before the forced "
+                f"kill does not show the goal was achieved either: {grade['reasoning']}"
+            )
+        grade["passed"] = False
+    elif not run_res["success"]:
+        deterministic_kind = deterministic_sequence_kind(resolved_run_commands)
+        if deterministic_kind is not None:
+            verification_authority = "process_exit"
+            grade = {
+                "passed": False,
+                "reasoning": (
+                    f"One or more deterministic {deterministic_kind} verification commands "
+                    "returned a non-zero process status."
+                ),
+                "likely_files": [],
+            }
+        else:
+            state_, contract_verdict = _classify_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
+            grade, verification_authority = await _resolve_runtime_verification_grade(
+                ctx, state_, contract_verdict,
+                {
+                    "goal": ctx.goal, "success_criteria": judgment["success_criteria"],
+                    "output": run_res["output"], "returncode": run_res["returncode"],
+                    "files_written": known_files,
+                },
+                run_result=run_res,
+            )
+        # PRD-025: a nonzero exit outranks any semantic grade unless the
+        # user's goal declares that exit as expected from a launched app.
+        apply_runtime_disposition(
+            grade, run_res, goal_text=exit_authority_text(ctx),
+            verification_authority=verification_authority,
+        )
+    else:
+        deterministic_kind = deterministic_sequence_kind(resolved_run_commands)
+        if deterministic_kind is not None:
+            verification_authority = "process_exit"
+            grade = {
+                "passed": True,
+                "reasoning": (
+                    f"All deterministic {deterministic_kind} verification commands completed "
+                    "successfully (exit code 0)."
+                ),
+                "likely_files": [],
+            }
+        else:
+            state_, contract_verdict = _classify_grounded_contract_verdict(run_res["output"], ctx.worktree_path, known_files)
+            grade, verification_authority = await _resolve_runtime_verification_grade(
+                ctx, state_, contract_verdict,
+                {
+                    "goal": ctx.goal, "success_criteria": judgment["success_criteria"],
+                    "output": run_res["output"], "returncode": run_res["returncode"],
+                    "files_written": known_files,
+                },
+                run_result=run_res,
+            )
+
+    apply_runtime_disposition(
+        grade, run_res, goal_text=exit_authority_text(ctx),
+        verification_authority=verification_authority,
+    )
+    if not grade["passed"]:
+        message = (
+            f"RUNTIME VERIFICATION FAILURE (verification-only subtask): {grade['reasoning']}"
+            f"\n\nCaptured output:\n{run_res['output']}"
+        )
+        enriched_output = run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}"
+        failure = _build_quality_gate_failure(
+            gate_type, message, enriched_output, ctx.worktree_path, known_files,
+            state.attempt_number, extra_likely_files=grade.get("likely_files") or [],
+        )
+        failure_outcome = failure.to_gate_outcome()
+        failure_outcome.update({
+            "graded_by": verification_authority, "commands": resolved_run_commands,
+            "steps": run_res.get("steps", []),
+            "deterministic_result": _deterministic_result_provenance_field(verification_authority),
+            **runtime_evidence_outcome_fields(grade),
+        })
+        state.gate_outcomes.append(failure_outcome)
+        raise QualityGateFailure(failure)
+
+    state.gate_outcomes.append({
+        "attempt": state.attempt_number, "type": gate_type, "success": True,
+        "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
+        "graded_by": verification_authority, "commands": resolved_run_commands,
+        "steps": run_res.get("steps", []),
+        "deterministic_result": _deterministic_result_provenance_field(verification_authority),
+        **runtime_evidence_outcome_fields(grade),
+        **execution_evidence(run_res),
+    })
+
+
+def _spec_compliance_authoritative_context(ledger: Optional[ObligationLedger]) -> Optional[str]:
+    """MA8 (spec §31) - a short "AUTHORITATIVELY ESTABLISHED" prose block
+    naming which MIGRATION_COMPLETION requirements are already
+    DETERMINISTIC-authority SATISFIED, injected into SpecComplianceAgent's
+    own prompt BEFORE the call - see SpecComplianceAgent.check()'s own
+    docstring for why this is advisory only. The mandatory backstop
+    remains _spec_requirements_contradicting_authority below, applied
+    AFTER the model responds regardless of whether this context was
+    honored.
+
+    Same precondition as that function (only when EVERY current migration
+    obligation is SATISFIED - a still-VIOLATED requirement is exactly what
+    SpecCompliance should remain free to also flag), so the two never
+    disagree about when authoritative context applies."""
+    if not ledger:
+        return None
+    migration_records = ledger.current_by_kind(ObligationKind.MIGRATION_COMPLETION)
+    if not migration_records or any(
+        rec.status != ObligationStatus.SATISFIED for rec in migration_records
+    ):
+        return None
+    lines = "\n".join(f"- {rec.description}" for rec in migration_records)
+    return (
+        "AUTHORITATIVELY ESTABLISHED (deterministic evidence - do not report these as "
+        f"missing/incomplete):\n{lines}\n\n"
+        "Evaluate only requirements not already covered by the above."
+    )
+
+
+def _migration_obligations_all_satisfied(ledger: Optional[ObligationLedger]) -> bool:
+    """True only when the ledger has at least one current MIGRATION_
+    COMPLETION obligation and every one of them is SATISFIED. Shared
+    precondition for every SpecCompliance arbitration path below - a
+    JUDGMENT-authority verdict may only ever be suppressed/overridden when
+    the DETERMINISTIC migration gate has fully confirmed the fact it
+    contradicts; a still-VIOLATED (or no-obligation-recorded-at-all) case
+    means judgment and determinism simply agree, or there's nothing to
+    arbitrate against, and the LLM verdict must stand."""
+    if not ledger:
+        return False
+    migration_records = ledger.current_by_kind(ObligationKind.MIGRATION_COMPLETION)
+    return bool(migration_records) and not any(
+        rec.status == ObligationStatus.VIOLATED for rec in migration_records
+    )
+
+
+def _spec_requirements_contradicting_authority(
+    missing_requirements: List[str], ledger: Optional[ObligationLedger],
+) -> Tuple[List[str], List[str]]:
+    """MA8 (PRV-05 run #8, 2026-08-28) - splits SpecComplianceAgent's own
+    free-text missing_requirements into (kept, contradicted).
+
+    An entry is "contradicted" when it mentions the migration's own
+    source/target identity terms (e.g. "gson", "jackson-databind") AND the
+    ledger's current MIGRATION_COMPLETION obligations are ALL SATISFIED -
+    i.e. the DETERMINISTIC migration gate already confirmed this exact
+    fact, so a JUDGMENT-authority claim to the contrary is a contradiction,
+    not a second, independent finding. Deliberately does NOT try to give
+    each free-text requirement its own stable ObligationRecord id (missing_
+    requirements are reworded attempt to attempt by construction - exactly
+    the "never derive an id from an LLM's own error string" case this
+    module's own docstring warns about) - arbitration here is a one-shot
+    text correlation against the migration ledger's OWN stable ids, not a
+    new obligation-tracked kind.
+
+    Never touches a requirement while ANY current migration obligation is
+    still VIOLATED - that is judgment and determinism agreeing, not a
+    contradiction to arbitrate away."""
+    if not _migration_obligations_all_satisfied(ledger):
+        return list(missing_requirements), []
+    migration_records = ledger.current_by_kind(ObligationKind.MIGRATION_COMPLETION)
+    # Tokenized (split on "-"/"_"), not the raw identity string as a single
+    # substring: an artifactId like "jackson-databind" must still correlate
+    # with prose that names the human-friendly library "Jackson" - found
+    # live while verifying this fix, not assumed: a full-string match missed
+    # the exact hallucinated text ("the code still uses Jackson library
+    # components") this arbitration exists to catch. Short tokens (<3 chars)
+    # are dropped to avoid trivial false positives.
+    identity_terms = {
+        token
+        for rec in migration_records
+        for value in (rec.evidence.get("source_identity"), rec.evidence.get("target_identity"))
+        if value
+        for token in re.split(r"[-_]", str(value).lower())
+        if len(token) >= 3
+    }
+    if not identity_terms:
+        return list(missing_requirements), []
+    kept: List[str] = []
+    contradicted: List[str] = []
+    for requirement in missing_requirements:
+        lowered = requirement.lower()
+        matched = any(re.search(rf"\b{re.escape(term)}\b", lowered) for term in identity_terms)
+        (contradicted if matched else kept).append(requirement)
+    return kept, contradicted
+
+
+_REQUIREMENT_WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_-]*")
+_REQUIREMENT_PROVENANCE_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "does",
+    "for", "from", "has", "have", "in", "instead", "is", "it", "must",
+    "named", "not", "of", "on", "or", "requires", "require", "required",
+    "should", "that", "the", "this", "to", "uses", "using", "with",
+}
+
+
+def _identifier_local_terms(text: str, identifier: str, radius: int = 3) -> set[str]:
+    """Return meaningful lexical terms close to ``identifier`` in ``text``.
+
+    This is deliberately a provenance primitive, not a vocabulary of code
+    shapes.  It knows nothing about fields, methods, routes, schemas, UI
+    controls, or any particular programming language.  A term matters only
+    because the Planner and the later judgment both placed it next to the
+    same concrete identifier while the authoritative goal did not.
+    """
+    words = _REQUIREMENT_WORD_RE.findall(text)
+    lowered_identifier = identifier.lower()
+    terms: set[str] = set()
+    for index, word in enumerate(words):
+        if word.lower() != lowered_identifier:
+            continue
+        start = max(0, index - radius)
+        end = min(len(words), index + radius + 1)
+        for nearby in words[start:end]:
+            normalized = nearby.lower()
+            if (
+                normalized != lowered_identifier
+                and normalized not in _REQUIREMENT_PROVENANCE_STOPWORDS
+                and len(normalized) >= 3
+            ):
+                terms.add(normalized)
+    return terms
+
+
+def _extract_requirement_identifier_tokens(requirement: str) -> List[str]:
+    """Pulls candidate provenance-check terms out of a SpecCompliance
+    missing_requirement string - reuses the SAME general word/stopword
+    primitives _identifier_local_terms above already uses for nearby-term
+    provenance, rather than a syntax-specific shape (camelCase, backtick/
+    quote-wrapped, a dotted manifest filename, a version specifier, ...).
+
+    PRV-17 (2026-09-03): an earlier version of this function matched only
+    code-shaped identifiers via a hand-written regex, extended twice live
+    to also catch a dotted manifest filename ("requirements.txt") and a
+    PEP 508 version specifier ("python>=3.12") after each shape was found,
+    separately, to slip through with zero extracted tokens. A THIRD shape
+    ("requires-python = \">=3.12\"") and a fourth, pure-prose one ("minimum
+    Python version 3.12") immediately proved this was an open-ended list,
+    not a closed one - correctness must not depend on anticipating every
+    way a Planner (or SpecComplianceAgent's own judgment) can phrase an
+    invented detail. General word extraction needs no such list: _spec_
+    requirements_naming_planner_only_identifiers' own section-provenance
+    comparison (does this word, or its nearby context, appear only in
+    Planned Implementation, never Authoritative Goal) already does the
+    real work for ANY word shape, once given real candidate words to
+    check - producing those candidates is this function's only job.
+    Excludes short/stopword-only words the same way _identifier_local_
+    terms already does, so a bare "Customer" or "The" isn't itself proof
+    of anything (matched or not, the actual provenance decision is
+    _spec_requirements_naming_planner_only_identifiers' own nearby-context
+    comparison, not this function's word list)."""
+    tokens: List[str] = []
+    for word in _REQUIREMENT_WORD_RE.findall(requirement):
+        if (
+            len(word) >= 3
+            and word.lower() not in _REQUIREMENT_PROVENANCE_STOPWORDS
+            and word not in tokens
+        ):
+            tokens.append(word)
+    return tokens
+
+
+def _spec_requirements_naming_planner_only_identifiers(
+    missing_requirements: List[str], goal_text: str,
+) -> Tuple[List[str], List[str]]:
+    """PRV-11 (2026-08-30) - the deterministic other half of build_subtask_
+    goal_text()'s own authority-isolation split (kriya/workflow/
+    workflow_controller.py). That function already labels a Planner-only
+    identifier under PLANNED IMPLEMENTATION STRATEGY and SpecComplianceAgent's
+    own system_prompt already instructs the model not to treat it as a
+    requirement - but a prompt instruction alone is not a guarantee, the same
+    "do not trust the prompt alone" principle _spec_requirements_
+    contradicting_authority above already applies to the migration case, just
+    never extended to this one. Live incident this closes: SpecCompliance's
+    own judge repeatedly reported "the goal requires a displayName field",
+    reconstructing the model's own worked counter-example from its system
+    prompt almost verbatim, even though "displayName field" appears ONLY in
+    the Planned Implementation Strategy section of the exact goal text it was
+    given, never in the Authoritative Goal section.
+
+    Splits missing_requirements into (kept, planner_only). An entry is
+    planner_only in either of two text-grounded cases:
+
+    * it names a concrete identifier found only in Planned Implementation; or
+    * the identifier is authoritative, but the judgment attaches a nearby
+      constraining term that is also attached to it in Planned Implementation
+      and absent from Authoritative Goal.
+
+    The second case closes a more subtle authority leak: a Planner can preserve
+    the user's identifier while silently narrowing its representation. The
+    implementation is intentionally language- and use-case-agnostic: it has no
+    catalog of representation words. It correlates lexical provenance around
+    the same identifier instead. Requirements with no identifier, behavioral
+    terms grounded in the authoritative section, and judgment-only terms with
+    no Planner provenance are always kept.
+
+    A no-op (everything kept) when goal_text doesn't carry both section
+    headers - every pre-MA6 caller, and every subtask goal without a real
+    top-level goal to separate out, sees identical behavior to before this
+    function existed."""
+    if (
+        AUTHORITATIVE_GOAL_SECTION_HEADER not in goal_text
+        or PLANNED_IMPLEMENTATION_SECTION_HEADER not in goal_text
+    ):
+        return list(missing_requirements), []
+    authoritative_text = goal_text.split(AUTHORITATIVE_GOAL_SECTION_HEADER, 1)[1].split(
+        PLANNED_IMPLEMENTATION_SECTION_HEADER, 1,
+    )[0]
+    planned_text = goal_text.split(PLANNED_IMPLEMENTATION_SECTION_HEADER, 1)[1]
+    kept: List[str] = []
+    planner_only: List[str] = []
+    for requirement in missing_requirements:
+        tokens = _extract_requirement_identifier_tokens(requirement)
+        if not tokens:
+            kept.append(requirement)
+            continue
+        authoritative_tokens = [
+            tok for tok in tokens
+            if re.search(rf"\b{re.escape(tok)}\b", authoritative_text)
+        ]
+        planned_tokens = [
+            tok for tok in tokens
+            if re.search(rf"\b{re.escape(tok)}\b", planned_text)
+        ]
+        planner_only_identifier = bool(planned_tokens) and not authoritative_tokens
+        planner_only_constraint = False
+        for token in set(authoritative_tokens) & set(planned_tokens):
+            requirement_terms = _identifier_local_terms(requirement, token)
+            planned_terms = _identifier_local_terms(planned_text, token)
+            authoritative_terms = _identifier_local_terms(authoritative_text, token)
+            if (requirement_terms & planned_terms) - authoritative_terms:
+                planner_only_constraint = True
+                break
+        (planner_only if planner_only_identifier or planner_only_constraint else kept).append(
+            requirement
+        )
+    return kept, planner_only
+
+
+def _goal_spec_requirement_obligation_id(subtask_id: str) -> str:
+    return f"attempt.subtask.{subtask_id}.goal_spec_requirement"
+
+
+def _stage_scoped_spec_compliance_goal(ctx: "AttemptContext") -> tuple[str, List[str]]:
+    """Return only obligations due at the current structured-plan stage.
+
+    The top-level goal remains the authority used to validate the plan.  Once
+    that plan is approved, however, its acceptance-criterion ownership is the
+    deterministic schedule for *when* each final requirement can be demanded.
+    Feeding the whole final goal to every intermediate candidate gate made a
+    project-scaffold stage fail for an endpoint explicitly owned by a later
+    application stage.  Unstructured callers retain the historical behavior.
+
+    Stage-projection ownership (PRV-17, 2026-09-03): `current`'s own
+    acceptance_criteria_ids/relevant_global_invariant_ids are Planner-
+    authored data this function used to trust in isolation. An earlier
+    version of this fix deferred an id whenever ANY other pending subtask
+    also claimed it - but bare duplicate occurrence is not proof of FUTURE
+    ownership: an accidental/lazy Planner assignment onto an UNRELATED
+    sibling subtask produces the exact same "also claimed elsewhere"
+    signal a genuine future owner would, and silently deferring on that
+    signal alone would just as easily hide a real, currently-due
+    violation. This now asks the plan's own validated dependency DAG
+    directly via EngineeringPlan.classify_requirement_ownership() (mirrors
+    classify_file_ownership()'s existing PAST_ORDERED/CURRENT/
+    FUTURE_ORDERED/UNRELATED reasoning, generalized to a claimant-id list
+    since a criterion/invariant carries no file path to derive ownership
+    from) - a FUTURE_ORDERED verdict requires a REAL, structurally later
+    (not-yet-run, provably downstream) claimant, not just another mention.
+    A genuinely stage-spanning claim with no provable DAG relationship
+    (UNRELATED) falls back to this function's own pre-existing behavior
+    (trust current's claim, evaluate now) rather than inventing a new
+    resolution for an ambiguity the plan's own structure can't settle.
+    """
+    plan = ctx.structured_plan
+    current_id = ctx.current_subtask_id
+    if plan is None or not current_id:
+        return ctx.goal, []
+    current = plan.subtask_by_id(current_id)
+    if current is None:
+        return ctx.goal, []
+
+    def _claimants(cid: str, field: str) -> List[str]:
+        return [st.id for st in plan.subtasks if cid in getattr(st, field)]
+
+    criteria = {criterion.id: criterion.description for criterion in plan.acceptance_criteria}
+    due_acceptance_ids = [
+        cid for cid in current.acceptance_criteria_ids
+        if cid in criteria
+        and plan.classify_requirement_ownership(current_id, _claimants(cid, "acceptance_criteria_ids"))
+        != RequirementOwnershipRelation.FUTURE_ORDERED
+    ]
+    due = [criteria[cid] for cid in due_acceptance_ids]
+    invariants = {invariant.id: invariant.statement for invariant in plan.global_invariants}
+    due_invariant_ids = [
+        iid for iid in current.relevant_global_invariant_ids
+        if iid in invariants
+        and plan.classify_requirement_ownership(current_id, _claimants(iid, "relevant_global_invariant_ids"))
+        != RequirementOwnershipRelation.FUTURE_ORDERED
+    ]
+    due.extend(invariants[iid] for iid in due_invariant_ids)
+    # Genuinely still-pending work only (claimed by a not-yet-completed
+    # OTHER subtask) - pure observability, matching this field's own
+    # pre-existing contract; an id only a COMPLETED subtask ever claimed is
+    # done, not "future", regardless of whether current also excluded it.
+    pending_subtask_ids = {
+        st.id for st in plan.subtasks if st.id != current_id and st.id not in ctx.completed_subtask_ids
+    }
+    pending_acceptance_ids = {
+        cid for st in plan.subtasks if st.id in pending_subtask_ids for cid in st.acceptance_criteria_ids
+    }
+    pending_invariant_ids = {
+        iid for st in plan.subtasks if st.id in pending_subtask_ids for iid in st.relevant_global_invariant_ids
+    }
+    future_ids = sorted(
+        (pending_acceptance_ids - set(due_acceptance_ids))
+        | (pending_invariant_ids - set(due_invariant_ids))
+    )
+    scoped = (
+        f"Current approved subtask: {current.id}\n"
+        f"Current implementation obligation: {current.description}\n"
+        "Acceptance requirements due at this stage:\n"
+        + ("\n".join(f"- {item}" for item in due) if due else "- None beyond the current implementation obligation")
+        + "\nOnly decide whether this current stage satisfies the requirements listed above. "
+          "Requirements assigned to unfinished later subtasks are pending, not violated."
+    )
+    return scoped, future_ids
+
+
+def _goal_spec_evidence_fingerprint(goal: str, file_contents: Dict[str, str]) -> str:
+    """Correctness Continuity Part A (PRV-06, 2026-08-29) - a stable digest
+    of exactly what a goal_spec_compliance verdict was based on: the
+    requirement text plus every checked file's own content, byte for byte.
+    Reuses edit_safety.content_revision (the same primitive the anchored-
+    edit pipeline already trusts for content identity) rather than
+    inventing a second hashing scheme. Two calls producing the same
+    fingerprint mean the judge was shown literally the same requirement
+    and the same code - the precondition evidence monotonicity requires
+    before a settled verdict may be reused or a contradiction suppressed.
+    A single byte of real change (either side) produces a different
+    fingerprint and is always treated as genuinely new evidence, never
+    "close enough" - see _settled_goal_spec_requirement's own docstring."""
+    blob = goal + "\x00" + "\x00".join(
+        f"{path}\x01{file_contents[path]}" for path in sorted(file_contents)
+    )
+    return content_revision(blob)
+
+
+def _record_original_requirement_verdicts(
+    state: GenerationState, ctx: "AttemptContext", spec_result: Dict[str, Any], fingerprint: str,
+) -> None:
+    """PRD-020: record the verifier's per-requirement outcome for the exact
+    candidate it judged (the evidence id is the fingerprint of the goal and
+    every checked file). Runs only here, after every deterministic gate of
+    this attempt passed; a requirement without a readable verdict is
+    UNKNOWN. The event is the run's durable lineage record."""
+    requirements = ctx.requirement_set
+    if requirements is None or ctx.obligation_ledger is None:
+        return
+    # MODEL-EVIDENCE-HARDENING-001: typed reasons and the verifier identity.
+    verdicts, findings, missing_reason, missing_detail = verifier_result_verdicts(spec_result, requirements)
+    outcomes = record_requirement_verdicts(
+        ctx.obligation_ledger, requirements, verdicts,
+        revision=state.attempt_number, evidence_fingerprint=fingerprint,
+        source="attempt.goal_spec_compliance",
+        gate_evidence=[f"attempt {state.attempt_number}: deterministic gates passed"],
+        missing_reason=missing_reason, missing_detail=missing_detail,
+        verifier=spec_result.get("verifier"),
+    )
+    details = requirement_verdict_details(ctx.obligation_ledger, requirements)
+    state.record_event(RunEvent(
+        kind="requirement.verdicts", attempt=state.attempt_number, source="attempt.goal_spec_compliance",
+        authority=EventAuthority.ADVISORY,
+        message="original requirement outcomes: " + ", ".join(
+            f"{rid}={outcome.value}({details[rid]['reason_code']})" for rid, outcome in outcomes.items()),
+        details={"requirement_set_digest": requirements.digest, "evidence_id": fingerprint,
+                 "outcomes": {rid: outcome.value for rid, outcome in outcomes.items()},
+                 "evidence": {rid: entry[1] for rid, entry in verdicts.items()},
+                 "verdicts": {rid: details[rid] for rid in outcomes},
+                 "findings": findings},
+    ))
+
+
+def _downgrade_suppressed_requirement_claims(
+    state: GenerationState, ctx: "AttemptContext", suppressed: List[str], fingerprint: str,
+) -> None:
+    """PRD-020: a verifier claim that REQ-n is missing, suppressed because it
+    contradicts stronger authority (a SATISFIED deterministic obligation, or
+    an identifier only the Planner named), is not evidence either way: the
+    requirement is recorded UNVERIFIED rather than left VIOLATED."""
+    requirements = ctx.requirement_set
+    if requirements is None or ctx.obligation_ledger is None:
+        return
+    claimed = {text.split(":", 1)[0].strip() for text in suppressed if ":" in text}
+    ids = [rid for rid in requirements.ids if rid in claimed]
+    if not ids:
+        return
+    verdicts = {rid: (RequirementOutcome.UNVERIFIED, "missing claim contradicts stronger authority; suppressed",
+                      CLAIM_CONTRADICTS_STRONGER_AUTHORITY)
+                for rid in ids}
+    record_requirement_verdicts(
+        ctx.obligation_ledger, requirements, verdicts, revision=state.attempt_number,
+        evidence_fingerprint=fingerprint, source="attempt.goal_spec_compliance.arbitration", only=ids,
+    )
+
+
+def _close_requirements_by_migration_gate(
+    state: GenerationState, ctx: "AttemptContext", fingerprint: str,
+) -> None:
+    """PRD-020: an UNVERIFIED requirement that states the migration itself -
+    its own text names both the migration's source and its target identity -
+    is positively verified by the DETERMINISTIC migration gate once every
+    current migration obligation is SATISFIED for this candidate. The
+    binding is the user's words, never the verifier's claim text; a
+    requirement naming only one side (e.g. a detail of how the target
+    library is used) is not the migration and stays UNVERIFIED."""
+    requirements, ledger = ctx.requirement_set, ctx.obligation_ledger
+    if requirements is None or ledger is None or not _migration_obligations_all_satisfied(ledger):
+        return
+    records = ledger.current_by_kind(ObligationKind.MIGRATION_COMPLETION)
+
+    def _terms(key: str) -> set:
+        return {token for rec in records for value in [rec.evidence.get(key)] if value
+                for token in re.split(r"[-_]", str(value).lower()) if len(token) >= 3}
+
+    source_terms, target_terms = _terms("source_identity"), _terms("target_identity")
+    if not source_terms or not target_terms:
+        return
+    outcomes = requirement_outcomes(ledger, requirements)
+    for requirement in requirements.requirements:
+        if outcomes.get(requirement.id) is not RequirementOutcome.UNVERIFIED:
+            continue
+        record = ledger.current(requirement_obligation_id(requirement.id))
+        if record is None or (record.evidence or {}).get("evidence_id") != fingerprint:
+            continue
+        lowered = requirement.text.lower()
+
+        def _names(terms: set, text: str = lowered) -> bool:
+            return any(re.search(rf"\b{re.escape(term)}\b", text) for term in terms)
+
+        if _names(source_terms) and _names(target_terms):
+            record_requirement_closure(
+                ledger, requirements, requirement.id, evidence_id=fingerprint, method="migration_gate",
+                detail={"migration_obligations": sorted(rec.id for rec in records)},
+                source="attempt.migration_gate", revision=state.attempt_number,
+            )
+
+
+def _structured_plan_paths(ctx: "AttemptContext") -> set:
+    """Every path an approved structured plan declares (any subtask)."""
+    plan = getattr(ctx, "structured_plan", None)
+    return {pf.path for st in (getattr(plan, "subtasks", None) or []) for pf in (st.planned_files or [])}
+
+
+def _stage_ownership_redirect_restoration(
+    state: GenerationState, ctx: "AttemptContext", staged_writes: List[StagedFileWrite],
+) -> None:
+    """PRD-022: after a deterministic brownfield ownership violation
+    (workflow.py), the corrective retry is scoped to the grounded owner, with
+    patch authority over it only. The tests the rejected candidate redirected
+    and the parallel file it created are not the retry's to repair, and left
+    in place they would fail the same check whatever the owner fix, making
+    the retry redundant by construction. Like the RESTORE_PUBLIC_CONTRACT
+    evidence restoration above, they are restored deterministically in the
+    same guarded batch: each redirected test back to its exact baseline, and
+    each parallel file this run created removed - unless an approved
+    structured plan declares that file (the enforce terminal commit
+    materializes every planned path), in which case it stays and the
+    restored test alone ends the redirect. Anything the Developer
+    writes again in this attempt is left as written, so a repeated choice
+    still recurs and still counts toward ARCHITECTURE_CHOICE_INVALIDATED."""
+    recovery = state.ownership_redirect_recovery
+    if not recovery:
+        return
+    staged_targets = {staged.target_path for staged in staged_writes}
+    restored: List[str] = []
+    for test_path in recovery.get("redirected_tests", []):
+        baseline = state.all_original_contents.get(test_path)
+        target = os.path.join(ctx.worktree_path, test_path)
+        if not baseline or target in staged_targets:
+            continue
+        try:
+            with open(target, "r", encoding="utf-8", errors="replace") as handle:
+                current = handle.read()
+        except OSError:
+            current = ""
+        if current != baseline:
+            staged_writes.append(_baseline_restoration_write(state, target, test_path))
+            restored.append(test_path)
+    removed: List[str] = []
+    for candidate in recovery.get("abandoned_candidates", []):
+        target = os.path.join(ctx.worktree_path, candidate)
+        if (target in staged_targets or state.all_original_contents.get(candidate)
+                or candidate in _structured_plan_paths(ctx)
+                or os.path.exists(os.path.join(ctx.workspace_path, candidate)) or not os.path.isfile(target)):
+            continue  # written again this attempt, or not a file this run created
+        with open(target, "r", encoding="utf-8", errors="replace") as handle:
+            current = handle.read()
+        staged_writes.append(StagedFileWrite(
+            target_path=target, content="", base_path=target,
+            expected_base_revision=file_raw_digest(target), delete=True,
+        ))
+        removed.append(candidate)
+    if restored or removed:
+        state.record_event(RunEvent(
+            kind="ownership.redirect_restored", attempt=state.attempt_number, source="attempt.staged_writes",
+            authority=EventAuthority.AUXILIARY,
+            message=f"restored redirected tests {restored}; removed abandoned parallel files {removed}",
+            details={"restored_tests": restored, "removed_candidates": removed,
+                     "owners": list(recovery.get("owners", []))},
+        ))
+
+
+async def _classify_and_escalate_contract_changes(
+    state: GenerationState, ctx: "AttemptContext", violations: List[Dict[str, Any]],
+    baseline_contents: Dict[str, str], candidate_contents: Dict[str, str],
+    run_direct_authorizations: List[Any], authorized_changes: List[Dict[str, Any]] = (),
+) -> Tuple[List[Dict[str, Any]], List[Any], Optional[str]]:
+    """PRD-023: classify every public contract change the detector reported,
+    then offer only the evidence-backed POTENTIALLY_DERIVED/INDETERMINATE
+    ones to a human - when ``autonomy.contract_change_escalation`` is
+    ``human`` and a human-in-the-loop approval callback exists. An approval
+    creates revision-bound authorizations and drops exactly those changes;
+    otherwise every change stays a violation (fail closed). Returns the
+    remaining violations, the classifications and the escalation reason code."""
+    from kriya.workflow.contract_classification import (
+        CONTRACT_ESCALATION_DECLINED,
+        CONTRACT_ESCALATION_UNAVAILABLE,
+        ESCALATABLE,
+        classify_api_violations,
+        escalation_prompt,
+        human_authorization,
+        record_classifications,
+    )
+
+    classifications = classify_api_violations(
+        violations, original_contents=baseline_contents, final_contents=candidate_contents,
+        run_authorizations=run_direct_authorizations,
+        human_authorizations=state.human_contract_authorizations, authorized_changes=authorized_changes,
+    )
+    record_classifications(ctx.obligation_ledger, classifications, revision=state.attempt_number,
+                           subtask_id=ctx.current_subtask_id)
+    escalatable = [c for c in classifications if c.status in ESCALATABLE]
+    autonomy = ctx.kernel.config.autonomy
+    if not escalatable or autonomy.contract_change_escalation != "human":
+        return violations, classifications, None
+    if autonomy.mode != "human-in-the-loop" or not ctx.approval_callback:
+        logger.warning("Contract change needs human authorization but none can be asked - blocked: %s",
+                       [c.id for c in escalatable])
+        return violations, classifications, CONTRACT_ESCALATION_UNAVAILABLE
+    approved = ctx.approval_callback([], escalation_prompt(escalatable))
+    if asyncio.iscoroutine(approved):
+        approved = await approved
+    if not approved:
+        return violations, classifications, CONTRACT_ESCALATION_DECLINED
+    plan_revision = (getattr(ctx.structured_plan, "plan_id", None)
+                     or hashlib.sha256((ctx.grounding_goal or ctx.goal).encode("utf-8")).hexdigest())
+    granted = [human_authorization(c, subtask_id=ctx.current_subtask_id, plan_revision=plan_revision)
+               for c in escalatable]
+    state.human_contract_authorizations.extend(granted)
+    for authorization in granted:
+        state.record_event(RunEvent(
+            kind="contract.human_authorization", attempt=state.attempt_number, source="attempt.contract_gate",
+            authority=EventAuthority.AUXILIARY,
+            message=f"human authorized {authorization.affected_owner}::{authorization.affected_symbol} "
+                    f"({authorization.allowed_change_category.value})",
+            details={"authorization_id": authorization.authorization_id,
+                     "plan_revision": authorization.plan_revision,
+                     "legal_scope": authorization.legal_scope,
+                     "evidence": authorization.derivation_evidence},
+        ))
+    approved_keys = {(c.owner, c.signature) for c in escalatable}
+    remaining = [v for v in violations if (v["owner"], v["removed_signature"]) not in approved_keys]
+    return remaining, classifications, None
+
+
+def _settled_goal_spec_requirement(
+    ledger: Optional[ObligationLedger], obligation_id: Optional[str], fingerprint: str,
+) -> Optional[ObligationRecord]:
+    """Correctness Continuity Part A (PRV-06, 2026-08-29) - MA8 evidence
+    monotonicity applied to ObligationKind.GOAL_SPEC_REQUIREMENT (defined
+    since MA8, never populated until now - see docs/design.md's own
+    "defined for future use" note). Returns the ledger's current record for
+    this obligation only when it is SATISFIED and its own recorded evidence
+    fingerprint exactly matches `fingerprint` - i.e. the SAME requirement
+    text and the SAME checked-file content already satisfied it once.
+
+    Returns None whenever there is no prior record, the prior record isn't
+    SATISFIED, or the fingerprint differs by even one byte - a changed
+    fingerprint is always treated as genuinely new evidence, entitled to a
+    full, independent re-judgment (Part A6: unchanged evidence cannot be
+    destabilized by weaker judgment; new evidence must always be free to
+    invalidate). This function only ever answers "is there settled,
+    unchanged evidence to protect" - it never itself skips or overrides an
+    LLM call; see run_attempt's own call site for how the answer is used to
+    suppress a contradictory JUDGMENT-authority verdict without ever
+    letting it become failure evidence or consume a Developer retry."""
+    if ledger is None or not obligation_id:
+        return None
+    current = ledger.current(obligation_id)
+    if current is None or current.status != ObligationStatus.SATISFIED:
+        return None
+    if current.evidence.get("fingerprint") != fingerprint:
+        return None
+    return current
+
+
+def _restore_api_contract_owners_deterministically(
+    state: GenerationState, contract: APIContractRecovery,
+) -> List[Dict[str, str]]:
+    """Control-plane audit (2026-08-30): RESTORE_PUBLIC_CONTRACT's own real
+    objective - "restore these exact signatures, do not solve the
+    behavioral issue yet" - is a FACT Kriya already has, not a generation
+    task. `state.all_original_contents[owner]` is populated at violation-
+    detection time (run_attempt's own "BEFORE WRITE" early-violation
+    branch), before any byte of the offending candidate that triggered
+    recovery ever reached the sandbox - it is the exact, authoritative
+    pre-mutation content for every owner file this phase exists to restore.
+
+    Live incident this closes (PRV-11, 2026-08-30): asking the Developer to
+    reproduce this already-known content is not merely redundant, it is
+    unreliable - a real run burned all 3 RESTORE_PUBLIC_CONTRACT attempts
+    with the model repeatedly re-adding the very field whose presence broke
+    the signature in the first place, despite a prompt that never once
+    mentioned that field. This mirrors an ALREADY-EXISTING precedent one
+    phase over: protected_evidence_files (damaged callers/tests) are
+    already restored deterministically, never via the Developer, a few
+    hundred lines below in run_attempt's own staged-write section - this
+    closes the one remaining asymmetric case (the owner file itself).
+
+    Returns the SAME [{"filepath": ..., "content": ...}, ...] shape
+    _run_developer_generation would have returned, so every downstream
+    consumer (the staged-write commit, find_unrestored_public_api_contracts,
+    the RESTORE_PUBLIC_CONTRACT -> REPAIR_BEHAVIOR transition) is completely
+    unaware this attempt never called the Developer at all - none of that
+    machinery needed to change.
+
+    Fails closed, not silently: a missing baseline for a real violating
+    owner is a genuine internal-state defect (that owner's content should
+    ALWAYS have been captured at violation-detection time) - raising here,
+    rather than skipping that owner or silently falling back to asking the
+    Developer anyway, surfaces the bug instead of masking it."""
+    files: List[Dict[str, str]] = []
+    for owner in contract.owner_files:
+        baseline = state.all_original_contents.get(owner)
+        if baseline is None:
+            raise IncompleteGenerationError(
+                [owner],
+                f"API_CONTRACT_RECOVERY: no captured baseline content for owner "
+                f"{owner!r} - cannot restore deterministically without it.",
+            )
+        files.append({"filepath": owner, "content": baseline})
+    return files
 
 
 async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
@@ -260,101 +6115,370 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     Raises QualityGateFailure or IncompleteGenerationError on any gate
     failure; returns normally when Quality Gates (including Runtime
     Verification) pass."""
+    if ctx.write_scope_mode == WriteScopeMode.DENY_ALL and (
+        _directly_executable_verifiers(ctx.required_verification)
+        or _directly_executable_runtime_verifiers(ctx.required_verification)
+    ):
+        # Verification-only subtask with at least one directly-executable
+        # verifier (compile/test, or - PRV-06, 2026-08-28 - an explicit
+        # application_runtime check) - take the whole rest of this function
+        # out of the loop entirely (see _run_verification_only_attempt's own
+        # docstring for why). Falls through to the ordinary path below ONLY
+        # when NOTHING in required_verification is directly executable -
+        # still fully protected by DENY_ALL either way, just not optimized
+        # for that shape (a plan-repair/DAG defect, not a Kriya execution
+        # gap, at that point).
+        state.terminal_regression_succeeded = False
+        state.overall_attempt_succeeded = False
+        await _run_verification_only_attempt(state, ctx)
+        return
     state.attempt_number += 1
-    use_targeted = bool(state.last_implicated_files) and state.budgets.targeted_retry_count < ctx.targeted_max_retries
-    use_missing_files = (
-        not use_targeted and bool(state.last_missing_files) and state.budgets.targeted_retry_count < ctx.targeted_max_retries
-    )
-    # One-shot fallback-model targeted fix (see fallback_targeted_attempted's
-    # own docstring above) - only eligible once the primary-model targeted
-    # budget is exhausted (never competes with use_targeted/use_missing_files
-    # for the same attempt) and only when there's still a real implicated-file
-    # set and a fallback model to try it on.
-    use_fallback_targeted = (
-        not use_targeted and not use_missing_files
-        and bool(state.last_implicated_files) and bool(ctx.chain) and not state.budgets.fallback_targeted_attempted
+    state.candidate_gates_succeeded = False
+    state.terminal_regression_succeeded = False
+    state.overall_attempt_succeeded = False
+    # PLAT-039: a planned target that is repository metadata or Kriya control
+    # state is refused before any Developer request - the same DENY the
+    # writer gives, which the retry loop stops on at once.
+    control_targets = [path for path in ctx.architect_files
+                       if is_trusted_control_path(ctx.worktree_path, os.path.join(ctx.worktree_path, path))]
+    if control_targets:
+        state.rejected_generation_targets.extend(control_targets)
+        denied_path = os.path.join(ctx.worktree_path, control_targets[0])
+        raise PolicyDeniedError(request=ActionRequest(action_type=ActionType.WRITE_FILE, target=denied_path),
+                                result=trusted_control_path_denial(denied_path))
+    # Mode selection is retry_policy.decide_attempt_mode(): the same pure
+    # decision and the same state inputs as the outer loop's
+    # decide_for_state() (workflow.py), so "targeted beats missing_files
+    # beats fallback_targeted beats full_set" and the API-recovery handback
+    # are encoded in exactly one place. It leaves out the stop conditions:
+    # the loop already decided them before this attempt began, and they must
+    # not fire a second time here with a since-incremented attempt_number.
+    retry_decision = decide_attempt_mode(
+        state, max_retries=ctx.max_retries, targeted_max_retries=ctx.targeted_max_retries,
+        has_fallback_model=bool(ctx.chain),
     )
     # Recorded now, not derived by the caller afterward - see the field's own
     # docstring in kriya/workflow/state.py for why that would be unsafe.
+    # RetryAction.STOP_EXHAUSTED can't actually occur here (see the None
+    # defaults above), but falls back to "full_set" rather than raising, to
+    # stay inert if that ever changes.
     state.last_attempt_mode = (
-        "targeted" if use_targeted
-        else "fallback_targeted" if use_fallback_targeted
-        else "missing_files" if use_missing_files
+        retry_decision.action.value
+        if retry_decision.action in (
+            RetryAction.API_CONTRACT_RECOVERY, RetryAction.TARGETED,
+            RetryAction.MISSING_FILES, RetryAction.FALLBACK_TARGETED,
+        )
         else "full_set"
     )
+    # Downstream branches below key off these booleans (not the mode string
+    # directly) since that predates this function's decide_retry_action()
+    # consolidation - derived from the single state.last_attempt_mode value
+    # above rather than re-testing the same conditions a second time.
+    use_targeted = state.last_attempt_mode == "targeted"
+    use_api_contract_recovery = state.last_attempt_mode == "api_contract_recovery"
+    use_missing_files = state.last_attempt_mode == "missing_files"
+    use_fallback_targeted = state.last_attempt_mode == "fallback_targeted"
+    attempt_operation = operation_for_attempt(
+        state.last_attempt_mode, has_prior_failure=bool(state.error_context),
+        recovery_phase=(
+            state.api_contract_recovery.phase if state.api_contract_recovery else None
+        ),
+    )
+    state.record_event(RunEvent(
+        kind="attempt.started",
+        attempt=state.attempt_number,
+        source="workflow",
+        authority=EventAuthority.ADVISORY,
+        operation=attempt_operation.value,
+        details={"mode": state.last_attempt_mode},
+    ))
+    state.attempts_by_mode[state.last_attempt_mode] = state.attempts_by_mode.get(state.last_attempt_mode, 0) + 1
+    if retry_decision.reserved_fallback:
+        # STATE-RESERVED-FALLBACK-001: only the fallback's own allowance in
+        # the global ceiling remains, so this attempt is the fallback's.
+        state.record_event(RunEvent(
+            kind="retry.reserved_fallback",
+            attempt=state.attempt_number,
+            source="attempt.run_attempt",
+            authority=EventAuthority.AUTHORITATIVE,
+            message=retry_decision.reason,
+            details={"reason_code": RESERVED_FALLBACK_ALLOWANCE, "mode": state.last_attempt_mode},
+        ))
     # Needed unconditionally below (both the normal compile/test gate
     # path and the always-run full regression check use it) - imported
     # here rather than only inside the skippable gate block so a
-    # resumed "developer_success" checkpoint iteration (which skips
+    # resumed candidate-gates checkpoint iteration (which skips
     # that block entirely) still has it in scope.
     from kriya.tools.validate import PolymorphicValidator
 
-    # A "developer_success" checkpoint means Developer generation + all
-    # Quality Gates already passed once, before this process was
-    # interrupted - only usable on the very first iteration of a resumed
-    # run; any retry after that needs a real, fresh generation attempt.
-    resuming_developer_stage = bool(
-        ctx.resume_state and ctx.resume_state.get("stage") == "developer_success" and state.attempt_number == 1
+    # PRD-008: a reused candidate replaces generation on the first attempt
+    # only; it is written into this attempt's fresh worktree through the
+    # same write path as model output. Its candidate gates are skipped only
+    # when the resume also kept their outcomes (every verification
+    # fingerprint matched); terminal regression always runs.
+    reusing_candidate = bool(
+        ctx.resume_plan is not None
+        and ctx.resume_plan.reuse_candidate
+        and ctx.resume_state
+        and state.attempt_number == 1
     )
+    skipping_candidate_gates = bool(reusing_candidate and ctx.resume_plan.skip_candidate_gates)
+    # PRV-06 completion (2026-08-29, "MA8.1 <-> MA9 composition and
+    # AttemptContext correctness"): a defensive baseline, not the real fix
+    # (see the MA9-coordinated branch below, which now assigns a real,
+    # candidate-view-aware value) - every branch below is still expected to
+    # set a MEANINGFUL active_code_context of its own. This exists only so
+    # that a FUTURE branch that forgets to (the exact live-reproduced defect
+    # this closes) degrades to "no shown-context grounding check" -
+    # edit_safety.py::apply_anchored_edits already treats an empty
+    # shown_context as exactly that, the same sentinel _materialize_
+    # candidate_content already uses for its own, narrower equivalent case -
+    # rather than raising UnboundLocalError the moment a response comes back
+    # as anchored edits.
+    active_code_context = ""
 
-    if resuming_developer_stage:
-        logger.info(f"Resuming checkpoint '{ctx.run_id}': using saved Developer output, skipping generation + Quality Gates.")
+    if reusing_candidate:
+        logger.info(
+            f"Resuming checkpoint '{ctx.run_id}': rebuilding the saved candidate in a fresh worktree "
+            "instead of generating; "
+            + ("its candidate gates are skipped (all verification fingerprints matched)"
+               if skipping_candidate_gates else "its candidate gates run again")
+            + "; terminal regression remains required."
+        )
         files = [
             {"filepath": fp, "content": content}
-            for fp, content in ctx.resume_state.get("final_files", {}).items()
+            for fp, content in (ctx.resume_state.get("final_files") or {}).items()
         ]
-        state.gate_outcomes = ctx.resume_state.get("gate_outcomes", state.gate_outcomes)
-        state.model_hops = ctx.resume_state.get("model_hops", state.model_hops)
+        if skipping_candidate_gates:
+            state.gate_outcomes = list(ctx.resume_state.get("gate_outcomes") or state.gate_outcomes)
+        state.model_hops = list(ctx.resume_state.get("model_hops") or state.model_hops)
         model_override = None
         base_url_override = None
         api_key_override = None
-    elif use_targeted:
+        extra_body_override = None
+    elif use_targeted or use_api_contract_recovery:
         # Targeted retry: always the primary model, never escalated
         # (see the budget comment above) - so the context budget is
         # always the primary model's own window, not a fallback's.
+        reference_window = allocation_window(ctx.kernel.config)
+        learned_reference = developer_reference(
+            reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+        )
         current_limit = _reserve_graph_context_budget(
-            ctx.kernel.config.llm.context_window, ctx.skills_prompt, ctx.learned_rag_context
+            reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
         )
         model_override = None
         base_url_override = None
         api_key_override = None
+        extra_body_override = None
 
-        current_graph_context = build_code_context(ctx.matched_files, ctx.related_files, ctx.workspace_path, current_limit)
-        base_code_context = ctx.skills_prompt
+        # CTX-001 P1 WP4 (C3/F9 fix): ctx.worktree_path, not
+        # ctx.workspace_path - by the time any retry runs, create_git_
+        # worktree() has already returned, so the worktree is the current-
+        # source-of-truth root for the rest of this run (see
+        # CurrentSourceResolver's own docstring for the full invariant).
+        # WP7 dedup: exclude any path retry_prompts.py's own targeted-retry
+        # renderer will show fresh/full a moment later (see
+        # _graph_context_exclusion_set's own docstring).
+        _graph_exclude = _graph_context_exclusion_set(state, ctx)
+        current_graph_context = build_code_context(
+            _filtered_candidates(ctx.matched_files, _graph_exclude),
+            _filtered_candidates(ctx.related_files, _graph_exclude),
+            ctx.worktree_path, current_limit,
+            cache=ctx.source_cache,
+        )
+        planned_source = _planned_source_context(ctx, _graph_exclude)
+        base_code_context = ctx.skills_prompt + planned_source
         if current_graph_context:
             base_code_context += current_graph_context
-        if ctx.learned_rag_context:
-            base_code_context += ctx.learned_rag_context
+        if learned_reference:
+            base_code_context += learned_reference
 
-        task_desc, active_code_context = _build_targeted_retry_prompt(
-            ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
-            state.all_files_written, ctx.worktree_path, base_code_context,
-            ecosystem_invariant_block=ctx.ecosystem_invariant_block,
-            resource_lifecycle_block=ctx.resource_lifecycle_block,
-            verification_contract_block=ctx.verification_contract_block,
+        if use_api_contract_recovery:
+            state.last_implicated_files = sorted({
+                item["owner"] for item in state.api_contract_recovery["violations"]
+            })
+
+        # MA9 (2026-08-29): an ACTIVE coordinated RepairContract takes over
+        # this entire targeted-retry branch for as long as it stays ACTIVE -
+        # see repair_contract.py's own module docstring for the PRV-06
+        # Bucket A finding this closes. Never active at the same time as
+        # API_CONTRACT_RECOVERY (a different, unrelated sticky contract on
+        # the same state object). Every other targeted-retry mechanic below
+        # this if/else (budget accounting, model_hops, the shared staged-
+        # write/atomic-commit pipeline further down run_attempt()) is
+        # unchanged either way - this only changes WHAT gets asked for and
+        # HOW it's framed.
+        active_repair_contract = (
+            state.repair_contract
+            if (
+                not use_api_contract_recovery
+                and state.repair_contract is not None
+                and state.repair_contract.status == RepairContractStatus.ACTIVE
+            ) else None
         )
-        logger.info(f"Targeted retry {state.budgets.targeted_retry_count + 1}/{ctx.targeted_max_retries}: focusing on {', '.join(state.last_implicated_files)}.")
 
-        state.model_hops.append(ctx.kernel.config.llm.model)
+        if active_repair_contract is not None:
+            logger.info(
+                "Targeted retry %d/%d: COORDINATED repair '%s' - generating %s together.",
+                state.budgets.targeted_retry_count + 1, ctx.targeted_max_retries,
+                active_repair_contract.id, ", ".join(active_repair_contract.generation_order),
+            )
+            state.record_event(RunEvent(
+                kind="repair_retry", attempt=state.attempt_number, source="attempt.run_attempt",
+                authority=EventAuthority.ADVISORY,
+                message=f"RepairContract '{active_repair_contract.id}' still ACTIVE on retry.",
+                details={
+                    "repair_contract_id": active_repair_contract.id,
+                    "immediate_targets": list(active_repair_contract.immediate_correction_targets),
+                    "contract_remains_active": True,
+                },
+            ))
+            state.model_hops.append(ctx.kernel.config.llm.model)
+            dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
+            files, coordinated_candidate_view = await _run_coordinated_repair_generation(
+                state, ctx, active_repair_contract, base_code_context, dev_stream, attempt_operation,
+                optional_sections=_developer_optional_sections(
+                    ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
+            )
+            # PRV-06 completion (2026-08-29): active_code_context was
+            # previously left UNASSIGNED on this branch - live-reproduced
+            # UnboundLocalError the moment a coordinated response came back
+            # as anchored edits and reached the shared anchored-edit
+            # application further down this function. Built from the SAME
+            # base_code_context every coordinated participant's own prompt
+            # was seeded from, PLUS each participant's real staged content
+            # (candidate_view) - never the stale authoritative baseline
+            # alone, so a later participant's edit whose search-block only
+            # exists in an earlier participant's just-generated candidate
+            # (not yet written to the worktree, per Rule 2A) is correctly
+            # recognized as grounded rather than incorrectly rejected.
+            active_code_context = base_code_context + "".join(
+                f"\n\n=== Candidate (not yet committed) for {path} ===\n{content}"
+                for path, content in sorted(coordinated_candidate_view.items())
+            )
+        else:
+            # VAL-001 G1-R3: centralized retry-time source/member-hint
+            # preparation (target reachability, C3 member escalation, no-
+            # progress gate) - see _prepare_retry_context's own docstring.
+            retry_prep = _prepare_retry_context(
+                state, ctx,
+                target_files=state.last_implicated_files,
+                prompt_window=allocation_window(ctx.kernel.config),
+                model_identity=ctx.kernel.config.llm.model,
+                base_code_context=base_code_context,
+                enable_no_progress_gate=not use_api_contract_recovery,
+            )
+            retry_package = retry_prep.retry_package
+            retry_error_context = retry_prep.retry_error_context
+            task_desc, active_code_context = _build_targeted_retry_prompt(
+                ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
+                state.all_files_written, ctx.worktree_path, base_code_context,
+                ecosystem_invariant_block=ctx.ecosystem_invariant_block,
+                resource_lifecycle_block=ctx.resource_lifecycle_block,
+                verification_contract_block=ctx.verification_contract_block,
+                retry_package=retry_package,
+                recovery_contract_block=ctx.recovery_contract_block,
+            )
+            if use_api_contract_recovery:
+                contract = state.api_contract_recovery
+                required = ", ".join(
+                    f"{item['owner']}::{item['removed_signature']}"
+                    for item in contract["violations"]
+                )
+                protected = ", ".join(contract["protected_evidence_files"])
+                baseline_owners = "\n\n".join(
+                    f"=== EXACT BASELINE OWNER SOURCE: {owner} ===\n"
+                    + state.all_original_contents.get(owner, "<baseline source unavailable>")[:12000]
+                    for owner in sorted({item["owner"] for item in contract["violations"]})
+                )
+                if contract.phase in (
+                    APIContractRecoveryPhase.REPAIR_BEHAVIOR,
+                    APIContractRecoveryPhase.AWAIT_TERMINAL_SUCCESS,
+                ):
+                    task_desc = (
+                        "=== API_CONTRACT_RECOVERY: REPAIR_BEHAVIOR ===\n"
+                        f"The following restored public contracts are immutable: {required}.\n"
+                        f"Protected baseline callers/tests are immutable evidence: {protected}.\n"
+                        "Now repair the requested behavior behind the existing public contract. "
+                        "Prefer private/internal helper changes. Do not rename, remove, replace, "
+                        "or redirect the public API.\n\n"
+                        f"Original goal:\n{ctx.goal}\n\n{baseline_owners}"
+                    )
+                else:
+                    task_desc = (
+                        "=== API_CONTRACT_RECOVERY: RESTORE_PUBLIC_CONTRACT ===\n"
+                        "This is the only objective for this phase.\n"
+                        f"Restore these exact public signatures in their existing owners: {required}.\n"
+                        "Do not solve the behavioral issue yet. Do not rename or replace a method. "
+                        "Do not modify protected callers/tests. The candidate is invalid unless "
+                        "every exact signature exists after this edit.\n"
+                        f"Protected contract evidence: {protected}.\n\n{baseline_owners}"
+                    )
+                active_code_context = base_code_context + "\n\n" + baseline_owners
+                retry_error_context = task_desc
+                logger.info(
+                    "API_CONTRACT_RECOVERY %s %d/%d: signatures=%s protected_evidence=%s",
+                    contract.phase.value, state.budgets.api_contract_recovery_count + 1,
+                    API_CONTRACT_RECOVERY_MAX_ATTEMPTS, required, protected,
+                )
+            else:
+                logger.info(f"Targeted retry {state.budgets.targeted_retry_count + 1}/{ctx.targeted_max_retries}: focusing on {', '.join(state.last_implicated_files)}.")
 
-        dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-        files = await ctx.developer.run_generation(
-            task_description=task_desc,
-            design_context=ctx.design,
-            existing_code_context=active_code_context,
-            stream_callback=dev_stream,
-            model_override=model_override,
-            base_url_override=base_url_override,
-            api_key_override=api_key_override,
-            known_target_files=state.last_implicated_files,
-            prior_error_context=state.error_context or None,
-            implicated_files=state.last_implicated_files,
-            error_source_context=state.last_error_source_context or None,
-            retry_temperature=ctx.kernel.config.llm.retry_temperature,
-            extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
-            files_with_current_content=state.all_files_written,
-            sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
-        )
+            # CTX-001 P1 C2 production integration: only for the plain
+            # targeted-retry flow (never API_CONTRACT_RECOVERY, which
+            # overwrote active_code_context with baseline_owners above -
+            # untouched here). _prepare_retry_context() already built and
+            # recorded the member-hint package (if any); appending its
+            # rendering here is the only thing this branch still needs to
+            # do with it.
+            if not use_api_contract_recovery and retry_prep.member_hint_rendered:
+                active_code_context += retry_prep.member_hint_rendered
+
+            if use_api_contract_recovery and contract.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT:
+                # Deterministic, not generative (control-plane audit,
+                # 2026-08-30) - see _restore_api_contract_owners_
+                # deterministically's own docstring for the live incident
+                # this closes and why no Developer call belongs here at
+                # all: the exact answer is already known. state.model_hops
+                # deliberately untouched - no model was invoked this
+                # attempt, so nothing belongs in a MODEL escalation history.
+                files = _restore_api_contract_owners_deterministically(state, contract)
+                logger.info(
+                    "API_CONTRACT_RECOVERY %s %d/%d (deterministic restore, no Developer "
+                    "call): owners=%s",
+                    contract.phase.value, state.budgets.api_contract_recovery_count + 1,
+                    API_CONTRACT_RECOVERY_MAX_ATTEMPTS, contract.owner_files,
+                )
+            else:
+                state.model_hops.append(ctx.kernel.config.llm.model)
+
+                dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
+                files = await _run_developer_generation(
+                    state, ctx,
+                    optional_sections=_developer_optional_sections(
+                        ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
+                    task_description=task_desc,
+                    design_context=(task_desc if use_api_contract_recovery else ctx.design),
+                    existing_code_context=active_code_context,
+                    stream_callback=dev_stream,
+                    model_override=model_override,
+                    base_url_override=base_url_override,
+                    api_key_override=api_key_override,
+                    extra_body_override=extra_body_override,
+                    known_target_files=state.last_implicated_files,
+                    prior_error_context=retry_error_context or None,
+                    implicated_files=state.last_implicated_files,
+                    error_source_context=state.last_error_source_context or None,
+                    retry_temperature=ctx.kernel.config.llm.retry_temperature,
+                    extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+                    files_with_current_content=state.all_files_written,
+                    sibling_content_budget=_reserve_sibling_content_budget(allocation_window(ctx.kernel.config)),
+                    operation_by_file=_operation_map(
+                        ctx, state.last_implicated_files, attempt_operation, state,
+                    ),
+                    default_operation=attempt_operation,
+                )
     elif use_fallback_targeted:
         # One-shot targeted fix on the first fallback model (see
         # fallback_targeted_attempted's own docstring above) - same
@@ -365,38 +6489,76 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # a result is known, so a crash/exception mid-attempt can
         # never cause this to be retried in a loop.
         state.budgets.fallback_targeted_attempted = True
-        fallback = ctx.chain[0]
+        state.budgets.fallback_targeted_requested = False
+        fallback = _select_developer_fallback(state, ctx, 1)
+        state.budgets.fallback_attempts_used += 1
+        reference_window = allocation_window(ctx.kernel.config, fallback)
+        learned_reference = developer_reference(
+            reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+        )
         current_limit = _reserve_graph_context_budget(
-            fallback.context_window, ctx.skills_prompt, ctx.learned_rag_context
+            reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
         )
         model_override = fallback.model
         base_url_override = fallback.base_url
         api_key_override = fallback.api_key
+        extra_body_override = fallback.extra_body
         logger.info(
-            f"Primary-model targeted retries exhausted - trying ONE targeted fix on "
-            f"fallback model {model_override} before falling back to full-set regeneration."
+            f"Trying ONE targeted fix on fallback model {model_override} before "
+            "falling back to full-set regeneration."
         )
 
-        current_graph_context = build_code_context(ctx.matched_files, ctx.related_files, ctx.workspace_path, current_limit)
-        base_code_context = ctx.skills_prompt
+        # CTX-001 P1 WP4/WP7 - see the targeted-retry branch above for the
+        # full rationale (worktree-authoritative source, dedup against
+        # retry_prompts.py's own all_files_written rendering).
+        _graph_exclude = _graph_context_exclusion_set(state, ctx)
+        current_graph_context = build_code_context(
+            _filtered_candidates(ctx.matched_files, _graph_exclude),
+            _filtered_candidates(ctx.related_files, _graph_exclude),
+            ctx.worktree_path, current_limit,
+            cache=ctx.source_cache,
+        )
+        planned_source = _planned_source_context(ctx, _graph_exclude)
+        base_code_context = ctx.skills_prompt + planned_source
         if current_graph_context:
             base_code_context += current_graph_context
-        if ctx.learned_rag_context:
-            base_code_context += ctx.learned_rag_context
+        if learned_reference:
+            base_code_context += learned_reference
 
+        # VAL-001 G1-R3: centralized retry-time source/member-hint
+        # preparation - previously this branch never called
+        # _resolve_retry_member_hints() at all (a confirmed, real C3
+        # branch-coverage gap), so C3 member escalation was structurally
+        # unavailable for the one-shot fallback-model targeted attempt.
+        retry_prep = _prepare_retry_context(
+            state, ctx,
+            target_files=state.last_implicated_files,
+            prompt_window=allocation_window(ctx.kernel.config, fallback),
+            model_identity=model_override,
+            base_code_context=base_code_context,
+        )
+        retry_package = retry_prep.retry_package
+        retry_error_context = retry_prep.retry_error_context
         task_desc, active_code_context = _build_targeted_retry_prompt(
             ctx.goal, ctx.plan, state.error_context, state.last_implicated_files,
             state.all_files_written, ctx.worktree_path, base_code_context,
             ecosystem_invariant_block=ctx.ecosystem_invariant_block,
             resource_lifecycle_block=ctx.resource_lifecycle_block,
             verification_contract_block=ctx.verification_contract_block,
+            retry_package=retry_package,
+            recovery_contract_block=ctx.recovery_contract_block,
         )
+        if retry_prep.member_hint_rendered:
+            active_code_context += retry_prep.member_hint_rendered
         logger.info(f"Fallback-targeted retry: focusing on {', '.join(state.last_implicated_files)}.")
 
         state.model_hops.append(model_override)
 
         dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-        files = await ctx.developer.run_generation(
+        files = await _run_developer_generation(
+            state, ctx,
+            optional_sections=_developer_optional_sections(
+                ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -404,14 +6566,19 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             model_override=model_override,
             base_url_override=base_url_override,
             api_key_override=api_key_override,
+            extra_body_override=extra_body_override,
             known_target_files=state.last_implicated_files,
-            prior_error_context=state.error_context or None,
+            prior_error_context=retry_error_context or None,
             implicated_files=state.last_implicated_files,
             error_source_context=state.last_error_source_context or None,
             retry_temperature=ctx.kernel.config.llm.retry_temperature,
             extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
             files_with_current_content=state.all_files_written,
-            sibling_content_budget=_reserve_sibling_content_budget(fallback.context_window),
+            sibling_content_budget=_reserve_sibling_content_budget(allocation_window(ctx.kernel.config, fallback)),
+            operation_by_file=_operation_map(
+                ctx, state.last_implicated_files, attempt_operation, state,
+            ),
+            default_operation=attempt_operation,
         )
     elif use_missing_files:
         # Missing-file recovery: same primary-model-only, non-escalating
@@ -419,19 +6586,34 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # last_missing_files above) - asks for exactly the file(s) the
         # completeness check found missing, instead of re-describing an
         # error or regenerating the whole file set.
+        reference_window = allocation_window(ctx.kernel.config)
+        learned_reference = developer_reference(
+            reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+        )
         current_limit = _reserve_graph_context_budget(
-            ctx.kernel.config.llm.context_window, ctx.skills_prompt, ctx.learned_rag_context
+            reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
         )
         model_override = None
         base_url_override = None
         api_key_override = None
+        extra_body_override = None
 
-        current_graph_context = build_code_context(ctx.matched_files, ctx.related_files, ctx.workspace_path, current_limit)
-        base_code_context = ctx.skills_prompt
+        # CTX-001 P1 WP4/WP7 - see the targeted-retry branch above for the
+        # full rationale (worktree-authoritative source, dedup against
+        # retry_prompts.py's own all_files_written rendering).
+        _graph_exclude = _graph_context_exclusion_set(state, ctx)
+        current_graph_context = build_code_context(
+            _filtered_candidates(ctx.matched_files, _graph_exclude),
+            _filtered_candidates(ctx.related_files, _graph_exclude),
+            ctx.worktree_path, current_limit,
+            cache=ctx.source_cache,
+        )
+        planned_source = _planned_source_context(ctx, _graph_exclude)
+        base_code_context = ctx.skills_prompt + planned_source
         if current_graph_context:
             base_code_context += current_graph_context
-        if ctx.learned_rag_context:
-            base_code_context += ctx.learned_rag_context
+        if learned_reference:
+            base_code_context += learned_reference
 
         # last_missing_files (from find_missing_expected_files) is always
         # bare basenames (compared against written files by basename).
@@ -448,6 +6630,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             ctx.architect_basename_to_path.get(basename, basename) for basename in state.last_missing_files
         ]
 
+        # VAL-001 G1 D1: _build_missing_files_retry_prompt reads every file in
+        # all_files_written fresh from the worktree (real, complete, current) -
+        # record that same real evidence before _operation_map() runs.
+        _record_all_files_written_as_exact_context(state, ctx, state.all_files_written)
         task_desc, active_code_context = _build_missing_files_retry_prompt(
             ctx.goal, ctx.plan, ctx.design, resolved_missing_files,
             state.all_files_written, ctx.worktree_path, base_code_context,
@@ -460,7 +6646,10 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         state.model_hops.append(ctx.kernel.config.llm.model)
 
         dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-        files = await ctx.developer.run_generation(
+        files = await _run_developer_generation(
+            state, ctx,
+            optional_sections=_developer_optional_sections(
+                ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
             task_description=task_desc,
             design_context=ctx.design,
             existing_code_context=active_code_context,
@@ -468,48 +6657,45 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             model_override=model_override,
             base_url_override=base_url_override,
             api_key_override=api_key_override,
+            extra_body_override=extra_body_override,
             known_target_files=resolved_missing_files,
-            sibling_content_budget=_reserve_sibling_content_budget(ctx.kernel.config.llm.context_window),
+            sibling_content_budget=_reserve_sibling_content_budget(allocation_window(ctx.kernel.config)),
+            operation_by_file=_operation_map(
+                ctx, resolved_missing_files, attempt_operation, state,
+            ),
+            default_operation=attempt_operation,
         )
     else:
         # Re-run context budget allocator dynamically for escalated model context window size
+        reference_window = allocation_window(ctx.kernel.config)
+        learned_reference = developer_reference(
+            reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+        )
         current_limit = _reserve_graph_context_budget(
-            ctx.kernel.config.llm.context_window, ctx.skills_prompt, ctx.learned_rag_context
+            reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
         )
         model_override = None
         base_url_override = None
         api_key_override = None
+        extra_body_override = None
 
-        active_context_window = ctx.kernel.config.llm.context_window
-        fallback = resolve_fallback_model(state.budgets.retry_count, ctx.chain)
+        active_prompt_window = allocation_window(ctx.kernel.config)
+        fallback = _select_developer_fallback(state, ctx, state.budgets.retry_count)
         if fallback is not None:
+            state.budgets.fallback_attempts_used += 1
             model_override = fallback.model
             base_url_override = fallback.base_url
             api_key_override = fallback.api_key
-            active_context_window = fallback.context_window
+            extra_body_override = fallback.extra_body
+            active_prompt_window = allocation_window(ctx.kernel.config, fallback)
+            reference_window = active_prompt_window
+            learned_reference = developer_reference(
+                reference_window, ctx.learned_rag_context, ctx.skills_prompt, ctx.design, ctx.plan,
+            )
             current_limit = _reserve_graph_context_budget(
-                fallback.context_window, ctx.skills_prompt, ctx.learned_rag_context
+                reference_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan
             )
             logger.info(f"Escalating compilation attempt to fallback model: {model_override} (Limit: {current_limit} tokens)")
-
-        current_graph_context = build_code_context(ctx.matched_files, ctx.related_files, ctx.workspace_path, current_limit)
-        active_code_context = ctx.skills_prompt
-        if current_graph_context:
-            active_code_context += current_graph_context
-        if ctx.learned_rag_context:
-            active_code_context += ctx.learned_rag_context
-
-        task_desc, active_code_context = _build_full_set_retry_prompt(
-            ctx.goal, ctx.plan, state.error_context, ctx.required_files_prompt_block,
-            state.all_files_written, ctx.worktree_path, active_code_context,
-            ctx.required_dependencies_prompt_block,
-            ecosystem_invariant_block=ctx.ecosystem_invariant_block,
-            resource_lifecycle_block=ctx.resource_lifecycle_block,
-            verification_contract_block=ctx.verification_contract_block,
-        )
-
-        # Track model hops
-        state.model_hops.append(model_override or ctx.kernel.config.llm.model)
 
         # On the very first attempt only (never a full-set retry, which
         # already escalates through the fallback chain above and is
@@ -529,126 +6715,217 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # Architect's own structured JSON file list, or, in the fallback
         # case above, from _resolve_file_paths_from_design already) - no
         # separate resolution step needed here anymore.
+        #
+        # CTX-001 P1 WP7: moved BEFORE the build_code_context() call below
+        # (was previously computed after it) - purely a reordering, same
+        # logic, same inputs (none of which depend on current_graph_context/
+        # retry_package/task_desc computed further down) - needed so a
+        # known-target path can be excluded from the Graph-RAG matched/
+        # related candidate set before it's rendered, rather than
+        # potentially shown twice at two different fidelities
+        # (DUPLICATE_SOURCE_CONTEXT_PATHS=0).
         known_target_files = None
-        if state.budgets.retry_count == 0 and ctx.expected_files_upfront:
+        active_failure_signature = state.budgets.last_failure_signature
+        if state.budgets.retry_count == 0 and ctx.expected_files_upfront and active_failure_signature is None:
             known_target_files = ctx.expected_files_upfront
-        elif state.budgets.retry_count == 0 and state.last_implicated_files:
-            # First full-set attempt reached via TARGETED-BUDGET EXHAUSTION,
-            # not via this exact failure genuinely resisting narrow scoping -
-            # found live, 2026-08-14 (spikes/eval_harness/runs/a-3, a-4,
-            # ignite_qpid_protocol): targeted_retry_count/fallback_targeted_attempted
-            # are single counters shared across the WHOLE run (kriya/workflow/
-            # state.py's RetryBudgets), not per-failure. A run that spends its
-            # entire targeted budget resolving one bug (a-4: 4 targeted attempts
-            # + 1 fallback-targeted fixing an unclosed Ignite resource) has ZERO
-            # scoped-retry runway left for the NEXT, completely different failure,
-            # even when that new failure has a precise, high-confidence locator
-            # (a-4: `Protocol.java:[17,5] variable dataLength might not have been
-            # initialized`, a one-line javac error) that's never once been given a
-            # targeted shot. Without this, that brand-new, trivially-scoped failure
-            # falls straight into a full, unscoped "regenerate every file" walk on
-            # a fallback model, chosen here purely by an unrelated earlier bug's
-            # bad luck - confirmed live as the actual mechanism behind BOTH runs'
-            # eventual 2400s timeout, not the fallback model's raw speed on its
-            # own (glm-4.7-flash then pays one multi-minute completion PER FILE,
-            # ~9 files, for a fix that only ever needed one).
-            #
-            # Fixed by reusing known_target_files here too - same mechanism
-            # already used for expected_files_upfront just above, and already
-            # trusted unconditionally (regardless of attribution confidence tier)
-            # by every targeted/fallback_targeted branch above. Deliberately
-            # gated to retry_count == 0 (the FIRST full-set attempt only, not
-            # every one) so the existing "broaden to a clean full regeneration"
-            # escape hatch is fully preserved for a failure that keeps recurring
-            # despite already being given a scoped shot at THIS level too - only
-            # the specific gap (a failure that's never once been targeted,
-            # inheriting a spent budget from a different, already-resolved bug)
-            # gets the cheaper, narrower first try.
-            known_target_files = state.last_implicated_files
+        elif (
+            active_failure_signature is not None
+            and state.last_implicated_files
+            and state.budgets.scoped_full_set_failure_signature != active_failure_signature
+        ):
+            # Each distinct, grounded validator failure gets exactly one
+            # dependency-closure repair before broad regeneration, independent
+            # of global retry_count consumed by earlier, unrelated failures.
+            # Repetition of the SAME signature broadens after this one shot.
+            known_target_files = dependent_closure(
+                state.last_implicated_files, ctx.generation_dependencies,
+            )
+            state.budgets.scoped_full_set_failure_signature = active_failure_signature
             logger.info(
-                f"First full-set attempt after targeted-budget exhaustion, but the "
-                f"current failure already has known implicated file(s) - scoping to "
+                f"First full-set attempt for this failure family has grounded implicated "
+                f"file(s) - scoping to their dependency closure "
                 f"{', '.join(known_target_files)} instead of the full file set."
             )
 
-        # PlannerAgent's own prompt never asks for full code, but models
-        # routinely over-deliver it anyway in fenced blocks inside the plan
-        # text - Architect explicitly discards it, and Developer previously
-        # always regenerated every file from scratch regardless, paying a
-        # full completion per file for work already done. On attempt 1 only
-        # (never a retry - a plan that already led to a failure isn't a
-        # trustworthy source for a fresh attempt), if the Planner's own text
-        # already has usable code for EVERY expected file, use it directly
-        # instead of asking Developer to redo it - still subject to the
-        # exact same compile/test/Runtime-Verification gates as any other
-        # attempt, so a wrong or incomplete Planner draft costs at most one
-        # gate cycle before falling through to a real Developer generation
-        # on the next attempt, the same downside a bad first Developer
-        # attempt would already have. Deliberately all-or-nothing: a partial
-        # match (some but not all expected files present) is NOT reused, to
-        # avoid a third, harder-to-verify code path that mixes Planner and
-        # Developer output for the same attempt.
-        reused_files = None
-        if state.budgets.retry_count == 0 and ctx.expected_files_upfront:
-            planner_blocks = extract_planner_code_blocks(ctx.plan, ctx.expected_files_upfront)
-            if set(planner_blocks.keys()) == set(ctx.expected_files_upfront):
-                reused_files = [{"filepath": fp, "content": content} for fp, content in planner_blocks.items()]
-                logger.info(
-                    f"Planner's own plan already contains complete code for all "
-                    f"{len(reused_files)} expected file(s) - reusing it directly instead of "
-                    "a fresh Developer generation call, subject to the same Quality Gates "
-                    "as any other attempt."
-                )
+        # CTX-001 P1 WP4/WP7: ctx.worktree_path (current-source invariant),
+        # matched/related filtered to exclude known-target paths (which get
+        # their own, higher-fidelity representation below) and
+        # already-written paths (which retry_prompts.py's own renderer will
+        # show fresh/full a moment later) - see
+        # _graph_context_exclusion_set's own docstring.
+        _graph_exclude = _graph_context_exclusion_set(state, ctx, known_target_files)
+        current_graph_context = build_code_context(
+            _filtered_candidates(ctx.matched_files, _graph_exclude),
+            _filtered_candidates(ctx.related_files, _graph_exclude),
+            ctx.worktree_path, current_limit,
+            cache=ctx.source_cache,
+        )
+        planned_source = _planned_source_context(ctx, _graph_exclude)
+        active_code_context = ctx.skills_prompt + planned_source
+        if current_graph_context:
+            active_code_context += current_graph_context
+        if learned_reference:
+            active_code_context += learned_reference
 
-        # Logged symmetrically on BOTH branches (previously only the reused
-        # branch logged anything) so a run's log alone - via the same grep-
-        # based analysis this session has used all day - can already answer
-        # "did attempt 1 use Planner-reused content or fresh Developer
-        # generation" without needing new tooling. See
-        # state.planner_reuse_used_attempt1's own docstring for why this is
-        # worth tracking at all: an external review raised, and two of the
-        # same day's live incidents supported, the hypothesis that reused
-        # Planner content correlates with more first-attempt failures than
-        # fresh Developer generation - this makes that measurable from
-        # ordinary run logs instead of argued from a handful of anecdotes.
+        # VAL-001 G1-R3: centralized retry-time source/member-hint
+        # preparation (target reachability, C3 member escalation, no-
+        # progress gate) - see _prepare_retry_context's own docstring.
+        # retry_package.target_projections is empty only when state.
+        # last_failure is None (_retry_package_for_attempt's own early
+        # return) - true on a clean first attempt (this branch's other real
+        # caller, where state.last_implicated_files is necessarily still
+        # empty too) - _prepare_retry_context/_resolve_retry_member_hints/
+        # _retry_package_for_attempt/_record_retry_projection_context_items
+        # all no-op cleanly for that case, exactly as the code this replaces
+        # already did.
+        retry_prep = _prepare_retry_context(
+            state, ctx,
+            target_files=state.last_implicated_files,
+            prompt_window=active_prompt_window,
+            model_identity=model_override or ctx.kernel.config.llm.model,
+            base_code_context=active_code_context,
+        )
+        retry_package = retry_prep.retry_package
+        retry_error_context = retry_prep.retry_error_context
+        task_desc, active_code_context = _build_full_set_retry_prompt(
+            ctx.goal, ctx.plan, state.error_context, ctx.required_files_prompt_block,
+            state.all_files_written, ctx.worktree_path, active_code_context,
+            ctx.required_dependencies_prompt_block,
+            ecosystem_invariant_block=ctx.ecosystem_invariant_block,
+            resource_lifecycle_block=ctx.resource_lifecycle_block,
+            verification_contract_block=ctx.verification_contract_block,
+            retry_package=retry_package,
+            recovery_contract_block=ctx.recovery_contract_block,
+        )
+        if retry_prep.member_hint_rendered:
+            active_code_context += retry_prep.member_hint_rendered
+
+        # Track model hops
+        state.model_hops.append(model_override or ctx.kernel.config.llm.model)
+
         if state.budgets.retry_count == 0:
-            state.planner_reuse_used_attempt1 = reused_files is not None
-            if reused_files is None:
-                logger.info(
-                    "Attempt 1: Planner's plan did not contain usable code for every expected "
-                    "file (or none was expected upfront) - using a fresh Developer generation "
-                    "call for all files."
-                )
-
-        if reused_files is not None:
-            files = reused_files
-        else:
-            # Generate code files
-            dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
-            files = await ctx.developer.run_generation(
-                task_description=task_desc,
-                design_context=ctx.design,
-                existing_code_context=active_code_context,
-                stream_callback=dev_stream,
-                model_override=model_override,
-                base_url_override=base_url_override,
-                api_key_override=api_key_override,
-                known_target_files=known_target_files,
-                prior_error_context=state.error_context or None,
-                implicated_files=state.last_implicated_files,
-                error_source_context=state.last_error_source_context or None,
-                retry_temperature=ctx.kernel.config.llm.retry_temperature,
-                extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
-                files_with_current_content=state.all_files_written,
-                sibling_content_budget=_reserve_sibling_content_budget(active_context_window),
+            process_boundary_constraint = _initial_test_process_boundary_constraint(
+                _runtime_contract_requirements(ctx), known_target_files,
             )
+            if process_boundary_constraint:
+                task_desc += process_boundary_constraint
+
+        if state.attempt_number == 1 and known_target_files:
+            # CTX-001 P1 WP7 (A3): instruction text (unconditional, fixed
+            # cost, stays in task_desc) is now fully separate from source
+            # content (budget-allocated, member-aware where possible,
+            # explicitly omitted rather than silently capped at 24,000
+            # chars - build_known_target_context(), context_budget.py).
+            owner_contract = _brownfield_owner_contract_block(ctx, known_target_files)
+            if owner_contract:
+                task_desc += owner_contract
+            known_target_limit = _reserve_graph_context_budget(
+                active_prompt_window, ctx.skills_prompt, learned_reference, ctx.design, ctx.plan, current_graph_context,
+            )
+            # CTX-001 P1 C2: a known-target file's member is only ever
+            # supplied here when an INDEPENDENT retrieval signal grounded
+            # it for THIS exact path (see _resolve_known_target_member_
+            # hints' own docstring) - a known target with no such evidence
+            # gets {} and build_known_target_context() falls back to its
+            # existing file-level handling unchanged.
+            known_target_member_hints = _resolve_known_target_member_hints(ctx, known_target_files)
+            known_target_rendered, known_target_package = _target_package_with_window_reserve(
+                ctx, known_target_files, known_target_limit, active_prompt_window, known_target_member_hints,
+            )
+            if known_target_rendered:
+                active_code_context += known_target_rendered
+                logger.info(
+                    "Attempt 1 known-target context: %d unit(s), %d omission(s) for %s "
+                    "(see run trace for full detail).",
+                    len(known_target_package.relevant_files), len(known_target_package.omitted),
+                    ", ".join(known_target_files),
+                )
+            # VAL-001 G1 D1: record real provenance for _completeness_gated_operation()'s
+            # own authorization check - never inferred from file size. This is the exact
+            # context package run 8b6ee803's attempt 1 built (skeleton tier, body elided)
+            # for graphify/extractors/engine.py; recording it here is what lets the
+            # invariant see that a whole-file replacement was never authorized for it.
+            #
+            # VAL-001 G1-R3: same same-path precedence fix as _prepare_retry_
+            # context's own identical update() - a grounded member_id entry
+            # must never be silently overwritten by a broader, less precise
+            # same-path overview merely because it happens to sort later.
+            state.known_target_context_items.update({
+                item.path: item
+                for item in sorted(
+                    known_target_package.relevant_files,
+                    key=lambda item: item.member_id is not None,
+                )
+            })
+            # Internal evidence (WP6/observability) - never the full source,
+            # just enough to answer "what tier/omission did each known
+            # target actually get" from the run trace alone.
+            state.record_event(RunEvent(
+                kind="context.known_target_package",
+                attempt=state.attempt_number,
+                source="attempt.run_attempt",
+                authority=EventAuthority.ADVISORY,
+                message="Known-target context package built for the attempt-1 owner-contract replacement.",
+                details={
+                    "known_target_files": list(known_target_files),
+                    "unit_count": len(known_target_package.relevant_files),
+                    "tiers": [
+                        {"path": item.path, "member_id": item.member_id, "tier": item.tier}
+                        for item in known_target_package.relevant_files
+                    ],
+                    "omitted": list(known_target_package.omitted),
+                    "package_hash": known_target_package.package_hash,
+                    # CTX-001 P1 C2 observability: WHICH known-target paths
+                    # got a validated, production-derived member hint at
+                    # all - never the candidate names or source text.
+                    "member_hint_paths": sorted(known_target_member_hints.keys()),
+                },
+            ))
+
+        # FILE-INTEGRITY-CONTRACT-001B: Planner prose is never repository
+        # mutation authority. A fenced block in the plan is never written as
+        # a file (the former attempt-1 "Planner reuse" committed a shell line
+        # as config.yaml); every attempt's files come from a parsed Developer
+        # response through the authorized writer.
+        # Generate code files
+        dev_stream = (lambda token: ctx.stream_callback("Code Generation", token)) if ctx.stream_callback else None
+        files = await _run_developer_generation(
+            state, ctx,
+            optional_sections=_developer_optional_sections(
+                ctx, current_graph_context, _graph_exclude, learned_reference, planned_source),
+            task_description=task_desc,
+            design_context=ctx.design,
+            existing_code_context=active_code_context,
+            stream_callback=dev_stream,
+            model_override=model_override,
+            base_url_override=base_url_override,
+            api_key_override=api_key_override,
+            extra_body_override=extra_body_override,
+            known_target_files=known_target_files,
+            prior_error_context=retry_error_context or None,
+            implicated_files=state.last_implicated_files,
+            error_source_context=state.last_error_source_context or None,
+            retry_temperature=ctx.kernel.config.llm.retry_temperature,
+            extra_fix_instruction=DeveloperAgent.SELF_CONSISTENCY_NUDGE,
+            files_with_current_content=state.all_files_written,
+            sibling_content_budget=_reserve_sibling_content_budget(active_prompt_window),
+            operation_by_file=(
+                _operation_map(ctx, known_target_files, attempt_operation, state)
+                if known_target_files else None
+            ),
+            default_operation=attempt_operation,
+        )
 
     # Recorded now, not derived by the caller afterward - see the fields'
     # own docstring in kriya/workflow/state.py. Every branch above sets all
-    # three of these (to None for the primary model, or a fallback's values).
-    state.last_model_override = model_override
-    state.last_base_url_override = base_url_override
-    state.last_api_key_override = api_key_override
+    # four of these (to None for the primary model, or a fallback's values).
+    if state.last_developer_call_attempt != state.attempt_number:
+        # No Developer call this attempt; otherwise _enter_developer_model
+        # already recorded the model the call actually went to (PRD-017).
+        state.last_model_override = model_override
+        state.last_base_url_override = base_url_override
+        state.last_api_key_override = api_key_override
+        state.last_extra_body_override = extra_body_override
 
     # Normalize filepaths before anything downstream uses them - the
     # Developer Agent occasionally returns an absolute path instead of a
@@ -667,6 +6944,495 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         normalized_files.append(file_obj)
     files = normalized_files
 
+    # Sticky existing-owner resolution, applied on EVERY attempt/retry - not
+    # just the Architect's initial file list (see workflow.py's own call to
+    # this SAME function for that first pass, before any Developer call has
+    # happened at all). Found live, PRV-03 legacy (2026-08-27): the
+    # Architect-stage resolution correctly mapped an invented
+    # 'service/CustomerService.java' back to the real, existing
+    # 'CustomerService.java' on attempt 1 - but a LATER full-set retry (the
+    # Developer's own initiative, not the Architect's plan) reinvented the
+    # exact same parallel-package path again. Nothing re-applied that same
+    # resolution to a Developer response's own filepath choices on a later
+    # attempt, so it compiled as a genuine second declaration (a real
+    # "duplicate type" compile error), and every subsequent retry kept
+    # targeting the invented path for repair instead of the real owner -
+    # 5 further attempts burned entirely on malformed repair responses for
+    # a path that should never have reached disk. Reusing the SAME
+    # resolution function here (not a parallel duplicate implementation)
+    # closes the loop generically: a model-invented parallel-package path
+    # for an ALREADY-OWNED artifact is redirected back to the real owner
+    # before it's ever written, treated as a compile target, or targeted
+    # for repair - on every attempt, not just the first.
+    #
+    # Must exclude anything THIS RUN has already legitimately established
+    # (state.all_files_written / ctx.established_files) before resolving -
+    # prefer_existing_artifact_owners() only checks ctx.workspace_path (the
+    # pristine ORIGINAL brownfield repo) to decide what already exists, so
+    # a genuinely new file this run created on an earlier attempt (which
+    # naturally doesn't exist in the pristine original) looks identical to
+    # a truly invented duplicate. Found live, PRV-03 legacy (2026-08-27):
+    # attempt 1 legitimately created a new dto/CustomerDto.java; attempt 5
+    # edited that SAME already-established file again, and this check
+    # (before this fix) mistook it for an invented duplicate and redirected
+    # it onto CustomerController.java via the weakest, semantic-overlap-
+    # only fallback tier - a real class merge, not a same-basename/same-
+    # type collision. An existing MISDIRECTED EDIT gate happened to catch
+    # the resulting bad anchored edit before it corrupted
+    # CustomerController.java, but that's a lucky downstream catch, not a
+    # guarantee - the redirect itself must never fire on a file this run
+    # already owns.
+    already_established = set(state.all_files_written) | set(ctx.established_files)
+    candidate_paths = [file_obj["filepath"] for file_obj in files]
+    paths_to_resolve = [path for path in candidate_paths if path not in already_established]
+    resolution = dict(zip(
+        paths_to_resolve,
+        prefer_existing_artifact_owners(paths_to_resolve, ctx.goal, ctx.workspace_path),
+        strict=False,  # unresolved paths fall back to themselves via .get() below
+    )) if paths_to_resolve else {}
+    resolved_paths = [resolution.get(path, path) for path in candidate_paths]
+    if resolved_paths != candidate_paths:
+        for file_obj, resolved_path in zip(files, resolved_paths, strict=True):  # one path per file
+            original_path = file_obj["filepath"]
+            if resolved_path != original_path:
+                logger.warning(
+                    "Redirected Developer-invented parallel-owner path '%s' back to sticky "
+                    "existing owner '%s' - the existing owner is authoritative; the invented "
+                    "path is abandoned before ever reaching disk.", original_path, resolved_path,
+                )
+            file_obj["filepath"] = resolved_path
+        # A redirect can now collide two entries onto the same real path
+        # (an invented duplicate remapped onto an owner this SAME response
+        # also wrote directly under its real name) - keep the LAST one,
+        # matching this function's own natural "later entry wins" order.
+        deduped: Dict[str, Dict[str, Any]] = {}
+        for file_obj in files:
+            deduped[file_obj["filepath"]] = file_obj
+        files = list(deduped.values())
+
+    # P9-R1 (P9/PRV-08, 2026-09-08): while API_CONTRACT_RECOVERY is active
+    # (RESTORE_PUBLIC_CONTRACT AND REPAIR_BEHAVIOR both narrow the Developer's
+    # own target scope to state.api_contract_recovery.owner_files ONLY - see
+    # this attempt's known_target_files=state.last_implicated_files above,
+    # and _restore_api_contract_owners_deterministically's own [owner]-only
+    # return - confirmed against the real P9 log: the collision this fixes
+    # actually fires during REPAIR_BEHAVIOR, attempts 3-4, not the single
+    # RESTORE_PUBLIC_CONTRACT attempt itself, which transitions before ever
+    # reaching quality gates), this attempt's own `files` legitimately omits
+    # every OTHER expected file - the completeness check below has no way to
+    # know that omission was deliberate and correct, not the Developer
+    # silently under-delivering. For each expected file outside the active
+    # recovery owner set that isn't already part of THIS attempt's own
+    # `files`, fold in its own most-recent cumulative candidate content
+    # (state.last_candidate_contents, updated below from every attempt's
+    # own `files`, deliberately BEFORE quality-gate outcome is known - Case
+    # A's own "changed A" survives even though the batch containing it was
+    # ultimately rejected for an unrelated reason, exactly the real P9
+    # shape). A file with NO cumulative entry (never generated in any
+    # attempt) is left alone - still correctly reported missing (Case B);
+    # never fabricated from baseline merely to satisfy completeness. This is
+    # the SAME `files` list every downstream gate (brownfield check,
+    # compile, staged writes, the completeness check itself) sees - no
+    # second, shadow candidate representation.
+    if state.api_contract_recovery is not None:
+        recovery_owner_files = set(state.api_contract_recovery.owner_files)
+        already_in_files = {file_obj["filepath"] for file_obj in files}
+        for expected_path in ctx.architect_files:
+            if expected_path in recovery_owner_files or expected_path in already_in_files:
+                continue
+            cumulative_content = state.last_candidate_contents.get(expected_path)
+            if cumulative_content is not None:
+                # VAL-001 G1 D1-A (2026-09-18): this entry is Kriya's OWN
+                # continuity bookkeeping re-asserting a file's already-
+                # tracked cumulative state so completeness holds - it is not
+                # a mutation the Developer returned THIS attempt at all, so
+                # it carries no "actual returned shape" for
+                # _validate_actual_mutation_authority() to evaluate.
+                # Unmarked, this synthetic entry would look identical to a
+                # genuine unauthorized full-file replacement and be wrongly
+                # rejected; marked, the per-file loop below exempts it the
+                # same way it exempts a RESTORE_PUBLIC_CONTRACT restoration.
+                files.append({
+                    "filepath": expected_path, "content": cumulative_content,
+                    "_kriya_carried_forward_content": True,
+                })
+    # VAL-001 G1 D1-B (2026-09-18): this cache is recorded further down,
+    # inside the per-file operation-authority enforcement loop, ONLY after
+    # that file's own actual returned mutation shape has cleared
+    # _validate_actual_mutation_authority() (or was exempt as carried-
+    # forward content already itself authorized in an earlier attempt) -
+    # never unconditionally for every entry in `files` up front. Recording
+    # unconditionally here (the original P9-R1 shape) would let a full-file
+    # candidate this SAME attempt is about to reject on authority grounds
+    # still land in the cache, ready to be silently resurrected as
+    # `_kriya_carried_forward_content` on a LATER attempt that never asks
+    # the Developer for this file at all - required authority case #6
+    # ("failed/rejected candidate-derived full projection, later retry ->
+    # REJECT"). See that loop's own comment for the unchanged Case A/B/C
+    # recovery semantics this preserves exactly, just gated on authority.
+
+    # Brownfield ownership is enforced before any candidate byte reaches the
+    # sandbox. Path resolution alone is insufficient: a model can target the
+    # correct existing pathname while pasting an invented replacement class
+    # into it. Detect that contract removal now, not after compiler retries or
+    # terminal regression.
+    #
+    # Runs on EVERY attempt, not just the first - found live, PRV-03
+    # hardened (2026-08-27): the actual contract-breaking change (Customer's
+    # record component list going from 4 to 5) was introduced by the model
+    # on attempt 10, not attempt 1. The old `state.attempt_number == 1`
+    # restriction meant this whole detection - and the sticky
+    # api_contract_recovery repair flow it feeds - never even looked at
+    # that attempt's own candidate. `not state.api_contract_recovery` still
+    # guards against double-checking once a violation is already being
+    # actively recovered (find_unrestored_public_api_contracts/find_
+    # protected_api_reference_changes own that phase instead, further
+    # below).
+    if not state.api_contract_recovery:
+        baseline_contents = {}
+        candidate_contents = {}
+        for file_obj in files:
+            filepath = file_obj["filepath"]
+            workspace_file = os.path.join(ctx.workspace_path, filepath)
+            if not os.path.isfile(workspace_file) or file_obj.get("content") is None:
+                continue
+            try:
+                with open(workspace_file, "r", encoding="utf-8", errors="replace") as handle:
+                    baseline_contents[filepath] = handle.read()
+            except OSError:
+                continue
+            candidate_contents[filepath] = file_obj["content"]
+        # CORR-016 (P9/PRV-08, 2026-09-08, DIRECT-only): direct_contract_
+        # authorizations() is a pure function of ctx.grounding_goal (the raw,
+        # unmediated user request) and ctx.structured_plan - filtered here to
+        # exactly this subtask's own legal_scope, never a wider allowlist.
+        # See kriya/workflow/contract_authority.py's own module docstring.
+        run_direct_authorizations = derive_direct_contract_authorizations(
+            ctx.grounding_goal, ctx.structured_plan,
+        )
+        direct_authorizations = [
+            authorization for authorization in run_direct_authorizations
+            if authorization.legal_scope.get("subtask_id") == ctx.current_subtask_id
+        ]
+        # PRD-023: a human-approved change of this subtask's scope is
+        # authorized exactly like a DIRECT one (same per owner/symbol/category
+        # match inside the detector).
+        human_authorizations = [
+            authorization for authorization in state.human_contract_authorizations
+            if authorization.legal_scope.get("subtask_id") == ctx.current_subtask_id
+        ]
+        early_api_violations = find_brownfield_public_api_changes(
+            ctx.workspace_path, baseline_contents, candidate_contents, ctx.goal,
+            direct_authorizations + human_authorizations,
+        )
+        contract_classifications: List[Any] = []
+        escalation_reason_code: Optional[str] = None
+        # PRD-023: the changes an authorization covered are classified too
+        # (AUTHORIZED_DIRECT/AUTHORIZED_HUMAN evidence), found as the
+        # difference against the same detector without authorizations.
+        authorized_api_changes: List[Dict[str, Any]] = []
+        if direct_authorizations or human_authorizations:
+            remaining_keys = {(v["owner"], v["removed_signature"]) for v in early_api_violations}
+            authorized_api_changes = [
+                v for v in find_brownfield_public_api_changes(
+                    ctx.workspace_path, baseline_contents, candidate_contents, ctx.goal, [],
+                )
+                if (v["owner"], v["removed_signature"]) not in remaining_keys
+            ]
+        if early_api_violations or authorized_api_changes:
+            early_api_violations, contract_classifications, escalation_reason_code = (
+                await _classify_and_escalate_contract_changes(
+                    state, ctx, early_api_violations, baseline_contents, candidate_contents,
+                    run_direct_authorizations, authorized_api_changes,
+                )
+            )
+        if early_api_violations:
+            state.all_original_contents.update(baseline_contents)
+            for baseline_path in baseline_contents:
+                _capture_original(state, ctx, baseline_path)
+            for evidence_path in sorted({
+                path
+                for item in early_api_violations
+                for path in item.get("evidence_files", [])
+            }):
+                if evidence_path not in state.all_original_contents:
+                    _capture_original(state, ctx, evidence_path)
+            failure = Failure(
+                type="brownfield_public_api_changed",
+                message=(
+                    "BROWNFIELD PUBLIC API REJECTED BEFORE WRITE: the candidate would "
+                    "replace or remove an established public signature. Restore the existing "
+                    "owner contract before behavioral repair."
+                ),
+                raw_output=str(early_api_violations),
+                source="ownership_gate", authority="deterministic",
+                file_locations=[
+                    FileLocation(filepath=item["owner"])
+                    for item in early_api_violations
+                ],
+                likely_files=sorted({item["owner"] for item in early_api_violations}),
+                diagnostics={
+                    "api_contract_recovery": {"violations": early_api_violations},
+                    # PRD-023: how each change was classified, and why no
+                    # escalation authorized it.
+                    "contract_classifications": [c.to_dict() for c in contract_classifications],
+                    **({"reason_code": escalation_reason_code} if escalation_reason_code else {}),
+                },
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+        # CORR-018-P1 (A3-bound slice, 2026-09-09): a SEPARATE, deterministic
+        # check from the brownfield-API gate immediately above - that gate asks
+        # "did a protected public signature change without authority"; this one
+        # asks "did anything structurally material change outside explicitly
+        # authorized regions", including inside a signature-preserving method
+        # body (the exact P10 production gap - CustomerPrinter.print() kept its
+        # signature while its body silently changed). Deliberately its own
+        # module/function/reason-code space, never merged into
+        # find_brownfield_public_api_changes() - see semantic_region_authority.py's
+        # own module docstring. Per-region checking is a no-op for a file
+        # absent from ctx.authorized_semantic_regions - unaffected by A3 or
+        # by CORR-018's general-case closure (2026-09-13), which populates
+        # this list automatically for ordinary generate/fix and structured-
+        # plan calls, but ONLY when autonomy.semantic_region_enforcement_
+        # required is True (see kriya/workflow/semantic_scope_derivation.py).
+        # strict_existing_java_files below is what makes an UNLISTED
+        # existing .java file's own real change a rejection rather than a
+        # silent no-op, and is itself gated by that same flag - default
+        # False preserves every existing caller's behavior exactly.
+        semantic_violations = find_unauthorized_semantic_changes(
+            baseline_contents, candidate_contents, ctx.authorized_semantic_regions,
+            strict_existing_java_files=ctx.kernel.config.autonomy.semantic_region_enforcement_required,
+        )
+        if semantic_violations:
+            evidence = "; ".join(
+                f"file={v.relpath}, member={v.member_key}, reason={v.reason_code}: {v.detail}"
+                for v in semantic_violations
+            )
+            failure = Failure(
+                type="semantic_region_unauthorized",
+                message=(
+                    "SEMANTIC REGION REJECTED BEFORE WRITE: the candidate changes source "
+                    "outside the explicitly authorized region(s) for this run. Only the "
+                    "approved change, and its narrowly authorized supporting regions, may "
+                    "differ from the baseline."
+                ),
+                raw_output=evidence,
+                source="semantic_authority_gate", authority="deterministic",
+                file_locations=[FileLocation(filepath=v.relpath) for v in semantic_violations],
+                likely_files=sorted({v.relpath for v in semantic_violations}),
+                diagnostics={
+                    "semantic_region_authority": {
+                        "violations": [
+                            {"relpath": v.relpath, "member_key": v.member_key,
+                             "reason_code": v.reason_code, "detail": v.detail}
+                            for v in semantic_violations
+                        ],
+                    },
+                },
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+        # UNREQUESTED_ARCHITECTURAL_SURFACE: verification strategy must not be
+        # allowed to mutate the product's real architectural surface. Same
+        # pre-write timing, same goal-explicit-request escape hatch, same
+        # typed-Failure + likely_files targeted-retry pattern as the
+        # brownfield-API check above (deliberately NOT the api_contract_
+        # recovery phased state machine - see find_unrequested_architectural_
+        # surfaces's own docstring for why this needs only a single-shot fix,
+        # not a two-phase restore-then-repair). Found live, PRV-04
+        # (2026-08-27): a runtime-verification pass added its own `public
+        # static void main(...)` to a brand-new AppTest.java instead of
+        # reusing the real, correctly-extended App.main(...) entrypoint.
+        #
+        # Deliberately NOT reusing baseline_contents/candidate_contents from
+        # the brownfield-API check above: that loop skips any file that
+        # doesn't already exist in the workspace (os.path.isfile(...) guard),
+        # since a REMOVED/CHANGED public signature is only a meaningful
+        # concept for a pre-existing owner. The confirmed PRV-04 incident is
+        # the opposite shape - a brand-NEW file introducing an entrypoint -
+        # so this needs every file_obj in the response, existing or not.
+        surface_original_contents: Dict[str, str] = {}
+        surface_candidate_contents: Dict[str, str] = {}
+        for file_obj in files:
+            filepath = file_obj["filepath"]
+            if file_obj.get("content") is None:
+                continue
+            workspace_file = os.path.join(ctx.workspace_path, filepath)
+            if os.path.isfile(workspace_file):
+                try:
+                    with open(workspace_file, "r", encoding="utf-8", errors="replace") as handle:
+                        surface_original_contents[filepath] = handle.read()
+                except OSError:
+                    pass
+            surface_candidate_contents[filepath] = file_obj["content"]
+        surface_violations = find_unrequested_architectural_surfaces(
+            ctx.workspace_path, surface_original_contents, surface_candidate_contents, ctx.goal,
+        )
+        if surface_violations:
+            failure = Failure(
+                type="unrequested_architectural_surface",
+                message=(
+                    "UNREQUESTED ARCHITECTURAL SURFACE REJECTED BEFORE WRITE: the candidate "
+                    "introduces a new executable entrypoint (public static void main(...)) "
+                    "that this repository's existing baseline entrypoint(s) "
+                    f"({', '.join(sorted({e for v in surface_violations for e in v['baseline_entrypoints']}))}) "
+                    "did not have, and the goal never asked for a second one. Verification "
+                    "strategy must not alter persistent application architecture - remove this "
+                    "entrypoint; if runtime verification needs to run something, invoke the "
+                    "existing entrypoint, an existing test, or a harness-level command instead."
+                ),
+                raw_output=str(surface_violations),
+                source="ownership_gate", authority="deterministic",
+                file_locations=[
+                    FileLocation(filepath=item["file"]) for item in surface_violations
+                ],
+                likely_files=sorted({item["file"] for item in surface_violations}),
+                diagnostics={"reason_code": "UNREQUESTED_ARCHITECTURAL_SURFACE"},
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+    # Enforce the selected response contract before attribution heuristics or
+    # writes.  Classification is based on the target's real existence, so the
+    # same full-content shape is CREATE for an absent file and REPAIR for an
+    # existing one.  Repair fallbacks are explicit and observable; creation has
+    # no permissive fallback that could turn a missing file into a silent no-op.
+    for file_obj in files:
+        filepath = file_obj["filepath"]
+        file_exists = _target_exists(ctx, filepath)
+        expected_operation, mandatory_patch = _completeness_gated_operation(
+            filepath,
+            operation_for_file(attempt_operation, file_exists=file_exists),
+            file_exists=file_exists, ctx=ctx, state=state,
+        )
+        actual_operation, contract_error = validate_operation_result(
+            file_obj,
+            expected=expected_operation,
+            file_exists=file_exists,
+        )
+        if contract_error:
+            failure = Failure(
+                type="operation_contract",
+                message=(
+                    f"OPERATION CONTRACT FAILURE in {filepath}: {contract_error}. "
+                    f"Return exactly the {expected_operation.value} response shape requested."
+                ),
+                raw_output=contract_error,
+                file_locations=[FileLocation(filepath=filepath)],
+                likely_files=[filepath],
+                attempted_edits=file_obj.get("edits") or [],
+                # Typed only when the producer named the violation (e.g. a `[]`
+                # file-list answer given as file content). Deliberately NOT in
+                # _DETERMINISTIC_VERDICT_REASON_CODES: it is model output, and a
+                # resampled retry can genuinely return real content.
+                diagnostics=(
+                    {"reason_code": file_obj["protocol_reason_code"]}
+                    if file_obj.get("protocol_reason_code") else None
+                ),
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        # VAL-001 G1 D1-A (2026-09-18): independent of `mandatory_patch`
+        # above (which only ever reflects the REQUESTED operation - see
+        # _validate_actual_mutation_authority()'s own docstring for the
+        # full G1-R2 incident this closes) - this checks the ACTUAL
+        # returned shape, unconditionally, for every mode. validate_
+        # operation_result()'s own PATCH -> FULL_FILE transition is
+        # intentionally permissive at THAT layer (an ordinary targeted
+        # retry may legitimately decide a small patch isn't enough) - this
+        # is the layer that must never be permissive about a full-file
+        # response reaching the sandbox without real authority for it,
+        # PRE-WRITE (this whole loop runs strictly before the batch commit
+        # further down in this function - see AuthorizedFileWriter.
+        # commit_batch()'s own call site).
+        authority_rejection_reason = (
+            None if file_obj.get("_kriya_carried_forward_content")
+            else _validate_actual_mutation_authority(
+                filepath, actual_operation, file_exists=file_exists, ctx=ctx, state=state,
+            )
+        )
+        if authority_rejection_reason is not None:
+            state.record_event(RunEvent(
+                kind="operation_authority.rejected",
+                attempt=state.attempt_number,
+                source="attempt.run_attempt",
+                authority=EventAuthority.AUTHORITATIVE,
+                operation=actual_operation.value,
+                message=f"{filepath}: whole-file authority rejected - {authority_rejection_reason}",
+                details={
+                    "filepath": filepath,
+                    "requested_operation": expected_operation.value,
+                    "actual_operation": actual_operation.value,
+                    "mandatory_patch_from_request": mandatory_patch,
+                    "known_context_tier": (
+                        state.known_target_context_items[filepath].tier
+                        if filepath in state.known_target_context_items else None
+                    ),
+                    "known_context_is_exact": (
+                        state.known_target_context_items[filepath].is_exact
+                        if filepath in state.known_target_context_items else None
+                    ),
+                    "known_context_member_id": (
+                        state.known_target_context_items[filepath].member_id
+                        if filepath in state.known_target_context_items else None
+                    ),
+                    "known_context_revision": (
+                        state.known_target_context_items[filepath].revision
+                        if filepath in state.known_target_context_items else None
+                    ),
+                },
+            ))
+            failure = Failure(
+                type="operation_contract",
+                message=f"OPERATION CONTRACT FAILURE in {filepath}: {authority_rejection_reason}",
+                raw_output=f"actual returned operation {actual_operation.value} lacks whole-file authority",
+                file_locations=[FileLocation(filepath=filepath)],
+                likely_files=[filepath],
+                attempted_edits=file_obj.get("edits") or [],
+                diagnostics={"reason_code": "ACTUAL_MUTATION_SHAPE_AUTHORITY_REJECTED"},
+                attempt=state.attempt_number,
+            )
+            _record_edit_protocol_failure(state, filepath, failure.type)
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        if actual_operation in (CodeOperation.CREATE_FULL_FILE, CodeOperation.REPAIR_WITH_FULL_FILE):
+            state.edit_failure_capability.pop(filepath, None)  # an authorized whole-file edit was accepted
+        # VAL-001 G1 D1-B: only reached once this file's actual mutation
+        # shape has cleared authority - see this cache's own recording-site
+        # comment above for why an unconditional/earlier recording would
+        # reopen required authority case #6. A targeted/anchored-edit
+        # response's own entries carry "edits", not "content" (resolved to
+        # full content later by the anchored-edit pipeline further down) -
+        # skipped here, not an error, exactly as the original P9-R1
+        # recording did.
+        _candidate_content = file_obj.get("content")
+        if _candidate_content is not None:
+            state.last_candidate_contents[filepath] = _candidate_content
+        if actual_operation is not expected_operation:
+            state.record_event(RunEvent(
+                kind="operation.fallback",
+                attempt=state.attempt_number,
+                source="developer",
+                authority=EventAuthority.ADVISORY,
+                operation=actual_operation.value,
+                message=(
+                    f"{filepath}: accepted safe fallback from "
+                    f"{expected_operation.value} to {actual_operation.value}."
+                ),
+                details={
+                    "filepath": filepath,
+                    "requested": expected_operation.value,
+                    "returned": actual_operation.value,
+                },
+            ))
+
     # Captured here (before any write can raise) rather than after the write
     # loop below, so a self-diagnosis is never lost to an anchored-edit
     # exception on an unrelated file later in the same batch. Paired with
@@ -676,25 +7442,156 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
     # failure is classified) - see kriya/workflow/attribution.py's
     # extract_self_diagnosed_files() and retry_strategy.py's signature-gated
     # consumption of this field.
-    self_diagnosed = extract_self_diagnosed_files(files, list(state.all_files_written))
+    # Only overwritten when THIS attempt actually produced a fresh self-
+    # diagnosis - left untouched otherwise, not reset to None.
+    #
+    # PRV-05 run 7 (2026-08-28): the THIRD tuple element (state.attempt_number,
+    # i.e. THIS attempt) narrows this memory's original design, which relied
+    # on signature equality ALONE to survive intervening attempts
+    # indefinitely ("attempt N redirects, attempt N+1 returns no analysis,
+    # the same signature recurs at attempt N+2 - the diagnosis must still be
+    # there"). Live evidence proved that design unsafe: retry_strategy.py
+    # deliberately COLLAPSES an edit-protocol failure's signature onto
+    # whatever authoritative failure it's repairing (anchored_edit/
+    # structural_corruption/etc - see _REPAIR_FEEDBACK_FAILURE_TYPES), so a
+    # diagnosis captured mid-repair inherits that same collapsed signature -
+    # and a GENUINELY NEW, later occurrence of the ORIGINAL authoritative
+    # failure (not a continuation of the repair the diagnosis was about) can
+    # recompute to the identical signature purely because the message text
+    # matches. PRV-05 s1: a diagnosis captured responding to attempt 4's
+    # structural_corruption ("the fix is really in JsonService.java, not
+    # pom.xml") kept winning attribution for attempts 5, 6, 7, AND 8's
+    # entirely fresh migration_incomplete failures, none of which could ever
+    # be satisfied by re-editing JsonService.java again. Requiring the
+    # diagnosis's own attempt number to equal the CURRENTLY-processed
+    # failure's attempt number restricts reuse to "this attempt's own
+    # outcome" - i.e. the diagnosis explains THIS failure, not some later,
+    # merely-same-signature one. Signatures remain the right tool for BUDGET
+    # grouping (retry_strategy.py's failure_family_changed); they are not,
+    # by themselves, sufficient for diagnosis freshness.
+    #
+    # Unioned with ctx.established_files (see that field's own docstring) so a
+    # correct diagnosis naming an EARLIER milestone's file - one THIS attempt
+    # never wrote itself - is still a valid redirect candidate, not silently
+    # unmatchable.
+    self_diagnosed = extract_self_diagnosed_files(
+        files, sorted(set(state.all_files_written) | set(ctx.established_files)),
+    )
     if self_diagnosed:
-        state.last_self_diagnosis = (state.budgets.last_failure_signature, self_diagnosed)
+        state.last_self_diagnosis = (
+            state.budgets.last_failure_signature, self_diagnosed, state.attempt_number,
+        )
+
+    # Test-obligation preservation (2026-09-20): a planned-but-nonexistent
+    # test artifact that got redirected onto an already-existing owner must
+    # never have its acceptance obligation discharged by a bare NO CHANGE
+    # NEEDED response for that owner - file/semantic similarity alone is not
+    # evidence the goal's own test-coverage intent is actually satisfied.
+    # Applies on EVERY attempt mode (not just targeted/fallback_targeted,
+    # unlike the block below) - a fresh, first full-set attempt's own bare
+    # NO CHANGE NEEDED response is the live incident this closes, not a
+    # retry-only shape. See find_unpreserved_test_obligation()'s own
+    # docstring (kriya/workflow/file_resolution.py) for the full check.
+    # Reuses the ordinary QualityGateFailure/retry-loop machinery unchanged
+    # - no new retry budget, no new control flow.
+    _unpreserved_obligation = find_unpreserved_test_obligation(
+        files, state.redirected_test_obligations, state.all_files_written, state.attempt_number,
+    )
+    if _unpreserved_obligation is not None:
+        state.gate_outcomes.append(_unpreserved_obligation.to_gate_outcome())
+        raise QualityGateFailure(_unpreserved_obligation)
+
+    # "NO CHANGE NEEDED" is useful negative attribution evidence, not a
+    # successful repair. In a targeted attempt, rerunning compile/tests/runtime
+    # after every returned target was explicitly left untouched wastes an
+    # expensive gate and routes the same failure back to the same file. Turn it
+    # into a retry signal before any write or gate. If FIX ANALYSIS names a
+    # different known file, redirect there. Otherwise preserve a preceding
+    # deterministic locator; only genuinely ungrounded scope widens.
+    all_targets_rejected = all_results_are_no_change(files)
+    if state.last_attempt_mode in ("targeted", "fallback_targeted") and all_targets_rejected:
+        state.record_event(RunEvent(
+            kind="operation.no_change",
+            attempt=state.attempt_number,
+            source="developer",
+            authority=EventAuthority.ADVISORY,
+            operation="no_change_assessment",
+            message="Every targeted result rejected the selected file scope.",
+        ))
+        returned_targets = [f.get("filepath", "") for f in files if f.get("filepath")]
+        # An advisory NO CHANGE response may redirect a weak/judgment-based
+        # attribution, but it must not erase an authoritative deterministic
+        # locator.  Preserve only the files that were both locator-backed and
+        # actually in this response's target set; this cannot pull unrelated
+        # stale evidence forward.  A grounded alternate named by the response
+        # still wins because it is explicit current-turn root-cause evidence.
+        preserved_locator_files = _preserved_authoritative_locator_files(
+            state, returned_targets, self_diagnosed,
+        )
+        likely_files = list(self_diagnosed or preserved_locator_files)
+        _request_fallback_for_rejected_authoritative_target(
+            state, ctx, preserved_locator_files,
+        )
+        evidence = "\n\n".join(
+            f"{f.get('filepath', '(unknown file)')}: "
+            f"{f.get('analysis') or '(no FIX ANALYSIS supplied)'}" for f in files
+        )
+        if self_diagnosed:
+            attribution_message = (
+                f"Its own analysis instead names: {', '.join(self_diagnosed)}."
+            )
+        elif preserved_locator_files:
+            attribution_message = (
+                "The advisory response supplied no grounded alternate; retaining the "
+                "preceding authoritative locator for: "
+                f"{', '.join(preserved_locator_files)}."
+            )
+        else:
+            attribution_message = (
+                "No grounded alternate file or authoritative locator was available; "
+                "widen the next attempt to the full file set."
+            )
+        failure = Failure(
+            type="attribution_rejected",
+            message=(
+                "TARGET ATTRIBUTION REJECTED: the Developer reported NO CHANGE NEEDED "
+                f"for every targeted file ({', '.join(returned_targets)}). "
+                + attribution_message
+            ),
+            raw_output=evidence,
+            source="developer",
+            authority="advisory",
+            file_locations=[FileLocation(filepath=f) for f in likely_files],
+            likely_files=likely_files,
+            diagnostics=_preserved_attribution_diagnostics(preserved_locator_files),
+            attempt=state.attempt_number,
+        )
+        state.gate_outcomes.append(failure.to_gate_outcome())
+        raise QualityGateFailure(failure)
 
     # Read original file contents before overwriting (crucial for fallback mode diffs)
     for file_obj in files:
         filepath = file_obj.get("filepath", "")
         if not filepath:
             continue
-        if filepath not in state.all_original_contents:
-            actual_file = os.path.join(ctx.workspace_path, filepath)
-            if os.path.exists(actual_file):
-                with open(actual_file, "r", encoding="utf-8", errors="replace") as fh:
-                    state.all_original_contents[filepath] = fh.read()
-            else:
-                state.all_original_contents[filepath] = ""
+        _capture_original(state, ctx, filepath)
 
     # Write files to worktree sandbox
     state.files_written = []
+    staged_writes: List[StagedFileWrite] = []
+    # Built once per attempt, not once per file - see _build_workspace_type_index's
+    # own docstring. Updated in place below as each new file is accepted, so two
+    # files in the SAME batch that collide with each other are caught too.
+    workspace_type_index = _build_workspace_type_index(state, ctx)
+    # PRV-17 (2026-09-03): normalized ONCE per attempt, not per file - the
+    # plan-declared allowlist doesn't change mid-attempt. Canonicalizes
+    # trailing-slash/'./' formatting so 'customers_project/' (as the Planner
+    # wrote it) and 'customers_project' (as the Developer reported it) are
+    # recognized as the same target - see normalize_workspace_relpath's own
+    # docstring for the live incident this closes.
+    normalized_allowed_write_relpaths = {
+        normalize_workspace_relpath(p) for p in ctx.allowed_write_relpaths
+    }
     for file_obj in files:
         filepath = file_obj.get("filepath", "")
         content = file_obj.get("content", "")
@@ -704,26 +7601,65 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         if not filepath:
             continue
 
-        # Single choke point every content path (batch JSON, iterative
-        # per-file, a full-set retry) converges through before a byte
-        # reaches disk - closes a real gap the per-path fixes upstream
-        # (DeveloperAgent.sanitize_generated_content) don't: a batch JSON
-        # response's content/edits fields are consumed directly from
-        # parsed JSON and never passed through any sanitization at all
-        # before this point. Idempotent/harmless to re-apply to content
-        # that already went through it upstream.
-        if edits:
-            edits = [
-                {
-                    **e,
-                    "search": DeveloperAgent.sanitize_generated_content(e.get("search", "")),
-                    "replace": DeveloperAgent.sanitize_generated_content(e.get("replace", "")),
-                }
-                for e in edits
-            ]
-        elif content is not None:
-            content = DeveloperAgent.sanitize_generated_content(content)
+        if (
+            ctx.write_scope_mode == WriteScopeMode.ALLOWLIST
+            and ctx.allowed_write_relpaths
+            and normalize_workspace_relpath(filepath) not in normalized_allowed_write_relpaths
+        ):
+            # Correctness Continuity Part B4 (PRV-06, 2026-08-29): rejected
+            # HERE, before apply_anchored_edits or any write is attempted -
+            # distinct from, and in addition to, AuthorizedFileWriter's own
+            # final write-scope enforcement at commit time later in this
+            # pipeline (both layers remain; see WriteScopeMode's own
+            # docstring for that one). This layer exists so an unauthorized
+            # target never even gets a wasted anchored-edit attempt against
+            # it. Live incident this closes: an owner-recovery attempt for
+            # s2 (authorized scope = App.java only) also generated a SEARCH/
+            # REPLACE for InMemoryService.java (owned by a different
+            # subtask, s3) - apply_anchored_edits() was invoked on it anyway
+            # and failed the whole retry attempt on content that was never
+            # legally writable by this attempt in the first place.
+            #
+            # Raises the SAME PolicyDeniedError/reason_code AuthorizedFile
+            # Writer.authorize() would eventually produce for this exact
+            # target, rather than silently dropping the file_obj and letting
+            # the REST of the batch proceed - MA9's own atomic-rejection
+            # invariant ("an unauthorized coordinated participant denies the
+            # WHOLE batch") must hold here too. Found and fixed during this
+            # same change's own regression sweep: an earlier draft silently
+            # `continue`d past the unauthorized file, which let an
+            # OTHERWISE-authorized sibling in the same batch (e.g. App.java)
+            # commit anyway - exactly the bypass MA9's own tests
+            # (test_run_attempt_coordinated_repair_denies_unauthorized_
+            # participant_atomically) exist to catch. Nothing in this
+            # attempt's `staged_writes` has reached disk yet at this point
+            # (that only happens in the later, single atomic commit step),
+            # so raising here still leaves every file at its pre-attempt
+            # baseline, matching the final write-scope gate's own contract
+            # exactly.
+            state.rejected_generation_targets.append(filepath)
+            full_path = os.path.join(ctx.worktree_path, filepath)
+            logger.warning(
+                "RECOVERY_GENERATION_TARGET_REJECTED filepath=%s reason=outside_authorized_scope "
+                "allowed=%s", filepath, sorted(ctx.allowed_write_relpaths),
+            )
+            raise PolicyDeniedError(
+                request=ActionRequest(action_type=ActionType.WRITE_FILE, target=full_path),
+                result=PolicyResult(
+                    decision=PolicyDecision.DENY,
+                    reason_code="FILE_OUTSIDE_VALIDATED_SUBTASK_SCOPE",
+                    explanation=(
+                        f"'{full_path}' is outside the validated subtask's allowed modification "
+                        f"scope: {sorted(ctx.allowed_write_relpaths)!r}."
+                    ),
+                    matched_rule="filesystem.authorized_writer.validated_subtask_scope",
+                ),
+            )
 
+        # FILE-INTEGRITY-CONTRACT-001: content and edits arrive here as
+        # parsed protocol payload (kriya/agents/response_protocol.py) and are
+        # never rewritten; the bytes written are the snapshot-bound result of
+        # the one edit engine (kriya/workflow/file_integrity.py).
         full_path = os.path.join(ctx.worktree_path, filepath)
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
 
@@ -732,14 +7668,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             if not os.path.exists(current_file_path):
                 current_file_path = os.path.join(ctx.workspace_path, filepath)
 
-            orig_text = ""
-            if os.path.exists(current_file_path):
-                with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
-                    orig_text = fh.read()
-
+            source_snapshot = load_snapshot(current_file_path)
+            orig_text = display_text(source_snapshot.raw_bytes)
             try:
+                orig_text = source_snapshot.text
+                _authorize_anchors(state, filepath, edits, orig_text)
                 new_content = apply_anchored_edits(orig_text, edits, active_code_context)
+                new_bytes = source_snapshot.encode(new_content)
             except ValueError as anchor_ex:
+                if getattr(anchor_ex, "reason_code", None) in DETERMINISTIC_FILE_INTEGRITY_STOPS:
+                    raise _file_integrity_stop(state, filepath, anchor_ex) from anchor_ex
                 # apply_anchored_edits() itself never receives a filepath, so its
                 # raised ValueError never named one either - this failure class
                 # always fell through to a blind full-set retry, unlike a compile
@@ -765,7 +7703,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 # already-written file straight from the worktree (nothing keeps
                 # their content in memory this late in the per-file write loop).
                 other_files: Dict[str, str] = {}
-                for other_filepath in state.all_files_written:
+                # Unioned with ctx.established_files (see that field's own
+                # docstring) - a misdirected edit could legitimately belong to
+                # an established file from an earlier milestone, not just
+                # another file this attempt itself wrote.
+                for other_filepath in set(state.all_files_written) | set(ctx.established_files):
                     if other_filepath == filepath:
                         continue
                     other_full_path = os.path.join(ctx.worktree_path, other_filepath)
@@ -806,6 +7748,12 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure) from anchor_ex
 
+                state.budgets.anchor_failure_counts[filepath] = (
+                    state.budgets.anchor_failure_counts.get(filepath, 0) + 1
+                )
+                _record_edit_protocol_failure(state, filepath, "anchored_edit")
+                _remember_anchor_loci(state, filepath, edits, orig_text)
+                anchor_reason = str(anchor_ex).split(":", 1)[0]
                 failure = Failure(
                     type="anchored_edit",
                     message=f"ANCHORED EDIT FAILURE in {filepath}: {anchor_ex}",
@@ -814,10 +7762,14 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     likely_files=[filepath],
                     failed_content={filepath: orig_text},
                     attempted_edits=edits,
+                    diagnostics=({"reason_code": anchor_reason} if anchor_reason.isupper() else {}),
                     attempt=state.attempt_number,
                 )
                 state.gate_outcomes.append(failure.to_gate_outcome())
                 raise QualityGateFailure(failure) from anchor_ex
+
+            state.budgets.anchor_failure_counts[filepath] = 0
+            state.edit_failure_capability.pop(filepath, None)
 
             # Layer 0 pre-flight check (see find_whole_response_no_op's own
             # docstring): purely structural, no analysis text or fail_type
@@ -829,20 +7781,30 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
             # already confirmed every search block matched real content -
             # this only fires when the edit(s) that matched changed nothing.
             if find_whole_response_no_op(edits):
+                preserved_locator_files = _preserved_authoritative_locator_files(
+                    state, [filepath], self_diagnosed,
+                )
+                retry_files = list(self_diagnosed or preserved_locator_files) or [filepath]
+                _request_fallback_for_rejected_authoritative_target(
+                    state, ctx, preserved_locator_files,
+                )
                 failure = Failure(
                     type="no_op_edit",
                     message=(
                         f"NO-OP EDIT in {filepath}: every SEARCH/REPLACE pair in your response "
                         f"is byte-identical - this response changes nothing. If this file "
-                        f"genuinely needs no change, write \"NO CHANGE NEEDED:\" instead of a "
-                        f"SEARCH/REPLACE block; otherwise your REPLACE text must actually differ "
+                        f"genuinely needs no change, use the response protocol's no-change outcome "
+                        f"instead of an edit; otherwise your REPLACE text must actually differ "
                         f"from your SEARCH text."
                     ),
                     raw_output="every edit in the response was a no-op (search == replace)",
-                    file_locations=[FileLocation(filepath=filepath)],
-                    likely_files=[filepath],
+                    source="developer",
+                    authority="advisory",
+                    file_locations=[FileLocation(filepath=f) for f in retry_files],
+                    likely_files=retry_files,
                     failed_content={filepath: orig_text},
                     attempted_edits=edits,
+                    diagnostics=_preserved_attribution_diagnostics(preserved_locator_files),
                     attempt=state.attempt_number,
                 )
                 state.gate_outcomes.append(failure.to_gate_outcome())
@@ -969,10 +7931,49 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 # run for this same file still gets its own bounded veto.
                 state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
-            atomic_write_file(full_path, new_content)
+            _reject_explanatory_prose(state, filepath, new_content)
+            staged_writes.append(StagedFileWrite(
+                target_path=full_path,
+                content=new_content,
+                base_path=current_file_path,
+                expected_base_revision=source_snapshot.raw_sha256,
+                content_bytes=new_bytes,
+                mode=source_snapshot.file_mode,
+            ))
         else:
             if content is None:
                 continue
+
+            current_file_path = os.path.join(ctx.worktree_path, filepath)
+            if not os.path.exists(current_file_path):
+                workspace_file_path = os.path.join(ctx.workspace_path, filepath)
+                if os.path.exists(workspace_file_path):
+                    current_file_path = workspace_file_path
+            # FILE-INTEGRITY-CONTRACT-001: a whole-file replacement of an
+            # existing file keeps its BOM, line-ending convention and final
+            # newline state, and is refused for a file the edit engine cannot
+            # represent exactly (never re-encoded from a lossy view).
+            source_snapshot = load_snapshot(current_file_path)
+            file_is_new = not source_snapshot.exists
+            prior_content = display_text(source_snapshot.raw_bytes)
+            if not file_is_new:
+                try:
+                    source_snapshot.require_mutable()
+                except FileIntegrityError as integrity_ex:
+                    raise _file_integrity_stop(state, filepath, integrity_ex) from integrity_ex
+                content = keep_final_newline_state(source_snapshot, content)
+            try:
+                content_bytes = source_snapshot.encode(content)
+            except FileIntegrityError as integrity_ex:
+                failure = Failure(
+                    type="file_integrity", message=f"FILE INTEGRITY FAILURE in {filepath}: {integrity_ex}",
+                    raw_output=str(integrity_ex), file_locations=[FileLocation(filepath=filepath)],
+                    likely_files=[filepath], diagnostics={"reason_code": integrity_ex.reason_code},
+                    attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure) from integrity_ex
+
             structural_problem = find_structural_corruption(filepath, content)
             if structural_problem:
                 failure = Failure(
@@ -987,19 +7988,62 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 state.gate_outcomes.append(failure.to_gate_outcome())
                 raise QualityGateFailure(failure)
 
+            # Cross-file duplicate-type pre-flight check - only for a
+            # genuinely NEW file (a REPAIR of a file that already legitimately
+            # owns `filepath` is never a conflict, even if it re-declares its
+            # own class). See find_cross_file_type_conflict's own docstring
+            # for the live incident this prevents.
+            candidate_type_names: List[str] = []
+            if file_is_new and workspace_type_index:
+                candidate_type_names = _extract_class_names_best_effort(
+                    _dependency_graph_db_path(ctx), filepath, content,
+                )
+            if candidate_type_names:
+                conflict = find_cross_file_type_conflict(filepath, candidate_type_names, workspace_type_index)
+                if conflict:
+                    # conflict[0] is an "ext:name" key (see extract_class_names'
+                    # own docstring for why the extension is folded in) - strip
+                    # it back to a plain class name for the human-facing message.
+                    type_name = conflict[0].split(":", 1)[-1]
+                    other_paths = conflict[1]
+                    conflict_content: Dict[str, str] = {filepath: content}
+                    for other_path in other_paths:
+                        for base in (ctx.worktree_path, ctx.workspace_path):
+                            other_full = os.path.join(base, other_path)
+                            if os.path.exists(other_full):
+                                with open(other_full, "r", encoding="utf-8", errors="replace") as fh:
+                                    conflict_content[other_path] = fh.read()
+                                break
+                    failure = Failure(
+                        type="duplicate_type_across_files",
+                        message=(
+                            f"DUPLICATE TYPE in {filepath}: '{type_name}' is already declared in "
+                            f"{', '.join(other_paths)} (shown below). This is almost always a sign "
+                            f"the existing file was never found or edited - target "
+                            f"{other_paths[0]} directly instead of creating a new file. Only if "
+                            f"'{type_name}' in {filepath} is genuinely a different, deliberately "
+                            f"separate concept (rare) should you instead rename it to something "
+                            f"unambiguous."
+                        ),
+                        raw_output=f"'{type_name}' declared in both {filepath} and {', '.join(other_paths)}",
+                        file_locations=[FileLocation(filepath=filepath)] + [FileLocation(filepath=p) for p in other_paths],
+                        likely_files=[filepath] + other_paths,
+                        failed_content=conflict_content,
+                        attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+                for name in candidate_type_names:
+                    paths = workspace_type_index.setdefault(name, [])
+                    if filepath not in paths:
+                        paths.append(filepath)
+
             # Layer 2 pre-flight check - same rationale as the anchored-edit branch
             # above, applied to a full-file regeneration instead. Only reads the
             # file's current on-disk content when there's actually an analysis to
             # check against, to avoid the extra I/O on the common (no prior error)
             # case.
             if analysis:
-                current_file_path = os.path.join(ctx.worktree_path, filepath)
-                if not os.path.exists(current_file_path):
-                    current_file_path = os.path.join(ctx.workspace_path, filepath)
-                prior_content = ""
-                if os.path.exists(current_file_path):
-                    with open(current_file_path, "r", encoding="utf-8", errors="replace") as fh:
-                        prior_content = fh.read()
                 diagnosis_mismatch = find_edits_ignoring_own_diagnosis(analysis, None, content, prior_content)
                 if diagnosis_mismatch:
                     bypass_reason = _diagnosis_mismatch_bypass_reason(state, ctx, filepath, content)
@@ -1029,56 +8073,224 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 else:
                     state.budgets.diagnosis_mismatch_veto_counts.pop(filepath, None)
 
-            atomic_write_file(full_path, content)
+            _reject_explanatory_prose(state, filepath, content)
+            staged_writes.append(StagedFileWrite(
+                target_path=full_path,
+                content=content,
+                base_path=current_file_path,
+                expected_base_revision=source_snapshot.raw_sha256,
+                content_bytes=content_bytes,
+                mode=source_snapshot.file_mode,
+            ))
 
+    # Protected callers/tests are contract evidence, not repair targets.  An
+    # earlier rejected candidate may already have redirected them, so owner
+    # recovery restores their exact baseline content deterministically rather
+    # than asking the model to edit evidence.  This is deliberately limited to
+    # RESTORE_PUBLIC_CONTRACT and does not compare formatting or line order.
+    recovery = state.api_contract_recovery or {}
+    if recovery and recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT:
+        staged_targets = {staged.target_path for staged in staged_writes}
+        current_evidence = {}
+        for evidence_path in recovery.protected_evidence_files:
+            try:
+                with open(
+                    os.path.join(ctx.worktree_path, evidence_path),
+                    "r", encoding="utf-8", errors="replace",
+                ) as handle:
+                    current_evidence[evidence_path] = handle.read()
+            except OSError:
+                current_evidence[evidence_path] = ""
+        semantically_damaged = {
+            item["evidence_file"]
+            for item in find_protected_api_reference_changes(
+                state.all_original_contents, current_evidence, recovery,
+            )
+        }
+        for evidence_path in recovery.get("protected_evidence_files", []):
+            baseline = state.all_original_contents.get(evidence_path)
+            target_path = os.path.join(ctx.worktree_path, evidence_path)
+            if (
+                baseline is None or target_path in staged_targets
+                or evidence_path not in semantically_damaged
+            ):
+                continue
+            current = current_evidence[evidence_path]
+            if current != baseline:
+                staged_writes.append(_baseline_restoration_write(state, target_path, evidence_path))
+                logger.info(
+                    "RESTORE_PUBLIC_CONTRACT: deterministically restoring protected "
+                    "baseline evidence %s", evidence_path,
+                )
+
+    _stage_ownership_redirect_restoration(state, ctx, staged_writes)
+
+    # Nothing reaches the sandbox until every candidate has passed its cheap
+    # deterministic checks.  The batch commit re-checks all source revisions
+    # before the first write and rolls back already-written targets if an OS
+    # error or last-moment revision conflict interrupts the commit.
+    # MA4.16 - AuthorizedFileWriter really enforces (raises PolicyDeniedError,
+    # not audit-only) workspace containment + a narrow sensitive-path check
+    # BEFORE any write in the batch, using the real ctx.worktree_path this
+    # call site has always had in scope - propagates uncaught, same as
+    # FileRevisionConflict/BatchCommitError already do from this call.
+    AuthorizedFileWriter(
+        ctx.worktree_path,
+        protected_relpaths=(ctx.protected_relpath,) if ctx.protected_relpath else (),
+        allowed_relpaths=ctx.allowed_write_relpaths,
+        write_scope_mode=ctx.write_scope_mode,
+    ).commit_batch(staged_writes)
+    for staged in staged_writes:
+        state.candidate_digests[os.path.relpath(staged.target_path, ctx.worktree_path)] = (
+            None if staged.delete else raw_digest(
+                staged.content_bytes if staged.content_bytes is not None else staged.content.encode("utf-8"))
+        )
+    changed_files = [
+        os.path.relpath(staged.target_path, ctx.worktree_path)
+        for staged in staged_writes
+    ]
+    invalidated = invalidate_validated_revisions(
+        state.validated_file_revisions,
+        changed_files,
+        ctx.generation_dependencies,
+    )
+    if invalidated:
+        state.record_event(RunEvent(
+            kind="validation.invalidated",
+            attempt=state.attempt_number,
+            source="workflow",
+            authority=EventAuthority.ADVISORY,
+            message=(
+                "Candidate changes invalidated compiled revisions for: "
+                + ", ".join(invalidated)
+            ),
+            details={"changed_files": changed_files, "invalidated_files": invalidated},
+        ))
+    for staged in staged_writes:
+        filepath = os.path.relpath(staged.target_path, ctx.worktree_path)
+        if staged.delete:
+            # PRD-022: an abandoned run-created parallel file is gone from
+            # the candidate, so no later gate reads it.
+            state.all_files_written.discard(filepath)
+            logger.info(f"Removed abandoned candidate from sandbox: {filepath}")
+            continue
         state.files_written.append(filepath)
         state.all_files_written.add(filepath)
-        logger.info(f"Wrote generated/edited file to sandbox: {filepath}")
+        logger.info(f"Committed generated/edited candidate to sandbox: {filepath}")
 
-        if os.path.basename(filepath) == "pom.xml":
-            # Cheap, semantic pre-check for pom.xml specifically - see
-            # PolymorphicValidator.run_pom_validate()'s own docstring for the
-            # real incident this closes (a well-formed-but-wrong-root-element
-            # POM sailing straight past find_structural_corruption's XML
-            # well-formedness check above, only caught by paying for the full
-            # compile gate's own dependency resolution + javac invocation,
-            # after every OTHER file in the batch had already been written
-            # for nothing - nothing else in the project can possibly compile
-            # without a usable POM). Checked here, immediately after the
-            # write, not deferred to after the whole batch - pom.xml has no
-            # cross-file dependency on sibling files (unlike a proactive
-            # unresolved-symbol check on a .java file would), so there's no
-            # "sibling not written yet" false-positive risk in checking it
-            # this early, and this is exactly where the payoff is: the loop
-            # stops right here, before any of the other files this attempt
-            # would otherwise write are generated.
-            #
-            # Deliberately a fresh, minimal validator instance, not the one
-            # built later for the real compile gate - "mvn validate" never
-            # invokes javac or runs the application, so it doesn't need the
-            # goal-specific JAVA_HOME override that compilation/execution
-            # does (that override is resolved further below, after this
-            # point in the loop, specifically to close a real JDK-version
-            # mismatch gap for actual compilation - not applicable here).
-            from kriya.tools.validate import PolymorphicValidator
-            pom_validator = PolymorphicValidator(ctx.worktree_path, autonomy_cfg=ctx.kernel.config.autonomy)
-            pom_validate_res = pom_validator.run_pom_validate()
-            if not pom_validate_res["success"]:
-                with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
-                    failed_pom_content = fh.read()
-                failure = Failure(
-                    type="pom_semantic_validation",
-                    message=f"POM VALIDATION FAILED for {filepath}: {pom_validate_res['output']}",
-                    raw_output=pom_validate_res["output"],
-                    file_locations=[FileLocation(filepath=filepath)],
-                    likely_files=[filepath],
-                    failed_content={filepath: failed_pom_content},
-                    attempt=state.attempt_number,
-                )
-                state.gate_outcomes.append(failure.to_gate_outcome())
-                raise QualityGateFailure(failure)
+    # A recovery candidate must restore its sticky baseline contract before
+    # any compiler, test runner, or LLM-backed gate is allowed to consume it.
+    if state.api_contract_recovery:
+        recovery_contents = {}
+        recovery_paths = {
+            item["owner"]
+            for item in state.api_contract_recovery.get("violations", [])
+        } | set(state.api_contract_recovery.get("protected_evidence_files", []))
+        for recovery_path in recovery_paths:
+            try:
+                with open(
+                    os.path.join(ctx.worktree_path, recovery_path),
+                    "r", encoding="utf-8", errors="replace",
+                ) as handle:
+                    recovery_contents[recovery_path] = handle.read()
+            except OSError:
+                recovery_contents[recovery_path] = ""
+        unrestored = find_unrestored_public_api_contracts(
+            recovery_contents, state.api_contract_recovery,
+        )
+        redirected = find_protected_api_reference_changes(
+            state.all_original_contents, recovery_contents, state.api_contract_recovery,
+        )
+        if unrestored:
+            required = "; ".join(
+                f"{item['owner']}::{item['removed_signature']}"
+                for item in unrestored
+            )
+            failure = Failure(
+                type="api_contract_recovery_incomplete",
+                message=(
+                    "API_CONTRACT_RECOVERY INCOMPLETE: restore every authoritative "
+                    f"baseline signature before quality gates ({required})."
+                ),
+                raw_output=str({"unrestored": unrestored}),
+                source="ownership_gate", authority="deterministic",
+                file_locations=[FileLocation(filepath=item["owner"]) for item in unrestored],
+                likely_files=sorted({item["owner"] for item in unrestored}),
+                diagnostics={"api_contract_recovery": state.api_contract_recovery.to_diagnostics()},
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        if redirected:
+            failure = Failure(
+                type="api_contract_evidence_restore_required",
+                message=(
+                    "API_CONTRACT_RECOVERY EVIDENCE RESTORE REQUIRED: owner signatures "
+                    "are restored, but baseline callers/tests were redirected, removed, or "
+                    "weakened. Restore their original contract calls and assertions before gates."
+                ),
+                raw_output=str({"redirected": redirected}),
+                source="ownership_gate", authority="deterministic",
+                file_locations=[
+                    FileLocation(filepath=item["evidence_file"]) for item in redirected
+                ],
+                likely_files=sorted({item["evidence_file"] for item in redirected}),
+                diagnostics={"api_contract_recovery": state.api_contract_recovery.to_diagnostics()},
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        if state.api_contract_recovery.phase is APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT:
+            state.api_contract_recovery.owner_contract_restored()
+            logger.info(
+                "RESTORE_PUBLIC_CONTRACT pre-check passed; transitioning to "
+                "REPAIR_BEHAVIOR before quality gates."
+            )
+            raise RecoveryPhaseAdvanced(
+                APIContractRecoveryPhase.RESTORE_PUBLIC_CONTRACT.value,
+                APIContractRecoveryPhase.REPAIR_BEHAVIOR.value,
+            )
+        logger.info(
+            "REPAIR_BEHAVIOR pre-check passed; baseline contract remains restored."
+        )
+        # Keep the contract sticky through candidate gates and terminal
+        # regression.  workflow.py clears it only after terminal regression
+        # passes; any intervening gate failure therefore returns to
+        # REPAIR_BEHAVIOR with the exact signature still authoritative.
 
-    if not resuming_developer_stage:
+    # A POM has no dependency on sibling source files, but it is now validated
+    # after the atomic candidate batch so no quality gate can observe a partial
+    # model response.  This remains much cheaper than dependency resolution and
+    # compilation, and a failed attempt is discarded by the worktree lifecycle.
+    tree_binding = _bind_verification_tree(state, ctx)
+    pom_files = [
+        filepath for filepath in state.files_written
+        if os.path.basename(filepath) == "pom.xml"
+    ]
+    if pom_files:
+        pom_validator = PolymorphicValidator(
+            ctx.worktree_path, autonomy_cfg=ctx.kernel.config.autonomy,
+        )
+        pom_validator.tree_binding = tree_binding
+        pom_validate_res = pom_validator.run_pom_validate()
+        if not pom_validate_res["success"]:
+            filepath = pom_files[0]
+            full_path = os.path.join(ctx.worktree_path, filepath)
+            with open(full_path, "r", encoding="utf-8", errors="replace") as fh:
+                failed_pom_content = fh.read()
+            failure = Failure(
+                type="pom_semantic_validation",
+                message=f"POM VALIDATION FAILED for {filepath}: {pom_validate_res['output']}",
+                raw_output=pom_validate_res["output"],
+                file_locations=[FileLocation(filepath=filepath)],
+                likely_files=[filepath],
+                failed_content={filepath: failed_pom_content},
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+    if not skipping_candidate_gates:
         # Completeness Check: catch the Developer Agent silently under-delivering
         # (e.g. only writing pom.xml when the Architect's design called for 7 files).
         # A trivially-passing compile on a near-empty sandbox would otherwise report
@@ -1086,7 +8298,11 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # Sourced from architect_files (the structured file list, or its heuristic
         # fallback - see the Architect call above) rather than re-deriving via a
         # second independent regex pass over the design's prose.
-        expected_files = {os.path.basename(f) for f in ctx.architect_files}
+        # PRD-022: a parallel file a deterministic ownership violation
+        # abandoned is no longer an expected output, whatever the design said.
+        abandoned = (set(state.ownership_redirect_recovery.get("abandoned_candidates", []))
+                     - _structured_plan_paths(ctx))
+        expected_files = {os.path.basename(f) for f in ctx.architect_files if f not in abandoned}
         missing_files = find_missing_expected_files(expected_files, state.all_files_written, goal=ctx.goal)
         if missing_files:
             raise IncompleteGenerationError(
@@ -1101,7 +8317,42 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # documented in active skill rules (e.g. mixing Ignite's two startup mechanisms,
         # an unclosed Ignition.start()) - catches a mistake the model already had the
         # rule for, before the expensive compile+run cycle rather than after it.
-        static_violation = run_static_checks(ctx.worktree_path, state.all_files_written)
+        # Unioned with ctx.established_files (see that field's own docstring) -
+        # a static rule violation (e.g. mixing Ignite's two startup mechanisms)
+        # can span an established file plus one this attempt just wrote.
+        static_check_known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+        static_violation = run_static_checks(ctx.worktree_path, static_check_known_files)
+        if not static_violation:
+            # MA7.5 - MA6 spec section 72's "Django doesn't drift to Spring,
+            # Python doesn't invent Maven layout" permanent regression
+            # category. Deliberately checked against state.all_files_written
+            # ONLY (this attempt's own fresh writes), never the union with
+            # ctx.established_files used above - established_files are
+            # genuinely pre-existing (from an earlier milestone/attempt) and
+            # must count as the ESTABLISHED baseline this check compares
+            # against, not get counted as part of "what this attempt wrote."
+            static_violation = find_established_stack_drift(ctx.worktree_path, state.all_files_written)
+        if not static_violation:
+            # 2026-08-25 (external review, P1) - MA7.5's own honest scope
+            # note said a first-milestone goal-vs-generated-language
+            # mismatch (nothing established yet to compare against) was
+            # intentionally out of scope. This is that gap, closed: goal
+            # text's own declared language family vs. this attempt's own
+            # newly-written ecosystem marker, independent of established
+            # history. Same all_files_written-only scoping as the check
+            # above, same reasoning.
+            static_violation = find_goal_stack_mismatch(ctx.goal, state.all_files_written)
+        stack_contract = derive_stack_contract(ctx.grounding_goal or ctx.goal)
+        stack_decision = validate_stack_contract_artifacts(
+            stack_contract, state.all_files_written,
+        )
+        log_stack_contract_boundary("candidate", stack_contract, stack_decision)
+        if not static_violation:
+            # The logged REJECT/PASS decision above must actually gate the
+            # candidate - matching the plan boundary (plan_validation.py)
+            # and terminal boundary (workflow_controller.py), which both
+            # already reject on this same check's non-None result.
+            static_violation = stack_decision
         if static_violation:
             # _build_quality_gate_failure() (not a bare Failure(...)), matching the
             # SAME construction every other Quality Gate type already uses (compile/
@@ -1127,7 +8378,7 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 message=f"STATIC RULE VIOLATION: {static_violation}",
                 raw_output=static_violation,
                 worktree_path=ctx.worktree_path,
-                known_files=state.all_files_written,
+                known_files=static_check_known_files,
                 attempt=state.attempt_number,
             )
             state.gate_outcomes.append(failure.to_gate_outcome())
@@ -1138,6 +8389,24 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         validator = PolymorphicValidator(
             ctx.worktree_path, original_workspace_path=ctx.workspace_path,
             autonomy_cfg=ctx.kernel.config.autonomy,
+            toolchain_declaration_mutable=_ctx_toolchain_declaration_mutable(ctx),
+            # PRV-05 (2026-08-28, run 5): the dependency-preservation check
+            # below used to unconditionally reject ANY pom.xml dependency
+            # removal, restoring Gson every time the subtask that owns
+            # pom.xml tried to remove it - even though the top-level goal
+            # explicitly authorizes replacing it. PRV-05 run 6 (2026-08-28):
+            # re-resolving authorization from CURRENT (possibly already-
+            # mutated) workspace state per attempt was itself timing-
+            # sensitive - read from the run's ONE already-resolved
+            # migration_resolution instead (see AttemptContext.migration_
+            # resolution's own docstring), never re-derived here.
+            authorized_dependency_removals=(
+                set(ctx.migration_resolution.obligation.source_artifacts)
+                if ctx.migration_resolution is not None
+                and ctx.migration_resolution.status == MigrationResolutionStatus.RESOLVED
+                and ctx.migration_resolution.obligation is not None
+                else set()
+            ),
         )
 
         if not state.toolchain_checked:
@@ -1158,7 +8427,42 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # just computed.
         validator.java_home_override = state.java_home_override
 
-        compile_res = validator.run_compile_check(list(state.all_files_written))
+        # Unioned with ctx.established_files (see that field's own docstring) -
+        # for a no-build-file Java project, this list is extended DIRECTLY into
+        # the raw javac fallback's command line (kriya/tools/validate.py); an
+        # established file not passed explicitly is only found via javac's
+        # fragile implicit sourcepath auto-discovery, which silently breaks
+        # whenever the established file's real location doesn't mirror its
+        # package path relative to the workspace root - exactly the layout
+        # mismatch this session's live incident already proved can happen.
+        compile_known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+
+        # Deterministic pom.xml sourceDirectory correction - found live,
+        # 2026-08-22 (ignite_qpid_protocol milestone 3/4): see
+        # ensure_maven_covers_nonconventional_java_files()'s own docstring
+        # (kriya/workflow/file_resolution.py) for the full incident. Runs
+        # every attempt, unconditionally, whenever a pom.xml exists in the
+        # worktree - cheap to detect "already customized" and no-op, and
+        # correctly re-applies if a retry rewrites pom.xml back to a plain
+        # Maven-convention shape.
+        _apply_candidate_pom_corrections(state, ctx, compile_known_files)
+        _require_worktree_matches_candidate(state, ctx)
+        tree_binding.check("pre_compile")
+        validator.tree_binding = tree_binding
+
+        _compile_started = time.monotonic()
+        compile_res = validator.run_compile_check(compile_known_files)
+        # R1 Deliverable 5 - observational only, timing the primary compile
+        # gate call (the main full-set/targeted path's own compile check,
+        # not every secondary/verification-only call site in this module -
+        # see docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md for the exact
+        # coverage boundary). Recorded AFTER the call returns; never reads
+        # compile_res beyond what the very next line already does.
+        state.validator_timings.append({
+            "kind": "compile",
+            "duration_seconds": time.monotonic() - _compile_started,
+            "success": bool(compile_res.get("success")),
+        })
         if not compile_res["success"]:
             self_correction_result = None
             if ctx.kernel.config.autonomy.self_correction_loop_enabled:
@@ -1167,15 +8471,45 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "Compile gate failed - attempting bounded self-correction "
                     "micro-loop before raising QualityGateFailure."
                 )
-                self_correction_result = await run_self_correction_loop(
+                self_correction_result = await _as_developer(run_self_correction_loop(
                     llm=ctx.developer.llm,
                     worktree_path=ctx.worktree_path,
                     validator=validator,
-                    files_in_scope=list(state.all_files_written),
+                    files_in_scope=compile_known_files,
+                    # DENY_ALL means never writable here either - a bug in
+                    # this recovery/fallback loop must not be able to bypass
+                    # the same invariant AuthorizedFileWriter enforces at the
+                    # real write gate below (see WriteScopeMode's own
+                    # docstring for why "recovery paths can accidentally
+                    # bypass otherwise correct invariants" is a confirmed,
+                    # not hypothetical, risk here).
+                    writable_files=(
+                        [] if ctx.write_scope_mode == WriteScopeMode.DENY_ALL
+                        else (ctx.allowed_write_relpaths or compile_known_files)
+                    ),
                     compile_error_output=compile_res["output"],
                     active_code_context=active_code_context,
                     max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
+                    authorized_semantic_regions=ctx.authorized_semantic_regions,
+                    strict_existing_java_files=ctx.kernel.config.autonomy.semantic_region_enforcement_required,
+                    baseline_contents=state.all_original_contents,
+                    # DEVELOPER-AUX-LOOP-PROMPT-FIT-001: the primary Developer
+                    # binding's request capacity bounds every turn.
+                    request_capacity=request_capacity(ctx.kernel.config),
+                ))
+                _record_self_correction_scope_conflict(
+                    state, ctx, self_correction_result, "compile",
                 )
+                for incident in getattr(self_correction_result, "incidents", []):
+                    state.record_event(RunEvent(
+                        kind="auxiliary.failed",
+                        attempt=state.attempt_number,
+                        source=incident["source"],
+                        authority=EventAuthority.AUXILIARY,
+                        message=incident["message"],
+                        failure_type=incident["type"],
+                        operation="repair_with_patch",
+                    ))
 
             if self_correction_result and self_correction_result.resolved:
                 logger.info(
@@ -1192,9 +8526,116 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     "self_correction_transcript": self_correction_result.transcript,
                 })
             else:
-                failure = _build_quality_gate_failure(
-                    "compile", f"COMPILATION FAILURE:\n{compile_res['output']}",
-                    compile_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+                # Deterministic cross-milestone Java package-mismatch check -
+                # found live, 2026-08-22 (ignite_qpid_protocol milestone
+                # 3/4): a fresh milestone's Architect chose a Maven-
+                # conventional package for its own new file while an earlier
+                # milestone's established file stayed in the default
+                # package - a `cannot find symbol` error that recurred
+                # BYTE-FOR-BYTE IDENTICAL across 3+ retries, because a class
+                # in one named package can never reference a class in a
+                # different (or default) package under any circumstances -
+                # not a missing import, a genuine language-level
+                # incompatibility no amount of prose-level retrying can
+                # resolve. See find_cross_package_symbol_mismatch()'s own
+                # docstring (kriya/workflow/failure_grounding.py) for the
+                # full incident, including how the Developer's own reasoning
+                # actually diagnosed this correctly, more than once, then
+                # talked itself out of fixing it every time. Checked only
+                # after self-correction's own micro-loop (if enabled)
+                # already had its chance and didn't resolve it, so this
+                # never competes with or short-circuits that separate
+                # recovery path.
+                cross_package_failure = None
+                java_files_for_mismatch = sorted(
+                    f for f in set(state.all_files_written) | set(ctx.established_files)
+                    if f.endswith(".java")
+                )
+                if java_files_for_mismatch:
+                    mismatch = find_cross_package_symbol_mismatch(
+                        compile_res.get("output", ""),
+                        _build_workspace_type_index(state, ctx),
+                        _build_java_package_map(java_files_for_mismatch, ctx),
+                    )
+                    if mismatch:
+                        missing_symbol, referencing_path, candidate_path = mismatch
+                        java_packages_for_message = _build_java_package_map(
+                            [referencing_path, candidate_path], ctx
+                        )
+                        message = build_cross_package_mismatch_message(
+                            missing_symbol, referencing_path,
+                            java_packages_for_message.get(referencing_path),
+                            candidate_path, java_packages_for_message.get(candidate_path),
+                        )
+                        cross_package_failure = Failure(
+                            type="cross_package_symbol_mismatch",
+                            message=message,
+                            raw_output=compile_res.get("output", ""),
+                            file_locations=[FileLocation(filepath=referencing_path), FileLocation(filepath=candidate_path)],
+                            likely_files=[referencing_path, candidate_path],
+                            failed_content=_capture_failed_content(
+                                ctx.worktree_path, [referencing_path, candidate_path]
+                            ),
+                            attempt=state.attempt_number,
+                        )
+                compile_message = f"COMPILATION FAILURE:\n{compile_res['output']}"
+                if not cross_package_failure:
+                    # See find_locator_files_outside_known_scope()'s own docstring
+                    # for the real live incident this closes, 2026-08-22
+                    # (ignite_qpid_protocol): a workspace reused across two
+                    # unrelated runs left stale files on disk that the compiler's
+                    # own precise locator named but this run's tracking never
+                    # heard of - surfacing that plainly here, rather than letting
+                    # it silently degrade to "no known file implicated," turns 8
+                    # wasted retries into one clear, actionable diagnostic.
+                    unrecognized = find_locator_files_outside_known_scope(
+                        compile_res.get("output", ""), compile_known_files,
+                    )
+                    if unrecognized:
+                        # Found live, PRV-03 hardened (2026-08-27): "not
+                        # tracked by this run" does NOT mean stale - a real,
+                        # currently-existing brownfield sibling (e.g.
+                        # CustomerService.java, broken because THIS
+                        # candidate changed the Customer record's own
+                        # constructor arity) is exactly as "unrecognized"
+                        # to compile_known_files as genuine leftover cruft
+                        # from an unrelated run would be. The two are only
+                        # distinguishable by checking whether the file
+                        # actually exists in the real worktree - resolve
+                        # that before asserting either story, rather than
+                        # defaulting to the "stale" framing that's actively
+                        # wrong for the common brownfield case.
+                        real_siblings = resolve_repository_locator_files(
+                            compile_res.get("output", ""), ctx.worktree_path, compile_known_files,
+                        )
+                        genuinely_unrecognized = sorted(
+                            set(unrecognized) - {os.path.basename(p) for p in real_siblings}
+                        )
+                        if real_siblings:
+                            compile_message += (
+                                "\n\nNOTE: this error also references existing repository "
+                                f"file(s) this run's own tracking never declared as scope: "
+                                f"{', '.join(sorted(real_siblings))}. These are REAL, CURRENT "
+                                "files, not stale content - if they only started failing to "
+                                "compile because of THIS candidate's own change (e.g. an "
+                                "existing type's constructor/signature changed), that is a "
+                                "regression this candidate caused. Prefer preserving the "
+                                "existing contract over expanding scope to repair every caller "
+                                "it breaks."
+                            )
+                        if genuinely_unrecognized:
+                            compile_message += (
+                                "\n\nNOTE: this error also references file(s) not tracked by "
+                                f"this run at all and not found anywhere in the current "
+                                f"workspace either: {', '.join(genuinely_unrecognized)}. These "
+                                "are likely stale/leftover content from an earlier, unrelated "
+                                "run or attempt - not something the current milestone's own "
+                                "files can fix. If they don't belong, they should be removed "
+                                "from the workspace rather than repeatedly retried against."
+                            )
+                failure = cross_package_failure or _build_quality_gate_failure(
+                    "compile", compile_message,
+                    compile_res.get("output", ""), ctx.worktree_path, compile_known_files, state.attempt_number,
                 )
                 if self_correction_result is not None:
                     # The loop ran but didn't resolve it within budget - persist
@@ -1214,44 +8655,224 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 "attempt": state.attempt_number,
                 "type": "compile",
                 "success": True,
-                "output": compile_res.get("output", "")
+                "output": compile_res.get("output", ""),
+                **execution_evidence(compile_res),
             })
 
+        # A successful real compile is the authority for cross-file signature,
+        # import, classpath, and build consistency. Record exact revisions only
+        # after that gate; heuristics never mark a file validated.
+        state.validated_file_revisions = {
+            filepath: read_file_revision(os.path.join(ctx.worktree_path, filepath))
+            for filepath in state.all_files_written
+        }
+
+        accepted_test_output: Optional[str] = None
+        runnable_test_files = find_runnable_test_files(state.all_files_written)
+        _raise_unsafe_process_boundary_test_candidate(
+            state, ctx, runnable_test_files,
+        )
+        _raise_ungrounded_child_process_test_candidate(
+            state, ctx, runnable_test_files,
+        )
         target_test = extract_target_test(state.error_context, list(state.all_files_written))
         if target_test:
             logger.info(f"Quality Gates: Running targeted tests: {target_test}")
+            test_repair_result = None
             test_res = validator.run_tests(target_test=target_test)
-            if not test_res["success"]:
-                failure = _build_quality_gate_failure(
-                    "targeted_test", f"TARGETED TEST FAILURE:\n{test_res['output']}",
-                    test_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+            if not output_confirms_nonzero_test_execution(test_res.get("output", "")):
+                # A targeted command that collected zero tests says the selector
+                # did not identify an executable test; it says nothing about the
+                # generated application.  Do not route this orchestration error to
+                # the Developer as a source repair.  Retry once with the runner's
+                # native suite discovery, which is the authoritative fallback.
+                logger.warning(
+                    "Quality Gates: Targeted test selection collected zero tests for "
+                    f"{target_test}; retrying the full suite before attributing a code failure."
                 )
-                state.gate_outcomes.append(failure.to_gate_outcome())
-                raise QualityGateFailure(failure)
-            state.gate_outcomes.append({
-                "attempt": state.attempt_number,
-                "type": "targeted_test",
-                "success": True,
-                "output": test_res.get("output", "")
-            })
-        else:
-            test_written = any("test" in f.lower() or "spec" in f.lower() for f in state.all_files_written)
-            if test_written:
-                logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
+                state.gate_outcomes.append({
+                    "attempt": state.attempt_number,
+                    "type": "test_selection",
+                    "success": False,
+                    "output": test_res.get("output", ""),
+                    "target_test": target_test,
+                    "recovered_by": "full_suite",
+                })
+                target_test = None
                 test_res = validator.run_tests()
                 if not test_res["success"]:
-                    failure = _build_quality_gate_failure(
+                    failure = _build_test_quality_gate_failure(
                         "test", f"TEST FAILURE:\n{test_res['output']}",
-                        test_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+                        test_res.get("output", ""), ctx.worktree_path,
+                        state.all_files_written, state.attempt_number,
                     )
+                    if failure.type == "test_process_terminated":
+                        if _record_process_boundary_obligation(
+                            ctx, state, violated=True,
+                            evidence={"detected_via": "test_selection_fallback", "raw_output": failure.raw_output},
+                        ):
+                            failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
                     state.gate_outcomes.append(failure.to_gate_outcome())
                     raise QualityGateFailure(failure)
+                _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
                 state.gate_outcomes.append({
                     "attempt": state.attempt_number,
                     "type": "test",
                     "success": True,
-                    "output": test_res.get("output", "")
+                    "output": test_res.get("output", ""),
+                    "selection_fallback": True,
+                    **execution_evidence(test_res),
                 })
+                accepted_test_output = test_res.get("output", "")
+
+            if target_test and not test_res["success"]:
+                if ctx.kernel.config.autonomy.self_correction_loop_enabled:
+                    from kriya.workflow.self_correction import run_repair_loop
+                    test_repair_result = await run_repair_loop(
+                        llm=ctx.developer.llm,
+                        worktree_path=ctx.worktree_path,
+                        validator=validator,
+                        files_in_scope=list(state.all_files_written),
+                        # See the compile-gate self-correction call site's own
+                        # comment (above, this module) for why DENY_ALL is
+                        # checked explicitly here too.
+                        writable_files=(
+                            [] if ctx.write_scope_mode == WriteScopeMode.DENY_ALL
+                            else (ctx.allowed_write_relpaths or list(state.all_files_written))
+                        ),
+                        compile_error_output=test_res["output"],
+                        active_code_context=active_code_context,
+                        max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
+                        failure_type="targeted_test",
+                        target_test=target_test,
+                    )
+                    _record_self_correction_scope_conflict(
+                        state, ctx, test_repair_result, "targeted_test",
+                    )
+                    for incident in getattr(test_repair_result, "incidents", []):
+                        state.record_event(RunEvent(
+                            kind="auxiliary.failed", attempt=state.attempt_number,
+                            source=incident["source"], authority=EventAuthority.AUXILIARY,
+                            message=incident["message"], failure_type=incident["type"],
+                            operation="repair_with_patch",
+                        ))
+                if test_repair_result and test_repair_result.resolved:
+                    _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
+                    state.gate_outcomes.append({
+                        "attempt": state.attempt_number,
+                        "type": "targeted_test",
+                        "success": True,
+                        "output": test_repair_result.final_compile_output,
+                        "self_corrected": True,
+                        "self_correction_turns": test_repair_result.turns_used,
+                        "self_correction_transcript": test_repair_result.transcript,
+                    })
+                    test_res = {"success": True, "output": test_repair_result.final_compile_output}
+                else:
+                    failure = _build_test_quality_gate_failure(
+                        "targeted_test", f"TARGETED TEST FAILURE:\n{test_res['output']}",
+                        test_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+                    )
+                    if test_repair_result is not None:
+                        failure.self_correction_attempt = {
+                            "turns_used": test_repair_result.turns_used,
+                            "transcript": test_repair_result.transcript,
+                            "final_validation_output": test_repair_result.final_compile_output,
+                        }
+                    if failure.type == "test_process_terminated":
+                        if _record_process_boundary_obligation(
+                            ctx, state, violated=True,
+                            evidence={"detected_via": "targeted_test", "raw_output": failure.raw_output},
+                        ):
+                            failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+            if target_test and not (test_repair_result and test_repair_result.resolved):
+                _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
+                state.gate_outcomes.append({
+                    "attempt": state.attempt_number,
+                    "type": "targeted_test",
+                    "success": True,
+                    "output": test_res.get("output", ""),
+                    **execution_evidence(test_res),
+                })
+            if target_test:
+                accepted_test_output = test_res.get("output", "")
+        else:
+            if runnable_test_files:
+                logger.info(f"Quality Gates: Executing tests for {validator.stack} stack...")
+                test_res = validator.run_tests()
+                if not test_res["success"]:
+                    failure = _build_test_quality_gate_failure(
+                        "test", f"TEST FAILURE:\n{test_res['output']}",
+                        test_res.get("output", ""), ctx.worktree_path, state.all_files_written, state.attempt_number,
+                    )
+                    if failure.type == "test_process_terminated":
+                        if _record_process_boundary_obligation(
+                            ctx, state, violated=True,
+                            evidence={"detected_via": "full_suite", "raw_output": failure.raw_output},
+                        ):
+                            failure.message += _PROCESS_BOUNDARY_RECURRENCE_ESCALATION
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
+                _record_process_boundary_obligation(ctx, state, violated=False, evidence={})
+                state.gate_outcomes.append({
+                    "attempt": state.attempt_number,
+                    "type": "test",
+                    "success": True,
+                    "output": test_res.get("output", ""),
+                    **execution_evidence(test_res),
+                })
+                accepted_test_output = test_res.get("output", "")
+
+        # PRV-11 (2026-08-30): obligation/ownership-aware, not a blind scan
+        # over ctx.goal - see subtask_owns_test_obligation's own docstring
+        # for the live incident (a FUTURE_ORDERED test obligation genuinely
+        # owned by a LATER subtask was being treated as CURRENT for every
+        # OTHER subtask, merely because the full top-level goal - correctly,
+        # since the authority-isolation fix - is visible in every subtask's
+        # own ctx.goal, not because anything actually reassigned ownership).
+        this_subtask_owns_tests = subtask_owns_test_obligation(
+            ctx.grounding_goal or ctx.goal, ctx.structured_plan, ctx.current_subtask_id,
+        )
+        if accepted_test_output is None and this_subtask_owns_tests:
+            failure = Failure(
+                type="test_acceptance",
+                message=(
+                    "TEST ACCEPTANCE FAILURE: the goal explicitly requires tests, "
+                    "but no runnable test module was generated. Package initializers, "
+                    "test-runner configuration, fixtures, and support files do not count as tests."
+                ),
+                raw_output="runnable_test_files=[]",
+                likely_files=sorted(state.all_files_written),
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+        # The same acceptance rule applies whether extract_target_test() chose
+        # one test or the validator ran the suite. Test-selection strategy must
+        # never change an explicit user contract.
+        if (
+            accepted_test_output is not None
+            and this_subtask_owns_tests
+            and not output_confirms_nonzero_test_execution(accepted_test_output)
+        ):
+            failure = Failure(
+                type="test_acceptance",
+                message=(
+                    "TEST ACCEPTANCE FAILURE: the goal explicitly requires tests, "
+                    "but the configured test runner reported that zero tests executed."
+                ),
+                raw_output=accepted_test_output,
+                likely_files=[
+                    path for path in state.all_files_written
+                    if "test" in path.lower() or "spec" in path.lower()
+                ],
+                attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
 
         # Quality Gates: Runtime Verification. Compiling and passing whatever tests
         # exist only proves the code is valid - it says nothing about whether it does
@@ -1259,7 +8880,39 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
         # suite at all. Judgment decides per-attempt whether this goal describes
         # self-terminating runtime behavior worth actually running and checking.
         autonomy_cfg_rv = ctx.kernel.config.autonomy
+        if ctx.runtime_verification_required and not autonomy_cfg_rv.run_verification_enabled:
+            message = (
+                "REQUIRED_RUNTIME_VERIFICATION_DISABLED: the declared verification contract "
+                "requires observable execution, but runtime verification is disabled."
+            )
+            failure = Failure(
+                type="verification_infrastructure_failure", message=message,
+                raw_output=message, attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        if ctx.runtime_verification_required and state.run_verification_declined:
+            message = (
+                "REQUIRED_RUNTIME_VERIFICATION_DECLINED: the declared runtime check was not "
+                "authorized, so correctness remains unverified."
+            )
+            failure = Failure(
+                type="verification_infrastructure_failure", message=message,
+                raw_output=message, attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
         if autonomy_cfg_rv.run_verification_enabled and not state.run_verification_declined:
+            current_judgment_basis = _run_verification_basis_hash(ctx, state)
+            if (
+                state.cached_run_verification_judgment is not None
+                and state.cached_run_verification_basis_hash != current_judgment_basis
+            ):
+                logger.info(
+                    "Invocation-affecting workspace content changed - invalidating cached "
+                    "runtime-verification judgment."
+                )
+                state.cached_run_verification_judgment = None
             if state.cached_run_verification_judgment is None:
                 pom_content_for_judge = None
                 try:
@@ -1270,9 +8923,42 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 raw_judgment = await ctx.run_verifier.judge(
                     goal=ctx.goal,
                     design=ctx.design,
-                    files_written=list(state.all_files_written),
+                    # Merge in ctx.established_files (see its own docstring) -
+                    # same "known_files should span the whole workspace, not
+                    # just this attempt's own writes" gap as the self-
+                    # diagnosis attribution fix above, just at a different
+                    # call site. Found live, 2026-08-21 (ignite_qpid_protocol
+                    # milestone 3/4): App.java (this milestone's own file)
+                    # imports Protocol and needs ProtocolParser, both written
+                    # by EARLIER milestones - judge() only ever saw
+                    # state.all_files_written (this milestone's own writes:
+                    # applicationContext.xml, App.java), so it had no way to
+                    # know those two files existed at all, and inferred a
+                    # bare `java -cp . App` assuming pre-compiled classes
+                    # (or, on a pom.xml-less project, a Maven-classpath
+                    # command that also doesn't apply) instead of a real
+                    # `javac App.java Protocol.java ProtocolParser.java &&
+                    # java App` - 6 attempts straight rewrote perfectly
+                    # correct application code chasing a ClassNotFoundException
+                    # that was never a code bug, until the run's time budget
+                    # was exhausted.
+                    files_written=sorted(set(state.all_files_written) | set(ctx.established_files)),
                     build_file_content=pom_content_for_judge,
                 )
+                if raw_judgment.get("infrastructure_error") and ctx.runtime_verification_required:
+                    message = (
+                        "VERIFICATION INFRASTRUCTURE FAILURE: runtime behavior is required, but "
+                        f"the runtime-verification judge was unavailable: "
+                        f"{raw_judgment['infrastructure_error']}"
+                    )
+                    failure = Failure(
+                        type="verification_infrastructure_failure",
+                        message=message,
+                        raw_output=message,
+                        attempt=state.attempt_number,
+                    )
+                    state.gate_outcomes.append(failure.to_gate_outcome())
+                    raise QualityGateFailure(failure)
                 # Independent brutal review finding #2 (2026-08-15): don't trust
                 # command_source="goal_explicit" as self-reported - verify it's
                 # actually grounded in the goal text before it gets cached (and
@@ -1284,9 +8970,177 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                 state.cached_run_verification_judgment = downgrade_ungrounded_goal_explicit_commands(
                     raw_judgment, ctx.goal
                 )
+                state.cached_run_verification_basis_hash = current_judgment_basis
             else:
                 logger.debug("Reusing cached run-verification judgment from an earlier attempt in this run.")
             judgment = state.cached_run_verification_judgment
+            if _runtime_verification_is_advisory_only(ctx, judgment):
+                # PRV-17 (2026-09-03): the SAME authority _execute_runtime_
+                # verification_directly() consults for a DENY_ALL
+                # verification-only subtask - this is the OTHER, much more
+                # common call site (an ordinary ALLOWLIST implementation
+                # subtask's own candidate-gates run-verification), which a
+                # prior fix missed entirely: patching only the DENY_ALL copy
+                # left this one free to still execute a FUTURE-owned
+                # endpoint's inferred command for an ordinary scaffold
+                # subtask. Forcing should_run False here (rather than an
+                # early return) lets every later section of this same
+                # attempt - candidate_gates_succeeded, Spec Compliance, etc.
+                # - proceed exactly as it already does for judge()'s own
+                # genuine should_run=False verdict, matching precedent
+                # already established a few lines below for the Java-
+                # entrypoint self-heal.
+                logger.info(
+                    "Run-verification judge inferred should_run=True, but this subtask's own "
+                    "approved plan declares no runtime-verification obligation - treating as "
+                    "advisory only, not executing (a later subtask that DOES own this "
+                    "obligation still runs it for real)."
+                )
+                judgment = dict(judgment)
+                judgment["should_run"] = False
+                judgment["run_commands"] = None
+            if ctx.runtime_verification_required and not judgment.get("should_run"):
+                message = _required_runtime_verification_missing_message(judgment)
+                failure = Failure(
+                    type="verification_infrastructure_failure", message=message,
+                    raw_output=message, attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
+            execution_mode, execution_mode_error = _resolve_execution_mode(judgment)
+            if execution_mode_error:
+                message = f"MANAGED_SERVICE_CONTRACT_INVALID: {execution_mode_error}"
+                failure = Failure(
+                    type="verification_infrastructure_failure", message=message,
+                    raw_output=message, attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
+            if judgment.get("should_run") and execution_mode == "managed_service":
+                await _execute_managed_service_verification(
+                    state, ctx, judgment,
+                    sorted(set(state.all_files_written) | set(ctx.established_files)),
+                    validator,
+                )
+                return
+            if (
+                ctx.runtime_verification_required
+                and judgment.get("should_run")
+                and deterministic_sequence_kind(judgment.get("run_commands") or []) == "build"
+            ):
+                message = (
+                    "BEHAVIORAL_GOAL_WITH_BUILD_ONLY_VERIFICATION: observable runtime behavior "
+                    "is required, but the inferred sequence contains only build commands."
+                )
+                failure = Failure(
+                    type="verification_infrastructure_failure", message=message,
+                    raw_output=message, attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
+            # Deterministic Java entrypoint resolution - applied fresh every
+            # attempt (never cached alongside judge()'s own should_run/
+            # success_criteria decision above, unlike everything else on
+            # this dict): a retry can edit file content between attempts, so
+            # which file has the real entrypoint must be re-checked against
+            # what's actually on disk right now, not a stale snapshot. See
+            # ground_java_entrypoint_in_no_build_file_projects()'s own
+            # docstring (kriya/workflow/file_resolution.py) for the full
+            # incident and design - this replaces a free-form LLM guess with
+            # a real javac+java sequence for a Java project with no pom.xml/
+            # build.gradle, the one shape PolymorphicValidator's stack
+            # detection has zero deterministic compile capability for today.
+            # Applied here, BEFORE the human-in-the-loop approval display
+            # below builds commands_desc from judgment["run_commands"] -
+            # never correct AFTER a human already approved a different,
+            # uncorrected command than what would actually execute.
+            if judgment["should_run"] and judgment.get("run_commands"):
+                pom_content_for_correction = None
+                try:
+                    with open(os.path.join(ctx.worktree_path, "pom.xml"), "r", encoding="utf-8") as f:
+                        pom_content_for_correction = f.read()
+                except Exception:
+                    pass
+                entrypoint_known_files = sorted(set(state.all_files_written) | set(ctx.established_files))
+                java_files = [f for f in entrypoint_known_files if f.endswith(".java")]
+                if java_files and not pom_content_for_correction:
+                    corrected_commands = ground_java_entrypoint_in_no_build_file_projects(
+                        judgment["run_commands"],
+                        judgment["command_source"],
+                        entrypoint_known_files,
+                        _build_java_main_class_map(java_files, ctx),
+                        extract_jvm_module_flags(ctx.skills_prompt),
+                        pom_content_for_correction,
+                    )
+                    if corrected_commands is None:
+                        # ground_java_entrypoint_in_no_build_file_projects() returns None
+                        # (distinct from "unchanged") only when it's already checked and
+                        # confirmed zero of files_written has a real main() method, yet the
+                        # judged command still tries to `java <SomeClass>` anyway - that
+                        # class name is provably fabricated, not merely unverified, so
+                        # trusting it would just repeat the exact live incident (a
+                        # hallucinated "ProtocolParserTest" class) that motivated this
+                        # fix. Force should_run False rather than execute a command known
+                        # in advance to fail - matches judge()'s own system-prompt rule
+                        # for a pure-library milestone with no runnable entrypoint at all.
+                        logger.info(
+                            "Deterministic Java entrypoint resolution: no pom.xml/build.gradle "
+                            "found and no known .java file has a main() method - overriding "
+                            "should_run to False instead of executing a command that targets "
+                            "a nonexistent entrypoint class."
+                        )
+                        judgment = dict(judgment)
+                        judgment["should_run"] = False
+                        judgment["run_commands"] = None
+                    elif corrected_commands != judgment["run_commands"]:
+                        logger.info(
+                            "Deterministic Java entrypoint resolution: no pom.xml/build.gradle "
+                            "found and exactly one real entrypoint was detected - overriding the "
+                            f"inferred run command(s) with {corrected_commands} instead of "
+                            "trusting the model's own guess."
+                        )
+                        judgment = dict(judgment)
+                        judgment["run_commands"] = corrected_commands
+
+                # VER-005 implementation (2026-09-13): the Python sibling of
+                # the Java entrypoint grounding just above - see
+                # ground_python_runtime_target()'s own docstring (kriya/
+                # workflow/file_resolution.py) for the live E4 defect this
+                # closes. Applied fresh every attempt, same as the Java
+                # branch above - never cached alongside judge()'s own
+                # judgment, since a retry can edit file content between
+                # attempts. Independent of the Java branch (mutually
+                # exclusive in practice - java_files is empty for a real
+                # Python project, and this block's own gate is False for a
+                # real Java one), so no interaction between them.
+                if any(f.endswith(".py") for f in entrypoint_known_files) or validator.stack == "python":
+                    all_python_files, package_dirs, entrypoint_files = _build_python_runtime_grounding(
+                        validator.workspace_path
+                    )
+                    corrected_py_commands = ground_python_runtime_target(
+                        judgment["run_commands"], judgment["command_source"],
+                        all_python_files, package_dirs, entrypoint_files,
+                    )
+                    if corrected_py_commands is None:
+                        logger.info(
+                            "Deterministic Python runtime-target grounding: the run-verification "
+                            "judge's proposed target is not a valid application runtime target "
+                            "(test-shaped, nonexistent, or unguarded), and no unambiguous real "
+                            "entrypoint exists elsewhere in the repository to substitute - "
+                            "overriding should_run to False instead of executing an invalid target."
+                        )
+                        judgment = dict(judgment)
+                        judgment["should_run"] = False
+                        judgment["run_commands"] = None
+                    elif corrected_py_commands != judgment["run_commands"]:
+                        logger.info(
+                            "Deterministic Python runtime-target grounding: the run-verification "
+                            "judge's proposed target was not a valid application runtime target - "
+                            f"substituting {corrected_py_commands} instead of trusting the model's "
+                            "own guess."
+                        )
+                        judgment = dict(judgment)
+                        judgment["run_commands"] = corrected_py_commands
             if judgment["should_run"]:
                 proceed_with_run = True
                 if judgment["command_source"] == "inferred" and not state.run_verification_confirmed:
@@ -1307,7 +9161,16 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                                 approved = await approved
                             proceed_with_run = bool(approved)
                         else:
-                            logger.warning("Runtime verification warrants human approval but no approval_callback is available. Proceeding under default policy.")
+                            # Fail-closed (2026-09-20) - same fix as the
+                            # sibling gate in _execute_runtime_verification_
+                            # directly() above; see that call site's own
+                            # comment for the full 2026-08-16 precedent.
+                            logger.warning(
+                                "Runtime verification warrants human approval but no "
+                                "approval_callback is available - refusing to execute "
+                                "unreviewed rather than proceeding under default policy."
+                            )
+                            proceed_with_run = False
                     if not proceed_with_run:
                         state.run_verification_declined = True
                 if proceed_with_run:
@@ -1318,22 +9181,28 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             "One or more inferred run commands aren't resolvable as given here - "
                             "substituted Kriya's own interpreter/PATH-resolved equivalents."
                         )
-                    jvm_flag_correction = _strip_jdk_incompatible_jvm_flags(ctx.worktree_path, state.java_home_override)
-                    if jvm_flag_correction:
-                        logger.warning(f"JVM flag preflight: {jvm_flag_correction}")
-                        state.toolchain_warning = (
-                            f"{state.toolchain_warning} {jvm_flag_correction}"
-                            if state.toolchain_warning else jvm_flag_correction
-                        )
-                    exec_pin_correction = _pin_exec_plugin_executable_to_resolved_jdk(ctx.worktree_path, state.java_home_override)
-                    if exec_pin_correction:
-                        logger.warning(f"JVM executable preflight: {exec_pin_correction}")
-                        state.toolchain_warning = (
-                            f"{state.toolchain_warning} {exec_pin_correction}"
-                            if state.toolchain_warning else exec_pin_correction
-                        )
+                    rv_input_channel = judgment.get("input_channel") or "none"
+                    resolved_run_commands, rv_stdin_payload, rv_contract_incomplete_reason = (
+                        _apply_runtime_verification_contract(resolved_run_commands, rv_input_channel)
+                    )
                     logger.info(
-                        "Quality Gates: Running runtime verification: "
+                        "RUNTIME_VERIFICATION_CONTRACT input_channel=%s argument_count=%d stdin_present=%s",
+                        rv_input_channel, len(resolved_run_commands[-1]) if resolved_run_commands else 0,
+                        bool(rv_stdin_payload),
+                    )
+                    if rv_contract_incomplete_reason:
+                        rv_message = f"RUNTIME_VERIFICATION_CONTRACT_INCOMPLETE: {rv_contract_incomplete_reason}"
+                        logger.warning(rv_message)
+                        rv_failure = Failure(
+                            type="verification_infrastructure_failure", message=rv_message,
+                            raw_output=rv_message, attempt=state.attempt_number,
+                        )
+                        state.gate_outcomes.append(rv_failure.to_gate_outcome())
+                        raise QualityGateFailure(rv_failure)
+                    command_verification_kind = deterministic_sequence_kind(resolved_run_commands)
+                    logger.info(
+                        "Quality Gates: Running %s verification: "
+                        % (command_verification_kind or "application_runtime")
                         + " && ".join(" ".join(cmd) for cmd in resolved_run_commands)
                     )
                     # Snapshot/clean around the actual execution, not just once
@@ -1346,13 +9215,30 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                     # N's run started from attempt N-1's leftover state instead
                     # of a fresh one, producing task-ID drift and "not found"
                     # failures that had nothing to do with the generated code.
+                    _prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
                     pre_run_untracked = snapshot_untracked_files(ctx.worktree_path)
                     run_res = validator.run_app_sequence(
                         resolved_run_commands,
                         timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+                        stdin_payload=rv_stdin_payload,
                     )
                     clean_untracked_files_since(ctx.worktree_path, pre_run_untracked)
-                    gate_type = "run_verification"
+                    _raise_runtime_verification_infrastructure_failure(
+                        state, run_res, resolved_run_commands,
+                    )
+                    gate_type = (
+                        "test" if command_verification_kind == "test"
+                        else "run_verification"
+                    )
+                    # Set unconditionally (only ever reassigned in the "plain
+                    # nonzero exit, no hang" branch below - see its own
+                    # comment for why the other two branches are deliberately
+                    # NOT self-corrected) so the shared failure-raising block
+                    # further down can attach it to the Failure regardless of
+                    # which branch actually ran, mirroring the compile gate's
+                    # own self_correction_attempt pattern above.
+                    self_correction_result = None
+                    verification_authority = "llm"
                     if run_res["timed_out"]:
                         # _run_cmd_with_timeout still reaps and captures whatever
                         # stdout/stderr the process produced before being killed (see
@@ -1367,22 +9253,24 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         # trying timeout-tuning fixes that could never fix a genuine
                         # resource leak, burning the whole retry budget on the wrong
                         # class of change.
-                        contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
-                        if contract_verdict is not None:
+                        state_, contract_verdict = _classify_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
+                        if state_ in (ContractVerdictState.PASS, ContractVerdictState.FAIL):
                             logger.info(
                                 "Runtime verification: using deterministic verification-contract "
                                 "marker instead of LLM grading (timed-out run)."
                             )
-                            grade = contract_verdict
-                        else:
-                            grade = await ctx.run_verifier.grade(
-                                goal=ctx.goal,
-                                success_criteria=judgment["success_criteria"],
-                                output=run_res["output"],
-                                returncode=run_res["returncode"],
-                                files_written=list(state.all_files_written),
-                                timed_out=True,
-                            )
+                        grade, verification_authority = await _resolve_runtime_verification_grade(
+                            ctx, state_, contract_verdict,
+                            {
+                                "goal": ctx.goal,
+                                "success_criteria": judgment["success_criteria"],
+                                "output": run_res["output"],
+                                "returncode": run_res["returncode"],
+                                "files_written": list(state.all_files_written),
+                                "timed_out": True,
+                            },
+                            run_result=run_res,
+                        )
                         timeout_s = autonomy_cfg_rv.run_verification_timeout_seconds
                         if grade["passed"]:
                             # The goal's described behavior WAS genuinely produced -
@@ -1441,37 +9329,219 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         # the clean-run branch below exactly: check the deterministic
                         # marker first, only fall back to the LLM grader if the
                         # generated program didn't comply with the contract.
-                        contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
-                        if contract_verdict is not None:
-                            logger.info(
-                                "Runtime verification: using deterministic verification-contract "
-                                "marker instead of LLM grading (non-zero exit, no hang)."
-                            )
-                            grade = contract_verdict
+                        deterministic_kind = deterministic_sequence_kind(resolved_run_commands)
+                        if deterministic_kind is not None:
+                            verification_authority = "process_exit"
+                            grade = {
+                                "passed": False,
+                                "reasoning": (
+                                    f"One or more deterministic {deterministic_kind} verification "
+                                    "commands returned a non-zero process status."
+                                ),
+                                "likely_files": [],
+                            }
                         else:
-                            grade = await ctx.run_verifier.grade(
-                                goal=ctx.goal,
-                                success_criteria=judgment["success_criteria"],
-                                output=run_res["output"],
-                                returncode=run_res["returncode"],
-                                files_written=list(state.all_files_written),
+                            state_, contract_verdict = _classify_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
+                            if state_ in (ContractVerdictState.PASS, ContractVerdictState.FAIL):
+                                logger.info(
+                                    "Runtime verification: using deterministic verification-contract "
+                                    "marker instead of LLM grading (non-zero exit, no hang)."
+                                )
+                            grade, verification_authority = await _resolve_runtime_verification_grade(
+                                ctx, state_, contract_verdict,
+                                {
+                                    "goal": ctx.goal,
+                                    "success_criteria": judgment["success_criteria"],
+                                    "output": run_res["output"],
+                                    "returncode": run_res["returncode"],
+                                    "files_written": list(state.all_files_written),
+                                },
+                                run_result=run_res,
                             )
+
+                        # A semantic expected-failure verdict is admissible
+                        # only when every setup step succeeded and the final
+                        # application process actually launched. JVM/module/
+                        # executable launch failures were already classified
+                        # as verifier infrastructure above and never reach
+                        # this branch.
+                        #
+                        # PRD-025: beyond that, a nonzero exit outranks any
+                        # semantic grade unless the user's own goal declares
+                        # that exit as the expected behaviour.
+                        apply_runtime_disposition(
+                            grade, run_res, goal_text=exit_authority_text(ctx),
+                            verification_authority=verification_authority,
+                        )
+
+                        # Bounded self-correction, widened 2026-08-22 from
+                        # compile-only to also cover THIS specific run-
+                        # verification shape - found live (ignite_qpid_protocol):
+                        # a plain nonzero exit with no hang ("Could not find or
+                        # load main class App") is very often an
+                        # infrastructure/classpath/build-layout problem, not
+                        # application logic - exactly the class of thing
+                        # inspect_class/list_dependencies/list_compiled_output
+                        # (kriya/workflow/self_correction.py) exist to ground a
+                        # fix in, instead of the Developer chasing phantom
+                        # import/package theories across several full-set
+                        # retries (5+ attempts, observed live). Deliberately
+                        # NOT applied to the timed-out branch (a hang is a
+                        # resource-lifecycle bug in application logic, not
+                        # something inspect_class/list_dependencies can help
+                        # diagnose) or the clean-run branch (exit 0 but wrong
+                        # output is almost always an application-logic defect
+                        # too) - see run_self_correction_loop()'s own
+                        # docstring for the same scoping rationale.
+                        if not grade["passed"] and ctx.kernel.config.autonomy.self_correction_loop_enabled:
+                            from kriya.workflow.self_correction import run_self_correction_loop
+                            logger.info(
+                                "Runtime verification failed with a plain nonzero exit (no hang) - "
+                                "attempting bounded self-correction micro-loop before raising "
+                                "QualityGateFailure."
+                            )
+                            run_verification_known_files = sorted(
+                                set(state.all_files_written) | set(ctx.established_files)
+                            )
+                            self_correction_result = await _as_developer(run_self_correction_loop(
+                                llm=ctx.developer.llm,
+                                worktree_path=ctx.worktree_path,
+                                validator=validator,
+                                files_in_scope=run_verification_known_files,
+                                # See the compile-gate self-correction call
+                                # site's own comment above for why DENY_ALL is
+                                # checked explicitly here too.
+                                writable_files=(
+                                    [] if ctx.write_scope_mode == WriteScopeMode.DENY_ALL
+                                    else (ctx.allowed_write_relpaths or list(state.all_files_written))
+                                ),
+                                compile_error_output=(
+                                    f"RUNTIME VERIFICATION FAILURE (plain nonzero exit): {grade['reasoning']}"
+                                    f"\n\nCaptured output:\n{run_res['output']}"
+                                ),
+                                active_code_context=active_code_context,
+                                max_turns=ctx.kernel.config.autonomy.self_correction_loop_max_turns,
+                                failure_type="run_verification",
+                                authorized_semantic_regions=ctx.authorized_semantic_regions,
+                                strict_existing_java_files=ctx.kernel.config.autonomy.semantic_region_enforcement_required,
+                                baseline_contents=state.all_original_contents,
+                                request_capacity=request_capacity(ctx.kernel.config),
+                            ))
+                            _record_self_correction_scope_conflict(
+                                state, ctx, self_correction_result, "run_verification",
+                            )
+                            for incident in getattr(self_correction_result, "incidents", []):
+                                state.record_event(RunEvent(
+                                    kind="auxiliary.failed",
+                                    attempt=state.attempt_number,
+                                    source=incident["source"],
+                                    authority=EventAuthority.AUXILIARY,
+                                    message=incident["message"],
+                                    failure_type=incident["type"],
+                                    operation="repair_run_verification",
+                                ))
+                            if self_correction_result.resolved:
+                                # Self-correction only ever validates via
+                                # recompile (did the INFRASTRUCTURE issue get
+                                # fixed) - it never re-runs the generated
+                                # application itself (see the module's own
+                                # docstring). Re-run the real run-verification
+                                # sequence exactly once here to confirm actual
+                                # behavior, reassigning run_res/grade/
+                                # contract_verdict so the SHARED pass/fail
+                                # handling below (and the success bookkeeping
+                                # further down, reached only when grade
+                                # ["passed"] is True) needs no duplication.
+                                logger.info(
+                                    "Self-correction micro-loop resolved the run-verification "
+                                    f"infrastructure issue in {self_correction_result.turns_used} "
+                                    "turn(s) - re-running the actual application to confirm."
+                                )
+                                _prepare_finite_command_runtime_artifacts(resolved_run_commands, validator, ctx, state)
+                                pre_run_untracked_after_repair = snapshot_untracked_files(ctx.worktree_path)
+                                run_res = validator.run_app_sequence(
+                                    resolved_run_commands,
+                                    timeout=autonomy_cfg_rv.run_verification_timeout_seconds,
+                                )
+                                clean_untracked_files_since(ctx.worktree_path, pre_run_untracked_after_repair)
+                                repaired_deterministic_kind = deterministic_sequence_kind(
+                                    resolved_run_commands
+                                )
+                                if repaired_deterministic_kind is not None:
+                                    verification_authority = "process_exit"
+                                    repaired_reasoning = (
+                                        f"All deterministic {repaired_deterministic_kind} "
+                                        "verification commands completed successfully (exit code 0)."
+                                        if run_res["success"] else
+                                        f"One or more deterministic {repaired_deterministic_kind} "
+                                        "verification commands still returned a non-zero process "
+                                        "status after repair."
+                                    )
+                                    grade = {
+                                        "passed": bool(run_res["success"]),
+                                        "reasoning": repaired_reasoning,
+                                        "likely_files": [],
+                                    }
+                                else:
+                                    state_, contract_verdict = _classify_grounded_contract_verdict(
+                                        run_res["output"], ctx.worktree_path, list(state.all_files_written),
+                                    )
+                                    grade, verification_authority = await _resolve_runtime_verification_grade(
+                                        ctx, state_, contract_verdict,
+                                        {
+                                            "goal": ctx.goal,
+                                            "success_criteria": judgment["success_criteria"],
+                                            "output": run_res["output"],
+                                            "returncode": run_res["returncode"],
+                                            "files_written": list(state.all_files_written),
+                                        },
+                                        run_result=run_res,
+                                    )
                     else:
-                        contract_verdict = _extract_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
-                        if contract_verdict is not None:
+                        deterministic_kind = deterministic_sequence_kind(resolved_run_commands)
+                        if deterministic_kind is not None:
+                            # An allowlisted build/test tool's zero exit status
+                            # is its authoritative verdict. Quiet output is a
+                            # normal success mode, not evidence of missing
+                            # runtime behavior for an LLM to reinterpret.
+                            verification_authority = "process_exit"
+                            grade = {
+                                "passed": True,
+                                "reasoning": (
+                                    f"All deterministic {deterministic_kind} verification "
+                                    "commands completed successfully (exit code 0)."
+                                ),
+                                "likely_files": [],
+                            }
                             logger.info(
-                                "Runtime verification: using deterministic verification-contract "
-                                "marker instead of LLM grading."
+                                "Runtime verification: trusting deterministic %s command "
+                                "process status instead of behavioral LLM grading.",
+                                deterministic_kind,
                             )
-                            grade = contract_verdict
                         else:
-                            grade = await ctx.run_verifier.grade(
-                                goal=ctx.goal,
-                                success_criteria=judgment["success_criteria"],
-                                output=run_res["output"],
-                                returncode=run_res["returncode"],
-                                files_written=list(state.all_files_written),
+                            state_, contract_verdict = _classify_grounded_contract_verdict(run_res["output"], ctx.worktree_path, list(state.all_files_written))
+                            if state_ in (ContractVerdictState.PASS, ContractVerdictState.FAIL):
+                                logger.info(
+                                    "Runtime verification: using deterministic verification-contract "
+                                    "marker instead of LLM grading."
+                                )
+                            grade, verification_authority = await _resolve_runtime_verification_grade(
+                                ctx, state_, contract_verdict,
+                                {
+                                    "goal": ctx.goal,
+                                    "success_criteria": judgment["success_criteria"],
+                                    "output": run_res["output"],
+                                    "returncode": run_res["returncode"],
+                                    "files_written": list(state.all_files_written),
+                                },
+                                run_result=run_res,
                             )
+                    # PRD-025: the final disposition, re-applied after any
+                    # self-correction re-verification replaced the grade.
+                    apply_runtime_disposition(
+                        grade, run_res, goal_text=exit_authority_text(ctx),
+                        verification_authority=verification_authority,
+                    )
                     if not grade["passed"]:
                         # A compile error always names its own broken file
                         # (file:[line,col]) - a runtime failure's captured
@@ -1507,22 +9577,63 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                             ctx.worktree_path, state.all_files_written, state.attempt_number,
                             extra_likely_files=grade.get("likely_files") or [],
                         )
-                        state.gate_outcomes.append(failure.to_gate_outcome())
+                        if self_correction_result is not None:
+                            # The loop ran (only ever possible from the plain-
+                            # nonzero-exit branch above) but didn't leave the
+                            # gate passing - either it never resolved, or it
+                            # resolved the infrastructure issue but the
+                            # re-run still failed for a genuine application-
+                            # logic reason. Persist what it tried either way,
+                            # same forensics reasoning as the compile gate's
+                            # identical pattern above.
+                            failure.self_correction_attempt = {
+                                "turns_used": self_correction_result.turns_used,
+                                "transcript": self_correction_result.transcript,
+                                "final_compile_output": self_correction_result.final_compile_output,
+                            }
+                        failure_outcome = failure.to_gate_outcome()
+                        failure_outcome.update({
+                            "graded_by": verification_authority,
+                            "commands": resolved_run_commands,
+                            "steps": run_res.get("steps", []),
+                            "deterministic_result": _deterministic_result_provenance_field(verification_authority),
+                            **runtime_evidence_outcome_fields(grade),
+                        })
+                        state.gate_outcomes.append(failure_outcome)
                         raise QualityGateFailure(failure)
-                    state.gate_outcomes.append({
+                    run_verification_outcome = {
                         "attempt": state.attempt_number,
-                        "type": "run_verification",
+                        "type": gate_type,
                         "success": True,
                         "output": run_res["output"] + f"\n\n[Grader reasoning]: {grade['reasoning']}",
-                        # Only reachable via the clean-run branch above (the timed-out
-                        # branch always forces grade["passed"] = False, so it can never
-                        # reach here) - contract_verdict is guaranteed in scope. Makes
-                        # deterministic-contract-vs-LLM-grader compliance queryable
-                        # directly from traces.db instead of grepping raw stdout logs by
-                        # hand, which is what diagnosing the underlying reliability gap
-                        # required this session, repeatedly.
-                        "graded_by": "contract" if contract_verdict is not None else "llm",
-                    })
+                        # Reachable via the clean-run branch above, or (since
+                        # 2026-08-22) the plain-nonzero-exit branch's own
+                        # self-correction re-verification - the timed-out
+                        # branch always forces grade["passed"] = False, so it
+                        # can never reach here - contract_verdict is
+                        # guaranteed in scope either way. Makes deterministic-
+                        # contract-vs-LLM-grader compliance queryable directly
+                        # from traces.db instead of grepping raw stdout logs
+                        # by hand, which is what diagnosing the underlying
+                        # reliability gap required this session, repeatedly.
+                        "graded_by": verification_authority,
+                        "commands": resolved_run_commands,
+                        "steps": run_res.get("steps", []),
+                        "deterministic_result": _deterministic_result_provenance_field(verification_authority),
+                        **runtime_evidence_outcome_fields(grade),
+                    }
+                    if self_correction_result is not None and self_correction_result.resolved:
+                        # Same markers the compile gate's own self-correction
+                        # success path already records - lets Pillar 3's
+                        # lesson-extraction trigger (kriya/workflow/workflow.py)
+                        # find this outcome and feed the real transcript
+                        # (diagnosis + before/after + verification) into
+                        # LiveFailureChannel.extract() as richer evidence than
+                        # bare error_context/file_contents.
+                        run_verification_outcome["self_corrected"] = True
+                        run_verification_outcome["self_correction_turns"] = self_correction_result.turns_used
+                        run_verification_outcome["self_correction_transcript"] = self_correction_result.transcript
+                    state.gate_outcomes.append(run_verification_outcome)
                     logger.info(f"Quality Gates: Runtime verification PASSED: {grade['reasoning']}")
                     # A passing real-world run is exactly the proof the
                     # skill-verification gap check is looking for - mark every
@@ -1543,5 +9654,445 @@ async def run_attempt(state: GenerationState, ctx: AttemptContext) -> None:
                         except Exception as ex:
                             logger.debug(f"Failed to mark skill '{active_skill_name}' verified: {ex}")
 
-    # If we made it here, Quality Gates passed successfully!
-    logger.info("Quality Gates check PASSED.")
+    # Quality Gates: Migration Completion. Deliberately runs BEFORE Spec
+    # Compliance and is never overridable by it - an explicit, objectively-
+    # testable migration obligation (see kriya/workflow/migration.py's own
+    # docstring for the PRV-05, 2026-08-28 incident) must not be reopened by
+    # a semantic verdict that disagrees.
+    #
+    # PRV-05 run 6 (2026-08-28): this used to call resolve_migration_
+    # obligation() fresh, per attempt, against ctx.workspace_path - re-
+    # inferring source/target identity from whatever state the repository
+    # happened to be in at that moment, which is exactly the timing-
+    # sensitive defect this module's own docstring now documents. Reads the
+    # run's ONE already-resolved migration_resolution instead (see
+    # AttemptContext.migration_resolution's own docstring) - identity is
+    # fixed; only find_migration_incomplete's completion CHECK still runs
+    # fresh, against this attempt's own current candidate tree, which is
+    # exactly what it's for.
+    #
+    # Only relevant to THIS attempt when its own scope (architect_files)
+    # actually touches the obligation's grounded consumer(s) or the
+    # manifest (pom.xml) - an unrelated subtask elsewhere in the same plan
+    # must not be failed for a migration it was never responsible for.
+    migration_obligation = (
+        ctx.migration_resolution.obligation
+        if ctx.migration_resolution is not None
+        and ctx.migration_resolution.status == MigrationResolutionStatus.RESOLVED
+        else None
+    )
+    subtask_owns_migration_scope = migration_obligation is not None and bool(
+        set(ctx.architect_files) & (set(migration_obligation.grounded_consumers) | {"pom.xml"})
+    )
+    if subtask_owns_migration_scope:
+        # validation_scope=CURRENT_SUBTASK (PRV-05 run 7, 2026-08-28): only
+        # requirements DUE at this subtask's position in the plan can fail
+        # this gate - a requirement whose only implicated file(s) belong to
+        # a not-yet-reached, dependency-ordered subtask (e.g. this exact
+        # PRV-05 plan's s4, which owns removing the old dependency from
+        # pom.xml) is PENDING here, not FAILED, even though s1 legitimately
+        # touches the grounded consumer. Degrades to the original always-
+        # TERMINAL behavior when ctx.structured_plan/current_subtask_id are
+        # None (a non-MA6-structured caller) - see MigrationValidationScope's
+        # own docstring.
+        migration_gap = find_migration_incomplete(
+            migration_obligation, ctx.worktree_path,
+            current_subtask_id=ctx.current_subtask_id,
+            engineering_plan=ctx.structured_plan,
+            validation_scope=MigrationValidationScope.CURRENT_SUBTASK,
+            obligation_ledger=ctx.obligation_ledger,
+            revision=state.attempt_number, source="migration.attempt_gate",
+        )
+        if migration_gap:
+            message = (
+                "MIGRATION INCOMPLETE: the goal explicitly requires replacing "
+                f"{migration_gap['source_identity']} with {migration_gap['target_identity']}, but "
+                f"{', '.join(migration_gap['reason_codes'])}. Grounded consumer(s) that must use "
+                f"{migration_gap['target_identity']}: {', '.join(migration_gap['grounded_consumers']) or 'none'}."
+            )
+            # Union, not "first non-empty wins": found live, PRV-05
+            # (2026-08-28 rerun) - a fully-migrated consumer with the
+            # dependency still declared leaves BOTH unmigrated_consumers
+            # and source_usage_files empty, so the failure had no
+            # likely_files at all and couldn't point the retry/
+            # attribution pipeline at the one file that actually needs
+            # fixing (typically pom.xml, owned by a different, already-
+            # completed subtask - see migration.py's own manifest_files
+            # docstring). Already DUE-filtered by find_migration_incomplete
+            # above, so this union never includes a future-owned file.
+            evidence_files = list(dict.fromkeys(
+                migration_gap["unmigrated_consumers"]
+                + migration_gap["source_usage_files"]
+                + migration_gap["manifest_files"]
+            ))
+            failure = _build_quality_gate_failure(
+                "migration_incomplete", message, message,
+                ctx.worktree_path, state.all_files_written, state.attempt_number,
+                extra_likely_files=evidence_files,
+            )
+            # PRV-05 run 7: this evidence is deterministic (parsed from
+            # pom.xml/scanned imports), not a text-scan guess - it must
+            # outrank the model's own self-diagnosis in attribute_failure()
+            # (kriya/workflow/attribution.py), and its "high" confidence
+            # lets the existing plan-scope-conflict check (retry_strategy.py)
+            # correctly hard-stop rather than call the Developer at all if
+            # ever an authoritative target genuinely falls outside this
+            # subtask's authorized write scope.
+            failure.authoritative_files = evidence_files
+            failure.diagnostics = {
+                **(failure.diagnostics or {}),
+                "reason_code": "MIGRATION_INCOMPLETE",
+                "reason_codes": migration_gap["reason_codes"],
+                "pending_reason_codes": migration_gap.get("pending_reason_codes", []),
+            }
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+
+    # Quality Gates: Goal Spec Compliance. Compiling, passing tests, and (when
+    # applicable) runtime verification above all structurally can't catch a goal's
+    # LITERALLY named requirement (an exact field/method/class name, an exact type,
+    # an exact constant) going unimplemented - the generated code can be perfectly
+    # valid and even behave correctly while still being a different shape than what
+    # was actually asked for. Runs once, here, only after every other gate has
+    # already passed, so an attempt doomed for another reason never pays for it.
+    # See SpecComplianceAgent's own docstring (kriya/agents/agent.py) for the live
+    # incident (ignite_qpid_protocol milestone 1, 2026-08-21) this closes.
+    if ctx.kernel.config.autonomy.spec_compliance_enabled:
+        compliance_goal, pending_acceptance_ids = _stage_scoped_spec_compliance_goal(ctx)
+        if ctx.structured_plan is not None and ctx.current_subtask_id:
+            logger.info(
+                "STAGE_OBLIGATION_SCOPE %s",
+                json.dumps({
+                    "subtask_id": ctx.current_subtask_id,
+                    "decision": "CURRENT_STAGE_ONLY",
+                    "pending_acceptance_criteria_ids": pending_acceptance_ids,
+                }, sort_keys=True),
+            )
+        # A bounded consumer is judged against both its own candidate and the
+        # already-verified upstream contracts it consumes. Restricting this to
+        # files written by the current subtask made compliance incorrectly say
+        # an upstream field/type was absent, then reopen a healthy owner.
+        spec_check_files = sorted(
+            set(state.all_files_written) | set(ctx.established_files)
+        )
+        spec_file_contents: Dict[str, str] = {}
+        for spec_path in spec_check_files:
+            spec_full_path = os.path.join(ctx.worktree_path, spec_path)
+            if not os.path.exists(spec_full_path):
+                spec_full_path = os.path.join(ctx.workspace_path, spec_path)
+            if not os.path.exists(spec_full_path):
+                continue
+            try:
+                with open(spec_full_path, "r", encoding="utf-8", errors="replace") as fh:
+                    spec_file_contents[spec_path] = fh.read()
+            except Exception as e:
+                logger.debug(f"Spec compliance check: couldn't read {spec_path}, skipping it: {e}")
+        authoritative_context = _spec_compliance_authoritative_context(ctx.obligation_ledger)
+        # Correctness Continuity Part A (PRV-06, 2026-08-29): computed BEFORE
+        # the call so the fingerprint reflects exactly what's about to be
+        # judged, and captured here (not recomputed later) so the settled
+        # check and the eventual ledger write always agree on one value.
+        goal_spec_obligation_id = (
+            _goal_spec_requirement_obligation_id(ctx.current_subtask_id)
+            if ctx.current_subtask_id else None
+        )
+        goal_spec_evidence_fingerprint = _goal_spec_evidence_fingerprint(compliance_goal, spec_file_contents)
+        settled_goal_spec = _settled_goal_spec_requirement(
+            ctx.obligation_ledger, goal_spec_obligation_id, goal_spec_evidence_fingerprint,
+        )
+        # PRD-020: the original requirements ride along only when this check
+        # is their verifier (never passed otherwise, so existing callers and
+        # test doubles see the same call).
+        requirement_kwargs = {"requirements": ctx.requirement_set} if ctx.requirement_set is not None else {}
+        spec_result = await ctx.spec_compliance.check(
+            goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
+            authoritative_context=authoritative_context, **requirement_kwargs,
+        )
+        if spec_result.get("status") == "indeterminate":
+            # SpecComplianceAgent.check() returns this when the model's own
+            # verdict is internally contradictory (compliant=false naming no
+            # concrete missing requirement) - used to be silently forced to
+            # compliant=True (see that method's own docstring for the PRV-05,
+            # 2026-08-28 incident this closes: a real migration failure the
+            # model's own reasoning had already identified became a
+            # fabricated PASS). One bounded re-evaluation, not a retry-budget
+            # spend - if it's STILL indeterminate, stop rather than guess
+            # either way; trusting a bare compliant=false here would just
+            # move the same problem (an unreliable LLM verdict as sole
+            # authority) in the opposite direction.
+            spec_result = await ctx.spec_compliance.check(
+                goal=compliance_goal, files_written=spec_check_files, file_contents=spec_file_contents,
+                authoritative_context=authoritative_context, **requirement_kwargs,
+            )
+        if ctx.requirement_set is not None:
+            _record_original_requirement_verdicts(
+                state, ctx, spec_result, goal_spec_evidence_fingerprint,
+            )
+        if spec_result.get("status") == "indeterminate":
+            if _migration_obligations_all_satisfied(ctx.obligation_ledger):
+                # MA8 follow-up (found live, PRV-05, 2026-08-28): this branch
+                # used to raise unconditionally, with ZERO reference to
+                # ctx.obligation_ledger, even though the sibling "not
+                # compliant, with actual named requirements" branch just
+                # below already arbitrates against it. A candidate whose
+                # migration was ALREADY fully and correctly complete
+                # (confirmed live: the real worktree files, not just the
+                # log - pom.xml, JsonService.java, JacksonConfig.java all
+                # correct) got destabilized into an 11-attempt budget
+                # exhaustion by this exact gap - the model's own repeated
+                # verdict ("the code still uses Jackson... does not show
+                # replacement of any prior library") is the same direction-
+                # hallucination class this whole gate exists to catch, just
+                # reached through the indeterminate shape instead of a
+                # named-requirement one. The up-front authoritative_context
+                # prompt addition alone did not prevent it - confirming the
+                # spec's own "do not trust the prompt alone" warning live.
+                # Same suppression treatment as the arbitrated-requirements
+                # branch below: normalize to compliant so the rest of this
+                # function's existing success path handles it, rather than
+                # adding a second, parallel success path.
+                logger.warning(
+                    "Quality Gates: Goal spec compliance returned an internally "
+                    "contradictory INDETERMINATE verdict twice in a row while every "
+                    "current migration obligation is deterministically SATISFIED - "
+                    "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY, suppressed (treated as "
+                    "compliant, not used to trigger retry): %s",
+                    spec_result.get("reasoning"),
+                )
+                spec_result = {
+                    "compliant": True, "reasoning": spec_result.get("reasoning", ""),
+                    "missing_requirements": [], "likely_files": [],
+                    "status": "indeterminate_suppressed",
+                    "reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
+                }
+            else:
+                message = (
+                    "SPEC COMPLIANCE INDETERMINATE: the compliance check returned an "
+                    "internally contradictory verdict (compliant=false naming no concrete "
+                    f"missing requirement) twice in a row: {spec_result['reasoning']}"
+                )
+                failure = Failure(
+                    type="spec_compliance_indeterminate", message=message, raw_output=message,
+                    attempt=state.attempt_number,
+                )
+                state.gate_outcomes.append(failure.to_gate_outcome())
+                raise QualityGateFailure(failure)
+        if spec_result.get("status") == "unknown" and ctx.strict_spec_compliance:
+            message = (
+                "SPEC COMPLIANCE INFRASTRUCTURE FAILURE: authoritative execution cannot "
+                f"treat an unavailable compliance judgment as satisfied: {spec_result['reasoning']}"
+            )
+            failure = Failure(
+                type="verification_infrastructure_failure", message=message,
+                raw_output=message, attempt=state.attempt_number,
+            )
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        if not spec_result["compliant"] and settled_goal_spec is not None:
+            # Correctness Continuity Part A (PRV-06, 2026-08-29): the SAME
+            # evidence (requirement text + every checked file's content,
+            # byte for byte) already satisfied this exact obligation on an
+            # earlier attempt for this subtask - e.g. s2's own planned pass,
+            # re-judged again during a later owner-recovery attempt with no
+            # relevant content change. A later contradictory JUDGMENT-
+            # authority verdict against UNCHANGED evidence must never
+            # overturn a settled fact (MA8: DETERMINISTIC > GROUNDED >
+            # JUDGMENT; here, even within JUDGMENT itself, unchanged
+            # evidence cannot be destabilized by a mere re-ask of the same
+            # question). Live incident this closes: byte-identical App.java
+            # content passed goal_spec_compliance during s2's own pass, then
+            # failed the same check type during s2's owner-recovery,
+            # inventing a "protocolVersion field" requirement that appeared
+            # nowhere in the goal, plan, or either file.
+            logger.warning(
+                "Quality Gates: Goal spec compliance returned a contradictory verdict against "
+                f"UNCHANGED evidence already SATISFIED at attempt {settled_goal_spec.revision} for "
+                f"{settled_goal_spec.id!r} - SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY, suppressed "
+                f"(not used to trigger retry): {spec_result.get('reasoning')}"
+            )
+            spec_result = {
+                "compliant": True, "reasoning": spec_result.get("reasoning", ""),
+                "missing_requirements": [], "likely_files": [],
+                "reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
+            }
+        arbitrated_contradictions: List[str] = []
+        if not spec_result["compliant"]:
+            # MA8 (PRV-05 run #8, 2026-08-28) - kriya/workflow/obligations.py.
+            # SpecComplianceAgent is pure LLM judgment (authority=JUDGMENT) -
+            # a missing_requirement whose text correlates to a migration
+            # identity the DETERMINISTIC migration gate already reports fully
+            # SATISFIED must never drive a retry; DETERMINISTIC always
+            # outranks JUDGMENT for the same real-world fact. Found live: "the
+            # code still uses Jackson... does not show evidence of replacing
+            # the old dependency" fired AFTER the migration was actually
+            # complete, and drove 3 further wasted, destabilizing attempts.
+            # Only ever suppresses requirements when EVERY current migration
+            # obligation is SATISFIED (never touches one while the
+            # deterministic check itself still reports a violation - that's
+            # not a contradiction, judgment and determinism simply agree).
+            kept_requirements, arbitrated_contradictions = _spec_requirements_contradicting_authority(
+                spec_result["missing_requirements"], ctx.obligation_ledger,
+            )
+            if arbitrated_contradictions:
+                logger.warning(
+                    "Quality Gates: Goal spec compliance reported requirement(s) that contradict "
+                    "an authoritative deterministic SATISFIED obligation - SPEC_COMPLIANCE_"
+                    "CONTRADICTS_AUTHORITY, suppressed (not used to trigger retry): %s",
+                    arbitrated_contradictions,
+                )
+            # PRV-11 (2026-08-30): the other half of build_subtask_goal_
+            # text()'s own authority-isolation split - a prompt instruction
+            # telling SpecComplianceAgent not to treat a Planned-Implementation
+            # -only identifier as a requirement is not a deterministic
+            # guarantee (same "do not trust the prompt alone" principle the
+            # migration arbitration above already applies), and this model
+            # was observed reconstructing its own worked counter-example
+            # almost verbatim. Deterministically re-checks each surviving
+            # requirement's own identifier token(s) against ctx.goal's two
+            # labeled sections directly - never a prompt-only fix.
+            kept_requirements, planner_only_requirements = _spec_requirements_naming_planner_only_identifiers(
+                kept_requirements, ctx.goal,
+            )
+            if planner_only_requirements:
+                logger.warning(
+                    "Quality Gates: Goal spec compliance reported requirement(s) naming an "
+                    "identifier that appears only in the Planned Implementation Strategy "
+                    "section of the goal, never in the Authoritative Goal section - "
+                    "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY (planner-only identifier), "
+                    "suppressed (not used to trigger retry): %s",
+                    planner_only_requirements,
+                )
+        else:
+            kept_requirements = []
+            arbitrated_contradictions = []
+            planner_only_requirements = []
+        if ctx.requirement_set is not None and (arbitrated_contradictions or planner_only_requirements):
+            _downgrade_suppressed_requirement_claims(
+                state, ctx, arbitrated_contradictions + planner_only_requirements,
+                goal_spec_evidence_fingerprint,
+            )
+        if ctx.requirement_set is not None:
+            _close_requirements_by_migration_gate(state, ctx, goal_spec_evidence_fingerprint)
+        if not spec_result["compliant"] and kept_requirements:
+            missing_desc = "; ".join(kept_requirements)
+            message = (
+                "GOAL SPEC COMPLIANCE FAILURE: the goal names concrete requirements the "
+                f"generated code doesn't satisfy: {missing_desc}\n\n{spec_result['reasoning']}"
+            )
+            # Full synchronous tree-walk + per-file read, re-run on every
+            # failed spec-compliance retry; offload so it doesn't block the
+            # event loop inside this async attempt.
+            grounded_architectural_owners = await asyncio.to_thread(
+                discover_response_construction_owners,
+                ctx.worktree_path, ctx.grounding_goal or ctx.goal, spec_check_files,
+            )
+            failure = _build_quality_gate_failure(
+                "goal_spec_compliance", message, message,
+                ctx.worktree_path, state.all_files_written, state.attempt_number,
+                extra_likely_files=list(dict.fromkeys(
+                    (spec_result.get("likely_files") or [])
+                    + grounded_architectural_owners
+                )),
+            )
+            failure.diagnostics = {
+                **(failure.diagnostics or {}),
+                **({"grounded_architectural_owners": grounded_architectural_owners}
+                   if grounded_architectural_owners else {}),
+                **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
+                    "arbitrated_contradictions": arbitrated_contradictions}
+                   if arbitrated_contradictions else {}),
+                **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
+                    "planner_only_requirements": planner_only_requirements}
+                   if planner_only_requirements else {}),
+            }
+            if goal_spec_obligation_id and ctx.obligation_ledger is not None:
+                # Correctness Continuity Part A6: this IS new/changed evidence
+                # (settled_goal_spec was None, or content genuinely differed) -
+                # a real violation is always free to (re)invalidate.
+                ctx.obligation_ledger.record(ObligationRecord(
+                    id=goal_spec_obligation_id, kind=ObligationKind.GOAL_SPEC_REQUIREMENT,
+                    status=ObligationStatus.VIOLATED, authority=ObligationAuthority.JUDGMENT,
+                    description="goal_spec_compliance verdict for this subtask's checked files",
+                    source="attempt.run_attempt", revision=state.attempt_number,
+                    evidence={"fingerprint": goal_spec_evidence_fingerprint,
+                              "missing_requirements": kept_requirements},
+                    owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
+                ))
+            state.gate_outcomes.append(failure.to_gate_outcome())
+            raise QualityGateFailure(failure)
+        if goal_spec_obligation_id and ctx.obligation_ledger is not None:
+            ctx.obligation_ledger.record(ObligationRecord(
+                id=goal_spec_obligation_id, kind=ObligationKind.GOAL_SPEC_REQUIREMENT,
+                status=ObligationStatus.SATISFIED, authority=ObligationAuthority.JUDGMENT,
+                description="goal_spec_compliance verdict for this subtask's checked files",
+                source="attempt.run_attempt", revision=state.attempt_number,
+                evidence={"fingerprint": goal_spec_evidence_fingerprint},
+                owner_subtask_id=ctx.current_subtask_id, terminal_required=False,
+            ))
+        # Verifier-availability honesty (2026-09-20): `success: True` here
+        # has historically meant two structurally different things - a real
+        # PASS verdict, and an infrastructure failure (status="unknown",
+        # from SpecComplianceAgent.check()'s own call/parse-exception
+        # handler) or a suppressed contradictory verdict
+        # (status="indeterminate_suppressed", set just above) that this
+        # non-strict path deliberately does not block on. `success: True`
+        # is kept unchanged for backward structural compatibility (nothing
+        # here weakens ctx.strict_spec_compliance's own existing fail-closed
+        # escalation a few lines above, which still raises before reaching
+        # this point whenever that flag is set) - but `status` now always
+        # says explicitly which case this is, so a genuinely unavailable or
+        # suppressed check can never be silently read back as real
+        # verification evidence downstream (traces.db's own persisted
+        # gate_outcomes, or any future consumer). PASS / UNAVAILABLE /
+        # SUPPRESSED are the only values; a real compliant verdict carries
+        # no `status` key at all (unchanged from before this fix).
+        _spec_status = spec_result.get("status")
+        state.gate_outcomes.append({
+            "attempt": state.attempt_number,
+            "type": "goal_spec_compliance",
+            "success": True,
+            "output": spec_result["reasoning"],
+            **({"status": _spec_status} if _spec_status else {}),
+            **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
+                "arbitrated_contradictions": arbitrated_contradictions}
+               if arbitrated_contradictions else {}),
+            **({"reason_code": "SPEC_COMPLIANCE_CONTRADICTS_AUTHORITY",
+                "planner_only_requirements": planner_only_requirements}
+               if planner_only_requirements else {}),
+            **({"reason_code": spec_result["reason_code"]} if spec_result.get("reason_code") else {}),
+        })
+        if _spec_status == "unknown":
+            logger.info(
+                "Quality Gates: Goal spec compliance UNAVAILABLE (the check itself could "
+                f"not run - advisory only, not evaluated as verification evidence): {spec_result['reasoning']}"
+            )
+        elif _spec_status == "indeterminate_suppressed":
+            logger.info(
+                "Quality Gates: Goal spec compliance SUPPRESSED (contradictory verdict "
+                f"against deterministically-satisfied authority, not evaluated as verification evidence): {spec_result['reasoning']}"
+            )
+        else:
+            logger.info(f"Quality Gates: Goal spec compliance PASSED: {spec_result['reasoning']}")
+
+    # The isolated candidate passed its inner checks. Terminal full regression
+    # and application still remain, so this must never claim overall success.
+    state.candidate_gates_succeeded = True
+    if state.api_contract_recovery:
+        state.api_contract_recovery.candidate_gates_passed()
+    state.record_event(RunEvent(
+        kind="candidate_gates.passed",
+        attempt=state.attempt_number,
+        source="workflow",
+        authority=EventAuthority.AUTHORITATIVE,
+        details={"passed": True, "terminal": False},
+    ))
+    log_gate_banner(
+        "CANDIDATE GATES", "PASSED", state.attempt_number,
+        scope=ctx.execution_scope,
+    )
+
+
+def _ctx_toolchain_declaration_mutable(ctx: "AttemptContext") -> bool:
+    """PRD-011: this attempt's structured authority to change the toolchain
+    declaration (its write scope and the approved plan)."""
+    return toolchain_declaration_mutable(ctx.write_scope_mode, ctx.allowed_write_relpaths, ctx.structured_plan)

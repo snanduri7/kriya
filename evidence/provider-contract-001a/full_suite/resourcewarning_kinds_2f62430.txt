@@ -1,0 +1,24 @@
+ 110 ResourceWarning: unclosed database in <sqlite3.Connection
+  27 ResourceWarning: unclosed file <_io.TextIOWrapper name='<tmp>'
+  10 ResourceWarning: unclosed file <_io.TextIOWrapper
+   7 ResourceWarning: unclosed transport <_SelectorSocketTransport
+   7 ResourceWarning: unclosed <socket.socket
+   6 ResourceWarning: Implicitly cleaning up <HTTPError
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/policy/trust.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/policy/telemetry.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/policy/model.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/policy/injection.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/policy/filesystem.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/policy/execution.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/policy/errors.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/policy/enforcement.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/policy/egress.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/policy/approved_sources.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/policy/__init__.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/control/workspace_identity.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/control/state.py'
+   2 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/control/contracts.py'
+   2 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/kriya/control/artifacts.py'
+   1 ResourceWarning: unclosed scandir iterator <posix.ScandirIterator
+   1 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/plugins/core_tools/validation_tool.py'
+   1 ResourceWarning: unclosed file <_io.TextIOWrapper name='/private/tmp/claude-501/-Users-sriramnanduri-WorkingDirectory-AI-ClaudeCode-Kriya-By-ClaudeCode/87a2eb00-d6ac-4665-84f2-cf4b4d0720f9/scratchpad/prefix-2f62430/plugins/core_tools/__init__.py'

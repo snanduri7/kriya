@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -6,20 +7,30 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional, Tuple
+import uuid
+from typing import Any, Dict, List, NoReturn, Optional, Tuple
 
 import click
 
-from kriya import __version__
 from kriya.agents import ReviewerAgent
 from kriya.analyzer import RepositoryAnalyzer
+from kriya.build_info import version_line, version_report
+from kriya.cli_output import GenerateOutput, no_progress_stop_message
 from kriya.config import AppConfig, load_config
+from kriya.control.commit_state import UncertainWorkspaceStateError
+from kriya.control.run_coordinator import begin_mutating_run, transition_mutating_run
+from kriya.control.run_ownership import WorkspaceLockHeldError
+from kriya.control.run_record import RunLifecycle
 from kriya.core import LLMClient
 from kriya.core.kernel import Kernel
+from kriya.core.logging_setup import LogDirectoryError, configure_logging
+from kriya.core.state_paths import trace_db_path
 from kriya.plugins.plugin import PluginManager
 from kriya.prompt import PromptEngine
 from kriya.skills import SkillEngine
 from kriya.workflow import WorkflowEngine
+from kriya.workflow.failure_reporting import dominant_category
+from kriya.workflow.workflow_controller import WorkflowController
 
 logger = logging.getLogger(__name__)
 
@@ -75,45 +86,84 @@ async def _initialize_plugins_tolerant(kernel: Kernel, pm: PluginManager) -> Dic
             results[p.name] = e
     return results
 
-def configure_logging(cfg: AppConfig) -> None:
-    """Initializes root logging handlers (console + optional file) from AppConfig.logging."""
-    if logging.getLogger().handlers:
-        return
+def _user_error_text(error: BaseException) -> str:
+    """An expected operator error as one message: its typed reason code and
+    remediation first when it carries them (e.g. SEC-009's
+    TRUST_PATH_INSIDE_WORKSPACE)."""
+    code = getattr(error, "reason_code", None)
+    remediation = getattr(error, "remediation", None)
+    text = f"[{code}] {error}" if isinstance(code, str) and code else str(error)
+    return f"{text}\nRemediation: {remediation}" if isinstance(remediation, str) and remediation else text
 
-    level = getattr(logging, cfg.logging.level.upper(), logging.INFO)
-    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    handlers: List[logging.Handler] = []
+def _bootstrap_logging(cfg: AppConfig, file_logging: bool = True) -> None:
+    """configure_logging() with a typed log-directory failure turned into a
+    clean CLI error instead of a traceback."""
+    try:
+        configure_logging(cfg, file_logging=file_logging)
+    except LogDirectoryError as error:
+        click.secho(f"Error configuring logging: {error}", fg="red", err=True)
+        sys.exit(1)
 
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.setFormatter(formatter)
-    handlers.append(console_handler)
 
-    if cfg.logging.file:
-        try:
-            log_path = os.path.abspath(cfg.logging.file)
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
-            file_handler = logging.FileHandler(log_path)
-            file_handler.setFormatter(formatter)
-            handlers.append(file_handler)
-        except Exception as e:
-            click.secho(f"Warning: Failed to initialize log file '{cfg.logging.file}': {e}", fg="yellow", err=True)
+async def _closing(llm: Any, coroutine: Any) -> Any:
+    """Run ``coroutine``, then close ``llm``'s transports deterministically
+    (PROVIDER-CONTRACT-001): on every exit path, SystemExit included."""
+    try:
+        return await coroutine
+    finally:
+        await llm.aclose()
 
-    logging.basicConfig(level=level, handlers=handlers)
+def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    """KRIYA-VERSION-001: eager, so it answers before any configuration is
+    loaded (it needs none, and must work in any directory)."""
+    if value and not ctx.resilient_parsing:
+        click.echo(version_line())
+        ctx.exit()
+
 
 @click.group(invoke_without_command=True)
+@click.option('--version', is_flag=True, expose_value=False, is_eager=True, callback=_print_version,
+              help='Print the Kriya version and the exact source it was built from, then exit.')
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to Kriya configuration YAML file.')
+@click.option('--trust-file', type=click.Path(), default=None,
+              help="SEC-009 P2: path to an operator/CI-supplied approval artifact "
+              "(see `kriya authority approve --out`), for non-interactive authorization "
+              "of security-authority configuration. Must resolve outside the workspace - "
+              "an in-repository path is refused, never silently ignored. Defaults to the "
+              "KRIYA_TRUST_FILE environment variable when not passed.")
 @click.pass_context
-def main(ctx: click.Context, config: Optional[str]) -> None:
+def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -> None:
     """Kriya - Production-Grade AI Engineering Platform CLI."""
     ctx.ensure_object(dict)
     ctx.obj['config_path'] = config
+    ctx.obj['trust_file'] = trust_file
+    # SEC-009 P2: `kriya authority inspect/approve/revoke` must stay reachable
+    # even when the CURRENT configuration has pending/denied security-authority
+    # fields - otherwise a user could never run the one command that lets them
+    # see and resolve exactly the problem being reported. Every other
+    # subcommand still goes through the normal, potentially-denying
+    # load_config() below, unchanged.
+    # PRD-008: `kriya runs` (status/recover/prune) likewise - a workspace
+    # blocked on an interrupted commit must be recoverable without loading
+    # repository-controlled configuration.
+    # KRIYA-VERSION-001: `kriya version` reads only the installed package; it
+    # must answer in any directory, whatever configuration is there.
+    if ctx.invoked_subcommand in ('authority', 'runs', 'version'):
+        return
     try:
-        ctx.obj['config'] = load_config(config)
+        ctx.obj['config'] = load_config(config, trust_file=trust_file)
     except Exception as e:
-        click.secho(f"Error loading configuration: {e}", fg="red", err=True)
+        if ctx.invoked_subcommand == 'doctor':
+            # PRD-010: `doctor --production --json` must still emit a parseable
+            # (failing) report; the doctor itself decides how to render this.
+            ctx.obj['config_error'] = e
+            return
+        click.secho(f"Error loading configuration: {_user_error_text(e)}", fg="red", err=True)
         sys.exit(1)
-    configure_logging(ctx.obj['config'])
+    if ctx.invoked_subcommand != 'doctor':
+        # doctor configures its own logging: --production writes no log file.
+        _bootstrap_logging(ctx.obj['config'])
 
     # No subcommand given: drop into the interactive session, same as bare
     # `python`/`node`/`claude` - but only on a real interactive terminal.
@@ -131,9 +181,21 @@ def main(ctx: click.Context, config: Optional[str]) -> None:
         ctx.exit()
 
 @main.command()
-def version() -> None:
-    """Print the Kriya platform version."""
-    click.echo(f"Kriya version: {__version__}")
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable identity (stdout carries only the JSON).')
+def version(as_json: bool) -> None:
+    """Print the Kriya version and the exact source it was built from.
+
+    KRIYA-VERSION-001: the package version comes from the installed
+    distribution's metadata; commit, tree and dirty come from the identity
+    embedded when the wheel was built (never from git at run time). Without
+    embedded provenance they are UNKNOWN, never guessed."""
+    report = version_report()
+    if as_json:
+        click.echo(json.dumps(report, indent=2, sort_keys=True))
+        return
+    click.echo(version_line(report))
+    for key in ("version", "commit", "tree", "dirty", "build_provenance", "python", "install_path"):
+        click.echo(f"  {key + ':':<18}{report[key]}")
 
 @main.command()
 @click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
@@ -166,20 +228,57 @@ def config(ctx: click.Context) -> None:
     click.echo(json.dumps(_redact_secrets(cfg.model_dump(mode="json")), indent=2))
 
 @main.command()
+@click.option("--production", is_flag=True, help="Run the fail-closed production deployment preflight.")
+@click.option("--json", "json_output", is_flag=True, help="Emit the production report as stable JSON.")
 @click.pass_context
-def doctor(ctx: click.Context) -> None:
+def doctor(ctx: click.Context, production: bool, json_output: bool) -> None:
     """Check Kriya platform health, directories, and LLM connection."""
+    if json_output and not production:
+        raise click.UsageError("--json is supported with --production")
+    config_error = ctx.obj.get('config_error')
+    if config_error is not None and not production:
+        click.secho(f"Error loading configuration: {_user_error_text(config_error)}", fg="red", err=True)
+        sys.exit(1)
+    if production:
+        if config_error is None:
+            _bootstrap_logging(ctx.obj['config'], file_logging=False)
+        from kriya.production_doctor import (
+            config_load_failure_report,
+            render_production_report,
+            run_production_doctor,
+        )
+
+        if config_error is not None:
+            report = config_load_failure_report(config_error)
+        else:
+            report = run_production_doctor(ctx.obj['config'], os.getcwd())
+        if json_output:
+            click.echo(json.dumps(report.to_dict(), sort_keys=True))
+        else:
+            click.echo(render_production_report(report))
+        if not report.production_ready:
+            ctx.exit(1)
+        return
+
     cfg: AppConfig = ctx.obj['config']
+    _bootstrap_logging(cfg)
     click.secho("=== Kriya Doctor ===", bold=True)
     
     # 1. Check directories
     click.echo("\nChecking directories:")
+    from kriya.core.logging_setup import resolve_log_directory
+    from kriya.core.state_paths import resolve_state_directory
+
     dirs = {
         "Plugins Directory": cfg.plugins.directory,
         "Skills Directory": cfg.paths.skills,
         "Memory Directory": cfg.paths.memory,
-        "Logs Directory": cfg.paths.logs,
     }
+    for name, resolver in (("Logs Directory", resolve_log_directory), ("State Directory (traces.db)", resolve_state_directory)):
+        try:
+            dirs[name] = resolver(cfg)[0]
+        except ValueError as error:
+            click.secho(f"  - {name}: [ERROR] {error}", fg="red")
     for name, path in dirs.items():
         resolved = os.path.abspath(path)
         exists = os.path.exists(resolved)
@@ -187,6 +286,55 @@ def doctor(ctx: click.Context) -> None:
         click.echo(f"  - {name}: {resolved} [{status}]")
         
     errors_found = False
+
+    # Diagnostic control-plane validation. Runtime enforcement remains in
+    # the persistence/controller paths; doctor only makes the same state
+    # visible to an operator.
+    click.echo("\nChecking workspace/control plane:")
+    workspace_path = os.getcwd()
+    try:
+        from kriya.control.persistence import (
+            load_artifact_registry,
+            load_contract_registry,
+            load_control_state,
+        )
+        from kriya.control.workspace_identity import workspace_identity
+        from kriya.core.llm import is_local_url
+        from kriya.workflow.checkpoint import compute_base_commit, compute_tree_hash
+
+        state = load_control_state(workspace_path)
+        contracts = load_contract_registry(workspace_path)
+        artifacts = load_artifact_registry(workspace_path)
+        click.echo(f"  - Workspace identity: {workspace_identity(workspace_path)[:12]} [VALID]")
+        click.echo(
+            f"  - Controller: enabled={cfg.workflow_controller.enabled}, "
+            f"mode={cfg.workflow_controller.mode}"
+        )
+        click.echo(f"  - ContractRegistry: {len(contracts.all_records())} record(s) [VALID]")
+        click.echo(f"  - ArtifactRegistry: {len(artifacts.all_records())} record(s) [VALID]")
+        if state is not None:
+            mismatches = []
+            current_base = compute_base_commit(workspace_path)
+            current_tree = compute_tree_hash(workspace_path)
+            if state.base_commit and current_base != state.base_commit:
+                mismatches.append("base commit")
+            if state.tree_hash and current_tree != state.tree_hash:
+                mismatches.append("tree")
+            if mismatches:
+                click.secho(f"  - ControlState: DRIFT ({', '.join(mismatches)}) [WARNING]", fg="yellow")
+            else:
+                click.secho("  - ControlState: consistent [VALID]", fg="green")
+        else:
+            click.echo("  - ControlState: not initialized")
+        if cfg.autonomy.egress_policy == "local_only" and not is_local_url(cfg.llm.base_url):
+            click.secho("  - [ERROR] local_only is configured with a non-local LLM URL", fg="red")
+            errors_found = True
+        else:
+            click.secho("  - LLM egress policy: local configuration [VALID]", fg="green")
+        click.echo("  - Hard policy boundaries: enabled at authorized execution/write boundaries")
+    except Exception as e:
+        click.secho(f"  - [ERROR] control-plane validation failed: {e}", fg="red")
+        errors_found = True
 
     # 2. Check local LLM connection
     # NOTE: LLMClient (kriya/core/llm.py) always talks to base_url via the
@@ -206,6 +354,12 @@ def doctor(ctx: click.Context) -> None:
     click.echo(f"  - Model: {model}")
     click.echo("  - Testing connection...")
     try:
+        from kriya.core.llm import is_local_url
+
+        if cfg.autonomy.egress_policy == "local_only" and not is_local_url(base_url):
+            # PRD-012: never probe (or send the API key to) an endpoint the
+            # egress policy refuses; the error is already reported above.
+            raise RuntimeError("not probed: the endpoint is not local under local_only egress")
         url = f"{base_url.rstrip('/')}/models"
         req = urllib.request.Request(
             url=url,
@@ -249,14 +403,11 @@ def doctor(ctx: click.Context) -> None:
     click.echo("  - Testing connection...")
 
     try:
-        from kriya.memory.vector import OllamaEmbeddingClient
-        client = OllamaEmbeddingClient(base_url=embed_url, model=embed_model)
         import asyncio
-        emb = asyncio.run(client.get_embedding("test connectivity"))
-        if emb and any(v != 0.0 for v in emb):
-            click.secho(f"  - [SUCCESS] Connected and successfully generated embedding of dimension {len(emb)}", fg="green")
-        else:
-            click.secho("  - [WARNING] Generated empty or zero embedding vector.", fg="yellow")
+
+        from kriya.memory.embedding import configured_client
+        emb = asyncio.run(configured_client(cfg).get_embedding("test connectivity"))
+        click.secho(f"  - [SUCCESS] Connected and successfully generated embedding of dimension {len(emb)}", fg="green")
     except Exception as e:
         click.secho(f"  - [ERROR] Could not connect or failed to generate test embedding: {e}", fg="red")
         click.echo("    Ensure your embedding provider (e.g. local Ollama) is running and model is pulled.")
@@ -465,7 +616,7 @@ def prompt_generate(ctx: click.Context, description: str) -> None:
         )
 
     try:
-        res = asyncio.run(run_gen())
+        res = asyncio.run(_closing(llm, run_gen()))
         click.echo()
 
         # Inside `kriya repl` there's no shell pipe between two typed lines -
@@ -592,14 +743,44 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
                         click.secho("Execution cancelled.", fg="yellow")
                         sys.exit(1)
 
+                # PRD-006: a possibly-mutating direct tool call owns the
+                # workspace through the same gateway as generate/fix, so it
+                # can never run concurrently with a mutating Kriya run.
                 try:
-                    result = await tool.execute(**args)
-                    if isinstance(result, (dict, list)):
-                        click.echo(json.dumps(result, indent=2))
-                    else:
-                        click.echo(result)
-                except Exception as ex:
-                    click.secho(f"Execution failed: {ex}", fg="red")
+                    ownership = (
+                        begin_mutating_run(os.getcwd())
+                        if tool.mutates_workspace(args) else contextlib.nullcontext()
+                    )
+                    with ownership as run_context:
+                        if run_context is not None:
+                            transition_mutating_run(run_context, RunLifecycle.RUNNING)
+                        try:
+                            result = await tool.execute(**args)
+                            if isinstance(result, (dict, list)):
+                                click.echo(json.dumps(result, indent=2))
+                            else:
+                                click.echo(result)
+                        except Exception as ex:
+                            click.secho(f"Execution failed: {ex}", fg="red")
+                            if run_context is not None:
+                                # A failed tool may still have written: its
+                                # mutation is direct, never a commit transaction.
+                                transition_mutating_run(
+                                    run_context, RunLifecycle.FAILURE,
+                                    commit_result="DIRECT_TOOL_EXECUTION",
+                                )
+                        else:
+                            if run_context is not None:
+                                transition_mutating_run(
+                                    run_context, RunLifecycle.SUCCESS,
+                                    commit_result="DIRECT_TOOL_EXECUTION",
+                                )
+                except UncertainWorkspaceStateError as e:
+                    click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
+                    sys.exit(1)
+                except WorkspaceLockHeldError as e:
+                    click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
+                    sys.exit(1)
             finally:
                 # try/finally so a bad --yes-less invalid-JSON arguments_json,
                 # or any other exception before reaching the end of the happy
@@ -612,6 +793,1049 @@ def tools_execute(ctx: click.Context, tool_name: str, arguments_json: Optional[s
     except Exception as e:
         click.secho(f"Execution failed: {e}", fg="red")
         sys.exit(1)
+
+@main.group(name="context")
+def context_group() -> None:
+    """PRD-027: context-recall certification - does Kriya's retrieval deliver
+    the evidence a task needs, independently of any model."""
+    pass
+
+
+@context_group.command(name="certify")
+@click.option("--json", "as_json", is_flag=True, help="Print the certification record as JSON.")
+@click.pass_context
+def context_certify(ctx: click.Context, as_json: bool) -> None:
+    """Run the version-controlled recall/precision benchmark against the
+    configured embedding model and record the result outside the workspace.
+    Never calls a chat model. Exit 0 only when every class target and the
+    precision target are met."""
+    import asyncio
+
+    from kriya.memory.vector import OllamaEmbeddingClient
+    from kriya.workflow.context_certification import (
+        EMBEDDER_CONFIGURED,
+        embedding_runtime_identity,
+        run_certification,
+        save_certification,
+    )
+
+    cfg = _model_cfg(ctx)
+    runtime = embedding_runtime_identity(cfg)
+    if runtime == "unavailable":
+        click.secho(
+            f"Error: the exact runtime identity of embedding model {cfg.embedding.model} cannot be "
+            "proven (not served, or not a local exact runtime) - a certification must bind to it.",
+            fg="red", err=True,
+        )
+        sys.exit(1)
+    client = OllamaEmbeddingClient(
+        base_url=cfg.embedding.base_url, model=cfg.embedding.model, egress_policy=cfg.autonomy.egress_policy,
+    )
+    report = asyncio.run(run_certification(
+        cfg, embedding_client=client, embedder=EMBEDDER_CONFIGURED, embedding_runtime=runtime,
+    ))
+    path = save_certification(cfg, report)
+    data = report.to_dict()
+    if as_json:
+        click.echo(json.dumps({**data, "record_path": path}, indent=2, sort_keys=True))
+    else:
+        click.echo(f"=== Context-recall certification ({data['identity']['suite_version']}) ===")
+        for name, entry in data["classes"].items():
+            marker = "PASS" if entry["passed"] else "FAIL"
+            misses = ", ".join(f"{reason}={count}" for reason, count in sorted(entry["misses"].items()))
+            click.echo(
+                f"[{marker}] {name}: {entry['hits']}/{entry['golden']} recall {entry['recall']} "
+                f"(target {entry['target']}){' - ' + misses if misses else ''}"
+            )
+        click.echo(f"precision {data['precision']} (target {data['precision_target']})")
+        click.echo(f"CERTIFIED={str(data['certified']).lower()}  record: {path}")
+    sys.exit(0 if data["certified"] else 1)
+
+
+@main.group(name="model")
+def model_group() -> None:
+    """PRD-013/014: exact model runtime identity and protocol qualification.
+    A model name is never a qualification: `qualify` runs the protocol cases
+    against the exact served runtime and records the evidence outside the
+    workspace; `status` shows whether each production role's models are
+    currently qualified."""
+    pass
+
+
+def _model_cfg(ctx: click.Context) -> AppConfig:
+    config_error = ctx.obj.get('config_error')
+    if config_error is not None:
+        click.secho(f"Error loading configuration: {_user_error_text(config_error)}", fg="red", err=True)
+        sys.exit(1)
+    return ctx.obj['config']
+
+
+def _resumed_model_routes(workspace: Optional[str], resume: bool, resume_id: Optional[str],
+                          milestone_plan: Optional[str] = None) -> Optional[dict]:
+    """PRD-019: the routes recorded by the run a resume continues, or None
+    (nothing to resume, or recorded before routing). Only that run's own
+    checkpoints count, the way the engine selects them
+    (plan_executor.select_work_unit_checkpoint): ``resume_id``'s checkpoint;
+    for ``--from-milestones``, the newest checkpoint of that plan's
+    milestone group; for a direct goal, the newest direct-run checkpoint.
+    A newer checkpoint of another run in the workspace never lends its
+    routes."""
+    if not (resume or resume_id) or not workspace:
+        return None
+    from kriya.workflow.checkpoint import list_checkpoints, load_checkpoint
+
+    workspace = os.path.abspath(workspace)
+    try:
+        if resume_id:
+            checkpoint = load_checkpoint(workspace, resume_id)
+        else:
+            group = None
+            if milestone_plan:
+                with open(milestone_plan, "r", encoding="utf-8") as handle:
+                    group = json.load(handle).get("group_id")
+            own = [item for item in list_checkpoints(workspace)
+                   if (item.get("milestone_group_id") == group if milestone_plan
+                       else not item.get("milestone_group_id"))]
+            checkpoint = max(own, key=lambda item: item.get("saved_at", 0)) if own else None
+    except Exception as error:  # the engine reports an unreadable checkpoint or plan itself
+        logger.warning("Could not read the checkpoint to resume for its model routes: %s", error)
+        return None
+    return (checkpoint or {}).get("model_routes")
+
+
+def _echo_final_review_refusal(res: Dict[str, Any]) -> None:
+    """PROMPT-BUDGET-FIT-001C: gates passed but the final review was refused
+    before inference. Not a success, and never reported as unapplied or
+    rolled back."""
+    refusal = res["final_review_refusal"]
+    click.secho("Quality Gates: PASSED - run NOT successful (final review not performed)", bold=True, fg="red")
+    files = ", ".join(res.get("files") or [])
+    if refusal.get("candidate_applied"):
+        committed = refusal.get("committed_work_units")
+        where = f" and committed ({', '.join(committed)})" if committed else ""
+        click.echo(f"Files applied to workspace{where}, not rolled back: {files}")
+    else:
+        click.echo(f"Files not applied to workspace: {files}")
+    click.secho(f"[FINAL REVIEW REFUSED] {refusal.get('detail')}", fg="yellow", bold=True)
+    click.echo(f"Failure category: {res.get('failure_category')}")
+
+
+def _workflow_config(cfg: AppConfig, *, resume: bool = False, resume_id: Optional[str] = None,
+                     workspace: Optional[str] = None, milestone_plan: Optional[str] = None) -> AppConfig:
+    """The configuration a workflow command (generate, fix, proposal
+    execution) runs with, decided before any model call.
+
+    PRD-019: with model_policy.routing enabled, each routed role is bound to
+    its chosen candidate (a routed copy; the loaded configuration is not
+    changed) and the plan travels with it for the run's model.route events;
+    a frozen route that no longer holds refuses the command. Routes are
+    sticky within a run: a resume replays the routes its checkpoint
+    recorded (never re-routing on a metrics table that changed since) and is
+    refused (ROUTE_RESUME_MISMATCH) when one no longer holds.
+    PRD-018: when model_policy.independent_roles requires roles to run on a
+    runtime distinct from the Developer's, it is checked on the routed
+    configuration and the command is refused if the exact runtimes do not
+    show it."""
+    if cfg.model_policy.routing.mode != "off":
+        from kriya.core.model_routing import RoutingError, apply_routes, plan_routes
+
+        try:
+            plan = plan_routes(cfg, resume_routes=_resumed_model_routes(workspace, resume, resume_id,
+                                                                        milestone_plan))
+        except RoutingError as error:
+            click.secho(f"[{error.reason_code}] model routing refused this run: {error}", fg="red", err=True)
+            sys.exit(1)
+        routed = apply_routes(cfg, plan)
+        if routed is cfg:
+            routed = cfg.model_copy(deep=True)
+        routed._routing_plan = plan
+        for decision in plan.decisions.values():
+            click.secho(f"Model route: {decision.role} -> {decision.model} ({decision.source}: {decision.reason})",
+                        fg="cyan", err=True)
+        cfg = routed
+    from kriya.agents.response_protocol import STRUCTURED, developer_response_protocol
+
+    if cfg.runtime_profile == "production" and developer_response_protocol(cfg) != STRUCTURED:
+        # FILE-INTEGRITY-CONTRACT-001: the legacy markers have no payload
+        # terminator; production never runs them as if equivalent.
+        click.secho("[RESPONSE_PROTOCOL_NOT_PRODUCTION] runtime_profile: production requires "
+                    "autonomy.developer_response_protocol: structured (legacy_strict is compatibility-only).",
+                    fg="red", err=True)
+        sys.exit(1)
+    if cfg.model_policy.independent_roles:
+        from kriya.core.role_metrics import ROLE_INDEPENDENCE_REQUIRED, independence_violations, role_runtimes
+
+        violations = independence_violations(cfg, role_runtimes(cfg))
+        if violations:
+            click.secho(f"[{ROLE_INDEPENDENCE_REQUIRED}] model_policy.independent_roles is not met:", fg="red",
+                        err=True)
+            for violation in violations:
+                click.secho(f"  - {violation}", fg="red", err=True)
+            sys.exit(1)
+    return cfg
+
+
+@model_group.command(name="metrics")
+@click.option("--json", "json_output", is_flag=True, help="Emit the aggregated table as JSON.")
+@click.option("--write-table", "write_table", is_flag=True,
+              help="Also write it as the routing table model_policy.routing reads (PRD-019; runs never write it).")
+@click.pass_context
+def model_metrics(ctx: click.Context, json_output: bool, write_table: bool) -> None:
+    """Per-role model metrics aggregated over the finished runs in traces.db.
+
+    One row per (role, model, exact runtime): calls, protocol and schema
+    failures, latency and tokens, and for the Developer its attempts,
+    first-pass successes and the retries its failed attempts triggered.
+    Observations only: deterministic gate outcomes remain the only
+    verification evidence (PRD-018)."""
+    from kriya.core.role_metrics import aggregate_role_metrics, runs_with_role_metrics
+    from kriya.core.state_paths import trace_db_path
+
+    cfg = _model_cfg(ctx)
+    table = aggregate_role_metrics(runs_with_role_metrics(trace_db_path(cfg)))
+    if write_table:
+        from kriya.core import model_routing
+
+        path = model_routing.routing_table_path(cfg)
+        model_routing.write_table(path, table)
+        click.secho(f"Routing table written: {path} (digest {table['digest'][:12]})", fg="green", err=True)
+    if json_output:
+        click.echo(json.dumps(table, indent=2, sort_keys=True))
+        return
+    click.secho(f"Per-role model metrics over {len(table['runs'])} run(s) (table {table['digest'][:12]})", bold=True)
+    if not table["rows"]:
+        click.echo("  No run has recorded per-role metrics yet.")
+    for row in table["rows"]:
+        runtime = row["runtime_digest"][:12] if row["runtime_exact"] else "unverified runtime"
+        line = (f"  {row['role']:<16} {row['model']:<28} {runtime:<18} calls={row['calls']} "
+                f"protocol_failures={row['protocol_failures']} schema_failures={row['schema_failures']} "
+                f"latency={row['latency_seconds']:.1f}s tokens={row['prompt_tokens']}+{row['completion_tokens']}")
+        if row["attempts"]:
+            line += (f" attempts={row['attempts']} passed={row['attempts_passed']} "
+                     f"first_pass={row['first_pass_successes']}/{row['first_pass_runs']} "
+                     f"retries_triggered={row['retries_triggered']}")
+        click.echo(line)
+
+
+@model_group.command(name="routes")
+@click.option("--json", "json_output", is_flag=True, help="Emit the route decisions as JSON.")
+@click.option("--freeze", "freeze_path", type=click.Path(dir_okay=False), default=None,
+              help="Write these decisions as a frozen route table (for model_policy.routing.mode: frozen).")
+@click.pass_context
+def model_routes(ctx: click.Context, json_output: bool, freeze_path: Optional[str]) -> None:
+    """Show the evidence-based route of every role in model_policy.routing.roles
+    (PRD-019): each candidate's evidence, every rejection reason and the final
+    route. Runs nothing; shows the evidence decision even while routing is
+    off (in frozen mode, the replayed routes)."""
+    from kriya.core.model_routing import RoutingError, frozen_routes_from, plan_routes, write_table
+
+    cfg = _model_cfg(ctx)
+    mode = "frozen" if cfg.model_policy.routing.mode == "frozen" else "evidence"
+    try:
+        plan = plan_routes(cfg, mode=mode)
+        frozen = frozen_routes_from(plan) if freeze_path else None
+    except RoutingError as error:
+        click.secho(f"[{error.reason_code}] {error}", fg="red", err=True)
+        ctx.exit(1)
+        return
+    if frozen is not None:
+        write_table(os.path.abspath(freeze_path), frozen)
+        click.secho(f"Frozen route table written: {os.path.abspath(freeze_path)}", fg="green", err=True)
+    events = plan.to_events()
+    if json_output:
+        click.echo(json.dumps({"mode": mode, "table_digest": plan.table_digest, "routes": events},
+                              indent=2, sort_keys=True))
+        return
+    if not events:
+        click.echo("No role is listed in model_policy.routing.roles.")
+    for decision in events:
+        click.secho(f"  {decision['role']:<16} -> {decision['model']}  ({decision['source']}: {decision['reason']})",
+                    bold=True)
+        for rejected in decision["rejected"]:
+            click.echo(f"      rejected {rejected['model']}: {'; '.join(rejected['reasons'])}")
+
+
+@model_group.command(name="fingerprint")
+@click.option("--model", "model_name", default=None, help="Model to fingerprint (default: llm.model).")
+@click.option("--json", "json_output", is_flag=True, help="Emit the fingerprint as JSON.")
+@click.pass_context
+def model_fingerprint(ctx: click.Context, model_name: Optional[str], json_output: bool) -> None:
+    """Show the exact runtime fingerprint of a configured model."""
+    from kriya.core.model_runtime import resolve_configured_model_runtime
+
+    cfg = _model_cfg(ctx)
+    fingerprint = resolve_configured_model_runtime(cfg, model_name, fresh=True)
+    record = fingerprint.to_dict()
+    if json_output:
+        click.echo(json.dumps(record, indent=2, sort_keys=True))
+    else:
+        click.secho(f"Model runtime: {fingerprint.alias}", bold=True)
+        for key in sorted(record):
+            click.echo(f"  {key}: {record[key]}")
+    if not fingerprint.exact:
+        ctx.exit(1)
+
+
+@model_group.command(name="pin")
+@click.option("--model", "model_name", default=None, help="Model to pin (default: llm.model).")
+@click.option("--dry-run", is_flag=True, help="Show the derived model and its parameters; create nothing.")
+@click.option("--json", "json_output", is_flag=True, help="Emit the pin as JSON.")
+@click.pass_context
+def model_pin(ctx: click.Context, model_name: Optional[str], dry_run: bool, json_output: bool) -> None:
+    """Serve a model with its binding's server-only settings (PROVIDER-CONTRACT-001).
+
+    Settings a request cannot carry (context window, top_k, ...) are fixed in
+    a derived, content-named model on the local runtime. Only values the
+    binding itself declares are pinned. The configuration is not changed:
+    point the binding at the printed model name, then qualify it."""
+    from kriya.core.inference_runtime import runtime_for_binding
+    from kriya.core.model_runtime import binding_object, requested_context_window
+    from kriya.core.provider_contract import ProviderContractError
+
+    cfg = _model_cfg(ctx)
+    model = model_name or cfg.llm.model
+    binding = binding_object(cfg, model)
+    if binding is None:
+        raise click.ClickException(f"{model} is not bound by this configuration")
+    adapter = runtime_for_binding(binding)
+    extra_body = getattr(binding, "extra_body", None) or None
+    try:
+        pin = adapter.pin_served_configuration(
+            base_url=getattr(binding, "base_url", None) or cfg.llm.base_url, model=model, extra_body=extra_body,
+            requested_context_window=requested_context_window(extra_body, getattr(binding, "context_window", None),
+                                                              adapter),
+            api_key=getattr(binding, "api_key", None) or cfg.llm.api_key, create=not dry_run)
+    except ProviderContractError as error:
+        raise click.ClickException(str(error)) from error
+    if json_output:
+        click.echo(json.dumps(pin, indent=2, sort_keys=True))
+        return
+    click.secho(f"{'Would create' if dry_run else 'Created'} {pin['model']} from {pin['base_model']}", bold=True)
+    for name, value in sorted(pin["parameters"].items()):
+        click.echo(f"  PARAMETER {name} {value}")
+    click.echo(f"Set this binding's model to {pin['model']}, then run: kriya model qualify --model {pin['model']}")
+
+
+@model_group.command(name="qualify")
+@click.option("--model", "model_name", default=None, help="Model to qualify (default: llm.model).")
+@click.option("--case", "cases", multiple=True, help="Run only these capability cases (repeatable).")
+@click.option("--json", "json_output", is_flag=True, help="Emit the qualification record as JSON.")
+@click.option("--out", "out_path", type=click.Path(dir_okay=False), default=None,
+              help="Also write the record (JSON) to this file, e.g. for a handover.")
+@click.option("--context-window", "context_window", type=click.IntRange(min=1024), default=None,
+              help="Qualify the model at this num_ctx instead of its configured one: a larger context tier the "
+                   "adaptive budget policy may then select (it must also pass context_capacity).")
+@click.option("--role", "route_role", default=None,
+              help="Qualify a model_policy.routing candidate exactly as it runs when routed to this role "
+                   "(PRD-019: a runtime's identity depends on the binding it is placed in).")
+@click.pass_context
+def model_qualify(ctx: click.Context, model_name: Optional[str], cases: tuple, json_output: bool,
+                  out_path: Optional[str], context_window: Optional[int], route_role: Optional[str]) -> None:
+    """Run the protocol qualification cases against the exact served runtime.
+
+    The record is keyed by the runtime fingerprint plus the inference
+    settings the model is called with (temperature, reasoning flag,
+    reasoning_effort, sampling options: MODEL-QUAL-IDENTITY-001) and stored
+    outside the workspace (~/.kriya/qualifications, or
+    KRIYA_QUALIFICATION_HOME). It becomes stale when the runtime, those
+    settings, Kriya's protocol adapter or the qualification policy changes.
+    When the configured roles call the model with different settings, each
+    distinct settings identity is qualified in turn. With --context-window
+    the runtime is the same model at that num_ctx (a different fingerprint);
+    context_capacity then sends one near-window request, which loads the
+    model at that size."""
+    from kriya.core.inference_settings import role_inference_identities
+    from kriya.core.model_qualification import (
+        CAPABILITIES,
+        QualificationError,
+        record_policy_digest,
+        role_models,
+        run_qualification,
+        save_record,
+    )
+
+    cfg = _model_cfg(ctx)
+    _bootstrap_logging(cfg, file_logging=False)
+    target = model_name or cfg.llm.model
+    if route_role:
+        from kriya.core.model_routing import place_candidate
+
+        candidate = next((c for c in cfg.model_policy.routing.candidates if c.model == model_name), None)
+        if candidate is None:
+            raise click.UsageError(f"--role needs --model to name a model_policy.routing candidate; {model_name!r} is not")
+        cfg = place_candidate(cfg, route_role, candidate)
+        identities = {settings.digest: (settings, [route_role if label == "normal" else f"{route_role} ({label})"])
+                      for label, settings in role_inference_identities(cfg, route_role, target)}
+    else:
+        identities = {}
+        users = [role for role, models in role_models(cfg).items()
+                 if any(m.casefold() == target.casefold() for m in models)] or ["developer"]
+        for role in users:
+            # Including a Developer's differing retry-temperature identity.
+            for label, settings in role_inference_identities(cfg, role, target):
+                identities.setdefault(settings.digest, (settings, []))[1].append(
+                    role if label == "normal" else f"{role} ({label})")
+    unknown = sorted(set(cases) - set(CAPABILITIES))
+    if unknown:
+        raise click.UsageError(f"unknown case(s) {unknown}; known: {', '.join(CAPABILITIES)}")
+
+    def progress(result) -> None:
+        if not json_output:
+            color = {"PASS": "green", "FAIL": "red"}.get(result.status, "yellow")
+            click.secho(f"  {result.capability:<28} {result.status:<11} {result.elapsed_seconds:>7.2f}s", fg=color)
+            if result.status != "PASS" and result.evidence.get("policy"):
+                # QUAL-CONFIG-001: the policy that controlled a non-PASS
+                # verdict, next to what the endpoint reported.
+                used = result.evidence["policy"]
+                controls = ", ".join(f"{key}={value}" for key, value in used.items() if key != "source")
+                sent = result.evidence.get("max_tokens")
+                click.secho(f"      policy: {controls} ({used.get('source', 'model_qualification')})"
+                            f"{f'; sent max_tokens={sent}' if sent is not None else ''}"
+                            f"; finish_reason={result.evidence.get('finish_reason')}", fg=color)
+
+    records = []
+    for settings, roles in identities.values():
+        if not json_output:
+            window_note = f" at num_ctx {context_window}" if context_window else ""
+            click.secho(f"Qualifying {target}{window_note} for {', '.join(roles)} "
+                        f"(inference settings {settings.digest}: temperature={settings.temperature}, "
+                        f"reasoning={settings.reasoning}, extra_body={settings.extra_body_json}) ...", bold=True)
+        try:
+            record = asyncio.run(run_qualification(cfg, target, only=cases or None, progress=progress,
+                                                   context_window=context_window, settings=settings))
+        except QualificationError as error:
+            click.secho(str(error), fg="red", err=True)
+            ctx.exit(1)
+            return
+        record["roles"] = roles
+        if cases:
+            record["partial"] = True
+        path = None if cases else save_record(record, workspace_root=os.path.realpath(os.getcwd()))
+        records.append(record)
+        if not json_output:
+            click.echo(f"\nSummary: {record['summary']}  measured limits: {record['measured_limits']}")
+            click.echo(f"Runtime fingerprint: {record['fingerprint_digest']}")
+            click.echo(f"Qualification identity: {record['qualification_identity']}")
+            click.echo(f"Qualification policy: {record_policy_digest(record)} (model_qualification)")
+            env = record.get("environment") or {}
+            click.echo(f"Execution environment: {env.get('digest')} ({env.get('os')}/{env.get('architecture')}, "
+                       f"{env.get('accelerator_backend')} {env.get('accelerator_model')}, "
+                       f"{env.get('system_memory_class_gib')} GiB class, {env.get('inference_runtime')}; "
+                       f"exact={env.get('exact')}) - capacity evidence counts only here")
+            click.echo(f"Record: {path}" if path else "Partial run (--case): not saved as a qualification record.")
+    output: Any = records[0] if len(records) == 1 else {"records": records}
+    if out_path:
+        with open(out_path, "w", encoding="utf-8") as stream:
+            json.dump(output, stream, indent=2, sort_keys=True)
+    if json_output:
+        click.echo(json.dumps(output, indent=2, sort_keys=True))
+
+
+@model_group.command(name="status")
+@click.option("--json", "json_output", is_flag=True, help="Emit the per-role assessment as JSON.")
+@click.pass_context
+def model_status(ctx: click.Context, json_output: bool) -> None:
+    """Show each production role's models, exact runtimes and qualification."""
+    from kriya.core.execution_environment import environment_for_fingerprint
+    from kriya.core.inference_settings import role_inference_identities
+    from kriya.core.model_qualification import QUALIFIED, assess, policy_digest_for, required_capabilities, role_models
+    from kriya.core.model_runtime import resolve_configured_model_runtime
+
+    cfg = _model_cfg(ctx)
+    report: Dict[str, Any] = {}
+    all_qualified = True
+    for role, models in role_models(cfg).items():
+        report[role] = []
+        for model in models:
+            runtime = resolve_configured_model_runtime(cfg, model, fresh=True)
+            for label, settings in role_inference_identities(cfg, role, model):
+                assessment = assess(runtime, required_capabilities(cfg, role, model), settings=settings,
+                                    workspace_root=os.path.realpath(os.getcwd()),
+                                    policy_digest=policy_digest_for(cfg))
+                all_qualified &= assessment.status == QUALIFIED
+                report[role].append({"model": model, "identity": label, "exact": runtime.exact,
+                                     "inference_settings": settings.to_dict(),
+                                     "execution_environment": environment_for_fingerprint(runtime).to_dict(),
+                                     **assessment.to_dict()})
+    if json_output:
+        click.echo(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        for role, entries in report.items():
+            for entry in entries:
+                color = "green" if entry["status"] == QUALIFIED else "red"
+                label = "" if entry["identity"] == "normal" else f" ({entry['identity']})"
+                click.secho(f"  {role:<16} {entry['model'] + label:<40} {entry['status']}", fg=color)
+                for reason in entry["reasons"]:
+                    click.echo(f"      - {reason}")
+    if not all_qualified:
+        ctx.exit(1)
+
+
+@model_group.command(name="certification")
+@click.option("--json", "json_output", is_flag=True, help="Emit the certification status as JSON.")
+@click.pass_context
+def model_certification(ctx: click.Context, json_output: bool) -> None:
+    """PRD-035: is the configured Developer identity live-certified? CURRENT
+    only for the exact runtime, inference settings, execution environment and
+    case set a passing matrix (scripts/certify_model.sh) certified; exit 1
+    otherwise."""
+    from kriya.core.execution_environment import environment_for_fingerprint
+    from kriya.core.inference_settings import role_inference_settings
+    from kriya.core.model_certification import CURRENT, CertificationKey, certification_status
+    from kriya.core.model_runtime import resolve_configured_model_runtime
+
+    cfg = _model_cfg(ctx)
+    model = cfg.llm.model
+    runtime = resolve_configured_model_runtime(cfg, model, fresh=True)
+    key = CertificationKey(
+        model=model, runtime_digest=runtime.digest,
+        inference_settings_digest=role_inference_settings(cfg, "developer", model).digest,
+        environment_digest=environment_for_fingerprint(runtime).digest,
+    )
+    status = {"model": model, "runtime_exact": runtime.exact, "key": key.digest, **certification_status(key)}
+    if json_output:
+        click.echo(json.dumps(status, indent=2, sort_keys=True))
+    else:
+        color = "green" if status["status"] == CURRENT else "red"
+        click.secho(f"  developer {model:<40} {status['status']}", fg=color)
+        for field in status.get("changed", []):
+            click.echo(f"      - changed since certification: {field}")
+    if status["status"] != CURRENT:
+        ctx.exit(1)
+
+
+@main.group(name="metrics")
+def metrics_group() -> None:
+    """PRD-033: production metrics derived from persisted run evidence, and
+    the trusted adjudication of past runs (false success, regression escape).
+    Adjudications are recorded ONLY here; never from a model's opinion."""
+
+
+@metrics_group.command(name="report")
+@click.option("--since", help="Only trace rows at or after this time (YYYY-MM-DD[ HH:MM:SS]).")
+@click.option("--workspace", "workspaces", multiple=True, type=click.Path(file_okay=False),
+              help="Also derive RunRecord metrics (resume invalidation, recovery) from this workspace; repeatable.")
+@click.option("--chaos-report", "chaos_report", type=click.Path(exists=True, dir_okay=False),
+              help="A PRD-032 chaos-report.json to include.")
+@click.option("--thresholds", type=click.Path(exists=True, dir_okay=False),
+              help="An operator thresholds file (outside the workspace); none ship with Kriya.")
+@click.option("--out", "out_dir", type=click.Path(file_okay=False),
+              help="Write metrics-report.json and metrics-report.md here.")
+@click.option("--json", "json_output", is_flag=True, help="Print the report as JSON.")
+@click.pass_context
+def metrics_report(
+    ctx: click.Context, since: Optional[str], workspaces: Tuple[str, ...], chaos_report: Optional[str],
+    thresholds: Optional[str], out_dir: Optional[str], json_output: bool,
+) -> None:
+    """Derive the metrics report (exit 1 when a configured threshold FAILs)."""
+    from kriya.core.state_paths import historical_default_trace_db, trace_db_path
+    from kriya.metrics.adjudication import load_adjudications
+    from kriya.metrics.evidence import load_chaos_report, load_run_record_facts, load_trace_runs
+    from kriya.metrics.report import build_report, render_markdown, write_report
+    from kriya.metrics.thresholds import load_thresholds
+
+    cfg: AppConfig = ctx.obj["config"]
+    trace_db = trace_db_path(cfg)
+    try:
+        loaded = load_thresholds(thresholds, workspace_root=os.path.realpath(os.getcwd())) if thresholds else None
+        report = build_report(
+            load_trace_runs(trace_db, since=since), adjudications=load_adjudications(),
+            run_records=load_run_record_facts([os.path.realpath(w) for w in workspaces]) if workspaces else None,
+            chaos=load_chaos_report(chaos_report) if chaos_report else None,
+            thresholds=loaded[0] if loaded else None, thresholds_digest=loaded[1] if loaded else None,
+            generated={
+                "trace_db": trace_db,
+                # LEGACY-TRACES-MIGRATION-001: a pre-move database is named, never read.
+                "legacy_trace_db_present": os.path.exists(historical_default_trace_db()),
+            },
+        )
+    except ValueError as error:
+        click.secho(f"metrics report refused: {_user_error_text(error)}", fg="red", err=True)
+        sys.exit(2)
+    if out_dir:
+        json_path, md_path = write_report(out_dir, report)
+        click.echo(f"Wrote {json_path} and {md_path}", err=json_output)
+    click.echo(json.dumps(report, indent=2, sort_keys=True) if json_output else render_markdown(report))
+    if report["content"]["thresholds"]["status"] == "FAIL":
+        sys.exit(1)
+
+
+@metrics_group.command(name="adjudicate")
+@click.argument("run_id")
+@click.option("--verdict", required=True, type=click.Choice(["false_success", "regression_escape", "confirmed_success"]))
+@click.option("--evidence", required=True, help="What proves the verdict (a bug, a failing test, a review).")
+@click.option("--adjudicator", required=True, help="Who adjudicates.")
+@click.option("-y", "--yes", is_flag=True, help="Record without asking.")
+@click.pass_context
+def metrics_adjudicate(ctx: click.Context, run_id: str, verdict: str, evidence: str, adjudicator: str,
+                       yes: bool) -> None:
+    """Record a human verdict on a traced run (the only way one is recorded)."""
+    from kriya.config.authority_approval import validate_trust_path_outside_workspace
+    from kriya.core.state_paths import trace_db_path
+    from kriya.metrics.adjudication import AdjudicationStoreError, record_adjudication, store_path
+    from kriya.metrics.evidence import load_trace_runs
+
+    cfg: AppConfig = ctx.obj["config"]
+    path = store_path()
+    try:
+        validate_trust_path_outside_workspace(path, os.path.realpath(os.getcwd()))
+    except ValueError as error:
+        click.secho(f"adjudication refused: {_user_error_text(error)}", fg="red", err=True)
+        sys.exit(2)
+    status = next((run.status for run in load_trace_runs(trace_db_path(cfg)) if run.run_id == run_id), None)
+    click.echo(f"Run {run_id}: {status or 'not traced'}; verdict {verdict}; adjudicator {adjudicator}")
+    if not yes and not click.confirm("Record this adjudication?", default=False):
+        click.echo("No adjudication recorded.")
+        sys.exit(1)
+    try:
+        record = record_adjudication(run_id=run_id, verdict=verdict, adjudicator=adjudicator, evidence=evidence,
+                                     run_status=status, path=path)
+    except (AdjudicationStoreError, ValueError, OSError) as error:
+        click.secho(f"adjudication not recorded: {error}", fg="red", err=True)
+        sys.exit(2)
+    click.secho(f"Recorded {record.adjudication_id} ({verdict}) for run {run_id} in {path}", fg="green")
+
+
+@metrics_group.command(name="adjudications")
+@click.option("--json", "json_output", is_flag=True)
+def metrics_adjudications(json_output: bool) -> None:
+    """List recorded adjudications (read-only)."""
+    from kriya.metrics.adjudication import adjudications_for_listing, load_adjudications
+
+    store = load_adjudications()
+    payload = {"store": store.path, "status": store.status, "error": store.error,
+               "adjudications": adjudications_for_listing(store)}
+    if json_output:
+        click.echo(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        click.echo(f"Store: {store.path} ({store.status}{': ' + store.error if store.error else ''})")
+        for item in payload["adjudications"]:
+            click.echo(f"  {item['adjudication_id']}  {item['run_id']}  {item['verdict']}  "
+                       f"{item['source']}  {item['adjudicator']}  {item['recorded_at']}")
+    if store.status == "invalid":
+        sys.exit(2)
+
+
+@main.group(name="static-analysis")
+def static_analysis_group() -> None:
+    """PRD-031A: the static-analysis gate's status, an operator scan, and
+    trusted risk acceptance. Waivers are created and revoked ONLY here;
+    no model, repository or candidate can create one."""
+
+
+def _static_analysis_workspace() -> str:
+    return os.path.realpath(os.getcwd())
+
+
+@static_analysis_group.command(name="status")
+@click.option("--json", "json_output", is_flag=True, help="Emit the status as JSON.")
+@click.pass_context
+def static_analysis_status(ctx: click.Context, json_output: bool) -> None:
+    """Configuration, provider identity/capability and waiver store (read-only)."""
+    from kriya.static_analysis.doctor import static_analysis_status_report
+
+    report = static_analysis_status_report(ctx.obj["config"], _static_analysis_workspace())
+    if json_output:
+        click.echo(json.dumps(report, indent=2, sort_keys=True, default=str))
+        return
+    for key, value in report.items():
+        click.echo(f"{key}: {json.dumps(value, sort_keys=True, default=str)}")
+
+
+@static_analysis_group.command(name="scan")
+@click.option("--base", default="HEAD", show_default=True, help="Git revision the working tree is compared with.")
+@click.option("--json", "json_output", is_flag=True, help="Emit the full evidence as JSON.")
+@click.pass_context
+def static_analysis_scan(ctx: click.Context, base: str, json_output: bool) -> None:
+    """Evaluate the gate on the working tree's changes against BASE. Read-only:
+    nothing is committed. Exit 0 only when the result would permit a commit."""
+    from kriya.static_analysis.operator_scan import OperatorScanError, run_operator_scan
+    from kriya.static_analysis.service import banner
+
+    try:
+        result = run_operator_scan(ctx.obj["config"], _static_analysis_workspace(), base)
+    except OperatorScanError as error:
+        click.secho(f"static-analysis scan failed: {error}", fg="red")
+        sys.exit(2)
+    if json_output:
+        click.echo(json.dumps(dict(result.evidence), indent=2, sort_keys=True, default=str))
+    else:
+        click.secho(banner(result), fg="green" if result.outcome.value == "PASS" else "yellow", bold=True)
+        click.echo(f"permits_commit: {result.permits_commit}")
+        if result.gap:
+            click.echo(result.gap)
+        click.echo(f"evidence: {result.evidence.get('evidence_path')}")
+    sys.exit(0 if result.permits_commit else 1)
+
+
+@static_analysis_group.command(name="waive")
+@click.option("--id", "waiver_id", required=True, help="Stable waiver id, e.g. SAW-2026-0001.")
+@click.option("--provider", required=True, help="Provider name (as configured).")
+@click.option("--rule", "rule_id", required=True, help="Exact normalized rule id (<provider>:<rule>).")
+@click.option("--path", "paths", required=True, multiple=True, help="Path or glob scope (repeatable).")
+@click.option("--reason", required=True)
+@click.option("--owner", required=True, help="The accountable owner/authority.")
+@click.option("--max-severity", default="high", show_default=True,
+              type=click.Choice(["critical", "high", "medium", "low", "info"]))
+@click.option("--classification", "classifications", multiple=True,
+              type=click.Choice(["existing", "introduced", "worsened"]),
+              help="Finding classes covered (default: existing only).")
+@click.option("--fingerprint", default=None, help="Restrict to one exact finding fingerprint.")
+@click.option("--rule-pack-digest", default=None, help="Apply only under this exact rule-pack digest.")
+@click.option("--tracking-ref", default=None)
+@click.option("--expires", "expires_at", default=None, help="ISO-8601 expiry with timezone, e.g. 2026-12-31T00:00:00Z.")
+@click.option("-y", "--yes", is_flag=True, help="Skip the confirmation prompt.")
+@click.pass_context
+def static_analysis_waive(
+    ctx: click.Context, waiver_id: str, provider: str, rule_id: str, paths: Tuple[str, ...], reason: str,
+    owner: str, max_severity: str, classifications: Tuple[str, ...], fingerprint: Optional[str],
+    rule_pack_digest: Optional[str], tracking_ref: Optional[str], expires_at: Optional[str], yes: bool,
+) -> None:
+    """Record an operator risk acceptance (disposition accepted_risk)."""
+    from kriya.static_analysis.waivers import WaiverStoreError, new_waiver, waiver_store_path, write_waiver
+
+    cfg: AppConfig = ctx.obj["config"]
+    workspace = _static_analysis_workspace()
+    try:
+        path = waiver_store_path(cfg.static_analysis.waivers.store, workspace)
+        record = new_waiver(
+            workspace_root=workspace, waiver_id=waiver_id, provider=provider, rule_id=rule_id, paths=paths,
+            reason=reason, owner=owner, max_severity=max_severity,
+            classifications=classifications or ("existing",), fingerprint=fingerprint,
+            rule_pack_digest=rule_pack_digest, tracking_ref=tracking_ref, expires_at=expires_at,
+        )
+    except ValueError as error:
+        click.secho(f"waiver refused: {error}", fg="red")
+        sys.exit(2)
+    click.echo(json.dumps(record.to_dict(), indent=2, sort_keys=True))
+    if expires_at is None:
+        click.secho("WARNING: this waiver never expires; `kriya doctor --production` will warn about it.", fg="yellow")
+    if not yes and not click.confirm("Record this ACCEPTED RISK waiver?", default=False):
+        click.echo("No waiver recorded.")
+        sys.exit(1)
+    try:
+        write_waiver(path, workspace, record)
+    except (WaiverStoreError, OSError) as error:
+        click.secho(f"waiver not recorded: {error}", fg="red")
+        sys.exit(2)
+    click.secho(f"Recorded waiver {waiver_id} in {path}", fg="green")
+
+
+@static_analysis_group.command(name="revoke")
+@click.argument("waiver_id")
+@click.pass_context
+def static_analysis_revoke(ctx: click.Context, waiver_id: str) -> None:
+    """Revoke a waiver; takes effect on the next gate evaluation."""
+    from kriya.static_analysis.waivers import revoke_waiver, waiver_store_path
+
+    cfg: AppConfig = ctx.obj["config"]
+    workspace = _static_analysis_workspace()
+    try:
+        removed = revoke_waiver(waiver_store_path(cfg.static_analysis.waivers.store, workspace), workspace, waiver_id)
+    except (ValueError, OSError) as error:
+        click.secho(f"revoke failed: {error}", fg="red")
+        sys.exit(2)
+    if not removed:
+        click.secho(f"No waiver {waiver_id!r}.", fg="yellow")
+        sys.exit(1)
+    click.secho(f"Revoked waiver {waiver_id}.", fg="green")
+
+
+@static_analysis_group.command(name="waivers")
+@click.option("--expired", is_flag=True, help="Only expired waivers.")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def static_analysis_waivers(ctx: click.Context, expired: bool, json_output: bool) -> None:
+    """List this workspace's waivers (read-only)."""
+    from kriya.static_analysis.waivers import is_expired, load_waivers, waiver_store_path
+
+    cfg: AppConfig = ctx.obj["config"]
+    workspace = _static_analysis_workspace()
+    try:
+        store = load_waivers(waiver_store_path(cfg.static_analysis.waivers.store, workspace), workspace)
+    except ValueError as error:
+        click.secho(f"waiver store unusable: {error}", fg="red")
+        sys.exit(2)
+    records = [r for r in store.records if not expired or is_expired(r)]
+    if json_output:
+        click.echo(json.dumps({"store": store.path, "status": store.status, "error": store.error,
+                               "waivers": [r.to_dict() for r in records]}, indent=2, sort_keys=True))
+        return
+    click.echo(f"store: {store.path} ({store.status}{': ' + store.error if store.error else ''})")
+    for record in records:
+        state = "EXPIRED" if is_expired(record) else "active"
+        click.echo(f"  {record.waiver_id} [{state}] {record.rule_id} {', '.join(record.paths)} "
+                   f"owner={record.owner} expires={record.expires_at or 'never'}")
+
+
+@main.group(name="mcp")
+def mcp_group() -> None:
+    """TOOL-002 P2: inspect MCP tool identities and explicitly, durably
+    approve or revoke invocation authority for them. Approval is never
+    granted implicitly during `tools execute` (and `-y` never creates
+    it) - it must be requested here, once, and it persists across
+    processes until revoked or invalidated by drift."""
+    pass
+
+
+def _mcp_workspace_root() -> str:
+    """The one workspace-identity source every TOOL-002 P2 command/resolver
+    in this file derives from - identical to MCPManager.__init__'s own
+    default-resolver construction (kriya/mcp/mcp.py) and to
+    MCPManager.start_all()'s capability-profile resolution, so an approval
+    granted here always binds to the exact workspace the real invocation-
+    time resolver will check against."""
+    return os.path.realpath(os.getcwd())
+
+
+async def _discover_mcp_tools(cfg: AppConfig):
+    """Starts a real Kernel - spawning every configured MCP server exactly
+    like `tools list`/`tools execute` do - and returns (kernel, pairs)
+    where pairs are the LIVE (flattened_name, MCPTool) entries currently
+    held by the kernel's own tool registry. This is the ONLY way any `mcp`
+    subcommand resolves an operator-supplied name to a structured
+    identity: by looking up the SAME registry entry `tools execute` itself
+    would dispatch to, never by parsing/splitting the flattened name
+    string (Invariant 14) - so even under a flattened-name collision
+    between two servers, whichever MCPTool object the registry actually
+    holds under that name is exactly the one approval binds to, matching
+    whichever object real execution would actually invoke."""
+    from kriya.mcp.mcp import MCPTool
+
+    kernel = Kernel(config=cfg)
+    await kernel.start()
+    pairs = []
+    for name in kernel.registry.list_components("tool"):
+        tool = kernel.registry.get("tool", name)
+        if isinstance(tool, MCPTool):
+            pairs.append((name, tool))
+    return kernel, pairs
+
+
+def _print_mcp_identity(flattened_name: str, tool: Any, approved: bool) -> None:
+    """TASK 5 - authority information sufficient for a meaningful approval
+    decision, with the server's own untrusted description clearly
+    separated (labeled) from authority facts rather than presented as one
+    of them."""
+    profile = tool.client.capability_profile
+    click.secho(f"\n  - {flattened_name}", bold=True, fg="cyan")
+    click.echo(f"      server identity:       {tool.identity.server_identity}")
+    click.echo(f"      tool name:             {tool.identity.tool_name}")
+    click.echo(f"      schema digest:         {tool.identity.schema_digest[:16]}...")
+    click.echo(
+        f"      capability profile:    {tool.capability_profile_identity.profile_digest[:16]}... "
+        f"(workspace_read={profile.workspace_read}, workspace_write={profile.workspace_write}, "
+        f"network={profile.network.value})"
+    )
+    click.echo(f"      containment required:  {tool.client.containment_required}")
+    click.echo(
+        f"      containment active:    {tool.client.containment_active} "
+        f"(backend={tool.client.containment_backend_name})"
+    )
+    click.echo(f"      description (untrusted, informational only): {tool.description!r}")
+    status = click.style("APPROVED (current)", fg="green") if approved else click.style("NOT APPROVED", fg="yellow")
+    click.echo(f"      invocation approval:   {status}")
+
+
+@mcp_group.command(name="inspect")
+@click.pass_context
+def mcp_inspect(ctx: click.Context) -> None:
+    """Discover every configured MCP server's tools and show their exact
+    identity, TOOL-003 capability profile, containment state, and current
+    invocation-approval status. Read-only - starts configured MCP servers
+    to discover their real schema/identity but never writes an approval."""
+    cfg: AppConfig = ctx.obj['config']
+    if not cfg.mcp:
+        click.echo("No MCP servers configured.")
+        return
+
+    from kriya.control.workspace_identity import workspace_identity
+    from kriya.mcp.invocation_approval import (
+        default_local_approval_path,
+        is_tool_approved,
+        load_approval_artifact,
+    )
+
+    workspace_root = _mcp_workspace_root()
+
+    async def run() -> None:
+        kernel, pairs = await _discover_mcp_tools(cfg)
+        try:
+            if not pairs:
+                click.echo("No MCP tools discovered.")
+                return
+            path = default_local_approval_path(workspace_root)
+            try:
+                artifact = load_approval_artifact(path)
+            except Exception as e:
+                click.secho(
+                    f"Warning: local invocation-approval store at {path} is present but "
+                    f"invalid ({e}) - treating as no approvals (fail closed).", fg="yellow",
+                )
+                artifact = None
+            click.secho(f"=== MCP tools ({len(pairs)}) ===", bold=True)
+            for flattened_name, tool in pairs:
+                approved = artifact is not None and is_tool_approved(
+                    artifact, workspace_identity(workspace_root),
+                    tool.identity, tool.capability_profile_identity.profile_digest,
+                )
+                _print_mcp_identity(flattened_name, tool, approved)
+        finally:
+            await kernel.stop()
+
+    try:
+        asyncio.run(run())
+    except Exception as e:
+        click.secho(f"Error: {e}", fg="red")
+        sys.exit(1)
+
+
+@mcp_group.command(name="approve")
+@click.argument('tool_name')
+@click.option('--confirm', is_flag=True, default=False,
+              help="Skip the interactive confirmation prompt.")
+@click.pass_context
+def mcp_approve(ctx: click.Context, tool_name: str, confirm: bool) -> None:
+    """Explicitly, durably approve invocation of TOOL_NAME - the exact
+    flattened name shown by `kriya mcp inspect` / `kriya tools list`
+    (e.g. `myserver_mytool`).
+
+    Always re-discovers TOOL_NAME fresh from a real, currently-running MCP
+    connection - never reuses a prior `inspect` call's output - and binds
+    the approval to its EXACT (workspace, server identity, tool name,
+    schema digest, capability-profile digest) at the moment of approval,
+    closing the TOCTOU window by construction."""
+    cfg: AppConfig = ctx.obj['config']
+    if not cfg.mcp:
+        click.secho("No MCP servers configured - nothing to approve.", fg="yellow")
+        return
+
+    from kriya.control.workspace_identity import workspace_identity
+    from kriya.mcp.invocation_approval import (
+        add_approval,
+        default_local_approval_path,
+        empty_artifact,
+        load_approval_artifact,
+        save_approval_artifact,
+    )
+
+    workspace_root = _mcp_workspace_root()
+
+    async def run() -> None:
+        kernel, pairs = await _discover_mcp_tools(cfg)
+        try:
+            match = next((tool for name, tool in pairs if name == tool_name), None)
+            if match is None:
+                click.secho(
+                    f"MCP tool '{tool_name}' was not discovered among currently configured/"
+                    "reachable servers - run 'kriya mcp inspect' to see exact available names.",
+                    fg="red",
+                )
+                sys.exit(1)
+
+            _print_mcp_identity(tool_name, match, approved=False)
+
+            if not confirm:
+                if not sys.stdin.isatty():
+                    click.secho(
+                        "\nError: Non-TTY (piped) input detected. You must pass --confirm to "
+                        "approve non-interactively.", fg="red",
+                    )
+                    sys.exit(1)
+                if not click.confirm(
+                    "\nGrant explicit, durable invocation approval to exactly this tool "
+                    "identity/capability binding shown above?"
+                ):
+                    click.echo("Not approved - no artifact written.")
+                    sys.exit(1)
+
+            path = default_local_approval_path(workspace_root)
+            try:
+                existing = load_approval_artifact(path)
+            except Exception:
+                existing = None
+            base = existing if existing is not None else empty_artifact(workspace_identity(workspace_root))
+            updated = add_approval(base, match.identity, match.capability_profile_identity.profile_digest)
+            save_approval_artifact(path, updated)
+            click.secho(f"\nApproved. Durable invocation approval written to {path}.", fg="green", bold=True)
+        finally:
+            await kernel.stop()
+
+    try:
+        asyncio.run(run())
+    except SystemExit:
+        raise
+    except Exception as e:
+        click.secho(f"Error: {e}", fg="red")
+        sys.exit(1)
+
+
+@mcp_group.command(name="revoke")
+@click.argument('tool_name')
+@click.pass_context
+def mcp_revoke(ctx: click.Context, tool_name: str) -> None:
+    """Immediately revoke any durable invocation approval for TOOL_NAME
+    (matches on exact server identity + tool name, even if its schema or
+    capability profile has since drifted from what was originally
+    approved - an operator must be able to revoke a stale approval too).
+    Idempotent, and takes effect on the very next invocation - no restart
+    of Kriya required."""
+    cfg: AppConfig = ctx.obj['config']
+    if not cfg.mcp:
+        click.secho("No MCP servers configured - nothing to revoke.", fg="yellow")
+        return
+
+    from kriya.mcp.invocation_approval import (
+        default_local_approval_path,
+        load_approval_artifact,
+        remove_approvals_for_identity,
+        save_approval_artifact,
+    )
+
+    workspace_root = _mcp_workspace_root()
+
+    async def run() -> None:
+        kernel, pairs = await _discover_mcp_tools(cfg)
+        try:
+            match = next((tool for name, tool in pairs if name == tool_name), None)
+            if match is None:
+                click.secho(
+                    f"MCP tool '{tool_name}' was not discovered among currently configured/"
+                    "reachable servers - run 'kriya mcp inspect' to see exact available names.",
+                    fg="red",
+                )
+                sys.exit(1)
+
+            path = default_local_approval_path(workspace_root)
+            try:
+                artifact = load_approval_artifact(path)
+            except Exception as e:
+                click.secho(
+                    f"Local invocation-approval store at {path} is present but invalid "
+                    f"({e}) - nothing to revoke.", fg="yellow",
+                )
+                return
+            if artifact is None:
+                click.echo(f"No local invocation-approval store at {path} - nothing to revoke.")
+                return
+
+            updated, removed = remove_approvals_for_identity(artifact, match.identity)
+            save_approval_artifact(path, updated)
+            if removed:
+                click.secho(f"Revoked {removed} approval record(s) for '{tool_name}'.", fg="yellow", bold=True)
+            else:
+                click.echo(f"No existing approval on file for '{tool_name}' - nothing to revoke.")
+        finally:
+            await kernel.stop()
+
+    try:
+        asyncio.run(run())
+    except SystemExit:
+        raise
+    except Exception as e:
+        click.secho(f"Error: {e}", fg="red")
+        sys.exit(1)
+
 
 @main.command()
 @click.argument('path', type=click.Path(exists=True))
@@ -662,11 +1886,24 @@ def analyze(ctx: click.Context, path: str, changed: bool, force: bool) -> None:
                 progress_bar.update(1)
 
             async def run_indexing():
-                await analyzer.index_repository(cfg, changed=changed, force=force, progress_callback=progress_callback)
+                return await analyzer.index_repository(cfg, changed=changed, force=force,
+                                                       progress_callback=progress_callback)
 
-            asyncio.run(run_indexing())
+            report = asyncio.run(run_indexing())
             if progress_bar:
                 progress_bar.render_finish()
+            if report is not None and report.failed:
+                # EMBEDDING-CONTRACT-001: a file without current vectors is
+                # never reported as indexed.
+                reasons: Dict[str, int] = {}
+                for reason in report.failed.values():
+                    reasons[reason] = reasons.get(reason, 0) + 1
+                click.secho(
+                    f"Indexing incomplete: {report.indexed} file(s) indexed, {len(report.failed)} failed "
+                    f"({', '.join(f'{r}={n}' for r, n in sorted(reasons.items()))}). Failed files have no "
+                    "current vectors and will be retried on the next run.", fg="red", err=True,
+                )
+                sys.exit(1)
             click.secho("Success: Semantic index compiled and cached to disk.", fg="green", err=True)
     except Exception as e:
         click.secho(f"Analysis failed: {e}", fg="red", err=True)
@@ -682,7 +1919,7 @@ def skills_group() -> None:
 def skills_list(ctx: click.Context) -> None:
     """List all registered skills and staged/active conventions."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
     
     skills = se.list_skills()
@@ -731,7 +1968,7 @@ def skills_list(ctx: click.Context) -> None:
 def skills_show(ctx: click.Context, skill_name: str) -> None:
     """Display information about a specific skill."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
     
     try:
@@ -782,7 +2019,7 @@ def skills_readiness(ctx: click.Context, skill_name: str) -> None:
     """Score a skill's knowledge against the 10-category readiness rubric (0-4 per
     category, scoring both staged and already-approved structured facts together)."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
 
     try:
@@ -815,7 +2052,7 @@ def skills_gaps(ctx: click.Context, skill_name: str, interactive: bool) -> None:
     """Show targeted questions for whatever the readiness rubric says is still thin,
     instead of a blank rules.txt - optionally answer them right here with --interactive."""
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
 
     try:
@@ -869,7 +2106,7 @@ def skills_create(ctx: click.Context, skill_name: str) -> None:
 
     os.makedirs(cfg.paths.skills, exist_ok=True)
 
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     try:
         path = se.create_skill_skeleton(skill_name)
         click.secho(f"Successfully created skill skeleton at: {path}", fg="green")
@@ -1062,7 +2299,7 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
     show <name>' first to see when/what it was last verified for.
     """
     cfg: AppConfig = ctx.parent.obj['config'] if ctx.parent else load_config()
-    se = SkillEngine(cfg.paths.skills)
+    se = SkillEngine.from_config(cfg)
     se.discover_and_load()
 
     try:
@@ -1080,6 +2317,87 @@ def skills_unverify(ctx: click.Context, skill_name: str) -> None:
     else:
         click.secho(f"Failed to update skill '{skill_name}'.", fg="red")
         sys.exit(1)
+
+def _print_static_analysis_banner(res: Dict[str, Any]) -> None:
+    """PRD-031A: any static-analysis outcome other than a clean PASS is
+    printed unmissably; ACCEPTED_RISK is never presented as a pass."""
+    summary = res.get("static_analysis")
+    if not summary or summary.get("outcome") == "PASS":
+        return
+    color = "red" if summary.get("outcome") in ("ACCEPTED_RISK", "BLOCKED", "UNKNOWN") else "yellow"
+    click.secho(f"\n{summary.get('banner')}", fg=color, bold=True)
+    if summary.get("evidence_path"):
+        click.echo(f"Static-analysis evidence: {summary['evidence_path']}")
+
+
+def _print_workspace_commit_failure(res: Dict[str, Any]) -> None:
+    """PRD-032: the verified candidate's terminal commit did not commit -
+    neither a toolchain problem nor a retryable code defect."""
+    if res.get("failure_category") != "workspace_commit_failed":
+        return
+    failure = res.get("workspace_commit_failure") or {}
+    advice = (
+        "The workspace state is UNCERTAIN: run `kriya runs recover` before any other run."
+        if failure.get("workspace_state") == "UNCERTAIN"
+        else "The workspace is unchanged. Resolve the reason above (a concurrent edit, a candidate "
+             "changed after verification, a disk or permission problem, refused static-analysis "
+             "evidence) and run again."
+    )
+    click.secho(f"\n[WORKSPACE COMMIT NOT COMPLETED] {res.get('environment_failure')}\n{advice}",
+                fg="yellow", bold=True)
+
+
+async def _dispatch_generation(we: "WorkflowEngine", cfg: AppConfig, **kwargs: Any) -> Dict[str, Any]:
+    """MA7.1 - routes through WorkflowController when workflow_controller.enabled
+    (kriya.yaml, default False) so its shadow-mode control-plane bookkeeping
+    (MA5/MA6) actually runs alongside a real `kriya generate` call instead
+    of being permanently unreachable, per WorkflowController's own
+    docstring. `mode` is "legacy", "shadow" or (since MA7.8) "enforce"; with
+    the packaged default (enabled=False) this is a pure passthrough to
+    we.run_generation_workflow, which runs the goal as a one-unit
+    ExecutionPlan (PRD-008A). Module-level (not a nested closure inside
+    `generate()`) so it's independently unit-testable without invoking the
+    full CLI command."""
+    if cfg.workflow_controller.enabled:
+        result = await WorkflowController(we).execute(
+            migration_mode=cfg.workflow_controller.mode, **kwargs,
+        )
+        return result.legacy_result
+    return await we.run_generation_workflow(**kwargs)
+
+
+async def _learned_reference_context(cfg: AppConfig, query: str) -> str:
+    """Learned knowledge (``kriya learn``) relevant to ``query`` - the user's
+    own words - with provenance, for the model's context only: the caller
+    passes it as ``reference_context``, which is fenced as untrusted and never
+    joined to the goal (AUTH-GOAL-CONTAMINATION-001, KNOWLEDGE-READPATH-001).
+    Anything that kept it from being used is shown on stderr."""
+    from kriya.memory.learned_knowledge import retrieve_learned_references
+
+    retrieval = await retrieve_learned_references(cfg, query)
+    for note in retrieval.warnings():
+        click.secho(note, fg="yellow", err=True)
+    return retrieval.render()
+
+
+async def _dispatch_milestones(we: "WorkflowEngine", cfg: AppConfig, run_state: Any, workspace_path: str, **kwargs: Any) -> Dict[str, Any]:
+    """MA7-C4 (2026-08-25 external review) - the milestone-DAG counterpart
+    to _dispatch_generation above, closing the architectural split its own
+    docstring didn't yet cover: `generate --from-milestones` previously
+    called kriya.workflow.milestones.run_milestones() directly, bypassing
+    WorkflowController (and therefore ControlState/the rest of the control
+    plane) entirely, even when workflow_controller.enabled was true for
+    every OTHER generate call. Same exact gate/shape as
+    _dispatch_generation: with the packaged default (enabled=False) this
+    is a pure passthrough to run_milestones(), identical to every call
+    site before this change. Module-level, independently unit-testable,
+    same reasoning as _dispatch_generation."""
+    if cfg.workflow_controller.enabled:
+        result = await WorkflowController(we).execute_milestones(run_state, workspace_path, **kwargs)
+        return result.legacy_result
+    from kriya.workflow.milestones import run_milestones
+    return await run_milestones(we, run_state, workspace_path, **kwargs)
+
 
 def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> None:
     """Overwrites a transient `knowledge_gap` trace row with an honest `in_progress`
@@ -1106,8 +2424,7 @@ def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> N
         return
     try:
         from kriya.core.trace import TraceLogger
-        trace_db = os.path.join(cfg.paths.logs, "traces.db")
-        TraceLogger(trace_db).log_run(
+        TraceLogger(trace_db_path(cfg)).log_run(
             run_id=run_id,
             goal=goal,
             duration_sec=0.0,
@@ -1128,15 +2445,26 @@ def _mark_run_in_progress(cfg: AppConfig, run_id: Optional[str], goal: str) -> N
 @click.option('--resume', is_flag=True, default=False, help="Resume the most recently saved checkpoint for this workspace (only exists if a prior run was interrupted mid-Plan/Design/Developer).")
 @click.option('--resume-id', default=None, help="Resume a specific checkpoint by run_id instead of the latest one.")
 @click.option('--json', 'json_output', is_flag=True, default=False, help="Print only the final result as JSON on stdout - all progress/narrative output goes to stderr instead. For CI/scripting use.")
+@click.option('--from-milestones', type=click.Path(exists=True), default=None, help="Execute a milestone plan file produced by `kriya plan-milestones` instead of a single goal - GOAL/--file are ignored.")
 @click.pass_context
-def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool) -> None:
+def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: bool, knowledge_policy: str, ack_knowledge_gap: tuple, resume: bool, resume_id: Optional[str], json_output: bool, from_milestones: Optional[str]) -> None:
     """Run autonomous multi-agent pipeline to satisfy a goal."""
-    if file:
+    with GenerateOutput(json_output) as output:
+        _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
+                       resume, resume_id, json_output, from_milestones, output)
+
+
+def _generate_impl(ctx, goal, file, yes, knowledge_policy, ack_knowledge_gap,
+                   resume, resume_id, json_output, from_milestones, output):
+    if from_milestones:
+        pass  # goal text lives inside the milestone plan file - nothing to resolve here
+    elif file:
         try:
             with open(file, "r", encoding="utf-8") as fh:
                 goal = fh.read()
         except Exception as e:
             click.secho(f"Failed to read goal file: {e}", fg="red")
+            output.fail(str(e))
             sys.exit(1)
     elif not goal:
         if not sys.stdin.isatty():
@@ -1145,21 +2473,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             click.secho("Error: Missing argument 'GOAL' or '--file' option.", fg="red")
             sys.exit(1)
 
-    cfg: AppConfig = ctx.obj['config']
-
-    # --json: swap sys.stdout to stderr for the rest of this command, so
-    # every one of the many existing click.echo/secho calls below (streaming
-    # tokens, approval prompts, warnings, the human-formatted final summary)
-    # is redirected with zero per-call-site changes - click resolves
-    # sys.stdout dynamically at call time (confirmed live), so this one swap
-    # covers all of them. Restored just before printing the final JSON.
-    # Subprocess output (compile/test/run commands) is unaffected -
-    # PolymorphicValidator always captures via pipes into Python strings,
-    # never lets a child process's own stdout flow directly to the terminal.
-    # Architectural add-on from a 2026-08-12 SME review.
-    real_stdout = sys.stdout
-    if json_output:
-        sys.stdout = sys.stderr
+    cfg: AppConfig = _workflow_config(ctx.obj['config'], resume=resume, resume_id=resume_id, workspace=os.getcwd(),
+                                      milestone_plan=from_milestones)
 
     llm = LLMClient(cfg)
     kernel = Kernel(config=cfg)
@@ -1171,7 +2486,20 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
         nonlocal current_step
         if current_step != step_name:
             current_step = step_name
-            click.secho(f"\n>>> Step: {step_name} <<<", bold=True, fg="green")
+            # No separate ">>> Step: X <<<" announcement here anymore - it
+            # duplicated the solid-line phase banner run_generation_workflow()
+            # itself now logs (kriya/workflow/workflow.py::_log_phase_banner,
+            # visible on this same console via the root logger's stderr
+            # handler) for the exact same transition, confirmed live to print
+            # seconds apart for the identical phase. This callback still owns
+            # the one thing the banner doesn't: streaming the raw token output.
+            if step_name == "Review":
+                click.echo("Preparing reviewer report...")
+        # The complete Reviewer artifact has one terminal owner: the approval
+        # context when approval is required, otherwise the final report block.
+        # Token streaming it as well would display the same report twice.
+        if step_name == "Review":
+            return
         click.echo(token, nl=False)
         sys.stdout.flush()
 
@@ -1255,32 +2583,130 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             "never goal/design/code/error text)"
         )
 
-    async def run_workflow():
-        nonlocal goal
-        rag_context = ""
-        index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
-        if os.path.exists(index_path):
-            try:
-                from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
-                embed_client = OllamaEmbeddingClient(
-                    base_url=cfg.embedding.base_url,
-                    model=cfg.embedding.model
+    if from_milestones:
+        # Mirrors on_approval's exact shape (present callback -> ask; -y ->
+        # safe default) - only "abandon"/"retry" are offered, never a silent
+        # skip-ahead, since a later milestone building on a known-broken one
+        # directly contradicts the vertical-slice premise this whole feature
+        # relies on (see kriya/workflow/milestones.py's run_milestones()).
+        def on_milestone_failure(failed_index: int, total: int, milestone, failure_result: Dict[str, Any]) -> str:
+            if yes:
+                click.secho(f"\n[Milestone {failed_index}/{total} FAILED] Auto-abandoning under -y", fg="red")
+                return "abandon"
+            click.secho(f"\n[Milestone {failed_index}/{total} FAILED]", bold=True, fg="red")
+            click.echo(f"  Goal: {milestone.goal}")
+            click.echo(f"  Status: {failure_result.get('status')}")
+            # A knowledge_gap-shaped failure is not an ordinary quality-gate
+            # failure - "retry" re-issues the IDENTICAL goal, so without the
+            # knowledge risk having been confirmed for this whole run (--yes
+            # or --knowledge-policy permissive), it reproduces the exact same
+            # knowledge_gap every time rather than ever making progress.
+            if failure_result.get("status") == "knowledge_gap":
+                click.secho(
+                    "  This is a knowledge-gap pause, not a quality-gate failure - "
+                    "retrying will reproduce the identical gap. Re-run with -y or "
+                    "--knowledge-policy permissive to accept the risk for this whole "
+                    "milestone sequence, then resume with the same "
+                    "`generate --from-milestones` command.",
+                    fg="yellow",
                 )
-                vector_store = LocalVectorStore(index_path)
-                query_emb = await embed_client.get_embedding(goal, is_query=True)
-                matches = vector_store.query(query_emb, top_k=5)
-                good_matches = [m for m in matches if m["score"] > 0.4]
-                if good_matches:
-                    rag_context = "\n".join([f"[Source: {m['filepath']}]\n{m['text']}" for m in good_matches])
-                vector_store.close()
-            except Exception as e:
-                logger.warning(f"Failed to query RAG database in workflow: {e}")
-                
-        if rag_context:
-            goal = f"{goal}\n\n=== Web Reference Documentation Context ===\n{rag_context}"
+            return click.prompt(
+                "What do you want to do? (abandon = stop here, keeping whatever earlier "
+                "milestones already applied; retry = try this milestone again from scratch)",
+                type=click.Choice(["abandon", "retry"]), default="abandon"
+            )
+
+        async def run_milestone_sequence():
+            from kriya.workflow.milestones import load_or_resume_milestone_run_state
+            with open(from_milestones, "r", encoding="utf-8") as fh:
+                plan_data = json.load(fh)
+            workspace_path = os.getcwd()
+            # milestones/original_goal always come from THIS load of the plan
+            # file (so a hand-edit made between runs takes effect); progress
+            # (completed_milestone_ids/established_dependencies/
+            # verification_commands) resumes from an existing same-group_id
+            # sidecar if a prior invocation of this plan got partway through -
+            # see load_or_resume_milestone_run_state's own docstring.
+            run_state = load_or_resume_milestone_run_state(workspace_path, plan_data)
+            # Learned knowledge for the plan's own user goal (never a
+            # milestone's MilestonePlanner text), fenced in every unit.
+            reference_context = await _learned_reference_context(cfg, run_state.original_goal)
+            await kernel.start()
+            # MA7-C4: routes through WorkflowController when
+            # workflow_controller.enabled (same gate/shape as plain
+            # generate's own _dispatch_generation) - pure passthrough to
+            # run_milestones() with the packaged default.
+            result = await _dispatch_milestones(
+                we, cfg, run_state, workspace_path,
+                approval_callback=on_approval,
+                stream_callback=on_stream,
+                skill_gap_callback=on_skill_gap,
+                skill_conflict_callback=on_skill_conflict,
+                web_lookup_callback=on_web_lookup,
+                web_lookup_query_callback=on_web_lookup_query,
+                milestone_failure_callback=on_milestone_failure,
+                # Decided once, up front, for the whole sequence - unlike plain
+                # `generate`'s per-gap interactive resolution, a milestone
+                # sequence has no equivalent mid-run gap-detail UI (see
+                # run_milestones()'s own docstring). Mirrors plain generate's
+                # "-y or permissive policy already means accept this risk"
+                # convention rather than introducing new milestone-specific
+                # flags.
+                knowledge_risk_confirmed=yes or knowledge_policy == 'permissive',
+                resume=resume,
+                resume_id=resume_id,
+                reference_context=reference_context,
+            )
+            await kernel.stop()
+            return result
+
+        try:
+            with begin_mutating_run(os.getcwd()):
+                milestone_result = asyncio.run(_closing(llm, run_milestone_sequence()))
+        except UncertainWorkspaceStateError as e:
+            click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
+            output.fail(str(e))
+            sys.exit(1)
+        except WorkspaceLockHeldError as e:
+            click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
+            output.fail(str(e))
+            sys.exit(1)
+        except Exception as e:
+            click.secho(f"Milestone sequence error: {e}", fg="red")
+            output.fail(str(e))
+            sys.exit(1)
+
+        output.result = milestone_result
+        if not json_output:
+            status = milestone_result.get("status")
+            click.secho(
+                f"\n=== Milestone sequence: {status} ===", bold=True,
+                fg="green" if status == "success" else "red"
+            )
+            committed_units = milestone_result.get("committed_work_units")
+            if status != "success" and committed_units:
+                # Units commit incrementally; the plan failing later does not
+                # undo them. Built from the result only: a unit can fail after
+                # its own commit (a dropped dependency, the artifact registry).
+                failed_unit = milestone_result.get("milestone_id") or (
+                    "integration" if status == "integration_failed" else None)
+                note = "Committed and still applied (not rolled back): " + ", ".join(committed_units) + "."
+                if failed_unit in committed_units:
+                    note += f" {failed_unit} failed after its changes were committed; they remain applied."
+                elif failed_unit:
+                    note += f" {failed_unit} failed before its changes were applied."
+                click.secho(note + " The plan is not successful.", fg="yellow")
+            click.echo(json.dumps(milestone_result, indent=2, default=str))
+        sys.exit(0 if milestone_result.get("status") == "success" else 1)
+
+    async def run_workflow():
+        # AUTH-GOAL-CONTAMINATION-001: `goal` stays the user's exact words;
+        # retrieved text travels separately and is fenced as untrusted.
+        reference_context = await _learned_reference_context(cfg, goal)
 
         await kernel.start()
-        res = await we.run_generation_workflow(
+        res = await _dispatch_generation(
+            we, cfg,
             goal=goal,
             workspace_path=os.getcwd(),
             approval_callback=on_approval,
@@ -1290,7 +2716,9 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             web_lookup_callback=on_web_lookup,
             web_lookup_query_callback=on_web_lookup_query,
             resume=resume,
-            resume_id=resume_id
+            resume_id=resume_id,
+            protected_source_file=file,
+            reference_context=reference_context,
         )
 
         if isinstance(res, dict) and res.get("status") == "knowledge_gap":
@@ -1303,7 +2731,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
 
             if not unacked_gaps or knowledge_policy == 'permissive':
                 _mark_run_in_progress(cfg, res.get("run_id"), goal)
-                res = await we.run_generation_workflow(
+                res = await _dispatch_generation(
+                    we, cfg,
                     goal=goal,
                     workspace_path=os.getcwd(),
                     approval_callback=on_approval,
@@ -1320,6 +2749,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     # run_id, its primary key) the transient knowledge_gap row just
                     # written above, instead of leaving two independent rows behind.
                     trace_id_override=res.get("run_id"),
+                    protected_source_file=file,
+                    reference_context=reference_context,
                 )
             elif knowledge_policy == 'strict':
                 click.secho("\n[KRIYA BLOCKED] Knowledge gap detected in strict mode:", bold=True, fg="red")
@@ -1327,6 +2758,7 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                     version_desc = "no specific version mentioned" if g['version'] == "unspecified" else f"version {g['version']}"
                     click.secho(f"  - {g['library']} ({version_desc}): {g['reason']}", fg="red")
                 await kernel.stop()
+                output.result = dict(res, quality_gates_passed=False)
                 sys.exit(1)
             else:  # 'warn'
                 click.secho("\n⚠️  KNOWLEDGE GUARD RISK DETECTED", bold=True, fg="yellow")
@@ -1349,7 +2781,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
 
                 if confirm:
                     _mark_run_in_progress(cfg, res.get("run_id"), goal)
-                    res = await we.run_generation_workflow(
+                    res = await _dispatch_generation(
+                        we, cfg,
                         goal=goal,
                         workspace_path=os.getcwd(),
                         approval_callback=on_approval,
@@ -1366,6 +2799,8 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         # supersedes the transient knowledge_gap one instead of
                         # leaving two independent rows behind.
                         trace_id_override=res.get("run_id"),
+                        protected_source_file=file,
+                        reference_context=reference_context,
                     )
                 else:
                     if click.confirm("Would you like Kriya to scaffold skill templates for these libraries?"):
@@ -1388,7 +2823,11 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         click.secho("  - Add detailed code blocks to instructions.md and files in examples/.", fg="cyan")
                         click.secho("Refer to Part 2 Section 2-D of the User Guide for detailed instructions.", fg="cyan")
                     await kernel.stop()
-                    sys.exit(0)
+                    # Declining a required knowledge/safety decision is an
+                    # unsuccessful generation, not a successful no-op. Keep it
+                    # non-zero for CI and shell callers.
+                    output.result = dict(res, quality_gates_passed=False)
+                    sys.exit(3)
 
         await kernel.stop()
         
@@ -1421,7 +2860,9 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             # signal about on its own.
             for warning in res["skill_staleness_warnings"]:
                 click.secho(f"[SKILL STALENESS] {warning}", fg="yellow")
-        if res.get("files"):
+        if res.get("files") and res.get("final_review_refusal"):
+            _echo_final_review_refusal(res)
+        elif res.get("files"):
             status_color = "green" if res.get('quality_gates_passed') else "red"
             status_text = "PASSED" if res.get('quality_gates_passed') else "FAILED"
             click.secho(f"Quality Gates: {status_text}", bold=True, fg=status_color)
@@ -1434,12 +2875,147 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                 )
                 if res.get("failure_category"):
                     click.echo(f"Failure category: {res['failure_category']}")
-                if res.get("environment_failure"):
+                # PRV-17 preflight correction (2026-09-03): an unauthorized/
+                # unrecoverable generation target reuses environment_failure
+                # purely as its STOP mechanism (see retry_strategy.py's own
+                # comment) but is a plan/scope defect, not a machine/toolchain
+                # problem - failure_category already distinguishes the two
+                # (set in kriya/workflow/workflow.py), so this toolchain-
+                # specific message and its "check your Java/Maven toolchain"
+                # advice must not fire for it.
+                if res.get("environment_failure") and res.get("failure_category") not in (
+                    "unauthorized_generation_target", "candidate_independent_deterministic_failure",
+                    "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
+                    "fallback_model_incompatible", "context_edit_protocol_unsatisfiable", "provider_contract_violation",
+                    "requirements_unresolved", "contract_registry_blocked",
+                    "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
+                    "workspace_commit_failed",
+                ):
                     click.secho(
                         f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
                         "Kriya stopped retrying early rather than burning its retry budget "
                         "re-generating code that could never fix this - run `kriya doctor` "
-                        "to check your Java/Maven toolchain resolution.",
+                        "to check your language toolchain resolution.",
+                        fg="yellow", bold=True
+                    )
+                # VAL-001 G1-DEVINV2 (2026-09-20): a full-regression block
+                # with no candidate-attributable evidence is neither an
+                # environment/toolchain problem nor an ordinary retryable
+                # code defect - see kriya/workflow/workflow.py's own
+                # _full_regression_unattributed branch.
+                if res.get("failure_category") == "regression_unattributed":
+                    click.secho(
+                        f"\n[REGRESSION UNATTRIBUTED] {res['environment_failure']}\n"
+                        "Kriya stopped retrying early: the full-regression suite's aggregate "
+                        "outcome changed relative to the captured PRE-mutation baseline, but "
+                        "no specific test could be confirmed as caused by this candidate - "
+                        "every per-test failure either matches the baseline exactly, or was "
+                        "independently replayed (in isolation, against both a pristine and a "
+                        "candidate copy) and could not be confirmed either way - an "
+                        "indeterminate/non-reproducible result is never treated as a known "
+                        "pre-existing failure, only as unattributable. "
+                        "Investigate the full-regression output directly; further Developer "
+                        "regeneration cannot resolve this.",
+                        fg="yellow", bold=True
+                    )
+                # PRV-17 (2026-09-08, P7 efficiency finding): a candidate-
+                # independent deterministic failure (kriya/workflow/
+                # deterministic_failure_diagnostic.py) is neither an
+                # environment/toolchain problem nor a plan/scope defect - an
+                # isolated baseline replay already proved no candidate change
+                # could have resolved it, so the advice must point at the
+                # validator/build configuration, not the toolchain.
+                if res.get("failure_category") == "candidate_independent_deterministic_failure":
+                    click.secho(
+                        f"\n[DETERMINISTIC VALIDATOR DEFECT] {res['environment_failure']}\n"
+                        "Kriya stopped retrying early: replaying the same deterministic check "
+                        "against an isolated copy of the pre-candidate baseline reproduced the "
+                        "identical failure, proving no further Developer regeneration could "
+                        "have fixed it - the defect is in the validator or build configuration "
+                        "itself, not the generated code.",
+                        fg="yellow", bold=True
+                    )
+                # Demo-01 Finding 4 (2026-09-11): GENERATION TIME BUDGET
+                # EXHAUSTED was previously funneled into the same
+                # state.environment_failure field the genuine toolchain
+                # cases above use (retry_strategy.py reuses that field/the
+                # STOP_ENVIRONMENT mechanism deliberately for any stop
+                # reason no further retry can fix), so it inherited the
+                # SAME "[ENVIRONMENT/TOOLCHAIN ISSUE]"/`kriya doctor`
+                # message even though running `kriya doctor` cannot help a
+                # run that simply ran out of configured time - a terminal
+                # STOP CONDITION, not a root ENVIRONMENT/TOOLCHAIN failure.
+                # This is a distinct, dedicated message, not toolchain
+                # advice repurposed.
+                if res.get("failure_category") == "no_progress":
+                    click.secho(no_progress_stop_message(res.get("retry_progress")), fg="yellow")
+                if res.get("failure_category") == "generation_budget_exhausted":
+                    click.secho(
+                        f"\n[GENERATION BUDGET EXHAUSTED] {res['environment_failure']}\n"
+                        "Kriya stopped retrying because the configured generation time budget "
+                        "ran out before another repair attempt could safely begin - this is a "
+                        "terminal stop condition, not an environment/toolchain problem; running "
+                        "`kriya doctor` will not help. Increase autonomy."
+                        "generation_time_budget_seconds if this goal genuinely needs more time, "
+                        "or reduce the plan's file scope. Any earlier, still-unresolved "
+                        "engineering failure from a prior attempt (if one occurred) remains in "
+                        "this run's own persisted gate_outcomes/trace record, distinct from this "
+                        "stop reason.",
+                        fg="yellow", bold=True
+                    )
+                # SEC-001 (2026-09-11): a required containment backend was
+                # unavailable/misconfigured/failed to prepare - Kriya
+                # refused to run the command uncontained rather than
+                # silently degrading. Not an environment/toolchain problem
+                # `kriya doctor` can diagnose, and not something further
+                # Developer retries can fix.
+                # PRD-017: the configured fallback model cannot serve the
+                # attempt it was chosen for (kriya/workflow/model_transition.py).
+                # PRD-020: an original requirement has no accepted evidence
+                # and the requirement policy blocks success.
+                # PRD-031A: the static-analysis gate stopped the run; nothing was applied.
+                if str(res.get("failure_category") or "").startswith("static_analysis_"):
+                    click.secho(
+                        f"\n[STATIC ANALYSIS] {res['environment_failure']}\n"
+                        "Nothing was applied. See the static-analysis evidence file for every finding; "
+                        "only an operator waiver (`kriya static-analysis waive`) can accept a blocking "
+                        "finding, and coverage gaps or scanner failures are never waivable.",
+                        fg="yellow", bold=True
+                    )
+                if res.get("failure_category") == "requirements_unresolved":
+                    click.secho(
+                        f"\n[REQUIREMENTS UNRESOLVED] {res['environment_failure']}\n"
+                        "Nothing was applied. The verifier gave no accepted evidence for these "
+                        "requirements of your goal; restate them concretely, or review the result "
+                        "(autonomy.requirement_unknown_policy / requirement_unverified_policy).",
+                        fg="yellow", bold=True
+                    )
+                if res.get("failure_category") == "context_edit_protocol_unsatisfiable":
+                    click.secho(
+                        f"\n[NO FEASIBLE EDIT OPERATION] {res['environment_failure']}\n"
+                        "Kriya stopped before asking the model for an edit it could not authorize: "
+                        "the target's exact source for the change could not be localized or did not "
+                        "fit, and its complete source was not available.",
+                        fg="yellow", bold=True
+                    )
+                if res.get("failure_category") == "fallback_model_incompatible":
+                    click.secho(
+                        f"\n[FALLBACK MODEL INCOMPATIBLE] {res['environment_failure']}\n"
+                        "Kriya stopped instead of sending this attempt to a fallback model that "
+                        "cannot do what it requires. Fix the llm_chain entry (its capabilities, "
+                        "or re-run `kriya model qualify` for it), or remove it from llm_chain.",
+                        fg="yellow", bold=True
+                    )
+                _print_workspace_commit_failure(res)
+                if res.get("failure_category") == "containment_setup_failed":
+                    click.secho(
+                        f"\n[CONTAINMENT SETUP FAILED] {res['environment_failure']}\n"
+                        "Kriya stopped retrying because a required execution-containment "
+                        "backend could not be established for a command that needed one - "
+                        "this is a configuration/environment problem with the containment "
+                        "backend itself (not the generated code), and `kriya doctor` will not "
+                        "help. Check autonomy.containment_backend and the backend's own "
+                        "availability.",
                         fg="yellow", bold=True
                     )
                 if res.get("run_id"):
@@ -1449,16 +3025,112 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
                         "without redoing Plan/Design.",
                         fg="yellow"
                     )
-            if res.get("review"):
-                click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+            if res.get("review") and not res.get("review_included_in_approval"):
+                # Demo-01 Run A finding (2026-09-11): this used to print the
+                # same "Reviewer Report & Run Instructions" header regardless
+                # of quality_gates_passed - a rejected, unapplied candidate's
+                # review (already told not to include run instructions, see
+                # ReviewerAgent.rejected_candidate_system_prompt) still needs
+                # its own header, so the diagnostic-only nature is visually
+                # unambiguous even if the model imperfectly complies.
+                _print_static_analysis_banner(res)
+                if res.get("quality_gates_passed"):
+                    click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+                else:
+                    click.secho(
+                        "\n=== Rejected Candidate Review (diagnostic only - NOT applied to workspace) ===",
+                        bold=True, fg="red",
+                    )
                 click.echo(res.get("review"))
         else:
             click.secho("No files written (either rejected or empty changes).", fg="yellow")
+            # Found live, 2026-08-25 (ignite_qpid_protocol, workflow_controller.enabled
+            # enforce mode): when the very FIRST subtask of a structured plan fails,
+            # `files` above stays empty (nothing was ever established) - the message
+            # above alone left the user with zero indication of what actually went
+            # wrong, unlike the legacy path's own detailed "Quality Gates: FAILED" +
+            # failure_category + checkpoint-resume block a few lines up, which only
+            # ever fires when `files` is non-empty. Reusing that same real per-
+            # subtask detail (SubtaskResult.error, already computed and returned by
+            # WorkflowController - see kriya/workflow/workflow_controller.py) rather
+            # than leaving this branch a black box.
+            for sr in res.get("subtask_results") or []:
+                if sr.get("status") == "failed" and sr.get("error"):
+                    click.secho(f"Subtask '{sr.get('subtask_id')}' failed: {sr['error']}", fg="red")
+                    break
+
+        # R1 Deliverable 5 (2026-09-08) - concise Performance summary from
+        # the same generation_metrics dict already threaded into JSON output
+        # and traces.db (see docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md).
+        # High-value totals only - detailed per-call data belongs in the
+        # structured artifact (traces.db/`kriya traces`), never flooded into
+        # this terminal summary. Printed for the legacy/single-run path only
+        # (the same scope generation_metrics itself is threaded through
+        # here) - the milestone path has its own separate summary above.
+        gm = res.get("generation_metrics") or {}
+        # R1 Deliverable 5 correction (2026-09-08): plan_repair_attempts is a
+        # sibling top-level key on `res`, not part of `gm` - it comes from
+        # WorkflowController._run_structured_enforce's own repair_attempts
+        # counter (kriya/workflow/workflow_controller.py), a structured-plan
+        # concept that only exists when workflow_controller.enabled=True
+        # (not the packaged default). Read unconditionally so it still shows
+        # for an enforce-mode run even though enforce mode's own aggregated
+        # result never populates generation_metrics (a separate, accepted
+        # R1 limitation - see docs/assurance/KRIYA_PERFORMANCE_TELEMETRY.md).
+        # None (the packaged-default legacy/single-run path has no repair-
+        # round concept at all) is printed as "unavailable", never guessed.
+        plan_repair_attempts = res.get("plan_repair_attempts")
+        if gm or plan_repair_attempts is not None:
+            llm = gm.get("llm") or {}
+            validators = gm.get("validators") or {}
+            retry = gm.get("retry") or {}
+
+            def _fmt_duration(seconds: Optional[float]) -> str:
+                if seconds is None:
+                    return "n/a"
+                minutes, secs = divmod(int(seconds), 60)
+                return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+
+            click.secho("\nPerformance", bold=True)
+            click.echo("-----------")
+            if gm:
+                click.echo(f"Total wall:             {_fmt_duration(gm.get('total_wall_seconds'))}")
+                click.echo(f"LLM calls:              {llm.get('calls', 0)}")
+                click.echo(f"LLM wall:               {_fmt_duration(llm.get('wall_seconds'))}")
+                click.echo(f"Validator wall:         {_fmt_duration(validators.get('wall_seconds'))}")
+                click.echo(f"Developer attempts:     {llm.get('developer_calls', 0)}")
+                # Was mislabeled "Planner repair rounds" prior to this
+                # correction - full_set_attempts counts the Developer's own
+                # full-file-set attempts (GenerationState.attempts_by_mode),
+                # unrelated to structured-plan Planner repair.
+                click.echo(f"Developer full-set retries: {retry.get('full_set_attempts', 0)}")
+                click.echo(f"Baseline replays:       {retry.get('baseline_replay_count', 0)}")
+            if plan_repair_attempts is not None:
+                click.echo(f"Planner repair rounds:  {plan_repair_attempts}")
+            else:
+                click.echo("Planner repair rounds:  unavailable (structured-plan repair not active for this run)")
+            # Categories above overlap by design (a validator call happens
+            # WHILE wall-clock time toward total_wall also elapses) - never
+            # presented as though they sum exactly to total wall.
+            if gm:
+                click.secho(
+                    "(LLM/validator wall overlap with total wall - they are not additive)",
+                    dim=True,
+                )
 
         return res
 
     try:
-        final_res = asyncio.run(run_workflow())
+        with begin_mutating_run(os.getcwd()):
+            final_res = asyncio.run(_closing(llm, run_workflow()))
+    except UncertainWorkspaceStateError as e:
+        click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
+        output.fail(str(e))
+        sys.exit(1)
+    except WorkspaceLockHeldError as e:
+        click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
+        output.fail(str(e))
+        sys.exit(1)
     except Exception as e:
         click.secho(f"Workflow error: {e}", fg="red")
         click.secho(
@@ -1466,30 +3138,110 @@ def generate(ctx: click.Context, goal: Optional[str], file: Optional[str], yes: 
             "re-run the same command with --resume to pick up where it left off instead of starting over.",
             fg="yellow"
         )
-        if json_output:
-            sys.stdout = real_stdout
-            click.echo(json.dumps({"error": str(e)}, indent=2))
+        output.fail(str(e))
         sys.exit(1)
 
-    if json_output:
-        sys.stdout = real_stdout
-        click.echo(json.dumps(final_res, indent=2))
-        # Some early-exit paths inside run_workflow() (a strict-mode
-        # knowledge-gap block, or a declined-then-scaffolded one) call
-        # sys.exit() directly and never reach here at all - known,
-        # documented gap for a v1: those paths don't get JSON output,
-        # matching their pre-existing narrower, non-structured signal today.
-        sys.exit(0 if final_res and final_res.get("quality_gates_passed") else 1)
+    output.result = final_res
+
+    # Click otherwise returns zero merely because the command function reached
+    # its end. Workflow outcome is the process contract for both human and JSON
+    # presentation modes: only terminally verified generation is success.
+    sys.exit(0 if final_res and final_res.get("quality_gates_passed") else 1)
+
+@main.command(name="plan-milestones")
+@click.argument('goal', required=False)
+@click.option('--file', '-f', type=click.Path(exists=True), help="Path to a text/markdown file containing the goal/prompt.")
+@click.option('--output', '-o', type=click.Path(), default=None, help="Where to write the proposed milestone plan (default: .kriya/milestones/<group_id>.plan.json).")
+@click.pass_context
+def plan_milestones_cmd(ctx: click.Context, goal: Optional[str], file: Optional[str], output: Optional[str]) -> None:
+    """Decompose a large goal into small, independently verifiable milestones.
+
+    Slices by BEHAVIOR, not by code structure - writes the proposed plan to a
+    file for review and possible hand-editing; nothing is executed. Run
+    `kriya generate --from-milestones <file>` to actually execute a
+    (possibly edited) plan against your workspace. Deliberately a separate,
+    no-side-effects step: the slicing quality is worth a human eyeballing
+    before N real generate calls run against a real workspace.
+    """
+    if file:
+        try:
+            with open(file, "r", encoding="utf-8") as fh:
+                goal = fh.read()
+        except Exception as e:
+            click.secho(f"Failed to read goal file: {e}", fg="red")
+            sys.exit(1)
+    elif not goal:
+        if not sys.stdin.isatty():
+            goal = sys.stdin.read()
+        else:
+            click.secho("Error: Missing argument 'GOAL' or '--file' option.", fg="red")
+            sys.exit(1)
+
+    cfg: AppConfig = _workflow_config(ctx.obj['config'])
+    llm = LLMClient(cfg)
+    kernel = Kernel(config=cfg)
+    we = WorkflowEngine(kernel, llm)
+
+    def on_stream(token: str):
+        click.echo(token, nl=False)
+        sys.stdout.flush()
+
+    async def run_plan():
+        from kriya.workflow.milestones import plan_milestones
+        await kernel.start()
+        result = await plan_milestones(
+            we.milestone_planner, goal, os.getcwd(), stream_callback=on_stream, trace_db=trace_db_path(cfg),
+        )
+        await kernel.stop()
+        return result
+
+    try:
+        run_state, err = asyncio.run(_closing(llm, run_plan()))
+    except Exception as e:
+        click.secho(f"Milestone planning error: {e}", fg="red")
+        sys.exit(1)
+
+    if err:
+        click.secho(f"\nMilestone planning failed: {err}", fg="red")
+        sys.exit(1)
+
+    workspace_path = os.getcwd()
+    plan_path = output or os.path.join(workspace_path, ".kriya", "milestones", f"{run_state.group_id}.plan.json")
+    os.makedirs(os.path.dirname(plan_path) or ".", exist_ok=True)
+    with open(plan_path, "w", encoding="utf-8") as fh:
+        json.dump(run_state.to_dict(), fh, indent=2)
+
+    click.secho(f"\n=== Proposed {len(run_state.milestones)} milestone(s) ===", bold=True, fg="green")
+    for m in run_state.milestones:
+        click.secho(f"\n{m.id}. {m.goal}", bold=True)
+        for a in m.acceptance:
+            click.echo(f"   Verification: {a.description}")
+        if m.depends_on:
+            click.echo(f"   Depends on: {', '.join(sorted(m.depends_on))}")
+    click.secho(f"\nPlan written to: {plan_path}", fg="cyan")
+    click.echo("Review (and hand-edit if needed), then run:")
+    click.secho(f"  kriya generate --from-milestones {plan_path} -y", fg="yellow")
 
 @main.command()
 @click.argument('file_path', type=click.Path(exists=True))
+@click.option('--propose', 'propose_finding_id', default=None, metavar='FINDING_ID',
+              help="A2: after the review, build an advisory (not-yet-approved) proposed "
+              "modification from finding FINDING_ID (e.g. F2) in THIS review's own output - "
+              "invocation-local, single-Java-file repository-aware review path only. Never "
+              "modifies files, never invokes generation - see the printed proposal's own "
+              "Authority/Approval fields.")
+@click.option('--save', 'save_proposal', is_flag=True, default=False,
+              help="A3-P1: with --propose, also persist the proposal to .kriya/proposals/<id>.json "
+              "as PENDING_APPROVAL (see `kriya proposal show/approve/reject`). Without --save, "
+              "the proposal is printed only, exactly as before - nothing is written.")
 @click.pass_context
-def review(ctx: click.Context, file_path: str) -> None:
+def review(ctx: click.Context, file_path: str, propose_finding_id: Optional[str], save_proposal: bool) -> None:
     """Run code review agent on a file or a folder."""
     cfg: AppConfig = ctx.obj['config']
 
     llm = LLMClient(cfg)
-    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain)
+    reviewer = ReviewerAgent("reviewer", llm, cfg.agent_llms.reviewer.llm, cfg.agent_llms.reviewer.llm_chain,
+                             max_output_tokens=cfg.agent_llms.reviewer.max_output_tokens)
 
     REVIEW_EXTENSIONS = (".py", ".java", ".xml", ".rb")
 
@@ -1572,7 +3324,7 @@ def review(ctx: click.Context, file_path: str) -> None:
             return
 
         click.secho(f"Reviewing {len(files_to_review)} file(s)...", fg="cyan", err=True)
-        from kriya.workflow.review_context import build_review_batches
+        from kriya.workflow.context_budget import review_requests
 
         # Budget-aware batching (kriya/workflow/review_context.py - shared with the
         # generation workflow's own Reviewer stage). Confirmed live as a real, severe
@@ -1582,7 +3334,6 @@ def review(ctx: click.Context, file_path: str) -> None:
         # received an unlabeled fragment of raw code with no indication it was even
         # being asked to review anything, produced a confused non-review response, and
         # Kriya still reported success (exit 0) with no warning at all.
-        budget = int(cfg.llm.context_window * 0.75)
         file_contents: List[Tuple[str, str]] = []
         for rel, full in files_to_review:
             try:
@@ -1590,18 +3341,6 @@ def review(ctx: click.Context, file_path: str) -> None:
                     file_contents.append((rel, f.read()))
             except Exception as e:
                 click.secho(f"Failed to read file {rel}: {e}", fg="yellow", err=True)
-
-        batches, truncated_relpaths = build_review_batches(file_contents, budget)
-        for rel in truncated_relpaths:
-            # Even this one file alone doesn't fit - keep as many whole chunks as fit
-            # and say so explicitly, both to the model (so it knows it's working from a
-            # partial view, not confidently reviewing what it thinks is the complete
-            # file) and to the user.
-            click.secho(
-                f"Warning: '{rel}' is too large to review in full within the "
-                f"configured context window - reviewing only the portion that fits.",
-                fg="yellow", err=True,
-            )
 
         # Stage 6 SME review, Finding 3 (2026-08-15): unlike the embedded pipeline's
         # Reviewer stage (workflow.py), which always prefixes "Goal: {goal}...", this
@@ -1628,22 +3367,728 @@ def review(ctx: click.Context, file_path: str) -> None:
             "partial file set.\n\n"
         )
 
-        import sys
+        # PROMPT-BUDGET-FIT-001B: each batch gets the room its request leaves
+        # after the Reviewer system prompt and the review header, refitted
+        # for each role candidate that is called (PROMPT-FIT-ROLE-CHAIN-001).
+        batches, truncated_relpaths, _ = review_requests(
+            cfg, reviewer, file_contents, reviewer.system_prompt, review_context_header,
+        )
+        for rel in truncated_relpaths:
+            # Even this one file alone doesn't fit - keep as many whole chunks as fit
+            # and say so explicitly, both to the model (so it knows it's working from a
+            # partial view, not confidently reviewing what it thinks is the complete
+            # file) and to the user.
+            click.secho(
+                f"Warning: '{rel}' is too large to review in full within the "
+                f"configured context window - reviewing only the portion that fits.",
+                fg="yellow", err=True,
+            )
+
+        # Repository-aware Java review contract (A1-P1/A1-E2): only for the narrow,
+        # unambiguous case of reviewing exactly one .java file whose content fit
+        # in a single batch (untruncated/unsplit) - a deterministic member
+        # inventory and bounded repository context are assembled BEFORE the
+        # model call (no model-directed reads/tools), each item given a
+        # Kriya-generated evidence id (M#/R#), and the model's own structured
+        # response is deterministically adjudicated against those ids before
+        # any confidence label reaches the user (A1-E2 - Kriya, not the
+        # Reviewer, is authoritative for final finding confidence). Every
+        # other case (directories, non-Java files, multi-batch splits) is
+        # completely unchanged from before - still the free-form path.
+        structured_evidence = None
+        if (
+            len(files_to_review) == 1
+            and len(batches) == 1
+            # Its whole content (never the files-omitted note or a cut prefix).
+            and not truncated_relpaths
+            and files_to_review[0][0].endswith(".java")
+        ):
+            from kriya.analyzer.java_members import extract_java_members
+            from kriya.workflow.review_context import (
+                build_member_evidence_ids,
+                build_relation_evidence_ids,
+                build_review_repository_context,
+                find_java_repo_root,
+                format_member_evidence_registry,
+                format_relation_evidence_registry,
+            )
+
+            target_rel, target_full = files_to_review[0]
+            target_content = dict(file_contents)[target_rel]
+            members = extract_java_members(target_content)
+            repo_root = find_java_repo_root(target_full)
+            target_relpath_in_root = os.path.relpath(target_full, repo_root)
+            repo_ctx = build_review_repository_context(
+                repo_root, target_relpath_in_root, target_content, members,
+            )
+            member_ids = build_member_evidence_ids(members)
+            relation_ids = build_relation_evidence_ids(repo_ctx.related_files)
+            evidence_prefix = format_member_evidence_registry(member_ids) + format_relation_evidence_registry(repo_ctx, relation_ids)
+            structured_evidence = (member_ids, relation_ids, evidence_prefix, target_relpath_in_root, repo_root)
+
+        if propose_finding_id and not structured_evidence:
+            click.secho(
+                "--propose is only supported for the single-Java-file repository-aware review "
+                "path (exactly one .java file, whose content fits in a single batch).",
+                fg="red", err=True,
+            )
+            sys.exit(1)
+
         def on_stream(token: str):
             click.echo(token, nl=False)
             sys.stdout.flush()
 
         async def run_review():
-            for i, batch in enumerate(batches, 1):
+            if structured_evidence:
+                from kriya.workflow.review_context import (
+                    adjudicate_findings,
+                    build_proposed_modification,
+                    build_structured_review_report,
+                    format_proposed_modification,
+                    parse_structured_findings,
+                )
+
+                member_ids, relation_ids, evidence_prefix, target_relpath_in_root, repo_root = structured_evidence
+                click.secho("\n=== Code Review Report ===", bold=True, fg="cyan", err=True)
+                # The whole file, as the first candidate's batch carries it
+                # (this path requires one untruncated batch, see above).
+                target_batch = batches[0].first()[len(review_context_header):]
+                prompt = "=== TARGET SOURCE ===\n" + target_batch + evidence_prefix + "\n=== REVIEW TASK ===\n" + review_context_header
+                raw = await reviewer.run_structured_review(prompt)
+                if "_error" in raw:
+                    click.secho(f"Structured review failed: {raw['_error']}", fg="red", err=True)
+                    sys.exit(1)
+                report = build_structured_review_report(raw, member_ids, relation_ids)
+                click.echo(report)
+
+                if propose_finding_id:
+                    # A2: same adjudicated findings this exact call already computed inside
+                    # build_structured_review_report() above - recomputed here (cheap, pure,
+                    # no second model call) since that function doesn't expose them. Never
+                    # touches DeveloperAgent/AuthorizedFileWriter/the generation workflow -
+                    # see review_context.py's own A2 section docstring for the zero-write
+                    # invariant this whole path is built to preserve.
+                    findings = parse_structured_findings(raw.get("findings"))
+                    adjudicated = adjudicate_findings(findings, member_ids, relation_ids)
+                    try:
+                        proposal = build_proposed_modification(
+                            propose_finding_id, adjudicated, member_ids, relation_ids, target_relpath_in_root,
+                            workspace_root=repo_root,
+                        )
+                    except ValueError as e:
+                        click.secho(f"\nCannot build proposal: {e}", fg="red", err=True)
+                        sys.exit(1)
+                    click.echo("\n" + format_proposed_modification(proposal))
+                    if save_proposal:
+                        from kriya.workflow.proposal_store import persist_proposal
+                        try:
+                            persisted = persist_proposal(proposal, repo_root)
+                        except ValueError as e:
+                            click.secho(f"\nCannot save proposal: {e}", fg="red", err=True)
+                            sys.exit(1)
+                        click.secho(
+                            f"\nSaved: .kriya/proposals/{persisted.proposal_id}.json "
+                            f"(state={persisted.approval_state}, digest={persisted.proposal_digest[:12]}...)",
+                            fg="cyan",
+                        )
+                        click.echo(
+                            f"Review it, then run `kriya proposal approve {persisted.proposal_id}` "
+                            "to explicitly approve it (nothing is executed automatically)."
+                        )
+                return
+
+            for i, batch_prompts in enumerate(batches, 1):
                 label = "=== Code Review Report ===" if len(batches) == 1 else f"=== Code Review Report (batch {i}/{len(batches)}) ==="
                 click.secho(f"\n{label}", bold=True, fg="cyan", err=True)
-                await reviewer.run(review_context_header + batch, stream_callback=on_stream)
+                await reviewer.run(batch_prompts.first(), stream_callback=on_stream, candidate_prompt=batch_prompts)
                 click.echo()
 
         asyncio.run(run_review())
     except Exception as e:
         click.secho(f"Review failed: {e}", fg="red", err=True)
         sys.exit(1)
+
+@main.group(name="authority")
+def authority_group() -> None:
+    """SEC-009 P2: inspect and explicitly, durably approve security-authority
+    configuration (mcp.*, plugins.*, execution_policy.*, runtime_profile, and
+    similar fields kriya/config/authority.py classifies SECURITY_AUTHORITY/
+    PLATFORM_POLICY) that a repository-equivalent source (auto-discovered
+    kriya.yaml, an explicit --config) cannot grant itself. Approval is bound
+    to the EXACT current effective security configuration (a digest over the
+    complete set, not a blanket "trust this repo" bit) and is stored outside
+    the workspace, never inside it - see kriya/config/authority_approval.py's
+    module docstring for why. Reachable even when the current configuration
+    has pending/denied security fields, so this is always the way out of a
+    "Configuration-authority denied" error."""
+    pass
+
+
+# The typed errors that mean "the operator must fix the configuration or the
+# approval store". Named one by one, never ValueError/Exception: a coding error
+# (a failed unpack, a bad int(), a TypeError) must still show its traceback.
+def _authority_user_errors() -> tuple:
+    import pydantic
+    import yaml
+
+    from kriya.config.authority import ConfigAuthorityError
+    from kriya.config.authority_approval import ApprovalArtifactError, TrustPathInsideWorkspaceError
+    from kriya.config.config import RemovedConfigFieldError
+    from kriya.core.state_paths import StateDirectoryError
+    return (
+        StateDirectoryError, LogDirectoryError, RemovedConfigFieldError, ConfigAuthorityError,
+        pydantic.ValidationError, TrustPathInsideWorkspaceError, ApprovalArtifactError,
+        OSError, yaml.YAMLError,
+    )
+
+
+def _authority_fail(error: BaseException) -> NoReturn:
+    click.secho(f"Error: {_user_error_text(error)}", fg="red", err=True)
+    sys.exit(1)
+
+
+def _authority_local_path(workspace_root: str) -> str:
+    """This workspace's local approval store; a store configured inside the
+    workspace is refused as a typed operator error, never a traceback."""
+    from kriya.config.authority_approval import default_local_approval_path
+    try:
+        return default_local_approval_path(workspace_root)
+    except _authority_user_errors() as error:
+        _authority_fail(error)
+
+
+def _authority_state(ctx: click.Context):
+    from kriya.config.config import resolve_config_state
+    try:
+        return resolve_config_state(ctx.obj.get('config_path'))
+    except _authority_user_errors() as error:
+        _authority_fail(error)
+
+
+def _print_pending(pending) -> None:
+    if not pending:
+        click.echo("No pending security-authority fields - current configuration is fully authorized.")
+        return
+    click.secho(f"{len(pending)} security-authority field(s) pending approval:", bold=True)
+    for p in pending:
+        click.echo(f"  - {p.field_path}")
+        click.echo(f"      classification: {p.classification}")
+        click.echo(f"      source:         {p.source}")
+        click.echo(f"      value:          {json.dumps(p.redacted_value, default=str)}")
+
+
+@authority_group.command(name="inspect")
+@click.pass_context
+def authority_inspect(ctx: click.Context) -> None:
+    """Display the CURRENT effective configuration's pending security-authority
+    fields (field path, classification, provenance, and a secret-redacted
+    value) and whether an existing local approval currently covers them.
+    Read-only - never writes anything, never itself approves."""
+    from kriya.config.authority_approval import describe_pending, is_approval_current_for, load_approval_artifact
+
+    state = _authority_state(ctx)
+    pending = describe_pending(state.violations, state.config_dict)
+    _print_pending(pending)
+
+    if not state.violations:
+        return
+
+    path = _authority_local_path(state.workspace_root)
+    try:
+        artifact = load_approval_artifact(path)
+    except Exception as e:
+        click.secho(f"\nLocal approval store at {path}: present but invalid ({e}).", fg="yellow")
+        return
+
+    if artifact is None:
+        click.echo(f"\nNo local approval on file at {path}.")
+        click.echo("Run 'kriya authority approve' to grant it.")
+        return
+
+    if is_approval_current_for(artifact, state.violations, state.config_dict, state.workspace_root):
+        click.secho(f"\nLocal approval at {path} is CURRENT and covers all pending fields.", fg="green")
+    else:
+        click.secho(
+            f"\nLocal approval at {path} exists but does NOT cover the current configuration "
+            "(it is stale, tampered, or was granted for a different security-field set) - "
+            "the fields above remain denied. Run 'kriya authority approve' again.",
+            fg="yellow",
+        )
+
+
+@authority_group.command(name="approve")
+@click.option('--out', type=click.Path(), default=None,
+              help="Write the approval artifact to this path instead of the default local "
+              "per-workspace store (~/.kriya/authority/ by default, override via "
+              "KRIYA_AUTHORITY_HOME) - for producing a portable artifact to ship to CI via "
+              "your own external channel. Must resolve outside the workspace, same rule as "
+              "--trust-file; refused otherwise.")
+@click.option('--confirm', is_flag=True, default=False,
+              help="Skip the interactive confirmation prompt (for scripted/operator use). "
+              "This is a dedicated flag for this command only - it has no relationship to "
+              "and is never satisfied by generate/fix's -y flag.")
+@click.pass_context
+def authority_approve(ctx: click.Context, out: Optional[str], confirm: bool) -> None:
+    """Explicitly approve the CURRENT effective security-authority configuration.
+
+    Always re-resolves the configuration fresh (never reuses a prior `inspect`
+    call's output - closes the TOCTOU window by construction: what you approve
+    is recomputed at the moment of approval, not shown once and trusted
+    later). Approval binds to the EXACT set of security-relevant fields and
+    their current values - adding, removing, or changing ANY of them
+    afterward invalidates this approval entirely; it is not a blanket grant
+    to the repository, the config file, or any future field."""
+    from kriya.config.authority_approval import (
+        build_approval_artifact,
+        describe_pending,
+        save_approval_artifact,
+        validate_trust_path_outside_workspace,
+    )
+
+    state = _authority_state(ctx)
+    pending = describe_pending(state.violations, state.config_dict)
+    _print_pending(pending)
+
+    if not state.violations:
+        click.echo("Nothing to approve.")
+        return
+
+    out_path = out or _authority_local_path(state.workspace_root)
+    if out:
+        try:
+            validate_trust_path_outside_workspace(out_path, state.workspace_root)
+        except _authority_user_errors() as error:
+            _authority_fail(error)
+
+    if not confirm:
+        if not click.confirm(
+            "\nGrant explicit approval to exactly the security-authority field(s) listed above? "
+            "Any later change to any of them will require re-approval."
+        ):
+            click.echo("Not approved - no artifact written.")
+            sys.exit(1)
+
+    try:
+        artifact = build_approval_artifact(state.violations, state.config_dict, state.workspace_root)
+        save_approval_artifact(out_path, artifact)
+    except _authority_user_errors() as error:
+        _authority_fail(error)
+    click.secho(
+        f"\nApproved. Artifact written to {out_path} (set digest {artifact.set_digest[:16]}...).",
+        fg="green", bold=True,
+    )
+    if not out:
+        click.echo(
+            "This is the default local store for this workspace - ordinary `kriya generate`/`fix`/etc. "
+            "will now honor it automatically. For CI, copy this file via your own external channel and "
+            "pass it with --trust-file (or set KRIYA_TRUST_FILE) - Kriya never ships or auto-provisions it."
+        )
+
+
+@authority_group.command(name="revoke")
+@click.pass_context
+def authority_revoke(ctx: click.Context) -> None:
+    """Immediately revoke this workspace's local approval, if any - future
+    `load_config()` calls fall back to P1 fail-closed denial for every
+    security-authority field, with no need to touch the config itself.
+    Idempotent: revoking when nothing is approved is not an error."""
+    from kriya.config.authority_approval import revoke_local_approval
+
+    state = _authority_state(ctx)
+    path = _authority_local_path(state.workspace_root)
+    try:
+        removed = revoke_local_approval(state.workspace_root)
+    except _authority_user_errors() as error:
+        _authority_fail(error)
+    if removed:
+        click.secho(f"Revoked local approval at {path}.", fg="yellow", bold=True)
+    else:
+        click.echo(f"No local approval on file at {path} - nothing to revoke.")
+
+
+# PRD-008: `kriya runs` - run lifecycle management. Like `authority`, it is
+# reachable even when the current configuration is denied (main() skips
+# load_config() for it): recovering a half-committed workspace must never
+# depend on loading repository-controlled configuration.
+_RUNS_EXIT_ACTION_REQUIRED = 1
+_RUNS_EXIT_RUN_ACTIVE = 3
+
+
+@main.group(name="runs")
+def runs_group() -> None:
+    """Inspect, recover and prune this workspace's run records and commit
+    evidence. Exit codes: 0 = nothing needs attention, 1 = action required
+    (see the output), 3 = a live Kriya run holds the workspace lock."""
+    pass
+
+
+def _runs_short(value: Optional[str]) -> str:
+    return value[:12] if isinstance(value, str) else "-"
+
+
+def _runs_state(state: Dict[str, Any]) -> str:
+    if not isinstance(state, dict):
+        return "?"
+    if state.get("outside_workspace"):
+        return "outside the workspace"
+    if state.get("not_a_regular_file"):
+        return "not a regular file"
+    if "text_revision" in state:
+        return f"text {_runs_short(state['text_revision'])}"
+    if not state.get("exists"):
+        return "absent"
+    mode = state.get("mode")
+    return f"{_runs_short(state.get('sha256'))} mode {oct(mode) if isinstance(mode, int) else '?'}"
+
+
+def _print_recovery_assessment(assessment) -> None:
+    from kriya.control import recovery
+
+    click.echo(f"Workspace: {assessment.workspace_path}")
+    click.secho(f"Status: {assessment.status}", bold=True)
+    if assessment.run_active is not None:
+        click.echo(f"A live Kriya run holds the workspace lock ({assessment.run_active}); "
+                   "nothing is classified while it runs.")
+        return
+    for finding in assessment.records:
+        click.echo(f"\nRun {finding.run_id}: {finding.lifecycle_state} "
+                   f"(commit_result={finding.commit_result})")
+        for txid, result in finding.cycle_results.items():
+            click.echo(f"  commit {txid}: {result or 'not proven'}")
+        for reason in finding.blocked_reasons:
+            click.secho(f"  blocked: {reason}", fg="red")
+        for txid in finding.completable_transactions:
+            click.secho(f"  commit {txid} is partially applied; `kriya runs recover "
+                        "--complete-partial` can finish it", fg="yellow")
+        if finding.recoverable:
+            click.echo(f"  -> RECOVERED, commit_result={finding.proposed_commit_result}, "
+                       f"terminal_status={finding.proposed_terminal_status}")
+    for finding in assessment.evidence:
+        click.echo(f"\nCommit {finding.transaction_id}: {finding.state or 'unreadable'} -> {finding.outcome}"
+                   + (f" (run {finding.owner_run_id})" if finding.owner_run_id else ""))
+        if finding.error:
+            click.secho(f"  unreadable: {finding.error} ({finding.path})", fg="red")
+        for item in finding.operations:
+            click.echo(f"  {item.classification:<11} {item.kind:<6} {item.target_path}")
+            if item.classification != recovery.OP_APPLIED:
+                click.echo(f"      before {_runs_state(item.expected_before)} | "
+                           f"after {_runs_state(item.expected_after)} | "
+                           f"now {_runs_state(item.current)}")
+        if finding.outcome == recovery.OUTCOME_PARTIAL:
+            if finding.roll_forward_refusal is None:
+                click.secho("  --complete-partial can finish this commit", fg="yellow")
+            else:
+                click.secho(f"  cannot be completed: {finding.roll_forward_refusal}", fg="red")
+        if finding.leftover_staged_files:
+            click.echo(f"  {len(finding.leftover_staged_files)} staged temp file(s) to remove")
+    for path, reason in assessment.unreadable_records:
+        click.secho(f"\nUnreadable run record {path}: {reason}", fg="red")
+        click.echo("  Kriya never edits or deletes it. Once you have confirmed it is not the only "
+                   "evidence of an interrupted commit (no commit above belongs to it and the "
+                   "workspace files are as you expect), move it out of .kriya/control/runs/.")
+    if assessment.evidence_error:
+        click.secho(f"\nCommit evidence could not be listed: {assessment.evidence_error}", fg="red")
+
+    advice = {
+        recovery.STATUS_CLEAN: "Nothing needs recovery.",
+        recovery.STATUS_RECOVERY_AVAILABLE: "Run `kriya runs recover` to settle what the evidence proves.",
+        recovery.STATUS_COMPLETE_PARTIAL_REQUIRED: (
+            "A commit-eligible candidate was partially applied. `kriya runs recover "
+            "--complete-partial` finishes it from its staged files; there is no rollback."
+        ),
+        recovery.STATUS_MANUAL_ACTION_REQUIRED: (
+            "Some state cannot be settled automatically. Restore each listed file to its "
+            "`before` or `after` state (or inspect the unreadable files), then run "
+            "`kriya runs status` again. `kriya runs recover` still settles everything else."
+        ),
+    }.get(assessment.status)
+    if advice:
+        click.echo(f"\n{advice}")
+
+
+def _runs_workspace_option(function):
+    return click.option(
+        "--workspace", "workspace", default=".", show_default=True,
+        type=click.Path(exists=True, file_okay=False),
+        help="Workspace whose runs to inspect.",
+    )(function)
+
+
+@runs_group.command(name="status")
+@_runs_workspace_option
+@click.option("--json", "as_json", is_flag=True, help="Print the assessment as JSON.")
+def runs_status(workspace: str, as_json: bool) -> None:
+    """Read-only: classify crashed runs and interrupted commits from their
+    durable evidence and the files on disk, and say what `recover` would do.
+    Never takes the lock or writes anything; reports RUN_ACTIVE while a live
+    run holds the workspace."""
+    from kriya.control.recovery import STATUS_CLEAN, STATUS_RUN_ACTIVE, assess_recovery
+
+    assessment = assess_recovery(workspace)
+    if as_json:
+        click.echo(json.dumps(assessment.to_dict(), indent=2, sort_keys=True))
+    else:
+        _print_recovery_assessment(assessment)
+    if assessment.status == STATUS_RUN_ACTIVE:
+        sys.exit(_RUNS_EXIT_RUN_ACTIVE)
+    if assessment.status != STATUS_CLEAN:
+        sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
+
+
+@runs_group.command(name="recover")
+@_runs_workspace_option
+@click.option("--complete-partial", is_flag=True,
+              help="Finish a partially applied commit from its staged candidate files. Only "
+                   "allowed when the run's record proves the exact candidate was commit-eligible.")
+@click.option("--json", "as_json", is_flag=True, help="Print the report as JSON.")
+def runs_recover(workspace: str, complete_partial: bool, as_json: bool) -> None:
+    """Settle crashed runs and interrupted commits from what the evidence
+    proves (RunRecord -> RECOVERED, never SUCCESS). Takes the workspace lock.
+    Source files change only with --complete-partial; there is no rollback."""
+    from kriya.control.recovery import STATUS_CLEAN, recover_workspace
+
+    try:
+        report = recover_workspace(workspace, complete_partial=complete_partial)
+    except WorkspaceLockHeldError as error:
+        click.secho(f"RUN_ACTIVE: {error}", fg="red", err=True)
+        sys.exit(_RUNS_EXIT_RUN_ACTIVE)
+    if as_json:
+        click.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+    else:
+        for item in report.settled_evidence:
+            click.echo(f"Settled commit {item['transaction_id']}: {item['outcome']} -> {item['state']}")
+        for path in report.rolled_forward:
+            click.echo(f"Completed: {path}")
+        for item in report.recovered_runs:
+            click.echo(f"Recovered run {item['run_id']} ({item['prior_lifecycle_state']}): "
+                       f"commit_result={item['commit_result']}, terminal_status={item['terminal_status']}")
+        if report.removed_staged_files:
+            click.echo(f"Removed {len(report.removed_staged_files)} staged temp file(s).")
+        for item in report.contract_transitions:
+            click.echo(f"Contract registry transition {item['transaction_id']}: {item['outcome']}")
+        for error in report.errors:
+            click.secho(f"Error: {error}", fg="red")
+        click.echo("")
+        _print_recovery_assessment(report.after)
+    if report.errors or report.after.status != STATUS_CLEAN:
+        sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
+
+
+@runs_group.command(name="prune")
+@_runs_workspace_option
+@click.option("--keep", type=click.IntRange(min=0), default=None,
+              help="Terminal run records to keep (default: the retention default).")
+@click.option("--dry-run", is_flag=True, help="Report what would be pruned without deleting.")
+@click.option("--json", "as_json", is_flag=True, help="Print the report as JSON.")
+def runs_prune(workspace: str, keep: Optional[int], dry_run: bool, as_json: bool) -> None:
+    """Reference-safe retention under the workspace lock: never removes a
+    non-terminal record, one whose commit state is unknown, one a checkpoint
+    or the control state references, or commit evidence a kept record needs;
+    nothing at all while any record is unreadable."""
+    from kriya.control.recovery import canonical_workspace
+    from kriya.control.retention import DEFAULT_KEEP_TERMINAL_RUNS, prune_run_state
+    from kriya.control.run_ownership import acquire_run_lock
+
+    canonical = canonical_workspace(workspace)
+    try:
+        with acquire_run_lock(canonical, run_id=f"prune-{uuid.uuid4().hex[:12]}"):
+            report = prune_run_state(
+                canonical, dry_run=dry_run,
+                keep_terminal_runs=DEFAULT_KEEP_TERMINAL_RUNS if keep is None else keep,
+            )
+    except WorkspaceLockHeldError as error:
+        click.secho(f"RUN_ACTIVE: {error}", fg="red", err=True)
+        sys.exit(_RUNS_EXIT_RUN_ACTIVE)
+    if as_json:
+        click.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+    else:
+        verb = "Would prune" if dry_run else "Pruned"
+        click.echo(f"{verb} {len(report.pruned_run_ids)} run record(s) and "
+                   f"{len(report.pruned_evidence_ids)} commit evidence file(s); "
+                   f"{len(report.protected_run_ids)} run record(s) kept.")
+        if report.skipped_reason:
+            click.secho(f"Skipped: {report.skipped_reason}", fg="red")
+    if report.skipped_reason:
+        sys.exit(_RUNS_EXIT_ACTION_REQUIRED)
+
+
+@main.group(name="proposal")
+def proposal_group() -> None:
+    """A3-P1: inspect/approve/reject persisted advisory proposals
+    (.kriya/proposals/, created via `kriya review <file> --propose <id> --save`).
+    Read-only + explicit approval-state changes only - never invokes generation,
+    never writes to the target repository, never applies any change."""
+    pass
+
+@proposal_group.command(name="show")
+@click.argument('proposal_id')
+@click.pass_context
+def proposal_show(ctx: click.Context, proposal_id: str) -> None:
+    """Display a persisted proposal's state, digest, and current binding/staleness status."""
+    from kriya.workflow.proposal_store import ProposalStoreError, load_proposal, verify_persisted_proposal
+
+    workspace_root = os.getcwd()
+    try:
+        persisted = load_proposal(proposal_id, workspace_root)
+    except ProposalStoreError as e:
+        click.secho(f"Cannot show proposal: [{e.reason_code}] {e.message}", fg="red", err=True)
+        sys.exit(1)
+
+    result = verify_persisted_proposal(persisted, workspace_root)
+    p = persisted.proposal
+    click.secho(f"Proposal ID: {persisted.proposal_id}", bold=True)
+    click.echo(f"State: {persisted.approval_state}")
+    click.echo(f"Authority: {p.authority}")
+    click.echo(f"Target: {p.target_file}")
+    click.echo(f"Member: {p.target_member}")
+    click.echo(f"Proposed Change: {p.proposed_change}")
+    click.echo("Must Preserve:")
+    for item in p.must_preserve:
+        click.echo(f"  - {item}")
+    click.echo("Verification:")
+    for item in p.verification:
+        click.echo(f"  - {item}")
+    click.echo(f"Proposal digest: {persisted.proposal_digest[:16]}...")
+    if persisted.approved_digest:
+        click.echo(f"Approved digest: {persisted.approved_digest[:16]}...")
+    click.echo(f"Created: {persisted.created_at}")
+    click.echo(f"Updated: {persisted.updated_at}")
+
+    if result.tampered:
+        click.secho("\nINTEGRITY: TAMPERED - stored digest does not match recomputed content.", fg="red", bold=True)
+    elif not result.ok:
+        click.secho(f"\nINTEGRITY: INVALID - {'; '.join(result.details)}", fg="red", bold=True)
+    elif persisted.approval_state == "APPROVED" and not result.approved_and_valid:
+        click.secho(f"\nINTEGRITY: APPROVED BUT STALE - {'; '.join(result.details)}", fg="yellow", bold=True)
+    elif persisted.approval_state == "APPROVED":
+        click.secho("\nINTEGRITY: APPROVED AND CURRENTLY VALID", fg="green", bold=True)
+    else:
+        click.secho("\nINTEGRITY: valid (untampered, repository/evidence still match)", fg="green")
+
+@proposal_group.command(name="approve")
+@click.argument('proposal_id')
+@click.pass_context
+def proposal_approve(ctx: click.Context, proposal_id: str) -> None:
+    """Explicitly approve a PENDING_APPROVAL proposal - requires the exact
+    persisted artifact to still be untampered and currently valid against
+    the real repository/evidence. Never re-runs review or rebuilds the
+    proposal. Never invokes generation."""
+    from kriya.workflow.proposal_store import ProposalStoreError, approve_proposal
+
+    workspace_root = os.getcwd()
+    try:
+        result = approve_proposal(proposal_id, workspace_root)
+    except ProposalStoreError as e:
+        click.secho(f"Cannot approve proposal: [{e.reason_code}] {e.message}", fg="red", err=True)
+        sys.exit(1)
+
+    if not result.ok:
+        click.secho(f"Approval refused: {', '.join(result.reason_codes)}", fg="red", err=True)
+        for d in result.details:
+            click.echo(f"  - {d}", err=True)
+        sys.exit(1)
+
+    click.secho(f"Approved: {proposal_id} (digest {result.persisted.approved_digest[:16]}...)", fg="green", bold=True)
+    click.echo("This records approval only - no source files were modified and no generation was invoked.")
+
+@proposal_group.command(name="reject")
+@click.argument('proposal_id')
+@click.pass_context
+def proposal_reject(ctx: click.Context, proposal_id: str) -> None:
+    """Mark a proposal REJECTED - permanent; a rejected proposal can never
+    be approved (create a new proposal instead)."""
+    from kriya.workflow.proposal_store import ProposalStoreError, reject_proposal
+
+    workspace_root = os.getcwd()
+    try:
+        persisted = reject_proposal(proposal_id, workspace_root)
+    except ProposalStoreError as e:
+        click.secho(f"Cannot reject proposal: [{e.reason_code}] {e.message}", fg="red", err=True)
+        sys.exit(1)
+    click.secho(f"Rejected: {persisted.proposal_id}", fg="yellow")
+
+@proposal_group.command(name="execute")
+@click.argument('proposal_id')
+@click.option('--yes', '-y', is_flag=True, default=False,
+              help="Auto-approve the generation workflow's own write-approval gate "
+              "(and any knowledge-guard risk it surfaces) once this ALREADY-APPROVED "
+              "proposal is confirmed still valid - does not and cannot approve the "
+              "proposal itself, that only ever happens via `kriya proposal approve`.")
+@click.pass_context
+def proposal_execute(ctx: click.Context, proposal_id: str, yes: bool) -> None:
+    """A3-P2: promote an APPROVED, currently-valid persisted proposal into a real
+    generation run via Kriya's existing generation workflow.
+
+    Refuses BEFORE invoking any generation if the proposal is PENDING_APPROVAL,
+    REJECTED, tampered, or has drifted stale (target/evidence file changed, wrong
+    workspace) since approval - `-y` here can never substitute for `kriya proposal
+    approve <id>`, it only controls the generation run's own internal write-approval
+    prompt once promotion has already been validated."""
+    from kriya.workflow.proposal_promotion import ProposalPromotionError, execute_approved_proposal
+    from kriya.workflow.proposal_store import ProposalStoreError
+
+    cfg: AppConfig = _workflow_config(ctx.obj['config'])
+    workspace_root = os.getcwd()
+
+    llm = LLMClient(cfg)
+    kernel = Kernel(config=cfg)
+    we = WorkflowEngine(kernel, llm)
+
+    def on_stream(step_name: str, token: str) -> None:
+        click.echo(token, nl=False)
+        sys.stdout.flush()
+
+    def on_approval(files: List[Dict[str, str]], reason: str) -> bool:
+        if yes:
+            click.secho(f"\n[Auto-Approving] Reason: {reason}", bold=True, fg="green")
+            return True
+        click.secho(f"\n[Escalation Review Needed] Reason: {reason}", bold=True, fg="yellow")
+        for f in files:
+            filepath = f.get("filepath", "")
+            content = f.get("content", "")
+            click.secho(f"\n--- Proposed changes for: {filepath} ---", bold=True, fg="cyan")
+            lines = content.splitlines()
+            click.echo("\n".join(lines[:15]))
+            if len(lines) > 15:
+                click.echo(f"... and {len(lines) - 15} more lines.")
+        return click.confirm("\nDo you approve applying these changes to the codebase?")
+
+    async def run_execution() -> Dict[str, Any]:
+        await kernel.start()
+        try:
+            return await execute_approved_proposal(
+                proposal_id, workspace_root, we,
+                knowledge_risk_confirmed=yes,
+                stream_callback=on_stream,
+                approval_callback=on_approval,
+            )
+        finally:
+            await kernel.stop()
+
+    try:
+        with begin_mutating_run(workspace_root):
+            res = asyncio.run(_closing(llm, run_execution()))
+    except UncertainWorkspaceStateError as e:
+        click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red", err=True)
+        sys.exit(1)
+    except WorkspaceLockHeldError as e:
+        click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red", err=True)
+        sys.exit(1)
+    except (ProposalPromotionError, ProposalStoreError) as e:
+        reason_code = getattr(e, "reason_code", None) or ", ".join(getattr(e, "reason_codes", ()))
+        click.secho(f"\nCannot execute proposal '{proposal_id}': [{reason_code}] {e}", fg="red", err=True)
+        sys.exit(1)
+
+    click.secho("\n=== Proposal Execution Completed ===", bold=True)
+    if res.get("status") == "knowledge_gap":
+        click.secho(
+            "Blocked by a knowledge-guard gap - re-run with -y to accept the risk "
+            "for this promoted goal (see `kriya generate --knowledge-policy` for the "
+            "equivalent manual-goal behavior).", fg="yellow",
+        )
+        sys.exit(3)
+    click.echo(json.dumps(res, indent=2, default=str))
+    sys.exit(0 if res.get("quality_gates_passed") else 1)
 
 @main.command(name="ask")
 @click.argument('question')
@@ -1713,35 +4158,23 @@ def ask(ctx: click.Context, question: str) -> None:
         sys.stdout.flush()
         
     async def run_query():
-        rag_context = ""
-        index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
-        if os.path.exists(index_path):
-            try:
-                from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
-                embed_client = OllamaEmbeddingClient(
-                    base_url=cfg.embedding.base_url,
-                    model=cfg.embedding.model
-                )
-                vector_store = LocalVectorStore(index_path)
-                query_emb = await embed_client.get_embedding(question, is_query=True)
-                matches = vector_store.query(query_emb, top_k=5)
-                good_matches = [m for m in matches if m["score"] > 0.4]
-                if good_matches:
-                    rag_context = "\n".join([f"[Source: {m['filepath']}]\n{m['text']}" for m in good_matches])
-                vector_store.close()
-            except Exception as e:
-                logger.debug(f"Failed to query RAG database for ask command: {e}")
+        from kriya.memory.learned_knowledge import retrieve_learned_references
+        from kriya.workflow.untrusted_context import fence_untrusted_reference
 
+        retrieval = await retrieve_learned_references(cfg, question)
+        for note in retrieval.warnings():
+            click.secho(note, fg="yellow", err=True)
         user_prompt = (
             f"=== Repository Context ===\n{repo_context}\n\n"
             f"=== Key Files Context ===\n{key_files_context}\n\n"
-            f"=== Web Resources Context ===\n{rag_context}\n\n"
             f"User Question: {question}"
+            # Learned knowledge: reference data, fenced after the question.
+            + fence_untrusted_reference(retrieval.render())
         )
         return await llm.complete(system_prompt, user_prompt, stream_callback=on_stream)
         
     try:
-        asyncio.run(run_query())
+        asyncio.run(_closing(llm, run_query()))
         click.echo()
     except Exception as e:
         click.secho(f"Failed to fetch answer: {e}", fg="red")
@@ -1760,17 +4193,16 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
         
     cfg: AppConfig = ctx.obj['config']
     
-    from kriya.memory.vector import LocalVectorStore, OllamaEmbeddingClient
+    from kriya.memory.embedding import EmbeddingError, configured_client
+    from kriya.memory.learned_knowledge import learned_knowledge_db_path
+    from kriya.memory.vector import LocalVectorStore
     from kriya.tools.web import fetch_url_text
-    
-    embed_client = OllamaEmbeddingClient(
-        base_url=cfg.embedding.base_url,
-        model=cfg.embedding.model
-    )
-    
+
+    embed_client = configured_client(cfg)
+    embedding_failed_sources: List[str] = []
+
     os.makedirs(cfg.paths.memory, exist_ok=True)
-    index_path = os.path.join(cfg.paths.memory, "web_knowledge.db")
-    vector_store = LocalVectorStore(index_path)
+    vector_store = LocalVectorStore(learned_knowledge_db_path(cfg))
     
     async def index_text_content(source_name: str, content: str):
         chunks = []
@@ -1782,26 +4214,17 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
             start += chunk_size - overlap
             
         click.echo(f"Generating embeddings for {len(chunks)} chunks of {source_name}...")
-        embeddings = await embed_client.get_embeddings(chunks)
-
-        # get_embeddings() silently substitutes an all-zero "dummy" vector on any
-        # failure (embedding server unreachable, malformed response) to degrade
-        # gracefully - reasonable for a caller like ask's RAG lookup, where a
-        # dummy query vector is naturally filtered out by the similarity-score
-        # threshold. But here that dummy vector gets WRITTEN permanently into the
-        # index - confirmed live as a real bug: the content becomes silently
-        # unsearchable forever (a zero vector never ranks meaningfully against a
-        # real query) while still being reported as "Successfully indexed" with
-        # no indication anything went wrong.
-        failed_count = sum(1 for emb in embeddings if not any(v != 0.0 for v in emb))
-        if failed_count:
+        try:
+            embeddings = await embed_client.get_embeddings(chunks)
+        except EmbeddingError as error:
+            # EMBEDDING-CONTRACT-001: nothing is written for a source whose
+            # embeddings failed - never a placeholder vector.
             click.secho(
-                f"Warning: embedding generation failed for {failed_count}/{len(chunks)} chunk(s) of "
-                f"{source_name} (embedding server unreachable or returned an error). Those chunks "
-                f"were still indexed but will NOT be findable via similarity search. Check your "
-                f"embedding server connection and re-run this 'kriya learn' command to fix it.",
-                fg="yellow",
+                f"Error: embedding failed for {source_name} ({error}); nothing was indexed for it. "
+                "Check the embedding server and re-run this 'kriya learn' command.", fg="red",
             )
+            embedding_failed_sources.append(source_name)
+            return False
 
         # Clear existing learned chunks matching source_name
         vector_store.remove_learned_knowledge(source_name)
@@ -1887,10 +4310,14 @@ def learn(ctx: click.Context, url: List[str], file: List[str], text: List[str]) 
         
     try:
         asyncio.run(process_sources())
-        click.secho("Local knowledge base updated successfully.", bold=True, fg="green")
     except Exception as e:
         click.secho(f"Learning process failed: {e}", fg="red")
         sys.exit(1)
+    if embedding_failed_sources:
+        click.secho(f"Learning incomplete: embedding failed for {len(embedding_failed_sources)} source(s): "
+                    f"{', '.join(embedding_failed_sources)}.", bold=True, fg="red")
+        sys.exit(1)
+    click.secho("Local knowledge base updated successfully.", bold=True, fg="green")
 
 @main.command(name="fix")
 @click.option('--error', '-e', help="Compilation or test error log string. If omitted, reads from stdin.")
@@ -1913,7 +4340,7 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
         click.secho("Error: Non-TTY (piped) input detected. You must specify the '--yes' (-y) flag to auto-approve patch application.", fg="red")
         sys.exit(1)
             
-    cfg: AppConfig = ctx.obj['config']
+    cfg: AppConfig = _workflow_config(ctx.obj['config'], resume=resume, resume_id=resume_id, workspace=workspace)
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     we = WorkflowEngine(kernel, llm)
@@ -1922,6 +4349,11 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
     
     async def run_fix():
         def step_cb(step_name, content):
+            # Review has a dedicated full-report surface below, or was already
+            # shown in the approval context. A truncated preview would be a
+            # second, less useful presentation of the same artifact.
+            if step_name == "Review":
+                return
             click.secho(f"\n[{step_name.upper()}]", bold=True, fg="cyan")
             click.echo(content[:300] + "..." if len(content) > 300 else content)
             
@@ -1949,7 +4381,9 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
             approval_callback=approval_cb,
             error_context=error,
             resume=resume,
-            resume_id=resume_id
+            resume_id=resume_id,
+            # PRD-020: the goal is Kriya's placeholder, not the user's words.
+            requirements_from_goal=False,
         )
         if res.get("toolchain_warning"):
             click.secho(f"\n[TOOLCHAIN PREFLIGHT WARNING] {res['toolchain_warning']}", fg="yellow")
@@ -1966,16 +4400,91 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                 click.secho(f"\n[SKILL STALENESS] {warning}", fg="yellow")
         if res["quality_gates_passed"]:
             click.secho("\n[SUCCESS] Diagnostic repair completed successfully! Compiled and verified.", fg="green", bold=True)
+        elif res.get("final_review_refusal"):
+            _echo_final_review_refusal(res)
         else:
             click.secho("\n[FAILURE] Repair attempts completed but compilation/tests still fail.", fg="red", bold=True)
             if res.get("failure_category"):
                 click.echo(f"Failure category: {res['failure_category']}")
-            if res.get("environment_failure"):
+            # PRV-17 preflight correction (2026-09-03): see the matching guard
+            # above in this file's other quality-gates-failure branch - an
+            # unauthorized/unrecoverable generation target reuses environment_
+            # failure purely as its STOP mechanism, not as a real toolchain
+            # problem, and must not print this Java/Maven-specific advice.
+            if res.get("environment_failure") and res.get("failure_category") not in (
+                "unauthorized_generation_target", "candidate_independent_deterministic_failure",
+                "generation_budget_exhausted", "containment_setup_failed", "regression_unattributed",
+                "fallback_model_incompatible", "context_edit_protocol_unsatisfiable", "provider_contract_violation",
+                "requirements_unresolved", "contract_registry_blocked",
+                "static_analysis_blocked", "static_analysis_unknown", "static_analysis_unavailable",
+                "workspace_commit_failed",
+            ):
                 click.secho(
                     f"\n[ENVIRONMENT/TOOLCHAIN ISSUE] {res['environment_failure']}\n"
                     "Kriya stopped retrying early rather than burning its retry budget "
                     "re-generating code that could never fix this - run `kriya doctor` "
                     "to check your Java/Maven toolchain resolution.",
+                    fg="yellow", bold=True
+                )
+            # VAL-001 G1-DEVINV2 (2026-09-20): see the matching branch above
+            # in this file's other quality-gates-failure branch.
+            if res.get("failure_category") == "regression_unattributed":
+                click.secho(
+                    f"\n[REGRESSION UNATTRIBUTED] {res['environment_failure']}\n"
+                    "Kriya stopped retrying early: the full-regression suite's aggregate "
+                    "outcome changed relative to the captured PRE-mutation baseline, but "
+                    "no specific test could be confirmed as caused by this candidate - "
+                    "every per-test failure either matches the baseline exactly, or was "
+                    "independently replayed (in isolation, against both a pristine and a "
+                    "candidate copy) and could not be confirmed either way - an "
+                    "indeterminate/non-reproducible result is never treated as a known "
+                    "pre-existing failure, only as unattributable. "
+                    "Investigate the full-regression output directly; further Developer "
+                    "regeneration cannot resolve this.",
+                    fg="yellow", bold=True
+                )
+            # PRV-17 (2026-09-08, P7 efficiency finding): see the matching
+            # branch above in this file's other quality-gates-failure branch.
+            if res.get("failure_category") == "candidate_independent_deterministic_failure":
+                click.secho(
+                    f"\n[DETERMINISTIC VALIDATOR DEFECT] {res['environment_failure']}\n"
+                    "Kriya stopped retrying early: replaying the same deterministic check "
+                    "against an isolated copy of the pre-candidate baseline reproduced the "
+                    "identical failure, proving no further Developer regeneration could "
+                    "have fixed it - the defect is in the validator or build configuration "
+                    "itself, not the generated code.",
+                    fg="yellow", bold=True
+                )
+            # Demo-01 Finding 4 (2026-09-11): see the matching branch above
+            # in this file's other quality-gates-failure branch.
+            if res.get("failure_category") == "no_progress":
+                click.secho(no_progress_stop_message(res.get("retry_progress")), fg="yellow")
+            if res.get("failure_category") == "generation_budget_exhausted":
+                click.secho(
+                    f"\n[GENERATION BUDGET EXHAUSTED] {res['environment_failure']}\n"
+                    "Kriya stopped retrying because the configured generation time budget "
+                    "ran out before another repair attempt could safely begin - this is a "
+                    "terminal stop condition, not an environment/toolchain problem; running "
+                    "`kriya doctor` will not help. Increase autonomy."
+                    "generation_time_budget_seconds if this goal genuinely needs more time, "
+                    "or reduce the plan's file scope. Any earlier, still-unresolved "
+                    "engineering failure from a prior attempt (if one occurred) remains in "
+                    "this run's own persisted gate_outcomes/trace record, distinct from this "
+                    "stop reason.",
+                    fg="yellow", bold=True
+                )
+            # SEC-001 (2026-09-11): see the matching branch above in this
+            # file's other quality-gates-failure branch.
+            _print_workspace_commit_failure(res)
+            if res.get("failure_category") == "containment_setup_failed":
+                click.secho(
+                    f"\n[CONTAINMENT SETUP FAILED] {res['environment_failure']}\n"
+                    "Kriya stopped retrying because a required execution-containment "
+                    "backend could not be established for a command that needed one - "
+                    "this is a configuration/environment problem with the containment "
+                    "backend itself (not the generated code), and `kriya doctor` will not "
+                    "help. Check autonomy.containment_backend and the backend's own "
+                    "availability.",
                     fg="yellow", bold=True
                 )
             if res.get("run_id"):
@@ -1985,23 +4494,47 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
                     "without redoing Plan/Design.",
                     fg="yellow"
                 )
-        # Stage 6 SME review, Finding 5 (2026-08-15): step_cb above truncates EVERY
-        # step's content to 300 chars, including the Reviewer's full report - unlike
-        # `generate`, which reprints res.get("review") in full at the end under its own
-        # header, `fix` never did, so the mandatory "How to Run the Application"
-        # section and most substantive findings were lost after a 300-char preview
-        # scrolled by mid-run with no second chance to see them. Same reprint `generate`
-        # already has, same guard: gated on res.get("files") too, not just
+        # Stage 6 SME review, Finding 5 (2026-08-15): `fix` historically truncated
+        # every step's content to 300 chars, including the Reviewer's full report,
+        # and never printed the complete report. Review previews are now suppressed
+        # above, so this block is the one full-report owner when an approval context
+        # did not already present it. Same guard as `generate`: gated on
+        # res.get("files") too, not just
         # res.get("review") alone - independent review caught that a human-rejected
         # approval-gate run sets "review" to a one-line rejection notice ("Rejected by
         # user during approval gate review.") with "files": [] - an unguarded reprint
         # would misleadingly label that notice as a "Reviewer Report".
-        if res.get("files") and res.get("review"):
-            click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+        if (
+            res.get("files") and res.get("review")
+            and not res.get("review_included_in_approval")
+            # PROMPT-BUDGET-FIT-001C: no review exists; the refusal was
+            # already reported, and this candidate was not rejected.
+            and not res.get("final_review_refusal")
+        ):
+            # Demo-01 Run A finding (2026-09-11) - same fix as `generate`
+            # above: header must reflect accepted vs rejected disposition,
+            # not just presence of a review. `fix` shares run_generation_
+            # workflow() with `generate`, so ReviewerAgent.rejected_candidate_
+            # system_prompt is already applied upstream for this case too.
+            _print_static_analysis_banner(res)
+            if res.get("quality_gates_passed"):
+                click.secho("\n=== Reviewer Report & Run Instructions ===", bold=True, fg="cyan")
+            else:
+                click.secho(
+                    "\n=== Rejected Candidate Review (diagnostic only - NOT applied to workspace) ===",
+                    bold=True, fg="red",
+                )
             click.echo(res.get("review"))
 
     try:
-        asyncio.run(run_fix())
+        with begin_mutating_run(os.path.abspath(workspace)):
+            asyncio.run(_closing(llm, run_fix()))
+    except UncertainWorkspaceStateError as e:
+        click.secho(f"\n[Recovery Required] {e}", bold=True, fg="red")
+        sys.exit(1)
+    except WorkspaceLockHeldError as e:
+        click.secho(f"\n[Workspace Locked] {e}", bold=True, fg="red")
+        sys.exit(1)
     except Exception as e:
         click.secho(f"Error executing fix workflow: {e}", fg="red")
         click.secho(
@@ -2014,20 +4547,63 @@ def fix(ctx: click.Context, error: Optional[str], workspace: str, yes: bool, res
 @main.command(name="traces")
 @click.option("-n", "--limit", type=int, default=20, show_default=True, help="Maximum number of most-recent runs to show. Use --all to show every run.")
 @click.option("--all", "show_all", is_flag=True, help="Show all recorded runs, ignoring --limit.")
+@click.option("--migrate-legacy", is_flag=True,
+              help="Copy a pre-state-directory traces.db to the canonical state location. Refused if the "
+              "canonical database already exists (histories are never merged); the source is kept.")
+@click.option("--legacy-path", type=click.Path(), default=None,
+              help="With --migrate-legacy: the exact traces.db to copy (absolute). Without it, only the "
+              "historical default <install dir>/logs/traces.db is considered.")
 @click.pass_context
-def traces(ctx: click.Context, limit: int, show_all: bool) -> None:
+def traces(ctx: click.Context, limit: int, show_all: bool, migrate_legacy: bool, legacy_path: Optional[str]) -> None:
     """Show persistent run trace logs and metrics of past runs."""
+    from kriya.core.state_paths import (
+        LegacyTraceMigrationError,
+        StateDirectoryError,
+        legacy_trace_db_path,
+        migrate_legacy_trace_db,
+    )
+
     cfg: AppConfig = ctx.obj['config']
-    db_path = os.path.join(cfg.paths.logs, "traces.db")
-    if not os.path.exists(db_path):
+    if legacy_path is not None and not migrate_legacy:
+        raise click.UsageError("--legacy-path is only used with --migrate-legacy")
+    try:
+        if migrate_legacy:
+            try:
+                migration = migrate_legacy_trace_db(cfg, legacy_path)
+            except LegacyTraceMigrationError as error:
+                click.secho(f"Migration refused: {error}", fg="red", err=True)
+                sys.exit(1)
+            click.echo(f"Copied {migration.runs} run(s) from {migration.source} to {migration.target}. "
+                       "The legacy file was left in place.")
+            return
+        db_path = trace_db_path(cfg)
+        legacy = legacy_trace_db_path(cfg)
+    except StateDirectoryError as error:
+        click.secho(f"Error: {error}", fg="red", err=True)
+        sys.exit(1)
+
+    def _legacy_notice() -> None:
+        if legacy is not None:
+            click.secho(
+                f"Note: an older trace database exists at {legacy} (run history now lives in {db_path}). "
+                "Run `kriya traces --migrate-legacy` to copy it (never merged or deleted).", fg="yellow", err=True,
+            )
+
+    if not os.path.exists(db_path):  # read-only: never creates the database
         click.echo("No run traces recorded yet.")
+        _legacy_notice()
         return
 
     from kriya.core.db import get_connection
     conn = get_connection(db_path)
     cursor = conn.cursor()
     total = cursor.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
-    query = "SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified, failure_category FROM runs ORDER BY timestamp DESC"
+    if total == 0:
+        _legacy_notice()
+    query = (
+        "SELECT run_id, timestamp, goal, duration_sec, attempts, status, files_modified, "
+        "failure_category, failure_report FROM runs ORDER BY timestamp DESC"
+    )
     if not show_all:
         query += " LIMIT ?"
         cursor.execute(query, (limit,))
@@ -2040,14 +4616,33 @@ def traces(ctx: click.Context, limit: int, show_all: bool) -> None:
         click.echo("No run traces recorded yet.")
         return
 
-    click.secho(f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'CATEGORY':<22} | {'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}", bold=True)
-    click.echo("-" * 120)
-    for _r_id, ts, goal, dur, att, status, _files, category in rows:
+    # MA7.6 (kriya/workflow/failure_reporting.py) - KIND is additive to,
+    # never a replacement for, CATEGORY: CATEGORY answers "why did the
+    # retry loop stop" (a stable value tests/test_traces_command.py
+    # already asserts on literally), KIND answers "what kind of thing
+    # kept failing" (derived from the real Failure.type of every failed
+    # attempt) - a NULL/old-row failure_report degrades to a blank KIND,
+    # not an error.
+    click.secho(
+        f"{'TIMESTAMP':<20} | {'STATUS':<10} | {'CATEGORY':<22} | {'KIND':<22} | "
+        f"{'ATTEMPTS':<8} | {'DURATION':<10} | {'GOAL':<40}",
+        bold=True,
+    )
+    click.echo("-" * 145)
+    for _r_id, ts, goal, dur, att, status, _files, category, failure_report_json in rows:
         dur_str = f"{dur:.2f}s"
         status_color = "green" if status.lower() == "success" else "red"
         status_styled = click.style(f"{status:<10}", fg=status_color)
         category_str = category or ""
-        click.echo(f"{ts:<20} | {status_styled} | {category_str:<22} | {att:<8} | {dur_str:<10} | {goal[:40]:<40}")
+        try:
+            entries = json.loads(failure_report_json) if failure_report_json else []
+        except (TypeError, ValueError):
+            entries = []
+        kind_str = dominant_category(entries) or ""
+        click.echo(
+            f"{ts:<20} | {status_styled} | {category_str:<22} | {kind_str:<22} | "
+            f"{att:<8} | {dur_str:<10} | {goal[:40]:<40}"
+        )
 
     if not show_all and total > len(rows):
         click.echo(f"\nShowing {len(rows)} of {total} recorded runs. Use -n/--limit or --all to see more.")

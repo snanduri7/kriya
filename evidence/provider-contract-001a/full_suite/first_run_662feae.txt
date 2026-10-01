@@ -1,0 +1,2 @@
+2 failed, 7868 passed, 14 warnings in 504.56s (0:08:24)
+exit=1 wall=506s

@@ -1,0 +1,52 @@
+=== Runtime prerequisite: mvn clean compile (current source): PASSED ===
+
+=== Step 1/1: mvn -e exec:java -Dexec.mainClass=com.example.IgniteDemoApp ===
+[INFO] Error stacktraces are turned on.
+[INFO] Scanning for projects...
+[WARNING] The POM for org.apache.maven.plugins:maven-jar-plugin:jar:3.5.0 is missing, no dependency information available
+[WARNING] Failed to retrieve plugin descriptor for org.apache.maven.plugins:maven-jar-plugin:3.5.0: Plugin org.apache.maven.plugins:maven-jar-plugin:3.5.0 or one of its dependencies could not be resolved:
+	Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact org.apache.maven.plugins:maven-jar-plugin:jar:3.5.0 has not been downloaded from it before.
+
+[WARNING] The POM for org.apache.maven.plugins:maven-surefire-plugin:jar:3.5.4 is missing, no dependency information available
+[WARNING] Failed to retrieve plugin descriptor for org.apache.maven.plugins:maven-surefire-plugin:3.5.4: Plugin org.apache.maven.plugins:maven-surefire-plugin:3.5.4 or one of its dependencies could not be resolved:
+	Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact org.apache.maven.plugins:maven-surefire-plugin:jar:3.5.4 has not been downloaded from it before.
+
+[INFO] 
+[INFO] -------------------< com.example:ignite-spring-demo >-------------------
+[INFO] Building ignite-spring-demo 1.0-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[WARNING] The POM for org.apache.maven.plugins:maven-jar-plugin:jar:3.5.0 is missing, no dependency information available
+[WARNING] Failed to retrieve plugin descriptor for org.apache.maven.plugins:maven-jar-plugin:3.5.0: Plugin org.apache.maven.plugins:maven-jar-plugin:3.5.0 or one of its dependencies could not be resolved:
+	Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact org.apache.maven.plugins:maven-jar-plugin:jar:3.5.0 has not been downloaded from it before.
+
+[WARNING] The POM for org.apache.maven.plugins:maven-surefire-plugin:jar:3.5.4 is missing, no dependency information available
+[WARNING] Failed to retrieve plugin descriptor for org.apache.maven.plugins:maven-surefire-plugin:3.5.4: Plugin org.apache.maven.plugins:maven-surefire-plugin:3.5.4 or one of its dependencies could not be resolved:
+	Cannot access central (https://repo.maven.apache.org/maven2) in offline mode and the artifact org.apache.maven.plugins:maven-surefire-plugin:jar:3.5.4 has not been downloaded from it before.
+
+[INFO] 
+[INFO] --- exec:3.6.4:java (default-cli) @ ignite-spring-demo ---
+[VERIFICATION] FAIL: Exception occurred
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  0.612 s
+[INFO] Finished at: 2026-10-01T13:06:27Z
+[INFO] ------------------------------------------------------------------------
+
+Picked up JAVA_TOOL_OPTIONS: -Duser.home=/kriya/tmp
+Error occurred: Ignite instance with provided name doesn't exist. Did you call Ignition.start(..) to start an Ignite instance? [name=null]
+class org.apache.ignite.IgniteIllegalStateException: Ignite instance with provided name doesn't exist. Did you call Ignition.start(..) to start an Ignite instance? [name=null]
+	at org.apache.ignite.internal.IgnitionEx.grid(IgnitionEx.java:1317)
+	at org.apache.ignite.internal.IgnitionEx.grid(IgnitionEx.java:1185)
+	at org.apache.ignite.Ignition.ignite(Ignition.java:466)
+	at com.example.IgniteDemoApp.main(IgniteDemoApp.java:19)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77)
+	at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
+	at org.codehaus.mojo.exec.AbstractExecJavaBase.executeMainMethod(AbstractExecJavaBase.java:402)
+	at org.codehaus.mojo.exec.ExecJavaMojo.executeMainMethod(ExecJavaMojo.java:142)
+	at org.codehaus.mojo.exec.AbstractExecJavaBase.doExecClassLoader(AbstractExecJavaBase.java:377)
+	at org.codehaus.mojo.exec.AbstractExecJavaBase.lambda$execute$0(AbstractExecJavaBase.java:287)
+	at java.base/java.lang.Thread.run(Thread.java:840)

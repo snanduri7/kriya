@@ -1,0 +1,24 @@
+  96 ResourceWarning: unclosed database in <sqlite3.Connection
+  27 ResourceWarning: unclosed file <_io.TextIOWrapper name='<tmp>'
+  10 ResourceWarning: unclosed file <_io.TextIOWrapper
+   6 ResourceWarning: unclosed transport <_SelectorSocketTransport
+   6 ResourceWarning: unclosed <socket.socket
+   6 ResourceWarning: Implicitly cleaning up <HTTPError
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/policy/trust.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/policy/telemetry.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/policy/model.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/policy/injection.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/policy/filesystem.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/policy/execution.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/policy/errors.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/policy/enforcement.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/policy/egress.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/policy/approved_sources.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/policy/__init__.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/control/workspace_identity.py'
+   3 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/control/state.py'
+   2 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/control/contracts.py'
+   2 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/kriya/control/artifacts.py'
+   1 ResourceWarning: unclosed scandir iterator <posix.ScandirIterator
+   1 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/plugins/core_tools/validation_tool.py'
+   1 ResourceWarning: unclosed file <_io.TextIOWrapper name='<repo>/plugins/core_tools/__init__.py'

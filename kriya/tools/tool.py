@@ -1,6 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Type
+from typing import Any, Dict, Type
 
 from pydantic import BaseModel, ValidationError
 
@@ -36,6 +36,14 @@ class BaseTool(ABC):
     def requires_confirmation(self) -> bool:
         """Whether callers (e.g. the CLI) should prompt for confirmation before executing this tool."""
         return False
+
+    def mutates_workspace(self, arguments: Dict[str, Any]) -> bool:
+        """PRD-006: whether this call may change files, so a direct CLI
+        invocation must own the workspace (the same run-ownership gateway
+        as ``generate``). Fails closed: every tool, including MCP tools whose
+        effects Kriya cannot know, is mutating unless it proves otherwise
+        for these exact arguments."""
+        return True
 
     async def execute(self, **kwargs: Any) -> Any:
         """Validates inputs against arguments_schema and calls _run."""

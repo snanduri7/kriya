@@ -42,8 +42,6 @@ Run: .venv/bin/pytest spikes/symbol_edit_reliability/test_symbol_client.py -v
 (Kriya's own venv - pytest/pytest-asyncio are already there, and this spike
 needs no other new Python dependency, just the `jdtls` binary on PATH.)
 """
-import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -55,7 +53,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # this dir, for symbol
                                                             # matching every other spike this session -
                                                             # spikes/ itself is not a package)
 
-from kriya.tools.lsp import find_jdtls  # noqa: E402
 from symbol_client import (  # noqa: E402
     SymbolAwareJdtlsClient,
     _base_name,
@@ -66,6 +63,8 @@ from symbol_client import (  # noqa: E402
     replace_symbol_range,
     resolve_unique_symbol,
 )
+
+from kriya.tools.lsp import find_jdtls  # noqa: E402
 
 FIXTURE_PROJECT = str(Path(__file__).resolve().parent / "project")
 CALCULATOR_JAVA = str(Path(FIXTURE_PROJECT) / "src/main/java/com/example/Calculator.java")

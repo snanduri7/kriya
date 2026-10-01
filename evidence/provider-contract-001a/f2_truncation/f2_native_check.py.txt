@@ -1,0 +1,35 @@
+"""Discriminating check for the 'dense 0.9x' anomaly: rebuild the exact
+prompts of f2_signature_probe (same seed) and send them to the native
+/api/chat with truncate:false (refuses a prompt over the window) and to /v1.
+Usage: python f2_native_check.py <model> <served window> <unit count>..."""
+import json, random, string, sys, time, urllib.error, urllib.request
+
+model, window = sys.argv[1], int(sys.argv[2])
+rng = random.Random(7)
+DENSE = " ".join("".join(rng.choice(string.ascii_letters + string.digits) for _ in range(rng.randint(3, 9)))
+                 for _ in range(400)) + "\n"
+
+
+def post(path, body):
+    req = urllib.request.Request(f"http://localhost:11434{path}", json.dumps(body).encode(),
+                                 {"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=900) as resp:
+            return resp.status, json.load(resp)
+    except urllib.error.HTTPError as error:
+        return error.code, error.read().decode()[:300]
+
+
+for count in map(int, sys.argv[3:]):
+    messages = [{"role": "system", "content": "Answer in one word."},
+                {"role": "user", "content": DENSE * count + "\nAnswer yes."}]
+    started = time.monotonic()
+    status, native = post("/api/chat", {"model": model, "messages": messages, "stream": False, "truncate": False,
+                                        "options": {"num_predict": 1, "temperature": 0}})
+    native_s = round(time.monotonic() - started, 1)
+    _, v1 = post("/v1/chat/completions", {"model": model, "messages": messages, "max_tokens": 1, "temperature": 0})
+    print(json.dumps({"units": count, "native_status": status,
+                      "native_prompt_eval_count": native.get("prompt_eval_count") if isinstance(native, dict) else None,
+                      "native_error": native if not isinstance(native, dict) else None, "native_seconds": native_s,
+                      "v1_reported": v1.get("usage", {}).get("prompt_tokens") if isinstance(v1, dict) else v1,
+                      "window": window}))

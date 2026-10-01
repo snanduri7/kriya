@@ -4,15 +4,34 @@ live 2026-08-12 (ignite_qpid_protocol), plus the language-generic
 bare-verification-marker bug found live 2026-08-13 (python_greeter), that
 motivated this module and its checks.
 """
-import os
-
+from kriya.workflow.failure_grounding import extract_implicated_files
 from kriya.workflow.static_checks import (
     BareVerificationMarkerCheck,
+    IgniteDuplicateSpringContextCheck,
     IgniteMethodMixingCheck,
     IgniteUnclosedResourceCheck,
+    MarkdownInlineCodeLeakCheck,
+    MismatchedFileTypeContentCheck,
     TestContradictsVerificationMarkerCheck,
     run_static_checks,
 )
+
+
+def test_python_markdown_leak_check_ignores_strings_docstrings_and_comments():
+    check = MarkdownInlineCodeLeakCheck()
+    assert check.check({"asgi.py": '"""Expose ``application``.\nRST :setting:`NAME`."""\napplication = object()\n'}) is None
+    assert check.check({"settings.py": "# configure `django` here\nDEBUG = False\n"}) is None
+    assert check.check({
+        "urls.py": '"""Django URL configuration.\nSee ``urlpatterns``.\n"""\nurlpatterns = []\n',
+        "wsgi.py": '"""WSGI config for project."""\napplication = None\n',
+    }) is None
+
+
+def test_python_markdown_leak_check_rejects_prose_outside_valid_syntax():
+    check = MarkdownInlineCodeLeakCheck()
+    result = check.check({"views.py": "Here is the `Django` implementation:\n```python\npass\n```\n"})
+    assert result is not None
+    assert "markdown_inline_code" not in result  # check returns evidence, caller adds the rule name
 
 _METHOD_MIXING_JAVA = """
 public class ProtocolApp {
@@ -75,6 +94,25 @@ public class ProtocolApp {
     _SPRING_BEAN_XML,
 )
 
+_DUPLICATE_SPRING_CONTEXT_JAVA = """
+public class MainApp {
+    public static void main(String[] args) {
+        try (ConfigurableApplicationContext context =
+                 new ClassPathXmlApplicationContext("applicationContext.xml")) {
+            send(context);
+        }
+    }
+
+    static void send(ConfigurableApplicationContext ignored) {
+        // This second load auto-starts the same IgniteSpringBean again.
+        try (ConfigurableApplicationContext context =
+                 new ClassPathXmlApplicationContext("applicationContext.xml")) {
+            context.getBean("qpidConnectionFactory");
+        }
+    }
+}
+"""
+
 
 def test_ignite_method_mixing_check_detects_direct_start_plus_spring_bean():
     files = {"src/ProtocolApp.java": _METHOD_MIXING_JAVA, "ignite-config.xml": _SPRING_BEAN_XML}
@@ -93,6 +131,72 @@ def test_ignite_method_mixing_check_clean_when_only_method_b_used():
 def test_ignite_method_mixing_check_clean_when_no_xml_at_all():
     files = {"src/ProtocolApp.java": _METHOD_MIXING_JAVA}
     assert IgniteMethodMixingCheck().check(files) is None
+
+
+def test_ignite_duplicate_spring_context_check_detects_live_incident_shape():
+    files = {
+        "src/MainApp.java": _DUPLICATE_SPRING_CONTEXT_JAVA,
+        "src/main/resources/applicationContext.xml": _SPRING_BEAN_XML,
+    }
+    violation = IgniteDuplicateSpringContextCheck().check(files)
+    assert violation is not None
+    assert "MainApp.java" in violation
+    assert "2 times" in violation
+    assert extract_implicated_files(violation, files) == ["src/MainApp.java"]
+
+
+def test_ignite_duplicate_spring_context_check_accepts_one_shared_context():
+    java, xml = _METHOD_B_XML_AND_JAVA
+    assert IgniteDuplicateSpringContextCheck().check({
+        "src/ProtocolApp.java": java,
+        "ignite-config.xml": xml,
+    }) is None
+
+
+def test_ignite_duplicate_spring_context_check_does_not_conflate_separate_programs():
+    files = {
+        "src/MainApp.java": (
+            'class MainApp { void run() { new ClassPathXmlApplicationContext('
+            '"applicationContext.xml"); } }'
+        ),
+        "src/test/MainAppTest.java": (
+            'class MainAppTest { void test() { new ClassPathXmlApplicationContext('
+            '"applicationContext.xml"); } }'
+        ),
+        "src/main/resources/applicationContext.xml": _SPRING_BEAN_XML,
+    }
+    assert IgniteDuplicateSpringContextCheck().check(files) is None
+
+
+def test_ignite_duplicate_spring_context_check_ignores_xml_comment_mentions():
+    files = {
+        "App.java": _DUPLICATE_SPRING_CONTEXT_JAVA,
+        "applicationContext.xml": (
+            "<beans><!-- Do not use IgniteSpringBean here. --><bean "
+            'id="plain" class="java.lang.Object"/></beans>'
+        ),
+    }
+    assert IgniteDuplicateSpringContextCheck().check(files) is None
+
+
+def test_ignite_duplicate_spring_context_check_requires_resource_path_boundary():
+    files = {
+        "App.java": _DUPLICATE_SPRING_CONTEXT_JAVA,
+        "src/main/resources/otherapplicationContext.xml": _SPRING_BEAN_XML,
+    }
+    assert IgniteDuplicateSpringContextCheck().check(files) is None
+
+
+def test_ignite_duplicate_spring_context_check_ignores_examples_in_comments_and_strings():
+    java = r'''
+public class App {
+    // new ClassPathXmlApplicationContext("applicationContext.xml")
+    String example = "new ClassPathXmlApplicationContext(\"applicationContext.xml\")";
+    void run() { new ClassPathXmlApplicationContext("applicationContext.xml"); }
+}
+'''
+    files = {"App.java": java, "applicationContext.xml": _SPRING_BEAN_XML}
+    assert IgniteDuplicateSpringContextCheck().check(files) is None
 
 
 def test_ignite_unclosed_resource_check_detects_missing_close():
@@ -299,3 +403,125 @@ def test_run_static_checks_reports_test_contradicts_verification_marker_violatio
     violation = run_static_checks(str(tmp_path), ["wordcount.py", "test_wordcount.py"])
     assert violation is not None
     assert violation.startswith("[test_contradicts_verification_marker]")
+
+
+# --- MismatchedFileTypeContentCheck: a .html file must contain SOME HTML ---
+
+# Golden regression fixture, trimmed from the exact real incident (2026-08-19,
+# a plain static HTML/CSS/JS calculator goal): calculator/index.html ended up
+# with calculator/script.js's own JavaScript content instead of markup, after
+# a retry misfired the REPAIR-mode "NO CHANGE NEEDED" escape hatch. Includes
+# the real file's own `<` less-than comparison (`Math.abs(result) < ...`) on
+# purpose - an earlier version of the check that fired on ANY bare `<`
+# character was tested against a simplified fixture without this line, passed,
+# and then silently failed to catch the actual real script.js content, which
+# has exactly this comparison. Keeping it here locks that fix in.
+_CALCULATOR_SCRIPT_JS_CONTENT_MISTAKENLY_IN_HTML = (
+    "function formatResult(result) {\n"
+    "  if (result === Infinity || result === -Infinity) {\n"
+    "    return 'Error';\n"
+    "  }\n"
+    "  if (Math.abs(result) < 0.000001 && result !== 0) {\n"
+    "    return result.toExponential(6);\n"
+    "  }\n"
+    "  return result.toString();\n"
+    "}\n\n"
+    "class Calculator {\n"
+    "  constructor() {\n"
+    "    this.currentOperand = '0';\n"
+    "  }\n"
+    "}\n\n"
+    "const calculator = new Calculator();\n"
+)
+
+_REAL_CALCULATOR_INDEX_HTML = (
+    "<!DOCTYPE html>\n"
+    "<html lang=\"en\">\n"
+    "<head><title>Calculator</title><link rel=\"stylesheet\" href=\"style.css\"></head>\n"
+    "<body>\n"
+    "  <div class=\"calculator\"><div class=\"display\"></div></div>\n"
+    "  <script src=\"script.js\"></script>\n"
+    "</body>\n"
+    "</html>\n"
+)
+
+
+def test_mismatched_file_type_content_check_detects_real_incident():
+    """Regression test for the real bug found live (2026-08-19, a plain
+    static-site calculator goal): calculator/index.html shipped with
+    calculator/script.js's own content instead of HTML markup, and nothing
+    else in the pipeline validates content by language for this stack."""
+    files = {"calculator/index.html": _CALCULATOR_SCRIPT_JS_CONTENT_MISTAKENLY_IN_HTML}
+    violation = MismatchedFileTypeContentCheck().check(files)
+    assert violation is not None
+    assert "calculator/index.html" in violation
+
+
+def test_mismatched_file_type_content_check_clean_for_real_html():
+    files = {"calculator/index.html": _REAL_CALCULATOR_INDEX_HTML}
+    assert MismatchedFileTypeContentCheck().check(files) is None
+
+
+def test_mismatched_file_type_content_check_clean_for_minimal_html_fragment():
+    # Even a bare fragment (no full <!DOCTYPE>/<html> document) has at least
+    # one tag - that's the whole signal this check relies on.
+    files = {"partial.html": "<div>hello</div>"}
+    assert MismatchedFileTypeContentCheck().check(files) is None
+
+
+def test_mismatched_file_type_content_check_ignores_non_html_files():
+    # The exact same JS content is legitimate in script.js - only .html/.htm
+    # filenames are ever checked.
+    files = {"calculator/script.js": _CALCULATOR_SCRIPT_JS_CONTENT_MISTAKENLY_IN_HTML}
+    assert MismatchedFileTypeContentCheck().check(files) is None
+
+
+def test_mismatched_file_type_content_check_covers_htm_extension_too():
+    files = {"page.htm": _CALCULATOR_SCRIPT_JS_CONTENT_MISTAKENLY_IN_HTML}
+    violation = MismatchedFileTypeContentCheck().check(files)
+    assert violation is not None
+    assert "page.htm" in violation
+
+
+def test_run_static_checks_reports_mismatched_file_type_content_violation(tmp_path):
+    (tmp_path / "calculator").mkdir()
+    (tmp_path / "calculator" / "index.html").write_text(_CALCULATOR_SCRIPT_JS_CONTENT_MISTAKENLY_IN_HTML)
+    violation = run_static_checks(str(tmp_path), ["calculator/index.html"])
+    assert violation is not None
+    assert violation.startswith("[mismatched_file_type_content]")
+
+
+def test_mismatched_file_type_content_check_not_fooled_by_bare_less_than_operator():
+    """Regression test for a real false-negative found while building this
+    check: a first version fired on ANY bare '<' character, which correctly
+    flagged a simplified test fixture but silently missed the actual real
+    incident's script.js content, which contains `Math.abs(result) <
+    0.000001` - a bare '<' from ordinary JS, not a tag. A lone comparison
+    operator, with no tag-shaped '<letter'/'</letter'/'<!' pattern anywhere,
+    must still be flagged as non-HTML."""
+    files = {"a.html": "if (x < 5 && y < 10) { return true; }"}
+    violation = MismatchedFileTypeContentCheck().check(files)
+    assert violation is not None
+    assert "a.html" in violation
+
+
+# STATIC-LEAK-UNPARSABLE-PY-001: measured on Graphify's engine.py (437 lines
+# with backticks inside docstrings/comments): one unbalanced parenthesis at
+# line 5365 made the check scan raw text and report the docstring at line
+# 133 as a Markdown leak - the retry evidence then named a valid docstring
+# instead of Python's own "unmatched ')'" at line 5365.
+_DOCSTRING_BACKTICKS = '"""Return names declared as `interface` in this unit."""\n'
+
+
+def test_a_syntax_error_elsewhere_never_blames_a_valid_docstring_backtick():
+    check = MarkdownInlineCodeLeakCheck()
+    source = _DOCSTRING_BACKTICKS + "".join(f"value_{i} = {i}\n" for i in range(40)) + "broken = len(x))\n"
+    assert check.check({"engine.py": source}) is None  # the compile gate reports the real error
+    assert check.check({"engine.py": source.replace("len(x))", "len(x)")}) is None
+
+
+def test_a_backtick_on_the_line_python_rejects_is_still_a_leak_at_that_line():
+    check = MarkdownInlineCodeLeakCheck()
+    source = _DOCSTRING_BACKTICKS + "".join(f"value_{i} = {i}\n" for i in range(40)) + "callee = `name`\n"
+    result = check.check({"engine.py": source})
+    assert result is not None and "line 42" in result and "`name`" in result

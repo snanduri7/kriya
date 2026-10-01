@@ -1,4 +1,10 @@
-from kriya.workflow.failure import Failure, FileLocation, QualityGateFailure
+from kriya.workflow.failure import (
+    Failure,
+    FailureAttributionKind,
+    FileLocation,
+    QualityGateFailure,
+    classify_failure_attribution,
+)
 
 
 def test_failure_to_gate_outcome_shape():
@@ -26,6 +32,13 @@ def test_failure_to_gate_outcome_shape():
         "attribution_tier": None,
         "attribution_confidence": None,
         "attribution_reasoning": None,
+        "attribution_kind": "SOURCE_DEFECT",
+        "subtask_id": None,
+        "plan_id": None,
+        "milestone_id": None,
+        "planned_files": [],
+        "verification_target": None,
+        "authoritative_files": [],
     }
 
 
@@ -82,3 +95,34 @@ def test_failure_defaults_are_empty_not_none():
     assert failure.attribution_tier is None
     assert failure.attribution_confidence is None
     assert failure.attribution_reasoning is None
+
+
+def test_missing_runtime_verification_is_a_contract_defect_not_a_source_defect():
+    assert classify_failure_attribution(
+        "verification_infrastructure_failure",
+        "REQUIRED_RUNTIME_VERIFICATION_MISSING",
+    ) is FailureAttributionKind.VERIFICATION_CONTRACT_DEFECT
+
+
+def test_test_process_failure_is_typed_as_test_evidence_until_source_is_grounded():
+    assert classify_failure_attribution(
+        "targeted_test", "one assertion failed",
+    ) is FailureAttributionKind.TEST_DEFECT
+
+
+def test_process_termination_failure_gets_same_repair_owner_routing_as_ordinary_test_failure():
+    """PRV-06 (2026-08-28): test_process_terminated must route the same as
+    test/targeted_test - the existing scope-widening/PLAN_SCOPE_DEFECT path
+    already reaches a causal producer file correctly (confirmed live); only
+    the label and the guidance shown to the model should differ, not who
+    owns repair."""
+    assert classify_failure_attribution(
+        "test_process_terminated", "TEST_PROCESS_TERMINATED (evidence: ...)",
+    ) is FailureAttributionKind.TEST_DEFECT
+
+
+def test_incompatible_verification_strategy_is_a_test_defect_not_product_source():
+    assert classify_failure_attribution(
+        "verification_strategy_incompatible",
+        "VERIFICATION_STRATEGY_INCOMPATIBLE",
+    ) is FailureAttributionKind.TEST_DEFECT

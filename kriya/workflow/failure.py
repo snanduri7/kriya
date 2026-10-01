@@ -19,7 +19,71 @@ by design) since this is a pure data shape, trivial to unit-test in
 isolation from the retry loop itself.
 """
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any, Dict, List, Optional
+
+
+class FailureAttributionKind(str, Enum):
+    """WHO owns the repair for a failure - source code, the plan, the
+    verification contract, a test, or the control plane. Deliberately a
+    different axis from attribution.py's AttributionTier, which answers
+    HOW confidently a failure was localized (self_diagnosis/locator/
+    architectural_owner/.../full_set) - not what a
+    kriya/workflow/failure_reporting.py-style second parallel taxonomy of
+    Failure.type itself. failure_reporting.py's module docstring documents
+    the deliberate choice not to re-taxonomize Failure.type for REPORTING;
+    this enum instead drives retry_strategy.py's actual repair-owner
+    routing (see classify_failure_attribution below) and both this kind
+    AND an AttributionTier are set on the SAME AttributionResult - they
+    are not competing classifications of the same question, and neither
+    should be extended without checking whether the other needs a
+    matching update."""
+
+    SOURCE_DEFECT = "SOURCE_DEFECT"
+    PLAN_SCOPE_DEFECT = "PLAN_SCOPE_DEFECT"
+    VERIFICATION_CONTRACT_DEFECT = "VERIFICATION_CONTRACT_DEFECT"
+    TEST_DEFECT = "TEST_DEFECT"
+    INFRASTRUCTURE_DEFECT = "INFRASTRUCTURE_DEFECT"
+
+
+def classify_failure_attribution(type_: str, message: str = "") -> FailureAttributionKind:
+    """Classify the repair owner before attempting file localization."""
+    if type_ == "verification_infrastructure_failure":
+        if (
+            "RUNTIME_VERIFICATION_MISSING" in (message or "")
+            or "SPEC COMPLIANCE INFRASTRUCTURE" in (message or "")
+            # The judge inferred only a build sequence for a goal that
+            # requires observable runtime behavior - same "the declared
+            # verification contract doesn't actually verify what it
+            # claims to" shape as RUNTIME_VERIFICATION_MISSING above, so
+            # it needs the same plan-revision path, not the
+            # verification/control-plane no-op INFRASTRUCTURE_DEFECT
+            # takes (see attempt.py's BEHAVIORAL_GOAL_WITH_BUILD_ONLY_
+            # VERIFICATION raise site).
+            or "BEHAVIORAL_GOAL_WITH_BUILD_ONLY_VERIFICATION" in (message or "")
+        ):
+            return FailureAttributionKind.VERIFICATION_CONTRACT_DEFECT
+        return FailureAttributionKind.INFRASTRUCTURE_DEFECT
+    if type_ in ("plan_scope_conflict", "ambiguous_planned_file_ownership"):
+        return FailureAttributionKind.PLAN_SCOPE_DEFECT
+    if type_ in (
+        "test", "targeted_test", "regression_test", "test_acceptance",
+        # The test artifact chose an execution boundary incompatible with
+        # the behavior it verifies (for example invoking a System.exit()-
+        # calling CLI main inside Surefire). Repair the verifier/test only;
+        # production behavior is not implicated by this classification.
+        "verification_strategy_incompatible",
+        "process_terminating_behavior_tested_in_process",
+        "test_verification_infrastructure_failure",
+        # PRV-06 (2026-08-28): a process/fork-termination failure still needs
+        # the SAME repair-owner routing as an ordinary test failure (the
+        # existing scope-widening/PLAN_SCOPE_DEFECT path already reaches a
+        # causal producer file correctly, confirmed live) - only the label
+        # and the guidance shown to the model change, not who owns repair.
+        "test_process_terminated",
+    ):
+        return FailureAttributionKind.TEST_DEFECT
+    return FailureAttributionKind.SOURCE_DEFECT
 
 
 @dataclass
@@ -41,6 +105,19 @@ class Failure:
     not a wrong-behavior one; see the non-binary grading in
     kriya/workflow/workflow.py's run-verification timeout branch),
     "regression_test", "incomplete_generation", "anchored_edit",
+    "attribution_rejected" (a targeted/fallback-targeted response explicitly
+    reported NO CHANGE NEEDED for every scoped file; its likely_files contains
+    any different known file named by the same response's FIX ANALYSIS, or is
+    empty to force a full-set widening without rerunning an unchanged target),
+    "test_obligation_not_preserved" (2026-09-20: a planned-but-nonexistent test
+    artifact was redirected onto an already-existing owner file - see
+    kriya/workflow/file_resolution.py::identify_redirected_test_obligations() -
+    and the Developer reported bare NO CHANGE NEEDED for that owner on an
+    attempt where it was never previously written; a file/semantic-similarity
+    redirect must never by itself discharge the acceptance obligation the
+    goal's own test-coverage intent created. Fires on every attempt mode, not
+    only targeted/fallback_targeted; see kriya/workflow/attempt.py's own
+    run_attempt() for the exact check),
     "unaddressed_error_location" (an edit applied cleanly - no anchor-match
     failure - but its own search block spanned the exact line a prior
     compile error reported, then left that line byte-identical in its
@@ -72,11 +149,38 @@ class Failure:
     element; caught immediately after pom.xml is written, before any other
     file in the batch is generated, since nothing else can compile without a
     usable POM anyway; see PolymorphicValidator.run_pom_validate() in
-    kriya/tools/validate.py), or "general_error" (fallback for a bare,
-    non-QualityGateFailure Exception).
+    kriya/tools/validate.py), "goal_spec_compliance" (compile/tests/run-
+    verification all passed, but the goal names a CONCRETE, literal requirement
+    - an exact field/method/class name, an exact type, an exact constant - that
+    the generated code doesn't actually satisfy; a gap none of the other gates
+    can structurally catch, since the code is otherwise valid; see
+    SpecComplianceAgent in kriya/agents/agent.py), "cross_package_symbol_mismatch"
+    (a Java compile failure - `cannot find symbol: class X, location: class Y` -
+    caused by a genuine cross-package incompatibility, not a missing/typo'd
+    class: X already exists elsewhere in the tracked files, just under a
+    different package than Y expects. A Java language-level fact, not a
+    missing import - no amount of retrying the SAME package layout can ever
+    resolve it; see find_cross_package_symbol_mismatch() in
+    kriya/workflow/failure_grounding.py), "test_process_terminated" (the test
+    runner's own PROCESS was killed mid-run - e.g. Maven Surefire's
+    "SurefireBooterForkException"/"forked VM terminated"/"VM crash or
+    System.exit called?" - not an ordinary assertion failure. A structural
+    process-boundary/testability conflict: already-written production code
+    terminates the process on a path a test invokes in-process; found live,
+    PRV-06, 2026-08-28 - see detect_process_termination_signature() in
+    kriya/workflow/failure_grounding.py and ObligationKind.
+    PROCESS_BOUNDARY_COMPATIBILITY in kriya/workflow/obligations.py), or
+    "general_error" (fallback for a bare, non-QualityGateFailure Exception).
     """
     type: str
     message: str
+    # Which subsystem produced the failure. Kept separate from `type` so retry
+    # policy never has to infer authority from an SDK exception string.
+    source: str = "quality_gate"
+    # Authoritative failures may drive retry/terminal state. Advisory and
+    # auxiliary failures are trace evidence only and can never replace the
+    # current validator failure (enforced by GenerationState.record_failure).
+    authority: str = "authoritative"
     raw_output: str = ""
     file_locations: List[FileLocation] = field(default_factory=list)
     likely_files: List[str] = field(default_factory=list)
@@ -132,6 +236,46 @@ class Failure:
     attribution_tier: Optional[str] = None
     attribution_confidence: Optional[str] = None
     attribution_reasoning: Optional[str] = None
+    attribution_kind: Optional[str] = None
+    # MA6.6 - set only by a caller executing failure grounding within MA6's
+    # structured subtask execution (kriya/workflow/subtask_executor.py);
+    # None for every failure raised by the legacy, non-subtask-scoped
+    # Quality Gates loop (the overwhelming majority of failures as of this
+    # writing - run_generation_workflow() is not yet wired to populate
+    # these, see MA6.9/6.10). subtask_id/plan_id/milestone_id are plain
+    # ids, not object references, so Failure (deliberately a pure data
+    # shape, see this module's own docstring) never needs to import
+    # plan_schema.py/EngineeringPlan - kriya/workflow/attribution.py's
+    # subtask_attribution_context_from_plan() is what actually resolves
+    # subtask_id back into real planned-file evidence, given the caller's
+    # own EngineeringPlan. planned_files mirrors the executing subtask's
+    # own Subtask.planned_files paths at the moment of failure (so this
+    # Failure record stays self-describing even without a plan object on
+    # hand later, e.g. when only reading it back out of traces.db).
+    # verification_target names which VerificationMethod (plan_schema.py)
+    # this failure came from, e.g. "tool:pytest" or "judgment:<criterion
+    # id>" - free-form, mirroring `mode`'s own plain-string convention
+    # above, not a new enum this module would need to import.
+    subtask_id: Optional[str] = None
+    plan_id: Optional[str] = None
+    milestone_id: Optional[str] = None
+    planned_files: List[str] = field(default_factory=list)
+    verification_target: Optional[str] = None
+    # PRV-05 run 7 (2026-08-28): a small, explicit set of failure types carry
+    # DETERMINISTIC evidence of which file(s) an unmet condition concerns -
+    # not a text-scan guess, a real structural fact (e.g. migration.py's
+    # find_migration_incomplete() parsing pom.xml itself to learn the old
+    # dependency is still declared). That evidence must outrank the model's
+    # own self-diagnosis in attribute_failure() (kriya/workflow/
+    # attribution.py) - found live, PRV-05 run 7: a stale self-diagnosis
+    # ("the fix is really in JsonService.java, not pom.xml") kept winning
+    # over the manifest's own authoritative pom.xml evidence across attempts
+    # 5-8, none of which could ever satisfy SOURCE_DEPENDENCY_REMAINS since
+    # the file that actually needed changing was never retried again. Empty
+    # for every failure type that has no such structural evidence (the
+    # overwhelming majority) - those keep today's locator/self-diagnosis/
+    # judge precedence exactly as before.
+    authoritative_files: List[str] = field(default_factory=list)
 
     def to_gate_outcome(self) -> dict:
         """The shape kriya/workflow/workflow.py's gate_outcomes list expects -
@@ -139,6 +283,9 @@ class Failure:
         literals (compile/targeted_test/test/run_verification/regression_test),
         each of which previously used a different type vocabulary than the
         except block's own fail_type derivation."""
+        attribution_kind = self.attribution_kind or classify_failure_attribution(
+            self.type, self.message,
+        ).value
         return {
             "attempt": self.attempt,
             "type": self.type,
@@ -156,6 +303,13 @@ class Failure:
             "attribution_tier": self.attribution_tier,
             "attribution_confidence": self.attribution_confidence,
             "attribution_reasoning": self.attribution_reasoning,
+            "attribution_kind": attribution_kind,
+            "subtask_id": self.subtask_id,
+            "plan_id": self.plan_id,
+            "milestone_id": self.milestone_id,
+            "planned_files": list(self.planned_files),
+            "verification_target": self.verification_target,
+            "authoritative_files": list(self.authoritative_files),
         }
 
 

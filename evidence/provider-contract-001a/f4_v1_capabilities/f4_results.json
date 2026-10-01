@@ -1,0 +1,42 @@
+{
+ "keep_alive_default_minutes_left": 5.0,
+ "keep_alive_v1_30m_minutes_left": 5.0,
+ "keep_alive_native_30m_minutes_left": 30.0,
+ "keep_alive_default_again_minutes_left": 30.0,
+ "presence_penalty": {
+  "v1_0": [
+   "77a557340142",
+   "77a557340142"
+  ],
+  "v1_2": [
+   "77a557340142",
+   "77a557340142"
+  ],
+  "native_0": [
+   "77a557340142",
+   "77a557340142"
+  ],
+  "native_2": [
+   "77a557340142",
+   "77a557340142"
+  ]
+ },
+ "frequency_penalty": {
+  "v1_0": [
+   "77a557340142",
+   "77a557340142"
+  ],
+  "v1_2": [
+   "1631f4f5cb35",
+   "1631f4f5cb35"
+  ],
+  "native_0": [
+   "77a557340142",
+   "77a557340142"
+  ],
+  "native_2": [
+   "1631f4f5cb35",
+   "1631f4f5cb35"
+  ]
+ }
+}

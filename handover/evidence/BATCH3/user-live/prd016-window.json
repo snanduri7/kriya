@@ -1,0 +1,44 @@
+{
+  "accepted_budget": {
+    "approximate": true,
+    "considered_tiers": [
+      {
+        "fits": true,
+        "room": 1690,
+        "source": "preferred",
+        "tokens": 8192
+      }
+    ],
+    "context_expanded": false,
+    "context_window": 8192,
+    "counting_method": "default_byte_bound",
+    "exact": false,
+    "expected_output_tokens": null,
+    "hard_context_ceiling": 262144,
+    "hard_output_ceiling": null,
+    "max_tokens": 1024,
+    "min_output_tokens": 1024,
+    "output_expanded": false,
+    "output_grounding": null,
+    "output_reduced": false,
+    "policy_mode": "adaptive",
+    "preferred_context_window": 8192,
+    "preferred_output_tokens": 1024,
+    "prompt_tokens": 6246,
+    "qualification_source": "preferred",
+    "reasoning_allowance": 0,
+    "reported_prompt_tokens": 5660,
+    "requested_max_tokens": 1024,
+    "required_tokens": 7526,
+    "safety_margin": 256,
+    "satisfiable": true,
+    "selected_context_window": 8192,
+    "selected_output_tokens": 1024,
+    "selection_reason": "fits_preferred",
+    "tier_note": "",
+    "under_predicted": false,
+    "window_source": "served_num_ctx"
+  },
+  "accepted_prompt_tokens": 5660,
+  "refused_seconds": 0.003
+}

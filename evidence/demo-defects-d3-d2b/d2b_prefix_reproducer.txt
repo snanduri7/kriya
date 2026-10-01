@@ -1,0 +1,11 @@
+# D2B reproducer, PRE-FIX: runtime step code as at d36e3eb (= 28fa21f D2), contained OCI, fresh Maven cache
+{
+ "compile_success": true,
+ "exec_plugin_cached_before_runtime": false,
+ "runtime_returncode": 0,
+ "candidate_executions": 2,
+ "executions": [
+  "CANDIDATE_MAIN_RAN https.proxyHost=172.19.0.2 registry=HTTP 200",
+  "CANDIDATE_MAIN_RAN https.proxyHost=null registry=no network (UnknownHostException)"
+ ]
+}

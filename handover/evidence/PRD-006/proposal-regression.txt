@@ -1,0 +1,32 @@
+....................................................                     [100%]
+=============================== warnings summary ===============================
+tests/test_proposal_promotion.py::test_corr018_authorized_target_body_only_change_allowed
+  /Users/sriramnanduri/Documents/Codex/2026-09-20/from-folder-users-sriramnanduri-workingdirectory-ai/work/kriya-prd004-impl/tests/test_proposal_promotion.py:574: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    outcome, failure_type, _ = _run_attempt_case(regions, AUTHORIZED_BODY)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_proposal_promotion.py::test_corr018_unauthorized_helper_add_rejected
+tests/test_proposal_promotion.py::test_corr018_planner_strategy_naming_helper_does_not_broaden_authority
+tests/test_proposal_promotion.py::test_recovery_retry_receives_same_immutable_authorized_regions
+tests/test_proposal_promotion.py::test_approve_then_target_file_mutated_then_execute_rejected
+tests/test_proposal_promotion.py::test_full_persist_approve_promote_generate_harness_rejects_unauthorized_helper
+  /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/lib/python3.14/unittest/mock.py:2259: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    def __init__(self, name, parent):
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_proposal_promotion.py::test_recovery_retry_receives_same_immutable_authorized_regions
+  /Users/sriramnanduri/Documents/Codex/2026-09-20/from-folder-users-sriramnanduri-workingdirectory-ai/work/kriya-prd004-impl/tests/test_proposal_promotion.py:613: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    _, _, ctx = _run_attempt_case(regions, AUTHORIZED_BODY)
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_proposal_promotion.py::test_full_persist_approve_promote_generate_harness_rejects_unauthorized_helper
+  /Users/sriramnanduri/Documents/Codex/2026-09-20/from-folder-users-sriramnanduri-workingdirectory-ai/work/kriya-prd004-impl/tests/test_proposal_promotion.py:999: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    passed_outcome, _, _ = _run_attempt_case(
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+52 passed, 8 warnings in 7.64s

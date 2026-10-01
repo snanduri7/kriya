@@ -1,0 +1,356 @@
+{
+  "cases": [
+    {
+      "case": "discount-cap",
+      "items": [
+        {
+          "context_class": "same_class_member",
+          "outcome": "HIT",
+          "path": "src/main/java/com/shop/order/OrderService.java",
+          "required_precision": "full",
+          "tier": "full"
+        },
+        {
+          "context_class": "interface_contract",
+          "outcome": "HIT",
+          "path": "src/main/java/com/shop/order/DiscountPolicy.java",
+          "required_precision": "signatures",
+          "tier": "full"
+        },
+        {
+          "context_class": "sibling_implementation",
+          "outcome": "HIT",
+          "path": "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+          "required_precision": "signatures",
+          "tier": "full"
+        },
+        {
+          "context_class": "direct_caller",
+          "outcome": "HIT",
+          "path": "src/main/java/com/shop/order/OrderController.java",
+          "required_precision": "skeleton",
+          "tier": "full"
+        },
+        {
+          "context_class": "one_hop_dependency",
+          "outcome": "HIT",
+          "path": "src/main/java/com/shop/pricing/PriceCalculator.java",
+          "required_precision": "signatures",
+          "tier": "full"
+        },
+        {
+          "context_class": "two_hop_dependency",
+          "outcome": "HIT",
+          "path": "src/main/java/com/shop/pricing/TaxTable.java",
+          "required_precision": "signatures",
+          "tier": "full"
+        },
+        {
+          "context_class": "test_precedent",
+          "outcome": "HIT",
+          "path": "src/test/java/com/shop/order/OrderServiceTest.java",
+          "required_precision": "skeleton",
+          "tier": "full"
+        }
+      ],
+      "packaged_files": [
+        "src/main/java/com/shop/order/DiscountPolicy.java",
+        "src/main/java/com/shop/order/Order.java",
+        "src/main/java/com/shop/order/OrderController.java",
+        "src/main/java/com/shop/order/OrderService.java",
+        "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+        "src/main/java/com/shop/pricing/PriceCalculator.java",
+        "src/main/java/com/shop/pricing/TaxTable.java",
+        "src/main/resources/application.properties",
+        "src/test/java/com/shop/order/OrderServiceTest.java"
+      ],
+      "precision": 0.8889,
+      "repository": "java-shop"
+    },
+    {
+      "case": "discount-from-config",
+      "items": [
+        {
+          "context_class": "configuration",
+          "outcome": "HIT",
+          "path": "src/main/resources/application.properties",
+          "required_precision": "full",
+          "tier": "full"
+        },
+        {
+          "context_class": "same_class_member",
+          "outcome": "HIT",
+          "path": "src/main/java/com/shop/order/OrderService.java",
+          "required_precision": "full",
+          "tier": "full"
+        }
+      ],
+      "packaged_files": [
+        "src/main/java/com/shop/order/DiscountPolicy.java",
+        "src/main/java/com/shop/order/Order.java",
+        "src/main/java/com/shop/order/OrderController.java",
+        "src/main/java/com/shop/order/OrderService.java",
+        "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+        "src/main/java/com/shop/pricing/PriceCalculator.java",
+        "src/main/java/com/shop/pricing/TaxTable.java",
+        "src/main/resources/application.properties",
+        "src/test/java/com/shop/order/OrderServiceTest.java"
+      ],
+      "precision": 0.4444,
+      "repository": "java-shop"
+    },
+    {
+      "case": "junit-upgrade",
+      "items": [
+        {
+          "context_class": "build_metadata",
+          "outcome": "HIT",
+          "path": "pom.xml",
+          "required_precision": "full",
+          "tier": "full"
+        }
+      ],
+      "packaged_files": [
+        "pom.xml",
+        "src/main/java/com/shop/order/DiscountPolicy.java",
+        "src/main/java/com/shop/order/Order.java",
+        "src/main/java/com/shop/order/OrderController.java",
+        "src/main/java/com/shop/order/OrderService.java",
+        "src/main/java/com/shop/order/SeasonalDiscountPolicy.java",
+        "src/main/java/com/shop/pricing/PriceCalculator.java",
+        "src/main/java/com/shop/pricing/TaxTable.java",
+        "src/test/java/com/shop/order/OrderServiceTest.java"
+      ],
+      "precision": 0.2222,
+      "repository": "java-shop"
+    },
+    {
+      "case": "charge-retry",
+      "items": [
+        {
+          "context_class": "same_class_member",
+          "outcome": "HIT",
+          "path": "payments/stripe_gateway.py",
+          "required_precision": "full",
+          "tier": "full"
+        },
+        {
+          "context_class": "interface_contract",
+          "outcome": "HIT",
+          "path": "payments/gateway.py",
+          "required_precision": "signatures",
+          "tier": "full"
+        },
+        {
+          "context_class": "sibling_implementation",
+          "outcome": "HIT",
+          "path": "payments/paypal_gateway.py",
+          "required_precision": "signatures",
+          "tier": "full"
+        },
+        {
+          "context_class": "direct_caller",
+          "outcome": "HIT",
+          "path": "payments/checkout.py",
+          "required_precision": "skeleton",
+          "tier": "full"
+        },
+        {
+          "context_class": "one_hop_dependency",
+          "outcome": "HIT",
+          "path": "payments/currency.py",
+          "required_precision": "signatures",
+          "tier": "full"
+        },
+        {
+          "context_class": "two_hop_dependency",
+          "outcome": "HIT",
+          "path": "payments/rates.py",
+          "required_precision": "signatures",
+          "tier": "full"
+        },
+        {
+          "context_class": "test_precedent",
+          "outcome": "HIT",
+          "path": "tests/test_stripe_gateway.py",
+          "required_precision": "skeleton",
+          "tier": "full"
+        }
+      ],
+      "packaged_files": [
+        "config/settings.yaml",
+        "payments/checkout.py",
+        "payments/currency.py",
+        "payments/gateway.py",
+        "payments/paypal_gateway.py",
+        "payments/rates.py",
+        "payments/stripe_gateway.py",
+        "tests/test_stripe_gateway.py"
+      ],
+      "precision": 0.875,
+      "repository": "python-payments"
+    },
+    {
+      "case": "retries-from-config",
+      "items": [
+        {
+          "context_class": "configuration",
+          "outcome": "HIT",
+          "path": "config/settings.yaml",
+          "required_precision": "full",
+          "tier": "full"
+        },
+        {
+          "context_class": "same_class_member",
+          "outcome": "HIT",
+          "path": "payments/stripe_gateway.py",
+          "required_precision": "full",
+          "tier": "full"
+        }
+      ],
+      "packaged_files": [
+        "config/settings.yaml",
+        "payments/checkout.py",
+        "payments/currency.py",
+        "payments/gateway.py",
+        "payments/paypal_gateway.py",
+        "payments/rates.py",
+        "payments/stripe_gateway.py",
+        "tests/test_stripe_gateway.py"
+      ],
+      "precision": 0.375,
+      "repository": "python-payments"
+    },
+    {
+      "case": "requests-upgrade",
+      "items": [
+        {
+          "context_class": "build_metadata",
+          "outcome": "HIT",
+          "path": "pyproject.toml",
+          "required_precision": "full",
+          "tier": "full"
+        }
+      ],
+      "packaged_files": [
+        "config/settings.yaml",
+        "payments/checkout.py",
+        "payments/currency.py",
+        "payments/gateway.py",
+        "payments/paypal_gateway.py",
+        "payments/rates.py",
+        "payments/stripe_gateway.py",
+        "pyproject.toml",
+        "tests/test_stripe_gateway.py"
+      ],
+      "precision": 0.1111,
+      "repository": "python-payments"
+    }
+  ],
+  "certified": false,
+  "classes": {
+    "build_metadata": {
+      "golden": 2,
+      "hits": 2,
+      "misses": {},
+      "passed": true,
+      "recall": 1.0,
+      "target": 0.5
+    },
+    "configuration": {
+      "golden": 2,
+      "hits": 2,
+      "misses": {},
+      "passed": true,
+      "recall": 1.0,
+      "target": 0.5
+    },
+    "direct_caller": {
+      "golden": 2,
+      "hits": 2,
+      "misses": {},
+      "passed": true,
+      "recall": 1.0,
+      "target": 1.0
+    },
+    "interface_contract": {
+      "golden": 2,
+      "hits": 2,
+      "misses": {},
+      "passed": true,
+      "recall": 1.0,
+      "target": 1.0
+    },
+    "one_hop_dependency": {
+      "golden": 2,
+      "hits": 2,
+      "misses": {},
+      "passed": true,
+      "recall": 1.0,
+      "target": 1.0
+    },
+    "same_class_member": {
+      "golden": 4,
+      "hits": 4,
+      "misses": {},
+      "passed": true,
+      "recall": 1.0,
+      "target": 1.0
+    },
+    "sibling_implementation": {
+      "golden": 2,
+      "hits": 2,
+      "misses": {},
+      "passed": true,
+      "recall": 1.0,
+      "target": 0.5
+    },
+    "test_precedent": {
+      "golden": 2,
+      "hits": 2,
+      "misses": {},
+      "passed": true,
+      "recall": 1.0,
+      "target": 0.5
+    },
+    "two_hop_dependency": {
+      "golden": 2,
+      "hits": 2,
+      "misses": {},
+      "passed": true,
+      "recall": 1.0,
+      "target": 0.5
+    }
+  },
+  "identity": {
+    "context_tier_policy": {
+      "reference_graph_budget_tokens": 10644,
+      "tiers": [
+        "signatures",
+        "skeleton",
+        "full"
+      ]
+    },
+    "embedder": "configured",
+    "embedding_dimensions": 768,
+    "embedding_model": "nomic-embed-text:latest",
+    "embedding_runtime": "aee1838260b897c964f0dc93efd9f64abcd536c32ae0e46ae9824f394e230511",
+    "fixtures_digest": "89a10e76d670c4a3ad933505d95645b6359abc0d53f91d210cd5175b3d207e58",
+    "index_implementation": "35633e6bb88152ce9873f37718e696508f4e6945a54b0974b60c420053dbb2af",
+    "kriya_version": "0.1.0",
+    "retrieval_policies": [
+      [
+        5,
+        2,
+        30
+      ]
+    ],
+    "suite_version": "context-recall/1"
+  },
+  "identity_digest": "7c8bf9aa6298ec538cb8bdecd157e995a8318752e09728f9a75246c50cbe87e3",
+  "precision": 0.4808,
+  "precision_target": 0.5,
+  "record_path": "/private/var/folders/zp/_m1ymkks749g2hfy8w2nbrf80000gn/T/pytest-of-sriramnanduri/pytest-590/kriya-state3/context_certification/7c8bf9aa6298ec538cb8bdecd157e995a8318752e09728f9a75246c50cbe87e3.json",
+  "record_version": 1,
+  "status": "LIVE_EXERCISED"
+}

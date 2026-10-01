@@ -8,6 +8,7 @@ import pytest
 from kriya.config import AppConfig
 from kriya.core.kernel import Kernel
 from kriya.core.llm import LLMClient
+from kriya.core.state_paths import trace_db_path
 from kriya.core.trace import TraceLogger
 from kriya.workflow.workflow import WorkflowEngine
 
@@ -46,7 +47,6 @@ async def test_staged_skill_accrual(tmp_path):
     cfg = AppConfig()
     cfg.autonomy.mode = "guardrails"
     cfg.paths.skills = str(tmp_path / "skills")
-    cfg.paths.logs = str(tmp_path / "logs")
     cfg.llm_chain = [FallbackModelConfig(model="model-fallback", base_url="http://localhost", api_key="test")]
     cfg.autonomy.run_verification_enabled = False
 
@@ -93,5 +93,5 @@ async def test_staged_skill_accrual(tmp_path):
     assert any("Always use print with" in fact["value"] for fact in staged_facts)
     
     # Verify trace logger wrote SQLite log
-    trace_db = tmp_path / "logs" / "traces.db"
+    trace_db = trace_db_path(cfg)
     assert os.path.exists(trace_db) is True

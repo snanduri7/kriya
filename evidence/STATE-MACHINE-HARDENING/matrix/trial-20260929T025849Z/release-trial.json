@@ -1,0 +1,64 @@
+{
+  "candidate_digest": "339986451a68baaf1956bf790e492a4e2cbeff5a7b0ff442ccee2f5ae2377952",
+  "case_set_version": 1,
+  "cases": [
+    {
+      "case_id": "C1",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C2",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C3",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C4",
+      "verdict": "FAILED"
+    },
+    {
+      "case_id": "C5",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C6",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C7",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C8",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C9",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C10",
+      "verdict": "PASSED"
+    },
+    {
+      "case_id": "C11",
+      "verdict": "FAILED"
+    }
+  ],
+  "ended": "2026-09-29T03:14:25Z",
+  "evidence": "/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/evidence/STATE-MACHINE-HARDENING/matrix/trial-20260929T025849Z",
+  "outcome": "FAILED",
+  "reasons": [
+    "matrix_not_certified",
+    "case_C4_FAILED",
+    "case_C11_FAILED"
+  ],
+  "recorded_at": "2026-09-29T03:14:27+00:00",
+  "report_digest": "66d65e04458c887af536c14980cd634a4b1190591b68b453b23c57113862a2f0",
+  "revision": "e509fbbec9349dc9918ca610b7b06f0a705b8ad9",
+  "started": "2026-09-29T02:58:50Z",
+  "streak_after": 0,
+  "trial": 1
+}

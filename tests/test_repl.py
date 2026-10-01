@@ -1,3 +1,4 @@
+from importlib import metadata
 from unittest.mock import AsyncMock, MagicMock
 
 from prompt_toolkit.completion import CompleteEvent
@@ -48,7 +49,7 @@ def test_dispatch_runs_a_successful_command_without_raising(capsys):
     # specifically responsible for swallowing so the REPL loop keeps going.
     _dispatch(cli_main, ["version"])
     captured = capsys.readouterr()
-    assert "Kriya version" in captured.out
+    assert captured.out.startswith(f"Kriya {metadata.version('kriya')} (commit ")  # KRIYA-VERSION-001
 
 
 def test_dispatch_reports_unknown_command_without_raising(capsys):

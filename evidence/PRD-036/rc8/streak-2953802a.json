@@ -1,0 +1,130 @@
+{
+  "candidate_digest": "2953802a5c6e8a503e7a6f2650685701b00d88dd1da13aa349f4db66ac15ca1d",
+  "log_digest": "5618ef1e79e0d3c6dff1a7ef8982d47af1fb3b8f781ce834c75009fa24a36c91",
+  "schema_version": 1,
+  "trials": [
+    {
+      "candidate_digest": "2953802a5c6e8a503e7a6f2650685701b00d88dd1da13aa349f4db66ac15ca1d",
+      "case_set_version": 1,
+      "cases": [
+        {
+          "case_id": "C1",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C2",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C3",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C4",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C5",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C6",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C7",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C8",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C9",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C10",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C11",
+          "verdict": "PASSED"
+        }
+      ],
+      "ended": "2026-09-28T20:10:51Z",
+      "evidence": "/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/evidence/PRD-036/matrix/trial-20260928T200257Z",
+      "outcome": "CERTIFIED",
+      "reasons": [],
+      "recorded_at": "2026-09-28T20:10:53+00:00",
+      "report_digest": "a740de99bfd3fd5ce8779c7876843e848e885a5c93c10a521e1b1315d21743a9",
+      "revision": "5727f9993c9e6f9cad9055674988ea9180895c3e",
+      "started": "2026-09-28T20:02:58Z",
+      "streak_after": 1,
+      "trial": 1
+    },
+    {
+      "candidate_digest": "2953802a5c6e8a503e7a6f2650685701b00d88dd1da13aa349f4db66ac15ca1d",
+      "case_set_version": 1,
+      "cases": [
+        {
+          "case_id": "C1",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C2",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C3",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C4",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C5",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C6",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C7",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C8",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C9",
+          "verdict": "PASSED"
+        },
+        {
+          "case_id": "C10",
+          "verdict": "FAILED"
+        },
+        {
+          "case_id": "C11",
+          "verdict": "PASSED"
+        }
+      ],
+      "ended": "2026-09-28T20:21:19Z",
+      "evidence": "/Users/sriramnanduri/WorkingDirectory/AI/ClaudeCode/Kriya-By-ClaudeCode/evidence/PRD-036/matrix/trial-20260928T201053Z",
+      "outcome": "FAILED",
+      "reasons": [
+        "matrix_not_certified",
+        "case_C10_FAILED"
+      ],
+      "recorded_at": "2026-09-28T20:21:21+00:00",
+      "report_digest": "5fc0be1a7f3449697912826c0e19bfb8156d3696e5d9137cc104b49bad83514a",
+      "revision": "5727f9993c9e6f9cad9055674988ea9180895c3e",
+      "started": "2026-09-28T20:10:54Z",
+      "streak_after": 0,
+      "trial": 2
+    }
+  ]
+}

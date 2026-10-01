@@ -1,0 +1,9 @@
+start-at-the-grounded-frame-again KILLED tests/test_d5b_recovery_evidence.py::test_the_live_stack_frame_failure_shows_its_exception_message
+first-exception-in-the-whole-log KILLED tests/test_d5b_recovery_evidence.py::test_a_caused_by_block_is_its_own_exception
+ignore-caused-by KILLED tests/test_d5b_recovery_evidence.py::test_a_caused_by_block_is_its_own_exception
+break-the-d5-resource-case KILLED tests/test_d5b_recovery_evidence.py::test_the_live_resource_failure_is_unchanged
+remove-the-bound KILLED tests/test_d5b_recovery_evidence.py::test_the_excerpt_stays_within_its_bound
+alter-recovery-file-scope KILLED tests/test_d5b_recovery_evidence.py::test_owner_and_scope_are_unchanged_and_the_owner_sees_the_message
+unbounded-message-reach KILLED tests/test_d5b_recovery_evidence.py::test_no_header_within_reach_keeps_the_frame_line[foo.BarException: too far\n
+frames-not-skipped KILLED tests/test_d5b_recovery_evidence.py::test_a_frame_deep_in_a_framework_trace_still_reaches_its_header
+8/8 killed

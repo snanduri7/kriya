@@ -1,0 +1,11 @@
+rules:
+  - id: python-eval
+    languages: [python]
+    severity: WARNING
+    message: "eval of dynamic input"
+    pattern: eval($X)
+  - id: python-print-info
+    languages: [py]
+    severity: INFO
+    message: "print call"
+    pattern: print(...)

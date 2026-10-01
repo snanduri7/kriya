@@ -1,0 +1,4 @@
+(1) inference_deadline_bound = False | read timeout sent = 900.0 s with a 600 s run budget
+   unit one quality_gates_passed = False
+   unit two quality_gates_passed = False
+(2) budget clock start per unit: {'one': 141420.586, 'two': 141421.371} | restarted for unit two: True

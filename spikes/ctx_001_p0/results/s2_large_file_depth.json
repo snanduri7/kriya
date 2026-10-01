@@ -1,0 +1,638 @@
+[
+  {
+    "requested_lines": 500,
+    "actual_lines": 589,
+    "placement": "near_start",
+    "tiers": {
+      "full": {
+        "elapsed_s": 4.170033207628876e-07,
+        "output_tokens_est": 4931,
+        "output_lines": 589,
+        "body_survives": true,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "skeleton": {
+        "elapsed_s": 0.00012966700160177425,
+        "output_tokens_est": 1401,
+        "output_lines": 264,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "signatures": {
+        "elapsed_s": 0.0036302090011304244,
+        "output_tokens_est": 1379,
+        "output_lines": 262,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      }
+    },
+    "budget_sweep": {
+      "8000": {
+        "output_tokens_est": 4955,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "16000": {
+        "output_tokens_est": 4955,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "32000": {
+        "output_tokens_est": 4955,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "128000": {
+        "output_tokens_est": 4955,
+        "body_survives": true,
+        "signature_survives": true
+      }
+    }
+  },
+  {
+    "requested_lines": 500,
+    "actual_lines": 589,
+    "placement": "near_end",
+    "tiers": {
+      "full": {
+        "elapsed_s": 2.090018824674189e-07,
+        "output_tokens_est": 4931,
+        "output_lines": 589,
+        "body_survives": true,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "skeleton": {
+        "elapsed_s": 0.00012029199933749624,
+        "output_tokens_est": 1401,
+        "output_lines": 264,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "signatures": {
+        "elapsed_s": 0.0038170420011738315,
+        "output_tokens_est": 1379,
+        "output_lines": 262,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      }
+    },
+    "budget_sweep": {
+      "8000": {
+        "output_tokens_est": 4954,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "16000": {
+        "output_tokens_est": 4954,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "32000": {
+        "output_tokens_est": 4954,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "128000": {
+        "output_tokens_est": 4954,
+        "body_survives": true,
+        "signature_survives": true
+      }
+    }
+  },
+  {
+    "requested_lines": 500,
+    "actual_lines": 593,
+    "placement": "far_apart",
+    "tiers": {
+      "full": {
+        "elapsed_s": 2.0899824448861182e-07,
+        "output_tokens_est": 4976,
+        "output_lines": 593,
+        "body_survives": true,
+        "signature_survives": true,
+        "interface_signature_survives": true
+      },
+      "skeleton": {
+        "elapsed_s": 0.0001292080014536623,
+        "output_tokens_est": 1422,
+        "output_lines": 267,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": true
+      },
+      "signatures": {
+        "elapsed_s": 0.003316415997687727,
+        "output_tokens_est": 1400,
+        "output_lines": 265,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": true
+      }
+    },
+    "budget_sweep": {
+      "8000": {
+        "output_tokens_est": 4999,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "16000": {
+        "output_tokens_est": 4999,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "32000": {
+        "output_tokens_est": 4999,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "128000": {
+        "output_tokens_est": 4999,
+        "body_survives": true,
+        "signature_survives": true
+      }
+    }
+  },
+  {
+    "requested_lines": 1000,
+    "actual_lines": 1170,
+    "placement": "near_start",
+    "tiers": {
+      "full": {
+        "elapsed_s": 2.500019036233425e-07,
+        "output_tokens_est": 9938,
+        "output_lines": 1170,
+        "body_survives": true,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "skeleton": {
+        "elapsed_s": 0.00023958299789228477,
+        "output_tokens_est": 2787,
+        "output_lines": 513,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "signatures": {
+        "elapsed_s": 0.007875249997596256,
+        "output_tokens_est": 2764,
+        "output_lines": 511,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      }
+    },
+    "budget_sweep": {
+      "8000": {
+        "output_tokens_est": 2812,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "16000": {
+        "output_tokens_est": 9962,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "32000": {
+        "output_tokens_est": 9962,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "128000": {
+        "output_tokens_est": 9962,
+        "body_survives": true,
+        "signature_survives": true
+      }
+    }
+  },
+  {
+    "requested_lines": 1000,
+    "actual_lines": 1170,
+    "placement": "near_end",
+    "tiers": {
+      "full": {
+        "elapsed_s": 2.500019036233425e-07,
+        "output_tokens_est": 9937,
+        "output_lines": 1170,
+        "body_survives": true,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "skeleton": {
+        "elapsed_s": 0.00023320800028159283,
+        "output_tokens_est": 2786,
+        "output_lines": 513,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "signatures": {
+        "elapsed_s": 0.007851250000385335,
+        "output_tokens_est": 2764,
+        "output_lines": 511,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      }
+    },
+    "budget_sweep": {
+      "8000": {
+        "output_tokens_est": 2811,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "16000": {
+        "output_tokens_est": 9961,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "32000": {
+        "output_tokens_est": 9961,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "128000": {
+        "output_tokens_est": 9961,
+        "body_survives": true,
+        "signature_survives": true
+      }
+    }
+  },
+  {
+    "requested_lines": 1000,
+    "actual_lines": 1174,
+    "placement": "far_apart",
+    "tiers": {
+      "full": {
+        "elapsed_s": 1.6599733498878777e-07,
+        "output_tokens_est": 9983,
+        "output_lines": 1174,
+        "body_survives": true,
+        "signature_survives": true,
+        "interface_signature_survives": true
+      },
+      "skeleton": {
+        "elapsed_s": 0.00023216699992190115,
+        "output_tokens_est": 2808,
+        "output_lines": 516,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": true
+      },
+      "signatures": {
+        "elapsed_s": 0.00750095799958217,
+        "output_tokens_est": 2785,
+        "output_lines": 514,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": true
+      }
+    },
+    "budget_sweep": {
+      "8000": {
+        "output_tokens_est": 2832,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "16000": {
+        "output_tokens_est": 10006,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "32000": {
+        "output_tokens_est": 10006,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "128000": {
+        "output_tokens_est": 10006,
+        "body_survives": true,
+        "signature_survives": true
+      }
+    }
+  },
+  {
+    "requested_lines": 2000,
+    "actual_lines": 2339,
+    "placement": "near_start",
+    "tiers": {
+      "full": {
+        "elapsed_s": 2.0899824448861182e-07,
+        "output_tokens_est": 20041,
+        "output_lines": 2339,
+        "body_survives": true,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "skeleton": {
+        "elapsed_s": 0.0004660420017899014,
+        "output_tokens_est": 5584,
+        "output_lines": 1014,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "signatures": {
+        "elapsed_s": 0.02040691600268474,
+        "output_tokens_est": 5561,
+        "output_lines": 1012,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      }
+    },
+    "budget_sweep": {
+      "8000": {
+        "output_tokens_est": 5609,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "16000": {
+        "output_tokens_est": 5609,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "32000": {
+        "output_tokens_est": 20065,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "128000": {
+        "output_tokens_est": 20065,
+        "body_survives": true,
+        "signature_survives": true
+      }
+    }
+  },
+  {
+    "requested_lines": 2000,
+    "actual_lines": 2339,
+    "placement": "near_end",
+    "tiers": {
+      "full": {
+        "elapsed_s": 2.090018824674189e-07,
+        "output_tokens_est": 20041,
+        "output_lines": 2339,
+        "body_survives": true,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "skeleton": {
+        "elapsed_s": 0.0005613749999611173,
+        "output_tokens_est": 5584,
+        "output_lines": 1014,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "signatures": {
+        "elapsed_s": 0.020889916002488462,
+        "output_tokens_est": 5561,
+        "output_lines": 1012,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      }
+    },
+    "budget_sweep": {
+      "8000": {
+        "output_tokens_est": 5608,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "16000": {
+        "output_tokens_est": 5608,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "32000": {
+        "output_tokens_est": 20064,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "128000": {
+        "output_tokens_est": 20064,
+        "body_survives": true,
+        "signature_survives": true
+      }
+    }
+  },
+  {
+    "requested_lines": 2000,
+    "actual_lines": 2343,
+    "placement": "far_apart",
+    "tiers": {
+      "full": {
+        "elapsed_s": 2.090018824674189e-07,
+        "output_tokens_est": 20086,
+        "output_lines": 2343,
+        "body_survives": true,
+        "signature_survives": true,
+        "interface_signature_survives": true
+      },
+      "skeleton": {
+        "elapsed_s": 0.0005541250029637013,
+        "output_tokens_est": 5605,
+        "output_lines": 1017,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": true
+      },
+      "signatures": {
+        "elapsed_s": 0.025158958000247367,
+        "output_tokens_est": 5582,
+        "output_lines": 1015,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": true
+      }
+    },
+    "budget_sweep": {
+      "8000": {
+        "output_tokens_est": 5630,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "16000": {
+        "output_tokens_est": 5630,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "32000": {
+        "output_tokens_est": 20110,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "128000": {
+        "output_tokens_est": 20110,
+        "body_survives": true,
+        "signature_survives": true
+      }
+    }
+  },
+  {
+    "requested_lines": 3000,
+    "actual_lines": 3508,
+    "placement": "near_start",
+    "tiers": {
+      "full": {
+        "elapsed_s": 3.749992174562067e-07,
+        "output_tokens_est": 30145,
+        "output_lines": 3508,
+        "body_survives": true,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "skeleton": {
+        "elapsed_s": 0.0007564160005131271,
+        "output_tokens_est": 8381,
+        "output_lines": 1515,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "signatures": {
+        "elapsed_s": 0.03696300000228803,
+        "output_tokens_est": 8358,
+        "output_lines": 1513,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      }
+    },
+    "budget_sweep": {
+      "8000": {
+        "output_tokens_est": 8384,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "16000": {
+        "output_tokens_est": 8406,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "32000": {
+        "output_tokens_est": 30169,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "128000": {
+        "output_tokens_est": 30169,
+        "body_survives": true,
+        "signature_survives": true
+      }
+    }
+  },
+  {
+    "requested_lines": 3000,
+    "actual_lines": 3508,
+    "placement": "near_end",
+    "tiers": {
+      "full": {
+        "elapsed_s": 3.749992174562067e-07,
+        "output_tokens_est": 30144,
+        "output_lines": 3508,
+        "body_survives": true,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "skeleton": {
+        "elapsed_s": 0.0007506660003855359,
+        "output_tokens_est": 8381,
+        "output_lines": 1515,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      },
+      "signatures": {
+        "elapsed_s": 0.0348556249991816,
+        "output_tokens_est": 8358,
+        "output_lines": 1513,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": null
+      }
+    },
+    "budget_sweep": {
+      "8000": {
+        "output_tokens_est": 8383,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "16000": {
+        "output_tokens_est": 8405,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "32000": {
+        "output_tokens_est": 30168,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "128000": {
+        "output_tokens_est": 30168,
+        "body_survives": true,
+        "signature_survives": true
+      }
+    }
+  },
+  {
+    "requested_lines": 3000,
+    "actual_lines": 3505,
+    "placement": "far_apart",
+    "tiers": {
+      "full": {
+        "elapsed_s": 2.9200236895121634e-07,
+        "output_tokens_est": 30129,
+        "output_lines": 3505,
+        "body_survives": true,
+        "signature_survives": true,
+        "interface_signature_survives": true
+      },
+      "skeleton": {
+        "elapsed_s": 0.0007016659983491991,
+        "output_tokens_est": 8386,
+        "output_lines": 1515,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": true
+      },
+      "signatures": {
+        "elapsed_s": 0.03441441699760617,
+        "output_tokens_est": 8363,
+        "output_lines": 1513,
+        "body_survives": false,
+        "signature_survives": true,
+        "interface_signature_survives": true
+      }
+    },
+    "budget_sweep": {
+      "8000": {
+        "output_tokens_est": 8388,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "16000": {
+        "output_tokens_est": 8410,
+        "body_survives": false,
+        "signature_survives": true
+      },
+      "32000": {
+        "output_tokens_est": 30153,
+        "body_survives": true,
+        "signature_survives": true
+      },
+      "128000": {
+        "output_tokens_est": 30153,
+        "body_survives": true,
+        "signature_survives": true
+      }
+    }
+  }
+]

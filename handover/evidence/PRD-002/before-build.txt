@@ -1,0 +1,536 @@
+* Getting build dependencies for wheel...
+running egg_info
+creating kriya.egg-info
+writing kriya.egg-info/PKG-INFO
+writing dependency_links to kriya.egg-info/dependency_links.txt
+writing entry points to kriya.egg-info/entry_points.txt
+writing requirements to kriya.egg-info/requires.txt
+writing top-level names to kriya.egg-info/top_level.txt
+writing manifest file 'kriya.egg-info/SOURCES.txt'
+reading manifest file 'kriya.egg-info/SOURCES.txt'
+writing manifest file 'kriya.egg-info/SOURCES.txt'
+* Building wheel...
+running bdist_wheel
+running build
+running build_py
+creating build/lib/kriya
+copying kriya/repl.py -> build/lib/kriya
+copying kriya/__init__.py -> build/lib/kriya
+copying kriya/cli.py -> build/lib/kriya
+copying kriya/routing.py -> build/lib/kriya
+creating build/lib/kriya/tools
+copying kriya/tools/web.py -> build/lib/kriya/tools
+copying kriya/tools/dependency_execution.py -> build/lib/kriya/tools
+copying kriya/tools/containment_oci.py -> build/lib/kriya/tools
+copying kriya/tools/__init__.py -> build/lib/kriya/tools
+copying kriya/tools/lsp.py -> build/lib/kriya/tools
+copying kriya/tools/sandbox.py -> build/lib/kriya/tools
+copying kriya/tools/validate.py -> build/lib/kriya/tools
+copying kriya/tools/resolver.py -> build/lib/kriya/tools
+copying kriya/tools/search.py -> build/lib/kriya/tools
+copying kriya/tools/process.py -> build/lib/kriya/tools
+copying kriya/tools/service_runtime.py -> build/lib/kriya/tools
+copying kriya/tools/knowledge.py -> build/lib/kriya/tools
+copying kriya/tools/tool.py -> build/lib/kriya/tools
+copying kriya/tools/containment.py -> build/lib/kriya/tools
+creating build/lib/kriya/core
+copying kriya/core/db.py -> build/lib/kriya/core
+copying kriya/core/trace.py -> build/lib/kriya/core
+copying kriya/core/kernel.py -> build/lib/kriya/core
+copying kriya/core/registry.py -> build/lib/kriya/core
+copying kriya/core/events.py -> build/lib/kriya/core
+copying kriya/core/model_capabilities.py -> build/lib/kriya/core
+copying kriya/core/__init__.py -> build/lib/kriya/core
+copying kriya/core/llm.py -> build/lib/kriya/core
+creating build/lib/kriya/memory
+copying kriya/memory/vector.py -> build/lib/kriya/memory
+copying kriya/memory/memory.py -> build/lib/kriya/memory
+copying kriya/memory/__init__.py -> build/lib/kriya/memory
+creating build/lib/kriya/config
+copying kriya/config/config.py -> build/lib/kriya/config
+copying kriya/config/authority_approval.py -> build/lib/kriya/config
+copying kriya/config/__init__.py -> build/lib/kriya/config
+copying kriya/config/authority.py -> build/lib/kriya/config
+creating build/lib/kriya/plugins
+copying kriya/plugins/__init__.py -> build/lib/kriya/plugins
+copying kriya/plugins/plugin.py -> build/lib/kriya/plugins
+creating build/lib/kriya/agents
+copying kriya/agents/__init__.py -> build/lib/kriya/agents
+copying kriya/agents/extractor.py -> build/lib/kriya/agents
+copying kriya/agents/agent.py -> build/lib/kriya/agents
+copying kriya/agents/contracts.py -> build/lib/kriya/agents
+creating build/lib/kriya/mcp
+copying kriya/mcp/containment_adapter.py -> build/lib/kriya/mcp
+copying kriya/mcp/server.py -> build/lib/kriya/mcp
+copying kriya/mcp/__init__.py -> build/lib/kriya/mcp
+copying kriya/mcp/capability.py -> build/lib/kriya/mcp
+copying kriya/mcp/mcp.py -> build/lib/kriya/mcp
+copying kriya/mcp/lifecycle.py -> build/lib/kriya/mcp
+copying kriya/mcp/invocation_approval.py -> build/lib/kriya/mcp
+creating build/lib/kriya/prompt
+copying kriya/prompt/__init__.py -> build/lib/kriya/prompt
+copying kriya/prompt/engine.py -> build/lib/kriya/prompt
+creating build/lib/kriya/knowledge
+copying kriya/knowledge/rubric.py -> build/lib/kriya/knowledge
+copying kriya/knowledge/__init__.py -> build/lib/kriya/knowledge
+copying kriya/knowledge/scaffold.py -> build/lib/kriya/knowledge
+copying kriya/knowledge/staging.py -> build/lib/kriya/knowledge
+copying kriya/knowledge/schema.py -> build/lib/kriya/knowledge
+creating build/lib/kriya/workflow
+copying kriya/workflow/plan_validation.py -> build/lib/kriya/workflow
+copying kriya/workflow/attempt.py -> build/lib/kriya/workflow
+copying kriya/workflow/generation_manifest.py -> build/lib/kriya/workflow
+copying kriya/workflow/skill_extraction.py -> build/lib/kriya/workflow
+copying kriya/workflow/planning_diagnostics.py -> build/lib/kriya/workflow
+copying kriya/workflow/outbound_lookup.py -> build/lib/kriya/workflow
+copying kriya/workflow/failure_reporting.py -> build/lib/kriya/workflow
+copying kriya/workflow/process_profile.py -> build/lib/kriya/workflow
+copying kriya/workflow/self_correction.py -> build/lib/kriya/workflow
+copying kriya/workflow/semantic_region_authority.py -> build/lib/kriya/workflow
+copying kriya/workflow/repository_topology.py -> build/lib/kriya/workflow
+copying kriya/workflow/failure_grounding.py -> build/lib/kriya/workflow
+copying kriya/workflow/workflow_types.py -> build/lib/kriya/workflow
+copying kriya/workflow/checkpoint.py -> build/lib/kriya/workflow
+copying kriya/workflow/subtask_checkpoint.py -> build/lib/kriya/workflow
+copying kriya/workflow/verification_authority.py -> build/lib/kriya/workflow
+copying kriya/workflow/lsp_integration.py -> build/lib/kriya/workflow
+copying kriya/workflow/retry_strategy.py -> build/lib/kriya/workflow
+copying kriya/workflow/workflow_controller.py -> build/lib/kriya/workflow
+copying kriya/workflow/proposal_store.py -> build/lib/kriya/workflow
+copying kriya/workflow/verification_report.py -> build/lib/kriya/workflow
+copying kriya/workflow/milestones.py -> build/lib/kriya/workflow
+copying kriya/workflow/acceptance.py -> build/lib/kriya/workflow
+copying kriya/workflow/planner_repair.py -> build/lib/kriya/workflow
+copying kriya/workflow/milestone_normalization.py -> build/lib/kriya/workflow
+copying kriya/workflow/milestone_validation.py -> build/lib/kriya/workflow
+copying kriya/workflow/subtask_context_projection.py -> build/lib/kriya/workflow
+copying kriya/workflow/obligations.py -> build/lib/kriya/workflow
+copying kriya/workflow/banners.py -> build/lib/kriya/workflow
+copying kriya/workflow/__init__.py -> build/lib/kriya/workflow
+copying kriya/workflow/regression_attribution.py -> build/lib/kriya/workflow
+copying kriya/workflow/deterministic_failure_diagnostic.py -> build/lib/kriya/workflow
+copying kriya/workflow/context_orchestrator.py -> build/lib/kriya/workflow
+copying kriya/workflow/context_budget.py -> build/lib/kriya/workflow
+copying kriya/workflow/live_lookup.py -> build/lib/kriya/workflow
+copying kriya/workflow/dependency_invalidation.py -> build/lib/kriya/workflow
+copying kriya/workflow/architectural_choice.py -> build/lib/kriya/workflow
+copying kriya/workflow/static_checks.py -> build/lib/kriya/workflow
+copying kriya/workflow/operations.py -> build/lib/kriya/workflow
+copying kriya/workflow/plan_schema.py -> build/lib/kriya/workflow
+copying kriya/workflow/context_projection.py -> build/lib/kriya/workflow
+copying kriya/workflow/triage.py -> build/lib/kriya/workflow
+copying kriya/workflow/attribution.py -> build/lib/kriya/workflow
+copying kriya/workflow/failure.py -> build/lib/kriya/workflow
+copying kriya/workflow/validation_baseline.py -> build/lib/kriya/workflow
+copying kriya/workflow/repair_contract.py -> build/lib/kriya/workflow
+copying kriya/workflow/control_context.py -> build/lib/kriya/workflow
+copying kriya/workflow/review_context.py -> build/lib/kriya/workflow
+copying kriya/workflow/retry_policy.py -> build/lib/kriya/workflow
+copying kriya/workflow/subtask_executor.py -> build/lib/kriya/workflow
+copying kriya/workflow/run_events.py -> build/lib/kriya/workflow
+copying kriya/workflow/subtask_telemetry.py -> build/lib/kriya/workflow
+copying kriya/workflow/file_resolution.py -> build/lib/kriya/workflow
+copying kriya/workflow/retry_package.py -> build/lib/kriya/workflow
+copying kriya/workflow/worktree.py -> build/lib/kriya/workflow
+copying kriya/workflow/toolchain.py -> build/lib/kriya/workflow
+copying kriya/workflow/investigation.py -> build/lib/kriya/workflow
+copying kriya/workflow/retry_prompts.py -> build/lib/kriya/workflow
+copying kriya/workflow/workflow.py -> build/lib/kriya/workflow
+copying kriya/workflow/verification_contract.py -> build/lib/kriya/workflow
+copying kriya/workflow/semantic_scope_derivation.py -> build/lib/kriya/workflow
+copying kriya/workflow/context_package.py -> build/lib/kriya/workflow
+copying kriya/workflow/edit_safety.py -> build/lib/kriya/workflow
+copying kriya/workflow/proposal_binding.py -> build/lib/kriya/workflow
+copying kriya/workflow/contract_authority.py -> build/lib/kriya/workflow
+copying kriya/workflow/context_source.py -> build/lib/kriya/workflow
+copying kriya/workflow/migration.py -> build/lib/kriya/workflow
+copying kriya/workflow/planner_validation.py -> build/lib/kriya/workflow
+copying kriya/workflow/evidence.py -> build/lib/kriya/workflow
+copying kriya/workflow/proposal_promotion.py -> build/lib/kriya/workflow
+copying kriya/workflow/recovery_plan.py -> build/lib/kriya/workflow
+copying kriya/workflow/best_of_n.py -> build/lib/kriya/workflow
+copying kriya/workflow/state.py -> build/lib/kriya/workflow
+creating build/lib/kriya/skills
+copying kriya/skills/skill.py -> build/lib/kriya/skills
+copying kriya/skills/__init__.py -> build/lib/kriya/skills
+creating build/lib/kriya/analyzer
+copying kriya/analyzer/graph.py -> build/lib/kriya/analyzer
+copying kriya/analyzer/analyzer.py -> build/lib/kriya/analyzer
+copying kriya/analyzer/__init__.py -> build/lib/kriya/analyzer
+copying kriya/analyzer/java_members.py -> build/lib/kriya/analyzer
+creating build/lib/kriya/control
+copying kriya/control/persistence.py -> build/lib/kriya/control
+copying kriya/control/run_ownership.py -> build/lib/kriya/control
+copying kriya/control/decisions.py -> build/lib/kriya/control
+copying kriya/control/__init__.py -> build/lib/kriya/control
+copying kriya/control/telemetry.py -> build/lib/kriya/control
+copying kriya/control/contracts.py -> build/lib/kriya/control
+copying kriya/control/artifacts.py -> build/lib/kriya/control
+copying kriya/control/workspace_identity.py -> build/lib/kriya/control
+copying kriya/control/state.py -> build/lib/kriya/control
+creating build/lib/kriya/policy
+copying kriya/policy/injection.py -> build/lib/kriya/policy
+copying kriya/policy/execution.py -> build/lib/kriya/policy
+copying kriya/policy/enforcement.py -> build/lib/kriya/policy
+copying kriya/policy/approved_sources.py -> build/lib/kriya/policy
+copying kriya/policy/filesystem.py -> build/lib/kriya/policy
+copying kriya/policy/__init__.py -> build/lib/kriya/policy
+copying kriya/policy/telemetry.py -> build/lib/kriya/policy
+copying kriya/policy/model.py -> build/lib/kriya/policy
+copying kriya/policy/trust.py -> build/lib/kriya/policy
+copying kriya/policy/errors.py -> build/lib/kriya/policy
+creating build/lib/kriya/knowledge/channels
+copying kriya/knowledge/channels/repo_manifest.py -> build/lib/kriya/knowledge/channels
+copying kriya/knowledge/channels/__init__.py -> build/lib/kriya/knowledge/channels
+copying kriya/knowledge/channels/live_failure.py -> build/lib/kriya/knowledge/channels
+copying kriya/knowledge/channels/base.py -> build/lib/kriya/knowledge/channels
+running egg_info
+writing kriya.egg-info/PKG-INFO
+writing dependency_links to kriya.egg-info/dependency_links.txt
+writing entry points to kriya.egg-info/entry_points.txt
+writing requirements to kriya.egg-info/requires.txt
+writing top-level names to kriya.egg-info/top_level.txt
+reading manifest file 'kriya.egg-info/SOURCES.txt'
+writing manifest file 'kriya.egg-info/SOURCES.txt'
+installing to build/bdist.macosx-26.0-arm64/wheel
+running install
+running install_lib
+creating build/bdist.macosx-26.0-arm64/wheel
+creating build/bdist.macosx-26.0-arm64/wheel/kriya
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/tools
+copying build/lib/kriya/tools/web.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/dependency_execution.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/containment_oci.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/lsp.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/sandbox.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/validate.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/resolver.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/search.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/process.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/service_runtime.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/knowledge.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/tool.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+copying build/lib/kriya/tools/containment.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/tools
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/core
+copying build/lib/kriya/core/db.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/core
+copying build/lib/kriya/core/trace.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/core
+copying build/lib/kriya/core/kernel.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/core
+copying build/lib/kriya/core/registry.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/core
+copying build/lib/kriya/core/events.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/core
+copying build/lib/kriya/core/model_capabilities.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/core
+copying build/lib/kriya/core/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/core
+copying build/lib/kriya/core/llm.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/core
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/memory
+copying build/lib/kriya/memory/vector.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/memory
+copying build/lib/kriya/memory/memory.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/memory
+copying build/lib/kriya/memory/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/memory
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/config
+copying build/lib/kriya/config/config.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/config
+copying build/lib/kriya/config/authority_approval.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/config
+copying build/lib/kriya/config/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/config
+copying build/lib/kriya/config/authority.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/config
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/plugins
+copying build/lib/kriya/plugins/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/plugins
+copying build/lib/kriya/plugins/plugin.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/plugins
+copying build/lib/kriya/repl.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya
+copying build/lib/kriya/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/agents
+copying build/lib/kriya/agents/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/agents
+copying build/lib/kriya/agents/extractor.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/agents
+copying build/lib/kriya/agents/agent.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/agents
+copying build/lib/kriya/agents/contracts.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/agents
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/mcp
+copying build/lib/kriya/mcp/containment_adapter.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/mcp
+copying build/lib/kriya/mcp/server.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/mcp
+copying build/lib/kriya/mcp/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/mcp
+copying build/lib/kriya/mcp/capability.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/mcp
+copying build/lib/kriya/mcp/mcp.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/mcp
+copying build/lib/kriya/mcp/lifecycle.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/mcp
+copying build/lib/kriya/mcp/invocation_approval.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/mcp
+copying build/lib/kriya/cli.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/prompt
+copying build/lib/kriya/prompt/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/prompt
+copying build/lib/kriya/prompt/engine.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/prompt
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/knowledge
+copying build/lib/kriya/knowledge/rubric.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/knowledge
+copying build/lib/kriya/knowledge/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/knowledge
+copying build/lib/kriya/knowledge/scaffold.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/knowledge
+copying build/lib/kriya/knowledge/staging.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/knowledge
+copying build/lib/kriya/knowledge/schema.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/knowledge
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/knowledge/channels
+copying build/lib/kriya/knowledge/channels/repo_manifest.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/knowledge/channels
+copying build/lib/kriya/knowledge/channels/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/knowledge/channels
+copying build/lib/kriya/knowledge/channels/live_failure.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/knowledge/channels
+copying build/lib/kriya/knowledge/channels/base.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/knowledge/channels
+copying build/lib/kriya/routing.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/workflow
+copying build/lib/kriya/workflow/plan_validation.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/attempt.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/generation_manifest.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/skill_extraction.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/planning_diagnostics.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/outbound_lookup.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/failure_reporting.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/process_profile.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/self_correction.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/semantic_region_authority.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/repository_topology.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/failure_grounding.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/workflow_types.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/checkpoint.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/subtask_checkpoint.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/verification_authority.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/lsp_integration.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/retry_strategy.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/workflow_controller.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/proposal_store.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/verification_report.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/milestones.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/acceptance.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/planner_repair.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/milestone_normalization.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/milestone_validation.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/subtask_context_projection.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/obligations.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/banners.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/regression_attribution.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/deterministic_failure_diagnostic.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/context_orchestrator.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/context_budget.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/live_lookup.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/dependency_invalidation.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/architectural_choice.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/static_checks.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/operations.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/plan_schema.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/context_projection.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/triage.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/attribution.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/failure.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/validation_baseline.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/repair_contract.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/control_context.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/review_context.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/retry_policy.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/subtask_executor.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/run_events.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/subtask_telemetry.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/file_resolution.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/retry_package.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/worktree.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/toolchain.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/investigation.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/retry_prompts.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/workflow.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/verification_contract.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/semantic_scope_derivation.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/context_package.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/edit_safety.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/proposal_binding.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/contract_authority.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/context_source.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/migration.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/planner_validation.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/evidence.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/proposal_promotion.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/recovery_plan.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/best_of_n.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+copying build/lib/kriya/workflow/state.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/workflow
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/skills
+copying build/lib/kriya/skills/skill.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/skills
+copying build/lib/kriya/skills/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/skills
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/analyzer
+copying build/lib/kriya/analyzer/graph.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/analyzer
+copying build/lib/kriya/analyzer/analyzer.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/analyzer
+copying build/lib/kriya/analyzer/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/analyzer
+copying build/lib/kriya/analyzer/java_members.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/analyzer
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/control
+copying build/lib/kriya/control/persistence.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/control
+copying build/lib/kriya/control/run_ownership.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/control
+copying build/lib/kriya/control/decisions.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/control
+copying build/lib/kriya/control/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/control
+copying build/lib/kriya/control/telemetry.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/control
+copying build/lib/kriya/control/contracts.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/control
+copying build/lib/kriya/control/artifacts.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/control
+copying build/lib/kriya/control/workspace_identity.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/control
+copying build/lib/kriya/control/state.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/control
+creating build/bdist.macosx-26.0-arm64/wheel/kriya/policy
+copying build/lib/kriya/policy/injection.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/policy
+copying build/lib/kriya/policy/execution.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/policy
+copying build/lib/kriya/policy/enforcement.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/policy
+copying build/lib/kriya/policy/approved_sources.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/policy
+copying build/lib/kriya/policy/filesystem.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/policy
+copying build/lib/kriya/policy/__init__.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/policy
+copying build/lib/kriya/policy/telemetry.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/policy
+copying build/lib/kriya/policy/model.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/policy
+copying build/lib/kriya/policy/trust.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/policy
+copying build/lib/kriya/policy/errors.py -> build/bdist.macosx-26.0-arm64/wheel/./kriya/policy
+running install_egg_info
+Copying kriya.egg-info to build/bdist.macosx-26.0-arm64/wheel/./kriya-0.1.0-py3.14.egg-info
+running install_scripts
+creating build/bdist.macosx-26.0-arm64/wheel/kriya-0.1.0.dist-info/WHEEL
+creating '/tmp/kriya-prd002-before/.tmp-b26_r9fj/kriya-0.1.0-py3-none-any.whl' and adding 'build/bdist.macosx-26.0-arm64/wheel' to it
+adding 'kriya/__init__.py'
+adding 'kriya/cli.py'
+adding 'kriya/repl.py'
+adding 'kriya/routing.py'
+adding 'kriya/agents/__init__.py'
+adding 'kriya/agents/agent.py'
+adding 'kriya/agents/contracts.py'
+adding 'kriya/agents/extractor.py'
+adding 'kriya/analyzer/__init__.py'
+adding 'kriya/analyzer/analyzer.py'
+adding 'kriya/analyzer/graph.py'
+adding 'kriya/analyzer/java_members.py'
+adding 'kriya/config/__init__.py'
+adding 'kriya/config/authority.py'
+adding 'kriya/config/authority_approval.py'
+adding 'kriya/config/config.py'
+adding 'kriya/control/__init__.py'
+adding 'kriya/control/artifacts.py'
+adding 'kriya/control/contracts.py'
+adding 'kriya/control/decisions.py'
+adding 'kriya/control/persistence.py'
+adding 'kriya/control/run_ownership.py'
+adding 'kriya/control/state.py'
+adding 'kriya/control/telemetry.py'
+adding 'kriya/control/workspace_identity.py'
+adding 'kriya/core/__init__.py'
+adding 'kriya/core/db.py'
+adding 'kriya/core/events.py'
+adding 'kriya/core/kernel.py'
+adding 'kriya/core/llm.py'
+adding 'kriya/core/model_capabilities.py'
+adding 'kriya/core/registry.py'
+adding 'kriya/core/trace.py'
+adding 'kriya/knowledge/__init__.py'
+adding 'kriya/knowledge/rubric.py'
+adding 'kriya/knowledge/scaffold.py'
+adding 'kriya/knowledge/schema.py'
+adding 'kriya/knowledge/staging.py'
+adding 'kriya/knowledge/channels/__init__.py'
+adding 'kriya/knowledge/channels/base.py'
+adding 'kriya/knowledge/channels/live_failure.py'
+adding 'kriya/knowledge/channels/repo_manifest.py'
+adding 'kriya/mcp/__init__.py'
+adding 'kriya/mcp/capability.py'
+adding 'kriya/mcp/containment_adapter.py'
+adding 'kriya/mcp/invocation_approval.py'
+adding 'kriya/mcp/lifecycle.py'
+adding 'kriya/mcp/mcp.py'
+adding 'kriya/mcp/server.py'
+adding 'kriya/memory/__init__.py'
+adding 'kriya/memory/memory.py'
+adding 'kriya/memory/vector.py'
+adding 'kriya/plugins/__init__.py'
+adding 'kriya/plugins/plugin.py'
+adding 'kriya/policy/__init__.py'
+adding 'kriya/policy/approved_sources.py'
+adding 'kriya/policy/enforcement.py'
+adding 'kriya/policy/errors.py'
+adding 'kriya/policy/execution.py'
+adding 'kriya/policy/filesystem.py'
+adding 'kriya/policy/injection.py'
+adding 'kriya/policy/model.py'
+adding 'kriya/policy/telemetry.py'
+adding 'kriya/policy/trust.py'
+adding 'kriya/prompt/__init__.py'
+adding 'kriya/prompt/engine.py'
+adding 'kriya/skills/__init__.py'
+adding 'kriya/skills/skill.py'
+adding 'kriya/tools/__init__.py'
+adding 'kriya/tools/containment.py'
+adding 'kriya/tools/containment_oci.py'
+adding 'kriya/tools/dependency_execution.py'
+adding 'kriya/tools/knowledge.py'
+adding 'kriya/tools/lsp.py'
+adding 'kriya/tools/process.py'
+adding 'kriya/tools/resolver.py'
+adding 'kriya/tools/sandbox.py'
+adding 'kriya/tools/search.py'
+adding 'kriya/tools/service_runtime.py'
+adding 'kriya/tools/tool.py'
+adding 'kriya/tools/validate.py'
+adding 'kriya/tools/web.py'
+adding 'kriya/workflow/__init__.py'
+adding 'kriya/workflow/acceptance.py'
+adding 'kriya/workflow/architectural_choice.py'
+adding 'kriya/workflow/attempt.py'
+adding 'kriya/workflow/attribution.py'
+adding 'kriya/workflow/banners.py'
+adding 'kriya/workflow/best_of_n.py'
+adding 'kriya/workflow/checkpoint.py'
+adding 'kriya/workflow/context_budget.py'
+adding 'kriya/workflow/context_orchestrator.py'
+adding 'kriya/workflow/context_package.py'
+adding 'kriya/workflow/context_projection.py'
+adding 'kriya/workflow/context_source.py'
+adding 'kriya/workflow/contract_authority.py'
+adding 'kriya/workflow/control_context.py'
+adding 'kriya/workflow/dependency_invalidation.py'
+adding 'kriya/workflow/deterministic_failure_diagnostic.py'
+adding 'kriya/workflow/edit_safety.py'
+adding 'kriya/workflow/evidence.py'
+adding 'kriya/workflow/failure.py'
+adding 'kriya/workflow/failure_grounding.py'
+adding 'kriya/workflow/failure_reporting.py'
+adding 'kriya/workflow/file_resolution.py'
+adding 'kriya/workflow/generation_manifest.py'
+adding 'kriya/workflow/investigation.py'
+adding 'kriya/workflow/live_lookup.py'
+adding 'kriya/workflow/lsp_integration.py'
+adding 'kriya/workflow/migration.py'
+adding 'kriya/workflow/milestone_normalization.py'
+adding 'kriya/workflow/milestone_validation.py'
+adding 'kriya/workflow/milestones.py'
+adding 'kriya/workflow/obligations.py'
+adding 'kriya/workflow/operations.py'
+adding 'kriya/workflow/outbound_lookup.py'
+adding 'kriya/workflow/plan_schema.py'
+adding 'kriya/workflow/plan_validation.py'
+adding 'kriya/workflow/planner_repair.py'
+adding 'kriya/workflow/planner_validation.py'
+adding 'kriya/workflow/planning_diagnostics.py'
+adding 'kriya/workflow/process_profile.py'
+adding 'kriya/workflow/proposal_binding.py'
+adding 'kriya/workflow/proposal_promotion.py'
+adding 'kriya/workflow/proposal_store.py'
+adding 'kriya/workflow/recovery_plan.py'
+adding 'kriya/workflow/regression_attribution.py'
+adding 'kriya/workflow/repair_contract.py'
+adding 'kriya/workflow/repository_topology.py'
+adding 'kriya/workflow/retry_package.py'
+adding 'kriya/workflow/retry_policy.py'
+adding 'kriya/workflow/retry_prompts.py'
+adding 'kriya/workflow/retry_strategy.py'
+adding 'kriya/workflow/review_context.py'
+adding 'kriya/workflow/run_events.py'
+adding 'kriya/workflow/self_correction.py'
+adding 'kriya/workflow/semantic_region_authority.py'
+adding 'kriya/workflow/semantic_scope_derivation.py'
+adding 'kriya/workflow/skill_extraction.py'
+adding 'kriya/workflow/state.py'
+adding 'kriya/workflow/static_checks.py'
+adding 'kriya/workflow/subtask_checkpoint.py'
+adding 'kriya/workflow/subtask_context_projection.py'
+adding 'kriya/workflow/subtask_executor.py'
+adding 'kriya/workflow/subtask_telemetry.py'
+adding 'kriya/workflow/toolchain.py'
+adding 'kriya/workflow/triage.py'
+adding 'kriya/workflow/validation_baseline.py'
+adding 'kriya/workflow/verification_authority.py'
+adding 'kriya/workflow/verification_contract.py'
+adding 'kriya/workflow/verification_report.py'
+adding 'kriya/workflow/workflow.py'
+adding 'kriya/workflow/workflow_controller.py'
+adding 'kriya/workflow/workflow_types.py'
+adding 'kriya/workflow/worktree.py'
+adding 'kriya-0.1.0.dist-info/METADATA'
+adding 'kriya-0.1.0.dist-info/WHEEL'
+adding 'kriya-0.1.0.dist-info/entry_points.txt'
+adding 'kriya-0.1.0.dist-info/top_level.txt'
+adding 'kriya-0.1.0.dist-info/RECORD'
+removing build/bdist.macosx-26.0-arm64/wheel
+Successfully built kriya-0.1.0-py3-none-any.whl

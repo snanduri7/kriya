@@ -1,0 +1,74 @@
+"""PROVIDER-CONTRACT-001A mutation check: each mutation removes or inverts an
+important part of the fix; the focused suite must fail for every one."""
+import subprocess, sys
+from pathlib import Path
+
+ROOT = Path(sys.argv[1])
+TESTS = ["tests/test_provider_contract_001a.py", "tests/test_generation_time_budget.py",
+         "tests/test_provider_contract_001.py"]
+M = [
+ ("F1-run-budget-not-bound", "kriya/core/llm.py",
+  "            candidates.append((started + budget, DEADLINE_SOURCE_RUN_BUDGET))", "            pass"),
+ ("F1-clock-restarts-every-claim", "kriya/control/run_coordinator.py",
+  "    if lease.generation_clock is None:\n        lease.generation_clock = time.monotonic()\n    return lease.generation_clock",
+  "    return time.monotonic()"),
+ ("F1-timeout-ignores-remaining", "kriya/core/llm.py",
+  'return transport_timeout(self.config, record["effective_request_timeout_ms"] / 1000)',
+  "return transport_timeout(self.config)"),
+ ("F1-exceeded-becomes-generic", "kriya/core/llm.py",
+  "                raise InferenceDeadlineError(INFERENCE_DEADLINE_EXCEEDED, record) from error\n", ""),
+ ("F1-no-total-bound", "kriya/core/llm.py",
+  "return await asyncio.wait_for(request(timeout), timeout=max(0.0, deadline - time.monotonic()))",
+  "return await request(timeout)"),
+ ("F1-recovery-not-typed", "kriya/workflow/recovery_coordinator.py",
+  "        if unclassified and isinstance(exc, InferenceDeadlineError)", "        if False"),
+ ("F1-unit-uses-fresh-clock", "kriya/workflow/workflow.py",
+  "        if run_clock is not None:\n            state.budget_started_monotonic = run_clock", "        pass"),
+ ("F1-budget-from-invocation-clock", "kriya/workflow/attempt.py",
+  "    elapsed = time.monotonic() - state.budget_started_monotonic",
+  "    elapsed = time.monotonic() - state.generation_started_monotonic"),
+ ("F1-provider-contact-before-exhaustion-check", "kriya/core/llm.py",
+  "        self.last_completion = None\n        self._require_time_left()\n", "        self.last_completion = None\n"),
+ ("F1-escalation-swallows-deadline", "kriya/agents/agent.py",
+  "        except InferenceDeadlineError:\n            raise  # the run's deadline binds every candidate alike\n", ""),
+ ("F1-final-review-raises", "kriya/workflow/workflow.py",
+  "except (ContextBudgetUnsatisfiableError, InferenceDeadlineError) as refusal:",
+  "except ContextBudgetUnsatisfiableError as refusal:"),
+ ("F1-deadline-resend-without-format", "kriya/core/llm.py",
+  "and is_reasoning and not isinstance(e, InferenceDeadlineError)", "and is_reasoning"),
+ ("F3-no-retry", "kriya/core/model_runtime.py",
+  "SERVED_CONTEXT_OBSERVATION_ATTEMPTS = 2", "SERVED_CONTEXT_OBSERVATION_ATTEMPTS = 1"),
+ ("F3-malformed-not-retried", "kriya/core/model_runtime.py",
+  '            failure = "malformed /api/ps response (no models list)"\n            continue',
+  '            failure = "malformed /api/ps response (no models list)"\n            break'),
+ ("F3-production-continues", "kriya/core/llm.py",
+  "            if self._strict_identity() and identified:", "            if False:"),
+ ("F3-silent-skip", "kriya/core/llm.py",
+  '        elif runtime.provider_capabilities.feature("served_context_observation").value != "unsupported":',
+  "        elif False:"),
+ ("F3-not-loaded-is-failure", "kriya/core/model_runtime.py",
+  "    return ServedContextObservation(NOT_LOADED)\n", "    return ServedContextObservation(OBSERVATION_FAILED)\n"),
+ ("F3-claimed-observed-when-unverified", "kriya/core/llm.py",
+  "                contract[\"served_context_window_after_call_provenance\"] = Provenance.UNVERIFIED.value",
+  "                contract[\"served_context_window_after_call\"] = 0"),
+ ("F3-adapter-error-escapes", "kriya/core/llm.py",
+  "            return ServedContextObservation(OBSERVATION_FAILED, reason=f\"{type(error).__name__}: {error}\"[:300])",
+  "            raise"),
+]
+survivors = 0
+for label, rel, old, new in M:
+    path = ROOT / rel
+    text = path.read_text()
+    if text.count(old) < 1:
+        print(f"{label}: ANCHOR NOT FOUND"); survivors += 1; continue
+    path.write_text(text.replace(old, new))
+    try:
+        run = subprocess.run([str(ROOT / ".venv/bin/pytest"), "-q", "-x", "-p", "no:randomly", *TESTS],
+                             cwd=ROOT, capture_output=True, text=True, timeout=600)
+    finally:
+        path.write_text(text)
+    killed = run.returncode != 0
+    survivors += not killed
+    tail = [l for l in run.stdout.splitlines() if l.startswith("FAILED")][:1]
+    print(f"{label}: {'KILLED' if killed else 'SURVIVED'} {tail[0] if tail else ''}")
+print(f"{len(M) - survivors}/{len(M)} killed")

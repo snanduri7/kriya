@@ -28,8 +28,9 @@ building it.
    workspace + `kriya.yaml`, shells out to the real `kriya generate <goal>
    -y` (fully unattended - matches `on_approval`/`on_skill_gap`/
    `on_web_lookup`'s auto-skip behavior under `-y` in `kriya/cli.py`), and
-   points every goal's `paths.logs` at one shared directory so the whole
-   batch lands in a single `traces.db`. Writes a `summary.txt` you can paste
+   points every goal's `paths.state` (and `logging.directory`) at one shared
+   batch directory so the whole batch lands in a single `traces.db`
+   (`runs/<batch>/state/traces.db`; batches before the move used `logs/`). Writes a `summary.txt` you can paste
    back without needing to dig through raw logs.
 3. `report.py` - reads that batch's `traces.db` and prints pass rate plus a
    breakdown by `status`/`failure_category` (the column

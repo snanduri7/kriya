@@ -1,0 +1,8 @@
+{
+ "revision": "2e8b09f (pre-fix)",
+ "quality_gates_passed": true,
+ "developer_called": false,
+ "files": {
+  "config.yaml": "export TOOL_HOME=/tmp/tool\n"
+ }
+}

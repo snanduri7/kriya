@@ -1,0 +1,80 @@
+"""PROVIDER-CONTRACT-001A Part A + FILE-INTEGRITY-CONTRACT-001B mutation
+check: each mutation removes or inverts an important part of the change; the
+focused suites must fail for every one."""
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(sys.argv[1])
+TESTS = ["tests/test_file_integrity_contract_001b.py", "tests/test_file_integrity_contract_001.py",
+         "tests/test_provider_contract_001a.py", "tests/test_provider_contract_native.py",
+         "tests/test_provider_contract_001.py", "tests/test_workflow.py"]
+PLANNER_REUSE = (
+    "\n    if state.budgets.retry_count == 0 and \"```\" in (ctx.plan or \"\"):\n"
+    "        files = [{\"filepath\": fp, \"content\": ctx.plan} for fp in ctx.expected_files_upfront]\n"
+)
+M = [
+    # --- Part A: presence_penalty truthfulness ---
+    ("A-native-presence-supported", "kriya/core/model_runtime.py",
+     '"presence_penalty": Support.UNSUPPORTED, "frequency_penalty": Support.SUPPORTED',
+     '"presence_penalty": Support.SUPPORTED, "frequency_penalty": Support.SUPPORTED'),
+    ("A-v1-presence-server-config", "kriya/core/model_runtime.py",
+     '"presence_penalty": Support.UNSUPPORTED, "frequency_penalty": Support.SERVER_CONFIG_ONLY',
+     '"presence_penalty": Support.SERVER_CONFIG_ONLY, "frequency_penalty": Support.SERVER_CONFIG_ONLY'),
+    ("A-unsupported-not-refused", "kriya/core/provider_contract.py",
+     "        if strict and unsupported:", "        if False:"),
+    ("A-observed-labelled-effective", "kriya/core/model_runtime.py",
+     "    return SettingState(name, _numeric(requested), None, Provenance.UNVERIFIED, support,",
+     "    return SettingState(name, _numeric(requested), server_value, Provenance.SERVER_MODEL_CONFIG, support,"),
+    ("A-default-plan-ignores-declaration", "kriya/core/inference_runtime.py",
+     "            if support is Support.SUPPORTED:\n                return SettingState(name, requested, requested, Provenance.REQUEST, support)",
+     "            if False:\n                return SettingState(name, requested, requested, Provenance.REQUEST, support)"),
+    # --- Part B: Planner bypass ---
+    ("B-planner-reuse-reintroduced", "kriya/workflow/attempt.py",
+     "\n    if state.last_developer_call_attempt != state.attempt_number:",
+     PLANNER_REUSE + "\n    if state.last_developer_call_attempt != state.attempt_number:"),
+    # --- Part B: untracked files created by a gate ---
+    ("B-created-not-checked", "kriya/workflow/file_integrity.py",
+     "        created = self.created()\n        if created:", "        created = []\n        if created:"),
+    ("B-preexisting-attributed", "kriya/workflow/file_integrity.py",
+     "untracked_repository_paths(self.root) - self._untracked_before - set(self._expected)",
+     "untracked_repository_paths(self.root) - set(self._expected)"),
+    ("B-candidate-attributed", "kriya/workflow/file_integrity.py",
+     "untracked_repository_paths(self.root) - self._untracked_before - set(self._expected)",
+     "untracked_repository_paths(self.root) - self._untracked_before"),
+    ("B-ignored-output-listed", "kriya/workflow/file_integrity.py",
+     '["git", "ls-files", "--others", "--exclude-standard", "-z"]', '["git", "ls-files", "--others", "-z"]'),
+    ("B-bytecode-exemption-broad", "kriya/workflow/file_integrity.py",
+     'return "__pycache__" in parts[:-1] and parts[-1].endswith((".pyc", ".pyo"))',
+     'return "__pycache__" in parts[:-1]'),
+    ("B-output-root-prefix-broad", "kriya/workflow/file_integrity.py",
+     'path == root or path.startswith(root + "/")', "path.startswith(root)"),
+    ("B-javac-output-not-registered", "kriya/tools/validate.py",
+     "            if self.tree_binding is not None:\n                # FILE-INTEGRITY-CONTRACT-001B: Kriya chose this output directory.",
+     "            if False:\n                # FILE-INTEGRITY-CONTRACT-001B: Kriya chose this output directory."),
+    ("B-new-code-not-a-stop", "kriya/workflow/file_integrity.py",
+     "VERIFICATION_TREE_STOP_CODES = (VERIFICATION_GATE_MUTATED_TRACKED_FILES, VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE)",
+     "VERIFICATION_TREE_STOP_CODES = (VERIFICATION_GATE_MUTATED_TRACKED_FILES,)"),
+    ("B-before-check-skipped", "kriya/workflow/file_integrity.py",
+     "            raise VerificationGateCreatedFiles(gate, created, phase)",
+     "            if phase == \"after\":\n                raise VerificationGateCreatedFiles(gate, created, phase)"),
+]
+survivors = 0
+for label, rel, old, new in M:
+    path = ROOT / rel
+    text = path.read_text()
+    if text.count(old) != 1:
+        print(f"{label}: ANCHOR count {text.count(old)}")
+        survivors += 1
+        continue
+    path.write_text(text.replace(old, new))
+    try:
+        run = subprocess.run([str(ROOT / ".venv/bin/pytest"), "-q", "-x", "-p", "no:randomly", "-n", "8", *TESTS],
+                             cwd=ROOT, capture_output=True, text=True, timeout=1200)
+    finally:
+        path.write_text(text)
+    killed = run.returncode != 0
+    survivors += not killed
+    tail = [line for line in run.stdout.splitlines() if line.startswith("FAILED")][:1]
+    print(f"{label}: {'KILLED' if killed else 'SURVIVED'} {tail[0] if tail else ''}", flush=True)
+print(f"{len(M) - survivors}/{len(M)} killed")

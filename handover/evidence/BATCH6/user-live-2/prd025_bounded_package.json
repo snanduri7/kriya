@@ -1,0 +1,62 @@
+{
+  "allocation_bytes": 33964,
+  "grade": {
+    "evidence_packages": [
+      {
+        "answered": true,
+        "budget_bytes": 29467,
+        "capture_truncation": [],
+        "decisive_windows_omitted": false,
+        "distinct_signature_overflow": 0,
+        "extraction_version": "verifier-evidence/1",
+        "head_tail": [
+          {
+            "head_chars": 9482,
+            "step": 1,
+            "stream": "stdout",
+            "tail_chars": 18965
+          }
+        ],
+        "included_windows": [
+          {
+            "end": 949226,
+            "kind": "assertion",
+            "occurrences": 1,
+            "start": 948826,
+            "step": 1,
+            "stream": "stdout"
+          }
+        ],
+        "model": "qwen3-coder:30b",
+        "omitted_ranges": [
+          {
+            "end": 948826,
+            "start": 9482,
+            "step": 1,
+            "stream": "stdout"
+          },
+          {
+            "end": 1889994,
+            "start": 949226,
+            "step": 1,
+            "stream": "stdout"
+          }
+        ],
+        "omitted_windows": [],
+        "package_truncated": true,
+        "rendered_bytes": 29190,
+        "rendered_chars": 29190,
+        "rendered_sha256": "58c4fdb45a102eb96faad00b3638edac87d4591db1c6d1f7934ca404772a8b1f",
+        "truncation": [
+          "PACKAGE_TRUNCATION"
+        ]
+      }
+    ],
+    "likely_files": [],
+    "passed": false,
+    "reason_code": "VERIFIER_REPORTED_FAILURE",
+    "reasoning": "The output shows that while all records are processed, there is an AssertionError stating 'MIDDLE total=41 but expected 42', which indicates the total calculation is incorrect and fails the success criteria.",
+    "verdict": "FAIL"
+  },
+  "status": "LIVE_EXERCISED"
+}

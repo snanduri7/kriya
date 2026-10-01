@@ -1,0 +1,72 @@
+
+[Usage: 142 input tokens, 122 output tokens | Time: 10.63s | Finish: stop]
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 532, "payload_verbatim": true, "applied": true}
+
+[Usage: 142 input tokens, 151 output tokens | Time: 1.95s | Finish: stop]
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "task": "edit", "kind": "no_change", "reason_code": null, "raw_len": 687}
+
+[Usage: 142 input tokens, 122 output tokens | Time: 1.68s | Finish: stop]
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 532, "payload_verbatim": true, "applied": true}
+
+[Usage: 101 input tokens, 102 output tokens | Time: 1.74s | Finish: stop]
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "task": "file", "kind": "file", "reason_code": null, "raw_len": 474, "payload_verbatim": true}
+
+[Usage: 101 input tokens, 99 output tokens | Time: 1.37s | Finish: stop]
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "task": "file", "kind": "file", "reason_code": null, "raw_len": 463, "payload_verbatim": true}
+
+[Usage: 101 input tokens, 80 output tokens | Time: 1.08s | Finish: stop]
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "legacy_strict", "task": "file", "kind": "file", "reason_code": null, "raw_len": 364, "payload_verbatim": true}
+
+[Usage: 258 input tokens, 167 output tokens | Time: 2.60s | Finish: stop]
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 653, "payload_verbatim": true, "applied": true}
+
+[Usage: 258 input tokens, 156 output tokens | Time: 2.14s | Finish: stop]
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 608, "payload_verbatim": true, "applied": true}
+
+[Usage: 258 input tokens, 151 output tokens | Time: 2.10s | Finish: stop]
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 578, "payload_verbatim": true, "applied": true}
+
+[Usage: 198 input tokens, 107 output tokens | Time: 1.79s | Finish: stop]
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "task": "file", "kind": "file", "reason_code": null, "raw_len": 439, "payload_verbatim": true}
+
+[Usage: 198 input tokens, 115 output tokens | Time: 1.48s | Finish: stop]
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "task": "file", "kind": "file", "reason_code": null, "raw_len": 478, "payload_verbatim": true}
+
+[Usage: 198 input tokens, 117 output tokens | Time: 1.55s | Finish: stop]
+{"model": "qwen3-coder:30b-kriya-e52213655394", "protocol": "structured", "task": "file", "kind": "file", "reason_code": null, "raw_len": 490, "payload_verbatim": true}
+
+[Usage: 155 input tokens, 91 output tokens | Time: 1.67s | Finish: stop]
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 354, "payload_verbatim": true, "applied": true}
+
+[Usage: 155 input tokens, 86 output tokens | Time: 1.22s | Finish: stop]
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 333, "payload_verbatim": true, "applied": true}
+
+[Usage: 155 input tokens, 88 output tokens | Time: 1.24s | Finish: stop]
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "task": "edit", "kind": "invalid", "reason_code": "INVALID_EDIT_PROTOCOL", "raw_len": 334, "raw_head": "FIX ANALYSIS: The current `total` function sums all elements in the `prices` list, including negative numbers. To fix this, we need to add a condition inside the loop to skip any price that is less than zero.\n\nREPLACE:\ndef total(prices):\n    result = 0\n    for p in prices:\n        if p >= 0:\n       "}
+
+[Usage: 108 input tokens, 89 output tokens | Time: 1.52s | Finish: stop]
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "task": "file", "kind": "file", "reason_code": null, "raw_len": 355, "payload_verbatim": true}
+
+[Usage: 108 input tokens, 87 output tokens | Time: 1.25s | Finish: stop]
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "task": "file", "kind": "file", "reason_code": null, "raw_len": 366, "payload_verbatim": true}
+
+[Usage: 108 input tokens, 91 output tokens | Time: 1.31s | Finish: stop]
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "legacy_strict", "task": "file", "kind": "file", "reason_code": null, "raw_len": 359, "payload_verbatim": true}
+
+[Usage: 272 input tokens, 115 output tokens | Time: 2.12s | Finish: stop]
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 387, "payload_verbatim": true, "applied": true}
+
+[Usage: 272 input tokens, 118 output tokens | Time: 1.67s | Finish: stop]
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 395, "payload_verbatim": true, "applied": true}
+
+[Usage: 272 input tokens, 118 output tokens | Time: 1.66s | Finish: stop]
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "task": "edit", "kind": "edits", "reason_code": null, "raw_len": 410, "payload_verbatim": true, "applied": true}
+
+[Usage: 210 input tokens, 115 output tokens | Time: 2.01s | Finish: stop]
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "task": "file", "kind": "file", "reason_code": null, "raw_len": 412, "payload_verbatim": true}
+
+[Usage: 210 input tokens, 104 output tokens | Time: 1.49s | Finish: stop]
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "task": "file", "kind": "file", "reason_code": null, "raw_len": 375, "payload_verbatim": true}
+
+[Usage: 210 input tokens, 97 output tokens | Time: 1.39s | Finish: stop]
+{"model": "qwen3.6:35b-a3b-q4_K_M-kriya-620d4d5ce36a", "protocol": "structured", "task": "file", "kind": "file", "reason_code": null, "raw_len": 346, "payload_verbatim": true}

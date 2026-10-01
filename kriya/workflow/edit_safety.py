@@ -1,15 +1,212 @@
 """Deterministic sanity checks applied to an anchored edit or full-file write before it reaches disk - whitespace-tolerant anchor matching and structural corruption detection. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization). The "which file does this edit concern" checks that used to live here (find_misdirected_edit_target, find_edits_ignoring_own_diagnosis, find_edits_ignoring_reported_line) moved to kriya/workflow/attribution.py on 2026-08-14 - see that module's own docstring taxonomy for why. What's left here is purely mechanical edit-safety: does the edit apply cleanly, and does the resulting file look structurally sound - never "which file"."""
 
+import contextlib
+import hashlib
+import json
 import logging
 import os
 import re
+import tempfile
+import time
+import uuid
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Optional
+from dataclasses import asdict, dataclass, replace
+from enum import Enum
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+from kriya.policy.execution import ExecutionPolicy
+from kriya.policy.model import ActionRequest, ActionType
+from kriya.workflow.file_integrity import (
+    ANCHOR_NOT_IN_FILE,
+    FileIntegrityError,
+    anchored_replaces,
+    apply_line_block_edits,
+    file_raw_digest,
+    raw_digest,
+)
 
 logger = logging.getLogger(__name__)
 
+# MA4.5 (control-plane implementation plan) - audit-only, module-level
+# since this file has no class/instance to hold it (unlike kriya/core/llm.py's
+# LLMClient or kriya/tools/validate.py's PolymorphicValidator). See
+# _audit_write_file below.
+_execution_policy = ExecutionPolicy()
 
-def atomic_write_file(full_path: str, content: str) -> None:
+
+def _audit_write_file(full_path: str, workspace_path: Optional[str] = None) -> None:
+    """MA4.5 - audit-only ExecutionPolicy consultation, mirroring
+    kriya/core/llm.py's _audit_llm_network_access (MA4.3) and kriya/tools/
+    validate.py's _audit_run_command (MA4.4) exactly: can never affect
+    whether atomic_write_file actually writes - any exception raised here is
+    caught and logged, never propagated, and the decision is only logged,
+    never branched on.
+
+    AuthorizedFileWriter callers supply their already-validated workspace
+    root so this second audit reports the same containment fact accurately.
+    Low-level compatibility callers may omit it; those retain the historical
+    context-free default-deny audit without changing write behavior.
+
+    MA4.16 update: this is no longer the only policy consultation Kriya's
+    two real content-write call sites (kriya/workflow/attempt.py,
+    kriya/workflow/self_correction.py) go through. Both now call
+    kriya/policy/filesystem.py's AuthorizedFileWriter FIRST, with the real
+    worktree_path they've always had in scope - that layer REALLY enforces
+    containment and a narrow sensitive-path check (raises PolicyDeniedError,
+    nothing reaches this function at all on a denial) before
+    commit_revision_grounded_file/batch are ever called. This audit-only
+    call therefore now only fires for writes that already passed real
+    enforcement upstream, plus any other/future caller of
+    atomic_write_file directly - it's a second, defense-in-depth signal,
+    not the only one anymore."""
+    try:
+        result = _execution_policy.evaluate(
+            ActionRequest(
+                action_type=ActionType.WRITE_FILE, target=full_path,
+                workspace_path=workspace_path,
+            )
+        )
+        logger.debug(
+            "MA4 policy audit (not enforced): WRITE_FILE '%s' -> %s (%s)",
+            full_path, result.decision.value, result.reason_code,
+        )
+    except Exception as e:
+        logger.debug("MA4 policy audit call failed (ignored, audit-only): %s", e)
+
+
+class CandidateMaterializationError(RuntimeError):
+    """An approved candidate file is missing or unreadable; nothing was
+    committed. Raised by terminal_commit.materialize_candidate, which
+    re-exports it; defined here so the terminal gate service can bind a
+    candidate without importing the commit module."""
+
+
+class FileRevisionConflict(ValueError):
+    """The file changed after Kriya read it and before the staged write."""
+
+
+class BatchCommitError(RuntimeError):
+    """A staged batch could not be committed or completely rolled back."""
+
+
+class UncertainCommitError(BatchCommitError):
+    """A prior process stopped while a source commit may have been active."""
+
+
+class CommitState(str, Enum):
+    """Durable source-commit states; absence means ``not_started``."""
+
+    NOT_STARTED = "not_started"
+    IN_PROGRESS = "in_progress"
+    COMMITTED = "committed"
+    ROLLED_BACK = "rolled_back"
+    UNCERTAIN = "uncertain"
+
+
+@dataclass(frozen=True)
+class CommitEvidence:
+    schema_version: int
+    transaction_id: str
+    state: CommitState
+    started_at_unix: float
+    updated_at_unix: float
+    operations: Tuple[Dict[str, Any], ...]
+    result_revisions: Dict[str, str]
+    failure: Optional[str] = None
+    # PRD-008 (schema 2): identity of the exact candidate this transaction
+    # applies (candidate_digest), linking it to its RunRecord commit cycle,
+    # and the provenance of an explicit `kriya runs recover` settlement.
+    candidate_hash: Optional[str] = None
+    recovery: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload = asdict(self)
+        payload["state"] = self.state.value
+        payload["operations"] = list(self.operations)
+        return payload
+
+
+class BatchCommitResult(dict):
+    """Backward-compatible revision mapping with commit evidence attached."""
+
+    def __init__(self, revisions: Dict[str, str], evidence: CommitEvidence) -> None:
+        super().__init__(revisions)
+        self.evidence = evidence
+
+
+@dataclass(frozen=True)
+class StagedFileWrite:
+    """One fully materialized candidate file and the revision it was based on.
+
+    ``base_path`` can differ from ``target_path`` when a sandbox file has not
+    been materialized yet and generation read the corresponding workspace file.
+    The source revision is still guarded before the candidate is committed.
+    ``delete`` represents an approved deletion in the same guarded batch; its
+    empty ``content`` value is ignored except for the returned tombstone
+    revision.
+    """
+
+    target_path: str
+    content: str
+    base_path: str
+    expected_base_revision: str
+    delete: bool = False
+    # Optional because legacy/sandbox callers predate explicit create/modify
+    # identity. Terminal source commits set it, making an empty existing file
+    # distinguishable from a missing create target.
+    expected_base_exists: Optional[bool] = None
+    # PRD-005: the exact verified bytes. When set they are what reaches disk
+    # (``content`` stays the decoded text used for revision identity), so a
+    # CRLF or non-UTF-8 candidate is committed byte-for-byte.
+    content_bytes: Optional[bytes] = None
+    # PRD-005: permission bits for the committed file (e.g. an executable
+    # ``mvnw`` created by the candidate). None keeps an existing target's
+    # mode, or the umask default for a new file.
+    mode: Optional[int] = None
+
+
+def content_revision(content: str) -> str:
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def read_file_revision(full_path: str) -> str:
+    """FILE-INTEGRITY-CONTRACT-001: a file's revision is the SHA-256 of its
+    raw bytes (the digest of no bytes when it is absent), never of a decoded
+    copy - two different byte sequences never share a revision. For valid
+    UTF-8 with LF line endings it equals content_revision() of its text."""
+    return file_raw_digest(full_path)
+
+
+def commit_revision_grounded_file(
+    full_path: str, content: str, expected_revision: str,
+    workspace_path: Optional[str] = None, *, content_bytes: Optional[bytes] = None,
+) -> str:
+    """Atomically commit a fully staged file only if its base is unchanged.
+
+    ``content_bytes``, when given, are the exact bytes written (``content``
+    is then only their text view); the returned revision is theirs."""
+    actual_revision = read_file_revision(full_path)
+    if actual_revision != expected_revision:
+        raise FileRevisionConflict(
+            f"Refusing stale write to '{full_path}': expected revision "
+            f"{expected_revision[:12]}, found {actual_revision[:12]}. Re-read the file and retry."
+        )
+    if os.path.islink(full_path):
+        raise FileRevisionConflict(
+            f"Refusing write to '{full_path}': it is a symbolic link, never replaced by a regular file."
+        )
+    data = content_bytes if content_bytes is not None else content.encode("utf-8")
+    mode = os.stat(full_path).st_mode & 0o7777 if os.path.exists(full_path) else None
+    atomic_write_file(full_path, content, workspace_path=workspace_path, content_bytes=data)
+    if mode is not None:
+        os.chmod(full_path, mode)
+    return raw_digest(data)
+
+
+def atomic_write_file(
+    full_path: str, content: str, workspace_path: Optional[str] = None,
+    *, content_bytes: Optional[bytes] = None,
+) -> None:
     """Writes `content` to `full_path` atomically - via a temp file in the SAME
     directory, then os.replace() (atomic on both POSIX and Windows NTFS) - so a
     process killed mid-write can never leave `full_path` truncated/corrupted at
@@ -40,10 +237,565 @@ def atomic_write_file(full_path: str, content: str) -> None:
     system tmp dir) so os.replace() stays within one filesystem - crossing
     filesystems silently degrades to a non-atomic copy+delete on some
     platforms, defeating the whole point."""
+    _audit_write_file(full_path, workspace_path=workspace_path)
     tmp_path = f"{full_path}.kriya-tmp-{os.getpid()}"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(content)
+    with open(tmp_path, "wb") as f:
+        f.write(content_bytes if content_bytes is not None else content.encode("utf-8"))
     os.replace(tmp_path, full_path)
+
+
+def _atomic_write_bytes(full_path: str, content: bytes) -> None:
+    tmp_path = f"{full_path}.kriya-rollback-{os.getpid()}"
+    try:
+        with open(tmp_path, "wb") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, full_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
+
+
+# Schema 2 (PRD-008) adds exact per-operation byte state ("before"/"after":
+# exists, sha256, mode), the operation kind and the candidate hash. Schema 1
+# evidence still loads; recovery treats its text-only revisions as weaker
+# evidence and never guesses when they cannot tell states apart.
+# Schema 3 (FILE-INTEGRITY-CONTRACT-001): every revision is a raw-byte digest.
+# Schemas 1-2 digested a decoded copy; they equal raw digests for valid UTF-8
+# LF files, and recovery fails closed on any other mismatch.
+_COMMIT_EVIDENCE_SCHEMA_VERSION = 3
+_SUPPORTED_COMMIT_EVIDENCE_SCHEMAS = frozenset({1, 2, 3})
+_COMMIT_EVIDENCE_RELATIVE_DIR = os.path.join(".kriya", "control", "commits")
+
+
+def commit_evidence_dir(workspace_path: str) -> str:
+    return os.path.join(workspace_path, _COMMIT_EVIDENCE_RELATIVE_DIR)
+
+
+def candidate_digest(writes: Iterable["StagedFileWrite"], workspace_root: Optional[str]) -> str:
+    """Content identity of an exact candidate: path, bytes, mode, deletion.
+
+    The same value is recorded in the RunRecord commit cycle (terminal
+    commit seam) and in the commit evidence, so recovery can prove both
+    describe the same verified candidate."""
+    entries = []
+    for item in writes:
+        data = item.content_bytes if item.content_bytes is not None else item.content.encode("utf-8")
+        relpath = (
+            os.path.relpath(item.target_path, workspace_root)
+            if workspace_root is not None else item.target_path
+        )
+        entries.append((
+            relpath, "delete" if item.delete else hashlib.sha256(data).hexdigest(), item.mode,
+        ))
+    return candidate_digest_of_entries(entries)
+
+
+def candidate_digest_of_entries(
+    entries: Iterable[Tuple[str, Optional[str], Optional[int]]],
+) -> str:
+    """candidate_digest over (relpath, sha256 or "delete", mode) entries, so
+    recovery can recompute it from bytes observed on disk."""
+    blob = json.dumps(sorted([list(entry) for entry in entries]), sort_keys=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _within_workspace(workspace_path: str, path: str) -> bool:
+    root = os.path.realpath(workspace_path)
+    candidate = os.path.realpath(path)
+    try:
+        return os.path.commonpath((root, candidate)) == root and candidate != root
+    except ValueError:
+        return False
+
+
+def _fsync_directory(path: str) -> None:
+    """Best-effort metadata durability on platforms supporting directory fsync."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(descriptor)
+    except OSError:
+        pass
+    finally:
+        os.close(descriptor)
+
+
+def _evidence_path(workspace_path: str, transaction_id: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", transaction_id):
+        raise BatchCommitError(f"Invalid commit transaction id: {transaction_id!r}.")
+    return os.path.join(
+        workspace_path, _COMMIT_EVIDENCE_RELATIVE_DIR, f"{transaction_id}.json",
+    )
+
+
+def _persist_commit_evidence(workspace_path: str, evidence: CommitEvidence) -> str:
+    path = _evidence_path(workspace_path, evidence.transaction_id)
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    payload = evidence.to_dict()
+    fd, temp_path = tempfile.mkstemp(prefix=".commit-", suffix=".tmp", dir=directory)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        _fsync_directory(directory)
+    finally:
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
+    return path
+
+
+def load_commit_evidence(path: str) -> CommitEvidence:
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    schema_version = int(payload["schema_version"])
+    if schema_version not in _SUPPORTED_COMMIT_EVIDENCE_SCHEMAS:
+        raise ValueError(f"Unsupported commit evidence schema: {schema_version}.")
+    return CommitEvidence(
+        schema_version=schema_version,
+        transaction_id=str(payload["transaction_id"]),
+        state=CommitState(payload["state"]),
+        started_at_unix=float(payload["started_at_unix"]),
+        updated_at_unix=float(payload["updated_at_unix"]),
+        operations=tuple(payload.get("operations", ())),
+        result_revisions=dict(payload.get("result_revisions", {})),
+        failure=payload.get("failure"),
+        candidate_hash=payload.get("candidate_hash"),
+        recovery=payload.get("recovery"),
+    )
+
+
+def list_commit_evidence(
+    workspace_path: str,
+) -> List[Tuple[str, Optional[CommitEvidence], Optional[str]]]:
+    """Every evidence file as (path, evidence, error); unreadable files are
+    reported with their error, never skipped."""
+    directory = commit_evidence_dir(workspace_path)
+    try:
+        names = sorted(name for name in os.listdir(directory) if name.endswith(".json"))
+    except FileNotFoundError:
+        return []
+    entries: List[Tuple[str, Optional[CommitEvidence], Optional[str]]] = []
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            entries.append((path, load_commit_evidence(path), None))
+        except Exception as error:
+            entries.append((path, None, f"{type(error).__name__}: {error}"))
+    return entries
+
+
+def settle_recovered_commit_evidence(
+    workspace_path: str, expected: CommitEvidence, *, state: CommitState,
+    recovery: Dict[str, Any], result_revisions: Dict[str, str],
+) -> CommitEvidence:
+    """Record the terminal state explicit recovery proved for an interrupted
+    transaction (kriya/control/recovery.py). Refuses unless the evidence on
+    disk is still exactly ``expected`` and still IN_PROGRESS/UNCERTAIN, so a
+    settlement can never overwrite evidence that changed after it was read."""
+    if state not in (CommitState.COMMITTED, CommitState.ROLLED_BACK):
+        raise BatchCommitError(f"Recovery can only settle to committed/rolled_back, not {state.value}.")
+    current = load_commit_evidence(_evidence_path(workspace_path, expected.transaction_id))
+    if current != expected or current.state not in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN):
+        raise BatchCommitError(
+            f"Commit evidence {expected.transaction_id!r} changed since it was assessed; re-run recovery."
+        )
+    settled = replace(
+        current, state=state, updated_at_unix=time.time(),
+        result_revisions=dict(result_revisions), recovery=dict(recovery),
+    )
+    _persist_commit_evidence(workspace_path, settled)
+    return settled
+
+
+def commit_state_for_transaction(workspace_path: str, transaction_id: str) -> CommitState:
+    """Return NOT_STARTED when no durable intent exists for this transaction."""
+    path = _evidence_path(workspace_path, transaction_id)
+    if not os.path.exists(path):
+        return CommitState.NOT_STARTED
+    return load_commit_evidence(path).state
+
+
+def find_uncertain_commit_evidence(workspace_path: str) -> Tuple[CommitEvidence, ...]:
+    """Return durable commits whose process never recorded a safe terminal state."""
+    uncertain = []
+    for path, evidence, error in list_commit_evidence(workspace_path):
+        if evidence is None:
+            raise UncertainCommitError(
+                f"Commit evidence {os.path.basename(path)!r} is unreadable; "
+                f"source state is uncertain: {error}"
+            )
+        if evidence.state in (CommitState.IN_PROGRESS, CommitState.UNCERTAIN):
+            uncertain.append(evidence)
+    return tuple(uncertain)
+
+
+def _existing_parent(path: str) -> str:
+    current = os.path.dirname(path)
+    while current and not os.path.isdir(current):
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    if not current or not os.path.isdir(current):
+        raise BatchCommitError(f"No existing parent directory for target {path!r}.")
+    return current
+
+
+def stage_file_prefix(transaction_id: str) -> str:
+    """Name prefix of every staged temp file of one transaction; recorded in
+    its commit evidence so a crash's leftovers can be found and removed."""
+    return f".kriya-stage-{transaction_id}-"
+
+
+def _candidate_mode(item: StagedFileWrite) -> int:
+    """Permission bits the committed file will have."""
+    if item.mode is not None:
+        return item.mode & 0o7777
+    try:
+        return os.stat(item.target_path, follow_symlinks=False).st_mode & 0o7777
+    except FileNotFoundError:
+        # mkstemp is deliberately restrictive. Match ordinary file-create
+        # behavior for a new target while respecting the process umask.
+        current_umask = os.umask(0)
+        os.umask(current_umask)
+        return 0o666 & ~current_umask
+
+
+def _stage_content(item: StagedFileWrite, transaction_id: str, index: int) -> str:
+    parent = _existing_parent(item.target_path)
+    fd, path = tempfile.mkstemp(
+        prefix=f"{stage_file_prefix(transaction_id)}{index}-", dir=parent,
+    )
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(
+                item.content_bytes if item.content_bytes is not None
+                else item.content.encode("utf-8")
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(path, _candidate_mode(item))
+        return path
+    except Exception:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _candidate_bytes(item: StagedFileWrite) -> bytes:
+    return item.content_bytes if item.content_bytes is not None else item.content.encode("utf-8")
+
+
+def _file_state(data: Optional[bytes], mode: Optional[int]) -> Dict[str, Any]:
+    if data is None:
+        return {"exists": False, "sha256": None, "mode": None}
+    return {"exists": True, "sha256": hashlib.sha256(data).hexdigest(), "mode": mode}
+
+
+def _operation_kind(item: StagedFileWrite, target_exists: bool) -> str:
+    if item.delete:
+        return "DELETE"
+    return "MODIFY" if target_exists else "CREATE"
+
+
+def _preflight_batch(
+    staged: List[StagedFileWrite], workspace_path: Optional[str],
+) -> None:
+    canonical_targets = [os.path.normcase(os.path.realpath(item.target_path)) for item in staged]
+    if len(set(canonical_targets)) != len(canonical_targets):
+        raise BatchCommitError("A candidate batch contains duplicate or aliased target paths.")
+    for item in staged:
+        if not item.target_path or not item.base_path or not item.expected_base_revision:
+            raise BatchCommitError("Every candidate write requires target, base, and expected revision.")
+        if workspace_path is not None and not (
+            _within_workspace(workspace_path, item.target_path)
+            and _within_workspace(workspace_path, item.base_path)
+        ):
+            raise BatchCommitError(
+                f"Candidate target/base escapes workspace {workspace_path!r}: "
+                f"{item.target_path!r} (base {item.base_path!r})."
+            )
+        if os.path.islink(item.target_path):
+            # Replacing a link would silently turn it into a regular file and
+            # rollback could not restore the link; refuse before mutation.
+            raise BatchCommitError(
+                f"Candidate file operation cannot target a symbolic link: {item.target_path!r}."
+            )
+        if os.path.isdir(item.target_path) or os.path.isdir(item.base_path):
+            raise BatchCommitError(
+                f"Candidate file operation cannot target a directory: {item.target_path!r}."
+            )
+        base_exists = os.path.exists(item.base_path)
+        target_exists = os.path.lexists(item.target_path)
+        if item.expected_base_exists is not None and base_exists != item.expected_base_exists:
+            raise FileRevisionConflict(
+                f"Refusing batch operation for {item.target_path!r}: expected base "
+                f"existence={item.expected_base_exists}, found {base_exists}."
+            )
+        if item.expected_base_exists is False and target_exists:
+            raise FileRevisionConflict(
+                f"Refusing create operation for existing target {item.target_path!r}."
+            )
+        if item.delete and item.expected_base_exists is False:
+            raise BatchCommitError(
+                f"Delete operation for {item.target_path!r} declares a missing expected base."
+            )
+        if item.delete and not target_exists:
+            raise FileRevisionConflict(
+                f"Refusing delete operation for missing target {item.target_path!r}."
+            )
+        actual = read_file_revision(item.base_path)
+        if actual != item.expected_base_revision:
+            raise FileRevisionConflict(
+                f"Refusing stale batch write to '{item.target_path}': base "
+                f"'{item.base_path}' expected revision "
+                f"{item.expected_base_revision[:12]}, found {actual[:12]}."
+            )
+
+
+
+def commit_revision_grounded_batch(
+    writes: Iterable[StagedFileWrite], workspace_path: Optional[str] = None,
+    *, transaction_id: Optional[str] = None,
+) -> BatchCommitResult:
+    """Apply one local source transaction with durable crash evidence.
+
+    Order of operations (PRD-005):
+    1. Whole-batch preflight (containment of target and base, no symlink
+       targets, duplicate/alias rejection, create/delete shape, every base
+       revision) and refusal while any prior commit is uncertain - all before
+       anything is written.
+    2. Snapshot every target's bytes and mode.
+    3. Persist IN_PROGRESS evidence (fsynced file + directory; each operation's
+       kind, exact before/after byte state, base and candidate revisions, and
+       the staged-file prefix) BEFORE staging, so no byte - not even a staged
+       temp file beside a source file - reaches the workspace before durable
+       evidence says a commit began, and anything a crash leaves behind is
+       attributable and removable. (The terminal commit seam records RunRecord
+       intent before calling this.)
+    4. Stage every write as a fully fsynced temp file beside its target.
+    5. Apply each operation (os.replace / unlink) after re-checking its base.
+    6. Persist COMMITTED evidence. Retention is reference-safe and lives in
+       kriya/control/retention.py, never here: evidence is pruned only
+       together with the run record that references it.
+
+    Any controlled failure before step 5 changes no source path. A failure
+    during step 5 restores every applied path's bytes, existence and mode and
+    records ROLLED_BACK. If a rollback step or the terminal evidence write
+    itself fails, the evidence is left UNCERTAIN/IN_PROGRESS and
+    UncertainCommitError is raised - never an ordinary failure. A batch with
+    no writes performs the uncertainty check but writes no evidence.
+    """
+    staged = list(writes)
+    _preflight_batch(staged, workspace_path)
+    if workspace_path is not None:
+        uncertain = find_uncertain_commit_evidence(workspace_path)
+        if uncertain:
+            ids = ", ".join(item.transaction_id for item in uncertain)
+            raise UncertainCommitError(
+                f"Refusing source commit while prior commit intent is uncertain: {ids}."
+            )
+    if not staged:
+        return BatchCommitResult({}, CommitEvidence(
+            schema_version=_COMMIT_EVIDENCE_SCHEMA_VERSION,
+            transaction_id=transaction_id or "empty", state=CommitState.COMMITTED,
+            started_at_unix=time.time(), updated_at_unix=time.time(),
+            operations=(), result_revisions={},
+        ))
+
+    transaction_id = transaction_id or uuid.uuid4().hex
+    if workspace_path is not None:
+        _evidence_path(workspace_path, transaction_id)  # validate before any write
+
+    def _rel(path: str) -> str:
+        return os.path.relpath(path, workspace_path) if workspace_path is not None else path
+
+    snapshots: Dict[str, Tuple[Optional[bytes], Optional[int]]] = {}
+    for item in staged:
+        try:
+            with open(item.target_path, "rb") as handle:
+                snapshots[item.target_path] = (
+                    handle.read(), os.stat(item.target_path, follow_symlinks=False).st_mode & 0o7777,
+                )
+        except FileNotFoundError:
+            snapshots[item.target_path] = (None, None)
+
+    started_at = time.time()
+    operations = tuple({
+        "target_path": _rel(item.target_path),
+        "base_path": _rel(item.base_path),
+        "operation": "delete" if item.delete else "write",
+        "expected_base_revision": item.expected_base_revision,
+        "expected_base_exists": item.expected_base_exists,
+        "candidate_revision": None if item.delete else raw_digest(_candidate_bytes(item)),
+        "stage_prefix": None if item.delete else stage_file_prefix(transaction_id),
+        # PRD-008: exact byte state of the target before and after, so crash
+        # recovery classifies each path by bytes and mode, not by decoded text.
+        "kind": _operation_kind(item, snapshots[item.target_path][0] is not None),
+        "before": _file_state(*snapshots[item.target_path]),
+        "after": (
+            _file_state(None, None) if item.delete
+            else _file_state(_candidate_bytes(item), _candidate_mode(item))
+        ),
+    } for item in staged)
+    batch_candidate_hash = (
+        candidate_digest(staged, workspace_path) if workspace_path is not None else None
+    )
+
+    def _evidence(state: CommitState, **extra: Any) -> CommitEvidence:
+        return CommitEvidence(
+            schema_version=_COMMIT_EVIDENCE_SCHEMA_VERSION,
+            transaction_id=transaction_id, state=state,
+            started_at_unix=started_at, updated_at_unix=time.time(),
+            operations=operations, candidate_hash=batch_candidate_hash,
+            result_revisions=extra.pop("result_revisions", {}), **extra,
+        )
+
+    if workspace_path is not None:
+        try:
+            _persist_commit_evidence(workspace_path, _evidence(CommitState.IN_PROGRESS))
+        except Exception as error:
+            # _persist_commit_evidence replaces atomically, so no evidence file
+            # (i.e. not started) exists and no source path was touched.
+            raise BatchCommitError(
+                f"Commit intent could not be persisted before mutation: {error}"
+            ) from error
+
+    staged_paths: Dict[str, str] = {}
+    applied: List[str] = []
+    created_directories: List[str] = []
+    mutation_started = False
+    # Staged files are removed only once durable evidence says the batch is
+    # settled (or there is no evidence at all). While it is IN_PROGRESS or
+    # UNCERTAIN they may be the only copy of the candidate bytes that
+    # `kriya runs recover --complete-partial` needs to finish the commit.
+    evidence_settled = workspace_path is None
+    try:
+        for index, item in enumerate(staged):
+            if not item.delete:
+                staged_paths[item.target_path] = _stage_content(item, transaction_id, index)
+        mutation_started = True
+        for item in staged:
+            actual = read_file_revision(item.base_path)
+            if actual != item.expected_base_revision:
+                raise FileRevisionConflict(
+                    f"Refusing stale batch write to '{item.target_path}': base "
+                    f"changed during commit."
+                )
+            parent = os.path.dirname(item.target_path)
+            missing = []
+            cursor = parent
+            while cursor and not os.path.exists(cursor):
+                missing.append(cursor)
+                cursor = os.path.dirname(cursor)
+            os.makedirs(parent, exist_ok=True)
+            created_directories.extend(reversed(missing))
+            _audit_write_file(item.target_path, workspace_path=workspace_path)
+            # Track conservatively before the syscall. If an injected
+            # wrapper raises after unlink/replace performed its side effect,
+            # rollback still restores this target.
+            applied.append(item.target_path)
+            if item.delete:
+                try:
+                    os.unlink(item.target_path)
+                except FileNotFoundError:
+                    pass
+            else:
+                os.replace(staged_paths[item.target_path], item.target_path)
+                staged_paths.pop(item.target_path)
+            _fsync_directory(parent)
+    except BaseException as commit_error:
+        # BaseException: a KeyboardInterrupt/SystemExit mid-apply must still
+        # restore the workspace (PRD-005), then propagate unchanged below.
+        rollback_errors = []
+        for target_path in reversed(applied):
+            try:
+                original, mode = snapshots[target_path]
+                if original is None:
+                    try:
+                        os.unlink(target_path)
+                    except FileNotFoundError:
+                        pass
+                else:
+                    _atomic_write_bytes(target_path, original)
+                    if mode is not None:
+                        os.chmod(target_path, mode)
+                _fsync_directory(os.path.dirname(target_path))
+            except Exception as rollback_error:
+                rollback_errors.append(f"{target_path}: {rollback_error}")
+        for directory in reversed(created_directories):
+            try:
+                os.rmdir(directory)
+            except OSError:
+                pass
+        failure = f"{type(commit_error).__name__}: {commit_error}"
+        terminal_state = CommitState.UNCERTAIN if rollback_errors else CommitState.ROLLED_BACK
+        evidence_error: Optional[BaseException] = None
+        if workspace_path is not None:
+            try:
+                _persist_commit_evidence(workspace_path, _evidence(terminal_state, failure=failure))
+            except Exception as error:
+                evidence_error = error
+            else:
+                evidence_settled = terminal_state is CommitState.ROLLED_BACK
+        if not isinstance(commit_error, Exception):
+            # The evidence now says what happened (ROLLED_BACK, or UNCERTAIN/
+            # IN_PROGRESS for `kriya runs recover`); the interrupt itself wins.
+            raise
+        if rollback_errors:
+            raise UncertainCommitError(
+                f"Candidate commit failed ({commit_error}); rollback also failed for: "
+                + "; ".join(rollback_errors)
+            ) from commit_error
+        if evidence_error is not None:
+            # Source paths are restored, but the durable record still says
+            # IN_PROGRESS; the state is only provable by explicit recovery.
+            raise UncertainCommitError(
+                f"Candidate commit failed ({commit_error}) and was rolled back, but the "
+                f"rolled-back evidence could not be persisted: {evidence_error}"
+            ) from commit_error
+        if not mutation_started:
+            raise BatchCommitError(f"Candidate staging failed before mutation: {commit_error}") from commit_error
+        raise BatchCommitError(
+            f"Candidate commit failed and was rolled back: {commit_error}"
+        ) from commit_error
+    finally:
+        if evidence_settled or not mutation_started:
+            for path in staged_paths.values():
+                try:
+                    os.unlink(path)
+                except FileNotFoundError:
+                    pass
+
+    revisions = {
+        item.target_path: raw_digest(b"" if item.delete else _candidate_bytes(item))
+        for item in staged
+    }
+    committed_evidence = _evidence(
+        CommitState.COMMITTED,
+        result_revisions={_rel(path): revision for path, revision in revisions.items()},
+    )
+    if workspace_path is not None:
+        try:
+            _persist_commit_evidence(workspace_path, committed_evidence)
+        except Exception as error:
+            raise UncertainCommitError(
+                f"Source changes were applied but committed evidence could not be persisted: {error}"
+            ) from error
+    return BatchCommitResult(revisions, committed_evidence)
 
 
 def normalize_whitespace(text: str) -> str:
@@ -52,116 +804,26 @@ def normalize_whitespace(text: str) -> str:
 
 
 def apply_anchored_edits(original_content: str, edits: List[Dict[str, str]], shown_context: str) -> str:
-    current_content = original_content
-    for idx, edit in enumerate(edits, 1):
-        search_block = edit.get("search", "")
-        replace_block = edit.get("replace", "")
+    """Apply the Developer's SEARCH/REPLACE edits to ``original_content``
+    (LF-normalized text) through the one edit engine
+    (kriya/workflow/file_integrity.py): complete-line anchors, located in the
+    same source, exactly one match each, no overlap, empty SEARCH refused.
 
-        if not search_block:
-            continue
-
-        norm_search = normalize_whitespace(search_block)
-
-        # Found live, 2026-08-17, digging into a corpus-wide survey of
-        # eval-harness runs: 14 "elided in the skeletonized context"
-        # failures across the whole run history, several from a genuinely
-        # legitimate shape this check never accounted for. shown_context is
-        # a fixed snapshot, passed in once and never updated across loop
-        # iterations - but current_content DOES evolve as earlier edits in
-        # this SAME response get applied (the .replace() call below).
-        # Reproduced directly: a two-step chained edit (edit #1 adds a
-        # `helper();` call, edit #2 wants to comment on that exact new
-        # line) is completely valid and internally consistent, but edit
-        # #2's search text was never part of the ORIGINAL file the model
-        # was shown - only of what edit #1 itself just introduced - so the
-        # old check (comparing only against the static shown_context)
-        # wrongly rejected it as "not shown to the model," when the model
-        # in fact introduced that exact text itself, one edit earlier in
-        # the same response. Grounding a search block against EITHER the
-        # original shown context OR the file's current (possibly
-        # already-edited) state closes this gap while still rejecting a
-        # genuinely fabricated/hallucinated search block, which by
-        # definition matches neither.
-        if shown_context:
-            norm_shown = normalize_whitespace(shown_context)
-            norm_current = normalize_whitespace(current_content)
-            if norm_search not in norm_shown and norm_search not in norm_current:
-                raise ValueError(
-                    f"Anchor matching failed for edit #{idx}: The search block contains code segments "
-                    f"that were elided in the skeletonized context and not shown to the model."
+    ``shown_context`` (the source shown to the model) additionally refuses a
+    SEARCH block that occurs neither there nor in the file
+    (ANCHOR_NOT_IN_FILE: fabricated or stale)."""
+    if shown_context:
+        norm_shown = normalize_whitespace(shown_context)
+        norm_current = normalize_whitespace(original_content)
+        for index, edit in enumerate(edits, 1):
+            norm_search = normalize_whitespace(edit.get("search") or "")
+            if norm_search and norm_search not in norm_shown and norm_search not in norm_current:
+                raise FileIntegrityError(
+                    ANCHOR_NOT_IN_FILE,
+                    f"Anchor matching failed for edit #{index}: the search block occurs neither in the "
+                    "source shown to the model nor in the current file (fabricated or stale).",
                 )
-
-        exact_count = current_content.count(search_block)
-        if exact_count >= 1:
-            # An exact (unnormalized) match exists - the strictest, most-
-            # preferred match shape, so its own count is the uniqueness
-            # signal here, not a whitespace-normalized count over the whole
-            # file (see the window branch below for why that can disagree
-            # with what's actually being matched).
-            if exact_count > 1:
-                raise ValueError(
-                    f"Anchor matching failed for edit #{idx}: The search block matched {exact_count} times (must match exactly once). "
-                    f"Provide more context surrounding the search block."
-                )
-            current_content = current_content.replace(search_block, replace_block, 1)
-            continue
-
-        # No exact match - fall back to a whitespace-tolerant search that
-        # also tolerates a DIFFERENT number of blank lines between content
-        # and search block, not just different indentation - consistent with
-        # normalize_whitespace's own blank-line-discarding philosophy used
-        # everywhere else in this function (the shown_context check above,
-        # for instance). A prior version used a FIXED-size raw-line window
-        # (exactly len(search_block.splitlines()) raw lines) for both the
-        # uniqueness check and the actual splice - found live, 2026-08-11
-        # (kriya-oneshot-protocol-ignite-qpid audit): a search block with one
-        # blank line between two statements, matched against content with
-        # TWO blank lines at the same location, made the OLD whole-file
-        # blank-line-collapsed uniqueness check report "exactly 1 match" (it
-        # discards all blank lines before counting) while the fixed-size
-        # window could never actually find it (the real match needs one more
-        # raw line than the search block has) - the check said "found,
-        # unique" while application then failed with "could not find match",
-        # a self-contradictory outcome that burned a retry on Kriya's own
-        # matching inconsistency, not a real problem with the edit.
-        #
-        # Matches the search block's own non-blank, stripped lines as a
-        # contiguous subsequence against the content's non-blank, stripped
-        # lines - the count of subsequence matches IS the uniqueness check
-        # (no separate, disagreeing mechanism), and the actual RAW splice
-        # range spans from the first to the last matched non-blank line's
-        # real index, so any blank lines interspersed between them in the
-        # original file are naturally included in (and replaced by) the
-        # spliced-in replace_block, regardless of how many there are.
-        search_norm_lines = [ln.strip() for ln in search_block.splitlines() if ln.strip()]
-        content_lines = current_content.splitlines()
-        content_nonblank = [(i, ln.strip()) for i, ln in enumerate(content_lines) if ln.strip()]
-        content_norm_lines = [ln for _, ln in content_nonblank]
-
-        n = len(search_norm_lines)
-        matched_starts = (
-            [i for i in range(len(content_norm_lines) - n + 1) if content_norm_lines[i:i + n] == search_norm_lines]
-            if n > 0 else []
-        )
-
-        if not matched_starts:
-            raise ValueError(
-                f"Anchor matching failed for edit #{idx}: The search block matched 0 times. "
-                f"Please ensure whitespace and contents match exactly."
-            )
-        elif len(matched_starts) > 1:
-            raise ValueError(
-                f"Anchor matching failed for edit #{idx}: The search block matched {len(matched_starts)} times (must match exactly once). "
-                f"Provide more context surrounding the search block."
-            )
-
-        match_pos = matched_starts[0]
-        raw_start = content_nonblank[match_pos][0]
-        raw_end = content_nonblank[match_pos + n - 1][0] + 1
-        content_lines[raw_start:raw_end] = replace_block.splitlines()
-        current_content = "\n".join(content_lines)
-
-    return current_content
+    return apply_line_block_edits(original_content, anchored_replaces(edits)).text
 
 
 def _strip_java_comments_and_strings(code: str) -> str:
@@ -295,9 +957,60 @@ def find_structural_corruption(filepath: str, content: str) -> Optional[str]:
         duplicate = _find_duplicate_top_level_type(stripped)
         if duplicate:
             return f"duplicate top-level type declaration: '{duplicate}' is declared more than once."
+        # A complete compilation unit followed by model commentary is often
+        # brace-balanced and therefore invisible to the checks above.  At
+        # least one top-level type means the last top-level closing brace is
+        # the end of Java source; non-whitespace afterward is payload
+        # contamination, not valid source. Comments/strings have already been
+        # blanked by the language adapter, avoiding marker-word heuristics.
+        if _TOP_LEVEL_TYPE_RE.search(stripped):
+            last_close = stripped.rfind("}")
+            trailing = stripped[last_close + 1:]
+            # Java permits empty top-level declarations (`;`) between/after
+            # type declarations; they are source, not model commentary.
+            if last_close >= 0 and trailing.replace(";", "").strip():
+                return "non-source payload appears after the final top-level type declaration."
     elif filepath.endswith(".xml"):
         try:
             ET.fromstring(content)
         except ET.ParseError as ex:
             return f"malformed XML: {ex}"
+    return None
+
+
+def find_cross_file_type_conflict(
+    filepath: str,
+    candidate_type_names: List[str],
+    type_index: Dict[str, List[str]],
+) -> Optional[Tuple[str, List[str]]]:
+    """The cross-file sibling of _find_duplicate_top_level_type above - that
+    one catches two declarations of the same type WITHIN one file; this one
+    catches a new file about to be written whose declared type already
+    exists somewhere ELSE in the workspace, found live 2026-08-21
+    (protocol_encoder_java): three separate, incompatible `Protocol.java`
+    files ended up coexisting in different packages, each missing different
+    pieces of the intended API, because nothing noticed a "new" file was
+    actually redeclaring an existing type under a different path.
+
+    Deliberately pure data in/out (no DependencyGraph/DB coupling) so it's
+    trivially unit-testable with hand-built inputs, matching
+    find_whole_response_no_op(edits)'s own style - the caller
+    (kriya/workflow/attempt.py) is responsible for building `type_index`
+    (kriya/analyzer/graph.py::DependencyGraph.get_class_symbol_locations(),
+    layered with anything written earlier in the same still-in-progress
+    attempt) and extracting `candidate_type_names`
+    (DependencyGraph.extract_class_names()) before calling this.
+
+    Scoped to genuinely NEW files by the caller, never a REPAIR of a file
+    that already legitimately owns `filepath` - `filepath` itself is
+    excluded from the conflict set here defensively (a file redeclaring its
+    OWN class is never a conflict), but the caller should not even reach
+    this for an existing-path write in the first place.
+
+    Returns (type_name, [other_paths]) for the FIRST candidate name also
+    declared elsewhere, or None if none conflict."""
+    for name in candidate_type_names:
+        others = [p for p in type_index.get(name, []) if p != filepath]
+        if others:
+            return name, others
     return None

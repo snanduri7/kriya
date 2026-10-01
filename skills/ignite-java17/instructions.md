@@ -1,5 +1,3 @@
-# instructions for ignite-java17
-
 # Running Apache Ignite 2.18.0 on Java 17
 
 When generating a Spring XML-based Apache Ignite application using Java 17 and Maven, adhere to the following setup instructions:
@@ -17,9 +15,11 @@ Add these dependencies to the `pom.xml`:
     <artifactId>ignite-spring</artifactId>
     <version>2.18.0</version>
 </dependency>
+```
 
-##2. Java 17 JVM Command Line Arguments
+## 2. Java 17 JVM Command Line Arguments
 Because of package encapsulation starting in JDK 16+, Apache Ignite requires opening internal packages to access system unsafe and reflections. Any execution command (e.g. exec-maven-plugin or runner scripts) must pass these JVM flags:
+```
 --add-opens=java.base/jdk.internal.access=ALL-UNNAMED
 --add-opens=java.base/jdk.internal.misc=ALL-UNNAMED
 --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
@@ -44,6 +44,7 @@ Because of package encapsulation starting in JDK 16+, Apache Ignite requires ope
 --add-opens=java.base/java.text=ALL-UNNAMED
 --add-opens=java.management/sun.management=ALL-UNNAMED
 --add-opens=java.desktop/java.awt.font=ALL-UNNAMED
+```
 
 ### 2a. CRITICAL - the ONLY correct way to wire these into exec-maven-plugin: use `exec:exec`, NOT `exec:java`
 **`<jvmArguments>` is NOT a real configuration parameter of exec-maven-plugin 3.1.0's `java`
@@ -98,12 +99,14 @@ value, and prints the result correctly).
 ```
 (the real, complete flag list from section 2 above goes as individual `<argument>` elements, abbreviated here for readability; run via `mvn -q compile exec:exec -Dexec.mainClass=com.example.App`, not `exec:java`)
 
-##3. Spring XML Bean Configuration Example
+## 3. Spring XML Bean Configuration Example
 When configuring the Ignite instance in Spring XML, use:
+```xml
 <bean id="ignite.cfg" class="org.apache.ignite.configuration.IgniteConfiguration">
     <property name="igniteInstanceName" value="ignite-server-node"/>
     <property name="peerClassLoadingEnabled" value="true"/>
 </bean>
+```
 
 ## 4. API Usage Rules
 - `Ignition.start(...)` returns an `Ignite` object.
@@ -111,6 +114,7 @@ When configuring the Ignite instance in Spring XML, use:
   ```java
   Ignite ignite = Ignition.start("ignite-config.xml");
   IgniteCache<Integer, String> cache = ignite.getOrCreateCache("my-cache");
+  ```
 
 ## 5. Starting Ignite with Spring XML Configuration
 There are two valid ways to start Ignite with Spring XML - use EXACTLY ONE,
@@ -134,11 +138,13 @@ public class App {
         }
     }
 }
+```
 
-### Method B:Spring ApplicationContext Container
+### Method B: Spring ApplicationContext Container
 If you prefer starting it via a Spring ClassPathXmlApplicationContext, you must define the IgniteSpringBean in your XML and retrieve it from the context:
 
 ignite-config.xml:
+```xml
 <bean id="ignite.cfg" class="org.apache.ignite.configuration.IgniteConfiguration">
     <property name="igniteInstanceName" value="ignite-server-node"/>
 </bean>
@@ -147,8 +153,10 @@ ignite-config.xml:
 <bean id="igniteNode" class="org.apache.ignite.IgniteSpringBean">
     <property name="configuration" ref="ignite.cfg"/>
 </bean>
+```
 
 App.java:
+```java
 import org.apache.ignite.Ignite;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.support.ClassPathXmlApplicationContext;
@@ -180,5 +188,4 @@ public class App {
         // correct and sufficient way to stop a Spring-managed IgniteSpringBean.
     }
 }
-
-
+```

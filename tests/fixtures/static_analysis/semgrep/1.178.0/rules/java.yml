@@ -1,0 +1,18 @@
+rules:
+  - id: java-runtime-exec
+    languages: [java]
+    severity: ERROR
+    message: "Runtime.exec with a dynamic command"
+    pattern: Runtime.getRuntime().exec($X)
+    metadata:
+      cwe: "CWE-78: OS Command Injection"
+      owasp: ["A03:2021 - Injection"]
+      impact: HIGH
+  - id: java-weak-hash
+    languages: [java]
+    severity: WARNING
+    message: "Weak hash algorithm MD5"
+    pattern: MessageDigest.getInstance("MD5")
+    metadata:
+      security-severity: Critical
+      cwe: ["CWE-327: Use of a Broken or Risky Cryptographic Algorithm"]

@@ -1,6 +1,6 @@
 # Embedded ActiveMQ Artemis Broker Server Skill
 
-This skill provides the instructions and rules to set up an embedded ActiveMQ server in Java with AMQP 1.0 protocol support.
+This skill provides the instructions and rules to set up an embedded ActiveMQ Artemis broker in Java with AMQP 1.0 protocol support. AMQP support needs no manual registration: `artemis-amqp-protocol` on the classpath plus an acceptor with `protocols=AMQP` is enough.
 
 ## Dependency Setup
 Add the following dependencies to the `pom.xml`:

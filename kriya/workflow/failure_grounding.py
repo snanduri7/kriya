@@ -1,17 +1,14 @@
 """Deterministic error-text parsing that grounds a Quality Gate failure in real source locations/files before it reaches the retry loop or the model - environment-failure classification, error-location/search-term extraction, and Failure construction. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
-import asyncio
-import difflib
 import hashlib
 import logging
 import os
 import re
-import shutil
-import subprocess
-import sys
-import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
 from kriya.workflow.failure import Failure, FileLocation
+from kriya.workflow.generation_manifest import FileRole, classify_file_role
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +29,19 @@ _ERROR_UNRESOLVED_IMPORT_PATTERN = re.compile(
     r"symbol:\s*class\s+(\w+)[\s\S]{0,80}?location:\s*package\s+([\w.]+)"
 )
 
+# The "location: class Y" sibling of the pattern above - this comment
+# previously called it "not an import-path mistake, nothing to usefully
+# search for", which undersold it: found live, 2026-08-22 (ignite_qpid_
+# protocol milestone 3/4), this exact shape (symbol: class Protocol,
+# location: class com.example.App) is precisely what a CROSS-PACKAGE
+# reference to an already-existing class looks like from javac's own
+# perspective. See find_cross_package_symbol_mismatch() below for how it's
+# used - a use-site error with a real, findable candidate elsewhere under a
+# different package is a definitive signal, not a guess.
+_ERROR_USE_SITE_MISSING_SYMBOL_PATTERN = re.compile(
+    r"symbol:\s*class\s+(\w+)[\s\S]{0,80}?location:\s*class\s+([\w.]+)"
+)
+
 
 # Maven prints these two lines at the end of EVERY build, success or failure,
 # and their values (build duration, wall-clock timestamp) differ on every
@@ -49,6 +59,61 @@ _BUILD_TIMING_NOISE_PATTERNS = (
     re.compile(r"^\[INFO\] Finished at:.*$", re.MULTILINE),
 )
 
+# FAILURE-SIGNATURE-RUN-NOISE-001: values that differ between runs of the same
+# failure (or shift with an edit), replaced by a fixed token, not removed, so
+# the surrounding text keeps its shape. PRD-036 rc7 matrix trial 1 (C8): an identical pytest
+# failure (same test, same line, same ValueError) got a new signature on
+# every attempt only because pytest printed `<inventory.Inventory object at
+# 0x10b1b7b10>`, so every repeat looked like a new failure family, reset the
+# targeted and fallback budgets, and kept the retry loop on the primary until
+# the global ceiling.
+_RUN_NOISE_PATTERNS = (
+    (re.compile(r"\b0x[0-9a-fA-F]{4,}\b"), "0x?"),  # Python object addresses
+    (re.compile(r"(\b[A-Za-z_$][\w$]*)@[0-9a-f]{4,8}\b"), r"\1@?"),  # Java identity hash codes
+    (re.compile(r"\bin \d+(?:\.\d+)?s\b"), "in ?s"),  # pytest/unittest elapsed time
+    (re.compile(r"\(\d+:\d{2}:\d{2}\)"), "(?:?:?)"),  # pytest's (h:mm:ss) elapsed time
+    (re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.IGNORECASE), "<uuid>"),
+    (re.compile(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?"), "<timestamp>"),
+    (re.compile(r"\btmp[a-z0-9_]{8}\b"), "tmp?"),  # Python tempfile names
+    (re.compile(r"\b(pid|PID)([ =:]+)\d+\b"), r"\1\2?"),
+    # Line numbers an edit shifts (PRD-036 rc8 matrix trial 2, C10): the same
+    # defect moved from line 10 to 12, 14, 16 as the model added lines.
+    # Structured Java evidence already keeps basenames only (see below).
+    (re.compile(r"(\.[A-Za-z]\w*):\d+(?::\d+)?\b"), r"\1:?"),  # x.py:23, x.rb:12:5
+    (re.compile(r"\bline \d+\b"), "line ?"),  # File "x.py", line 7 / x.py line 10
+)
+
+# A static rule violation is "[<check>] <path> ..." (static_checks.run_static_checks).
+_STATIC_RULE_IDENTITY_PATTERN = re.compile(r"\[([\w-]+)\]\s+(\S+)")
+
+
+def _normalize_run_noise(text: str) -> str:
+    for pattern, token in _RUN_NOISE_PATTERNS:
+        text = pattern.sub(token, text)
+    return text
+
+
+_BUILD_WRAPPER_COORDINATES = {
+    "org.apache.maven.plugins:maven-compiler-plugin",
+    "org.apache.maven.plugins:maven-surefire-plugin",
+    "org.codehaus.mojo:exec-maven-plugin",
+}
+
+_JAVAC_DIAGNOSTIC_PATTERN = re.compile(
+    r"\.java:\[\d+,\d+\]\s*([^\n]+)"
+)
+_JAVAC_DETAIL_PATTERN = re.compile(
+    r"^[ \t]*(?:\[ERROR\][ \t]*)?"
+    r"(symbol|location|required|found|reason):\s*([^\n]+)$",
+    re.MULTILINE,
+)
+_EXCEPTION_CAUSE_PATTERN = re.compile(
+    r"^[ \t]*(?:\[ERROR\][ \t]*)?"
+    r"(?:Exception in thread \"[^\"]+\"\s+|Caused by:\s*)?"
+    r"(?:class\s+)?([\w.$]+(?:Exception|Error))(?::\s*(.*))?$",
+    re.MULTILINE,
+)
+
 
 _JVM_STARTUP_FAILURE_MARKERS = (
     "Error occurred during initialization of VM",
@@ -58,22 +123,26 @@ _JVM_STARTUP_FAILURE_MARKERS = (
 )
 
 
-# Qpid Broker-J's own internal logging (AbstractMessageLogger.getLogActor())
-# unconditionally calls the JDK's Subject.getSubject() - an API tied to the
-# Security Manager, which JEP 486 permanently removed in JDK 24+. Confirmed
-# live, 2026-08-07 (ignite_qpid_person, immediately after the
-# _strip_jdk_incompatible_jvm_flags fix started correctly removing the now-
-# forbidden -Djava.security.manager=allow flag on a resolved JDK 26 target):
-# the broker then crashes on this instead, regardless of whether that flag is
-# present or absent - a genuine Qpid-Broker-J-version-vs-JDK-24+
-# incompatibility, not a code defect either way, and distinct enough from a
-# plain VM-startup-flag crash (_JVM_STARTUP_FAILURE_MARKERS above) to warrant
-# its own, more specific message rather than the generic "JVM flag
-# unsupported" one. Without this, the retry loop burned two full attempts
-# trying to code-fix it - both correctly concluding (per skill rule) that the
-# flag shouldn't be re-added, both still hitting the identical crash anyway -
-# before ever escalating past it.
-_QPID_JDK24_SECURITY_MANAGER_API_MARKER = "getSubject is not supported"
+# "getSubject is not supported" is the JDK's OWN UnsupportedOperationException
+# message from javax.security.auth.Subject.getSubject() - an API tied to the
+# Security Manager, which JEP 486 permanently removed in JDK 24+ - not a
+# message any particular library formats itself, so this marker fires for ANY
+# dependency that still calls that now-forbidden API, not just the one that
+# first surfaced it. First confirmed live, 2026-08-07 (ignite_qpid_person,
+# immediately after the _strip_jdk_incompatible_jvm_flags fix started
+# correctly removing the now-forbidden -Djava.security.manager=allow flag on a
+# resolved JDK 26 target): Qpid Broker-J's own internal logging
+# (AbstractMessageLogger.getLogActor()) called Subject.getSubject() and
+# crashed on this instead, regardless of whether that flag was present or
+# absent - a genuine library-version-vs-JDK-24+ incompatibility, not a code
+# defect either way, and distinct enough from a plain VM-startup-flag crash
+# (_JVM_STARTUP_FAILURE_MARKERS above) to warrant its own, more specific
+# message rather than the generic "JVM flag unsupported" one. Without this,
+# the retry loop burned two full attempts trying to code-fix it - both
+# correctly concluding (per skill rule) that the flag shouldn't be re-added,
+# both still hitting the identical crash anyway - before ever escalating past
+# it.
+_JDK24_SECURITY_MANAGER_API_MARKER = "getSubject is not supported"
 
 
 # Only matches the specific "Failed to invoke/execute ...: [Errno 2] No such
@@ -88,7 +157,104 @@ _MISSING_EXECUTABLE_PATTERN = re.compile(
 )
 
 
-def classify_environment_failure(error_text: str) -> Optional[str]:
+# PRV-17 (2026-09-03): Python's own "package genuinely missing from the
+# verification interpreter" shape - the interpreter-resolution analogue of
+# _MISSING_EXECUTABLE_PATTERN above. Matches either the modern
+# `ModuleNotFoundError: No module named 'x'` form or the bare `No module
+# named 'x'`/`No module named x` text a caught ImportError's str() can
+# also produce. Deliberately NOT itself a verdict that this is unfixable -
+# `customers_project.settings` matches this exact shape just as easily as
+# `django` does, and the former is ordinary project code the Developer
+# must still write; _classify_missing_module_environment_failure below is
+# what tells the two apart, using the SAME "does a legal repair path
+# already exist" question _detect_missing_build_manifest (this module's
+# Java/Maven sibling) already answers for a missing pom.xml/build.gradle.
+_MISSING_MODULE_PATTERN = re.compile(
+    r"ModuleNotFoundError:\s*No module named ['\"]([\w.]+)['\"]"
+    r"|No module named ['\"]?([\w.]+)['\"]?"
+)
+
+
+def extract_missing_project_local_python_module(
+    error_text: str, *, known_files: Iterable[str],
+) -> Optional[str]:
+    """Returns the dotted module name when error_text shows Python's
+    ModuleNotFoundError/ImportError shape AND the missing module's top-level
+    package is project-local (already a known file/package this same
+    candidate - or a sibling subtask's own established output - is
+    responsible for), e.g. 'customers_project.settings' resolving to
+    customers_project/settings.py. Returns None both when no missing-module
+    pattern matches at all, and when the top-level name is NOT project-local
+    (that second case is _classify_missing_module_environment_failure's own
+    question, not this function's - the two are deliberately asked
+    separately so a caller can act on "this IS project-local" without
+    duplicating the pattern match/known-files lookup).
+
+    Runtime-Evidence Plan Repair (2026-09-04, PRV-17 Run 13): the grounding
+    query kriya/workflow/attempt.py's managed-service verification path uses
+    to name WHICH logical artifact a runtime traceback proves is missing,
+    once classify_environment_failure() has already ruled out an external-
+    dependency explanation - see that module's own docstring for the full
+    incident (myproject.wsgi never planned by any subtask)."""
+    match = _MISSING_MODULE_PATTERN.search(error_text)
+    if not match:
+        return None
+    module_name = match.group(1) or match.group(2)
+    if not module_name:
+        return None
+    top_level = module_name.split(".")[0]
+    known = list(known_files)
+    known_module_names = {os.path.splitext(os.path.basename(f))[0] for f in known}
+    known_package_dirs = {f.split("/", 1)[0] for f in known if "/" in f}
+    if top_level in known_module_names or top_level in known_package_dirs:
+        return module_name
+    return None
+
+
+def _classify_missing_module_environment_failure(
+    error_text: str, *, worktree_path: str, known_files: Iterable[str],
+) -> Optional[str]:
+    """Returns a human-readable environment/dependency-failure description
+    when error_text names a Python module that (a) is not project-local
+    code this same candidate is supposed to write, AND (b) has no legal
+    manifest (requirements.txt or pyproject.toml) this candidate could add
+    it to - the two conditions together mean no amount of source-file
+    repair can ever make the import succeed, mirroring
+    _detect_missing_build_manifest's exact "manifest exists -> legally
+    repairable, stay in the ordinary retry loop; manifest genuinely absent
+    -> nothing to route to" reasoning for Java/Maven, generalized to
+    Python's two real manifest shapes. None (never an environment failure)
+    whenever either condition doesn't hold - in particular, a manifest
+    merely not YET declaring the missing package is still a legal repair
+    path (the Developer can add a line to it), not a reason to stop."""
+    match = _MISSING_MODULE_PATTERN.search(error_text)
+    if not match:
+        return None
+    module_name = match.group(1) or match.group(2)
+    if not module_name:
+        return None
+    if extract_missing_project_local_python_module(error_text, known_files=known_files) is not None:
+        # Project-local (e.g. 'customers_project.settings' resolving to
+        # customers_project/settings.py, or a Django app package this
+        # candidate itself owns) - ordinary code-repair territory, not an
+        # environment problem.
+        return None
+    if os.path.exists(os.path.join(worktree_path, "requirements.txt")):
+        return None
+    if os.path.exists(os.path.join(worktree_path, "pyproject.toml")):
+        return None
+    return (
+        f"Python module '{module_name}' is not available to the verification "
+        "environment and no dependency manifest (requirements.txt or "
+        "pyproject.toml) exists for this candidate to declare it in - not a "
+        "code defect regeneration can fix; the interpreter running Quality "
+        "Gates genuinely cannot import this package."
+    )
+
+
+def classify_environment_failure(
+    error_text: str, *, worktree_path: Optional[str] = None, known_files: Iterable[str] = (),
+) -> Optional[str]:
     """Returns a short, human-readable description if error_text shows a failure
     class no amount of code regeneration can ever fix - a JVM crashing during its
     own startup (before any generated code runs, e.g. a startup flag unsupported
@@ -99,7 +265,13 @@ def classify_environment_failure(error_text: str) -> Optional[str]:
     during golden-use-case validation: the same JVM-startup crash (a flag correct
     for JDK 17.0.10 became fatal under JDK 26, which removed the Security Manager
     entirely) recurred identically across 3 real retry attempts before a human
-    had to intervene, and Kriya had no way to recognize it wasn't a code bug."""
+    had to intervene, and Kriya had no way to recognize it wasn't a code bug.
+
+    worktree_path/known_files (PRV-17, 2026-09-03) are optional and used only
+    by the Python missing-external-package check below - every other check in
+    this function is pure text matching and ignores them. Omitting worktree_path
+    (the default) skips that one check entirely rather than guessing, matching
+    every existing caller's behavior unchanged."""
     for marker in _JVM_STARTUP_FAILURE_MARKERS:
         if marker in error_text:
             return (
@@ -107,15 +279,15 @@ def classify_environment_failure(error_text: str) -> Optional[str]:
                 "defect, most likely a JVM flag unsupported by the actually-"
                 "resolved Java version (see `kriya doctor`)."
             )
-    if _QPID_JDK24_SECURITY_MANAGER_API_MARKER in error_text:
+    if _JDK24_SECURITY_MANAGER_API_MARKER in error_text:
         return (
-            "Qpid Broker-J's own internal logging calls a JDK Security-Manager-era "
-            "API (Subject.getSubject()) that throws UnsupportedOperationException "
-            "once the Security Manager is permanently removed (JEP 486, JDK 24+) - "
-            "not a code defect, and not fixable by adding or omitting "
+            "A dependency on the classpath calls a JDK Security-Manager-era API "
+            "(Subject.getSubject()) that throws UnsupportedOperationException once "
+            "the Security Manager is permanently removed (JEP 486, JDK 24+) - not "
+            "a code defect, and not fixable by adding or omitting "
             "-Djava.security.manager=allow either way (that flag is itself "
-            "forbidden on this JDK range). A genuine Qpid Broker-J version vs. "
-            "JDK 24+ incompatibility - resolve with a newer Qpid Broker-J release "
+            "forbidden on this JDK range). A genuine library-version vs. JDK 24+ "
+            "incompatibility - resolve with a newer release of that dependency "
             "known to support JDK 24+, or by targeting an older JDK."
         )
     m = _MISSING_EXECUTABLE_PATTERN.search(error_text)
@@ -124,19 +296,66 @@ def classify_environment_failure(error_text: str) -> Optional[str]:
             f"Required build/run tool '{m.group(1)}' was not found on PATH - "
             "not a code defect, the toolchain itself is missing or misconfigured."
         )
+    if worktree_path is not None:
+        missing_module_failure = _classify_missing_module_environment_failure(
+            error_text, worktree_path=worktree_path, known_files=known_files,
+        )
+        if missing_module_failure:
+            return missing_module_failure
     return None
 
 
 def _normalize_error_for_repeat_detection(error_text: str) -> str:
     """Strips known non-deterministic per-run noise (Maven's own build-timing
-    lines) before error text is used as a repeated-failure signature - see the
-    fallback branch of the current_failure_signature computation below, used
-    only when extract_error_search_terms found no stable coordinate to key
-    on instead."""
+    lines, then object addresses, identity hash codes and elapsed times)
+    before unstructured error text is hashed as a repeated-failure
+    signature."""
     normalized = error_text
     for pattern in _BUILD_TIMING_NOISE_PATTERNS:
         normalized = pattern.sub("", normalized)
-    return normalized
+    return _normalize_run_noise(normalized)
+
+
+def build_failure_signature(failure_type: str, error_text: str) -> Tuple[str, Any]:
+    """Content-local identity for retry budgets and repeated-failure checks.
+
+    Public artifact coordinates are intentionally not the identity: Maven's
+    compiler/exec plugin wrapper appears around many unrelated source/runtime
+    defects and previously collapsed them into one run-global failure. Prefer
+    stable validator evidence with dynamic line numbers removed; hash the
+    normalized local text only when no structured diagnostic is available.
+    """
+    if failure_type == "static_rule_violation":
+        # The check and the file it names are the identity; the offending
+        # line's number and text change with every regeneration.
+        static_rule = _STATIC_RULE_IDENTITY_PATTERN.search(error_text)
+        if static_rule:
+            return failure_type, ("static_rule", static_rule.group(1), static_rule.group(2))
+    locations = tuple(sorted({name for name, _ in extract_error_source_locations(error_text)}))
+    javac_diagnostics = tuple(sorted({
+        " ".join(message.split())
+        for message in _JAVAC_DIAGNOSTIC_PATTERN.findall(error_text)
+    }))
+    if javac_diagnostics:
+        javac_details = tuple(sorted({
+            (label, " ".join(value.split()))
+            for label, value in _JAVAC_DETAIL_PATTERN.findall(error_text)
+        }))
+        return failure_type, (locations, "javac", javac_diagnostics, javac_details)
+
+    exception_causes = [
+        (exception_type, _normalize_run_noise(" ".join((message or "").split())))
+        for exception_type, message in _EXCEPTION_CAUSE_PATTERN.findall(error_text)
+    ]
+    if exception_causes:
+        # The deepest cause is normally last, after build-tool wrapper
+        # exceptions. Keep locations by basename but not line number so an
+        # edit that shifts a stack frame by one line remains the same failure.
+        return failure_type, (locations, "exception", exception_causes[-1])
+
+    normalized = _normalize_error_for_repeat_detection(error_text)
+    digest = hashlib.sha256(normalized.encode("utf-8", errors="replace")).hexdigest()
+    return failure_type, (locations, "digest", digest)
 
 
 def extract_error_search_terms(
@@ -164,10 +383,10 @@ def extract_error_search_terms(
     that can never find anything useful. Callers pass the workspace's own
     pom.xml coordinate (get_pom_own_coordinate()) here.
 
-    dependency_coordinates covers a DIFFERENT, previously-unhandled failure
-    shape - confirmed live during golden-use-case validation as a real,
-    generalizable gap, not library-specific: "wrong import path within a
-    library the project already, legitimately depends on" (e.g. writing
+    dependency_coordinates covers two failure shapes without widening the
+    egress boundary. The first was confirmed live during golden-use-case
+    validation: "wrong import path within a library the project already,
+    legitimately depends on" (e.g. writing
     `import org.apache.ignite.cache.IgniteCache;` when the class actually
     lives at the top-level `org.apache.ignite` package). Unlike a missing-
     dependency error, javac's diagnostic for this has no groupId:artifactId
@@ -180,14 +399,23 @@ def extract_error_search_terms(
     of the caller-supplied dependency_coordinates - i.e. only for a class
     that demonstrably belongs to a library already declared as a real
     project dependency, never an arbitrary/private symbol name. Pass
-    get_pom_dependencies() here. Renders as "{matched coordinate} {symbol}",
-    e.g. "org.apache.ignite:ignite-core IgniteCache", which _resolve_via_web_
-    lookup() then suffixes with " example" like every other term."""
+    get_pom_dependencies() here. The second is an exception whose package
+    begins with a declared dependency's groupId. Only the already-declared
+    coordinate is emitted for that case—not the exception class or message—so
+    an application stack locator can suppress an irrelevant Maven wrapper
+    without sending any project diagnostic text. The outbound public-catalog
+    gate still decides whether that coordinate may leave the machine."""
     seen = set()
     terms = []
     exclude = set(exclude_coordinates) if exclude_coordinates else set()
+    has_source_evidence = bool(extract_error_source_locations(error_text))
     for m in _ERROR_COORDINATE_PATTERN.finditer(error_text):
         term = f"{m.group(1)}:{m.group(2)}"
+        if term in _BUILD_WRAPPER_COORDINATES and has_source_evidence:
+            # A real source/stack locator proves the Maven plugin is only the
+            # execution wrapper around application evidence. Searching for the
+            # wrapper is safe but irrelevant and wastes the one lookup shot.
+            continue
         if term not in seen and term not in exclude:
             seen.add(term)
             terms.append(term)
@@ -198,6 +426,16 @@ def extract_error_search_terms(
                 group_id = coord.split(":", 1)[0]
                 if wrong_package == group_id or wrong_package.startswith(group_id + "."):
                     term = f"{coord} {symbol}"
+                    if term not in seen and term not in exclude:
+                        seen.add(term)
+                        terms.append(term)
+                    break
+        for exception_type, _message in _EXCEPTION_CAUSE_PATTERN.findall(error_text):
+            exception_package, _, _exception_name = exception_type.rpartition(".")
+            for coord in dependency_coordinates:
+                group_id = coord.split(":", 1)[0]
+                if exception_package == group_id or exception_package.startswith(group_id + "."):
+                    term = coord
                     if term not in seen and term not in exclude:
                         seen.add(term)
                         terms.append(term)
@@ -270,6 +508,187 @@ def extract_error_source_locations(error_text: str) -> List[Tuple[str, int]]:
             seen.add(key)
             locations.append(key)
     return locations
+
+
+# D5 (KNOW A on demo-runtime-3, 2026-10-01): a runtime exception that names the
+# candidate resource it failed on ("... defined in class path resource
+# [ignite-config.xml]: Invalid property 'gridStartTime'") was grounded to the
+# only candidate stack frame, the Java line that merely LOADS that resource,
+# so recovery reopened a file with nothing wrong in it. Only formats measured
+# on real runs (Spring 5.3 under `mvn -e exec:java`, evidence/demo-defect-d5)
+# are recognized: Spring's Resource descriptions `class path resource [p]` and
+# `file [p]`, and a `classpath:p` location. Deliberately not a general parser.
+_RESOURCE_REFERENCE_PATTERN = re.compile(
+    r"\bclass path resource \[(?P<classpath>[^\]\s]+)\]"
+    r"|\bfile \[(?P<file>[^\]]+)\]"
+    r"|\bclasspath\*?:(?P<location>[\w./-]+)"
+)
+_CAUSED_BY = re.compile(r"^\s*Caused by: ", re.MULTILINE)
+# Maven/Gradle resource roots: a classpath reference is relative to one of them.
+_RESOURCE_ROOTS = ("src/main/resources/", "src/test/resources/")
+
+
+@dataclass(frozen=True)
+class FailureResourceReference:
+    """One explicit resource reference in runtime failure output. `segment` is
+    its exception's depth in the chain (0 = outermost, each `Caused by:` + 1)."""
+
+    raw_reference: str
+    normalized_reference: str
+    kind: str  # "classpath" (classpath-root relative) | "file" (filesystem path)
+    segment: int
+    source: str = "runtime_exception"
+    confidence: str = "DIRECT"
+
+
+@dataclass(frozen=True)
+class ResourceGrounding:
+    """Resolution of a failure's resource references against the candidate files.
+    `files` is the repair target (empty when nothing resolves or a reference is
+    ambiguous); `loader_files` are the candidate stack frames kept as secondary
+    evidence, never as repair targets."""
+
+    files: Tuple[str, ...]
+    references: Tuple[FailureResourceReference, ...]
+    ambiguous: Tuple[Tuple[str, Tuple[str, ...]], ...]
+    loader_files: Tuple[str, ...]
+
+
+def _exception_segments(error_text: str) -> List[str]:
+    """The text of each exception in the chain, outermost first."""
+    return _CAUSED_BY.split(error_text)
+
+
+def extract_runtime_resource_references(error_text: str) -> List[FailureResourceReference]:
+    """Every explicit resource reference in runtime output, in order, with the
+    depth of the exception that names it."""
+    references = []
+    for depth, segment in enumerate(_exception_segments(error_text)):
+        for match in _RESOURCE_REFERENCE_PATTERN.finditer(segment):
+            raw = match.group("classpath") or match.group("location") or match.group("file")
+            kind = "file" if match.group("file") else "classpath"
+            normalized = raw.lstrip("/") if kind == "classpath" else raw
+            references.append(FailureResourceReference(raw, normalized, kind, depth))
+    return references
+
+
+def resolve_resource_reference(
+    reference: FailureResourceReference, known_files: Iterable[str], workspace_root: Optional[str],
+) -> Tuple[str, Tuple[str, ...]]:
+    """("resolved", (file,)) | ("ambiguous", files) | ("unresolved", ()).
+    Order: exact workspace-relative path, exact resource-root-relative path, then
+    a unique basename for a bare file name; no fuzzy or substring matching.
+    Every tier is an exact match against the workspace-relative candidate files,
+    so a path outside the workspace (which becomes `../...` here) never resolves.
+    An absolute path is read only relative to `workspace_root`."""
+    known = list(dict.fromkeys(known_files))
+    ref = reference.normalized_reference
+    if os.path.isabs(ref):
+        if not workspace_root:
+            return "unresolved", ()
+        ref = os.path.relpath(os.path.realpath(ref), os.path.realpath(workspace_root))
+    ref = os.path.normpath(ref).replace(os.sep, "/")
+    tiers = [[f for f in known if f == ref]]
+    if reference.kind == "classpath":
+        tiers.append([f for f in known if any(f == root + ref or f.endswith("/" + root + ref)
+                                              for root in _RESOURCE_ROOTS)])
+    if "/" not in ref:
+        tiers.append([f for f in known if os.path.basename(f) == ref])
+    for matches in tiers:
+        if len(matches) == 1:
+            return "resolved", (matches[0],)
+        if matches:
+            return "ambiguous", tuple(matches)
+    return "unresolved", ()
+
+
+def _candidate_frame_files(segment: str, known_files: Iterable[str]) -> set:
+    names = {name for name, _line in extract_error_source_locations(segment)}
+    return {f for f in known_files if os.path.basename(f) in names}
+
+
+def ground_runtime_resource_failure(
+    error_text: str, known_files: Iterable[str], workspace_root: Optional[str] = None,
+) -> Optional[ResourceGrounding]:
+    """A candidate resource named by the runtime exception is the repair target,
+    ahead of a candidate stack frame that only loads it - unless the innermost
+    exception has a candidate frame of its own (the candidate code itself threw,
+    e.g. a bean constructor), in which case the stack evidence stands and this
+    returns None. The deepest exception that names a resolvable candidate
+    resource decides; an ambiguous reference there grounds nothing."""
+    known = list(dict.fromkeys(known_files))
+    references = extract_runtime_resource_references(error_text)
+    if not references:
+        return None
+    segments = _exception_segments(error_text)
+    innermost = _candidate_frame_files(segments[-1], known)
+    enclosing = _candidate_frame_files(segments[-2], known) if len(segments) > 1 else set()
+    if innermost - enclosing:
+        return None
+    resolutions = [(ref, *resolve_resource_reference(ref, known, workspace_root)) for ref in references]
+    deepest = max((ref.segment for ref, status, _ in resolutions if status != "unresolved"), default=None)
+    if deepest is None:
+        return None
+    chosen = [(ref, status, files) for ref, status, files in resolutions if ref.segment == deepest
+              and status != "unresolved"]
+    ambiguous = tuple((ref.raw_reference, files) for ref, status, files in chosen if status == "ambiguous")
+    resolved = () if ambiguous else tuple(dict.fromkeys(files[0] for _ref, _status, files in chosen))
+    loaders = tuple(sorted(set().union(*(_candidate_frame_files(s, known) for s in segments)) - set(resolved)))
+    return ResourceGrounding(resolved, tuple(ref for ref, _s, _f in chosen), ambiguous, loaders)
+
+
+# D5b: a stack frame line, and an exception header line (the message a frame
+# belongs to): `x.y.SomeException: msg`, `Caused by: ...`, the JVM's
+# `Exception in thread "main" ...`, and Ignite's `class x.y.SomeException: msg`.
+_STACK_FRAME_LINE = re.compile(r"^\s+(?:at\s|\.\.\.\s\d+\s)")
+_EXCEPTION_HEADER_LINE = re.compile(
+    r"^\s*(?:Caused by:\s+|Exception in thread \"[^\"]*\"\s+|class\s+)?"
+    r"(?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*(?:Exception|Error|Throwable)(?::|\s*$)"
+)
+# Lines a multi-line exception message may span above its first frame.
+_EXCEPTION_MESSAGE_LINES = 5
+
+
+def _exception_block_start(raw_output: str, line_start: int) -> Optional[int]:
+    """For a stack frame starting at ``line_start``: the start of the header
+    line of the exception block that frame belongs to (the nearest header
+    above the block's frames), or None when there is none to find."""
+    lines = raw_output[:line_start].split("\n")[:-1]  # the lines above the frame
+    index = len(lines)
+    while index > 0 and _STACK_FRAME_LINE.match(lines[index - 1]):
+        index -= 1
+    for candidate in range(index - 1, max(-1, index - 1 - _EXCEPTION_MESSAGE_LINES), -1):
+        if _EXCEPTION_HEADER_LINE.match(lines[candidate]):
+            return sum(len(line) + 1 for line in lines[:candidate])
+    return None
+
+
+def grounded_evidence_excerpt(raw_output: str, grounded_files: Iterable[str], limit: int = 2000) -> str:
+    """The bounded failure evidence a reopened owner is shown. The first `limit`
+    characters, as before - unless they name none of the grounded files and the
+    output does later: then the window starts at the line of that first mention
+    (D5: live runtime output carried ~3.4 KB of Maven offline warnings before the
+    exception, so the owner saw no error at all). When that line is a stack
+    frame, the window starts at the header of the exception block the frame
+    belongs to (D5b: the message explaining the frame sits above it; a
+    `Caused by:` block is its own exception); no header within reach keeps the
+    frame line."""
+    if len(raw_output) <= limit:
+        return raw_output
+    names = [os.path.basename(f) for f in grounded_files if f]
+    pattern = re.compile("|".join(rf"(?<![\w.-]){re.escape(n)}(?![\w-])" for n in names)) if names else None
+    if pattern is None or pattern.search(raw_output, 0, limit):
+        return raw_output[:limit]
+    match = pattern.search(raw_output)
+    if match is None:
+        return raw_output[:limit]
+    start = raw_output.rfind("\n", 0, match.start()) + 1
+    line_end = raw_output.find("\n", start)
+    if _STACK_FRAME_LINE.match(raw_output[start:line_end if line_end >= 0 else len(raw_output)]):
+        header = _exception_block_start(raw_output, start)
+        if header is not None:
+            start = header
+    return raw_output[start:start + limit]
 
 
 def _files_by_basename(known_files: Iterable[str]) -> Dict[str, List[str]]:
@@ -375,6 +794,114 @@ def _capture_failed_content(worktree_path: str, files: Iterable[str]) -> Dict[st
     return content
 
 
+def find_cross_package_symbol_mismatch(
+    compile_output: str,
+    type_index: Dict[str, List[str]],
+    java_packages: Dict[str, Optional[str]],
+) -> Optional[Tuple[str, str, str]]:
+    """Detects a Java compile failure caused by a cross-milestone PACKAGE
+    mismatch, not a genuinely missing/typo'd class - found live, 2026-08-22
+    (ignite_qpid_protocol milestone 3/4): a fresh milestone's Architect chose
+    a Maven-conventional package (`com.example`) for its own new file, but an
+    EARLIER milestone's already-established file lives in the default
+    package (no package declaration at all) - a `cannot find symbol: class
+    Protocol, location: class com.example.App` error that recurred BYTE-FOR-
+    BYTE IDENTICAL across 3+ retries, because a class in one named package
+    can never reference a class in a different (or the default) package,
+    under any circumstances - not a missing import, a genuine language-level
+    incompatibility no amount of prose-level retrying can resolve. The
+    Developer's own reasoning actually diagnosed this correctly, more than
+    once, then talked itself out of fixing it every time - caught between
+    "only touch the targeted file" and "don't restructure what already
+    works". This function exists to hand the retry loop a diagnosis precise
+    enough that there's nothing left to talk itself out of.
+
+    type_index is the SAME Dict[str, List[str]] (".java:SimpleName" ->
+    [paths], extension-scoped) _build_workspace_type_index() already builds
+    for the duplicate-type-across-files gate - full reuse, no new indexing.
+    java_packages is {filepath: package_or_None} for every currently-tracked
+    .java file (the caller's own responsibility - see
+    _build_java_package_map() in attempt.py - keeping this function pure and
+    trivially testable, matching ground_java_entrypoint_in_no_build_file_
+    projects()'s own established separation of I/O from decision logic).
+
+    Returns (missing_symbol, referencing_path, candidate_path) - the file
+    that's MISSING the symbol (referencing_path) and the file that ALREADY
+    HAS it under a different package (candidate_path) - or None whenever
+    this can't be resolved with confidence: the symbol isn't in type_index
+    at all (a genuinely missing/typo'd class - let the existing generic
+    compile-failure path handle it), the symbol resolves to more than one
+    file (an ambiguity a flat lookup can't safely break), the candidate's
+    package already matches the referencing class's own package (not
+    actually a mismatch - some other compile error), or the referencing
+    file's own path can't be uniquely resolved the same way."""
+    for missing_symbol, referencing_qualified in dict.fromkeys(
+        _ERROR_USE_SITE_MISSING_SYMBOL_PATTERN.findall(compile_output)
+    ):
+        candidates = type_index.get(f".java:{missing_symbol}", [])
+        if len(candidates) != 1:
+            continue
+        candidate_path = candidates[0]
+        # Membership check, not .get()'s silent default: a candidate whose
+        # package was never actually read (out of the caller's known-files
+        # scope) must never be treated as "confirmed no package" - that
+        # would collide with a genuine default-package file and could
+        # fabricate a mismatch (or miss a real one) from pure absence of
+        # data, not evidence.
+        if candidate_path not in java_packages:
+            continue
+        candidate_pkg = java_packages[candidate_path]
+        referencing_pkg = (
+            referencing_qualified.rsplit(".", 1)[0] if "." in referencing_qualified else None
+        )
+        if candidate_pkg == referencing_pkg:
+            continue
+        referencing_simple = referencing_qualified.rsplit(".", 1)[-1]
+        referencing_matches = [
+            p for p in type_index.get(f".java:{referencing_simple}", [])
+            if p != candidate_path and java_packages.get(p, object()) == referencing_pkg
+        ]
+        if len(referencing_matches) != 1:
+            continue
+        return missing_symbol, referencing_matches[0], candidate_path
+    return None
+
+
+def build_cross_package_mismatch_message(
+    missing_symbol: str,
+    referencing_path: str,
+    referencing_pkg: Optional[str],
+    candidate_path: str,
+    candidate_pkg: Optional[str],
+) -> str:
+    """The part that actually breaks the retry deadlock, not just detects it -
+    see find_cross_package_symbol_mismatch()'s own docstring for the live
+    incident where the Developer correctly diagnosed a package mismatch
+    THREE TIMES and never fixed it, stuck between "only touch the targeted
+    file" and "don't restructure what already works". States plainly that
+    changing the referencing (new, current-milestone) file's package is a
+    REQUIRED compatibility fix, not a forbidden restructuring - and defaults
+    to recommending exactly that direction (adapt the new file to the
+    established one, never the reverse) so this stays consistent with, not
+    in tension with, the "don't touch already-established, working files"
+    instruction milestone goals already carry."""
+    referencing_desc = f"package `{referencing_pkg}`" if referencing_pkg else "the default (unnamed) package"
+    candidate_desc = f"package `{candidate_pkg}`" if candidate_pkg else "the default (unnamed) package"
+    return (
+        f"PACKAGE MISMATCH: {referencing_path} (in {referencing_desc}) references `{missing_symbol}`, "
+        f"which already exists at {candidate_path} - but that file is declared in {candidate_desc}, "
+        "a DIFFERENT package. This is a Java language rule, not a missing import: a class in one "
+        "named package can NEVER reference a class in a different (or the default) package under "
+        "any circumstances, no matter how the import statement is written. "
+        f"REQUIRED FIX: change {referencing_path} to use {candidate_desc} (matching "
+        f"{candidate_path}, which already works and should NOT be moved or modified). "
+        "This is a REQUIRED compatibility fix, not a forbidden restructuring of already-working "
+        f"code - {candidate_path} stays exactly as it is; only {referencing_path}'s own package "
+        "changes, since it is the new file being added to an existing, already-established "
+        "package layout."
+    )
+
+
 def _build_quality_gate_failure(
     type_: str,
     message: str,
@@ -406,6 +933,117 @@ def _build_quality_gate_failure(
         failed_content=_capture_failed_content(worktree_path, implicated),
         attempt=attempt,
     )
+
+
+# Known build-tool signatures for "the test PROCESS itself was killed",
+# distinct from an ordinary assertion/compile failure - PRV-06 (2026-08-28,
+# real live-validation finding): a JUnit test invoked a System.exit()-calling
+# main() in-process, which kills the Surefire fork outright rather than
+# reporting a normal test result. Deliberately a signature LIST (not a single
+# string) so a future stack's equivalent (pytest's own worker-crash text,
+# Node's forced-exit output, ...) can be added without restructuring the
+# caller - only the Java/Surefire entries are populated now, matching the
+# one stack this incident's live evidence actually covers; do not add
+# unverified signatures for other stacks speculatively.
+_PROCESS_TERMINATION_SIGNATURES: Tuple[str, ...] = (
+    "SurefireBooterForkException",
+    "forked VM terminated",
+    "VM crash or System.exit called?",
+)
+
+_PROCESS_TERMINATION_GUIDANCE = (
+    "This is a process-boundary/testability conflict, not an ordinary assertion "
+    "failure: the test runner's own process was killed while running a test. Resolve "
+    "it structurally or verify the terminating behavior out-of-process instead of "
+    "invoking it directly from a test. A single-file edit that toggles the terminating "
+    "call cannot resolve this structural conflict."
+)
+
+_VERIFICATION_STRATEGY_INCOMPATIBLE_GUIDANCE = (
+    "VERIFICATION_STRATEGY_INCOMPATIBLE: the test runner's own process was killed "
+    "because the test invoked process-terminating application behavior IN-PROCESS. "
+    "Do not change or remove the product's required process-exit behavior. Repair "
+    "only the verification strategy: observe that CLI path through a child process "
+    "and assert its exit code/stdout/stderr, or leave process-exit verification to "
+    "the declared application_runtime verifier. Do not use SecurityManager exit "
+    "interception and do not add dependencies or annotations to support it."
+)
+
+_CRASHED_TEST_CLASS_RE = re.compile(r"Crashed tests:\s*\n(?:\[ERROR\]\s*)?([\w.$]+)")
+
+
+def _crashed_test_artifacts(raw_output: str, known_files: Iterable[str]) -> List[str]:
+    match = _CRASHED_TEST_CLASS_RE.search(raw_output or "")
+    if not match:
+        return []
+    simple_name = match.group(1).rsplit(".", 1)[-1].split("$", 1)[0]
+    return sorted(
+        path for path in known_files
+        if classify_file_role(path) is FileRole.TEST
+        and os.path.splitext(os.path.basename(path))[0] == simple_name
+    )
+
+
+def detect_process_termination_signature(output: str) -> Optional[str]:
+    """Returns the first known process/fork-termination signature found in
+    `output`, or None. Pure/deterministic - no LLM call, matching this
+    module's own "ground before it reaches the model" role."""
+    text = output or ""
+    for signature in _PROCESS_TERMINATION_SIGNATURES:
+        if signature in text:
+            return signature
+    return None
+
+
+def _build_test_quality_gate_failure(
+    type_: str,
+    banner: str,
+    raw_output: str,
+    worktree_path: str,
+    known_files: Iterable[str],
+    attempt: int,
+) -> Failure:
+    """Same contract as _build_quality_gate_failure, for the "test"/
+    "targeted_test" call sites specifically - upgrades `type_`/`banner` to
+    the process-termination shape when `raw_output` carries a known
+    signature (see _PROCESS_TERMINATION_SIGNATURES above), so the retry
+    loop's own failure-family signature (keyed off `type_`) treats this as
+    genuinely distinct from an ordinary test failure, and the Developer
+    sees the structural guidance instead of re-deriving it (inconsistently)
+    from scratch every attempt. `raw_output` itself is left untouched -
+    still just the tool's real output, used for file-location extraction -
+    only `banner` (the human/model-facing message) gets the guidance
+    prepended."""
+    signature = detect_process_termination_signature(raw_output)
+    if signature:
+        crashed_tests = _crashed_test_artifacts(raw_output, known_files)
+        type_ = (
+            "verification_strategy_incompatible"
+            if crashed_tests else "test_process_terminated"
+        )
+        label = (
+            "VERIFICATION_STRATEGY_INCOMPATIBLE"
+            if crashed_tests else "TEST_PROCESS_TERMINATED"
+        )
+        guidance = (
+            _VERIFICATION_STRATEGY_INCOMPATIBLE_GUIDANCE
+            if crashed_tests else _PROCESS_TERMINATION_GUIDANCE
+        )
+        banner = (
+            f"{label} (evidence: {signature!r}):\n"
+            f"{guidance}\n\n{raw_output}"
+        )
+    failure = _build_quality_gate_failure(
+        type_, banner, raw_output, worktree_path, known_files, attempt,
+    )
+    if signature and crashed_tests:
+        failure.likely_files = crashed_tests
+        failure.diagnostics = {
+            **(failure.diagnostics or {}),
+            "reason_code": "VERIFICATION_STRATEGY_INCOMPATIBLE",
+            "crashed_test_artifacts": crashed_tests,
+        }
+    return failure
 
 
 def _strip_build_tool_info_noise(text: str) -> str:
@@ -490,11 +1128,140 @@ def extract_implicated_files(error_text: str, known_files: Iterable[str]) -> Lis
         located = [f for f in known_files if os.path.basename(f) in located_basenames]
         if located:
             return located
+        # A precise file:line locator exists but names NO known file at all -
+        # found live, 2026-08-22 (ignite_qpid_protocol, workspace reused
+        # across two unrelated runs without clearing prior output): a fresh
+        # milestone 1 wrote only Protocol.java/Main.java, but the compile
+        # error's real locators pointed at App.java/ProtocolTest.java - stale
+        # leftovers from an EARLIER run's different package layout, sitting
+        # in the workspace root, swept into this attempt's Maven compile scope
+        # by the worktree sync, but never part of state.all_files_written or
+        # ctx.established_files. Falling through to the substring/stem scan
+        # below in this situation is actively dangerous: the error text
+        # necessarily repeats the missing symbol's bare name ("cannot find
+        # symbol: class Protocol") many times, which the bare-TitleCase-stem
+        # fallback then misreads as evidence implicating Protocol.java - a
+        # known, unrelated file that already correctly defines that class -
+        # burning the whole retry budget re-editing it while the real,
+        # unrecognized files causing the error are never even considered.
+        # Stronger, more specific evidence (a real locator) must never be
+        # overridden by a weaker heuristic just because it names files
+        # outside this run's own scope - return the honest "nothing known
+        # implicated" answer instead, so the caller falls back to a full-set
+        # retry rather than confidently targeting the wrong file.
+        return []
 
     scan_text = _strip_build_tool_info_noise(error_text)
     implicated = []
     for filepath in known_files:
         basename = os.path.basename(filepath)
-        if basename and (basename in scan_text or filepath in scan_text):
+        # Filename-token boundaries matter: ``App.java`` is not evidence for
+        # that file when the validator actually named ``IntegrationApp.java``.
+        # A plain substring check used to fabricate precisely that attribution.
+        # The trailing boundary deliberately excludes ``.`` from the disallowed
+        # set (unlike the leading one) - free-form prose (e.g. a Developer's own
+        # FIX ANALYSIS text, read by extract_self_diagnosed_files()) routinely
+        # ends a sentence with "...the real issue is in Config.json." and a
+        # sentence-final period must not suppress an otherwise-real match.
+        path_named = bool(re.search(
+            rf"(?<![\w.-]){re.escape(filepath)}(?![\w-])", scan_text,
+        ))
+        basename_named = bool(basename and re.search(
+            rf"(?<![\w.-]){re.escape(basename)}(?![\w-])", scan_text,
+        ))
+        # A bare stem match (the filename with its extension stripped) catches
+        # prose that names the TYPE, not the FILE - found live, 2026-08-21
+        # (protocol_encoder_java): the Developer's own FIX ANALYSIS said "the
+        # Protocol class ... does not have the expected methods and
+        # constructor" and never once spelled "Protocol.java", so the
+        # extension-anchored basename check above missed it entirely and the
+        # self-diagnosis redirect this feeds (extract_self_diagnosed_files)
+        # silently failed to fire, leaving a targeted retry stuck re-editing
+        # the wrong file (ProtocolDemo.java, where the compiler error
+        # surfaced) instead of the file that actually needed the fix.
+        # Deliberately narrow, not a blanket "match any bare word": gated on
+        # the stem being TitleCase (stem[0].isupper()) and at least 3 chars.
+        # TitleCase-stem-equals-type-name is a real, load-bearing convention
+        # in Java/C#/C++/Kotlin (Protocol.java <-> class Protocol) but not in
+        # Python/Ruby/JS, where the module filename and the type name are
+        # different tokens by convention (protocol.py's class is still
+        # `Protocol`, but the FILE's own stem is lowercase `protocol`) - so
+        # this fallback naturally self-limits to the languages/conventions
+        # where it's actually reliable signal, rather than special-casing by
+        # language. The length/case guard also keeps a short or lowercase
+        # word ("the protocol used here", "the db connection") from being
+        # misread as naming a specific file.
+        stem = os.path.splitext(basename)[0]
+        stem_named = bool(
+            stem and len(stem) >= 3 and stem[0].isupper()
+            and re.search(rf"(?<![\w.-]){re.escape(stem)}(?![\w-])", scan_text)
+        )
+        if path_named or basename_named or stem_named:
             implicated.append(filepath)
     return implicated
+
+
+def find_locator_files_outside_known_scope(error_text: str, known_files: Iterable[str]) -> List[str]:
+    """Companion to extract_implicated_files() above - returns the basenames a
+    real file:line locator named that matched NO known file, or [] when every
+    located file is recognized (or there was no locator at all). Used to turn
+    the same live incident that function's own docstring describes into a
+    clear, actionable message instead of a silent full-set fallback: stale
+    content left over in a workspace from an earlier, unrelated run (a
+    different package layout, a differently-named entrypoint) can get swept
+    into a fresh attempt's compile scope by the worktree sync while never
+    being part of state.all_files_written or ctx.established_files - the
+    compiler's own precise locator already says exactly which file(s), this
+    just surfaces that instead of discarding it once extract_implicated_files()
+    has already decided not to trust it for targeting."""
+    basenames = {basename for basename, _line in extract_error_source_locations(error_text)}
+    if not basenames:
+        return []
+    known_basenames = {os.path.basename(f) for f in known_files}
+    return sorted(basenames - known_basenames)
+
+
+def resolve_repository_locator_files(
+    error_text: str,
+    workspace_path: str,
+    known_files: Iterable[str],
+    *,
+    max_files_scanned: int = 20_000,
+) -> List[str]:
+    """Resolve precise failure locators to unique existing repository files.
+
+    This is a bounded, local re-grounding step for terminal regression
+    failures that name an implementation file outside the current repair set.
+    It never guesses between duplicate basenames and never reads file content:
+    only a unique on-disk match for a real file:line locator is returned.
+    """
+    located_basenames = {
+        basename for basename, _line in extract_error_source_locations(error_text)
+    }
+    known_basenames = {os.path.basename(path) for path in known_files}
+    unresolved = located_basenames - known_basenames
+    if not unresolved:
+        return []
+
+    excluded_dirs = {
+        ".git", ".kriya", ".pytest_cache", "__pycache__", "node_modules",
+        "target", "build", "dist", ".venv", "venv",
+    }
+    matches: Dict[str, List[str]] = {basename: [] for basename in unresolved}
+    scanned = 0
+    for root, dirs, files in os.walk(workspace_path):
+        dirs[:] = sorted(name for name in dirs if name not in excluded_dirs)
+        for filename in sorted(files):
+            scanned += 1
+            if scanned > max_files_scanned:
+                return []
+            if filename not in unresolved:
+                continue
+            full_path = os.path.join(root, filename)
+            if not os.path.isfile(full_path) or os.path.islink(full_path):
+                continue
+            matches[filename].append(os.path.relpath(full_path, workspace_path))
+
+    return sorted(
+        paths[0] for paths in matches.values() if len(paths) == 1
+    )

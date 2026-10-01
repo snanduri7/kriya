@@ -1,0 +1,53 @@
+{
+  "containment": {
+    "backend": "oci",
+    "runtime_version": "27.5.1"
+  },
+  "digest": "f49435c412a080bc7d666f93fa2b0a6acd6413cbef0aca50a11ed0b5acdc207d",
+  "environment": {
+    "architecture": "arm64",
+    "os": "darwin",
+    "python": "3.14.6"
+  },
+  "kriya": {
+    "dirty": false,
+    "revision": "b73edb227d61c33240077f7aeccae5fe68f2c788"
+  },
+  "platform": {
+    "capabilities": [
+      [
+        "file_lock_crash_safe",
+        "enforced",
+        "posix-flock"
+      ],
+      [
+        "posix_rlimit_as",
+        "advisory",
+        "posix-setrlimit"
+      ],
+      [
+        "posix_rlimit_cpu",
+        "enforced",
+        "posix-setrlimit"
+      ],
+      [
+        "process_tree_termination",
+        "enforced",
+        "posix-process-group"
+      ],
+      [
+        "uid_gid_identity",
+        "enforced",
+        "posix-uid-gid"
+      ]
+    ],
+    "family": "posix",
+    "providers": {
+      "host_identity": "posix-uid-gid",
+      "process_control": "posix-process-group",
+      "resource_limits": "posix-setrlimit",
+      "workspace_lock": "posix-flock"
+    }
+  },
+  "version": 1
+}

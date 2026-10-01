@@ -167,6 +167,41 @@ async def test_live_failure_channel_drops_items_with_unknown_category():
 
 
 @pytest.mark.asyncio
+async def test_live_failure_channel_folds_self_correction_transcript_into_the_prompt():
+    """Added 2026-08-22: a resolved self-correction loop is the richest
+    evidence this pipeline produces all day (explicit tool-grounded
+    diagnosis, a real before/after edit, a real verification call) - when
+    present, it must reach the extraction prompt, not just error_context/
+    file_contents."""
+    llm = AsyncMock()
+    llm.complete = AsyncMock(return_value="[]")
+    channel = LiveFailureChannel(llm)
+    await channel.extract(LiveFailureContext(
+        error_context="RUNTIME VERIFICATION FAILURE: could not find or load main class",
+        file_contents={"pom.xml": "<project></project>"},
+        transcript=[
+            {"turn": 0, "tool": "list_compiled_output", "arguments": {}, "result": "(target/classes is empty)"},
+            {"turn": 0, "tool": "apply_patch", "arguments": {"filepath": "pom.xml"}, "result": "Patch applied to 'pom.xml'."},
+        ],
+    ))
+
+    prompt_sent = llm.complete.call_args.kwargs["user_prompt"]
+    assert "list_compiled_output" in prompt_sent
+    assert "target/classes is empty" in prompt_sent
+
+
+@pytest.mark.asyncio
+async def test_live_failure_channel_omits_transcript_section_when_none_given():
+    llm = AsyncMock()
+    llm.complete = AsyncMock(return_value="[]")
+    channel = LiveFailureChannel(llm)
+    await channel.extract(LiveFailureContext(error_context="err", file_contents={}))
+
+    prompt_sent = llm.complete.call_args.kwargs["user_prompt"]
+    assert "tool-assisted diagnosis loop" not in prompt_sent
+
+
+@pytest.mark.asyncio
 async def test_live_failure_channel_returns_empty_list_on_llm_failure():
     llm = AsyncMock()
     llm.complete = AsyncMock(side_effect=RuntimeError("backend unreachable"))

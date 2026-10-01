@@ -1,0 +1,48 @@
+"""PROVIDER-CONTRACT-001A F-2 mutation check: each mutation removes or
+inverts an important part of the F-2 change; the focused suites must fail."""
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(sys.argv[1])
+TESTS = ["tests/test_provider_contract_001a.py", "tests/test_provider_contract_native.py",
+         "tests/test_provider_contract_001.py", "tests/test_prd014_model_qualification.py"]
+M = [
+    ("F2-truncated-answer-passes", "kriya/core/model_qualification.py",
+     '"finish_reason": response.finish_reason})\n    return CaseResult("", FAIL, evidence)',
+     '"finish_reason": response.finish_reason})\n    return CaseResult("", PASS, evidence)'),
+    ("F2-count-consistency-dropped", "kriya/core/model_qualification.py",
+     "(exact is None or exact > int(window))", "True"),
+    ("F2-not-required", "kriya/core/model_qualification.py",
+     '"endpoint_error_semantics", "over_context_refusal")', '"endpoint_error_semantics")'),
+    ("F2-probe-under-window", "kriya/core/model_qualification.py",
+     "_OVER_CONTEXT_FACTOR = 1.25", "_OVER_CONTEXT_FACTOR = 0.9"),
+    ("F2-native-counts-dropped", "kriya/core/model_runtime.py",
+     '{"provider_status": status, **_context_exceeded_counts(message)}', '{"provider_status": status}'),
+    ("F2-admission-miss-not-recorded", "kriya/core/llm.py",
+     'if getattr(error, "reason_code", None) != PROVIDER_PROMPT_TRUNCATED or budget is None:\n            return',
+     "return"),
+    ("F2-tool-finish-not-normalized", "kriya/core/model_runtime.py",
+     'out.finish_reason = "tool_calls"  # the /v1 normalized meaning', "pass"),
+    ("F2-native-truncation-allowed", "kriya/core/model_runtime.py",
+     'payload["truncate"] = False\n', 'payload.pop("truncate", None)\n'),
+]
+survivors = 0
+for label, rel, old, new in M:
+    path = ROOT / rel
+    text = path.read_text()
+    if text.count(old) != 1:
+        print(f"{label}: ANCHOR count {text.count(old)}")
+        survivors += 1
+        continue
+    path.write_text(text.replace(old, new))
+    try:
+        run = subprocess.run([str(ROOT / ".venv/bin/pytest"), "-q", "-x", "-p", "no:randomly", *TESTS],
+                             cwd=ROOT, capture_output=True, text=True, timeout=900)
+    finally:
+        path.write_text(text)
+    killed = run.returncode != 0
+    survivors += not killed
+    tail = [line for line in run.stdout.splitlines() if line.startswith("FAILED")][:1]
+    print(f"{label}: {'KILLED' if killed else 'SURVIVED'} {tail[0] if tail else ''}")
+print(f"{len(M) - survivors}/{len(M)} killed")

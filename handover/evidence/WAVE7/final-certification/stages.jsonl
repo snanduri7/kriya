@@ -1,0 +1,6 @@
+{"stage": "environment", "status": "RECORDED", "detail": "{  \"docker_client\": \"27.5.1\",  \"docker_server\": \"27.5.1\",  \"git\": \"git version 2.54.0\",  \"git_revision\": \"220af75d18d1681914ec4361848f8b53c1c54a86\",  \"gradle\": null,  \"java\": \"openjdk version \\\"17.0.1"}
+{"stage": "static", "status": "PASS", "detail": ""}
+{"stage": "pytest", "status": "PASS", "detail": "6832 passed, 72 deselected, 176 warnings in 1722.44s (0:28:42)"}
+{"stage": "scanner", "status": "PASS", "detail": "27 passed, 6877 deselected, 2 warnings in 100.66s (0:01:40)"}
+{"stage": "release", "status": "PASS", "detail": ""}
+{"stage": "doctor", "status": "RECORDED", "detail": "production doctor JSON archived"}

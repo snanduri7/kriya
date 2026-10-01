@@ -1,0 +1,1142 @@
+"""ExecutionPolicy - the deterministic decision engine itself. MA4.2 of the
+control-plane implementation plan (see kriya/policy/__init__.py for MA4's
+overall principle; kriya/policy/model.py for the MA4.1 domain types this
+engine consumes and returns).
+
+MA4.2 stood up the fixed evaluate() pipeline and its stage ORDER, with real
+logic only in the platform-invariants stage (1) and the terminal
+default-policy stage (8); stages 2-7 were deliberately stubbed (each
+returning None - no rule matched, fall through), one per later MA4 sub-task,
+so each lands as a pure addition to an already-tested pipeline rather than a
+rewrite of it. MA4.4 filled in stage 6 (command allowlist, RUN_COMMAND
+only). MA4.5 filled in stage 2 (filesystem, READ_FILE/WRITE_FILE only -
+sensitive-path denial always, workspace-containment ALLOW/DENY when a
+workspace_path is supplied). MA4.6 filled in stage 4 (network/egress,
+NETWORK_ACCESS/LLM_NETWORK_ACCESS only - local/private target ALLOW, every
+non-local target an explicit, specific DENY since no public-lookup
+allowlist config exists yet). MA4.7 filled in stage 5 (package/supply-chain,
+INSTALL_PACKAGE only - a URL/SCP-shaped source denies outright, everything
+else well-formed requires approval, never a bare ALLOW). MA4.8 filled in
+stage 3 (git-destructive, GIT_WRITE only - force-push and protected-ref
+deletion hard-deny, config/remote mutation hard-deny, an ordinary push
+weighted LIGHT allows (matching today's actual unrestricted behavior,
+since Kriya never pushes on its own) while STANDARD/HEAVY or unknown weight
+requires approval, everything else requires approval). MA4.9 filled in
+stage 7 (risk/profile approval - trusts request.process_profile.
+human_review_required and request.engineering_route.max_observed_risk_class
+exactly as given, never reads config itself; only ever ADDS an approval
+requirement on top of whatever the backstop would otherwise decide, never
+grants a bare ALLOW). Every stage now has real logic - MA4.10 onward
+(trust model, approved sources, injection detection, failure mapping,
+telemetry, enforcement-mode validation) build on top of this engine rather
+than filling in more of it.
+
+MA4.4 gave ExecutionPolicy its first real caller (kriya/tools/validate.py's
+PolymorphicValidator, before every ProcessController.run() - MA4.7 reuses
+this SAME call site, issuing a second, INSTALL_PACKAGE-classified audit
+request alongside the existing RUN_COMMAND one whenever the real command
+looks like a package install); MA4.5 added a second real caller
+(kriya/workflow/edit_safety.py's atomic_write_file); MA4.6 added a third
+(kriya/tools/web.py's fetch_url_text); MA4.8 added a fourth
+(kriya/workflow/worktree.py's create_git_worktree - the ONE real GIT_WRITE
+Kriya's pipeline performs today, an empty bootstrap commit for a
+zero-commit repo); MA4.9 added a fifth (kriya/workflow/workflow.py's own
+existing MA2 approval-gate computation, the one real place
+WorkflowControlContext - pairing a real EngineeringRoute with its resolved
+ProcessProfile - is already in scope, so stage 7 has real, non-None input
+to reason about for at least one caller) - all audit-only: logged, never
+gating, exactly like kriya/core/llm.py's MA4.3 integration.
+MA4.15 closed the loop: the constructor gained one optional, additive
+parameter (sensitive_path_patterns - see ExecutionPolicy's own docstring)
+so a real caller with config access (WorkflowEngine) can hand in
+AutonomyConfig.sensitive_paths instead of drifting from the hardcoded
+default; ExecutionPolicy() with no arguments is still every other call
+site's exact construction, unchanged. This module itself still never
+imports or reads kriya.config directly, and still consults no LLM to reach
+a decision - MA4.15's actual AUDIT-vs-ENFORCE mode switch
+(kriya.config.config.ExecutionPolicyConfig) lives in the callers
+(WorkflowEngine._authorize_action's `enforce` argument), never inside this
+engine.
+"""
+
+import os
+import re
+import shlex
+from typing import Callable, FrozenSet, List, Optional, Sequence, Tuple
+
+from kriya.policy.model import (
+    ActionRequest,
+    ActionType,
+    MCPCapabilityProfileIdentity,
+    MCPToolIdentity,
+    PolicyDecision,
+    PolicyResult,
+)
+from kriya.workflow.triage import ExecutionWeight, RiskClass
+
+# MA4.4 - deliberately small starter allowlist (design doc section 18: "start
+# small... do not try to support every shell command in MA4"). Matched by
+# PREFIX (executable basename + a fixed run of leading subcommand tokens),
+# not full literal argv - a real invocation carries extra flags (e.g.
+# "mvn clean compile -Dmaven.compiler.showWarnings=true") that a bare-literal
+# match would reject even though it's the same recognized operation. This is
+# intentionally narrower than everything Kriya's own toolchain already runs
+# internally (mvn dependency:build-classpath, javap, pip install, bundle
+# install, rspec, python -m venv, ...) - those fall through to
+# COMMAND_NOT_ALLOWLISTED below and are meant to, for now: this is AUDIT
+# mode (see kriya/tools/validate.py's own MA4.4 integration), so the
+# resulting "would have denied Kriya's own internal toolchain calls" signal
+# is exactly the real-run comparison data the MA4 design doc's rollout
+# section calls for before any future task grows this list or turns
+# enforcement on - not a bug to silence by pre-approving everything now.
+_ALLOWLISTED_COMMAND_PREFIXES: Tuple[Tuple[str, ...], ...] = (
+    ("mvn", "compile"),
+    ("mvn", "clean", "compile"),
+    ("mvn", "test"),
+    ("mvn", "clean", "test"),
+    ("mvn", "verify"),
+    ("mvn", "clean", "verify"),
+    ("gradle", "test"),
+    ("gradlew", "test"),
+    ("pytest",),
+    ("python", "-m", "pytest"),
+    ("npm", "test"),
+    ("npm", "run", "build"),
+    ("go", "test"),
+    ("cargo", "test"),
+)
+
+# Section 19: allowlisting a shell wrapper effectively allowlists arbitrary
+# nested commands, so these never fall into the plain allowlist match above -
+# they get their own, more cautious REQUIRE_APPROVAL rule instead.
+_SHELL_WRAPPER_EXECUTABLES = frozenset({"sh", "bash", "zsh", "ksh", "dash"})
+
+
+def _command_matches_prefix(command: Tuple[str, ...], prefix: Tuple[str, ...]) -> bool:
+    if len(command) < len(prefix):
+        return False
+    if os.path.basename(command[0]) != os.path.basename(prefix[0]):
+        return False
+    return tuple(command[1:len(prefix)]) == tuple(prefix[1:])
+
+
+# MA4.7 - package-manager INSTALL verbs (section 26's own examples, minus
+# Maven: Kriya never shells out an explicit "install this new coordinate"
+# command for Maven - dependency resolution happens implicitly during
+# `mvn compile`/`test`, which section 27 explicitly calls "normal sandboxed
+# build behavior," not a supply-chain action this stage should intercept).
+_INSTALL_COMMAND_PREFIXES: Tuple[Tuple[str, ...], ...] = (
+    ("npm", "install"),
+    ("bundle", "install"),
+    ("gem", "install"),
+    ("cargo", "add"),
+)
+
+# A URL-shaped or SCP-style git target is exactly section 27's "unknown
+# external package source" - a registry name/version spec is not.
+_EXTERNAL_SOURCE_PATTERN = re.compile(r"(https?|ssh|git\+https?|git\+ssh)://|(^|\s)git@")
+
+
+def extract_install_package_target(command: Tuple[str, ...]) -> Optional[str]:
+    """MA4.7 - detects a package-manager install invocation from real
+    command shape (section 26: "introduce ActionType.INSTALL_PACKAGE rather
+    than depending only on command parsing" - the DETECTION here is still
+    necessarily shape-based, since Kriya only ever installs packages by
+    shelling out; what changes is that a match gets routed to its own
+    dedicated supply-chain policy stage instead of blending into the
+    generic command-allowlist stage's COMMAND_NOT_ALLOWLISTED signal).
+    Handles a venv-qualified pip invocation too (`<python> -m pip install
+    ...`, kriya/tools/validate.py's own real shape for _ensure_project_venv),
+    not just a bare `pip`/`pip3 install`.
+
+    Returns a short, audit-readable label for the install target (the
+    trailing arguments, space-joined) - NOT a precisely parsed single
+    package name/version; good enough for telemetry and this stage's
+    URL-vs-registry-name check, not meant for exact-match logic. Returns
+    None when `command` isn't an install invocation, or is one with no
+    trailing arguments at all (e.g. a bare `bundle install` with nothing
+    else to label - not itself suspicious, just nothing for this stage's
+    ActionRequest.target to carry)."""
+    if not command:
+        return None
+    executable = os.path.basename(command[0])
+    rest = command[1:]
+
+    if executable in ("pip", "pip3") and rest[:1] == ("install",):
+        return " ".join(rest[1:]) or None
+    if (
+        executable.startswith("python") and len(rest) >= 3
+        and rest[0] == "-m" and rest[1] in ("pip", "pip3") and rest[2] == "install"
+    ):
+        return " ".join(rest[3:]) or None
+
+    for prefix in _INSTALL_COMMAND_PREFIXES:
+        if _command_matches_prefix(command, prefix):
+            return " ".join(command[len(prefix):]) or None
+
+    return None
+
+
+# SEC-005 O5 (2026-09-13): ShellTool ("Execute arbitrary shell commands on
+# the local machine") is the one production call site that hardcodes
+# ContainmentProfile.network=UNRESTRICTED unconditionally, independent of
+# any package-manager shape - unlike PolymorphicValidator/dependency_execution.py,
+# which already route real Maven/pip acquisition through SEC-006's
+# registry-scoped network authority. This is deliberately NOT the same
+# recognition used by extract_install_package_target/_check_package_supply_chain
+# above (POL-001's INSTALL_PACKAGE approval-gating decision, which excludes
+# Maven entirely - "dependency resolution happens implicitly during mvn
+# compile/test") - here the question is narrower and different: "does this
+# ShellTool invocation touch a package registry over the network at all",
+# which for Maven is true on nearly every real invocation (compile/test/
+# verify/package/install/deploy all trigger implicit dependency
+# resolution), not just an explicit install verb.
+#
+# "registry_scoped" -> the two ecosystems SEC-006's own
+# AutonomyConfig.acquisition_registry_hosts already authorizes (Maven
+# Central, PyPI) - reuse that SAME host list, never a new one.
+# "unmapped" -> a real, recognized package-manager acquisition shape for
+# an ecosystem Kriya has no registry-host authority for today (npm,
+# Bundler, RubyGems, Cargo, Gradle) - fails closed to DENIED, never
+# UNRESTRICTED (Task 3: "do not silently convert unsupported managers into
+# UNRESTRICTED").
+# None -> not recognized at all (includes every "near miss" - an
+# unrelated command, a package name that merely contains "pip"/"npm", a
+# recognized executable used with an unrecognized verb) - falls through to
+# ShellTool's existing, UNCHANGED UNRESTRICTED default. Deliberately
+# conservative: this function only ever NARROWS authority relative to
+# today's baseline, never widens it, so a false negative (an unrecognized
+# real package-manager invocation) is no worse than today's status quo,
+# while a false positive would incorrectly restrict a legitimate command -
+# every prefix below is a real, well-known package-manager invocation
+# shape, not a guess.
+_UNMAPPED_PACKAGE_MANAGER_PREFIXES: Tuple[Tuple[str, ...], ...] = _INSTALL_COMMAND_PREFIXES + (
+    ("npm", "ci"),
+    ("npm", "i"),
+    ("gradle",),
+    ("gradlew",),
+)
+
+
+def _classify_acquisition_segment(command: Tuple[str, ...]) -> Optional[str]:
+    if not command:
+        return None
+    executable = os.path.basename(command[0])
+    rest = command[1:]
+
+    # mvn/mvnw (the Maven Wrapper - Task 6's own required bypass check):
+    # ANY subcommand, not just "install" - see the module comment above for
+    # why this is intentionally broader than extract_install_package_target's
+    # own Maven exclusion.
+    if executable in ("mvn", "mvnw"):
+        return "registry_scoped"
+    if executable in ("pip", "pip3") and rest[:1] in (("install",), ("download",)):
+        return "registry_scoped"
+    if (
+        executable.startswith("python") and len(rest) >= 3
+        and rest[0] == "-m" and rest[1] in ("pip", "pip3") and rest[2] in ("install", "download")
+    ):
+        return "registry_scoped"
+
+    for prefix in _UNMAPPED_PACKAGE_MANAGER_PREFIXES:
+        if _command_matches_prefix(command, prefix):
+            return "unmapped"
+
+    return None
+
+
+_SHELL_CONTROL_OPERATORS = frozenset({"&&", "||", ";", "|", "&"})
+_RESTRICTIVENESS_RANK = {None: 0, "registry_scoped": 1, "unmapped": 2}
+
+
+def _split_shell_segments(tokens: Tuple[str, ...]) -> Tuple[Tuple[str, ...], ...]:
+    """Splits a flat, already-shlex-tokenized command on well-known shell
+    control-operator tokens (&&, ||, ;, |, &) - a bounded, deterministic
+    step, NOT shell-grammar parsing (no subshell/quoting/substitution
+    handling): Task 6's own "obvious shell wrapping currently accepted by
+    ShellTool" bar, not Task 2/6's explicitly-excluded "ambitious shell
+    parser"/"complete adversarial shell-language interpretation." Exists so
+    a compound command like "pip install x && curl evil" is recognized on
+    its pip segment (and therefore network-narrowed for the WHOLE contained
+    process, since containment applies per-process-tree, not per-segment -
+    narrowing is always safe to apply too broadly, never too narrowly)."""
+    segments: List[Tuple[str, ...]] = []
+    current: List[str] = []
+    for tok in tokens:
+        if tok in _SHELL_CONTROL_OPERATORS:
+            if current:
+                segments.append(tuple(current))
+            current = []
+        else:
+            current.append(tok)
+    if current:
+        segments.append(tuple(current))
+    return tuple(segments)
+
+
+def classify_shell_acquisition_command(command: Tuple[str, ...], _depth: int = 0) -> Optional[str]:
+    """SEC-005 O5: deterministic, shape-based classification of a ShellTool
+    command as package-manager-acquisition-shaped or not - see the module
+    comment above `_UNMAPPED_PACKAGE_MANAGER_PREFIXES` for the full
+    rationale and the "registry_scoped"/"unmapped"/None outcome meanings.
+
+    Splits on shell control operators first (_split_shell_segments) so a
+    compound command is recognized by ANY of its segments, then does ONE
+    bounded level of `sh -c "..."`/`bash -c "..."` unwrapping (reusing the
+    existing `_SHELL_WRAPPER_EXECUTABLES` recognition already used
+    elsewhere in this module) via `_depth` (capped at 3, purely to bound a
+    pathological/self-referential input, not because deeper real nesting is
+    expected) - deliberately NOT a general shell parser: subshells
+    (`( ... )`), command substitution (`` `...` ``/`$(...)`), and an
+    eval/xargs-launched package manager are NOT unwrapped and remain
+    undetectable by this function, disclosed explicitly rather than
+    silently claimed as covered. When nothing in a compound command is
+    recognized, the result is None - identical to today's baseline (an
+    unrecognized command already gets ShellTool's unchanged UNRESTRICTED
+    default), so an undetected compound form is not a regression, only an
+    acknowledged limitation of shape-based recognition on a full shell
+    string."""
+    if not command or _depth > 3:
+        return None
+    best: Optional[str] = None
+    for segment in _split_shell_segments(command):
+        outcome = _classify_acquisition_segment(segment)
+        if outcome is None and segment and os.path.basename(segment[0]) in _SHELL_WRAPPER_EXECUTABLES:
+            if "-c" in segment:
+                c_index = segment.index("-c")
+                if c_index + 1 < len(segment):
+                    try:
+                        nested = tuple(shlex.split(segment[c_index + 1]))
+                    except ValueError:
+                        nested = ()
+                    if nested:
+                        outcome = classify_shell_acquisition_command(nested, _depth=_depth + 1)
+        if outcome is not None and _RESTRICTIVENESS_RANK[outcome] > _RESTRICTIVENESS_RANK[best]:
+            best = outcome
+    return best
+
+# Section 11 of the MA4 design doc: this fixed order is itself a safety
+# property. Placing filesystem/git/network/package restrictions ahead of the
+# command allowlist and approval rules means a later stage's convenience
+# match (e.g. "this looks like an allowlisted build command") can never
+# override an earlier stage's hard restriction (e.g. "this touches a
+# sensitive path") - the first matching stage wins, full stop.
+_STAGE_METHOD_NAMES: Tuple[str, ...] = (
+    "_check_platform_invariants",
+    "_check_filesystem",
+    "_check_git_destructive",
+    "_check_network_egress",
+    "_check_package_supply_chain",
+    "_check_mcp_invocation",
+    "_check_command_allowlist",
+    "_check_approval_rules",
+)
+
+# Which ActionTypes are inherently read-only / non-consequential and may
+# default-ALLOW when no earlier stage produced a decision. Deliberately a
+# short, explicit allowlist rather than "everything not obviously
+# destructive" - read_file and git_read are the only two MA4.1 action types
+# that can never mutate anything Kriya doesn't already treat as safe to
+# read, so they are the only two the engine may default-allow before their
+# owning stage (MA4.5 for filesystem, MA4.8 for git) exists to add real
+# path/ref-scoped rules on top.
+_DEFAULT_ALLOW_ACTION_TYPES = frozenset({ActionType.READ_FILE, ActionType.GIT_READ})
+
+# Per-ActionType minimum shape a well-formed ActionRequest must have -
+# platform invariant #1 (section 11's stage 1). This is deliberately about
+# PRESENCE, not value: whether "rm -rf /" is a safe command is stage 6's
+# (MA4.4) job, not this one's. A request that doesn't even carry the field
+# its own action_type requires is malformed on its face and fails closed
+# regardless of what any later stage would have decided.
+# MA4.5 - universal, context-free sensitive-path denials: these fire
+# regardless of whether an ActionRequest carries a workspace_path, since
+# "this is a credential/SSH-key/secrets path" doesn't depend on which repo
+# is in play. This is the DEFAULT list, used whenever a caller constructs
+# ExecutionPolicy() with no override - it duplicated kriya.config.config.
+# AutonomyConfig.sensitive_paths's baseline patterns until MA4.15, which
+# added ExecutionPolicy.__init__'s optional sensitive_path_patterns
+# parameter specifically so a real caller with config access (today: only
+# WorkflowEngine, the one real construction site that already has
+# self.kernel.config in scope) can hand in AutonomyConfig.sensitive_paths
+# directly instead of drifting from it. ExecutionPolicy itself still never
+# imports kriya.config or reads it directly (MA4.2's own principle intact -
+# this is a caller-supplied override, not the engine acquiring a config
+# dependency); the other real callers (llm.py, validate.py, edit_safety.py,
+# web.py, worktree.py) still construct ExecutionPolicy() with no override
+# and get this same default list.
+_DEFAULT_SENSITIVE_PATH_PATTERN_STRINGS: Tuple[str, ...] = (
+    r"(^|/)\.ssh(/|$)",
+    r"(^|/)\.aws(/|$)",
+    r"(^|/)\.kube(/|$)",
+    r"(^|/)\.gnupg(/|$)",
+    r"\.env$",
+    r"credentials",
+    r"secrets",
+    r"password",
+)
+
+
+def _compile_path_patterns(pattern_strings: Sequence[str]) -> Tuple[re.Pattern, ...]:
+    return tuple(re.compile(p, re.IGNORECASE) for p in pattern_strings)
+
+
+def _is_sensitive_path(normalized_path: str, patterns: Tuple[re.Pattern, ...]) -> bool:
+    return any(p.search(normalized_path) for p in patterns)
+
+
+def _normalize_path(path: str) -> str:
+    # MA4.16 - os.path.realpath, not os.path.abspath: abspath is pure string
+    # manipulation and never follows symlinks, so a symlinked subdirectory
+    # pointing outside an authorized root would lexically look contained
+    # while actually resolving elsewhere. realpath is non-strict by default
+    # (doesn't require the path to exist), so this is still safe for a
+    # target file that hasn't been written yet - it resolves as far as real,
+    # existing parent directories go and appends any nonexistent tail
+    # components literally, which is exactly the "where would this write
+    # really land" question containment needs answered.
+    return os.path.realpath(os.path.expanduser(path))
+
+
+# MA4.8 - git-write classification, all effect-based (section 31: "requires
+# effect-based protection rather than matching only one command spelling"),
+# never a single literal string match.
+_GIT_FORCE_PUSH_FLAGS = frozenset({"--force", "-f"})
+_GIT_DELETE_FLAGS = frozenset({"--delete", "-d", "-D"})
+# Deliberately small and generic (not read from this repo's own real branch
+# name, which this stage has no way to know) - "start small" per MA4.4's own
+# precedent; a real project's actual default branch is config territory
+# (MA4.15), not something this stage can discover on its own.
+_GIT_PROTECTED_REFS = frozenset({"main", "master"})
+_GIT_MUTATING_REMOTE_VERBS = frozenset({"set-url", "remove", "rm", "add", "rename", "set-head"})
+
+
+def _git_subcommand_and_args(command: Tuple[str, ...]) -> Tuple[Optional[str], Tuple[str, ...]]:
+    args = list(command)
+    if args and os.path.basename(args[0]) == "git":
+        args = args[1:]
+    if not args:
+        return None, ()
+    return args[0], tuple(args[1:])
+
+
+def _is_force_push(rest: Tuple[str, ...]) -> bool:
+    return any(a in _GIT_FORCE_PUSH_FLAGS or a.startswith("--force-with-lease") for a in rest)
+
+
+def _targets_protected_ref(rest: Tuple[str, ...]) -> bool:
+    positional = [a for a in rest if not a.startswith("-")]
+    return any(a in _GIT_PROTECTED_REFS for a in positional)
+
+
+# POL-001-P3 - the exact, fixed command-local identity override
+# kriya/workflow/worktree.py's two internal bootstrap commits use (and the
+# ONLY place in the codebase that constructs it - confirmed by a full-repo
+# grep before adding this recognizer). Order-sensitive and exact: this is
+# the "command-local identity is exactly the reserved Kriya identity"
+# structural proof, not a trust label - a caller cannot spoof this without
+# already being able to construct an identical git invocation, and neither
+# GitTool (its own commit construction never emits `-c`/`--allow-empty` at
+# all - user input only ever reaches `-m`'s value) nor ShellTool (raw shell
+# strings are classified RUN_COMMAND, never reach this GIT_WRITE stage) can
+# produce it.
+_KRIYA_BOOTSTRAP_IDENTITY: Tuple[str, ...] = ("-c", "user.name=Kriya", "-c", "user.email=kriya@local")
+# SEC-001-P1 (2026-09-11): kriya/workflow/worktree.py now prepends this
+# exact prefix to every Kriya-internal git invocation capable of
+# triggering a repository hook (see that module's own _HOOKS_DISABLED),
+# INCLUDING the two bootstrap shapes these recognizers exist for - so the
+# exact-shape match below must expect it too, or a real, intended change
+# to worktree.py's own commands falls through to ordinary (REQUIRE_APPROVAL)
+# GIT_WRITE policy instead of its dedicated ALLOW. Still a positive
+# allowlist of one exact prefix, not a blacklist - nothing about the
+# recognizer's own "reject anything else" behavior changes.
+_KRIYA_HOOKS_DISABLED_PREFIX: Tuple[str, ...] = ("-c", "core.hooksPath=/dev/null")
+
+
+def _is_kriya_internal_bootstrap_commit(command: Tuple[str, ...]) -> bool:
+    """POL-001-P3 - recognizes ONLY Kriya's own two fixed internal bootstrap
+    commits (kriya/workflow/worktree.py's create_git_worktree and
+    _bootstrap_greenfield_repository): an --allow-empty commit made under
+    the reserved Kriya-internal identity above, structurally incapable of
+    touching any file/history content. Deliberately a tiny, EXACT structural
+    match, not a general git-argv parser (`_git_subcommand_and_args`'s own
+    "first token after git" parsing would misread `-c` as the subcommand
+    here, since these global `-c key=value` options precede the subcommand
+    - this helper is intentionally independent of that parser). The commit
+    MESSAGE is never inspected - message content carries no authority here,
+    on purpose (an arbitrary message on a zero-file-change empty commit
+    cannot cause harm, and matching one specific literal string would be
+    exactly the "single command spelling" this stage's own docstring says
+    never to rely on).
+
+    A positive ALLOWLIST of the exact post-"commit" token shape, not a
+    blacklist of dangerous flags: anything other than precisely
+    `--allow-empty -m <one value>` (an extra flag, --amend, -a/--all, a
+    second -c reuse-message flag, a pathspec, wrong order, wrong count)
+    fails this check and falls through to ordinary GIT_WRITE policy
+    unchanged. A blacklist would need to name every dangerous flag and
+    could miss one; this allowlist is safe by construction - only the one
+    known-safe shape passes."""
+    args = list(command)
+    if args and os.path.basename(args[0]) == "git":
+        args = args[1:]
+    hp = len(_KRIYA_HOOKS_DISABLED_PREFIX)
+    if tuple(args[:hp]) != _KRIYA_HOOKS_DISABLED_PREFIX:
+        return False
+    args = args[hp:]
+    n = len(_KRIYA_BOOTSTRAP_IDENTITY)
+    if tuple(args[:n]) != _KRIYA_BOOTSTRAP_IDENTITY:
+        return False
+    rest = args[n:]
+    if not rest or rest[0] != "commit":
+        return False
+    rest = rest[1:]
+    return len(rest) == 3 and rest[0] == "--allow-empty" and rest[1] == "-m"
+
+
+def _is_kriya_internal_bootstrap_init(command: Tuple[str, ...]) -> bool:
+    """POL-001-P3 - recognizes ONLY the bare `git init` kriya/workflow/
+    worktree.py::_bootstrap_greenfield_repository issues (the ONLY `git
+    init` construction anywhere in the codebase, confirmed by a full-repo
+    grep) before its own bootstrap commit, when a workspace isn't a Git
+    repository at all yet. No identity override is possible for `init`
+    itself (there is no existing history for a command-local identity to
+    matter against), so the exact-argv-shape requirement carries the full
+    weight here: `--bare`, `--template=...`, a target-directory argument,
+    or any other flag routes this call to a DIFFERENT directory or a
+    different repository shape than the one Kriya just checked doesn't
+    exist yet, and must fall through to ordinary policy instead."""
+    args = list(command)
+    if args and os.path.basename(args[0]) == "git":
+        args = args[1:]
+    hp = len(_KRIYA_HOOKS_DISABLED_PREFIX)
+    if tuple(args[:hp]) != _KRIYA_HOOKS_DISABLED_PREFIX:
+        return False
+    return tuple(args[hp:]) == ("init",)
+
+
+_REQUIRED_FIELDS_BY_ACTION_TYPE = {
+    ActionType.READ_FILE: ("target",),
+    ActionType.WRITE_FILE: ("target",),
+    ActionType.RUN_COMMAND: ("command",),
+    ActionType.NETWORK_ACCESS: ("network_target",),
+    ActionType.LLM_NETWORK_ACCESS: ("network_target",),
+    ActionType.INSTALL_PACKAGE: ("target",),
+    ActionType.GIT_READ: ("command",),
+    ActionType.GIT_WRITE: ("command",),
+    ActionType.PUBLISH_ARTIFACT: ("target",),
+}
+
+
+class ExecutionPolicy:
+    """Policy decides whether an action is allowed; it never performs or
+    enforces the action itself (see kriya/policy/__init__.py). evaluate()
+    is the single entry point and is deterministic - no LLM is ever
+    consulted to decide whether an action is allowed.
+
+    MA4.15 - the constructor takes one optional, additive parameter
+    (sensitive_path_patterns) rather than a config object: ExecutionPolicy
+    still never imports or reads kriya.config itself. ExecutionPolicy()
+    with no arguments - every call site's exact current construction,
+    unchanged - keeps using the same hardcoded default list stage 2 always
+    has."""
+
+    def __init__(
+        self,
+        sensitive_path_patterns: Optional[Sequence[str]] = None,
+        approved_mcp_tool_identities: Optional[FrozenSet[MCPToolIdentity]] = None,
+        mcp_invocation_approval_resolver: Optional[
+            Callable[[MCPToolIdentity, Optional[MCPCapabilityProfileIdentity]], bool]
+        ] = None,
+    ) -> None:
+        self._sensitive_path_patterns = _compile_path_patterns(
+            sensitive_path_patterns if sensitive_path_patterns else _DEFAULT_SENSITIVE_PATH_PATTERN_STRINGS
+        )
+        # TOOL-002 P1 - additive, optional constructor override, mirroring
+        # sensitive_path_patterns's own precedent exactly: ExecutionPolicy()
+        # with no arguments (every real call site today) gets an EMPTY set -
+        # nothing is pre-approved, so every MCP_TOOL_CALL falls through to
+        # _check_mcp_invocation's own REQUIRE_APPROVAL default, which
+        # MCPTool's real-enforcement wiring then fails closed on (no
+        # approval mechanism is safely reachable at that call site in P1 -
+        # see kriya/mcp/mcp.py's own MCPTool._run() docstring). A real,
+        # operator-facing, SEC-009-governed capability/approval source is
+        # explicitly TOOL-002 P2 / TOOL-003 scope, not built here - this
+        # parameter exists so the ALLOW path is real, testable code now
+        # rather than invented later, matching MA4's own established
+        # "build the dormant branch now" precedent (execution_policy.py's
+        # own module docstring, `_authorize_action`'s enforce=True branch).
+        self._approved_mcp_tool_identities: FrozenSet[MCPToolIdentity] = (
+            approved_mcp_tool_identities if approved_mcp_tool_identities is not None else frozenset()
+        )
+        # TOOL-002 P2 - additive, optional constructor override, alongside
+        # (never replacing) approved_mcp_tool_identities above: that static
+        # frozenset stays exactly as-is, purely for isolated unit-test
+        # identity injection (Task 10 explicitly permits this to remain).
+        # This second, independent hook is where PRODUCTION authorization
+        # now comes from - a callable a real caller (MCPManager, see
+        # kriya/mcp/mcp.py) binds to a durable, on-disk, operator-approved
+        # store (kriya/mcp/invocation_approval.py), consulted fresh on
+        # EVERY call (Task 7's revalidation requirement - this stage never
+        # caches a resolver's answer). None (default, every call site that
+        # doesn't pass one - e.g. every existing unit test) disables this
+        # path entirely and changes NOTHING about pre-existing behavior:
+        # an identity not in the static approved set still falls straight
+        # through to REQUIRE_APPROVAL exactly as before. Any exception the
+        # resolver raises is deliberately NOT caught here - it propagates
+        # out of evaluate() to MCPTool._run()'s own existing fail-closed
+        # try/except (Task 15's "approval-store exception fails closed" -
+        # reusing that boundary rather than adding a second one here).
+        self._mcp_invocation_approval_resolver = mcp_invocation_approval_resolver
+
+    def evaluate(self, request: ActionRequest) -> PolicyResult:
+        for stage_name in _STAGE_METHOD_NAMES:
+            stage = getattr(self, stage_name)
+            result = stage(request)
+            if result is not None:
+                return result
+        return self._default_policy(request)
+
+    def _check_platform_invariants(self, request: ActionRequest) -> Optional[PolicyResult]:
+        required_fields = _REQUIRED_FIELDS_BY_ACTION_TYPE.get(request.action_type, ())
+        missing = [f for f in required_fields if not getattr(request, f)]
+        if missing:
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="MALFORMED_ACTION_REQUEST",
+                explanation=(
+                    f"ActionRequest for '{request.action_type.value}' is missing "
+                    f"required field(s): {', '.join(missing)}. Failing closed rather "
+                    "than guessing intent."
+                ),
+                matched_rule="platform_invariants.required_fields",
+            )
+        return None
+
+    def _check_filesystem(self, request: ActionRequest) -> Optional[PolicyResult]:
+        """MA4.5 - governs READ_FILE and WRITE_FILE only. Two independent
+        rules, per section 20:
+
+        1. A small set of universally sensitive paths (~/.ssh, ~/.aws,
+           ~/.kube, ~/.gnupg, .env, anything with credentials/secrets/
+           password in it) always denies, with or without workspace
+           context - reading or writing a credential file is never
+           legitimate regardless of which repo the request claims to be
+           for.
+        2. Workspace containment: when the request carries a
+           workspace_path (the real repo root or an active worktree root -
+           this stage doesn't need to know which), a target inside it is
+           explicitly ALLOWed (this already covers .kriya/ and any
+           worktree under it, since both are subpaths of whatever root the
+           caller passes) and a target outside it is explicitly DENYed.
+
+        Without a workspace_path, rule 2 cannot run (there is nothing to
+        check containment against) - this stage returns None for anything
+        that isn't a sensitive-path hit, falling through to the stage 8
+        default backstop (READ_FILE default-allows there; WRITE_FILE
+        default-denies). See kriya/workflow/edit_safety.py's own MA4.5
+        integration note for why its real call site can't supply
+        workspace_path today - a known, deliberately-flagged limitation of
+        this task's audit signal, not a silent gap."""
+        if request.action_type not in (ActionType.READ_FILE, ActionType.WRITE_FILE):
+            return None
+        if not request.target:
+            return None
+
+        normalized = _normalize_path(request.target)
+        if _is_sensitive_path(normalized, self._sensitive_path_patterns):
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="SENSITIVE_PATH_DENIED",
+                explanation=f"'{request.target}' matches a universally sensitive path pattern.",
+                matched_rule="filesystem.sensitive_path_denied",
+            )
+
+        if not request.workspace_path:
+            return None
+
+        workspace = _normalize_path(request.workspace_path)
+        if normalized == workspace or normalized.startswith(workspace + os.sep):
+            return PolicyResult(
+                decision=PolicyDecision.ALLOW,
+                reason_code="PATH_WITHIN_WORKSPACE_ALLOWED",
+                explanation=f"'{request.target}' is within workspace root '{request.workspace_path}'.",
+                matched_rule="filesystem.within_workspace_allowed",
+            )
+        return PolicyResult(
+            decision=PolicyDecision.DENY,
+            reason_code="PATH_OUTSIDE_WORKSPACE_DENIED",
+            explanation=f"'{request.target}' is outside workspace root '{request.workspace_path}'.",
+            matched_rule="filesystem.outside_workspace_denied",
+        )
+
+    def _check_git_destructive(self, request: ActionRequest) -> Optional[PolicyResult]:
+        """MA4.8 - governs GIT_WRITE only (GIT_READ default-allows at MA4.2's
+        own backstop, untouched here). Every rule reasons from parsed
+        command shape/effect (section 31), never a single literal spelling:
+        a force-push denies via ANY of --force/-f/--force-with-lease(=...),
+        not just one exact flag string; a branch/ref deletion denies only
+        when the ref being deleted is a recognized protected name, not
+        merely because -D was used.
+
+        `git push` gets its own weight-sensitive rule (section 33): LIGHT
+        allows (today's actual behavior is unrestricted, since Kriya never
+        pushes on its own - see kriya/workflow/worktree.py's own MA4.8
+        integration note for the one real GIT_WRITE call site that exists);
+        STANDARD/HEAVY, or no route to weigh at all, requires approval.
+        `git config` and a mutating `git remote` verb (set-url/remove/rm/
+        add/rename/set-head - section 30's "remote modification"/"git
+        config mutation") hard-deny unconditionally, no approval path, per
+        section 32. Everything else well-formed GIT_WRITE (an ordinary
+        commit, tag, merge, non-force push already handled above, a
+        non-protected branch delete) requires approval - never a bare
+        ALLOW, mirroring MA4.7's INSTALL_PACKAGE precedent.
+
+        POL-001-P3 - the one deliberate exception to "never a bare ALLOW":
+        `_is_kriya_internal_bootstrap_commit` recognizes Kriya's own two
+        fixed, zero-file-change worktree-bootstrap commits (KRIYA_INTERNAL_
+        CONTROL_PLANE authority, not USER_DIRECTED or MODEL_DIRECTED - see
+        docs/design.md POL-001-P3 narrative) and ALLOWs only that exact
+        structural shape, checked before this stage's own subcommand
+        parsing (which would misread the bootstrap commits' leading `-c`
+        options as the subcommand)."""
+        if request.action_type != ActionType.GIT_WRITE or not request.command:
+            return None
+
+        if _is_kriya_internal_bootstrap_commit(request.command):
+            return PolicyResult(
+                decision=PolicyDecision.ALLOW,
+                reason_code="KRIYA_INTERNAL_BOOTSTRAP_COMMIT_ALLOWED",
+                explanation=(
+                    "Recognized as Kriya's own internal, fixed, zero-file-change worktree-"
+                    "bootstrap commit (reserved kriya-local identity + --allow-empty, no other "
+                    "options) - a control-plane action, not a user- or model-directed mutation."
+                ),
+                matched_rule="git_destructive.kriya_internal_bootstrap_commit_allowed",
+            )
+
+        if _is_kriya_internal_bootstrap_init(request.command):
+            return PolicyResult(
+                decision=PolicyDecision.ALLOW,
+                reason_code="KRIYA_INTERNAL_BOOTSTRAP_INIT_ALLOWED",
+                explanation=(
+                    "Recognized as Kriya's own internal, bare `git init` for a workspace "
+                    "confirmed not to be a Git repository yet - a control-plane action, not a "
+                    "user- or model-directed mutation."
+                ),
+                matched_rule="git_destructive.kriya_internal_bootstrap_init_allowed",
+            )
+
+        subcommand, rest = _git_subcommand_and_args(request.command)
+        if subcommand is None:
+            return None
+
+        if subcommand == "push":
+            if _is_force_push(rest):
+                return PolicyResult(
+                    decision=PolicyDecision.DENY,
+                    reason_code="GIT_FORCE_PUSH_DENIED",
+                    explanation="Force-push variants are denied unconditionally.",
+                    matched_rule="git_destructive.force_push_denied",
+                )
+            if any(f in _GIT_DELETE_FLAGS for f in rest) and _targets_protected_ref(rest):
+                return PolicyResult(
+                    decision=PolicyDecision.DENY,
+                    reason_code="PROTECTED_REF_MUTATION_DENIED",
+                    explanation="Deleting a protected ref via push is denied unconditionally.",
+                    matched_rule="git_destructive.protected_ref_push_delete_denied",
+                )
+            weight = request.engineering_route.execution_weight if request.engineering_route else None
+            if weight == ExecutionWeight.LIGHT:
+                return PolicyResult(
+                    decision=PolicyDecision.ALLOW,
+                    reason_code="GIT_PUSH_ALLOWED_LIGHT",
+                    explanation="Ordinary push under a LIGHT execution weight matches today's unrestricted behavior.",
+                    matched_rule="git_destructive.push_allowed_light",
+                )
+            return PolicyResult(
+                decision=PolicyDecision.REQUIRE_APPROVAL,
+                reason_code="GIT_PUSH_REQUIRES_APPROVAL",
+                explanation="Push requires approval outside a LIGHT execution weight (or with no route to weigh).",
+                matched_rule="git_destructive.push_requires_approval",
+                requires_approval=True,
+            )
+
+        if subcommand == "branch" and any(f in _GIT_DELETE_FLAGS for f in rest):
+            if _targets_protected_ref(rest):
+                return PolicyResult(
+                    decision=PolicyDecision.DENY,
+                    reason_code="PROTECTED_REF_MUTATION_DENIED",
+                    explanation="Deleting a protected branch is denied unconditionally.",
+                    matched_rule="git_destructive.protected_branch_delete_denied",
+                )
+            return PolicyResult(
+                decision=PolicyDecision.REQUIRE_APPROVAL,
+                reason_code="GIT_WRITE_REQUIRES_APPROVAL",
+                explanation="Deleting a non-protected branch requires approval.",
+                matched_rule="git_destructive.branch_delete_requires_approval",
+                requires_approval=True,
+            )
+
+        if subcommand == "config":
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="GIT_CONFIG_MUTATION_DENIED",
+                explanation="git config mutation is denied unconditionally.",
+                matched_rule="git_destructive.config_mutation_denied",
+            )
+
+        if subcommand == "remote" and rest and rest[0] in _GIT_MUTATING_REMOTE_VERBS:
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="GIT_REMOTE_MUTATION_DENIED",
+                explanation=f"'git remote {rest[0]}' is denied unconditionally.",
+                matched_rule="git_destructive.remote_mutation_denied",
+            )
+
+        return PolicyResult(
+            decision=PolicyDecision.REQUIRE_APPROVAL,
+            reason_code="GIT_WRITE_REQUIRES_APPROVAL",
+            explanation=f"'git {subcommand}' is a write operation and requires approval.",
+            matched_rule="git_destructive.ordinary_write_requires_approval",
+            requires_approval=True,
+        )
+
+    def _check_network_egress(self, request: ActionRequest) -> Optional[PolicyResult]:
+        """MA4.6 - governs NETWORK_ACCESS and LLM_NETWORK_ACCESS only. Note
+        this stage governs the DECISION layer only; kriya/core/llm.py's
+        is_local_url/EgressViolationError enforcement (MA4.3) is a separate,
+        independent hard boundary this stage's rules can never substitute
+        for - see kriya/policy/__init__.py. This is why the local/non-local
+        check below deliberately reuses kriya.core.llm.is_local_url itself
+        (a deferred import - kriya/core/llm.py imports this module at
+        module level, so importing it back at module level here would be
+        circular; a function-local import is safe since by the time this
+        method is ever CALLED, both modules are already fully loaded) rather
+        than a second, independently-written local/private-address check
+        that could quietly drift from the real enforcement boundary's own
+        definition of "local" and produce misleading audit telemetry.
+
+        No config exists yet (MA4.15's job) to distinguish "known public
+        registry/lookup" from "arbitrary URL" (section 22) for plain
+        NETWORK_ACCESS, so - matching section 12's "never silently default
+        to ALLOW" - only a local/private target gets a real ALLOW here;
+        every non-local NETWORK_ACCESS or LLM_NETWORK_ACCESS gets an
+        explicit, specific DENY (not a fall-through to the generic
+        backstop) so the audit log at least shows WHICH stage denied it."""
+        if request.action_type not in (ActionType.NETWORK_ACCESS, ActionType.LLM_NETWORK_ACCESS):
+            return None
+        if not request.network_target:
+            return None
+
+        from kriya.core.llm import is_local_url
+
+        target_is_local = is_local_url(request.network_target)
+
+        if request.action_type == ActionType.LLM_NETWORK_ACCESS:
+            if target_is_local:
+                return PolicyResult(
+                    decision=PolicyDecision.ALLOW,
+                    reason_code="LOCAL_LLM_ENDPOINT_ALLOWED",
+                    explanation=f"'{request.network_target}' resolves to a local/private address.",
+                    matched_rule="network_egress.local_llm_endpoint_allowed",
+                )
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="NETWORK_TARGET_DENIED",
+                explanation=(
+                    f"'{request.network_target}' is not a local/private address; non-local LLM "
+                    "endpoints are denied by this stage (kriya/core/llm.py's own egress check is "
+                    "the real, independent enforcement boundary regardless of this decision)."
+                ),
+                matched_rule="network_egress.non_local_llm_denied",
+            )
+
+        if target_is_local:
+            return PolicyResult(
+                decision=PolicyDecision.ALLOW,
+                reason_code="LOCAL_NETWORK_TARGET_ALLOWED",
+                explanation=f"'{request.network_target}' resolves to a local/private address.",
+                matched_rule="network_egress.local_network_target_allowed",
+            )
+        return PolicyResult(
+            decision=PolicyDecision.DENY,
+            reason_code="NETWORK_TARGET_DENIED",
+            explanation=(
+                f"'{request.network_target}' is not a local/private address, and no config-driven "
+                "public-lookup allowlist exists yet (MA4.15) to authorize it."
+            ),
+            matched_rule="network_egress.non_local_network_target_denied",
+        )
+
+    def _check_package_supply_chain(self, request: ActionRequest) -> Optional[PolicyResult]:
+        """MA4.7 - governs INSTALL_PACKAGE only. Per section 27/28: MA4 does
+        not implement full SCA (no SBOM, license scan, CVE scanner, package
+        reputation) - the essential improvement is that a new dependency
+        becomes an explicit, policy-controlled action at all, not that this
+        stage judges the package itself. A URL/SCP-shaped target (an
+        arbitrary source, not a registry name+version) denies outright;
+        everything else well-formed requires approval - never a bare ALLOW,
+        since "the build already had this dependency declared" isn't
+        something this stage can distinguish from "the agent just added a
+        new one" without config this task doesn't have (MA4.15)."""
+        if request.action_type != ActionType.INSTALL_PACKAGE or not request.target:
+            return None
+
+        if _EXTERNAL_SOURCE_PATTERN.search(request.target):
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="UNKNOWN_PACKAGE_SOURCE_DENIED",
+                explanation=f"'{request.target}' names an arbitrary URL/git source, not a registry package.",
+                matched_rule="package_supply_chain.unknown_source_denied",
+            )
+
+        return PolicyResult(
+            decision=PolicyDecision.REQUIRE_APPROVAL,
+            reason_code="PACKAGE_INSTALL_REQUIRES_APPROVAL",
+            explanation=f"Installing '{request.target}' is a supply-chain action and requires approval.",
+            matched_rule="package_supply_chain.requires_approval",
+            requires_approval=True,
+        )
+
+    def _check_mcp_invocation(self, request: ActionRequest) -> Optional[PolicyResult]:
+        """TOOL-002 P1/P2 - governs ActionType.MCP_TOOL_CALL only. Unlike every
+        other stage in this pipeline, the caller (MCPTool._run(),
+        kriya/mcp/mcp.py) treats this stage's DENY and REQUIRE_APPROVAL
+        outcomes as REAL, mode-independent enforcement - never audit-only,
+        regardless of ExecutionPolicyConfig.mode - because unlike a Kriya-
+        authored command (mvn compile, a fixed git bootstrap commit), an
+        MCP tool call has no legitimate "this is Kriya's own trusted
+        internal action" carve-out to ever fall back on; every MCP call is
+        entirely LLM/server-directed. This method itself stays a pure,
+        deterministic PolicyResult producer exactly like every other
+        stage - it is MCPTool's own caller-side wiring that makes the
+        outcome real rather than logged-only, the same separation of
+        concerns _check_git_destructive/_check_command_allowlist already
+        keep from their own enforcement callers.
+
+        Identity, never metadata content, decides the outcome:
+        `request.metadata["mcp_tool_identity"]` must be a well-formed
+        `MCPToolIdentity` (server_identity + exact tool_name + a schema
+        digest that already excludes all description text - see
+        MCPToolIdentity's own docstring) - the server's own advertised
+        description/annotations/result text are never read here at all,
+        satisfying Invariant 5 (MCP-provided metadata may describe an
+        operation, never authorize it) structurally, not by convention.
+
+        TOOL-002 P1/P2 intentionally does NOT infer filesystem/network/
+        process capability from the identity or from anything else - that
+        semantic capability question is TOOL-003's scope (this stage reads
+        `mcp_capability_profile_identity` for one narrow purpose only: as
+        an anti-drift BINDING key inside the durable-approval check below,
+        never as an independent authority source - Invariant 13 stays
+        true). The decision this stage can make is IDENTITY-based, checked
+        against two independent sources in order: (1) is this EXACT
+        (server, tool, schema) tuple one Kriya/the operator has explicitly
+        pre-approved for THIS PROCESS (`self._approved_mcp_tool_identities`,
+        empty by default, test-injection only - see __init__)? (2) failing
+        that, does a durable, operator-granted, on-disk invocation approval
+        (TOOL-002 P2, `self._mcp_invocation_approval_resolver`, None by
+        default) exist whose FULL current binding - workspace, server,
+        tool, schema digest, AND capability-profile digest - still matches
+        exactly? If either yes, ALLOW. If neither - which is every real
+        call with no approval on file - REQUIRE_APPROVAL, never a bare
+        ALLOW merely because the identity looks unremarkable or the
+        server's own description sounds harmless (Invariant: never bare-
+        ALLOW an unknown/ambiguous MCP invocation)."""
+        if request.action_type != ActionType.MCP_TOOL_CALL:
+            return None
+
+        identity = request.metadata.get("mcp_tool_identity")
+        if not isinstance(identity, MCPToolIdentity):
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="MCP_IDENTITY_MISSING",
+                explanation=(
+                    "MCP_TOOL_CALL request carries no well-formed MCPToolIdentity in "
+                    "metadata['mcp_tool_identity'] - failing closed rather than guessing "
+                    "which server/tool this call refers to."
+                ),
+                matched_rule="mcp_invocation.identity_missing",
+            )
+
+        if identity in self._approved_mcp_tool_identities:
+            return PolicyResult(
+                decision=PolicyDecision.ALLOW,
+                reason_code="MCP_TOOL_IDENTITY_APPROVED",
+                explanation=(
+                    f"MCP tool identity (server={identity.server_identity!r}, "
+                    f"tool={identity.tool_name!r}) matches an explicitly pre-approved "
+                    "identity, including its schema digest."
+                ),
+                matched_rule="mcp_invocation.identity_approved",
+            )
+
+        # TOOL-002 P2 - the durable, operator-facing production approval
+        # path (see __init__'s own docstring for this parameter). Only
+        # reached when the static test-injection set above did not already
+        # match. `capability_identity` is validated to the exact expected
+        # type here (never trusted as arbitrary metadata content) before
+        # being handed to the resolver - this stage still owns validating
+        # the shape of its own ActionRequest, exactly like the identity
+        # check above.
+        if self._mcp_invocation_approval_resolver is not None:
+            capability_identity = request.metadata.get("mcp_capability_profile_identity")
+            if not isinstance(capability_identity, MCPCapabilityProfileIdentity):
+                capability_identity = None
+            if self._mcp_invocation_approval_resolver(identity, capability_identity):
+                return PolicyResult(
+                    decision=PolicyDecision.ALLOW,
+                    reason_code="MCP_TOOL_DURABLE_APPROVAL_VALID",
+                    explanation=(
+                        f"MCP tool identity (server={identity.server_identity!r}, "
+                        f"tool={identity.tool_name!r}) matches a durable, operator-"
+                        "granted invocation approval whose full binding (workspace, "
+                        "server, tool, schema digest, capability-profile digest) is "
+                        "still current."
+                    ),
+                    matched_rule="mcp_invocation.durable_approval_valid",
+                )
+
+        return PolicyResult(
+            decision=PolicyDecision.REQUIRE_APPROVAL,
+            reason_code="MCP_TOOL_REQUIRES_APPROVAL",
+            explanation=(
+                f"MCP tool identity (server={identity.server_identity!r}, "
+                f"tool={identity.tool_name!r}) is not on the pre-approved identity set "
+                "and has no current, valid durable invocation approval - failing closed "
+                "(no tools/call) rather than defaulting to ALLOW."
+            ),
+            matched_rule="mcp_invocation.requires_approval",
+            requires_approval=True,
+        )
+
+    def _check_command_allowlist(self, request: ActionRequest) -> Optional[PolicyResult]:
+        """MA4.4 - only governs ActionType.RUN_COMMAND; git commands go
+        through GIT_READ/GIT_WRITE (default-allow for reads at MA4.2,
+        MA4.8's own git-write rules), never through this stage. Reasons from
+        parsed command shape (executable + leading subcommand tokens), never
+        raw substring matching (section 17: no `if "rm" in command`)."""
+        if request.action_type != ActionType.RUN_COMMAND or not request.command:
+            return None
+
+        command = request.command
+        executable = os.path.basename(command[0])
+
+        if executable == "sudo":
+            return PolicyResult(
+                decision=PolicyDecision.DENY,
+                reason_code="COMMAND_SUDO_DENIED",
+                explanation="Commands invoked via 'sudo' are denied unconditionally.",
+                matched_rule="command_allowlist.sudo_denied",
+            )
+
+        if executable in _SHELL_WRAPPER_EXECUTABLES and "-c" in command:
+            return PolicyResult(
+                decision=PolicyDecision.REQUIRE_APPROVAL,
+                reason_code="COMMAND_SHELL_WRAPPER_REQUIRES_APPROVAL",
+                explanation=(
+                    f"'{executable} -c' can execute arbitrary nested commands and is not "
+                    "itself allowlistable; requires approval."
+                ),
+                matched_rule="command_allowlist.shell_wrapper",
+                requires_approval=True,
+            )
+
+        for prefix in _ALLOWLISTED_COMMAND_PREFIXES:
+            if _command_matches_prefix(command, prefix):
+                return PolicyResult(
+                    decision=PolicyDecision.ALLOW_SANDBOXED,
+                    reason_code="COMMAND_ALLOWLISTED",
+                    explanation=f"'{' '.join(prefix)}' matches the MA4.4 starter build/test allowlist.",
+                    matched_rule="command_allowlist.allowlisted",
+                    requires_sandbox=True,
+                )
+
+        return PolicyResult(
+            decision=PolicyDecision.DENY,
+            reason_code="COMMAND_NOT_ALLOWLISTED",
+            explanation=(
+                f"'{' '.join(command)}' does not match any entry in the MA4.4 starter "
+                "command allowlist."
+            ),
+            matched_rule="command_allowlist.not_allowlisted",
+        )
+
+    def _check_approval_rules(self, request: ActionRequest) -> Optional[PolicyResult]:
+        """MA4.9 - preserves MA2's STANDARD/HEAVY approval-requirement rule
+        (design doc section 35) as a policy-level decision, WITHOUT any
+        config dependency of its own: this stage trusts
+        request.process_profile.human_review_required and
+        request.engineering_route.max_observed_risk_class exactly as given,
+        the same way stages 2-6 already trust request.workspace_path/
+        network_target/command/etc. Whether to actually POPULATE those two
+        fields for a real call is the CALLER's responsibility (and, for a
+        real production caller, itself requires
+        process_profiles.enabled/enforce_approval per MA2's own config
+        gating - kriya/workflow/workflow.py's process_profile_requires_review
+        computation) - this stage has and needs no config of its own.
+
+        Only ever ADDS an approval requirement, never grants a bare ALLOW -
+        a LIGHT profile (human_review_required=False) and a non-HIGH risk
+        class simply return None here (no opinion), falling through to
+        whatever stage 8's backstop would have decided anyway. Since stage
+        6 already owns RUN_COMMAND unconditionally and stages 2/4/5/3
+        already own their own action types before this stage ever runs
+        (section 11's fixed order), this stage's real effect today is
+        narrow - a WRITE_FILE request that reached here without a
+        workspace_path, or a PUBLISH_ARTIFACT request - but is real and
+        directly testable against the ACTUAL ProcessProfile objects MA2
+        already uses (LIGHT_PROFILE/STANDARD_PROFILE/HEAVY_PROFILE), not a
+        hand-rolled stand-in, per section 35's "only remove duplicate logic
+        after tests prove parity" migration note."""
+        if request.process_profile is not None and request.process_profile.human_review_required:
+            return PolicyResult(
+                decision=PolicyDecision.REQUIRE_APPROVAL,
+                reason_code="PROCESS_PROFILE_REQUIRES_APPROVAL",
+                explanation="The resolved ProcessProfile for this request marks human_review_required=True.",
+                matched_rule="approval_rules.process_profile_requires_approval",
+                requires_approval=True,
+            )
+        if (
+            request.engineering_route is not None
+            and request.engineering_route.max_observed_risk_class == RiskClass.HIGH
+        ):
+            return PolicyResult(
+                decision=PolicyDecision.REQUIRE_APPROVAL,
+                reason_code="HIGH_RISK_REQUIRES_APPROVAL",
+                explanation="The request's EngineeringRoute has observed HIGH risk at some point this run.",
+                matched_rule="approval_rules.high_risk_requires_approval",
+                requires_approval=True,
+            )
+        return None
+
+    def _default_policy(self, request: ActionRequest) -> PolicyResult:
+        """Section 12's fail-closed backstop: never silently default to
+        ALLOW. Only the two inherently read-only action types default-allow
+        here; every other action type - including ones a later stage will
+        eventually classify as safe (e.g. `mvn test` under MA4.4) - denies
+        by default until that stage actually exists to say otherwise. This
+        is intentionally strict for an engine nothing calls yet (MA4.2's own
+        "Behavior Change: None in audit" scope) and stays strict as later
+        stages are added one at a time - each new stage only ever ADDS a
+        narrower ALLOW/ALLOW_SANDBOXED/REQUIRE_APPROVAL ahead of this
+        backstop, it never has to loosen this method itself."""
+        if request.action_type in _DEFAULT_ALLOW_ACTION_TYPES:
+            return PolicyResult(
+                decision=PolicyDecision.ALLOW,
+                reason_code="DEFAULT_READ_ONLY_ALLOWED",
+                explanation=(
+                    f"'{request.action_type.value}' is inherently read-only and no "
+                    "earlier stage denied it; allowed by default."
+                ),
+                matched_rule="default_policy.read_only_allow",
+            )
+        return PolicyResult(
+            decision=PolicyDecision.DENY,
+            reason_code="DEFAULT_UNKNOWN_ACTION_DENIED",
+            explanation=(
+                f"No policy stage recognized '{request.action_type.value}' as "
+                "allowed; denying by default (fail closed)."
+            ),
+            matched_rule="default_policy.unknown_denied",
+        )

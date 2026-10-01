@@ -1,0 +1,3 @@
+{"stage": "environment", "status": "RECORDED", "detail": "{  \"docker_client\": \"27.5.1\",  \"docker_server\": \"27.5.1\",  \"git\": \"git version 2.54.0\",  \"git_revision\": \"6cb0b7f512ef7e449130a83929702302c0951f3b\",  \"gradle\": null,  \"java\": \"openjdk version \\\"17.0.1"}
+{"stage": "release_identity", "status": "RECORDED", "detail": "fad53379503b9cd0e0f7644f61b6abdce1786f68c9c2b7bb7b9ce26d1f14a9ef"}
+{"stage": "static", "status": "PASS", "detail": ""}

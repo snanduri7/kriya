@@ -1,16 +1,11 @@
 """JDK/JAVA_HOME toolchain detection and correction for the Java/Maven retry loop - version mismatches, JDK-incompatible JVM flags, missing build manifests. Extracted from kriya/workflow/workflow.py (2026-08-11 modularization)."""
 
-import asyncio
-import difflib
-import hashlib
 import logging
 import os
 import re
-import shutil
-import subprocess
-import sys
-import xml.etree.ElementTree as ET
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple
+
+from kriya.platform.toolchain_locator import jdk_home_for_version as _resolve_jdk_home_for_version
 
 logger = logging.getLogger(__name__)
 
@@ -38,66 +33,6 @@ def _check_java_toolchain_mismatch(stack: str) -> Optional[str]:
 
 
 _JAVA_VERSION_MENTION_PATTERN = re.compile(r"\bjava\s+(\d{1,2})\b", re.IGNORECASE)
-
-
-def _resolve_jdk_home_for_version(version: str) -> Optional[str]:
-    """Resolves the real JDK home directory for a SPECIFIC major version
-    number, using whichever mechanism is actually reliable on this platform
-    - not one "portable" heuristic, since what 'java' on PATH even points to
-    differs fundamentally by OS.
-
-    Confirmed live, 2026-08-07, as a real, damaging bug in the original
-    single-heuristic design: on macOS, 'java' on PATH is ALWAYS Apple's own
-    dispatcher stub (`/usr/bin/java`) - a real, non-symlinked, root-owned
-    file, never a symlink into an actual JDK. Deriving a JDK home by walking
-    up from it (dirname(dirname(realpath('java')))) silently produced
-    '/usr' - a directory that happened to satisfy the '.../bin/java' layout
-    check but obviously isn't a JDK home. Set as JAVA_HOME, it hung a real
-    `mvn clean compile` subprocess indefinitely rather than erroring
-    cleanly, discovered live via `ps` showing the process stuck with near-
-    zero CPU time. macOS ships exactly the right tool for this instead:
-    `/usr/libexec/java_home -v <version>`, which resolves a SPECIFIC
-    registered JDK version directly - more precise than deriving from
-    whatever 'java' happens to point to, and unaffected by 'java' being a
-    stub at all.
-
-    On non-macOS platforms (Linux, where 'java' on PATH is typically a real
-    symlink chain into an actual JDK install via update-alternatives or
-    similar - no equivalent stub layer), falls back to resolving 'java' on
-    PATH through any symlinks and relying on the standard
-    '<JDK home>/bin/java' layout convention; the caller has already
-    confirmed via check_java_toolchain() that 'java' resolves to the wanted
-    version before this is ever called, so no version re-validation is
-    needed on that path.
-
-    Best-effort and defensive throughout - returns None (never raises) if
-    the version can't actually be resolved this way."""
-    if sys.platform == "darwin" and os.path.exists("/usr/libexec/java_home"):
-        try:
-            result = subprocess.run(
-                ["/usr/libexec/java_home", "-v", version],
-                capture_output=True, text=True, timeout=10,
-            )
-            if result.returncode == 0:
-                home = result.stdout.strip()
-                return home if home and os.path.isdir(home) else None
-        except Exception as e:
-            logger.debug(f"Failed to resolve JDK {version} home via /usr/libexec/java_home: {e}")
-        return None
-
-    java_path = shutil.which("java")
-    if not java_path:
-        return None
-    try:
-        real_path = os.path.realpath(java_path)
-        bin_dir = os.path.dirname(real_path)
-        if os.path.basename(bin_dir) != "bin":
-            return None
-        jdk_home = os.path.dirname(bin_dir)
-        return jdk_home if os.path.isdir(jdk_home) else None
-    except Exception as e:
-        logger.debug(f"Failed to resolve JDK home from 'java' on PATH: {e}")
-        return None
 
 
 def _resolve_java_home_override(goal: str) -> Optional[str]:
@@ -207,7 +142,9 @@ _JDK_INCOMPATIBLE_JVM_FLAGS: List[Tuple[str, int, str]] = [
 ]
 
 
-def _strip_jdk_incompatible_jvm_flags(worktree_path: str, java_home_override: Optional[str] = None) -> Optional[str]:
+def _strip_jdk_incompatible_jvm_flags(
+    content: str, java_home_override: Optional[str] = None,
+) -> Tuple[Optional[str], Optional[str]]:
     """Deterministically strips a JVM flag from the worktree's pom.xml
     exec-maven-plugin <argument> list when it's known to be fatal on the
     actually-resolved target JDK, right before the run-verification gate
@@ -246,47 +183,43 @@ def _strip_jdk_incompatible_jvm_flags(worktree_path: str, java_home_override: Op
     would otherwise be fine. Returns a human-readable note describing what
     was stripped (for logging/toolchain_warning), or None if nothing
     needed correcting."""
-    pom_path = os.path.join(worktree_path, "pom.xml")
-    if not os.path.exists(pom_path):
-        return None
+    # FILE-INTEGRITY-CONTRACT-001: a pure transform of pom.xml text,
+    # (corrected content, note) or (None, None). It never writes; the attempt
+    # applies it as a candidate mutation, before any verification gate.
+    # The flags are checked first: resolving the toolchain spawns java/mvn.
+    if not any(flag in content for flag, _jdk, _reason in _JDK_INCOMPATIBLE_JVM_FLAGS):
+        return None, None
     try:
         from kriya.tools.validate import check_java_toolchain
         toolchain = check_java_toolchain()
-        if java_home_override:
-            version_str = toolchain["java_version"]
-        else:
-            version_str = toolchain["mvn_java_version"] or toolchain["java_version"]
+        version_str = (
+            toolchain["java_version"] if java_home_override
+            else toolchain["mvn_java_version"] or toolchain["java_version"]
+        )
         if not version_str:
-            return None
+            return None, None
         resolved_major = int(version_str)
-
-        with open(pom_path, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        notes = []
-        for flag, min_forbidden_jdk, reason in _JDK_INCOMPATIBLE_JVM_FLAGS:
-            if resolved_major < min_forbidden_jdk or flag not in content:
-                continue
-            pattern = re.compile(rf"[ \t]*<argument>\s*{re.escape(flag)}\s*</argument>[ \t]*\n?")
-            new_content, count = pattern.subn("", content)
-            if count:
-                content = new_content
-                notes.append(
-                    f"Stripped '{flag}' from pom.xml before running - {reason} "
-                    f"(resolved target: JDK {resolved_major})."
-                )
-
-        if not notes:
-            return None
-        with open(pom_path, "w", encoding="utf-8") as f:
-            f.write(content)
-        return " ".join(notes)
     except Exception as e:
         logger.debug(f"_strip_jdk_incompatible_jvm_flags failed (non-fatal, skipping): {e}")
-        return None
+        return None, None
+    notes = []
+    for flag, min_forbidden_jdk, reason in _JDK_INCOMPATIBLE_JVM_FLAGS:
+        if resolved_major < min_forbidden_jdk or flag not in content:
+            continue
+        pattern = re.compile(rf"[ \t]*<argument>\s*{re.escape(flag)}\s*</argument>[ \t]*\n?")
+        new_content, count = pattern.subn("", content)
+        if count:
+            content = new_content
+            notes.append(
+                f"Stripped '{flag}' from pom.xml before running - {reason} "
+                f"(resolved target: JDK {resolved_major})."
+            )
+    return (content, " ".join(notes)) if notes else (None, None)
 
 
-def _pin_exec_plugin_executable_to_resolved_jdk(worktree_path: str, java_home_override: Optional[str]) -> Optional[str]:
+def _pin_exec_plugin_executable_to_resolved_jdk(
+    content: str, java_home_override: Optional[str],
+) -> Tuple[Optional[str], Optional[str]]:
     """Pins exec-maven-plugin's <executable> (the exec:exec goal only -
     exec:java always runs inside Maven's own already-started JVM and ignores
     <executable>/<arguments> entirely, using <mainClass>/systemProperties
@@ -321,34 +254,51 @@ def _pin_exec_plugin_executable_to_resolved_jdk(worktree_path: str, java_home_ov
     and silent on any I/O problem, same discipline as
     _strip_jdk_incompatible_jvm_flags - a defensive correction, never allowed
     to break a run that would otherwise be fine."""
+    # FILE-INTEGRITY-CONTRACT-001: a pure transform, like the one above.
     if not java_home_override:
-        return None
-    pom_path = os.path.join(worktree_path, "pom.xml")
-    if not os.path.exists(pom_path):
-        return None
-    try:
-        with open(pom_path, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        resolved_java = os.path.join(java_home_override, "bin", "java")
-        pattern = re.compile(r"<executable>\s*java\s*</executable>")
-        new_content, count = pattern.subn(f"<executable>{resolved_java}</executable>", content, count=1)
-        if not count:
-            return None
-
-        with open(pom_path, "w", encoding="utf-8") as f:
-            f.write(new_content)
-        return (
-            f"Pinned exec-maven-plugin's <executable> to {resolved_java} - the JDK this "
-            "run's verification actually used - so the delivered project runs consistently "
-            "later regardless of the default JDK on whoever runs it."
-        )
-    except Exception as e:
-        logger.debug(f"_pin_exec_plugin_executable_to_resolved_jdk failed (non-fatal, skipping): {e}")
-        return None
+        return None, None
+    resolved_java = os.path.join(java_home_override, "bin", "java")
+    pattern = re.compile(r"<executable>\s*java\s*</executable>")
+    new_content, count = pattern.subn(f"<executable>{resolved_java}</executable>", content, count=1)
+    if not count:
+        return None, None
+    return new_content, (
+        f"Pinned exec-maven-plugin's <executable> to {resolved_java} - the JDK this "
+        "run's verification actually used - so the delivered project runs consistently "
+        "later regardless of the default JDK on whoever runs it."
+    )
 
 
-# _detect_missing_build_manifest() (formerly here) moved to
-# kriya/workflow/attribution.py on 2026-08-14, alongside the rest of the
-# "which file does this concern" checks - see that module's own docstring
-# taxonomy.
+def toolchain_declaration_mutable(
+    write_scope_mode: Any, allowed_write_relpaths: Optional[Iterable[str]],
+    structured_plan: Any = None, extra_relpaths: Iterable[str] = (),
+) -> bool:
+    """PRD-011: whether this run has structured authority to change the
+    repository's toolchain declaration (pom.xml / build.gradle[.kts] /
+    pyproject.toml / .python-version at the workspace root) - the authority
+    a toolchain migration needs. Derived only from the run's write scope
+    (the same value AuthorizedFileWriter enforces) and the approved plan's
+    planned files, never from goal wording:
+    - an unrestricted direct run may write the declaration;
+    - otherwise the declaration must be in the allowed write scope, in some
+      subtask's planned files of the approved plan, or in ``extra_relpaths``
+      (an owner's authorized files).
+    ``write_scope_mode`` None means what run_generation_workflow means by
+    it: an allowlist when allowed paths are given, else unrestricted."""
+    from kriya.tools.toolchain_identity import ALL_TOOLCHAIN_DECLARATION_FILES
+
+    allowed = [path for path in (allowed_write_relpaths or ()) if path]
+    mode = getattr(write_scope_mode, "value", write_scope_mode)
+    if mode is None:
+        mode = "allowlist" if allowed else "unrestricted"
+    if mode == "unrestricted":
+        return True
+    paths = list(extra_relpaths)
+    if mode != "deny_all":
+        paths.extend(allowed)
+    for subtask in getattr(structured_plan, "subtasks", None) or ():
+        paths.extend(planned.path for planned in getattr(subtask, "planned_files", None) or ())
+    return any(
+        os.path.normpath(path).replace(os.sep, "/") in ALL_TOOLCHAIN_DECLARATION_FILES
+        for path in paths if isinstance(path, str)
+    )

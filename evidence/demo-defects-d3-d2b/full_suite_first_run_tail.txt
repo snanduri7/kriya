@@ -1,0 +1,3 @@
+=========================== short test summary info ============================
+FAILED tests/test_prd008_recovery.py::test_runs_commands_are_reachable_when_configuration_authority_is_denied
+1 failed, 7942 passed, 14 warnings in 508.12s (0:08:28)

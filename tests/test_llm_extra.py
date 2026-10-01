@@ -31,15 +31,12 @@ async def test_llm_client_forwards_extra_body():
         res = await llm.complete("system", "user")
         assert res == "Mock response"
         
-        # Verify that extra_body was forwarded exactly as specified in the configuration
+        # PROVIDER-CONTRACT-001: the /v1 wire carries what /v1 applies -
+        # top_p top-level, reasoning off explicitly - never options.*, which
+        # it ignores (the window is requested and budgeted, not sent).
         mock_create.assert_called_once()
         kwargs = mock_create.call_args[1]
-        assert kwargs.get("extra_body") == {
-            "options": {
-                "num_ctx": 32768,
-                "top_p": 0.8
-            }
-        }
+        assert kwargs.get("extra_body") == {"top_p": 0.8, "reasoning_effort": "none"}
 
 @pytest.mark.asyncio
 async def test_local_egress_policy():
@@ -60,6 +57,85 @@ def _mock_response(content):
     mock_response.choices[0].message.content = content
     mock_response.usage = None
     return mock_response
+
+
+@pytest.mark.asyncio
+async def test_complete_uses_fallback_extra_body_not_the_primarys():
+    """Regression test for a real gap, 2026-08-22: every call site that
+    escalates to a fallback model unconditionally used the PRIMARY model's
+    own extra_body (config.llm.extra_body) regardless of which model was
+    actually being called - a fallback needing different request shape
+    (e.g. qwen3.8:27b's reasoning_effort) had no way to get it, and the
+    primary's own tuning would silently leak onto the fallback call."""
+    cfg = AppConfig()
+    cfg.llm.extra_body = {"reasoning_effort": "xhigh"}
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(return_value=_mock_response("ok"))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        await llm.complete("system", "user", model_override="qwen3.8:27b", extra_body_override={"reasoning_effort": "none"})
+        # The fallback's own settings only; its window is requested and
+        # budgeted but never put on the /v1 wire (PROVIDER-CONTRACT-001).
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none"}
+
+
+@pytest.mark.asyncio
+async def test_complete_falls_back_to_primary_extra_body_when_no_override_given():
+    """Unchanged behavior for every existing caller that doesn't pass
+    extra_body_override at all (None, the default)."""
+    cfg = AppConfig()
+    cfg.llm.extra_body = {"reasoning_effort": "xhigh"}
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(return_value=_mock_response("ok"))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        await llm.complete("system", "user")
+        # The window is budgeted, never put on the /v1 wire (PROVIDER-CONTRACT-001).
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "xhigh"}
+
+
+@pytest.mark.asyncio
+async def test_complete_empty_dict_extra_body_override_means_no_extra_body():
+    """A fallback with no extra_body of its own (the common case - defaults to
+    {}) must not silently inherit the primary's: it sends only its requested
+    context window (FALLBACK-CONTEXT-WINDOW-001), no sampling settings."""
+    cfg = AppConfig()
+    cfg.llm.extra_body = {"reasoning_effort": "xhigh"}
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(return_value=_mock_response("ok"))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        await llm.complete("system", "user", model_override="some-other-model", extra_body_override={})
+        # Its own reasoning=false, sent explicitly (PROVIDER-CONTRACT-001);
+        # nothing of the primary's "xhigh".
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none"}
+
+
+@pytest.mark.asyncio
+async def test_complete_with_tools_uses_fallback_extra_body_not_the_primarys():
+    from kriya.config import FallbackModelConfig, ModelCapabilities
+
+    cfg = AppConfig()
+    cfg.llm.extra_body = {"reasoning_effort": "xhigh"}
+    # MODEL-001 P1: an unconfigured model no longer silently assumes
+    # native_tool_calls=True - this test is about extra_body threading, not
+    # capability gating, so give the overridden model an explicit binding.
+    cfg.llm_chain = [FallbackModelConfig(model="qwen3.8:27b", capabilities=ModelCapabilities(max_tool_argument_chars=16384))]
+    llm = LLMClient(cfg)
+
+    mock_message = MagicMock()
+    mock_message.tool_calls = []
+    mock_message.content = "done"
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=mock_message)]
+    mock_response.usage = None
+    mock_create = AsyncMock(return_value=mock_response)
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        await llm.complete_with_tools(
+            [{"role": "user", "content": "hi"}], [],
+            model_override="qwen3.8:27b", extra_body_override={"reasoning_effort": "none"},
+        )
+        assert mock_create.call_args[1].get("extra_body") == {"reasoning_effort": "none"}
 
 
 @pytest.mark.asyncio
@@ -88,6 +164,61 @@ async def test_json_mode_sets_response_format_for_non_reasoning_model():
     with patch.object(llm.client.chat.completions, "create", new=mock_create):
         await llm.complete("system", "user", json_mode=True)
         assert mock_create.call_args[1].get("response_format") == {"type": "json_object"}
+
+
+@pytest.mark.asyncio
+async def test_json_mode_retries_once_with_a_token_floor_on_empty_response():
+    """Regression test for a real bug caught live, 2026-08-22: some models emit
+    hidden <think>...</think> reasoning before ever committing to JSON regardless
+    of Kriya's own is_reasoning classification for them (a static per-model
+    config guess, not a live observation) - a tight max_tokens_override then gets
+    entirely consumed by hidden reasoning with nothing ever written to `content`,
+    and json.loads("") raises "Expecting value: line 1 column 1". Confirmed live
+    for two different models classified reasoning=False in this project's own
+    llm_chain config (gpt-oss:20b, then qwen3.6:35b-a3b) - complete() must detect
+    this directly and retry once with the same 12288-token floor reasoning
+    models get, rather than requiring another hand-tuned max_tokens_override per
+    affected model."""
+    cfg = AppConfig()
+    cfg.llm.reasoning = False
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(side_effect=[_mock_response(""), _mock_response('{"files": []}')])
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete("system", "user", json_mode=True, max_tokens_override=2000)
+        assert res == '{"files": []}'
+        assert mock_create.call_count == 2
+        assert mock_create.call_args_list[0][1].get("max_tokens") == 2000
+        assert mock_create.call_args_list[1][1].get("max_tokens") == 12288
+
+
+@pytest.mark.asyncio
+async def test_json_mode_does_not_retry_when_response_is_non_empty():
+    cfg = AppConfig()
+    cfg.llm.reasoning = False
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(return_value=_mock_response('{"files": ["a.py"]}'))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete("system", "user", json_mode=True, max_tokens_override=2000)
+        assert res == '{"files": ["a.py"]}'
+        assert mock_create.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_json_mode_does_not_retry_when_already_at_or_above_the_floor():
+    """An empty response at/above the 12288 floor is a genuine failure, not a
+    truncated-reasoning symptom the floor can fix - retrying with the same
+    budget again would just burn another call for the same empty result."""
+    cfg = AppConfig()
+    cfg.llm.reasoning = False
+    llm = LLMClient(cfg)
+
+    mock_create = AsyncMock(return_value=_mock_response(""))
+    with patch.object(llm.client.chat.completions, "create", new=mock_create):
+        res = await llm.complete("system", "user", json_mode=True, max_tokens_override=12288)
+        assert res == ""
+        assert mock_create.call_count == 1
 
 
 @pytest.mark.asyncio
@@ -234,6 +365,7 @@ def _mock_tool_call_response(tool_calls=None, content=""):
 @pytest.mark.asyncio
 async def test_complete_with_tools_returns_tool_calls():
     cfg = AppConfig()
+    cfg.llm.capabilities.max_tool_argument_chars = 16384  # MODEL-001 P1: diverges from the bare default, making this an explicit (tool-calls-enabled) binding
     llm = LLMClient(cfg)
 
     raw_call = MagicMock()
@@ -256,6 +388,7 @@ async def test_complete_with_tools_returns_tool_calls():
 @pytest.mark.asyncio
 async def test_complete_with_tools_handles_empty_tool_calls():
     cfg = AppConfig()
+    cfg.llm.capabilities.max_tool_argument_chars = 16384  # MODEL-001 P1: diverges from the bare default, making this an explicit (tool-calls-enabled) binding
     llm = LLMClient(cfg)
 
     mock_create = AsyncMock(return_value=_mock_tool_call_response(tool_calls=None, content="all done"))
@@ -287,6 +420,7 @@ async def test_complete_with_tools_malformed_arguments_does_not_crash():
     truncated JSON even at small tool-call-argument scale - falling back to
     {} rather than raising keeps one bad tool call from crashing the loop."""
     cfg = AppConfig()
+    cfg.llm.capabilities.max_tool_argument_chars = 16384  # MODEL-001 P1: diverges from the bare default, making this an explicit (tool-calls-enabled) binding
     llm = LLMClient(cfg)
 
     raw_call = MagicMock()
@@ -298,3 +432,122 @@ async def test_complete_with_tools_malformed_arguments_does_not_crash():
     with patch.object(llm.client.chat.completions, "create", new=mock_create):
         res = await llm.complete_with_tools([{"role": "user", "content": "fix it"}], [])
         assert res["tool_calls"] == [{"id": "call_1", "name": "apply_patch", "arguments": {}}]
+
+
+# =====================================================================
+# finish_reason capture (VAL-001 G1-R3, 2026-09-18) - a real investigation
+# had no way to directly confirm whether a Planner response was cut off by
+# the provider ("length") or ended naturally ("stop"), and had to infer it
+# entirely from token counts and content shape. Neither the streaming nor
+# the non-streaming completion path read `finish_reason` from the
+# provider's own response at all before this - now both do, defensively
+# (never a bare attribute access), and it is always present (possibly
+# None) on LLMClient.last_call_metrics after complete() returns.
+# =====================================================================
+
+class _FakeStreamChunk:
+    """Minimal stand-in for an OpenAI-SDK streaming chunk - only the
+    attributes _request_once's own streaming branch actually reads."""
+
+    def __init__(self, content=None, finish_reason=None, usage=None):
+        choice = MagicMock()
+        choice.delta.content = content
+        choice.finish_reason = finish_reason
+        self.choices = [choice]
+        self.usage = usage
+
+
+class _FakeStream:
+    """Minimal stand-in for the async-iterable streaming response object -
+    real chunks are yielded one at a time via `async for`, exactly how
+    _request_once's own streaming branch consumes them."""
+
+    def __init__(self, chunks):
+        self._chunks = chunks
+
+    def __aiter__(self):
+        return self._gen()
+
+    async def _gen(self):
+        for c in self._chunks:
+            yield c
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_captured_non_streaming_stop():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    mock_response = _mock_response("complete text")
+    mock_response.choices[0].finish_reason = "stop"
+    with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=mock_response)):
+        await llm.complete("system", "user")
+    assert llm.last_call_metrics["finish_reason"] == "stop"
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_captured_non_streaming_length():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    mock_response = _mock_response("cut off mid")
+    mock_response.choices[0].finish_reason = "length"
+    with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=mock_response)):
+        await llm.complete("system", "user")
+    assert llm.last_call_metrics["finish_reason"] == "length"
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_missing_non_streaming_is_none_not_fabricated():
+    """A provider/SDK that never reports finish_reason at all must produce
+    None, never a fabricated "stop" - real absence is a real, distinct
+    (and honestly reported) unknown, not silently presented as a normal
+    completion this code never actually observed."""
+    class _NoFinishReasonChoice:
+        def __init__(self):
+            self.message = MagicMock(content="no finish_reason field at all")
+
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    mock_response = MagicMock()
+    mock_response.choices = [_NoFinishReasonChoice()]
+    mock_response.usage = None
+    with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=mock_response)):
+        await llm.complete("system", "user")
+    assert llm.last_call_metrics["finish_reason"] is None
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_captured_streaming_stop():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    chunks = [
+        _FakeStreamChunk(content="Hello "),
+        _FakeStreamChunk(content="world"),
+        _FakeStreamChunk(content=None, finish_reason="stop"),
+    ]
+    with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=_FakeStream(chunks))):
+        result = await llm.complete("system", "user", stream_callback=lambda t: None)
+    assert result == "Hello world"
+    assert llm.last_call_metrics["finish_reason"] == "stop"
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_captured_streaming_length():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    chunks = [
+        _FakeStreamChunk(content="cut off"),
+        _FakeStreamChunk(content=None, finish_reason="length"),
+    ]
+    with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=_FakeStream(chunks))):
+        await llm.complete("system", "user", stream_callback=lambda t: None)
+    assert llm.last_call_metrics["finish_reason"] == "length"
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_missing_streaming_is_none_not_fabricated():
+    cfg = AppConfig()
+    llm = LLMClient(cfg)
+    chunks = [_FakeStreamChunk(content="no chunk ever reports finish_reason")]
+    with patch.object(llm.client.chat.completions, "create", new=AsyncMock(return_value=_FakeStream(chunks))):
+        await llm.complete("system", "user", stream_callback=lambda t: None)
+    assert llm.last_call_metrics["finish_reason"] is None

@@ -1,0 +1,1 @@
+{"artifact": "/tmp/kriya-prd002-before/kriya-0.1.0-py3-none-any.whl", "missing": ["kriya/config/default_config.yaml", "plugins/core_tools/__init__.py", "plugins/core_tools/validation_tool.py"], "passed": false}

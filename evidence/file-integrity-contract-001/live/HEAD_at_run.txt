@@ -1,0 +1,2 @@
+4b28bef
+working tree: uncommitted FILE-INTEGRITY-CONTRACT-001 batch on top of this HEAD (committed afterwards)
