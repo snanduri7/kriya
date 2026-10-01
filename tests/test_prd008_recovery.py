@@ -530,7 +530,8 @@ def test_runs_commands_are_reachable_when_configuration_authority_is_denied(tmp_
     Path(workspace, "kriya.yaml").write_text(yaml.safe_dump({"mcp": {"hostile": {"command": "/bin/sh"}}}))
     monkeypatch.chdir(workspace)
 
-    assert _cli("version").exit_code == 1  # ordinary commands are denied
+    assert _cli("config").exit_code == 1  # ordinary commands are denied
+    assert _cli("version").exit_code == 0  # KRIYA-VERSION-001: loads no configuration at all
     assert _cli("runs", "status").exit_code == 1
     assert _cli("runs", "recover").exit_code == 0
     assert _cli("runs", "prune", "--dry-run").exit_code == 0
