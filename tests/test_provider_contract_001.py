@@ -753,7 +753,7 @@ def test_qualification_proceeds_on_a_model_pinned_to_the_binding():
     config.llm.context_window = 32768
     config.llm.extra_body = {"options": {"top_p": 0.8, "top_k": 20}}
     record = _qualify(config, _pinned_fp(num_ctx=32768, top_k=20))
-    assert record["policy_version"] == mq.QUALIFICATION_POLICY_VERSION == "kriya-qualification/7"
+    assert record["policy_version"] == mq.QUALIFICATION_POLICY_VERSION == "kriya-qualification/8"
 
 
 def test_a_policy_3_record_is_stale():

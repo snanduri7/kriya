@@ -8,6 +8,7 @@ speaking the native protocol and assert what arrives on the wire."""
 import asyncio
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
@@ -141,6 +142,7 @@ class _NativeServer:
         self.requests = []
         self.status = 200
         self.error = None
+        self.delay = 0.0  # seconds before answering (a slow provider)
         self.reply = {"message": {"role": "assistant", "content": "ok", "thinking": ""},
                       "done": True, "done_reason": "stop", "prompt_eval_count": 0, "eval_count": 1,
                       "model": "m:1"}
@@ -155,6 +157,7 @@ class _NativeServer:
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 server.requests.append((self.path, body))
+                time.sleep(server.delay)
                 if server.status != 200:
                     self._send(server.status, json.dumps({"error": server.error}).encode())
                 elif body.get("stream"):
@@ -283,3 +286,105 @@ def test_every_native_request_refuses_truncation_whatever_the_body_says(extra_bo
 def test_the_native_url_is_the_servers_root_api_chat():
     client = SimpleNamespace(base_url="http://localhost:11434/v1/", api_key="k")
     assert NATIVE._url(client) == "http://localhost:11434/api/chat"  # pylint: disable=protected-access
+
+
+# --- PROVIDER-CONTRACT-001A: the refusal carries the provider's exact count ---------------------------
+
+# The error string Ollama 0.34.4 returned for a 33,987-token prompt in a
+# 32,768 window (evidence/provider-contract-001a/f2_truncation/native_check.jsonl).
+MEASURED_OVER_CONTEXT_ERROR = (
+    '{"error":{"code":400,"message":"request (33987 tokens) exceeds the available context size '
+    '(32768 tokens), try increasing it","type":"exceed_context_size_error","n_prompt_tokens":33987,'
+    '"n_ctx":32768}}')
+
+
+def test_an_over_window_refusal_keeps_the_exact_provider_count_and_records_the_admission_miss(native_server):
+    native_server.status, native_server.error = 400, MEASURED_OVER_CONTEXT_ERROR
+    result = asyncio.run(_call(_config(native_server.url)))
+    assert result.error.reason_code == PROVIDER_PROMPT_TRUNCATED
+    assert result.error.details["provider_prompt_tokens"] == 33987
+    assert result.error.details["provider_context_window"] == 32768
+    miss = result.protocol["provider_contract"]["admission_miss"]
+    assert miss["provider_prompt_tokens"] == 33987 and miss["served_context"] == 32768
+    assert miss["predicted_prompt_tokens"] == result.budget["prompt_tokens"]
+    assert miss["adapter"] == "ollama_native" and miss["prompt_bytes"] > 0
+    assert set(miss) == {"predicted_prompt_tokens", "provider_prompt_tokens", "served_context", "prompt_bytes",
+                         "bytes_per_token_observed", "counting_method", "role", "adapter", "model",
+                         "runtime_fingerprint"}  # content-free
+    assert len(native_server.requests) == 1
+
+
+def test_a_refusal_without_counts_is_still_typed_and_names_no_invented_count(native_server):
+    native_server.status, native_server.error = 400, "exceed_context_size_error: request exceeds the context"
+    result = asyncio.run(_call(_config(native_server.url)))
+    assert result.error.reason_code == PROVIDER_PROMPT_TRUNCATED
+    assert "provider_prompt_tokens" not in result.error.details
+    assert result.protocol["provider_contract"]["admission_miss"]["provider_prompt_tokens"] is None
+
+
+def test_an_ordinary_backend_error_is_not_an_admission_miss(native_server):
+    native_server.status, native_server.error = 500, "boom"
+    result = asyncio.run(_call(_config(native_server.url)))
+    assert "admission_miss" not in result.protocol["provider_contract"]
+
+
+# --- PROVIDER-CONTRACT-001A section 26: native parity fixtures ----------------------------------------
+
+def test_native_json_mode_is_format_json_on_the_wire(native_server):
+    native_server.reply["message"]["content"] = '{"a": 1}'
+    result = asyncio.run(_call(_config(native_server.url), json_mode=True))
+    assert result.status is CompletionStatus.OK and json.loads(result.content) == {"a": 1}
+    assert native_server.requests[0][1]["format"] == "json"
+
+
+def test_native_reasoning_off_is_think_false_on_the_wire(native_server):
+    config = _config(native_server.url, extra_body={"options": {"top_p": 0.8}, "reasoning_effort": "none"})
+    result = asyncio.run(_call(config))
+    assert result.status is CompletionStatus.OK and not result.reasoning_present
+    assert native_server.requests[0][1]["think"] is False
+
+
+def test_native_usage_and_finish_reason_are_normalized(native_server):
+    native_server.reply.update({"prompt_eval_count": 25, "eval_count": 2, "done_reason": "stop"})
+    result = asyncio.run(_call(_config(native_server.url)))
+    assert (result.prompt_tokens_reported, result.completion_tokens, result.finish_reason) == (25, 2, "stop")
+
+
+def test_a_native_answer_with_tool_calls_reports_the_tool_calls_finish_reason(native_server):
+    native_server.reply = {"message": {"role": "assistant", "content": "", "tool_calls": [
+        {"function": {"name": "t", "arguments": {}}}]}, "done": True, "done_reason": "stop",
+        "prompt_eval_count": 0, "eval_count": 1}
+    config = _config(native_server.url)
+    config.llm.capabilities.native_tool_calls = True
+
+    async def run():
+        llm = LLMClient(config)
+        try:
+            return await llm.complete_with_tools_result(
+                [{"role": "user", "content": "u"}],
+                [{"type": "function", "function": {"name": "t", "parameters": {"type": "object"}}}])
+        finally:
+            await llm.aclose()
+
+    assert asyncio.run(run()).finish_reason == "tool_calls"
+
+
+def test_native_keep_alive_is_serialized_on_the_wire(native_server):
+    asyncio.run(_call(_config(native_server.url, extra_body={"keep_alive": "30m"})))
+    assert native_server.requests[0][1]["keep_alive"] == "30m"
+
+
+def test_the_run_deadline_cuts_a_slow_native_request_as_one_request(native_server, tmp_path):
+    from kriya.control.run_coordinator import begin_mutating_run, current_run_context
+    from kriya.core.llm import INFERENCE_DEADLINE_EXCEEDED, InferenceDeadlineError
+
+    native_server.delay = 3.0
+    config = _config(native_server.url)
+    config.autonomy.generation_time_budget_seconds = 600
+    started = time.monotonic()
+    with begin_mutating_run(str(tmp_path)):
+        current_run_context()._lease.generation_clock = time.monotonic() - 599.5  # pylint: disable=protected-access
+        with pytest.raises(InferenceDeadlineError) as stopped:
+            asyncio.run(_call(config))
+    assert stopped.value.reason_code == INFERENCE_DEADLINE_EXCEEDED
+    assert time.monotonic() - started < 2.5 and len(native_server.requests) == 1

@@ -524,3 +524,76 @@ def test_a_deadline_stop_is_never_resent_without_response_format(fake, tmp_path)
     assert stopped.value.reason_code == INFERENCE_DEADLINE_EXCEEDED
     assert len(fake.started) == 1
     assert llm.last_completion.protocol["response_format_dropped"] is False
+
+
+# === F-2: qualification /8 requires a typed provider refusal of an over-window prompt =====================
+
+class _OverContextRuntime(FakeRuntimeAdapter):
+    """Reports 10 prompt tokens per filler unit; above ``window`` it either
+    refuses typed (native truncate:false) or answers from a truncated prompt
+    (/v1: window/2 + 2, measured on Ollama 0.34.4)."""
+
+    def __init__(self, *, refuses, exact=True):
+        super().__init__(name="fake-over-context")
+        self.refuses, self.exact = refuses, exact
+
+    async def complete(self, client, request):
+        from kriya.core.inference_runtime import ChatResponse
+        from kriya.core.provider_contract import PROVIDER_PROMPT_TRUNCATED, ProviderContractError
+
+        self.requests.append(request)
+        text = request.messages[-1]["content"]
+        tokens = 10 * text.count("kappa.") + 7
+        if tokens <= 8192:
+            return ChatResponse(content="yes", prompt_tokens=tokens, completion_tokens=1, finish_reason="stop")
+        if self.refuses:
+            raise ProviderContractError(PROVIDER_PROMPT_TRUNCATED, "over the window",
+                                        {"provider_prompt_tokens": tokens if self.exact else 8000,
+                                         "provider_context_window": 8192})
+        return ChatResponse(content="yes", prompt_tokens=8192 // 2 + 2, completion_tokens=1, finish_reason="stop")
+
+
+def _over_context_case(runtime):
+    from kriya.core import model_qualification as mq
+
+    class _Client:
+        client = object()
+
+    ctx = {"policy": mq.ModelQualificationConfig(), "context_window": 8192, "runtime": runtime,
+           "client_factory": lambda timeout: _Client()}
+    return asyncio.run(mq.case_over_context_refusal(None, "m:1", ctx))
+
+
+def test_a_typed_provider_refusal_with_its_exact_count_passes():
+    from kriya.core import model_qualification as mq
+
+    runtime = _OverContextRuntime(refuses=True)
+    result = _over_context_case(runtime)
+    assert result.status == mq.PASS, result.evidence
+    assert result.evidence["refused"] is True and result.evidence["provider_prompt_tokens"] > 8192
+    assert len(runtime.requests) == 3  # two token-rate probes, one over-window prompt
+    # The over-window prompt really exceeded the window by the measured rate.
+    assert 10 * runtime.requests[-1].messages[-1]["content"].count("kappa.") > 8192
+
+
+def test_an_answer_from_a_silently_truncated_prompt_fails():
+    from kriya.core import model_qualification as mq
+
+    result = _over_context_case(_OverContextRuntime(refuses=False))
+    assert result.status == mq.FAIL
+    assert result.evidence["refused"] is False and result.evidence["answered_from_reported_prompt_tokens"] == 4098
+
+
+def test_a_refusal_whose_count_fits_the_window_is_inconsistent_and_fails():
+    from kriya.core import model_qualification as mq
+
+    assert _over_context_case(_OverContextRuntime(refuses=True, exact=False)).status == mq.FAIL
+
+
+def test_every_role_requires_the_over_context_refusal():
+    from kriya.core import model_qualification as mq
+
+    config = AppConfig()
+    for role in mq.ROLES:
+        assert "over_context_refusal" in mq.required_capabilities(config, role, config.llm.model)
+    assert mq.QUALIFICATION_POLICY_VERSION == "kriya-qualification/8"

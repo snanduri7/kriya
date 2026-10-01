@@ -28,6 +28,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import urllib.error
 import urllib.parse
@@ -1014,7 +1015,10 @@ register_runtime_adapter(OllamaRuntimeAdapter(), default=True)
 # over-window prompt, false answers HTTP 400 instead).
 # --------------------------------------------------------------------------
 
-NATIVE_PROTOCOL_ADAPTER_VERSION = "kriya-ollama-native/1"
+# /2 (PROVIDER-CONTRACT-001A): an over-context refusal carries the
+# provider's exact prompt count, and an answer carrying tool calls reports
+# finish_reason "tool_calls" (Ollama's done_reason says "stop"; measured).
+NATIVE_PROTOCOL_ADAPTER_VERSION = "kriya-ollama-native/2"
 NATIVE_RUNTIME_NAME = "ollama_native"
 
 OLLAMA_NATIVE_CAPABILITIES = ProviderCapabilities(
@@ -1041,6 +1045,19 @@ _NATIVE_OPTION_NAMES = {
 _NATIVE_THINK = {"none": False, "low": "low", "medium": "medium", "high": "high", REASONING_MODEL_DEFAULT: None}
 # An over-window prompt refused under truncate:false (measured error text).
 _CONTEXT_EXCEEDED_MARKERS = ("exceed_context_size", "exceeds the context", "context length")
+
+
+def _context_exceeded_counts(message: str) -> Dict[str, int]:
+    """The provider's exact prompt token count and context size from an
+    over-context refusal (Ollama 0.34.4 nests a JSON error object carrying
+    ``n_prompt_tokens`` and ``n_ctx`` inside the error string, measured);
+    empty when the answer carries none."""
+    counts: Dict[str, int] = {}
+    for key, name in (("n_prompt_tokens", "provider_prompt_tokens"), ("n_ctx", "provider_context_window")):
+        match = re.search(rf'"{key}"\s*:\s*(\d+)', message)
+        if match:
+            counts[name] = int(match.group(1))
+    return counts
 
 
 class NativeRuntimeError(RuntimeError):
@@ -1218,10 +1235,11 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
         except (ValueError, AttributeError):
             message = text
         if status == 400 and any(marker in message for marker in _CONTEXT_EXCEEDED_MARKERS):
-            # truncate:false made the provider refuse instead of dropping input.
+            # truncate:false made the provider refuse instead of dropping input;
+            # its exact prompt count and window travel with the refusal.
             raise ProviderContractError(PROVIDER_PROMPT_TRUNCATED,
                                         f"the prompt exceeds the served context window: {message[:300]}",
-                                        {"provider_status": status})
+                                        {"provider_status": status, **_context_exceeded_counts(message)})
         raise NativeRuntimeError(status, message[:500])
 
     @staticmethod
@@ -1289,6 +1307,8 @@ class OllamaNativeRuntimeAdapter(InferenceRuntimePort):
                 str(call.get("id") or f"call_{index}"), str(function.get("name") or ""),
                 arguments if isinstance(arguments, str) else json.dumps(arguments or {})))
         self._read(out, {**data, "done": True})
+        if out.tool_calls and out.finish_reason == "stop":
+            out.finish_reason = "tool_calls"  # the /v1 normalized meaning
         return out
 
     def classify_error(self, error: BaseException) -> RuntimeErrorKind:

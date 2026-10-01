@@ -76,9 +76,11 @@ from kriya.core.inference_settings import InferenceSettings, qualification_ident
 from kriya.core.model_runtime import MODEL_PROTOCOL_ADAPTER_VERSION, ModelRuntimeFingerprint
 from kriya.core.provider_contract import (
     DEFAULT_BYTES_PER_TOKEN_CEILING,
+    PROVIDER_PROMPT_TRUNCATED,
     QUALIFICATION_IDENTITY_UNVERIFIED,
     RUNTIME_CONTEXT_IDENTITY_MISMATCH,
     SERVED_CONTEXT_BELOW_REQUESTED,
+    ProviderContractError,
     budget_window,
     consumption_bytes,
 )
@@ -112,7 +114,14 @@ from kriya.platform.filesystem_semantics import PathRelation, path_relation
 # /6 records stay as historical evidence (qwen3.6's /6 NOT_QUALIFIED
 # included) and are STALE under /7. A qualification case tests one named
 # capability; protocol fidelity never depends on model creativity.
-QUALIFICATION_POLICY_VERSION = "kriya-qualification/7"
+# /8 (PROVIDER-CONTRACT-001A): every role requires over_context_refusal -
+# a prompt larger than the served window must be REFUSED by the provider
+# with a typed PROVIDER_PROMPT_TRUNCATED (and its exact count, when it
+# reports one), never answered from a silently truncated prompt (measured on
+# Ollama 0.34.4 /v1: every over-window prompt is answered from window/2+2
+# tokens; the native API with truncate:false refuses). Every /7 record is
+# STALE; /7 records stay as historical evidence.
+QUALIFICATION_POLICY_VERSION = "kriya-qualification/8"
 QUALIFICATION_SCHEMA_VERSION = 2
 QUALIFICATION_HOME_ENV = "KRIYA_QUALIFICATION_HOME"
 
@@ -196,13 +205,14 @@ CAPABILITIES: Tuple[str, ...] = (
     "endpoint_restart_semantics",
     "tokenizer_measurement",
     "context_capacity",
+    "over_context_refusal",
 )
 
 # A larger context tier additionally needs a passing near-window probe.
 CONTEXT_TIER_REQUIREMENTS: Tuple[str, ...] = ("context_capacity",)
 
 _BASE_REQUIREMENTS = ("plain_completion", "finish_reason_stop", "output_truncation", "reasoning_behavior",
-                      "endpoint_error_semantics")
+                      "endpoint_error_semantics", "over_context_refusal")
 _ROLE_REQUIREMENTS: Dict[str, Tuple[str, ...]] = {
     "developer": ("full_file_raw_content", "anchored_edit_protocol", "malformed_output_recovery"),
     "planner": ("malformed_output_recovery",),
@@ -1325,13 +1335,86 @@ async def _context_capacity(llm, model, ctx, opened: List[Any]):
     return CaseResult("", PASS if ok else FAIL, evidence)
 
 
+@_case("over_context_refusal")
+async def case_over_context_refusal(llm, model, ctx):
+    """See _over_context_refusal; every probe client it opens is closed."""
+    opened: List[Any] = []
+    try:
+        return await _over_context_refusal(llm, model, ctx, opened)
+    finally:
+        for probe in opened:
+            await _close_probe(probe)
+
+
+# Not policy: how far over the window the probe goes is the test itself (a
+# prompt clearly larger than the served window, beyond any token-rate error).
+_OVER_CONTEXT_FACTOR = 1.25
+
+
+async def _over_context_refusal(llm, model, ctx, opened: List[Any]):
+    """PROVIDER-CONTRACT-001A: a prompt larger than the served window is
+    refused by the provider, typed, never answered from a truncated prompt.
+    Like context_capacity it goes straight to the endpoint through the
+    model's runtime adapter with the production wire body (Kriya's own
+    admission would refuse it first); the filler's real token rate is
+    measured on two small probes so the prompt really exceeds the window."""
+    from kriya.core.llm import is_local_url
+
+    window = ctx.get("context_window")
+    if not window:
+        return CaseResult("", UNAVAILABLE, {"reason": "the served context window (num_ctx) is not known"})
+    base_url = ctx.get("base_url")
+    if base_url and not is_local_url(base_url):
+        return CaseResult("", UNAVAILABLE, {"reason": "over-context refusal is only probed on a local endpoint",
+                                            "endpoint": base_url})
+    factory = ctx.get("client_factory")
+    if factory is not None:
+        opened.append(factory(_policy(ctx).cases.context_capacity.request_timeout_seconds))
+    client = opened[-1].client if opened else llm.client
+    runtime = ctx.get("runtime") or runtime_adapter()
+    extra_body = runtime.request_plan(ctx.get("extra_body") or None, temperature=None,
+                                      reasoning_flag=bool(ctx.get("reasoning")),
+                                      requested_context_window=int(window)).wire_body or None
+    if runtime.capabilities.per_request_context_window:
+        extra_body = runtime.with_context_window(extra_body, int(window))
+
+    async def send(messages):
+        return await runtime.complete(client, ChatRequest(
+            model=model, messages=messages, temperature=0.0, max_tokens=1, extra_body=extra_body,
+        ))
+
+    # Not policy: the token-rate probes (40 and 80 filler units) only measure
+    # prompt usage, as in context_capacity.
+    small = (await send([{"role": "user", "content": _CAPACITY_UNIT * 40}])).prompt_tokens or None
+    large = (await send([{"role": "user", "content": _CAPACITY_UNIT * 80}])).prompt_tokens or None
+    if not small or not large or large <= small:
+        return CaseResult("", UNAVAILABLE, {"reason": "the endpoint did not report prompt token usage",
+                                            "probe_prompt_tokens": [small, large]})
+    per_unit = (large - small) / 40
+    target = int(_OVER_CONTEXT_FACTOR * int(window))
+    units = int((target - (small - 40 * per_unit)) / per_unit) + 1
+    evidence: Dict[str, Any] = {"context_window": int(window), "target_prompt_tokens": target}
+    try:
+        response = await send([{"role": "user", "content": _CAPACITY_UNIT * units + "\nReply with yes."}])
+    except ProviderContractError as refusal:
+        exact = refusal.details.get("provider_prompt_tokens")
+        evidence.update({"refused": True, "reason_code": refusal.reason_code, "provider_prompt_tokens": exact,
+                         "provider_context_window": refusal.details.get("provider_context_window")})
+        ok = refusal.reason_code == PROVIDER_PROMPT_TRUNCATED and (exact is None or exact > int(window))
+        return CaseResult("", PASS if ok else FAIL, evidence)
+    # Answered: the provider evaluated something smaller than the prompt sent.
+    evidence.update({"refused": False, "answered_from_reported_prompt_tokens": response.prompt_tokens or None,
+                     "finish_reason": response.finish_reason})
+    return CaseResult("", FAIL, evidence)
+
+
 ALL_CASES: Tuple[CaseFn, ...] = (
     case_plain_completion, case_finish_reason_stop, case_structured_json, case_multiline_json,
     case_native_tool_calls, case_multiple_tool_calls, case_tool_argument_integrity, case_streaming_assembly,
     case_output_truncation, case_reasoning_behavior, case_full_file_raw_content, case_anchored_edit_protocol,
     case_malformed_output_recovery, case_timeout_semantics, case_cancellation_semantics,
     case_endpoint_error_semantics, case_endpoint_restart_semantics, case_tokenizer_measurement,
-    case_context_capacity,
+    case_context_capacity, case_over_context_refusal,
 )
 assert tuple(case.capability for case in ALL_CASES) == CAPABILITIES  # type: ignore[attr-defined]
 

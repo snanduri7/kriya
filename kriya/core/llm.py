@@ -628,6 +628,34 @@ class LLMClient:
             event["expected_output_tokens"], event["qualification_source"],
         )
 
+    @staticmethod
+    def _note_admission_miss(result, error: BaseException, *, budget, messages: List[Dict[str, Any]],
+                             tools: Optional[List[Dict[str, Any]]], runtime: InferenceRuntimePort) -> None:
+        """PROVIDER-CONTRACT-001A: admission said the prompt fits, the
+        provider refused it as over its context. Recorded (never prompt
+        text) so the frequency of admission undercounts is measured."""
+        from kriya.core.provider_contract import PROVIDER_PROMPT_TRUNCATED
+        from kriya.core.role_metrics import current_model_role
+        from kriya.core.token_budget import dispatch_text
+
+        if getattr(error, "reason_code", None) != PROVIDER_PROMPT_TRUNCATED or budget is None:
+            return
+        details = getattr(error, "details", {}) or {}
+        prompt_bytes = len(dispatch_text(messages, tools).encode("utf-8"))
+        provider_tokens = details.get("provider_prompt_tokens")
+        miss = {
+            "predicted_prompt_tokens": budget.prompt_tokens,
+            "provider_prompt_tokens": provider_tokens,
+            "served_context": details.get("provider_context_window") or budget.context_window,
+            "prompt_bytes": prompt_bytes,
+            "bytes_per_token_observed": round(prompt_bytes / provider_tokens, 4) if provider_tokens else None,
+            "counting_method": budget.counting_method,
+            "role": current_model_role(), "adapter": runtime.name,
+            "model": result.model, "runtime_fingerprint": result.runtime_fingerprint,
+        }
+        result.protocol.setdefault("provider_contract", {})["admission_miss"] = miss
+        logger.warning("Admission miss: %s", miss)
+
     def _record_deadline_stop(self, result, stopped: "InferenceDeadlineError", *, started: float, budget) -> None:
         """A deadline stop is a recorded TIMEOUT carrying its reason code
         (the typed error is then raised to the caller)."""
@@ -954,6 +982,7 @@ class LLMClient:
             result.backend_status = "error"
             result.backend_error = f"{type(e).__name__}: {e}"[:500]
             result.error = e
+            self._note_admission_miss(result, e, budget=budget, messages=messages, tools=None, runtime=runtime)
             self._finish(result, started=start_time, budget=budget)
             return result
 
@@ -1161,6 +1190,7 @@ class LLMClient:
             result.backend_status = "error"
             result.backend_error = f"{type(e).__name__}: {e}"[:500]
             result.error = e
+            self._note_admission_miss(result, e, budget=budget, messages=messages, tools=tools, runtime=runtime)
             self._finish(result, started=start_time, budget=budget)
             return result
 

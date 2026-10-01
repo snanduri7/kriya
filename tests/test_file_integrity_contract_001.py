@@ -1072,7 +1072,8 @@ def test_no_automatic_fallback_between_protocols():
 def test_qualification_binds_the_response_protocol_and_v6_records_are_stale():
     from kriya.core import model_qualification as mq
 
-    assert mq.QUALIFICATION_POLICY_VERSION == "kriya-qualification/7"
+    # The protocol binding exists from /7 on (a later bump keeps it).
+    assert int(mq.QUALIFICATION_POLICY_VERSION.rsplit("/", 1)[1]) >= 7
     structured, legacy = AppConfig(), AppConfig()
     legacy.autonomy.developer_response_protocol = "legacy_strict"
     assert mq.policy_digest_for(structured) != mq.policy_digest_for(legacy)
