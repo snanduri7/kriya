@@ -54,6 +54,7 @@ from kriya.workflow.failure_grounding import (
     build_failure_signature,
     classify_environment_failure,
     extract_error_search_terms,
+    grounded_evidence_excerpt,
     resolve_repository_locator_files,
 )
 from kriya.workflow.file_resolution import (
@@ -984,6 +985,7 @@ async def _record_attempt_failure(
                 self_diagnosed_files=self_diagnosed_files,
                 original_contents=state.all_original_contents,
                 skip_fallbacks=tuple(state.incompatible_fallbacks),
+                workspace_root=ctx.worktree_path,
             )
         implicated = attribution.files
         if (
@@ -1080,7 +1082,7 @@ async def _record_attempt_failure(
                     # silently erase the actual cause an owner-recovery
                     # obligation needs to quote. Bounded length - this
                     # becomes Developer-facing prompt text, not a log dump.
-                    "raw_evidence": (failure.raw_output or "")[:2000],
+                    "raw_evidence": grounded_evidence_excerpt(failure.raw_output or "", outside_scope),
                 }
         # For a QualityGateFailure type that appends its own gate_outcome at
         # the RAISE SITE (compile/test/regression_test/run_verification/

@@ -4,6 +4,7 @@ import hashlib
 import logging
 import os
 import re
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from kriya.workflow.failure import Failure, FileLocation
@@ -507,6 +508,152 @@ def extract_error_source_locations(error_text: str) -> List[Tuple[str, int]]:
             seen.add(key)
             locations.append(key)
     return locations
+
+
+# D5 (KNOW A on demo-runtime-3, 2026-10-01): a runtime exception that names the
+# candidate resource it failed on ("... defined in class path resource
+# [ignite-config.xml]: Invalid property 'gridStartTime'") was grounded to the
+# only candidate stack frame, the Java line that merely LOADS that resource,
+# so recovery reopened a file with nothing wrong in it. Only formats measured
+# on real runs (Spring 5.3 under `mvn -e exec:java`, evidence/demo-defect-d5)
+# are recognized: Spring's Resource descriptions `class path resource [p]` and
+# `file [p]`, and a `classpath:p` location. Deliberately not a general parser.
+_RESOURCE_REFERENCE_PATTERN = re.compile(
+    r"\bclass path resource \[(?P<classpath>[^\]\s]+)\]"
+    r"|\bfile \[(?P<file>[^\]]+)\]"
+    r"|\bclasspath\*?:(?P<location>[\w./-]+)"
+)
+_CAUSED_BY = re.compile(r"^\s*Caused by: ", re.MULTILINE)
+# Maven/Gradle resource roots: a classpath reference is relative to one of them.
+_RESOURCE_ROOTS = ("src/main/resources/", "src/test/resources/")
+
+
+@dataclass(frozen=True)
+class FailureResourceReference:
+    """One explicit resource reference in runtime failure output. `segment` is
+    its exception's depth in the chain (0 = outermost, each `Caused by:` + 1)."""
+
+    raw_reference: str
+    normalized_reference: str
+    kind: str  # "classpath" (classpath-root relative) | "file" (filesystem path)
+    segment: int
+    source: str = "runtime_exception"
+    confidence: str = "DIRECT"
+
+
+@dataclass(frozen=True)
+class ResourceGrounding:
+    """Resolution of a failure's resource references against the candidate files.
+    `files` is the repair target (empty when nothing resolves or a reference is
+    ambiguous); `loader_files` are the candidate stack frames kept as secondary
+    evidence, never as repair targets."""
+
+    files: Tuple[str, ...]
+    references: Tuple[FailureResourceReference, ...]
+    ambiguous: Tuple[Tuple[str, Tuple[str, ...]], ...]
+    loader_files: Tuple[str, ...]
+
+
+def _exception_segments(error_text: str) -> List[str]:
+    """The text of each exception in the chain, outermost first."""
+    return _CAUSED_BY.split(error_text)
+
+
+def extract_runtime_resource_references(error_text: str) -> List[FailureResourceReference]:
+    """Every explicit resource reference in runtime output, in order, with the
+    depth of the exception that names it."""
+    references = []
+    for depth, segment in enumerate(_exception_segments(error_text)):
+        for match in _RESOURCE_REFERENCE_PATTERN.finditer(segment):
+            raw = match.group("classpath") or match.group("location") or match.group("file")
+            kind = "file" if match.group("file") else "classpath"
+            normalized = raw.lstrip("/") if kind == "classpath" else raw
+            references.append(FailureResourceReference(raw, normalized, kind, depth))
+    return references
+
+
+def resolve_resource_reference(
+    reference: FailureResourceReference, known_files: Iterable[str], workspace_root: Optional[str],
+) -> Tuple[str, Tuple[str, ...]]:
+    """("resolved", (file,)) | ("ambiguous", files) | ("unresolved", ()).
+    Order: exact workspace-relative path, exact resource-root-relative path, then
+    a unique basename for a bare file name; no fuzzy or substring matching.
+    Every tier is an exact match against the workspace-relative candidate files,
+    so a path outside the workspace (which becomes `../...` here) never resolves.
+    An absolute path is read only relative to `workspace_root`."""
+    known = list(dict.fromkeys(known_files))
+    ref = reference.normalized_reference
+    if os.path.isabs(ref):
+        if not workspace_root:
+            return "unresolved", ()
+        ref = os.path.relpath(os.path.realpath(ref), os.path.realpath(workspace_root))
+    ref = os.path.normpath(ref).replace(os.sep, "/")
+    tiers = [[f for f in known if f == ref]]
+    if reference.kind == "classpath":
+        tiers.append([f for f in known if any(f == root + ref or f.endswith("/" + root + ref)
+                                              for root in _RESOURCE_ROOTS)])
+    if "/" not in ref:
+        tiers.append([f for f in known if os.path.basename(f) == ref])
+    for matches in tiers:
+        if len(matches) == 1:
+            return "resolved", (matches[0],)
+        if matches:
+            return "ambiguous", tuple(matches)
+    return "unresolved", ()
+
+
+def _candidate_frame_files(segment: str, known_files: Iterable[str]) -> set:
+    names = {name for name, _line in extract_error_source_locations(segment)}
+    return {f for f in known_files if os.path.basename(f) in names}
+
+
+def ground_runtime_resource_failure(
+    error_text: str, known_files: Iterable[str], workspace_root: Optional[str] = None,
+) -> Optional[ResourceGrounding]:
+    """A candidate resource named by the runtime exception is the repair target,
+    ahead of a candidate stack frame that only loads it - unless the innermost
+    exception has a candidate frame of its own (the candidate code itself threw,
+    e.g. a bean constructor), in which case the stack evidence stands and this
+    returns None. The deepest exception that names a resolvable candidate
+    resource decides; an ambiguous reference there grounds nothing."""
+    known = list(dict.fromkeys(known_files))
+    references = extract_runtime_resource_references(error_text)
+    if not references:
+        return None
+    segments = _exception_segments(error_text)
+    innermost = _candidate_frame_files(segments[-1], known)
+    enclosing = _candidate_frame_files(segments[-2], known) if len(segments) > 1 else set()
+    if innermost - enclosing:
+        return None
+    resolutions = [(ref, *resolve_resource_reference(ref, known, workspace_root)) for ref in references]
+    deepest = max((ref.segment for ref, status, _ in resolutions if status != "unresolved"), default=None)
+    if deepest is None:
+        return None
+    chosen = [(ref, status, files) for ref, status, files in resolutions if ref.segment == deepest
+              and status != "unresolved"]
+    ambiguous = tuple((ref.raw_reference, files) for ref, status, files in chosen if status == "ambiguous")
+    resolved = () if ambiguous else tuple(dict.fromkeys(files[0] for _ref, _status, files in chosen))
+    loaders = tuple(sorted(set().union(*(_candidate_frame_files(s, known) for s in segments)) - set(resolved)))
+    return ResourceGrounding(resolved, tuple(ref for ref, _s, _f in chosen), ambiguous, loaders)
+
+
+def grounded_evidence_excerpt(raw_output: str, grounded_files: Iterable[str], limit: int = 2000) -> str:
+    """The bounded failure evidence a reopened owner is shown. The first `limit`
+    characters, as before - unless they name none of the grounded files and the
+    output does later: then the window starts at the line of that first mention
+    (D5: live runtime output carried ~3.4 KB of Maven offline warnings before the
+    exception, so the owner saw no error at all)."""
+    if len(raw_output) <= limit:
+        return raw_output
+    names = [os.path.basename(f) for f in grounded_files if f]
+    pattern = re.compile("|".join(rf"(?<![\w.-]){re.escape(n)}(?![\w-])" for n in names)) if names else None
+    if pattern is None or pattern.search(raw_output, 0, limit):
+        return raw_output[:limit]
+    match = pattern.search(raw_output)
+    if match is None:
+        return raw_output[:limit]
+    start = raw_output.rfind("\n", 0, match.start()) + 1
+    return raw_output[start:start + limit]
 
 
 def _files_by_basename(known_files: Iterable[str]) -> Dict[str, List[str]]:

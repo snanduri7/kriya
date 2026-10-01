@@ -165,6 +165,7 @@ from kriya.workflow.failure_grounding import (
     _files_by_basename,
     extract_error_source_locations,
     extract_implicated_files,
+    ground_runtime_resource_failure,
 )
 from kriya.workflow.generation_manifest import FileRole, classify_file_role
 from kriya.workflow.plan_schema import EngineeringPlan
@@ -425,7 +426,9 @@ def _exclude_test_files_for_junit_assertion_mismatch(
     return [f for f in files if classify_file_role(f) is not FileRole.TEST]
 
 
-def _attribute_from_locator(failure: Failure, known_files: List[str]) -> Optional[AttributionResult]:
+def _attribute_from_locator(
+    failure: Failure, known_files: List[str], workspace_root: Optional[str] = None,
+) -> Optional[AttributionResult]:
     """A real file:line locator always wins - both the tier label AND which
     files get used - over failure.likely_files/a substring scan, even if
     likely_files is already non-empty (e.g. stale/judge-provided from a
@@ -460,6 +463,20 @@ def _attribute_from_locator(failure: Failure, known_files: List[str]) -> Optiona
     generated test) is UNAFFECTED - this filter only ever fires for the one
     exception type that structurally can never mean that."""
     raw_text = failure.raw_output or failure.message
+    if failure.type == "run_verification":
+        resource = ground_runtime_resource_failure(raw_text, known_files, workspace_root)
+        if resource is not None and resource.files:
+            return AttributionResult(
+                tier="locator", files=list(resource.files), confidence="high",
+                reasoning=(
+                    "The runtime exception names the candidate resource it failed on: "
+                    f"{', '.join(r.raw_reference for r in resource.references)}"
+                    + (f" (loaded by {', '.join(resource.loader_files)}, kept as context, not a repair target)."
+                       if resource.loader_files else ".")
+                ),
+            )
+        if resource is not None and resource.ambiguous:
+            logger.info("Runtime resource reference is ambiguous, not grounded: %s", list(resource.ambiguous))
     located_basenames = {b for b, _ in extract_error_source_locations(raw_text)}
     if located_basenames:
         locator_files = [f for f in known_files if os.path.basename(f) in located_basenames]
@@ -1047,6 +1064,7 @@ async def attribute_failure(
     plan: Optional[EngineeringPlan] = None,
     original_contents: Optional[Dict[str, str]] = None,
     skip_fallbacks: Collection[str] = (),
+    workspace_root: Optional[str] = None,
 ) -> AttributionResult:
     """The one entry point every retry site should call instead of
     independently re-deriving "which file". Always returns a result - the
@@ -1155,7 +1173,7 @@ async def attribute_failure(
     if result:
         return result
 
-    result = _attribute_from_locator(failure, known_files)
+    result = _attribute_from_locator(failure, known_files, workspace_root)
     if result:
         return result
 

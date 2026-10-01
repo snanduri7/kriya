@@ -311,6 +311,12 @@ falls back to the host's tools.
     `pom.xml` and the exact setting) and sends the fix to the step that wrote `pom.xml`, allowed to change only
     `pom.xml`. If Kriya's own command named a wrong class, or the class exists and still won't load, that is a
     verifier problem and nothing in your project is changed.
+  - If the app fails on a project file that the error names, that file is the one repaired. For example, Spring
+    reports `class path resource [app-config.xml]` with an invalid property, so Kriya sends the fix to the step that
+    wrote `app-config.xml`, allowed to change only that file, rather than to the Java code that loads it. The
+    reference must match exactly one of your project's files; an ambiguous name, a library resource or a path outside
+    the project changes nothing. If your own code threw the error (say, a bean's constructor), the stack trace still
+    decides. The step being reopened is shown the part of the output where the error appears.
 - **Unsupported.** Other versions (e.g. Java 7, Python 3.9) and toolchains without a profile fail closed.
   `kriya doctor --production` reports this as `toolchain.required`.
 
