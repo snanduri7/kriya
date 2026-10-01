@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+from importlib import metadata
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -100,7 +101,8 @@ def test_subcommand_group_help(runner, group, subcommands):
 def test_version_command_runs_end_to_end(runner):
     result = runner.invoke(main, ["version"])
     assert result.exit_code == 0, result.output
-    assert "Kriya version" in result.output
+    # KRIYA-VERSION-001: the first line is the concise build identity.
+    assert result.output.splitlines()[0].startswith(f"Kriya {metadata.version('kriya')} (commit ")
 
 
 @pytest.mark.parametrize("shell,expected_snippet", [

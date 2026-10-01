@@ -19,6 +19,12 @@ This guide describes how to install, configure, optimize, and use Kriya for code
     ```
 3.  **Ensure local LLM server is running**:
     *   Make sure Ollama, LM Studio, or your local inference engine is active and running.
+4.  **Check which Kriya you are running**:
+    ```bash
+    kriya --version          # Kriya 0.1.0 (commit 28fa21f, tree bc6ffc113f0d)
+    kriya version --json     # product, version, commit, tree, dirty, python, install_path, build_provenance
+    ```
+    The commit and tree are embedded when the wheel is built, so an installed Kriya reports exactly the source it came from, in any directory and without git. An editable install (`pip install -e .`) has no embedded build identity and says `commit UNKNOWN, tree UNKNOWN; build provenance unavailable` - it never guesses. `scripts/verify_release.sh` builds with `KRIYA_BUILD_REQUIRE_CLEAN=1`, which refuses to build from a dirty or unknown source.
 
 ---
 

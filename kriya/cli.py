@@ -12,9 +12,9 @@ from typing import Any, Dict, List, NoReturn, Optional, Tuple
 
 import click
 
-from kriya import __version__
 from kriya.agents import ReviewerAgent
 from kriya.analyzer import RepositoryAnalyzer
+from kriya.build_info import version_line, version_report
 from kriya.cli_output import GenerateOutput, no_progress_stop_message
 from kriya.config import AppConfig, load_config
 from kriya.control.commit_state import UncertainWorkspaceStateError
@@ -114,7 +114,17 @@ async def _closing(llm: Any, coroutine: Any) -> Any:
     finally:
         await llm.aclose()
 
+def _print_version(ctx: click.Context, _param: click.Parameter, value: bool) -> None:
+    """KRIYA-VERSION-001: eager, so it answers before any configuration is
+    loaded (it needs none, and must work in any directory)."""
+    if value and not ctx.resilient_parsing:
+        click.echo(version_line())
+        ctx.exit()
+
+
 @click.group(invoke_without_command=True)
+@click.option('--version', is_flag=True, expose_value=False, is_eager=True, callback=_print_version,
+              help='Print the Kriya version and the exact source it was built from, then exit.')
 @click.option('--config', '-c', type=click.Path(exists=True), help='Path to Kriya configuration YAML file.')
 @click.option('--trust-file', type=click.Path(), default=None,
               help="SEC-009 P2: path to an operator/CI-supplied approval artifact "
@@ -137,7 +147,9 @@ def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -
     # PRD-008: `kriya runs` (status/recover/prune) likewise - a workspace
     # blocked on an interrupted commit must be recoverable without loading
     # repository-controlled configuration.
-    if ctx.invoked_subcommand in ('authority', 'runs'):
+    # KRIYA-VERSION-001: `kriya version` reads only the installed package; it
+    # must answer in any directory, whatever configuration is there.
+    if ctx.invoked_subcommand in ('authority', 'runs', 'version'):
         return
     try:
         ctx.obj['config'] = load_config(config, trust_file=trust_file)
@@ -169,9 +181,21 @@ def main(ctx: click.Context, config: Optional[str], trust_file: Optional[str]) -
         ctx.exit()
 
 @main.command()
-def version() -> None:
-    """Print the Kriya platform version."""
-    click.echo(f"Kriya version: {__version__}")
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable identity (stdout carries only the JSON).')
+def version(as_json: bool) -> None:
+    """Print the Kriya version and the exact source it was built from.
+
+    KRIYA-VERSION-001: the package version comes from the installed
+    distribution's metadata; commit, tree and dirty come from the identity
+    embedded when the wheel was built (never from git at run time). Without
+    embedded provenance they are UNKNOWN, never guessed."""
+    report = version_report()
+    if as_json:
+        click.echo(json.dumps(report, indent=2, sort_keys=True))
+        return
+    click.echo(version_line(report))
+    for key in ("version", "commit", "tree", "dirty", "build_provenance", "python", "install_path"):
+        click.echo(f"  {key + ':':<18}{report[key]}")
 
 @main.command()
 @click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
