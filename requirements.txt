@@ -33,12 +33,16 @@ click==8.4.2
     #   kriya (pyproject.toml)
     #   pip-tools
     #   uvicorn
+coverage==7.16.2
+    # via pytest-testmon
 cryptography==49.0.0
     # via pyjwt
 dill==0.4.1
     # via pylint
 distro==1.9.0
     # via openai
+execnet==2.1.2
+    # via pytest-xdist
 h11==0.16.0
     # via
     #   httpcore
@@ -124,7 +128,13 @@ pytest==9.1.1
     # via
     #   kriya (pyproject.toml)
     #   pytest-asyncio
+    #   pytest-testmon
+    #   pytest-xdist
 pytest-asyncio==1.4.0
+    # via kriya (pyproject.toml)
+pytest-testmon==2.2.0
+    # via kriya (pyproject.toml)
+pytest-xdist==3.8.0
     # via kriya (pyproject.toml)
 python-multipart==0.0.32
     # via mcp

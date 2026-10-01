@@ -31,6 +31,10 @@ dev = [
     # 3.2 introduced possibly-used-before-assignment (E0606), the rule the
     # static-check gate exists for (see [tool.pylint] below).
     "pylint>=3.2",
+    # Parallel suite (-n) and change-based test selection (--testmon):
+    # the full serial suite takes ~30 minutes.
+    "pytest-xdist>=3.6",
+    "pytest-testmon>=2.1",
 ]
 
 [project.scripts]
