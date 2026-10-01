@@ -15,6 +15,7 @@ import os
 import random
 import re
 import subprocess
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1430,7 +1431,7 @@ def test_f4_a_mutating_gate_stops_the_real_run_and_nothing_is_committed(tmp_path
 
     from kriya.core.state_paths import trace_db_path
 
-    with sqlite3.connect(trace_db_path(engine.kernel.config)) as db:
+    with closing(sqlite3.connect(trace_db_path(engine.kernel.config))) as db:
         (outcomes,) = db.execute("SELECT gate_outcomes FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
     stops = [o for o in _json.loads(outcomes) if o["type"] == "verification_tree_mutated"]
     gate_name = {"run_compile_check": "compile", "run_tests": "tests"}[gate_method]
@@ -1544,7 +1545,7 @@ def test_f4_a_candidate_changed_between_gates_is_caught_before_the_next_gate_run
     assert result["quality_gates_passed"] is False
     assert result.get("failure_category") == "verification_tree_mutated"
     assert ran_on_tampered_tree == []
-    with sqlite3.connect(trace_db_path(engine.kernel.config)) as db:
+    with closing(sqlite3.connect(trace_db_path(engine.kernel.config))) as db:
         (outcomes,) = db.execute("SELECT gate_outcomes FROM runs ORDER BY timestamp DESC LIMIT 1").fetchone()
     stops = [o for o in _json.loads(outcomes) if o["type"] == "verification_tree_mutated"]
     assert stops and "detected before the tests gate" in stops[0]["output"]
