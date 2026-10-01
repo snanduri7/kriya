@@ -68,3 +68,36 @@ Maven `target/`, Gradle `build/` and similar are handled only by Git ignore sema
 - The F-4 test that allowed an untracked, non-ignored `build.log` was changed to the new rule.
 - Mutation: 15/15 killed across Parts A and B (`evidence/provider-contract-001a/mutation/mutation_ab.txt`).
 - Full suite: see `evidence/file-integrity-contract-001b/full_suite.txt`.
+
+## Correction (own defect in `3d2bfd2`, fixed in `7371c2a`): gate-owned output
+
+**Defect** (MEASURED, a real `mvn compile` under the binding): a greenfield Maven project has no `.gitignore`. The compile gate's own `target/` (`target/classes/…`, `target/maven-status/…`) therefore stopped every valid greenfield run as `VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE`.
+
+The two exemptions `3d2bfd2` shipped did not cover the build tool a gate actually runs: CPython bytecode anywhere, and Kriya's `javac -d build`. The suite missed it because its Maven gates are mocked.
+
+**Final design** (replaces those two exemptions; owner decision 2026-10-01: narrow and gate-owned):
+- Git-ignored output is outside the check (the repository's `.gitignore` stays authoritative).
+- A verification gate may additionally create only the output of the exact toolchain command it runs. `PolymorphicValidator._run_cmd_with_timeout` registers `validate.gate_output_roots(cmd, cwd)` for the gate now running:
+  - Maven: `target/` of every directory holding `pom.xml`;
+  - Gradle: `build/` of every `build.gradle[.kts]` project, plus the root `.gradle/`;
+  - `javac -d X`: exactly `X`;
+  - Python (interpreter, `py_compile`, pytest): `__pycache__/` of every directory holding `.py` sources (PEP 3147), plus pytest's `.pytest_cache/`.
+- Only that gate's own check accepts new files under those roots. What it accepted joins the baseline, so a later gate that does not run the toolchain (e.g. the app under runtime verification) cannot write there unseen.
+- There is no global `target/` or `build/` rule. A directory merely named `target` is never exempt.
+- Any other new, non-ignored file is still the typed stop.
+
+**Tests** (`tests/test_file_integrity_contract_001b.py`):
+- A real greenfield `mvn compile` passes.
+- Maven module `target/` output is accepted with no ignore rule.
+- These still fail: `extra.properties`, `src/main/java/Injected.java`, and `docs/target/notes.txt` (not a module).
+- A later non-Maven gate writing into `target/`, and output appearing between gates, still fail.
+- User files stay protected.
+- Per-command roots: Maven, Gradle, `javac`, Python, and `java -jar`, which owns nothing.
+
+Gradle is covered deterministically only: Gradle is not installed on this machine.
+
+**Verification:**
+- Negative control: both Maven tests fail at `3d2bfd2`'s code with the measured error.
+- Mutation 8/8 killed, including "gate-owned output → any directory named target/build" (`evidence/file-integrity-contract-001b/mutation_gate_owned.txt`).
+- Full parallel suite: 7899 passed, 0 failed, 0 skipped.
+- `doctor --production` (v4) at `7371c2a`: `production_ready=true`.
