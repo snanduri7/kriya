@@ -1,0 +1,20 @@
+F1-run-budget-not-bound: KILLED FAILED tests/test_provider_contract_001a.py::test_a_smaller_transport_timeout_is_the_request_timeout
+F1-clock-restarts-every-claim: KILLED FAILED tests/test_provider_contract_001a.py::test_a_smaller_remaining_budget_is_the_request_timeout
+F1-timeout-ignores-remaining: KILLED FAILED tests/test_provider_contract_001a.py::test_a_smaller_remaining_budget_is_the_request_timeout
+F1-exceeded-becomes-generic: KILLED 
+F1-no-total-bound: KILLED FAILED tests/test_provider_contract_001a.py::test_a_request_outliving_the_budget_is_a_typed_deadline_stop
+F1-recovery-not-typed: KILLED FAILED tests/test_provider_contract_001a.py::test_a_deadline_stop_inside_an_attempt_is_the_time_budget_stop
+F1-unit-uses-fresh-clock: KILLED FAILED tests/test_provider_contract_001a.py::test_a_work_unit_never_restarts_the_run_budget
+F1-budget-from-invocation-clock: KILLED FAILED tests/test_provider_contract_001a.py::test_a_work_unit_never_restarts_the_run_budget
+F1-provider-contact-before-exhaustion-check: KILLED FAILED tests/test_provider_contract_001a.py::test_an_exhausted_budget_refuses_before_any_provider_contact
+F1-escalation-swallows-deadline: KILLED FAILED tests/test_provider_contract_001a.py::test_a_deadline_stop_is_never_escalated_to_the_next_candidate
+F1-final-review-raises: KILLED FAILED tests/test_provider_contract_001a.py::test_a_deadline_stop_at_the_final_review_keeps_the_committed_run
+F1-deadline-resend-without-format: KILLED FAILED tests/test_provider_contract_001a.py::test_a_deadline_stop_is_never_resent_without_response_format
+F3-no-retry: KILLED FAILED tests/test_provider_contract_001a.py::test_one_transient_failure_is_absorbed_by_one_bounded_retry
+F3-malformed-not-retried: KILLED FAILED tests/test_provider_contract_001a.py::test_a_malformed_observation_is_retried_exactly_once
+F3-production-continues: KILLED FAILED tests/test_provider_contract_001a.py::test_production_refuses_a_result_whose_served_window_is_unobservable_after_the_call[after0]
+F3-silent-skip: KILLED FAILED tests/test_provider_contract_001a.py::test_production_refuses_a_result_whose_served_window_is_unobservable_after_the_call[after0]
+F3-not-loaded-is-failure: KILLED FAILED tests/test_provider_contract_001a.py::test_each_observation_outcome_is_distinguished[answers1-not_loaded]
+F3-claimed-observed-when-unverified: KILLED FAILED tests/test_provider_contract_001a.py::test_outside_production_an_unobservable_window_is_explicitly_unverified
+F3-adapter-error-escapes: KILLED FAILED tests/test_provider_contract_001a.py::test_an_observation_error_raised_by_an_adapter_is_a_failed_observation
+19/19 killed

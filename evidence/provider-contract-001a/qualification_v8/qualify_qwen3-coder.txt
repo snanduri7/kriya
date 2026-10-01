@@ -1,0 +1,66 @@
+Qualifying qwen3-coder:30b-kriya-e52213655394 for developer, planner, architect, reviewer, run_verifier, skill_gap, spec_compliance (settings sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15, extra_body={"options":{"num_ctx":32768,"top_k":20,"top_p":0.8},"think":false,"truncate":false})
+
+[Usage: 26 input tokens, 2 output tokens | Time: 0.46s | Finish: stop]
+  plain_completion             PASS           0.49s
+
+[Usage: 26 input tokens, 3 output tokens | Time: 0.13s | Finish: stop]
+  finish_reason_stop           PASS           0.14s
+
+[Usage: 45 input tokens, 17 output tokens | Time: 0.37s | Finish: stop]
+  structured_json              PASS           0.38s
+
+[Usage: 77 input tokens, 40 output tokens | Time: 0.67s | Finish: stop]
+  multiline_json               PASS           0.68s
+
+[Usage: 297 input tokens, 22 output tokens | Time: 0.68s | Finish: tool_calls]
+  native_tool_calls            PASS           0.69s
+
+[Usage: 308 input tokens, 45 output tokens | Time: 0.73s | Finish: tool_calls]
+  multiple_tool_calls          PASS           0.73s
+
+[Usage: 328 input tokens, 49 output tokens | Time: 1.01s | Finish: tool_calls]
+  tool_argument_integrity      PASS           1.02s
+
+[Usage: 36 input tokens, 51 output tokens | Time: 0.78s | Finish: stop]
+  streaming_assembly           PASS           0.79s
+
+[Usage: 34 input tokens, 16 output tokens | Time: 0.36s | Finish: length | OUTPUT_TRUNCATED]
+  output_truncation            PASS           0.37s
+
+[Usage: 52 input tokens, 3 output tokens | Time: 0.19s | Finish: stop]
+  reasoning_behavior           PASS           0.21s
+
+[Usage: 232 input tokens, 83 output tokens | Time: 1.99s | Finish: stop]
+  full_file_raw_content        PASS           2.00s
+
+[Usage: 255 input tokens, 134 output tokens | Time: 2.06s | Finish: stop]
+  anchored_edit_protocol       PASS           2.08s
+
+[Usage: 54 input tokens, 39 output tokens | Time: 0.63s | Finish: stop]
+  malformed_output_recovery    PASS           0.64s
+  timeout_semantics            PASS           0.01s
+
+[Usage: None input tokens, None output tokens | Time: 0.13s | Finish: unreported | CANCELLED]
+
+[Usage: 26 input tokens, 2 output tokens | Time: 0.15s | Finish: stop]
+  cancellation_semantics       PASS           0.30s
+  endpoint_error_semantics     PASS           0.05s
+  endpoint_restart_semantics   UNAVAILABLE    0.00s
+
+[Usage: 103 input tokens, 1 output tokens | Time: 0.26s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 105 input tokens, 1 output tokens | Time: 0.25s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 141 input tokens, 1 output tokens | Time: 0.26s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 119 input tokens, 1 output tokens | Time: 0.25s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 76 input tokens, 1 output tokens | Time: 0.19s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 86 input tokens, 1 output tokens | Time: 0.19s | Finish: length | OUTPUT_TRUNCATED]
+
+[Usage: 116 input tokens, 1 output tokens | Time: 0.25s | Finish: length | OUTPUT_TRUNCATED]
+  tokenizer_measurement        PASS           1.74s
+  context_capacity             PASS         124.38s
+  over_context_refusal         PASS           1.17s
+{"model": "qwen3-coder:30b-kriya-e52213655394", "roles": ["developer", "planner", "architect", "reviewer", "run_verifier", "skill_gap", "spec_compliance"], "summary": {"PASS": 19, "FAIL": 0, "UNAVAILABLE": 1}, "policy_version": "kriya-qualification/8", "policy_digest": "sha256:d34ab460fd768fb238717081c95f571dacc214c0d64d9c78dd3a4b2f0e549fff", "fingerprint_digest": "0769fe6214918434eeb7658144e6821c2d936b9b20c1ef3c2d4de03000363437", "qualification_identity": "1c8936a74dd2c88dc8c8677af99f9cbf072c68c4c102cc54c7b48ec73f0715d6", "inference_settings_digest": "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15", "measured_limits": {"verified_tool_argument_chars": 87, "reasoning_observed": false, "bytes_per_token_floor": 2.1101, "non_ascii_bytes_per_token_floor": 2.9499, "bytes_per_token_ceiling": 8.0}, "record": "/Users/sriramnanduri/.kriya/qualifications/1c8936a74dd2c88dc8c8677af99f9cbf072c68c4c102cc54c7b48ec73f0715d6.json"}

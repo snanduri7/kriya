@@ -1,0 +1,1 @@
+Token budget under-predicted for qwen3-coder:30b-kriya-e52213655394: predicted 247 prompt tokens (qualified_byte_bound), provider reported 355. Qualify this runtime (kriya model qualify) to measure its tokenizer.

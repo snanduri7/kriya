@@ -1,0 +1,48 @@
+"""F-3 measurement. (a) one /api/ps failure, then a healthy endpoint: is the
+served window observed again? (b) endpoint A failing: is endpoint B affected?
+(c) a production call on an exact runtime whose post-call observation cannot
+be made: does the call still succeed?"""
+import asyncio, os, sys
+sys.path.insert(0, os.path.join(sys.argv[1], "tests"))
+from _fake_inference_runtime import FakeRuntimeAdapter
+from kriya.config import AppConfig
+from kriya.core import model_runtime
+from kriya.core.inference_runtime import register_runtime_adapter
+from kriya.core.llm import LLMClient
+
+A, B = "http://127.0.0.1:11434/v1", "http://localhost:11435/v1"
+loaded = {"models": [{"name": "m:1", "context_length": 32768}]}
+calls = []
+def flaky(url, body, key):
+    calls.append(url)
+    if len(calls) == 1:
+        raise TimeoutError("transient /api/ps timeout")
+    return loaded
+os.environ[model_runtime.PROBE_ENV_VAR] = "1"
+first = model_runtime.observe_served_context(base_url=A, model="m:1", transport=flaky)
+second = model_runtime.observe_served_context(base_url=A, model="m:1", transport=flaky)
+other = model_runtime.observe_served_context(base_url=B, model="m:1", transport=lambda *a: loaded)
+print(f"(a) first={first} then healthy -> {second} (/api/ps requests sent: {len(calls)})")
+print(f"(b) endpoint B after A failed -> {other}")
+
+from kriya.core.model_runtime import OPENAI_COMPAT_CAPABILITIES
+class Unobservable(FakeRuntimeAdapter):
+    """Declares served-context observation like the Ollama /v1 adapter, but
+    the observation cannot be made (e.g. /api/ps keeps failing)."""
+    @property
+    def provider_capabilities(self):
+        return OPENAI_COMPAT_CAPABILITIES
+    def observe_served_context(self, **_):
+        return None
+fake = Unobservable(name="fake-unobservable"); register_runtime_adapter(fake)
+model_runtime.record_fingerprint = lambda *a, **k: None
+cfg = AppConfig(); cfg.llm.model = "primary:1"; cfg.llm.inference_runtime = "fake-unobservable"
+cfg.llm.context_window = 8192; cfg.llm_chain = []; cfg.runtime_profile = "production"
+try:
+    result = asyncio.run(LLMClient(cfg).complete_result("s", "u"))
+except Exception as error:
+    print(f"(c) production exact call, served context unobservable after the call -> refused: {error}")
+    raise SystemExit
+assert result.runtime_fingerprint_exact, "probe needs an exact runtime"
+print(f"(c) production exact call, served context unobservable after the call -> status={result.status.value},"
+      f" served_after_call={result.protocol['provider_contract'].get('served_context_window_after_call')}")

@@ -1,0 +1,57 @@
+"""PROVIDER-CONTRACT-001A F-4: does Ollama /v1 APPLY keep_alive,
+presence_penalty and frequency_penalty (not merely accept them)?
+- keep_alive: the model's /api/ps expires_at after a request carrying it,
+  vs the default; native keep_alive is the positive control.
+- penalties: greedy (temperature 0) seeded decoding of a repetition-prone
+  prompt, penalty 0 vs 2.0, each twice (determinism check); native options
+  are the positive control. Identical outputs across values = not applied."""
+import datetime, hashlib, json, urllib.request
+
+MODEL = "qwen3-coder:30b-kriya-e52213655394"
+ROOT = "http://localhost:11434"
+
+
+def post(path, body):
+    req = urllib.request.Request(ROOT + path, json.dumps(body).encode(), {"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=600) as resp:
+        return json.load(resp)
+
+
+def expires():
+    ps = json.load(urllib.request.urlopen(ROOT + "/api/ps", timeout=30))
+    for m in ps.get("models", []):
+        if m.get("name") == MODEL or m.get("model") == MODEL:
+            at = datetime.datetime.fromisoformat(m["expires_at"].replace("Z", "+00:00"))
+            return round((at - datetime.datetime.now(datetime.timezone.utc)).total_seconds() / 60, 1)
+    return None
+
+
+MSG = [{"role": "user", "content": "Write the word cat forty times, separated by spaces, then the word dog."}]
+out = {}
+post("/v1/chat/completions", {"model": MODEL, "messages": MSG, "max_tokens": 4})
+out["keep_alive_default_minutes_left"] = expires()
+post("/v1/chat/completions", {"model": MODEL, "messages": MSG, "max_tokens": 4, "keep_alive": "30m"})
+out["keep_alive_v1_30m_minutes_left"] = expires()
+post("/api/chat", {"model": MODEL, "messages": MSG, "stream": False, "keep_alive": "30m", "options": {"num_predict": 4}})
+out["keep_alive_native_30m_minutes_left"] = expires()
+post("/v1/chat/completions", {"model": MODEL, "messages": MSG, "max_tokens": 4})  # back to the default
+out["keep_alive_default_again_minutes_left"] = expires()
+
+
+def v1(**extra):
+    r = post("/v1/chat/completions", {"model": MODEL, "messages": MSG, "max_tokens": 120, "temperature": 0, "seed": 7, **extra})
+    return hashlib.sha256(r["choices"][0]["message"]["content"].encode()).hexdigest()[:12]
+
+
+def native(**options):
+    r = post("/api/chat", {"model": MODEL, "messages": MSG, "stream": False,
+                           "options": {"num_predict": 120, "temperature": 0, "seed": 7, **options}})
+    return hashlib.sha256(r["message"]["content"].encode()).hexdigest()[:12]
+
+
+for name in ("presence_penalty", "frequency_penalty"):
+    out[name] = {
+        "v1_0": [v1(**{name: 0.0}) for _ in range(2)], "v1_2": [v1(**{name: 2.0}) for _ in range(2)],
+        "native_0": [native(**{name: 0.0}) for _ in range(2)], "native_2": [native(**{name: 2.0}) for _ in range(2)],
+    }
+print(json.dumps(out, indent=1))

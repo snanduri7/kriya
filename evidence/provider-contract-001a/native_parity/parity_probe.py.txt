@@ -1,0 +1,132 @@
+"""PROVIDER-CONTRACT-001A native parity probe (live, bounded, synthetic requests).
+
+Same pinned models, same production settings; only the adapter differs:
+`/v1` (production today) vs `ollama_native`. Run from the approved workspace:
+    python parity_probe.py <production config> <v1|ollama_native>
+Writes one JSON line per case: N1 plain, N2 streamed, N3 reasoning off
+(qwen3.6), N4 JSON mode, N5 native tools (qwen3-coder), N6 over-context,
+N7 root deadline mid-stream, N8 served-context observation."""
+import asyncio, json, random, string, sys, tempfile, time
+
+from kriya.config.config import load_config
+from kriya.control.run_coordinator import begin_mutating_run, current_run_context
+from kriya.core.inference_runtime import runtime_for_binding
+from kriya.core.llm import InferenceDeadlineError, LLMClient
+
+cfg = load_config(sys.argv[1])
+adapter = sys.argv[2]
+if adapter != "v1":
+    cfg.llm.inference_runtime = adapter
+    for fallback in cfg.llm_chain:
+        fallback.inference_runtime = adapter
+CODER, QWEN36 = cfg.llm.model, cfg.llm_chain[0].model
+calls = {"n": 0}
+runtime = runtime_for_binding(cfg.llm)
+for name in ("complete", "complete_with_tools"):
+    original = getattr(runtime, name)
+
+    async def counted(client, request, _original=original):
+        calls["n"] += 1
+        return await _original(client, request)
+
+    setattr(runtime, name, counted)
+if adapter != "v1":  # the fallback binding resolves to the same adapter object
+    assert runtime_for_binding(cfg.llm_chain[0]) is runtime
+
+
+def contract(result):
+    c = (result.protocol or {}).get("provider_contract", {})
+    return {k: c.get(k) for k in ("adapter", "served_context_observation", "served_context_window_after_call",
+                                  "prompt_consumption", "admission_miss", "violation")}
+
+
+def emit(case, model, result, **extra):
+    print(json.dumps({
+        "adapter": adapter, "case": case, "model": model,
+        "status": getattr(getattr(result, "status", None), "value", None),
+        "finish_reason": getattr(result, "finish_reason", None),
+        "prompt_tokens_reported": getattr(result, "prompt_tokens_reported", None),
+        "completion_tokens": getattr(result, "completion_tokens", None),
+        "reasoning_present": getattr(result, "reasoning_present", None),
+        "runtime_fingerprint": getattr(result, "runtime_fingerprint", None),
+        "inference_settings_digest": getattr(result, "inference_settings_digest", None),
+        "contract": contract(result) if result is not None else None, **extra}, default=str), flush=True)
+
+
+async def main():
+    llm = LLMClient(cfg)
+    try:
+        for model in (CODER, QWEN36):
+            before = calls["n"]
+            r = await llm.complete_result("You answer tersely.", "Reply with exactly the word READY.",
+                                          model_override=model, max_tokens_override=32)
+            emit("N1_plain", model, r, content=r.content, requests=calls["n"] - before)
+            emit("N8_served_context", model, r)
+        before, pieces = calls["n"], []
+        r = await llm.complete_result("You answer tersely.", "Count from 1 to 20 separated by spaces.",
+                                      stream_callback=pieces.append, max_tokens_override=128)
+        emit("N2_streamed", CODER, r, chunks=len(pieces), assembled_equals_content="".join(pieces).strip() == r.content,
+             requests=calls["n"] - before)
+        r = await llm.complete_result("You answer tersely.", "What is 17 * 3? Reply with the number only.",
+                                      model_override=QWEN36, max_tokens_override=64)
+        emit("N3_reasoning_off", QWEN36, r, content=r.content)
+        r = await llm.complete_result("Reply with a JSON object only.",
+                                      'Return {"name": "kriya", "files": ["a.py", "b.py"]} exactly.',
+                                      json_mode=True, max_tokens_override=128)
+        try:
+            parsed, ok = json.loads(r.content), True
+        except ValueError:
+            parsed, ok = None, False
+        emit("N4_json_mode", CODER, r, json_parses=ok, parsed=parsed)
+        tools = [{"type": "function", "function": {"name": "get_weather", "description": "Weather for a city",
+                  "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}},
+                 {"type": "function", "function": {"name": "get_time", "description": "Local time in an IANA zone",
+                  "parameters": {"type": "object", "properties": {"zone": {"type": "string"}}, "required": ["zone"]}}}]
+        before = calls["n"]
+        r = await llm.complete_with_tools_result(
+            [{"role": "user", "content": "Call get_weather for city 'Paris' and get_time for zone 'Europe/Paris'."}],
+            tools, max_tokens_override=256)
+        emit("N5_tools", CODER, r, tool_calls=[(c.get("name"), c.get("arguments")) for c in (r.tool_calls or [])],
+             requests=calls["n"] - before)
+        # N6: dense text undercounted by admission (about 1.47 bytes/token measured
+        # vs the 2.11 qualified floor): admitted with a 1024-token output, larger
+        # than the 32,768 served window in real tokens.
+        rng = random.Random(7)
+        dense = " ".join("".join(rng.choice(string.ascii_letters + string.digits) for _ in range(rng.randint(3, 9)))
+                         for _ in range(400)) + "\n"
+        before = calls["n"]
+        try:
+            r = await llm.complete_result("Answer yes.", dense * 21, max_tokens_override=1024)
+            emit("N6_over_context", CODER, r, requests=calls["n"] - before,
+                 error=getattr(getattr(r, "error", None), "reason_code", None) or str(getattr(r, "error", "")))
+        except Exception as error:
+            emit("N6_over_context", CODER, None, requests=calls["n"] - before,
+                 raised=f"{type(error).__name__}: {str(error)[:200]}")
+    finally:
+        await llm.aclose()
+
+
+if len(sys.argv) < 4 or sys.argv[3] != "n7-only":
+    asyncio.run(main())
+
+# N7: the root run deadline cuts a streamed generation mid-answer.
+cfg.autonomy.generation_time_budget_seconds = 600
+with tempfile.TemporaryDirectory() as workspace, begin_mutating_run(workspace):
+    current_run_context()._lease.generation_clock = time.monotonic() - 597  # 3 s left
+
+    async def deadline_case():
+        llm = LLMClient(cfg)
+        before, started, pieces = calls["n"], time.monotonic(), []
+        try:
+            await llm.complete_result("", "Write a detailed 3000-word essay on the history of compilers. Do not stop early.",
+                                      stream_callback=pieces.append, max_tokens_override=12000)
+            outcome = "completed"
+        except InferenceDeadlineError as stopped:
+            outcome = stopped.reason_code
+        finally:
+            await llm.aclose()
+        emit("N7_deadline", CODER, llm.last_completion, outcome=outcome, elapsed=round(time.monotonic() - started, 2),
+             streamed_chunks=len(pieces), requests=calls["n"] - before,
+             deadline=(llm.last_completion.protocol or {}).get("provider_contract", {}).get("deadline"))
+
+    asyncio.run(deadline_case())

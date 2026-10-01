@@ -1,0 +1,69 @@
+"""PROVIDER-CONTRACT-001A F-2 measurement (live, bounded, provider-generic code text).
+
+For each pinned production model on Ollama /v1 (served window from /api/ps):
+send raw requests (no Kriya admission) whose prompts are a fixed code corpus
+repeated to target sizes below, at and above the served window, and record
+what the provider reports, next to Kriya's own numbers for the same messages:
+  predicted  = admission's count at dispatch (token_budget.count_tokens with the
+               qualified byte floor + framing), i.e. what plan_dispatch admits on
+  lower      = the byte-ceiling lower bound check_prompt_consumption uses
+  reported   = usage.prompt_tokens
+Run from the approved workspace:  python f2_probe.py <production config>
+Writes one JSON line per request to stdout."""
+import json, sys, time, urllib.request
+
+from kriya.config.config import load_config
+from kriya.core.inference_settings import role_inference_settings
+from kriya.core.model_qualification import measured_limits_for
+from kriya.core.model_runtime import observe_served_context, resolve_configured_model_runtime
+from kriya.core.provider_contract import DEFAULT_BYTES_PER_TOKEN_CEILING, consumption_bytes
+from kriya.core.token_budget import PER_MESSAGE_OVERHEAD_TOKENS, REQUEST_OVERHEAD_TOKENS, count_tokens, dispatch_text
+
+UNIT = '''def handle_request(request, store):
+    """Validate a request and persist it."""
+    if not request.get("id"):
+        raise ValueError("missing id")
+    record = {"id": request["id"], "items": [item.strip() for item in request.get("items", [])]}
+    store.save(record)
+    return record
+
+'''
+cfg = load_config(sys.argv[1])
+targets = [float(x) for x in (sys.argv[2].split(",") if len(sys.argv) > 2 else "0.25,0.5,0.9,0.97,1.1,1.5,2.2".split(","))]
+for model, role in ((cfg.llm.model, "developer"), (cfg.llm_chain[0].model, "developer")):
+    fp = resolve_configured_model_runtime(cfg, model, fresh=True)
+    settings = role_inference_settings(cfg, role, model)
+    limits = measured_limits_for(fp, cfg, settings=settings)
+    floor, ceiling = limits.get("bytes_per_token_floor"), limits.get("bytes_per_token_ceiling")
+    window = None
+    for max_tokens in (16, 4096):
+        for fraction in targets:
+            # size the prompt from the qualified floor so "fraction" is of the window as Kriya would count it
+            served = observe_served_context(base_url="http://localhost:11434/v1", model=model) or fp.effective_context_window
+            window = served
+            units = max(1, int(fraction * served * (floor or 2.5) / len(UNIT)))
+            messages = [{"role": "system", "content": "You are a code reviewer. Answer in one word."},
+                        {"role": "user", "content": UNIT * units + "\nIs this code valid Python? Answer yes or no."}]
+            text = dispatch_text(messages)
+            predicted = count_tokens(text, qualified_bytes_per_token=floor,
+                                     qualified_non_ascii_bytes_per_token=limits.get("non_ascii_bytes_per_token_floor")).tokens \
+                + REQUEST_OVERHEAD_TOKENS + PER_MESSAGE_OVERHEAD_TOKENS * len(messages)
+            lower = int(consumption_bytes("".join(m["content"] for m in messages)) / (ceiling or DEFAULT_BYTES_PER_TOKEN_CEILING))
+            body = {"model": model, "messages": messages, "max_tokens": max_tokens, "temperature": 0.0, "stream": False}
+            started = time.monotonic()
+            req = urllib.request.Request("http://localhost:11434/v1/chat/completions", json.dumps(body).encode(),
+                                         {"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=900) as resp:
+                    data = json.load(resp)
+                usage, error = data.get("usage", {}), None
+            except Exception as exc:
+                usage, error = {}, f"{type(exc).__name__}: {exc}"
+            print(json.dumps({
+                "model": model, "served_window": window, "max_tokens": max_tokens, "target_fraction": fraction,
+                "bytes": len(text.encode()), "consumption_bytes": consumption_bytes(text),
+                "qualified_floor": floor, "qualified_ceiling": ceiling,
+                "predicted_at_dispatch": predicted, "byte_lower_bound": lower,
+                "reported_prompt_tokens": usage.get("prompt_tokens"), "completion_tokens": usage.get("completion_tokens"),
+                "seconds": round(time.monotonic() - started, 1), "error": error,
+            }), flush=True)
