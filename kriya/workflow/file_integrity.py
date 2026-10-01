@@ -494,14 +494,6 @@ class VerificationGateCreatedFiles(QualityGateFailure):
         self.gate = gate
 
 
-def _bytecode_cache(relpath: str) -> bool:
-    """CPython's own bytecode cache (PEP 3147: ``__pycache__/<name>.<tag>.pyc``),
-    written beside the sources it is derived from by any gate that imports or
-    compiles Python - interpreter output, never repository content."""
-    parts = relpath.split("/")
-    return "__pycache__" in parts[:-1] and parts[-1].endswith((".pyc", ".pyo"))
-
-
 def untracked_repository_paths(root: str) -> frozenset:
     """Every file under ``root`` that Git neither tracks nor ignores (its own
     exclude semantics: .gitignore, info/exclude, core.excludesFile), Kriya's
@@ -540,7 +532,9 @@ class VerificationTreeBinding:
         # FILE-INTEGRITY-CONTRACT-001B: untracked, non-ignored content that
         # already existed is never attributed to a gate.
         self._untracked_before = untracked_repository_paths(root)
-        self._output_roots: set = set()
+        # Output roots registered by the gate invocation now running (its
+        # toolchain's own output); consumed by that gate's own check only.
+        self._gate_output_roots: Dict[str, set] = {}
 
     def _record(self, relpath: str) -> None:
         path = os.path.join(self.root, relpath)
@@ -554,11 +548,15 @@ class VerificationTreeBinding:
         """Kriya itself just wrote ``relpath`` through the authorized writer."""
         self._record(relpath)
 
-    def authorize_output_root(self, relroot: str) -> None:
-        """A Kriya gate designates ``relroot`` as its own output directory (e.g.
-        the Java gate's ``javac -d build``): what it writes there is
-        verification output Kriya chose, never repository content."""
-        self._output_roots.add(relroot.strip("/"))
+    def authorize_gate_output(self, gate: str, relroot: str) -> None:
+        """The ``gate`` invocation now running runs a toolchain whose own
+        output lands under ``relroot`` (e.g. its Maven invocation's
+        ``target/``). Only that gate's own check accepts new files there; the
+        files it legitimately created then belong to the baseline, so a later
+        gate that does not run that toolchain cannot write there unseen."""
+        relroot = relroot.strip("/")
+        if relroot and relroot != "." and not relroot.startswith(".."):
+            self._gate_output_roots.setdefault(gate, set()).add(relroot)
 
     def changes(self) -> List[Tuple[str, Optional[str], Optional[str]]]:
         changed = []
@@ -581,14 +579,16 @@ class VerificationTreeBinding:
         changed = self.changes()
         if changed:
             raise VerificationTreeMutated(gate, changed, phase)
-        created = self.created()
+        roots = self._gate_output_roots.pop(gate, set()) if phase == "after" else set()
+        new = untracked_repository_paths(self.root) - self._untracked_before - set(self._expected)
+        owned = {path for path in new if any(path == root or path.startswith(root + "/") for root in roots)}
+        created = sorted(new - owned)
         if created:
             raise VerificationGateCreatedFiles(gate, created, phase)
+        self._untracked_before |= owned
 
     def created(self) -> List[str]:
-        """Untracked, non-ignored files that appeared since the binding and
-        are neither candidate nor Kriya-authorized output."""
-        return sorted(
-            path for path in untracked_repository_paths(self.root) - self._untracked_before - set(self._expected)
-            if not _bytecode_cache(path)
-            and not any(path == root or path.startswith(root + "/") for root in self._output_roots))
+        """Untracked, non-ignored files that appeared since the binding (or
+        since the last gate whose own output was accepted) and are neither
+        candidate nor Kriya-authorized output."""
+        return sorted(untracked_repository_paths(self.root) - self._untracked_before - set(self._expected))

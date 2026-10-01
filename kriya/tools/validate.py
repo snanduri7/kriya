@@ -205,6 +205,47 @@ def execution_evidence(result: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 
+_GATE_WALK_SKIP = frozenset({".git", ".kriya", "node_modules", "target", "build", ".gradle", "__pycache__"})
+
+
+def _project_dirs(cwd: str, holds: Callable[[List[str]], bool]) -> List[str]:
+    """Directories under ``cwd`` (inclusive) whose files satisfy ``holds``."""
+    found = []
+    for directory, subdirs, files in os.walk(cwd):
+        subdirs[:] = [d for d in subdirs if d not in _GATE_WALK_SKIP and not d.startswith(".")]
+        if holds(files):
+            found.append(directory)
+    return found
+
+
+def gate_output_roots(cmd: List[str], cwd: str) -> List[str]:
+    """FILE-INTEGRITY-CONTRACT-001B: where the toolchain ``cmd`` invokes
+    writes its own build output, by that tool's documented default layout -
+    the only new files a verification gate running ``cmd`` may create:
+    Maven: ``target/`` of every module (a directory holding ``pom.xml``);
+    Gradle: ``build/`` of every project (``build.gradle[.kts]``) plus the
+    root ``.gradle/`` cache; ``javac -d X``: exactly ``X``; Python (any
+    interpreter, ``py_compile`` or pytest run): ``__pycache__/`` of every
+    directory holding ``.py`` sources (PEP 3147) plus pytest's
+    ``.pytest_cache/``. Anything else is repository content."""
+    if not cmd:
+        return []
+    tool = os.path.basename(cmd[0])
+    if tool in ("mvn", "mvnw", "mvn.cmd"):
+        return [os.path.join(d, "target") for d in _project_dirs(cwd, lambda files: "pom.xml" in files)]
+    if tool in ("gradle", "gradlew", "gradle.bat"):
+        return ([os.path.join(d, "build") for d in _project_dirs(
+            cwd, lambda files: "build.gradle" in files or "build.gradle.kts" in files)]
+                + [os.path.join(cwd, ".gradle")])
+    if tool == "javac" and "-d" in cmd[:-1]:
+        return [cmd[cmd.index("-d") + 1]]
+    if tool.startswith("python") or tool in ("pytest", "py.test"):
+        return ([os.path.join(d, "__pycache__") for d in _project_dirs(
+            cwd, lambda files: any(name.endswith(".py") for name in files))]
+                + [os.path.join(cwd, ".pytest_cache")])
+    return []
+
+
 def _verification_gate(name: str):
     """A validator method that runs repository/toolchain code is a named
     verification gate. FILE-INTEGRITY-CONTRACT-001: when a tree is bound
@@ -925,6 +966,7 @@ class PolymorphicValidator:
         acquisition: bool = False,
     ) -> Dict[str, Any]:
         self._audit_run_command(cmd, cwd)
+        self._register_gate_output(cmd, cwd)
         profile, backend = self.build_containment_profile_and_backend(
             network=network, dependency_cache_path=dependency_cache_path,
             dependency_cache_writable=dependency_cache_writable, acquisition=acquisition,
@@ -950,6 +992,17 @@ class PolymorphicValidator:
         if plan is not None:
             result["resources"] = plan.evidence()
         return result
+
+    def _register_gate_output(self, cmd: List[str], cwd: str) -> None:
+        """FILE-INTEGRITY-CONTRACT-001B: the verification gate now running
+        designates the output roots of the exact toolchain command it is
+        about to run (gate_output_roots); nothing else it creates is
+        accepted."""
+        binding, gate = self.tree_binding, self._gate
+        if binding is None or gate is None:
+            return
+        for root in gate_output_roots(cmd, cwd):
+            binding.authorize_gate_output(gate, os.path.relpath(root, binding.root))
 
     def _maven_cache_dir(self) -> str:
         """A persistent, per-workspace Maven local-repository cache
@@ -1485,10 +1538,6 @@ class PolymorphicValidator:
             cmd = ["javac", "-proc:none", "-d", os.path.join(self.workspace_path, "build")]
             cmd.extend(java_files)
             os.makedirs(os.path.join(self.workspace_path, "build"), exist_ok=True)
-            if self.tree_binding is not None:
-                # FILE-INTEGRITY-CONTRACT-001B: Kriya chose this output directory.
-                self.tree_binding.authorize_output_root(
-                    os.path.relpath(os.path.join(self.workspace_path, "build"), self.tree_binding.root))
             
             try:
                 res = self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)

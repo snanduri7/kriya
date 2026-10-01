@@ -129,7 +129,8 @@ def test_every_source_of_candidate_bytes_has_a_named_authority():
 
 # === P1: a verification gate must not create unauthorized repository content ===============================
 
-import subprocess  # noqa: E402 - the second half of this file
+import os  # noqa: E402 - the second half of this file
+import subprocess  # noqa: E402
 from pathlib import Path  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 
@@ -250,17 +251,145 @@ def test_the_untracked_listing_uses_gits_own_ignore_rules(tmp_path):
     subprocess.run(["git", "status"], cwd=root, check=True, capture_output=True)
 
 
-def test_interpreter_bytecode_and_kriyas_own_output_directory_are_not_repository_content(tmp_path):
+# --- gate-owned output: only the gate that runs a toolchain may create its output ---------------------------
+
+def _gate_run(validator, gate, cmd, effect):
+    """One real validator gate (the _verification_gate wrapper) that runs
+    ``cmd`` through the validator's own runner (process stubbed: ``effect``
+    plays the tool's file output) and then checks the bound tree."""
+    from kriya.tools.validate import PolymorphicValidator, _verification_gate
+
+    def body(self):
+        with patch("kriya.tools.validate.ProcessController.run") as run:
+            run.return_value.to_dict.return_value = {"returncode": 0, "stdout": "", "stderr": "", "timeout": False}
+            effect()
+            self._run_cmd_with_timeout(cmd, cwd=self.workspace_path)
+        return {"success": True}
+
+    with patch.object(PolymorphicValidator, "build_containment_profile_and_backend", return_value=(None, None)):
+        return _verification_gate(gate)(body)(validator)
+
+
+def _maven_tree(tmp_path):
+    from kriya.tools.validate import PolymorphicValidator
+
+    root = _tree(tmp_path)  # .gitignore: target/ - removed below: the greenfield case ignores nothing
+    (root / ".gitignore").unlink()
+    _git(root, "rm", "-q", "--cached", ".gitignore")
+    _git(root, "commit", "-qm", "no ignore rules")
+    (root / "pom.xml").write_text("<project/>\n")
+    (root / "core").mkdir()
+    (root / "core" / "pom.xml").write_text("<project/>\n")  # a module
+    validator = PolymorphicValidator(str(root))
+    validator.tree_binding = _binding(root)
+    validator.tree_binding.authorize("pom.xml")
+    validator.tree_binding.authorize("core/pom.xml")
+    return root, validator
+
+
+MVN = ["mvn", "-q", "compile"]
+
+
+def test_a_maven_gates_own_target_output_is_accepted_without_any_ignore_rule(tmp_path):
+    root, validator = _maven_tree(tmp_path)
+
+    def maven_output():
+        for module in (root, root / "core"):
+            (module / "target" / "classes").mkdir(parents=True)
+            (module / "target" / "classes" / "App.class").write_bytes(b"\xca\xfe")
+
+    _gate_run(validator, "compile", MVN, maven_output)  # passes: target/ of each module is Maven's own
+
+
+@pytest.mark.parametrize("stray", ["extra.properties", "src/main/java/Injected.java", "docs/target/notes.txt"])
+def test_a_maven_gate_creating_anything_else_is_still_a_typed_stop(tmp_path, stray):
+    from kriya.workflow.file_integrity import VerificationGateCreatedFiles
+
+    root, validator = _maven_tree(tmp_path)
+
+    def maven_output_plus_stray():
+        (root / "target").mkdir()
+        (root / "target" / "App.class").write_bytes(b"\xca\xfe")
+        (root / stray).parent.mkdir(parents=True, exist_ok=True)
+        (root / stray).write_text("x\n")
+
+    with pytest.raises(VerificationGateCreatedFiles) as stopped:
+        _gate_run(validator, "compile", MVN, maven_output_plus_stray)
+    assert [entry["path"] for entry in stopped.value.failure.diagnostics["created"]] == [stray]
+
+
+def test_a_target_directory_is_never_inferred_outside_the_gate_that_runs_maven(tmp_path):
+    """The compile gate's Maven run owns target/; a later gate that does not
+    run Maven (the app under runtime verification) writing there is caught,
+    and so is target/ output appearing between gates."""
+    from kriya.workflow.file_integrity import VerificationGateCreatedFiles
+
+    root, validator = _maven_tree(tmp_path)
+    _gate_run(validator, "compile", MVN, lambda: ((root / "target").mkdir(), (root / "target" / "A.class").write_bytes(b"x")))
+    with pytest.raises(VerificationGateCreatedFiles) as stopped:
+        _gate_run(validator, "runtime_verification", ["java", "-cp", "target", "App"],
+                  lambda: (root / "target" / "written-by-the-app.txt").write_text("x"))
+    assert stopped.value.failure.diagnostics["created"][0]["path"] == "target/written-by-the-app.txt"
+    (root / "target" / "between.txt").write_text("x")
+    with pytest.raises(VerificationGateCreatedFiles):
+        validator.tree_binding.check("tests", "before")
+
+
+def test_user_files_stay_protected_and_preexisting_ones_are_never_attributed(tmp_path):
+    from kriya.workflow.file_integrity import VerificationGateCreatedFiles
+
     root = _tree(tmp_path)
+    (root / "notes.txt").write_text("the user's own untracked file\n")  # before the binding: not the gate's
     binding = _binding(root)
-    (root / "src" / "__pycache__").mkdir()
-    (root / "src" / "__pycache__" / "calc.cpython-314.pyc").write_bytes(b"\x00")  # PEP 3147 cache
-    binding.authorize_output_root("build")  # the Java gate's own javac -d build
-    (root / "build" / "com").mkdir(parents=True)
-    (root / "build" / "com" / "App.class").write_bytes(b"\xca\xfe")
     binding.check("compile")
-    # The exemptions are exact: a .py beside the cache, or a file outside the
-    # designated root, is still repository content.
-    (root / "src" / "__pycache__" / "sneaky.py").write_text("x = 1\n")
-    (root / "buildx.txt").write_text("x\n")
-    assert binding.created() == ["buildx.txt", "src/__pycache__/sneaky.py"]
+    (root / "notes2.txt").write_text("appeared during verification\n")
+    with pytest.raises(VerificationGateCreatedFiles):
+        binding.check("tests")
+
+
+@pytest.mark.parametrize(("cmd", "markers", "roots"), [
+    (["mvn", "-q", "test"], ["pom.xml", "core/pom.xml", "docs/readme.md"], ["target", "core/target"]),
+    (["./mvnw", "compile"], ["pom.xml"], ["target"]),
+    (["gradle", "build"], ["build.gradle", "app/build.gradle.kts"], ["build", "app/build", ".gradle"]),
+    (["./gradlew", "test"], ["settings.gradle"], [".gradle"]),
+    (["javac", "-proc:none", "-d", "<root>/build", "A.java"], [], ["build"]),
+    (["python3", "-m", "py_compile", "src/a.py"], ["src/a.py", "docs/readme.md"], ["src/__pycache__", ".pytest_cache"]),
+    (["java", "-jar", "app.jar"], ["pom.xml"], []),  # running the app owns no output
+])
+def test_each_toolchain_command_designates_only_its_own_documented_output(tmp_path, cmd, markers, roots):
+    from kriya.tools.validate import gate_output_roots
+
+    for marker in markers:
+        (tmp_path / marker).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / marker).write_text("")
+    cmd = [part.replace("<root>", str(tmp_path)) for part in cmd]
+    found = sorted(os.path.relpath(path, tmp_path) for path in gate_output_roots(cmd, str(tmp_path)))
+    assert found == sorted(roots)
+
+
+@pytest.mark.skipif(subprocess.run(["which", "mvn"], capture_output=True).returncode != 0, reason="mvn not on PATH")
+def test_a_real_greenfield_maven_compile_passes_its_gate(tmp_path):
+    """The regression this fixes (measured at 3d2bfd2): a greenfield Maven
+    project has no .gitignore, so the real `mvn compile` gate's own target/
+    stopped the run as VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE."""
+    from kriya.tools.validate import PolymorphicValidator
+    from kriya.workflow.file_integrity import VerificationTreeBinding
+    from kriya.workflow.worktree import repository_content_paths
+
+    for args in (["init", "-q"], ["config", "user.email", "t@x"], ["config", "user.name", "t"],
+                 ["commit", "-q", "--allow-empty", "-m", "init"]):
+        _git(tmp_path, *args)
+    (tmp_path / "src/main/java/demo").mkdir(parents=True)
+    (tmp_path / "pom.xml").write_text(
+        '<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>'
+        "<groupId>demo</groupId><artifactId>demo</artifactId><version>1</version><properties>"
+        "<maven.compiler.release>17</maven.compiler.release>"
+        "<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding></properties></project>\n")
+    (tmp_path / "src/main/java/demo/App.java").write_text(
+        'package demo; public class App { public static void main(String[] a) { System.out.println("hi"); } }\n')
+    validator = PolymorphicValidator(str(tmp_path))
+    validator.tree_binding = VerificationTreeBinding(
+        str(tmp_path), repository_content_paths(str(tmp_path)), ["pom.xml", "src/main/java/demo/App.java"])
+    result = validator.run_compile_check(["src/main/java/demo/App.java"])
+    assert result["success"], result.get("output")
+    assert (tmp_path / "target" / "classes" / "demo" / "App.class").exists()
