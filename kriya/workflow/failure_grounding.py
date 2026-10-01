@@ -637,12 +637,42 @@ def ground_runtime_resource_failure(
     return ResourceGrounding(resolved, tuple(ref for ref, _s, _f in chosen), ambiguous, loaders)
 
 
+# D5b: a stack frame line, and an exception header line (the message a frame
+# belongs to): `x.y.SomeException: msg`, `Caused by: ...`, the JVM's
+# `Exception in thread "main" ...`, and Ignite's `class x.y.SomeException: msg`.
+_STACK_FRAME_LINE = re.compile(r"^\s+(?:at\s|\.\.\.\s\d+\s)")
+_EXCEPTION_HEADER_LINE = re.compile(
+    r"^\s*(?:Caused by:\s+|Exception in thread \"[^\"]*\"\s+|class\s+)?"
+    r"(?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*(?:Exception|Error|Throwable)(?::|\s*$)"
+)
+# Lines a multi-line exception message may span above its first frame.
+_EXCEPTION_MESSAGE_LINES = 5
+
+
+def _exception_block_start(raw_output: str, line_start: int) -> Optional[int]:
+    """For a stack frame starting at ``line_start``: the start of the header
+    line of the exception block that frame belongs to (the nearest header
+    above the block's frames), or None when there is none to find."""
+    lines = raw_output[:line_start].split("\n")[:-1]  # the lines above the frame
+    index = len(lines)
+    while index > 0 and _STACK_FRAME_LINE.match(lines[index - 1]):
+        index -= 1
+    for candidate in range(index - 1, max(-1, index - 1 - _EXCEPTION_MESSAGE_LINES), -1):
+        if _EXCEPTION_HEADER_LINE.match(lines[candidate]):
+            return sum(len(line) + 1 for line in lines[:candidate])
+    return None
+
+
 def grounded_evidence_excerpt(raw_output: str, grounded_files: Iterable[str], limit: int = 2000) -> str:
     """The bounded failure evidence a reopened owner is shown. The first `limit`
     characters, as before - unless they name none of the grounded files and the
     output does later: then the window starts at the line of that first mention
     (D5: live runtime output carried ~3.4 KB of Maven offline warnings before the
-    exception, so the owner saw no error at all)."""
+    exception, so the owner saw no error at all). When that line is a stack
+    frame, the window starts at the header of the exception block the frame
+    belongs to (D5b: the message explaining the frame sits above it; a
+    `Caused by:` block is its own exception); no header within reach keeps the
+    frame line."""
     if len(raw_output) <= limit:
         return raw_output
     names = [os.path.basename(f) for f in grounded_files if f]
@@ -653,6 +683,11 @@ def grounded_evidence_excerpt(raw_output: str, grounded_files: Iterable[str], li
     if match is None:
         return raw_output[:limit]
     start = raw_output.rfind("\n", 0, match.start()) + 1
+    line_end = raw_output.find("\n", start)
+    if _STACK_FRAME_LINE.match(raw_output[start:line_end if line_end >= 0 else len(raw_output)]):
+        header = _exception_block_start(raw_output, start)
+        if header is not None:
+            start = header
     return raw_output[start:start + limit]
 
 
