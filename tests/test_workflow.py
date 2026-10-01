@@ -18025,7 +18025,7 @@ async def test_response_construction_owner_false_positive_never_reaches_architec
 
 
 @pytest.mark.asyncio
-async def test_predetermined_plan_alone_without_design_and_architect_files_raises():
+async def test_predetermined_plan_alone_without_design_and_architect_files_raises(tmp_path):
     """All-or-nothing contract - a partial combination is a caller bug,
     never silently "use only some predetermined values"."""
     cfg = AppConfig()
@@ -18034,19 +18034,19 @@ async def test_predetermined_plan_alone_without_design_and_architect_files_raise
     we = WorkflowEngine(kernel, llm)
     with pytest.raises(ValueError):
         await we.run_generation_workflow(
-            goal="x", workspace_path="/tmp", predetermined_plan="only the plan",
+            goal="x", workspace_path=str(tmp_path), predetermined_plan="only the plan",
         )
 
 
 @pytest.mark.asyncio
-async def test_predetermined_design_alone_without_plan_raises():
+async def test_predetermined_design_alone_without_plan_raises(tmp_path):
     cfg = AppConfig()
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     we = WorkflowEngine(kernel, llm)
     with pytest.raises(ValueError):
         await we.run_generation_workflow(
-            goal="x", workspace_path="/tmp", predetermined_design="only the design",
+            goal="x", workspace_path=str(tmp_path), predetermined_design="only the design",
         )
 
 
@@ -18390,14 +18390,14 @@ async def test_predetermined_architect_files_deliberately_empty_is_not_replaced_
 
 
 @pytest.mark.asyncio
-async def test_predetermined_architect_files_alone_raises():
+async def test_predetermined_architect_files_alone_raises(tmp_path):
     cfg = AppConfig()
     kernel = Kernel(config=cfg)
     llm = LLMClient(cfg)
     we = WorkflowEngine(kernel, llm)
     with pytest.raises(ValueError):
         await we.run_generation_workflow(
-            goal="x", workspace_path="/tmp", predetermined_architect_files=["a.py"],
+            goal="x", workspace_path=str(tmp_path), predetermined_architect_files=["a.py"],
         )
 
 

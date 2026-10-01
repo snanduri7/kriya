@@ -137,10 +137,28 @@ STATE_MACHINE_TIER_FILES = frozenset({
 })
 
 
+# Parallel runs (`-n 8 --dist loadgroup`): every test that starts real
+# containers runs on ONE worker, serially. Their leak checks list every
+# kriya-oci-*/kriya-acq-* container on the daemon - deliberately global - so
+# two such tests running at once see each other's live containers (measured:
+# 7 parallel-only failures, zero real leftovers after the run). A real-Docker
+# test is the one gated on Docker being there: a skip/skipif naming docker.
+# Grouping by file text instead pinned ~540 tests (config tests that merely
+# say "docker") to one worker and doubled the wall time.
+def _needs_real_docker(item):
+    return any("docker" in str(marker.kwargs.get("reason", "")).lower()
+               for marker in item.iter_markers() if marker.name in ("skip", "skipif"))
+
+
+# tryfirst: xdist's own hook turns the xdist_group marker into the node id
+# suffix that --dist loadgroup schedules on; it must see the marker.
+@pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
     for item in items:
         if item.path.name in STATE_MACHINE_TIER_FILES:
             item.add_marker(pytest.mark.state_machine)
+        if _needs_real_docker(item):
+            item.add_marker(pytest.mark.xdist_group("docker"))
 
 
 _SKIPS = pytest.StashKey[list]()
