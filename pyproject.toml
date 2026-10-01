@@ -18,6 +18,14 @@ dependencies = [
     "httpx>=0.24.0",
     "numpy>=1.24.0",
     "prompt_toolkit>=3.0.0",
+    # Code Intelligence structural parsing (kriya/code_intel/): concrete
+    # syntax trees for Java and Python, MIT-licensed, prebuilt wheels.
+    # <0.26: tree-sitter 0.26.0 corrupts memory on CPython 3.14 when Node
+    # start_point/end_point are read across trees (measured: segfault 5/5
+    # runs, 0.25.2 0/5; benchmarks/code_intel/README.md).
+    "tree-sitter>=0.25.2,<0.26",
+    "tree-sitter-java>=0.23.5",
+    "tree-sitter-python>=0.25.0",
     # stdlib tomllib is 3.11+; kriya/core/tomlcompat.py uses this backport on 3.10.
     "tomli>=1.1.0; python_version < '3.11'",
 ]

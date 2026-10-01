@@ -312,9 +312,13 @@ def test_interface_extends_and_implements_relations_are_unaffected():
     )
     graph.index_file("UserServiceImpl.java", src, 1.0)
     symbols, relations = graph._parse_java("UserServiceImpl.java", src)
-    assert {"name": "p.UserServiceImpl", "type": "class", "start_line": 2, "end_line": 7} in symbols
+    # Code Intelligence R1: the real declaration span (the regex parser
+    # stored start+5), and the simple supertype name resolved lexically to
+    # the file's own package, so the edge joins the interface's qualified
+    # symbol ("p.UserService") instead of dangling on a bare name.
+    assert {"name": "p.UserServiceImpl", "type": "class", "start_line": 2, "end_line": 4} in symbols
     assert any(
-        r["source"] == "p.UserServiceImpl" and r["target"] == "UserService" and r["type"] == "implements"
+        r["source"] == "p.UserServiceImpl" and r["target"] == "p.UserService" and r["type"] == "implements"
         for r in relations
     )
 

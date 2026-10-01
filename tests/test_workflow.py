@@ -22279,14 +22279,17 @@ def test_java_method_signature_core_pattern_is_shared_across_all_three_call_site
     shared core (e.g. handling a generic return type) previously wouldn't
     propagate to the other two. Confirms all three now compose their own
     trailing-anchor variant on top of ONE shared JAVA_METHOD_SIGNATURE_CORE
-    constant, not just that each independently happens to still work."""
+    constant, not just that each independently happens to still work.
+    Code Intelligence R1: graph.py no longer matches Java declarations with a
+    regex at all (it reads the tree-sitter structural model), so it must not
+    grow a private copy of the pattern either."""
     import re
 
+    import kriya.analyzer.graph as graph_module
     from kriya.analyzer.analyzer import JAVA_METHOD_SIGNATURE_CORE
-    from kriya.analyzer.graph import JAVA_METHOD_SIGNATURE_CORE as graph_core
     from kriya.workflow.context_budget import JAVA_METHOD_SIGNATURE_CORE as context_budget_core
 
-    assert graph_core is JAVA_METHOD_SIGNATURE_CORE
+    assert not hasattr(graph_module, "JAVA_METHOD_SIGNATURE_CORE")
     assert context_budget_core is JAVA_METHOD_SIGNATURE_CORE
 
     signature = "public List<String> process(int id, String name)"
