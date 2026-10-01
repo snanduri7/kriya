@@ -428,6 +428,8 @@ class TerminalGateService:
                 # "Do not modify any other file": decided from what this
                 # final candidate (and the run's committed history)
                 # actually changed, against the files the goal names.
+                from kriya.policy.filesystem import WriteScopeMode
+                from kriya.workflow.toolchain import toolchain_declaration_mutable
                 from kriya.workflow.workflow import (
                     close_requirements_by_mutation_scope,
                     close_requirements_with_named_tests,
@@ -453,10 +455,15 @@ class TerminalGateService:
                     request.candidate_root, repository_content_paths(request.workspace_path),
                     _terminal_candidate_paths(request.plan),
                 )
+                # D8: the terminal writes nothing; the toolchain authority is
+                # the approved plan's (the same derivation its units used).
                 closures = await asyncio.to_thread(
                     close_requirements_with_named_tests, autonomy, ledger,
                     requirement_set, request.candidate_root, request.workspace_path,
                     modified=_terminal_candidate_paths(request.plan), revision="terminal",
+                    toolchain_declaration_mutable=toolchain_declaration_mutable(
+                        WriteScopeMode.DENY_ALL, (), request.plan,
+                    ),
                     tree_binding=tree_binding,
                 )
                 if closures:

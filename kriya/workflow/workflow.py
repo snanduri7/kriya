@@ -857,16 +857,29 @@ def _settle_future_owner_verification_obligations(
 
 def close_requirements_with_named_tests(
     autonomy_cfg: Any, ledger: Any, requirement_set: Any, candidate_root: str, workspace_path: str, *,
-    modified: Iterable[str], revision: Any, java_home_override: Optional[str] = None,
-    tree_binding: Any = None,
+    modified: Iterable[str], revision: Any, toolchain_declaration_mutable: bool,
+    java_home_override: Optional[str] = None, tree_binding: Any = None,
 ) -> List[Dict[str, Any]]:
     """PRD-020: runs the tests an UNVERIFIED requirement's own text names, on
     the candidate at ``candidate_root`` (the one the verifier just judged),
     and records closure evidence when they execute and pass - see
     requirements.close_unverified_requirements_with_named_tests. Shared by
-    the direct/milestone pre-apply boundary and enforce's terminal gate."""
+    the direct/milestone pre-apply boundary and enforce's terminal gate.
+
+    D8: the validator is built only when an UNVERIFIED requirement names an
+    existing test (otherwise there is nothing to close), and with the run's
+    own toolchain authority (``toolchain_declaration_mutable``,
+    derived by the caller from its write scope and approved plan exactly as
+    its own gates were): this step verifies the already-authorized
+    candidate; it never re-decides a toolchain change. Without that
+    authority a changed declaration still fails closed here."""
     from kriya.workflow.file_resolution import is_runnable_test_file
-    from kriya.workflow.requirements import close_unverified_requirements_with_named_tests
+    from kriya.workflow.requirements import (
+        RequirementOutcome,
+        close_unverified_requirements_with_named_tests,
+        named_existing_tests,
+        requirement_outcomes,
+    )
 
     test_files: List[str] = []
     for root, dirs, files in os.walk(candidate_root):
@@ -876,8 +889,14 @@ def close_requirements_with_named_tests(
             rel = os.path.relpath(os.path.join(root, name), candidate_root)
             if is_runnable_test_file(rel):
                 test_files.append(rel)
+    outcomes = requirement_outcomes(ledger, requirement_set)
+    if not any(outcomes.get(requirement.id) is RequirementOutcome.UNVERIFIED
+               and named_existing_tests(requirement.text, test_files)
+               for requirement in requirement_set.requirements):
+        return []  # D8: nothing to close, so no validator and no toolchain resolution
     validator = PolymorphicValidator(
         candidate_root, original_workspace_path=workspace_path, autonomy_cfg=autonomy_cfg,
+        toolchain_declaration_mutable=toolchain_declaration_mutable,
     )
     validator.java_home_override = java_home_override
     validator.tree_binding = tree_binding
@@ -3988,6 +4007,9 @@ class WorkflowEngine:
                             close_requirements_with_named_tests, self.kernel.config.autonomy,
                             resolved_obligation_ledger, requirement_set, worktree_path, workspace_path,
                             modified=state.all_files_written, revision=state.attempt_number,
+                            toolchain_declaration_mutable=toolchain_declaration_mutable(
+                                write_scope_mode, allowed_write_relpaths, structured_plan,
+                            ),
                             java_home_override=state.java_home_override,
                         )
                     except Exception as exc:
