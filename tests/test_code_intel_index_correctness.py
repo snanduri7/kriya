@@ -284,3 +284,28 @@ async def test_same_identity_reuses_structure_and_vectors(tmp_path):
 def structural_parser_version():
     from kriya.code_intel.parsing import STRUCTURAL_PARSER_VERSION
     return STRUCTURAL_PARSER_VERSION
+
+
+@pytest.mark.asyncio
+async def test_analyze_publishes_the_structural_baseline_the_service_reads(tmp_path):
+    from kriya.code_intel.service import CodeIntelligenceService
+
+    repo = _repo(tmp_path, {"src/a/Price.java": "package a;\npublic final class Price {\n  long total(int n) {\n"
+                                                "    return n;\n  }\n}\n", **SEVEN})
+    cfg = _cfg(tmp_path)
+    await _index(repo, cfg)
+    service = CodeIntelligenceService.for_config(cfg, str(repo))
+    try:
+        [total] = service.find_symbol("a.Price.total")
+        assert total.parameter_types == ("int",) and total.declaration.start_line == 3
+        assert service.locate("src/a/Price.java:[4,5] error: incompatible types")[0].lookup_key == "a.Price.total"
+        assert service.find_symbol("m4.f4")
+    finally:
+        service.close()
+    os.remove(repo / "src/a/Price.java")
+    await _index(repo, cfg)
+    service = CodeIntelligenceService.for_config(cfg, str(repo))
+    try:
+        assert service.find_symbol("a.Price.total") == [] and service.store.file_digest("src/a/Price.java") is None
+    finally:
+        service.close()

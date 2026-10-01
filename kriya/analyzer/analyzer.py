@@ -892,8 +892,12 @@ class RepositoryAnalyzer:
         )
         
         from kriya.analyzer.graph import DependencyGraph
+        from kriya.code_intel.parsing import language_for_path, parse_file
+        from kriya.code_intel.store import StructuralStore
         db_path = os.path.join(cfg.paths.memory, "dependency_graph.db")
         graph = DependencyGraph(db_path)
+        # The Code Intelligence BaselineIndex: the same parse feeds the graph.
+        structural = StructuralStore(db_path)
 
         # EMBEDDING-CONTRACT-001: the served model's identity is measured (a
         # real probe embedding, digest, served context) before anything is
@@ -917,6 +921,7 @@ class RepositoryAnalyzer:
         except Exception:
             store.close()
             graph.close()
+            structural.close()
             raise
         report = IndexReport(fingerprint=fingerprint.digest)
         # Structure built by another parser/schema identity is never reused.
@@ -1047,13 +1052,18 @@ class RepositoryAnalyzer:
                     progress_callback(rel_path, idx, total_files)
 
                 with open(filepath, "rb") as raw:
-                    source_digest = hashlib.sha256(raw.read()).hexdigest()
+                    raw_bytes = raw.read()
+                source_digest = hashlib.sha256(raw_bytes).hexdigest()
                 # Each store commits its own writes: a failure partway leaves
                 # this file's graph refreshed and its vectors either fully
                 # published or not current (publish_file/mark_stale), and the
                 # file cache unset, so the next non-force run retries it.
                 if not graph_current:
-                    graph.index_file(rel_path, content, mtime, file_hash, source_digest=source_digest)
+                    structure = parse_file(rel_path, raw_bytes) if language_for_path(rel_path) else None
+                    graph.index_file(rel_path, content, mtime, file_hash, source_digest=source_digest,
+                                     structure=structure)
+                    if structure is not None:
+                        structural.publish(structure, raw_bytes)
                     report.restructured += 1
                 if vectors_current:
                     store.file_metadata[rel_path] = {"mtime": mtime, "hash": file_hash}
@@ -1089,6 +1099,7 @@ class RepositoryAnalyzer:
             logger.info(f"Removing deleted file from index: {removed}")
             store.remove_file(removed)
             graph.clear_file(removed)
+            structural.remove(removed)
             report.removed.append(removed)
                 
         # 4. Save persistent cache index
@@ -1099,6 +1110,7 @@ class RepositoryAnalyzer:
                     report.indexed, len(report.failed))
         store.close()
         graph.close()
+        structural.close()
 
         # 5. Auto-Generate Codebase Conventions Skill
         if not generate_conventions_skill:

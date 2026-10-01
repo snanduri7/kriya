@@ -14,7 +14,7 @@ Retrieval/indexing commits since the snapshot: `c57d21f` (EMBEDDING-CONTRACT-001
 | E-03 graph adds noise | PARTIALLY CLOSED | PRD-027 corroborated seeds narrow the walk; extraction still regex | improved indirectly by E-02 |
 | E-04 target member dropped by per-file packing | STILL OPEN | packing tiers unchanged | Stage 7 (T0 never dropped) |
 | E-05 failed query embedding → zero vector | CLOSED | `c57d21f` | — |
-| E-06 no scale to 300k LOC | STILL OPEN | brute-force NumPy scan | Stage 6 measures structural lookup latency |
+| E-06 no scale to 300k LOC | STILL OPEN | brute-force NumPy scan | PARTIALLY ADDRESSED slice 3: deterministic structural locate p95 ≤ 34 ms on commons-lang (208k LOC) and Kriya (121k LOC), warm refresh 0.03 s; vector scan unchanged |
 | E-07 Ruby | DEFERRED | out of scope by owner decision | — |
 | E-08 Spring XML namespaces | STILL OPEN | namespace strip predates snapshot; measured failure stands | not in this batch unless reached |
 | E-09 `async def` not indexed | STILL OPEN | TRACED: graph.py `_parse_python` has no `AsyncFunctionDef` | FIXED slice 1 (`async def` in the graph; model carries `async`) |

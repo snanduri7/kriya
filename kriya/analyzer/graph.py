@@ -32,7 +32,7 @@ _JAVA_PRIMITIVE_FIELD_TYPES = frozenset({"String", "int", "long", "double", "flo
 _JAVA_INJECTION_ANNOTATIONS = frozenset({"Autowired", "Resource", "Inject", "Qualifier"})
 _JAVA_IGNORED_CALLS = frozenset({"println", "print", "equals", "toString", "split", "replace"})
 # Bump when the symbols/relations this graph stores change shape or meaning.
-STRUCTURAL_INDEX_SCHEMA_VERSION = "kriya-structural-index/1"
+STRUCTURAL_INDEX_SCHEMA_VERSION = "kriya-structural-index/2"  # /2: Code Intelligence tables
 
 
 def structural_identity() -> Dict[str, str]:
@@ -181,8 +181,11 @@ class DependencyGraph:
         with self.conn:
             stale = stored != json.dumps(identity, sort_keys=True) and self.has_indexed_files()
             if stale:
-                for table in ("relations", "symbols", "files"):
-                    self.conn.execute(f"DELETE FROM {table}")
+                present = {r[0] for r in self.conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+                # the Code Intelligence structural tables live in this database too
+                for table in ("relations", "symbols", "files", "ci_fts", "ci_symbols", "ci_files"):
+                    if table in present:
+                        self.conn.execute(f"DELETE FROM {table}")
             self.conn.execute("INSERT OR REPLACE INTO index_manifest (key, value) VALUES (?, ?)",
                               ("structural_identity", json.dumps(identity, sort_keys=True)))
             if embedding_fingerprint is not None:
@@ -260,7 +263,7 @@ class DependencyGraph:
         self.conn.commit()
 
     def index_file(self, rel_path: str, content: str, mtime: float, file_hash: Optional[str] = None,
-                   source_digest: Optional[str] = None) -> None:
+                   source_digest: Optional[str] = None, structure: Any = None) -> None:
         """Parse source code of a file and populate SQLite database indices."""
         if file_hash is None:
             import hashlib
@@ -277,7 +280,7 @@ class DependencyGraph:
             if ext == ".py":
                 symbols, relations = self._parse_python(rel_path, content)
             elif ext == ".java":
-                symbols, relations = self._parse_java(rel_path, content)
+                symbols, relations = self._parse_java(rel_path, content, structure)
             elif ext == ".xml":
                 symbols, relations = self._parse_xml(rel_path, content)
             elif ext == ".rb":
@@ -742,7 +745,7 @@ class DependencyGraph:
                     })
         return symbols, relations
 
-    def _parse_java(self, filepath: str, content: str) -> tuple:
+    def _parse_java(self, filepath: str, content: str, structure: Any = None) -> tuple:
         """Symbols and relations from the Code Intelligence structural model
         (tree-sitter; E-02): every type (class, interface, enum, record,
         annotation type, nested types as ``pkg.Outer.Inner``), constructor and
@@ -756,7 +759,8 @@ class DependencyGraph:
         from kriya.code_intel.model import ParseState
         from kriya.code_intel.parsing import parse_text
 
-        structure = parse_text(filepath, content)
+        if structure is None:
+            structure = parse_text(filepath, content)
         if structure.state is ParseState.PARSE_FAILED:
             raise ValueError(structure.detail)
         imports = [i for i in structure.imports if not i.startswith("static ")]
