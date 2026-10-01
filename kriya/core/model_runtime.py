@@ -674,7 +674,11 @@ OPENAI_COMPAT_CAPABILITIES = ProviderCapabilities(
         "reasoning": Support.SUPPORTED,
         "context_window": Support.SERVER_CONFIG_ONLY, "top_k": Support.SERVER_CONFIG_ONLY,
         "min_p": Support.SERVER_CONFIG_ONLY, "repeat_penalty": Support.SERVER_CONFIG_ONLY,
-        "presence_penalty": Support.SERVER_CONFIG_ONLY, "frequency_penalty": Support.SERVER_CONFIG_ONLY,
+        # PROVIDER-CONTRACT-001A (measured, Ollama 0.34.4): presence_penalty
+        # changes nothing at 0, 2 or 10, per request on either adapter, while
+        # repeat_penalty does; a served model's configured value is therefore
+        # observed, never assumed effective.
+        "presence_penalty": Support.UNSUPPORTED, "frequency_penalty": Support.SERVER_CONFIG_ONLY,
         "keep_alive": Support.UNSUPPORTED,
     },
     features={
@@ -800,6 +804,8 @@ def openai_compat_request_plan(extra_body: Optional[Dict[str, Any]], *, temperat
             if name != "temperature":  # the SDK's own parameter
                 wire[name] = requested
             states.append(SettingState(name, _numeric(requested), _numeric(requested), Provenance.REQUEST, support))
+        elif support is Support.UNSUPPORTED:
+            states.append(_unproven_state(name, requested, server_value, support))
         elif served is None:
             states.append(SettingState(name, _numeric(requested), None, Provenance.UNVERIFIED, support))
         else:
@@ -811,6 +817,14 @@ def openai_compat_request_plan(extra_body: Optional[Dict[str, Any]], *, temperat
             wire[field_name] = extra_body[field_name]
     return ProviderRequestPlan(wire_body=wire, settings=tuple(states), unknown=tuple(unknown),
                                conflicts=tuple(conflicts))
+
+
+def _unproven_state(name: str, requested: Any, server_value: Any, support: Support) -> SettingState:
+    """PROVIDER-CONTRACT-001A: a setting the adapter cannot prove has any
+    effect. Never sent; its effective value is unverified; what the served
+    model's configuration declares for it is kept as an observation only."""
+    return SettingState(name, _numeric(requested), None, Provenance.UNVERIFIED, support,
+                        server_config_observed=server_value)
 
 
 # PROVIDER-CONTRACT-001A: what one served-context observation established.
@@ -1025,7 +1039,8 @@ OLLAMA_NATIVE_CAPABILITIES = ProviderCapabilities(
     settings={
         "context_window": Support.SUPPORTED, "temperature": Support.SUPPORTED, "top_p": Support.SUPPORTED,
         "top_k": Support.SUPPORTED, "min_p": Support.SUPPORTED, "repeat_penalty": Support.SUPPORTED,
-        "presence_penalty": Support.SUPPORTED, "frequency_penalty": Support.SUPPORTED, "seed": Support.SUPPORTED,
+        # presence_penalty: no measured effect (see OPENAI_COMPAT_CAPABILITIES).
+        "presence_penalty": Support.UNSUPPORTED, "frequency_penalty": Support.SUPPORTED, "seed": Support.SUPPORTED,
         "reasoning": Support.SUPPORTED, "keep_alive": Support.SUPPORTED,
     },
     features={
@@ -1097,6 +1112,10 @@ def native_request_plan(extra_body: Optional[Dict[str, Any]], *, temperature: Op
         elif name == "keep_alive":
             wire["keep_alive"] = requested
             states.append(SettingState(name, requested, requested, Provenance.REQUEST, support))
+        elif support is Support.UNSUPPORTED:
+            server_value = (_numeric(served.get(_SERVER_PARAMETER_NAMES[name]))
+                            if served is not None and _SERVER_PARAMETER_NAMES.get(name) in served else None)
+            states.append(_unproven_state(name, requested, server_value, support))
         elif requested is not None:
             if name != "temperature":  # carried from the request's own temperature
                 options[_NATIVE_OPTION_NAMES[name]] = _numeric(requested)

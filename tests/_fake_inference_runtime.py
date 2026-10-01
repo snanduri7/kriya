@@ -49,6 +49,18 @@ class FakeRuntimeAdapter(InferenceRuntimePort):
         self.requests: List[ChatRequest] = []
         self.probes: List[Dict[str, Any]] = []
 
+    @property
+    def provider_capabilities(self):
+        """What this fake really applies: the request's temperature, and the
+        window when it takes one per request (else its own served window)."""
+        from kriya.core.provider_contract import ProviderCapabilities, Support
+
+        return ProviderCapabilities(settings={
+            "temperature": Support.SUPPORTED,
+            "context_window": (Support.SUPPORTED if self.capabilities.per_request_context_window
+                               else Support.SERVER_CONFIG_ONLY),
+        })
+
     # -- window ---------------------------------------------------------------
     def configured_context_window(self, extra_body: Optional[Dict[str, Any]]) -> Optional[int]:
         if not self.capabilities.per_request_context_window or not isinstance(extra_body, dict):

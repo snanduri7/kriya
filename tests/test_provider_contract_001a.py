@@ -597,3 +597,109 @@ def test_every_role_requires_the_over_context_refusal():
     for role in mq.ROLES:
         assert "over_context_refusal" in mq.required_capabilities(config, role, config.llm.model)
     assert mq.QUALIFICATION_POLICY_VERSION == "kriya-qualification/8"
+
+
+# === A: an unproven setting is never labelled effective ==================================================
+
+def _served_with(**parameters):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(server_parameters=tuple(f"{k} {v}" for k, v in parameters.items()),
+                           runtime_parameters_digest="sha256:params")
+
+
+@pytest.mark.parametrize("plan_fn", ["openai_compat_request_plan", "native_request_plan"])
+def test_a_served_models_presence_penalty_is_observed_never_effective(plan_fn):
+    # qwen3.6's Modelfile declares presence_penalty 1.5; Ollama 0.34.4 shows no
+    # effect of the setting (evidence/provider-contract-001a/f4_v1_capabilities).
+    plan = getattr(model_runtime, plan_fn)({"options": {"top_p": 0.8}}, temperature=0.7, reasoning_flag=False,
+                                           requested_context_window=None,
+                                           fingerprint=_served_with(presence_penalty=1.5, top_p=0.8))
+    state = plan.setting("presence_penalty")
+    assert state.requested is None and state.effective is None
+    assert state.provenance.value == "unverified" and state.support.value == "unsupported"
+    assert state.server_config_observed == 1.5
+    assert plan.identity()["presence_penalty"] == {"effective": None, "provenance": "unverified",
+                                                   "server_config_observed": 1.5}
+    assert "presence_penalty" not in json_dumps(plan.wire_body)
+    plan.enforce(strict=True)  # observed but not requested: nothing to refuse
+
+
+def json_dumps(value):
+    import json
+
+    return json.dumps(value, sort_keys=True)
+
+
+@pytest.mark.parametrize("plan_fn, extra_body", [
+    ("native_request_plan", {"options": {"presence_penalty": 0.5}}),
+    ("openai_compat_request_plan", {"presence_penalty": 0.5}),
+    ("openai_compat_request_plan", {"keep_alive": "30m"}),
+])
+def test_a_requested_setting_the_adapter_cannot_apply_is_refused_in_production(plan_fn, extra_body):
+    from kriya.core.provider_contract import PROVIDER_SETTING_UNSUPPORTED, ProviderContractError
+
+    plan = getattr(model_runtime, plan_fn)(extra_body, temperature=0.7, reasoning_flag=False,
+                                           requested_context_window=None, fingerprint=_served_with())
+    name = next(iter(k for k in ("presence_penalty", "keep_alive") if plan.setting(k).requested is not None))
+    assert name not in json_dumps(plan.wire_body)  # never sent
+    assert plan.setting(name).effective is None
+    plan.enforce(strict=False)  # recorded outside production
+    with pytest.raises(ProviderContractError) as refused:
+        plan.enforce(strict=True)
+    assert refused.value.reason_code == PROVIDER_SETTING_UNSUPPORTED and refused.value.details["settings"] == [name]
+
+
+def test_repeat_penalty_and_truncate_false_are_unchanged():
+    native = model_runtime.native_request_plan({"options": {"repeat_penalty": 1.1}}, temperature=0.7,
+                                               reasoning_flag=False, requested_context_window=32768)
+    assert native.wire_body["options"]["repeat_penalty"] == 1.1 and native.wire_body["truncate"] is False
+    assert native.setting("repeat_penalty").provenance.value == "request"
+    v1 = model_runtime.openai_compat_request_plan({"options": {"repeat_penalty": 1.1}}, temperature=0.7,
+                                                  reasoning_flag=False, requested_context_window=None,
+                                                  fingerprint=_served_with(repeat_penalty=1.1))
+    assert v1.setting("repeat_penalty").provenance.value == "server_model_config"
+    assert v1.setting("repeat_penalty").effective == 1.1
+
+
+def test_the_production_bindings_inference_identity_is_unchanged():
+    # Both pinned production bindings were qualified under /8 with this exact
+    # settings digest (evidence/provider-contract-001a/qualification_v8): the
+    # truthfulness correction changes no effective setting they use.
+    from kriya.core.inference_runtime import runtime_for_binding
+    from kriya.core.inference_settings import request_settings
+
+    config = AppConfig()
+    config.llm.inference_runtime = "ollama_native"
+    body = {"options": {"num_ctx": 32768, "top_p": 0.8, "top_k": 20}, "reasoning_effort": "none"}
+    settings = request_settings(temperature=0.7, reasoning=False, extra_body=body,
+                                runtime=runtime_for_binding(config.llm))
+    assert settings.digest == "sha256:482067b2e0b4d3b7d4ebdfbf83ef8aeef79c3f07ec9d3b0e2e38298eb74a3b15"
+
+
+def test_the_default_plan_carries_only_what_the_adapter_declares():
+    """The port's default plan: a declared SUPPORTED setting is carried by
+    the request (REQUEST provenance, effective as requested); an adapter that
+    declares nothing proves nothing, so production refuses it."""
+    from kriya.core.provider_contract import PROVIDER_SETTING_UNSUPPORTED, ProviderContractError
+
+    declared = FakeRuntimeAdapter(per_request_context_window=True).request_plan(
+        None, temperature=0.3, reasoning_flag=False, requested_context_window=8192)
+    for name, value in (("temperature", 0.3), ("context_window", 8192)):
+        state = declared.setting(name)
+        assert (state.provenance.value, state.effective) == ("request", value), name
+    declared.enforce(strict=True)
+
+    class _Undeclared(FakeRuntimeAdapter):
+        @property
+        def provider_capabilities(self):
+            from kriya.core.provider_contract import ProviderCapabilities
+
+            return ProviderCapabilities()
+
+    undeclared = _Undeclared().request_plan(None, temperature=0.3, reasoning_flag=False,
+                                            requested_context_window=None)
+    assert undeclared.setting("temperature").provenance.value == "unverified"
+    with pytest.raises(ProviderContractError) as refused:
+        undeclared.enforce(strict=True)
+    assert refused.value.reason_code == PROVIDER_SETTING_UNSUPPORTED

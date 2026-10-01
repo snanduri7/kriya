@@ -160,13 +160,23 @@ class InferenceRuntimePort(abc.ABC):
                      fingerprint: Any = None) -> Any:
         """The exact wire body of a request with these settings and each
         setting's requested/effective state. Default: the body is sent as is
-        (without the window field) and nothing is verified."""
+        (without the window field); a setting is carried only as the adapter's
+        own ``provider_capabilities`` declare it, and nothing is verified
+        beyond that (an adapter that declares nothing is refused in
+        production for every setting it is asked to carry)."""
         from kriya.core.provider_contract import Provenance, ProviderRequestPlan, SettingState, Support
 
-        states = [SettingState("temperature", temperature, None, Provenance.UNVERIFIED, Support.UNSUPPORTED)]
+        declared = self.provider_capabilities
+
+        def state(name: str, requested: Any) -> SettingState:
+            support = declared.setting(name)
+            if support is Support.SUPPORTED:
+                return SettingState(name, requested, requested, Provenance.REQUEST, support)
+            return SettingState(name, requested, None, Provenance.UNVERIFIED, support)
+
+        states = [state("temperature", temperature)]
         if requested_context_window is not None:
-            states.append(SettingState("context_window", requested_context_window, None, Provenance.UNVERIFIED,
-                                       Support.UNSUPPORTED))
+            states.append(state("context_window", requested_context_window))
         wire = self.without_context_window(extra_body)
         if self.capabilities.per_request_context_window and requested_context_window is not None:
             wire = self.with_context_window(wire, requested_context_window)

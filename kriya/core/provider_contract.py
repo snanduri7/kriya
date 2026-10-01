@@ -106,14 +106,21 @@ class SettingState:
     effective: Any
     provenance: Provenance
     support: Support
+    # PROVIDER-CONTRACT-001A: the value the served model's own configuration
+    # declares for a setting whose effect is not established (an UNSUPPORTED
+    # setting): a fact about the server, never the effective value.
+    server_config_observed: Any = None
 
     @property
     def effective_as_requested(self) -> bool:
         return self.requested is None or self.effective == self.requested
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"requested": self.requested, "effective": self.effective,
-                "provenance": self.provenance.value, "support": self.support.value}
+        record = {"requested": self.requested, "effective": self.effective,
+                  "provenance": self.provenance.value, "support": self.support.value}
+        if self.server_config_observed is not None:
+            record["server_config_observed"] = self.server_config_observed
+        return record
 
 
 @dataclass(frozen=True)
@@ -147,6 +154,8 @@ class ProviderRequestPlan:
         identity: Dict[str, Any] = {}
         for state in sorted(self.settings, key=lambda s: s.name):
             entry: Dict[str, Any] = {"effective": state.effective, "provenance": state.provenance.value}
+            if state.server_config_observed is not None:
+                entry["server_config_observed"] = state.server_config_observed
             if not state.effective_as_requested:
                 entry["requested"] = state.requested
             identity[state.name] = entry
@@ -170,6 +179,15 @@ class ProviderRequestPlan:
                 PROVIDER_SETTING_UNKNOWN,
                 f"request field(s) {sorted(self.unknown)} are not part of the provider contract; production "
                 "never forwards an unvalidated field", {"unknown": sorted(self.unknown)})
+        unsupported = sorted(state.name for state in self.settings
+                             if state.requested is not None and state.support is Support.UNSUPPORTED)
+        if strict and unsupported:
+            # PROVIDER-CONTRACT-001A: the adapter cannot prove it applies
+            # these at all, so production never relies on them.
+            raise ProviderContractError(
+                PROVIDER_SETTING_UNSUPPORTED,
+                f"setting(s) {unsupported} are not applied by this provider adapter (no proven effect); "
+                "production never sends a setting it cannot verify", {"settings": unsupported})
         missing = self.not_effective()
         if strict and missing:
             raise ProviderContractError(
