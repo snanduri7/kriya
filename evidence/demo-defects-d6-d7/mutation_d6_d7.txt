@@ -1,0 +1,17 @@
+D6 global-allowance-every-gate KILLED tests/test_d6_runtime_artifacts.py::test_other_gates_still_refuse_the_same_untracked_file[compile]
+D6 allowance-during-tests-and-builds KILLED tests/test_d6_runtime_artifacts.py::test_other_gates_still_refuse_the_same_untracked_file[compile]
+D6 ignore-tracked-modifications KILLED tests/test_d6_runtime_artifacts.py::test_a_bound_path_change_is_still_a_hard_stop[open('pom.xml', 'a').write('<!-
+D6 runtime-files-leak-into-candidate KILLED tests/test_d6_runtime_artifacts.py::test_an_application_created_file_is_recorded_and_discarded[work/runtime.dat-w
+D6 leak-and-not-fail-closed KILLED tests/test_d6_runtime_artifacts.py::test_a_runtime_file_that_cannot_be_discarded_fails_closed
+D6 runtime-files-become-recovery-targets KILLED tests/test_d6_runtime_artifacts.py::test_an_application_created_file_is_recorded_and_discarded[work/runtime.dat-w
+D6 directory-name-exemption KILLED tests/test_d6_runtime_artifacts.py::test_an_application_created_file_is_recorded_and_discarded[work/runtime.dat-w
+D6 artifacts-not-recorded KILLED tests/test_d6_runtime_artifacts.py::test_an_application_created_file_is_recorded_and_discarded[work/runtime.dat-w
+D6 artifacts-not-persisted-to-gate-outcome KILLED tests/test_d6_runtime_artifacts.py::test_an_application_created_file_is_recorded_and_discarded[work/runtime.dat-w
+D6 exception-path-keeps-artifacts KILLED tests/test_d6_runtime_artifacts.py::test_a_failing_runtime_gate_still_discards_its_artifacts
+D7 helper-disabled KILLED tests/test_d7_diagnosis_removal.py::test_the_live_removal_is_accepted
+D7 construct-need-not-exist-pre-edit KILLED tests/test_d7_diagnosis_removal.py::test_a_diagnosis_the_edit_does_not_implement_is_still_a_mismatch[Remove the i
+D7 partial-removal-accepted KILLED tests/test_d7_diagnosis_removal.py::test_only_some_occurrences_removed_is_still_a_mismatch
+D7 moved-call-accepted KILLED tests/test_d7_diagnosis_removal.py::test_a_diagnosis_the_edit_does_not_implement_is_still_a_mismatch[Remove the i
+D7 fuzzy-left-boundary KILLED tests/test_d7_diagnosis_removal.py::test_a_diagnosis_the_edit_does_not_implement_is_still_a_mismatch[Remove the i
+D7 any-signature-quote-accepted KILLED tests/test_d7_diagnosis_removal.py::test_a_removed_property_is_accepted
+16/16 killed

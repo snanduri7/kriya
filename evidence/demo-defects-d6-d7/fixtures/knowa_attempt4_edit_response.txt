@@ -1,0 +1,122 @@
+Analysis:
+The error indicates that `Ignition.getOrCreateIgnite(Object)` is undefined, meaning the code is trying to use a method that doesn't exist in Apache Ignite 2.18.0. The correct approach for starting an Ignite node via Spring XML configuration is to let Spring manage the Ignite instance lifecycle. The current code incorrectly attempts to retrieve the Ignite instance using `Ignition.getOrCreateIgnite()` with a bean from the Spring context, which is not the proper way to integrate Spring and Ignite in this setup.
+
+Looking at the existing code, we need to:
+1. Remove the incorrect `Ignition.getOrCreateIgnite()` call
+2. Properly retrieve the Ignite instance from Spring context (which should be automatically created via the XML config)
+3. Ensure clean resource management
+
+The fix involves changing how the Ignite instance is obtained and ensuring proper Spring integration.
+
+<<<KRIYA:EDIT path="src/main/java/com/example/IgniteDemoApp.java">>>
+<<<KRIYA:SEARCH>>>
+package com.example;
+
+import org.apache.ignite.Ignite;
+import org.apache.ignite.IgniteCache;
+import org.apache.ignite.Ignition;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.context.support.ClassPathXmlApplicationContext;
+
+public class IgniteDemoApp {
+    public static void main(String[] args) {
+        ConfigurableApplicationContext ctx = null;
+        Ignite ignite = null;
+
+        try {
+            // Start Spring context with Ignite configuration
+            ctx = new ClassPathXmlApplicationContext("ignite-config.xml");
+            
+            // Get the Ignite instance from Spring context
+            ignite = Ignition.getOrCreateIgnite(ctx.getBean("igniteConfiguration"));
+
+            // Get cache
+            IgniteCache<String, String> cache = ignite.cache("myCache");
+
+            // Put value in cache
+            cache.put("key1", "Hello Ignite!");
+
+            // Get value from cache
+            String value = cache.get("key1");
+            
+            System.out.println("Retrieved value: " + value);
+
+            // Verification
+            if ("Hello Ignite!".equals(value)) {
+                System.out.println("[VERIFICATION] PASS");
+            } else {
+                System.out.println("[VERIFICATION] FAIL: Value mismatch");
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println("[VERIFICATION] FAIL: Exception occurred");
+        } finally {
+            // Cleanly close Ignite
+            if (ignite != null) {
+                ignite.close();
+            }
+            
+            // Cleanly close Spring context
+            if (ctx != null && ctx.isActive()) {
+                ctx.close();
+            }
+        }
+    }
+}
+<<<KRIYA:REPLACE>>>
+package com.example;
+
+import org.apache.ignite.Ignite;
+import org.apache.ignite.IgniteCache;
+import org.apache.ignite.Ignition;
+import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.context.support.ClassPathXmlApplicationContext;
+
+public class IgniteDemoApp {
+    public static void main(String[] args) {
+        ConfigurableApplicationContext ctx = null;
+        Ignite ignite = null;
+
+        try {
+            // Start Spring context with Ignite configuration
+            ctx = new ClassPathXmlApplicationContext("ignite-config.xml");
+            
+            // Get the Ignite instance from Spring context
+            // In this setup, Ignite node is started automatically by Spring
+            // We can get it directly using Ignition.getIgnite() after Spring initialization
+            ignite = Ignition.getIgnite();
+
+            // Get cache
+            IgniteCache<String, String> cache = ignite.cache("myCache");
+
+            // Put value in cache
+            cache.put("key1", "Hello Ignite!");
+
+            // Get value from cache
+            String value = cache.get("key1");
+            
+            System.out.println("Retrieved value: " + value);
+
+            // Verification
+            if ("Hello Ignite!".equals(value)) {
+                System.out.println("[VERIFICATION] PASS");
+            } else {
+                System.out.println("[VERIFICATION] FAIL: Value mismatch");
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            System.out.println("[VERIFICATION] FAIL: Exception occurred");
+        } finally {
+            // Cleanly close Ignite
+            if (ignite != null) {
+                ignite.close();
+            }
+            
+            // Cleanly close Spring context
+            if (ctx != null && ctx.isActive()) {
+                ctx.close();
+            }
+        }
+    }
+}
+<<<KRIYA:END_EDIT>>>

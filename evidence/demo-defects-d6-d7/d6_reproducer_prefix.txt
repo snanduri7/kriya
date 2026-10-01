@@ -1,0 +1,11 @@
+{
+ "gate": "STOPPED",
+ "stop": "VerificationGateCreatedFiles",
+ "reason_code": "VERIFICATION_GATE_CREATED_UNAUTHORIZED_FILE",
+ "likely_files": [
+  "ignite/README.txt"
+ ],
+ "left_in_workspace": [
+  "ignite/README.txt"
+ ]
+}
