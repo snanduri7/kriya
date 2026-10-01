@@ -320,16 +320,17 @@ def test_a_maven_gate_creating_anything_else_is_still_a_typed_stop(tmp_path, str
 
 def test_a_target_directory_is_never_inferred_outside_the_gate_that_runs_maven(tmp_path):
     """The compile gate's Maven run owns target/; a later gate that does not
-    run Maven (the app under runtime verification) writing there is caught,
-    and so is target/ output appearing between gates."""
+    run Maven never gains that ownership: the app under runtime verification
+    writing there is runtime state (D6: recorded and discarded, never kept as
+    output), and target/ output appearing between gates is caught."""
     from kriya.workflow.file_integrity import VerificationGateCreatedFiles
 
     root, validator = _maven_tree(tmp_path)
     _gate_run(validator, "compile", MVN, lambda: ((root / "target").mkdir(), (root / "target" / "A.class").write_bytes(b"x")))
-    with pytest.raises(VerificationGateCreatedFiles) as stopped:
-        _gate_run(validator, "runtime_verification", ["java", "-cp", "target", "App"],
-                  lambda: (root / "target" / "written-by-the-app.txt").write_text("x"))
-    assert stopped.value.failure.diagnostics["created"][0]["path"] == "target/written-by-the-app.txt"
+    result = _gate_run(validator, "runtime_verification", ["java", "-cp", "target", "App"],
+                       lambda: (root / "target" / "written-by-the-app.txt").write_text("x"))
+    assert result["runtime_artifacts"] == ["target/written-by-the-app.txt"]
+    assert not (root / "target" / "written-by-the-app.txt").exists() and (root / "target" / "A.class").exists()
     (root / "target" / "between.txt").write_text("x")
     with pytest.raises(VerificationGateCreatedFiles):
         validator.tree_binding.check("tests", "before")

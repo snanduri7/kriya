@@ -317,6 +317,11 @@ falls back to the host's tools.
     reference must match exactly one of your project's files; an ambiguous name, a library resource or a path outside
     the project changes nothing. If your own code threw the error (say, a bean's constructor), the stack trace still
     decides. The step being reopened is shown the part of the output where the error appears.
+  - Files your application creates while it runs (a work folder, logs, a local database) are treated as the
+    run's own temporary state: Kriya lists them in the gate's evidence (`runtime_artifacts`) and deletes them
+    afterwards, so they never end up in your project or in a commit. Changing or deleting one of your project's
+    files while running is still a hard failure. Only the step that runs your application gets this; builds and
+    tests may still create nothing but their own tool output.
 - **Unsupported.** Other versions (e.g. Java 7, Python 3.9) and toolchains without a profile fail closed.
   `kriya doctor --production` reports this as `toolchain.required`.
 

@@ -573,9 +573,18 @@ class VerificationTreeBinding:
                 self._expected[relpath] = (current_identity, expected)
         return changed
 
-    def check(self, gate: str, phase: str = "after") -> None:
+    def check(self, gate: str, phase: str = "after", ephemeral_untracked: bool = False) -> List[str]:
         """``phase``: "after" the gate ran (the gate changed the tree) or
-        "before" it (something between verification steps changed it)."""
+        "before" it (something between verification steps changed it).
+
+        ``ephemeral_untracked`` (D6, the application-runtime gate only): the
+        application under verification may create untracked state while it
+        runs (work directories, logs, databases). That is execution state, not
+        candidate source: it is removed here and returned (recorded) instead of
+        stopping the run, so it never reaches a later gate, the commit, or
+        recovery. A change to any bound (tracked or candidate) path is still
+        the VerificationTreeMutated stop above; a file that cannot be removed
+        fails closed."""
         changed = self.changes()
         if changed:
             raise VerificationTreeMutated(gate, changed, phase)
@@ -583,9 +592,32 @@ class VerificationTreeBinding:
         new = untracked_repository_paths(self.root) - self._untracked_before - set(self._expected)
         owned = {path for path in new if any(path == root or path.startswith(root + "/") for root in roots)}
         created = sorted(new - owned)
-        if created:
+        if created and ephemeral_untracked:
+            self._discard(created)
+            remaining = sorted(set(created) & untracked_repository_paths(self.root))
+            if remaining:
+                raise VerificationGateCreatedFiles(gate, remaining, phase)
+        elif created:
             raise VerificationGateCreatedFiles(gate, created, phase)
         self._untracked_before |= owned
+        return created
+
+    def _discard(self, relpaths: Sequence[str]) -> None:
+        """Remove runtime-created files, then any directory they leave empty."""
+        root = os.path.realpath(self.root)
+        for relpath in relpaths:
+            path = os.path.join(root, relpath)
+            try:
+                os.unlink(path)
+            except OSError:
+                continue  # left in place: the caller's re-listing fails closed
+            parent = os.path.dirname(path)
+            while parent != root and parent.startswith(root + os.sep):
+                try:
+                    os.rmdir(parent)
+                except OSError:
+                    break
+                parent = os.path.dirname(parent)
 
     def created(self) -> List[str]:
         """Untracked, non-ignored files that appeared since the binding (or

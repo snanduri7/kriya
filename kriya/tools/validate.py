@@ -192,6 +192,9 @@ _EXECUTION_EVIDENCE_KEYS = (
     # LINUX-JVM-RLIMIT-AS-001: how the CPU/memory budget was enforced
     # (strategy, budget, address-space limit, JVM options).
     "resources",
+    # D6: untracked files the application created while it ran (paths only),
+    # recorded and discarded - never candidate bytes.
+    "runtime_artifacts",
 )
 
 
@@ -247,6 +250,9 @@ def gate_output_roots(cmd: List[str], cwd: str) -> List[str]:
     return []
 
 
+RUNTIME_VERIFICATION_GATE = "runtime_verification"
+
+
 def _verification_gate(name: str):
     """A validator method that runs repository/toolchain code is a named
     verification gate. FILE-INTEGRITY-CONTRACT-001: when a tree is bound
@@ -258,6 +264,10 @@ def _verification_gate(name: str):
     that repository content and candidate are exactly what was bound; a
     change raises the typed VerificationTreeMutated stop. It is checked on
     the exception path too, so an error never hides a mutation."""
+    # D6: only the gate that runs the candidate APPLICATION may leave untracked
+    # runtime state; it is recorded and discarded (VerificationTreeBinding.check).
+    ephemeral = name == RUNTIME_VERIFICATION_GATE
+
     def decorate(method):
         @functools.wraps(method)
         def wrapper(self, *args, **kwargs):
@@ -268,12 +278,14 @@ def _verification_gate(name: str):
                 result = method(self, *args, **kwargs)
             except BaseException:
                 if self.tree_binding is not None:
-                    self.tree_binding.check(name)
+                    self.tree_binding.check(name, ephemeral_untracked=ephemeral)
                 raise
             finally:
                 self._gate = previous
             if self.tree_binding is not None:
-                self.tree_binding.check(name)
+                artifacts = self.tree_binding.check(name, ephemeral_untracked=ephemeral)
+                if ephemeral and isinstance(result, dict):
+                    result["runtime_artifacts"] = artifacts
             return result
         return wrapper
     return decorate
@@ -1970,7 +1982,7 @@ class PolymorphicValidator:
         ]
         return rewritten, None
 
-    @_verification_gate("runtime_verification")
+    @_verification_gate(RUNTIME_VERIFICATION_GATE)
     def run_app(self, command: List[str], timeout: int = 90) -> Dict[str, Any]:
         """Executes an already-resolved run command for a self-terminating/batch entrypoint
         (not a long-running server) inside the sandboxed workspace, and returns the raw
@@ -2213,7 +2225,7 @@ class PolymorphicValidator:
         started = claim_run_generation_clock()
         return started + budget if started is not None and budget is not None else None
 
-    @_verification_gate("runtime_verification")
+    @_verification_gate(RUNTIME_VERIFICATION_GATE)
     def run_app_sequence(
         self, commands: List[List[str]], timeout: int = 90, stdin_payload: Optional[str] = None,
     ) -> Dict[str, Any]:

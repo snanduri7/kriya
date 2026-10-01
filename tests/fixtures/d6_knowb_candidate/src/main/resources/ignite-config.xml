@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:schemaLocation="
+           http://www.springframework.org/schema/beans
+           http://www.springframework.org/schema/beans/spring-beans.xsd">
+
+    <!-- Ignite configuration -->
+    <bean id="ignite.cfg" class="org.apache.ignite.configuration.IgniteConfiguration">
+        <property name="igniteInstanceName" value="ignite-server-node"/>
+        <property name="peerClassLoadingEnabled" value="true"/>
+    </bean>
+
+    <!-- Spring bean that starts the Ignite node -->
+    <bean id="igniteNode" class="org.apache.ignite.IgniteSpringBean">
+        <property name="configuration" ref="ignite.cfg"/>
+    </bean>
+
+</beans>
