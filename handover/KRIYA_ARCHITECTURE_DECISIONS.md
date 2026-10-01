@@ -1620,7 +1620,7 @@ not:
 
 ## KAD-062 — Effective Inference Identity Is Proven at the Provider Boundary
 
-**Status:** ACTIVE (2026-09-30, PROVIDER-CONTRACT-001)  
+**Status:** ACTIVE — EXTENDED (2026-09-30, PROVIDER-CONTRACT-001; extended 2026-10-01 by PROVIDER-CONTRACT-001A)  
 **Change class:** EXTEND (KAD-029, KAD-030, KAD-031)
 
 ### Decision
@@ -1662,9 +1662,26 @@ Any model/runtime setting that Kriya records, budgets against, qualifies or trea
 - Any new setting Kriya budgets or qualifies against.
 - Measured provider behaviour that contradicts an adapter's declared support.
 
+### Extension (PROVIDER-CONTRACT-001A, 2026-10-01)
+
+- **Provider transport timeout is subordinate to Kriya's authoritative remaining execution budget.** A run has one generation clock; no work unit, retry or role restarts it. Every model call is bounded, in total, by what remains of it. A deadline stop is a typed Kriya failure, never a provider timeout to retry or escalate.
+- **A transient failure to observe runtime identity must not mutate provider capability or silently disable production enforcement.** Each observation has a typed outcome. Nothing negative is cached. Strict production refuses a result whose served identity could not be observed.
+- **Qualified prompt-consumption behaviour is part of runtime verification evidence, bound to the qualification identity.** A production runtime must refuse a prompt larger than its served window, typed, rather than answer from a truncated prompt. Qualification proves that per identity. Detecting truncation after the fact is defence in depth, never the guarantee.
+
+Why (MEASURED, Ollama 0.34.4):
+- The deadline existed but production never entered it, and each milestone unit got a fresh budget.
+- One `/api/ps` failure blacklisted observation for the process.
+- `/v1` answered every over-window prompt from window/2 + 2 tokens, and Kriya accepted it as OK. The byte check missed it.
+- The native API with `truncate:false` refuses with the exact prompt count. Production now uses it, qualified under `kriya-qualification/8`.
+- Evidence: `evidence/provider-contract-001a/`, `handover/PROVIDER_CONTRACT_001A.md`.
+
+Does not imply:
+- That `/v1` is removed. It remains for compatibility, cannot pass `/8`, and its limits stay explicit.
+- Any universal Ollama constant. The window/2 + 2 signature is evidence for the tested runtime only.
+
 ### Related
 
-KAD-028, KAD-029, KAD-030, KAD-031, KAD-059. Evidence: `evidence/provider-contract-001/` (pre_fix, batch_a/b/c, live), `handover/PROVIDER_CONTRACT_001.md`.
+KAD-028, KAD-029, KAD-030, KAD-031, KAD-059. Evidence: `evidence/provider-contract-001/` (pre_fix, batch_a/b/c, live), `handover/PROVIDER_CONTRACT_001.md`; `evidence/provider-contract-001a/`, `handover/PROVIDER_CONTRACT_001A.md`.
 
 ---
 
