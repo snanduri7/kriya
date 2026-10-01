@@ -1,0 +1,52 @@
+"""D1 measurement: does Kriya's JDTLS analysis write into the candidate tree?
+Scratch greenfield Maven repo (committed pom + source, NO .gitignore, like a
+greenfield candidate); `git status --porcelain=v2 -z --untracked-files=all
+--ignored` before and after JdtlsClient start + a real check_file query.
+Usage: python d1_jdtls_probe.py <variant: current|settings>"""
+import asyncio, os, subprocess, sys, tempfile
+
+from kriya.tools.lsp import JdtlsClient
+
+VARIANT = sys.argv[1]
+SETTINGS = {"java": {"import": {"generatesMetadataFilesAtProjectRoot": False},
+                     "autobuild": {"enabled": False}}}
+
+
+class Settings(JdtlsClient):
+    async def _request(self, method, params, timeout=None):
+        if method == "initialize":
+            params = {**params, "initializationOptions": {"settings": SETTINGS}}
+        return await super()._request(method, params, timeout=timeout)
+
+
+def status(root):
+    out = subprocess.run(["git", "status", "--porcelain=v2", "-z", "--untracked-files=all", "--ignored"],
+                         cwd=root, capture_output=True).stdout
+    return sorted(r.decode() for r in out.split(b"\0") if r)
+
+
+async def main():
+    with tempfile.TemporaryDirectory() as root:
+        os.makedirs(f"{root}/src/main/java/demo")
+        open(f"{root}/pom.xml", "w").write(
+            '<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><groupId>d</groupId>'
+            '<artifactId>d</artifactId><version>1</version><properties><maven.compiler.release>17</maven.compiler.release>'
+            '</properties></project>\n')
+        src = f"{root}/src/main/java/demo/A.java"
+        open(src, "w").write("package demo;\npublic class A { int x() { return 1; } }\n")
+        for args in (["init", "-q"], ["config", "user.email", "t@x"], ["config", "user.name", "t"], ["add", "-A"],
+                     ["commit", "-qm", "base"]):
+            subprocess.run(["git", *args], cwd=root, check=True)
+        before = status(root)
+        client = (Settings if VARIANT == "settings" else JdtlsClient)(root, "/opt/homebrew/bin/jdtls")
+        await client.start()
+        diags = await client.check_file(src, "package demo;\npublic class A { int x() { return missing(); } }\n")
+        await asyncio.sleep(5)
+        after = status(root)
+        await client.shutdown()
+        new = [r for r in after if r not in before]
+        print(f"variant={VARIANT} before={before} new_state={new}")
+        print(f"diagnostics_returned={len(diags)} first={diags[0].get('message') if diags else None}")
+
+
+asyncio.run(main())

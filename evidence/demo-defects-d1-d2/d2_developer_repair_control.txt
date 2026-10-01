@@ -1,0 +1,4 @@
+PRE-FIX:
+developer_calls=7 grade_calls=7 failure_category=quality_gates_exhausted environment_failure=None
+POST-FIX:
+developer_calls=1 grade_calls=0 failure_category=environment_failure environment_failure=VERIFICATION_INFRASTRUCTURE_FAILURE: runtime behavior was no

@@ -1,0 +1,22 @@
+import asyncio, os, sys, tempfile
+from unittest.mock import AsyncMock, patch
+os.environ["KRIYA_MODEL_RUNTIME_PROBE"] = "0"
+from kriya.config import AppConfig
+from kriya.core.kernel import Kernel
+from kriya.core.llm import LLMClient
+from kriya.workflow.workflow import WorkflowEngine
+NO_PLUGIN = "[ERROR] No plugin found for prefix 'exec' in the current project and in the plugin groups [org.apache.maven.plugins, org.codehaus.mojo] available from the repositories [local (/kriya/m2)]"
+async def main():
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["KRIYA_STATE_DIR"] = os.path.join(tmp, "state"); os.environ["KRIYA_LOG_DIR"] = os.path.join(tmp, "logs")
+        ws = os.path.join(tmp, "ws"); os.makedirs(ws)
+        cfg = AppConfig(); cfg.autonomy.mode = "guardrails"
+        llm = LLMClient(cfg); llm.complete = AsyncMock(side_effect=["Step 1: Write code", "Design: Write app.py"] + ["Review: Approved"] * 5)
+        e = WorkflowEngine(Kernel(config=cfg), llm)
+        e.developer.run_generation = AsyncMock(return_value=[{"filepath": "app.py", "content": "print('ok')\n"}])
+        e.run_verifier.judge = AsyncMock(return_value={"should_run": True, "run_commands": [[sys.executable, "app.py"]], "command_source": "goal_explicit", "success_criteria": "prints ok"})
+        e.run_verifier.grade = AsyncMock(return_value={"passed": False, "reasoning": "plugin missing", "likely_files": ["pom.xml"]})
+        with patch("kriya.tools.validate.PolymorphicValidator.run_app_sequence", return_value={"success": False, "timed_out": False, "returncode": 1, "output": NO_PLUGIN}):
+            r = await e.run_generation_workflow(goal="Run with python app.py; it prints ok", workspace_path=ws)
+        print(f"developer_calls={e.developer.run_generation.await_count} grade_calls={e.run_verifier.grade.await_count} failure_category={r.get('failure_category')} environment_failure={str(r.get('environment_failure'))[:60]}")
+asyncio.run(main())
