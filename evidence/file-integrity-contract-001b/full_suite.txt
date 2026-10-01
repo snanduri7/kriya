@@ -1,0 +1,4 @@
+39 failed, 7845 passed, 14 warnings in 485.11s (0:08:05)
+  ^ strict-rule-only run (before the two named exemptions): 39 failures, all derived output in fixture repos without .gitignore: 123 __pycache__/*.pyc, 21 build/*.class (Kriya's own javac -d build), 1 build.log (the F-4 test that encoded the old rule)
+7886 passed, 14 warnings in 486.35s (0:08:06)
+  ^ final run at the tree committed as 382a270+3d2bfd2 (ulimit -n 256; pytest -q -n 8 --dist loadgroup)
