@@ -1,0 +1,50 @@
+"""FILE-INTEGRITY-CONTRACT-001B gate-owned output: each mutation weakens
+the gate-owner binding; the focused suites must fail for every one."""
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(sys.argv[1])
+TESTS = ["tests/test_file_integrity_contract_001b.py", "tests/test_file_integrity_contract_001.py",
+         "tests/test_workflow.py"]
+OWNED = "        owned = {path for path in new if any(path == root or path.startswith(root + \"/\") for root in roots)}"
+M = [
+    ("any-dir-named-target-or-build", "kriya/workflow/file_integrity.py", OWNED,
+     "        owned = {path for path in new if any(part in (\"target\", \"build\") for part in path.split(\"/\")[:-1])}"),
+    ("roots-shared-across-gates", "kriya/workflow/file_integrity.py",
+     "        roots = self._gate_output_roots.pop(gate, set()) if phase == \"after\" else set()",
+     "        roots = set().union(*self._gate_output_roots.values()) if phase == \"after\" else set()"),
+    ("owned-output-not-absorbed", "kriya/workflow/file_integrity.py",
+     "        self._untracked_before |= owned\n", ""),
+    ("gate-registers-nothing", "kriya/tools/validate.py",
+     "        self._register_gate_output(cmd, cwd)\n", ""),
+    ("maven-root-only-not-modules", "kriya/tools/validate.py",
+     '        return [os.path.join(d, "target") for d in _project_dirs(cwd, lambda files: "pom.xml" in files)]',
+     '        return [os.path.join(cwd, "target")]'),
+    ("javac-d-not-designated", "kriya/tools/validate.py",
+     '        return [cmd[cmd.index("-d") + 1]]', "        return []"),
+    ("python-cache-in-every-dir", "kriya/tools/validate.py",
+     "            cwd, lambda files: any(name.endswith(\".py\") for name in files))]",
+     "            cwd, lambda files: True)]"),
+    ("any-command-owns-maven-output", "kriya/tools/validate.py",
+     '    if tool in ("mvn", "mvnw", "mvn.cmd"):', "    if True:"),
+]
+survivors = 0
+for label, rel, old, new in M:
+    path = ROOT / rel
+    text = path.read_text()
+    if text.count(old) != 1:
+        print(f"{label}: ANCHOR count {text.count(old)}")
+        survivors += 1
+        continue
+    path.write_text(text.replace(old, new))
+    try:
+        run = subprocess.run([str(ROOT / ".venv/bin/pytest"), "-q", "-x", "-p", "no:randomly", "-n", "8", *TESTS],
+                             cwd=ROOT, capture_output=True, text=True, timeout=1200)
+    finally:
+        path.write_text(text)
+    killed = run.returncode != 0
+    survivors += not killed
+    tail = [line for line in run.stdout.splitlines() if line.startswith("FAILED")][:1]
+    print(f"{label}: {'KILLED' if killed else 'SURVIVED'} {tail[0] if tail else ''}", flush=True)
+print(f"{len(M) - survivors}/{len(M)} killed")

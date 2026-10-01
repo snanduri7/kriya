@@ -1,0 +1,9 @@
+any-dir-named-target-or-build: KILLED FAILED tests/test_file_integrity_contract_001b.py::test_a_maven_gate_creating_anything_else_is_still_a_typed_stop[docs/target/notes.txt]
+roots-shared-across-gates: KILLED FAILED tests/test_file_integrity_contract_001b.py::test_a_target_directory_is_never_inferred_outside_the_gate_that_runs_maven
+owned-output-not-absorbed: KILLED FAILED tests/test_file_integrity_contract_001b.py::test_a_target_directory_is_never_inferred_outside_the_gate_that_runs_maven
+gate-registers-nothing: KILLED FAILED tests/test_file_integrity_contract_001b.py::test_a_maven_gates_own_target_output_is_accepted_without_any_ignore_rule
+maven-root-only-not-modules: KILLED FAILED tests/test_file_integrity_contract_001b.py::test_a_maven_gates_own_target_output_is_accepted_without_any_ignore_rule
+javac-d-not-designated: KILLED FAILED tests/test_file_integrity_contract_001b.py::test_each_toolchain_command_designates_only_its_own_documented_output[cmd4-markers4-roots4]
+python-cache-in-every-dir: KILLED FAILED tests/test_file_integrity_contract_001b.py::test_each_toolchain_command_designates_only_its_own_documented_output[cmd5-markers5-roots5]
+any-command-owns-maven-output: KILLED FAILED tests/test_file_integrity_contract_001b.py::test_a_target_directory_is_never_inferred_outside_the_gate_that_runs_maven
+8/8 killed
