@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
@@ -1025,7 +1026,8 @@ class PolymorphicValidator:
 
     _MAVEN_ACQUISITION_INCOMPLETE_MARKER = "MAVEN_ACQUISITION_INCOMPLETE:"
 
-    def _run_maven_cmd(self, goals: List[str], cwd: str, timeout: int = 300) -> Dict[str, Any]:
+    def _run_maven_cmd(self, goals: List[str], cwd: str, timeout: int = 300, stdin_payload: Optional[str] = None,
+                       deadline: Optional[float] = None) -> Dict[str, Any]:
         """The `contained_execution_required`-aware replacement for a
         direct `_run_cmd_with_timeout(["mvn"] + goals, ...)` call - SEC-001
         live-validation follow-up (2026-09-11): the ORIGINAL version of
@@ -1066,16 +1068,29 @@ class PolymorphicValidator:
         acquisition, never a loop, never a fallback to unrestricted
         networking for the goals themselves."""
         if not self.autonomy_cfg.contained_execution_required:
-            return self._run_cmd_with_timeout(["mvn"] + goals, cwd=cwd, timeout=timeout)
+            # Byte-for-byte pass-through (stdin only when a runtime step has one).
+            stdin = {"stdin_payload": stdin_payload} if stdin_payload is not None else {}
+            return self._run_cmd_with_timeout(["mvn"] + goals, cwd=cwd, timeout=timeout, **stdin)
 
         cache_dir = self._maven_cache_dir()
+
+        def _bounded(seconds: int) -> int:
+            """``deadline`` (the run's root generation deadline, runtime
+            verification): every step is capped by what remains of it."""
+            if deadline is None:
+                return seconds
+            return max(1, min(seconds, int(deadline - time.monotonic())))
 
         def _offline_attempt() -> Dict[str, Any]:
             return self._run_cmd_with_timeout(
                 ["mvn", "-B", "-o", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}"] + goals,
-                cwd=cwd, timeout=timeout, network=NetworkAuthority.DENIED,
+                cwd=cwd, timeout=_bounded(timeout), network=NetworkAuthority.DENIED,
                 dependency_cache_path=cache_dir, dependency_cache_writable=True,
+                **({"stdin_payload": stdin_payload} if stdin_payload is not None else {}),
             )
+
+        def _deadline_exhausted() -> bool:
+            return deadline is not None and time.monotonic() >= deadline
 
         goal_desc = f"mvn {' '.join(goals)}"
 
@@ -1091,7 +1106,7 @@ class PolymorphicValidator:
             try:
                 result = self._run_cmd_with_timeout(
                     ["mvn", "-B", f"-Dmaven.repo.local={MAVEN_CACHE_MOUNT}"] + goals,
-                    cwd=cwd, timeout=timeout, network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
+                    cwd=cwd, timeout=_bounded(timeout), network=NetworkAuthority.DEPENDENCY_REGISTRY_ONLY, acquisition=True,
                     dependency_cache_path=cache_dir, dependency_cache_writable=True,
                 )
             except ContainmentSetupError:
@@ -1116,12 +1131,17 @@ class PolymorphicValidator:
         if classify_maven_offline_failure_text(first_output) != OfflineFailureKind.MISSING_DEPENDENCY:
             return first
 
+        if _deadline_exhausted():
+            return self._acquisition_incomplete(first, goals, "the run's generation deadline left no time to acquire it")
         logger.info(
             "mvn %s failed offline with a missing-dependency signature - running ONE bounded "
             "acquisition (network-enabled, preparation only, goals=%s) then one more offline "
             "attempt.", " ".join(goals), goals,
         )
         _acquire_for_this_goal()
+        if _deadline_exhausted():
+            # Never a retry once the deadline is gone (it would be cut anyway).
+            return self._acquisition_incomplete(first, goals, "the run's generation deadline ran out during acquisition")
         second = _offline_attempt()
         if second["returncode"] == 0:
             logger.info(f"Acquisition (maven, goal={goal_desc!r}): authoritative offline retry followed and succeeded.")
@@ -1150,14 +1170,21 @@ class PolymorphicValidator:
                 "reacquisition - terminating deterministically as acquisition-incomplete, "
                 "not retrying further.", " ".join(goals),
             )
-            second = dict(second)
-            second["stderr"] = (
-                f"{self._MAVEN_ACQUISITION_INCOMPLETE_MARKER} offline execution for goals "
-                f"{goals!r} still reports a missing dependency/plugin after one bounded, "
-                f"network-enabled reacquisition attempt - this is a dependency-acquisition "
-                f"gap, not necessarily a defect in the generated code.\n{second['stderr']}"
-            )
+            second = self._acquisition_incomplete(
+                second, goals, "it is still missing after one bounded, network-enabled reacquisition attempt")
         return second
+
+    def _acquisition_incomplete(self, result: Dict[str, Any], goals: List[str], why: str) -> Dict[str, Any]:
+        """``result`` marked as a dependency-acquisition gap (the
+        ``MAVEN_ACQUISITION_INCOMPLETE:`` marker callers classify), never as
+        a defect of the generated code."""
+        marked = dict(result)
+        marked["stderr"] = (
+            f"{self._MAVEN_ACQUISITION_INCOMPLETE_MARKER} offline execution for goals {goals!r} "
+            f"reports a missing dependency/plugin: {why} - this is a dependency-acquisition gap, "
+            f"not necessarily a defect in the generated code.\n{result.get('stderr', '')}"
+        )
+        return marked
 
     @_verification_gate("pom_validate")
     def run_pom_validate(self) -> Dict[str, Any]:
@@ -1877,7 +1904,7 @@ class PolymorphicValidator:
             return {"success": False, "timed_out": False, "returncode": None, "output": install_error}
         command = commands[0]
         try:
-            res = self._run_cmd_with_timeout(command, cwd=self.workspace_path, timeout=timeout)
+            res = self._run_runtime_step(command, timeout)
         except ContainmentSetupError:
             # SEC-002 (2026-09-12): must propagate to the existing
             # containment-failure classification, not be reported as an
@@ -1891,6 +1918,27 @@ class PolymorphicValidator:
             "returncode": res["returncode"],
             "output": res["stdout"] + "\n" + res["stderr"],
         }
+
+    def _run_runtime_step(self, command: List[str], timeout: int,
+                          stdin_payload: Optional[str] = None) -> Dict[str, Any]:
+        """D2 (2026-10-01): a runtime-verification command. A Maven
+        invocation gets the same bounded, registry-scoped dependency/plugin
+        acquisition as the compile and test gates (_run_maven_cmd; host mode:
+        byte-for-byte pass-through), within the run's root generation
+        deadline; anything else runs as is."""
+        if command and os.path.basename(command[0]) == "mvn":
+            return self._run_maven_cmd(list(command[1:]), cwd=self.workspace_path, timeout=timeout,
+                                       stdin_payload=stdin_payload, deadline=self._run_deadline())
+        return self._run_cmd_with_timeout(command, cwd=self.workspace_path, timeout=timeout,
+                                          stdin_payload=stdin_payload)
+
+    def _run_deadline(self) -> Optional[float]:
+        """The run's root generation deadline (PROVIDER-CONTRACT-001A), if any."""
+        from kriya.control.run_coordinator import claim_run_generation_clock
+
+        budget = self.autonomy_cfg.generation_time_budget_seconds
+        started = claim_run_generation_clock()
+        return started + budget if started is not None and budget is not None else None
 
     @_verification_gate("runtime_verification")
     def run_app_sequence(
@@ -1957,9 +2005,8 @@ class PolymorphicValidator:
                             os.makedirs(destination_path, exist_ok=True)
             step_label = f"=== Step {i}/{len(commands)}: {' '.join(command)} ==="
             try:
-                res = self._run_cmd_with_timeout(
-                    command, cwd=self.workspace_path, timeout=timeout,
-                    stdin_payload=stdin_payload if i == len(commands) else None,
+                res = self._run_runtime_step(
+                    command, timeout, stdin_payload=stdin_payload if i == len(commands) else None,
                 )
             except Exception as e:
                 output_parts.append(f"{step_label}\nFailed to execute: {e}")

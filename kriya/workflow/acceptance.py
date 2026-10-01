@@ -237,6 +237,11 @@ def run_command_targets_missing_entrypoint(output: str) -> bool:
     return any(pattern.search(output or "") for pattern in _MISSING_ENTRYPOINT_PATTERNS)
 
 
+RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE = "RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE"
+MAVEN_PLUGIN_UNAVAILABLE = "MAVEN_PLUGIN_UNAVAILABLE"
+_MAVEN_PLUGIN_PREFIX_UNRESOLVED = re.compile(r"No plugin found for prefix '[^']+'")
+
+
 def runtime_verification_infrastructure_reason(result: Dict[str, Any]) -> Optional[str]:
     """Identify a verifier launch failure before behavioral grading.
 
@@ -247,6 +252,14 @@ def runtime_verification_infrastructure_reason(result: Dict[str, Any]) -> Option
     output = result.get("output") or ""
     if run_command_targets_missing_entrypoint(output):
         return "runtime command could not load its configured application entrypoint"
+    # D2: a Maven artifact/plugin Kriya's own runtime command needs is a
+    # verification prerequisite, never an application defect to repair.
+    if "MAVEN_ACQUISITION_INCOMPLETE:" in output:
+        return (f"{RUNTIME_VERIFICATION_DEPENDENCY_UNAVAILABLE}: a Maven dependency/plugin the runtime command "
+                "needs could not be acquired within one bounded, registry-scoped acquisition")
+    if _MAVEN_PLUGIN_PREFIX_UNRESOLVED.search(output):
+        return (f"{MAVEN_PLUGIN_UNAVAILABLE}: the runtime command names a Maven plugin prefix that could not be "
+                "resolved")
     for step in result.get("steps") or []:
         if step.get("exit_code") is None and not step.get("timed_out"):
             return "runtime verification command could not be executed"

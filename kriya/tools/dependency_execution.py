@@ -73,7 +73,10 @@ class DependencyExecutionOutcome:
 
 _MAVEN_OFFLINE_MISSING_RE = re.compile(
     r"in offline mode|was cached in the local repository, resolution will not be reattempted"
-    r"|Cannot access central",
+    r"|Cannot access central"
+    # D2: a plugin prefix (e.g. `exec`) resolves only from plugin metadata,
+    # which an offline run cannot fetch (measured: `mvn ... exec:exec`).
+    r"|No plugin found for prefix",
     re.IGNORECASE,
 )
 _PIP_OFFLINE_MISSING_RE = re.compile(

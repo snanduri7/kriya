@@ -3790,9 +3790,11 @@ def _raise_runtime_verification_infrastructure_failure(
         f"the verifier infrastructure failed: {reason}.\n\nCaptured output:\n"
         f"{run_result.get('output', '')}"
     )
+    code = reason.split(":", 1)[0]
     failure = Failure(
         type="verification_infrastructure_failure", message=message,
         raw_output=run_result.get("output", ""), attempt=state.attempt_number,
+        diagnostics={"reason_code": code} if code.isupper() and "_" in code else None,
     )
     outcome = failure.to_gate_outcome()
     outcome.update({"commands": commands, "steps": run_result.get("steps", [])})
